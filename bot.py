@@ -93,7 +93,7 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import voice_clone_pipeline
-from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, video_final_output, video_provider_router, worker_auth
+from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_router, worker_auth
 from services.video_provider_base import mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -78234,6 +78234,298 @@ async def cmd_storage_job_artifacts(update: Update, context: ContextTypes.DEFAUL
         "",
         "Internal note: no SSH key, token, host secret, PayOS, wallet, pricing data is shown.",
     ]
+    await reply_html_lines(update, lines, limit=3900)
+
+
+def storage_migration_running_paths(max_rows: int = 1000) -> set[str]:
+    table_columns = {
+        "local_worker_jobs": ("output_url",),
+        "music_generation_jobs": ("output_url",),
+        "shopaikey_jobs": ("result_url", "output_sent_result_url"),
+        "video_projects": ("final_video_path",),
+    }
+    active_statuses = {"queued", "running", "processing", "submitted", "in_progress", "pending"}
+    paths: set[str] = set()
+    conn = None
+    try:
+        conn = db_connect()
+        cur = conn.cursor()
+        for table, candidate_columns in table_columns.items():
+            try:
+                existing = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+            except Exception:
+                continue
+            has_status = "status" in existing
+            for column in candidate_columns:
+                if column not in existing:
+                    continue
+                try:
+                    rows = cur.execute(
+                        f"SELECT {column}{', status' if has_status else ''} FROM {table} "
+                        f"WHERE {column} IS NOT NULL AND TRIM({column}) != '' LIMIT ?",
+                        (max(1, int(max_rows)),),
+                    ).fetchall()
+                except Exception:
+                    continue
+                for row in rows:
+                    status = str(row[1] if has_status and len(row) > 1 else "").strip().lower()
+                    if has_status and status not in active_statuses:
+                        continue
+                    local_path = _storage_cleanup_local_path(row[0] if row else "")
+                    if local_path:
+                        paths.add(os.path.abspath(local_path).replace("\\", "/"))
+    except Exception as exc:
+        logger.warning("storage migration running path scan skipped: %s", type(exc).__name__)
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+    return paths
+
+
+def run_storage_migration_preview_report():
+    return storage_migration.scan_migration_candidates(
+        storage_cleanup_base_dir(),
+        config=artifact_storage_config(),
+        protected_paths=storage_cleanup_protected_paths(),
+        max_scan_files=STORAGE_CLEANUP_MAX_SCAN_FILES,
+    )
+
+
+def run_storage_migration_report(*, confirm: bool):
+    conn = db_connect()
+    try:
+        return storage_migration.migrate_existing_assets(
+            storage_cleanup_base_dir(),
+            config=artifact_storage_config(),
+            protected_paths=storage_cleanup_protected_paths(),
+            running_paths=storage_migration_running_paths(),
+            conn=conn,
+            delete_local=True,
+            confirm=confirm,
+            max_scan_files=STORAGE_CLEANUP_MAX_SCAN_FILES,
+            max_migrate_files=STORAGE_CLEANUP_MAX_DELETE_FILES,
+        )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def storage_migration_report_lines(report, *, mode: str = "preview") -> list[str]:
+    dry_label = "PREVIEW" if report.dry_run else "RUN CONFIRMED"
+    lines = [
+        "<b>STORAGE MIGRATE - TOAN AAS</b>",
+        "",
+        f"- Mode: <b>{safe_html(dry_label)}</b>",
+        f"- Base: <code>{safe_html(report.base_dir)}</code>",
+        f"- Backend: <code>{safe_html(report.backend)}</code>",
+        f"- Candidates: <code>{int(report.candidate_files)}</code> / <code>{format_storage_bytes(report.candidate_bytes)}</code>",
+        f"- Protected/blocked: <code>{int(report.protected_files)}</code> / <code>{format_storage_bytes(report.protected_bytes)}</code>",
+        f"- Uploaded/verified/deleted: <code>{int(report.uploaded_files)}</code> / <code>{int(report.verified_files)}</code> / <code>{int(report.deleted_files)}</code>",
+        f"- Local freed: <code>{format_storage_bytes(report.deleted_bytes)}</code>",
+        "",
+        "<b>Targets</b>",
+    ]
+    for item in report.targets[:12]:
+        label = "yes" if item.exists else "no"
+        lines.append(f"- <code>{safe_html(item.path)}</code> | {label} | {int(item.files)} files | {format_storage_bytes(item.size_bytes)}")
+    lines.extend([
+        "",
+        "<b>Safety</b>",
+        "- Chi upload file media/generated trong cac thu muc asset cu.",
+        "- Khong migrate/xoa DB/sqlite, wallet/payment/finance, .env/secret, config/source.",
+        "- Chi xoa local sau khi remote da verify size/hash va metadata mapping da ghi.",
+        "- File job dang chay van bi khoa xoa local.",
+    ])
+    samples = [item for item in report.candidates if item.status in {"candidate", "deleted", "uploaded", "blocked"}][:10]
+    if samples:
+        lines.extend(["", "<b>Samples</b>"])
+        for item in samples:
+            name = os.path.basename(str(item.path or "")) or "-"
+            ref = " active_ref" if item.active_reference else ""
+            target = f" -> <code>{safe_html(item.remote_target)}</code>" if item.remote_target and mode == "preview" else ""
+            lines.append(
+                f"- <code>{safe_html(item.status)}</code>{ref} {safe_html(name)} "
+                f"{format_storage_bytes(item.size_bytes)} | <code>{safe_html(item.reason)}</code>{target}"
+            )
+    if report.errors:
+        lines.extend(["", "<b>Warnings</b>"])
+        for error in report.errors[:8]:
+            lines.append(f"- <code>{safe_html(error)}</code>")
+    if report.dry_run:
+        lines.extend(["", "De chay that: <code>/storage_migrate_run confirm</code>"])
+    return lines
+
+
+def storage_parse_keep_arg(args, default: int = 5) -> int:
+    keep = int(default)
+    for raw in list(args or []):
+        value = str(raw or "").strip().lower()
+        if value.startswith("keep="):
+            keep = safe_int(value.split("=", 1)[1], default)
+    return max(1, min(50, int(keep)))
+
+
+def storage_backup_cleanup_lines(report, *, mode: str = "preview") -> list[str]:
+    dry_label = "PREVIEW" if report.dry_run else "RUN CONFIRMED"
+    lines = [
+        "<b>STORAGE BACKUP CLEANUP - TOAN AAS</b>",
+        "",
+        f"- Mode: <b>{safe_html(dry_label)}</b>",
+        f"- Backup dir: <code>{safe_html(report.backup_dir)}</code>",
+        f"- Keep latest: <code>{int(report.keep)}</code>",
+        f"- Total: <code>{int(report.total_files)}</code> files / <code>{format_storage_bytes(report.total_bytes)}</code>",
+        f"- Delete candidates: <code>{int(report.delete_candidates)}</code> / <code>{format_storage_bytes(report.delete_candidate_bytes)}</code>",
+        f"- Deleted: <code>{int(report.deleted_files)}</code> / <code>{format_storage_bytes(report.deleted_bytes)}</code>",
+        "",
+        "<b>Safety</b>",
+        "- Chi xu ly file trong /backups.",
+        "- Giu latest N backup, mac dinh N=5.",
+        "- Khong bao gio xoa DB hien tai ngoai thu muc backups.",
+    ]
+    samples = report.files[:12]
+    if samples:
+        lines.extend(["", "<b>Samples</b>"])
+        for item in samples:
+            lines.append(
+                f"- <code>{safe_html(item.status)}</code> {safe_html(os.path.basename(item.path))} "
+                f"{format_storage_bytes(item.size_bytes)} | <code>{safe_html(item.reason)}</code>"
+            )
+    if report.errors:
+        lines.extend(["", "<b>Warnings</b>"])
+        for error in report.errors[:8]:
+            lines.append(f"- <code>{safe_html(error)}</code>")
+    if report.dry_run:
+        lines.extend(["", "De xoa backup cu: <code>/storage_backup_cleanup_run keep=5 confirm</code>"])
+    return lines
+
+
+def storage_db_refs_for_query(query: str, max_rows: int = 3000) -> list[dict]:
+    needle = str(query or "").strip().lower()
+    if not needle:
+        return []
+    table_columns = {
+        "storyboard_videos": ("output_path", "output_url"),
+        "voice_assets": ("local_path",),
+        "subtitle_assets": ("local_path",),
+        "translation_assets": ("local_path",),
+        "dub_assets": ("local_path",),
+        "local_worker_jobs": ("output_url",),
+        "music_generation_jobs": ("output_url",),
+        "shopaikey_jobs": ("result_url", "output_sent_result_url"),
+        "production_assets": ("local_path",),
+        "video_projects": ("final_video_path",),
+    }
+    matches: list[dict] = []
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        for table, candidate_columns in table_columns.items():
+            try:
+                existing = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+            except Exception:
+                continue
+            for column in candidate_columns:
+                if column not in existing:
+                    continue
+                try:
+                    rows = cur.execute(
+                        f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL AND TRIM({column}) != '' LIMIT ?",
+                        (max(1, int(max_rows)),),
+                    ).fetchall()
+                except Exception:
+                    continue
+                for row in rows:
+                    value = str(row[0] if row else "")
+                    if needle in value.lower() or needle in os.path.basename(value).lower():
+                        matches.append({"table": table, "column": column, "path": value})
+                        if len(matches) >= 20:
+                            return matches
+    finally:
+        conn.close()
+    return matches
+
+
+def storage_migration_records_for_query(query: str) -> list[dict]:
+    conn = db_connect()
+    try:
+        return storage_migration.migration_records_for_query(conn, query, limit=20)
+    finally:
+        conn.close()
+
+
+async def cmd_storage_migrate_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    report = run_storage_migration_preview_report()
+    await reply_html_lines(update, storage_migration_report_lines(report, mode="preview"), limit=3900)
+
+
+async def cmd_storage_migrate_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    if not args or str(args[0]).strip().lower() != "confirm":
+        report = run_storage_migration_preview_report()
+        return await reply_html_lines(update, storage_migration_report_lines(report, mode="confirm_missing"), limit=3900)
+    report = run_storage_migration_report(confirm=True)
+    await reply_html_lines(update, storage_migration_report_lines(report, mode="run"), limit=3900)
+
+
+async def cmd_storage_backup_cleanup_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    keep = storage_parse_keep_arg(getattr(context, "args", []) or [], default=5)
+    report = storage_migration.backup_cleanup_report(storage_cleanup_base_dir(), keep=keep, delete=False, confirm=False)
+    await reply_html_lines(update, storage_backup_cleanup_lines(report, mode="preview"), limit=3900)
+
+
+async def cmd_storage_backup_cleanup_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    keep = storage_parse_keep_arg(args, default=5)
+    if "confirm" not in {str(arg).strip().lower() for arg in args}:
+        report = storage_migration.backup_cleanup_report(storage_cleanup_base_dir(), keep=keep, delete=False, confirm=False)
+        return await reply_html_lines(update, storage_backup_cleanup_lines(report, mode="confirm_missing"), limit=3900)
+    report = storage_migration.backup_cleanup_report(storage_cleanup_base_dir(), keep=keep, delete=True, confirm=True)
+    await reply_html_lines(update, storage_backup_cleanup_lines(report, mode="run"), limit=3900)
+
+
+async def cmd_storage_asset_refs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    query = " ".join(str(arg) for arg in (getattr(context, "args", []) or [])).strip()
+    if not query:
+        return await update.message.reply_text("Dùng: /storage_asset_refs <path-hoac-ten-file>")
+    db_refs = storage_db_refs_for_query(query)
+    migration_refs = storage_migration_records_for_query(query)
+    lines = [
+        "<b>STORAGE ASSET REFS</b>",
+        "",
+        f"- Query: <code>{safe_html(query)}</code>",
+        f"- DB refs: <code>{len(db_refs)}</code>",
+        f"- Migration mappings: <code>{len(migration_refs)}</code>",
+    ]
+    if db_refs:
+        lines.extend(["", "<b>DB refs</b>"])
+        for item in db_refs[:10]:
+            lines.append(f"- <code>{safe_html(item['table'])}.{safe_html(item['column'])}</code>: {safe_html(item['path'])}")
+    if migration_refs:
+        lines.extend(["", "<b>Migration mappings</b>"])
+        for item in migration_refs[:10]:
+            verified = "yes" if int(item.get("verified") or 0) else "no"
+            deleted = "yes" if int(item.get("deleted_local") or 0) else "no"
+            lines.append(
+                f"- verified={verified} deleted_local={deleted} "
+                f"{format_storage_bytes(item.get('size_bytes'))} | <code>{safe_html(item.get('remote_path') or item.get('public_url') or '-')}</code>"
+            )
+    if not db_refs and not migration_refs:
+        lines.extend(["", "Chưa thấy DB ref hoặc mapping migration cho file này."])
     await reply_html_lines(update, lines, limit=3900)
 
 
@@ -171249,6 +171541,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("storage_cleanup_preview", cmd_storage_cleanup_preview))
     tg_app.add_handler(CommandHandler("storage_cleanup_run", cmd_storage_cleanup_run))
     tg_app.add_handler(CommandHandler("storage_job_artifacts", cmd_storage_job_artifacts))
+    tg_app.add_handler(CommandHandler("storage_migrate_preview", cmd_storage_migrate_preview))
+    tg_app.add_handler(CommandHandler("storage_migrate_run", cmd_storage_migrate_run))
+    tg_app.add_handler(CommandHandler("storage_backup_cleanup_preview", cmd_storage_backup_cleanup_preview))
+    tg_app.add_handler(CommandHandler("storage_backup_cleanup_run", cmd_storage_backup_cleanup_run))
+    tg_app.add_handler(CommandHandler("storage_asset_refs", cmd_storage_asset_refs))
     tg_app.add_handler(CommandHandler("db_status", cmd_db_status))
     tg_app.add_handler(CommandHandler("security_log", cmd_security_log))
     tg_app.add_handler(CommandHandler("security_checklist", cmd_security_checklist))
