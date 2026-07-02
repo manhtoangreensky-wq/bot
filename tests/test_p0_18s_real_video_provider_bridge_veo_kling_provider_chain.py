@@ -118,8 +118,8 @@ def test_video_provider_chain_loads_enabled_providers(monkeypatch):
     env = {
         "VIDEO_PROVIDER_CHAIN": "generic_http,veo,kling",
         "VIDEO_GENERIC_HTTP_ENABLED": "1",
-        "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://example.invalid/submit",
-        "VIDEO_GENERIC_HTTP_POLL_URL": "https://example.invalid/poll/{task_id}",
+        "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://video-provider.invalid/submit",
+        "VIDEO_GENERIC_HTTP_POLL_URL": "https://video-provider.invalid/poll/{task_id}",
         "VIDEO_GENERIC_HTTP_AUTH_HEADER_NAME": "Authorization",
         "VIDEO_GENERIC_HTTP_AUTH_HEADER_VALUE": "Bearer secret",
     }
@@ -132,8 +132,8 @@ def test_video_provider_status_masks_secrets(monkeypatch):
     env = {
         "VIDEO_PROVIDER_CHAIN": "generic_http",
         "VIDEO_GENERIC_HTTP_ENABLED": "1",
-        "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://example.invalid/submit",
-        "VIDEO_GENERIC_HTTP_POLL_URL": "https://example.invalid/poll/{task_id}",
+        "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://video-provider.invalid/submit",
+        "VIDEO_GENERIC_HTTP_POLL_URL": "https://video-provider.invalid/poll/{task_id}",
         "VIDEO_GENERIC_HTTP_AUTH_HEADER_NAME": "Authorization",
         "VIDEO_GENERIC_HTTP_AUTH_HEADER_VALUE": "Bearer super-secret-token",
     }

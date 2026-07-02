@@ -86,6 +86,33 @@ RESULT_URL_PATHS = (
     "videos.0.url",
     "files.0.url",
 )
+CONFIG_PLACEHOLDER_MARKERS = (
+    "th\u1eadt",
+    "example",
+    "placeholder",
+    "your_",
+    "todo",
+    "changeme",
+    "xxx",
+    "demo",
+    "test_url",
+)
+VALID_URL_PREFIXES = ("http://", "https://")
+
+
+def _config_value_is_placeholder(value: str) -> bool:
+    lowered = str(value or "").strip().lower()
+    return any(marker in lowered for marker in CONFIG_PLACEHOLDER_MARKERS)
+
+
+def _valid_config_url(value: str) -> bool:
+    cleaned = str(value or "").strip()
+    return bool(cleaned and cleaned.lower().startswith(VALID_URL_PREFIXES) and not _config_value_is_placeholder(cleaned))
+
+
+def _valid_config_secret(value: str) -> bool:
+    cleaned = str(value or "").strip()
+    return bool(cleaned and not _config_value_is_placeholder(cleaned))
 
 
 class VideoProviderContractError(ValueError):
@@ -324,9 +351,52 @@ class GenericHttpVideoProvider:
     def _auth_header(self) -> tuple[str, str]:
         return str(self.env.get(self.auth_header_name_env) or "").strip(), str(self.env.get(self.auth_header_value_env) or "").strip()
 
-    def _configured(self) -> bool:
+    def _config_validation(self) -> dict[str, Any]:
+        missing: list[str] = []
+        invalid_fields: list[str] = []
+        invalid_env: list[str] = []
         name, value = self._auth_header()
-        return bool(self._enabled() and self._submit_url() and self._poll_url() and name and value)
+        submit_url = self._submit_url()
+        poll_url = self._poll_url()
+        enabled = self._enabled()
+        if not enabled:
+            missing.append(self.enabled_env)
+        if not submit_url:
+            missing.append(self.submit_url_env)
+        elif not _valid_config_url(submit_url):
+            invalid_fields.append("submit_url")
+            invalid_env.append(self.submit_url_env)
+        if not poll_url:
+            missing.append(self.poll_url_env)
+        elif not _valid_config_url(poll_url):
+            invalid_fields.append("poll_url")
+            invalid_env.append(self.poll_url_env)
+        if not name:
+            missing.append(self.auth_header_name_env)
+        elif not _valid_config_secret(name):
+            invalid_fields.append("auth")
+            invalid_env.append(self.auth_header_name_env)
+        if not value:
+            missing.append(self.auth_header_value_env)
+        elif not _valid_config_secret(value):
+            if "auth" not in invalid_fields:
+                invalid_fields.append("auth")
+            invalid_env.append(self.auth_header_value_env)
+        blocker = "provider_config_placeholder_or_invalid_url" if invalid_fields else ""
+        return {
+            "enabled": enabled,
+            "configured": bool(enabled and not missing and not invalid_fields),
+            "missing": missing,
+            "invalid_fields": invalid_fields,
+            "invalid_env": invalid_env,
+            "blocker": blocker,
+            "submit_url_configured": bool(_valid_config_url(submit_url)),
+            "poll_url_configured": bool(_valid_config_url(poll_url)),
+            "auth_configured": bool(_valid_config_secret(name) and _valid_config_secret(value)),
+        }
+
+    def _configured(self) -> bool:
+        return bool(self._config_validation().get("configured"))
 
     def _capability_list(self) -> list[str]:
         raw = str(self.env.get(self.capabilities_env) or "text_to_video,image_to_video,video_to_video,multi_scene_video,scene_video")
@@ -338,35 +408,32 @@ class GenericHttpVideoProvider:
         return result
 
     def capabilities(self) -> dict[str, Any]:
-        missing = []
+        config = self._config_validation()
+        missing = list(config.get("missing") or [])
         name, value = self._auth_header()
         submit_url_present = bool(self._submit_url())
         poll_url_present = bool(self._poll_url())
         auth_present = bool(name and value)
         model_present = bool(str(self.env.get(self.model_env) or "").strip())
-        if not self._enabled():
-            missing.append(self.enabled_env)
-        if not submit_url_present:
-            missing.append(self.submit_url_env)
-        if not poll_url_present:
-            missing.append(self.poll_url_env)
-        if not name:
-            missing.append(self.auth_header_name_env)
-        if not value:
-            missing.append(self.auth_header_value_env)
         return {
             "provider": self.provider_name,
-            "enabled": self._enabled(),
-            "configured": not missing,
+            "enabled": bool(config.get("enabled")),
+            "configured": bool(config.get("configured")),
             "missing": missing,
+            "invalid_fields": list(config.get("invalid_fields") or []),
+            "invalid_env": list(config.get("invalid_env") or []),
+            "blocker": str(config.get("blocker") or ""),
+            "config_blocker": str(config.get("blocker") or ""),
             "capabilities": self._capability_list(),
-            "endpoint_configured": bool(submit_url_present and poll_url_present),
+            "endpoint_configured": bool(config.get("submit_url_configured") and config.get("poll_url_configured")),
             "submit_url_present": submit_url_present,
             "poll_url_present": poll_url_present,
+            "submit_url_configured": bool(config.get("submit_url_configured")),
+            "poll_url_configured": bool(config.get("poll_url_configured")),
             "endpoint_present": bool(submit_url_present or poll_url_present),
             "model_configured": model_present,
             "model_present": model_present,
-            "auth_configured": auth_present,
+            "auth_configured": bool(config.get("auth_configured")),
             "auth_present": auth_present,
         }
 
@@ -438,8 +505,8 @@ class GenericHttpVideoProvider:
         raw_debug = {
             "smoke_stage": "submit_response_parse",
             **_payload_debug(payload),
-            "submit_url_configured": bool(self._submit_url()),
-            "poll_url_configured": bool(self._poll_url()),
+            "submit_url_configured": bool(caps.get("submit_url_configured")),
+            "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
             "http_status": int(result.get("status_code") or 0),
             "submit_http_status": int(result.get("status_code") or 0),

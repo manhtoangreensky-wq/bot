@@ -63,8 +63,8 @@ def test_video_provider_setup_masks_secrets():
     env = {
         "VIDEO_PROVIDER_CHAIN": "generic_http",
         "VIDEO_GENERIC_HTTP_ENABLED": "true",
-        "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://example.invalid/submit",
-        "VIDEO_GENERIC_HTTP_POLL_URL": "https://example.invalid/poll/{task_id}",
+        "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://video-provider.invalid/submit",
+        "VIDEO_GENERIC_HTTP_POLL_URL": "https://video-provider.invalid/poll/{task_id}",
         "VIDEO_GENERIC_HTTP_AUTH_HEADER_NAME": "Authorization",
         "VIDEO_GENERIC_HTTP_AUTH_HEADER_VALUE": "Bearer real-secret-token",
     }
@@ -90,7 +90,7 @@ def test_key4u_alias_env_detected():
         {
             "VIDEO_PROVIDER_CHAIN": "key4u_video",
             "KEY4U_VIDEO_ENABLED": "true",
-            "KEY4U_BASE_URL": "https://key4u.example",
+            "KEY4U_BASE_URL": "https://key4u.invalid",
             "KEY4U_VIDEO_ENDPOINT": "/submit",
             "KEY4U_VIDEO_POLL_ENDPOINT": "/poll/{task_id}",
             "KEY4U_API_KEY": "key4u-secret",
@@ -109,7 +109,7 @@ def test_shopaikey_alias_env_detected():
         {
             "VIDEO_PROVIDER_CHAIN": "shopaikey_video",
             "SHOPAIKEY_VIDEO_ENABLED": "true",
-            "SHOPAIKEY_BASE_URL": "https://shopaikey.example",
+            "SHOPAIKEY_BASE_URL": "https://shopaikey.invalid",
             "SHOPAIKEY_VIDEO_ENDPOINT": "/video/submit",
             "SHOPAIKEY_VIDEO_POLL_ENDPOINT": "/video/poll/{task_id}",
             "SHOPAIKEY_API_KEY": "shop-secret",
@@ -127,10 +127,10 @@ def test_base_url_without_submit_poll_not_configured():
         {
             "VIDEO_PROVIDER_CHAIN": "shopaikey_video,key4u_video",
             "SHOPAIKEY_VIDEO_ENABLED": "true",
-            "SHOPAIKEY_BASE_URL": "https://shopaikey.example",
+            "SHOPAIKEY_BASE_URL": "https://shopaikey.invalid",
             "SHOPAIKEY_API_KEY": "shop-secret",
             "KEY4U_VIDEO_ENABLED": "true",
-            "KEY4U_BASE_URL": "https://key4u.example",
+            "KEY4U_BASE_URL": "https://key4u.invalid",
             "KEY4U_API_KEY": "key-secret",
         }
     )
@@ -197,8 +197,8 @@ def test_ready_provider_count_when_enabled_configured():
         {
             "VIDEO_PROVIDER_CHAIN": "generic_http",
             "VIDEO_GENERIC_HTTP_ENABLED": "true",
-            "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://example.invalid/submit",
-            "VIDEO_GENERIC_HTTP_POLL_URL": "https://example.invalid/poll/{task_id}",
+            "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://video-provider.invalid/submit",
+            "VIDEO_GENERIC_HTTP_POLL_URL": "https://video-provider.invalid/poll/{task_id}",
             "VIDEO_GENERIC_HTTP_AUTH_HEADER_NAME": "Authorization",
             "VIDEO_GENERIC_HTTP_AUTH_HEADER_VALUE": "Bearer token",
         }
@@ -215,8 +215,8 @@ def test_generic_http_provider_configured_with_submit_poll_auth():
             {
                 "VIDEO_PROVIDER_CHAIN": "generic_http",
                 "VIDEO_GENERIC_HTTP_ENABLED": "1",
-                "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://example.invalid/submit",
-                "VIDEO_GENERIC_HTTP_POLL_URL": "https://example.invalid/poll/{task_id}",
+                "VIDEO_GENERIC_HTTP_SUBMIT_URL": "https://video-provider.invalid/submit",
+                "VIDEO_GENERIC_HTTP_POLL_URL": "https://video-provider.invalid/poll/{task_id}",
                 "VIDEO_GENERIC_HTTP_AUTH_HEADER_NAME": "Authorization",
                 "VIDEO_GENERIC_HTTP_AUTH_HEADER_VALUE": "Bearer token",
             }

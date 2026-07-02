@@ -7,13 +7,13 @@ from services.video_provider_base import VideoArtifactResult, VideoGenerationReq
 def _provider_env(chain: str = "") -> dict[str, str]:
     env = {
         "SHOPAIKEY_VIDEO_ENABLED": "1",
-        "SHOPAIKEY_VIDEO_SUBMIT_URL": "https://example.invalid/shop/submit",
-        "SHOPAIKEY_VIDEO_POLL_URL": "https://example.invalid/shop/poll/{task_id}",
+        "SHOPAIKEY_VIDEO_SUBMIT_URL": "https://video-provider.invalid/shop/submit",
+        "SHOPAIKEY_VIDEO_POLL_URL": "https://video-provider.invalid/shop/poll/{task_id}",
         "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": "Authorization",
         "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": "Bearer shop",
         "KEY4U_VIDEO_ENABLED": "1",
-        "KEY4U_VIDEO_SUBMIT_URL": "https://example.invalid/key4u/submit",
-        "KEY4U_VIDEO_POLL_URL": "https://example.invalid/key4u/poll/{task_id}",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://video-provider.invalid/key4u/submit",
+        "KEY4U_VIDEO_POLL_URL": "https://video-provider.invalid/key4u/poll/{task_id}",
         "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
         "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer key4u",
     }

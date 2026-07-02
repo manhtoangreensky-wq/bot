@@ -28,8 +28,7 @@ from services.video_provider_base import (
 DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 VIDEO_STUB_PROVIDER_NAME = "stub_video"
 PUBLIC_NO_VIDEO_PROVIDER_COPY = (
-    "TOAN AAS chưa có máy dựng video phù hợp cho kiểu video này lúc này. "
-    "Hệ thống chưa trừ Xu. Anh/chị có thể thử kiểu video khác hoặc quay lại sau."
+    "Hiện hệ thống dựng video AI chưa sẵn sàng. Bot chưa trừ Xu."
 )
 VIDEO_CREDIT_BLOCKED_STATUSES = {
     "low",
@@ -412,6 +411,9 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
     for adapter in adapters:
         caps = dict(adapter.capabilities())
         missing = list(caps.get("missing") or [])
+        invalid_fields = list(caps.get("invalid_fields") or [])
+        invalid_env = list(caps.get("invalid_env") or [])
+        config_blocker = str(caps.get("config_blocker") or caps.get("blocker") or "")
         provider_name = str(caps.get("provider") or adapter.provider_name or "").strip()
         credit_status = provider_credit_status(provider_name, env)
         credit_ok = provider_credit_allows_selection(credit_status)
@@ -420,18 +422,24 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
         if configured and not credit_ok:
             selection_blocker = f"credit_{credit_status}"
         elif not configured:
-            selection_blocker = "not_configured"
+            selection_blocker = config_blocker or "not_configured"
         providers.append(
             {
                 "provider": provider_name,
                 "enabled": bool(caps.get("enabled")),
                 "configured": configured,
                 "missing": missing,
+                "invalid_fields": invalid_fields,
+                "invalid_env": invalid_env,
+                "blocker": config_blocker,
+                "config_blocker": config_blocker,
                 "capabilities": list(caps.get("capabilities") or []),
                 "endpoint_configured": bool(caps.get("endpoint_configured")),
                 "endpoint_present": bool(caps.get("endpoint_present") or caps.get("endpoint_configured")),
                 "submit_url_present": bool(caps.get("submit_url_present") or caps.get("endpoint_configured")),
                 "poll_url_present": bool(caps.get("poll_url_present") or caps.get("endpoint_configured")),
+                "submit_url_configured": bool(caps.get("submit_url_configured")),
+                "poll_url_configured": bool(caps.get("poll_url_configured")),
                 "model_configured": bool(caps.get("model_configured")),
                 "model_present": bool(caps.get("model_present") or caps.get("model_configured")),
                 "auth_configured": bool(caps.get("auth_configured")),
@@ -453,6 +461,8 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
         if not item["configured"] and (item["endpoint_present"] or item["auth_present"] or item["enabled"])
     ]
     missing_env = {item["provider"]: item["missing"] for item in providers if item["missing"]}
+    invalid_env = {item["provider"]: item["invalid_env"] for item in providers if item.get("invalid_env")}
+    invalid_config = [item["provider"] for item in providers if item.get("config_blocker")]
     selected_provider = ready[0] if ready else ""
     fallback_order = [item["provider"] for item in providers if item["configured"] and item["provider"] != selected_provider]
     usable_fallback_order = [
@@ -463,12 +473,14 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
     skipped_providers = [
         {"provider": item["provider"], "reason": item.get("selection_blocker") or f"credit_{item.get('credit_status')}"}
         for item in providers
-        if item["configured"] and not item.get("credit_ok")
+        if (item["configured"] and not item.get("credit_ok")) or (not item["configured"] and item.get("selection_blocker") != "not_configured")
     ]
     if ready:
         reason = "provider_ready_and_has_credit"
     elif not enabled:
         reason = "chưa bật provider nào"
+    elif invalid_config:
+        reason = "provider_config_placeholder_or_invalid_url"
     elif not configured:
         reason = "provider chưa đủ endpoint/auth"
     elif skipped_providers:
@@ -495,6 +507,8 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
         "configured_providers": configured,
         "near_ready_providers": near_ready,
         "missing_env": missing_env,
+        "invalid_env": invalid_env,
+        "invalid_config_providers": invalid_config,
         "providers": providers,
         "public_no_provider_copy": PUBLIC_NO_VIDEO_PROVIDER_COPY,
     }
@@ -621,6 +635,33 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
     return target
 
 
+def _config_validation_blocker_from_status(status: dict[str, Any], required_capability: str) -> dict[str, Any]:
+    for item in status.get("providers") or []:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("config_blocker") and not item.get("blocker"):
+            continue
+        supported = {str(cap) for cap in item.get("capabilities") or []}
+        if not any(cap in supported for cap in capability_options(required_capability)):
+            continue
+        invalid_fields = [str(field) for field in (item.get("invalid_fields") or [])]
+        if "submit_url" in invalid_fields:
+            blocker = "provider_config_invalid_submit_url"
+        elif "poll_url" in invalid_fields:
+            blocker = "provider_config_invalid_poll_url"
+        elif "auth" in invalid_fields:
+            blocker = "provider_config_invalid_auth"
+        else:
+            blocker = str(item.get("config_blocker") or item.get("blocker") or "provider_config_placeholder_or_invalid_url")
+        return {
+            "provider": str(item.get("provider") or ""),
+            "blocker": blocker,
+            "invalid_fields": invalid_fields,
+            "invalid_env": [str(env_name) for env_name in (item.get("invalid_env") or [])],
+        }
+    return {}
+
+
 def run_provider_generation(
     request: VideoGenerationRequest,
     *,
@@ -652,6 +693,34 @@ def run_provider_generation(
         "provider_result_url_present": False,
     }
     if adapter is None:
+        config_blocker = _config_validation_blocker_from_status(status, request.required_capability)
+        if config_blocker:
+            selected = str(config_blocker.get("provider") or "")
+            return {
+                "ok": False,
+                **base_debug,
+                "selected_provider": selected,
+                "provider": selected,
+                "provider_selection_blocker": str(config_blocker.get("blocker") or "provider_config_placeholder_or_invalid_url"),
+                "provider_attempted": False,
+                "provider_error": str(config_blocker.get("blocker") or "provider_config_placeholder_or_invalid_url"),
+                "blocker": str(config_blocker.get("blocker") or "provider_config_placeholder_or_invalid_url"),
+                "provider_status": "config_invalid",
+                "smoke_stage": "config_validation",
+                "exception_class": "",
+                "exception_message_safe": "",
+                "submit_url_configured": False,
+                "poll_url_configured": False,
+                "auth_configured": False,
+                "payload_has_prompt": False,
+                "payload_has_duration": False,
+                "payload_has_ratio": False,
+                "invalid_fields": list(config_blocker.get("invalid_fields") or []),
+                "invalid_env": list(config_blocker.get("invalid_env") or []),
+                "no_charge": True,
+                "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY,
+                "provider_readiness": status,
+            }
         return {
             "ok": False,
             **base_debug,
