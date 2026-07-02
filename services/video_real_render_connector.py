@@ -25,6 +25,7 @@ from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
     PUBLIC_NO_VIDEO_PROVIDER_COPY,
     capability_options,
+    normalize_capability_values,
     provider_status_payload,
     run_provider_generation,
 )
@@ -224,7 +225,7 @@ def _provider_candidates_for_capability(readiness: dict | None = None, required_
             continue
         if not item.get("configured"):
             continue
-        supported = {str(value) for value in (item.get("capabilities") or [])}
+        supported = set(normalize_capability_values(item.get("capabilities") or []))
         if allowed and not (supported & allowed):
             continue
         provider_name = str(item.get("provider") or "").strip()
@@ -733,7 +734,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     prompt = _safe_text(getattr(scene, "video_prompt", "") or getattr(scene, "visual_prompt", ""), 1200)
     aspect_ratio = str(getattr(scene, "aspect_ratio", "") or "9:16")
     job = getattr(scene, "_toan_aas_job", {}) if hasattr(scene, "_toan_aas_job") else {}
-    product_type = video_final_output.normalize_video_product_type((job or {}).get("product_type") or (job or {}).get("video_flow") or "")
+    product_type = _product_type(job)
     route = video_final_output.route_for_product_type(product_type)
     required_capability = str(route.get("provider_capability") or "text_to_video")
     request = VideoGenerationRequest(
@@ -1211,6 +1212,10 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["provider_error"] = effective_provider_error
         data["provider_order"] = _provider_order(job)
         data["required_capability"] = required_capability
+        data["required_capability_original"] = str(data.get("required_capability_original") or required_capability)
+        data["normalized_capability_candidates"] = list(
+            data.get("normalized_capability_candidates") or capability_options(required_capability)
+        )
         data["fallback_capability"] = fallback_capability
         data["route_requires_provider"] = bool(route_requires_provider)
         data["local_fallback_allowed"] = bool(local_fallback_allowed)
@@ -1235,6 +1240,10 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             or data.get("result_url_present")
             or any((item or {}).get("download_url_present") for item in provider_events if isinstance(item, dict))
         )
+        if not data.get("connector_renderer") and (route_requires_provider or provider_attempted):
+            data["connector_renderer"] = PROVIDER_BRIDGE_RENDERER
+        if not data.get("renderer") and (route_requires_provider or provider_attempted):
+            data["renderer"] = PROVIDER_SCENE_RENDERER
         data["continue_polling"] = bool(data.get("continue_polling"))
         data["normalized_provider_status"] = str(data.get("normalized_provider_status") or data.get("provider_status") or "")
         data["base_video_source"] = str(
@@ -1474,6 +1483,10 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["provider_order"] = _provider_order(job)
     result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
     result["required_capability"] = required_capability
+    result["required_capability_original"] = str(result.get("required_capability_original") or required_capability)
+    result["normalized_capability_candidates"] = list(
+        result.get("normalized_capability_candidates") or capability_options(required_capability)
+    )
     result["fallback_capability"] = fallback_capability
     result["route_requires_provider"] = bool(route_requires_provider)
     result["local_fallback_allowed"] = bool(local_fallback_allowed)

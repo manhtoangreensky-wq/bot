@@ -900,7 +900,7 @@ def run_once(
             unavailable = REAL_VIDEO_RENDER_UNAVAILABLE in message
             diagnostics = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
             continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
-            fail_job(
+            fail_result = fail_job(
                 job_id,
                 f"{type(exc).__name__}:{message}",
                 retryable=bool(continue_polling)
@@ -917,6 +917,8 @@ def run_once(
                     or job.get("product_video")
                 ),
             )
+            if continue_polling and (fail_result.get("deferred") or fail_result.get("continue_polling")):
+                return "pending"
         return "failed"
 
 

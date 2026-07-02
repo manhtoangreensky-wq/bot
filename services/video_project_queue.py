@@ -946,6 +946,67 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
     return {"ok": True, "status": final_status, "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}
 
 
+def defer_video_job_for_provider_polling(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    reason: str = "provider_in_progress",
+    diagnostics: dict | None = None,
+) -> dict[str, Any]:
+    """Keep a real provider video job non-terminal while the provider is still rendering."""
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        return {"ok": False, "reason": "job_not_found"}
+    project = get_video_project(conn, int(job.get("project_id") or 0))
+    if project and (project.get("video_delivered_at") or project.get("video_delivery_message_id")):
+        return {"ok": False, "reason": "late_defer_suppressed_after_delivery", "job": job, "project": project}
+    payload = _json_loads(job.get("result_json"), {})
+    if not isinstance(payload, dict):
+        payload = {}
+    if isinstance(diagnostics, dict):
+        payload.update(diagnostics)
+    clean_reason = str(reason or payload.get("provider_error") or payload.get("blocker") or "provider_in_progress")[:1000]
+    payload.update(
+        {
+            "ok": False,
+            "continue_polling": True,
+            "provider_pending_deferred": True,
+            "provider_error": payload.get("provider_error") or clean_reason,
+            "blocker": payload.get("blocker") or clean_reason,
+            "no_charge": True,
+        }
+    )
+    try:
+        progress = max(int(job.get("progress_percent") or 0), int(payload.get("progress_percent") or 0), 65)
+    except Exception:
+        progress = 65
+    current = now_text()
+    conn.execute(
+        """UPDATE video_jobs
+           SET status='queued', locked_by='', locked_at=NULL, lease_expires_at=NULL,
+               last_error=?, result_json=?, progress_percent=?, progress_message=?, updated_at=?
+           WHERE id=?""",
+        (clean_reason, _json_dumps(payload), progress, "provider_in_progress", current, int(job_id)),
+    )
+    conn.execute(
+        """UPDATE video_projects
+           SET status='processing', video_terminal_state='final_rendering',
+               error_log=?, updated_at=?
+           WHERE project_id=?""",
+        (clean_reason[:2000], current, int(job["project_id"])),
+    )
+    conn.commit()
+    return {
+        "ok": True,
+        "status": "queued",
+        "deferred": True,
+        "continue_polling": True,
+        "job": get_video_render_job(conn, int(job_id)),
+        "project": get_video_project(conn, int(job["project_id"])),
+    }
+
+
 def process_claimed_video_job(
     conn: sqlite3.Connection,
     job: dict[str, Any],
