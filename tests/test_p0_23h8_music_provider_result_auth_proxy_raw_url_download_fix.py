@@ -142,7 +142,7 @@ def test_selected_artifact_field_path_saved(monkeypatch, tmp_path):
 
 def test_403_access_denied_xml_classified_forbidden():
     detail = "http=403; downloaded_bytes=111; content_type=application/xml; error_body_class=AccessDenied"
-    assert bot.music_download_error_category(detail, 403) == "result_url_forbidden"
+    assert bot.music_download_error_category(detail, 403) == "result_url_forbidden_access_denied"
 
 
 def test_403_expired_token_xml_classified_expired():
@@ -258,7 +258,7 @@ def test_all_strategies_fail_clean_blocker(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "_download_music_audio_url_bytes", fake_download)
     result = asyncio.run(bot.materialize_music_artifact_for_job(_job(result_url="https://cdn/fail.mp3"), updated_by=USER_ID, source="h8"))
     assert result["ok"] is False
-    assert result["job"]["primary_blocker"] == "result_url_forbidden"
+    assert result["job"]["primary_blocker"] == "result_url_forbidden_access_denied"
     assert result["job"]["terminal_state"] == "failed_no_charge"
 
 
