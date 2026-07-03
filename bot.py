@@ -5844,6 +5844,8 @@ def normalize_engine_async_job(job: dict) -> dict:
     current.setdefault("next_poll_after", "")
     current.setdefault("parsed_fields", {})
     current.setdefault("expire_at", "")
+    if feature == "music_suno" and str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower() == "failed_no_charge":
+        current = ensure_music_failed_no_charge_metadata(current)
     return current
 
 def save_engine_async_job(job: dict) -> dict:
@@ -5872,6 +5874,17 @@ def save_engine_async_job(job: dict) -> dict:
             _engine_async_memory_save_id_list(_engine_async_user_key(current.get("user_id")), internal_id)
             _engine_async_memory_save_id_list(_engine_async_user_key(current.get("user_id"), current.get("feature")), internal_id)
     return current
+
+
+def save_music_engine_async_job_if_ready(job: dict) -> dict:
+    try:
+        return save_engine_async_job(job)
+    except ValueError as exc:
+        if "requires provider_task_id or output_bytes" not in str(exc):
+            raise
+        current = dict(job or {})
+        current["persist_skipped_reason"] = "provider_task_id_or_output_bytes_missing"
+        return current
 
 def get_engine_async_job(internal_job_id: str) -> dict:
     raw_id = str(internal_job_id or "").strip()
@@ -5980,8 +5993,20 @@ def mark_music_confirm_submit_blocker(
                 "auto_delivery_blocker": "job_persist_failed",
                 "last_provider_status": sanitize_provider_status_text(str(exc), "", 240),
             })
+            current = ensure_music_failed_no_charge_metadata(
+                current,
+                primary_blocker="job_persist_failed",
+                fail_stage="persist",
+                detail=str(exc),
+                provider_submit_called=False,
+            )
             ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
             return current
+    provider_submit_was_called = bool(
+        normalized not in {"confirm_state_missing", "provider_submit_not_called", "job_persist_failed"}
+        or current.get("provider_submit_called")
+        or str(current.get("provider_task_id") or current.get("provider_job_id") or "").strip()
+    )
     current.update({
         "feature": str(current.get("feature") or "music_suno"),
         "status": "failed",
@@ -6000,6 +6025,12 @@ def mark_music_confirm_submit_blocker(
         "submit_failed_at": now,
         "confirm_submit_failed_at": now,
     })
+    current = ensure_music_failed_no_charge_metadata(
+        current,
+        primary_blocker=normalized,
+        detail=safe_detail,
+        provider_submit_called=provider_submit_was_called,
+    )
     if not persist:
         ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
         return current
@@ -6014,6 +6045,13 @@ def mark_music_confirm_submit_blocker(
             "submit_failed_at": now_text(),
             "confirm_submit_failed_at": now_text(),
         })
+        current = ensure_music_failed_no_charge_metadata(
+            current,
+            primary_blocker="job_persist_failed",
+            fail_stage="persist",
+            detail=str(exc),
+            provider_submit_called=provider_submit_was_called,
+        )
         ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
         return current
 
@@ -6024,6 +6062,176 @@ def music_confirm_submit_blocker_from_job(job: dict | None = None) -> str:
         if value in MUSIC_CONFIRM_SUBMIT_BLOCKERS:
             return value
     return ""
+
+
+MUSIC_FAILED_NO_CHARGE_COMPAT_BLOCKER = "unknown_music_failed_no_charge_without_blocker"
+MUSIC_FAILED_NO_CHARGE_BLOCKERS = {
+    "music_confirm_callback_unbound",
+    "music_job_missing_after_confirm",
+    "music_job_persist_failed",
+    "music_registry_missing",
+    "music_provider_submit_not_called",
+    "music_provider_submit_exception",
+    "music_provider_task_id_missing",
+    "music_provider_completed_artifact_missing",
+    "music_artifact_resolver_exception",
+    "music_delivery_exception",
+    "music_debug_command_exception",
+    MUSIC_FAILED_NO_CHARGE_COMPAT_BLOCKER,
+    "confirm_state_missing",
+    "provider_submit_not_called",
+    "provider_submit_failed",
+    "provider_job_id_missing_after_submit",
+    "job_persist_failed",
+    "scheduler_start_failed",
+    "auto_tick_exception",
+    "provider_job_missing",
+    "provider_failed",
+    "timeout_provider_processing",
+    "artifact_materialization_failed",
+    "artifact_download_failed",
+    "artifact_zero_bytes",
+    "artifact_validation_failed",
+    "artifact_bytes_missing",
+    "artifact_not_ready",
+    "result_url_expired",
+    "result_url_forbidden_access_denied",
+    "result_url_forbidden_or_missing_auth",
+    "result_url_missing",
+}
+
+MUSIC_FAILED_STAGE_BY_BLOCKER = {
+    "music_confirm_callback_unbound": "confirm",
+    "confirm_state_missing": "confirm",
+    "music_job_missing_after_confirm": "persist",
+    "music_job_persist_failed": "persist",
+    "job_persist_failed": "persist",
+    "music_registry_missing": "registry",
+    "scheduler_start_failed": "scheduler",
+    "auto_tick_exception": "scheduler",
+    "music_provider_submit_not_called": "provider_submit",
+    "provider_submit_not_called": "provider_submit",
+    "music_provider_submit_exception": "provider_submit",
+    "provider_submit_failed": "provider_submit",
+    "provider_job_id_missing_after_submit": "provider_submit",
+    "music_provider_task_id_missing": "provider_submit",
+    "provider_job_missing": "provider_submit",
+    "provider_failed": "provider_poll",
+    "timeout_provider_processing": "provider_poll",
+    "music_provider_completed_artifact_missing": "artifact",
+    "music_artifact_resolver_exception": "artifact",
+    "artifact_materialization_failed": "artifact",
+    "artifact_download_failed": "artifact",
+    "artifact_zero_bytes": "artifact",
+    "artifact_validation_failed": "artifact",
+    "artifact_bytes_missing": "artifact",
+    "artifact_not_ready": "artifact",
+    "result_url_expired": "artifact",
+    "result_url_forbidden_access_denied": "artifact",
+    "result_url_forbidden_or_missing_auth": "artifact",
+    "result_url_missing": "artifact",
+    "music_delivery_exception": "delivery",
+    "music_debug_command_exception": "debug",
+    MUSIC_FAILED_NO_CHARGE_COMPAT_BLOCKER: "unknown",
+}
+
+
+def music_failed_no_charge_primary_blocker(job: dict | None = None) -> str:
+    current = dict(job or {})
+    for key in (
+        "primary_blocker",
+        "artifact_blocker",
+        "auto_delivery_blocker",
+        "music_delivery_blocker",
+        "confirm_submit_blocker",
+        "error_category",
+    ):
+        value = sanitize_provider_status_text(current.get(key) or "", str(current.get("provider_task_id") or current.get("provider_job_id") or ""), 160).strip()
+        if value and value not in {"failed", "failed_no_charge", "none", "-"}:
+            return value
+    terminal = str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower()
+    status = str(current.get("status") or "").strip().lower()
+    if terminal == "failed_no_charge" or status == "failed_no_charge":
+        return MUSIC_FAILED_NO_CHARGE_COMPAT_BLOCKER
+    return ""
+
+
+def music_failed_no_charge_fail_stage(job: dict | None = None, primary_blocker: str = "") -> str:
+    current = dict(job or {})
+    explicit = str(current.get("fail_stage") or current.get("music_fail_stage") or "").strip()
+    if explicit:
+        return sanitize_provider_status_text(explicit, "", 80)
+    blocker = str(primary_blocker or music_failed_no_charge_primary_blocker(current) or "").strip()
+    if blocker in MUSIC_FAILED_STAGE_BY_BLOCKER:
+        return MUSIC_FAILED_STAGE_BY_BLOCKER[blocker]
+    if blocker.startswith("artifact_") or "artifact" in blocker or "result_url" in blocker:
+        return "artifact"
+    if "delivery" in blocker or "telegram" in blocker:
+        return "delivery"
+    if "provider" in blocker:
+        return "provider_submit" if "submit" in blocker or "task_id" in blocker or "job_missing" in blocker else "provider_poll"
+    return "unknown" if blocker else ""
+
+
+def music_provider_submit_called_debug_value(job: dict | None = None) -> str:
+    current = dict(job or {})
+    provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or current.get("music_task_id") or "").strip()
+    if provider_task_id:
+        return "yes"
+    if "provider_submit_called" in current:
+        return "yes" if bool(current.get("provider_submit_called")) else "no"
+    phase = str(current.get("confirm_submit_phase") or "").strip().lower()
+    if phase in {"provider_submit_called", "provider_job_id_saved", "submitted"}:
+        return "yes"
+    blocker = music_failed_no_charge_primary_blocker(current)
+    if blocker in {"confirm_state_missing", "provider_submit_not_called", "music_provider_submit_not_called", "job_persist_failed", "music_job_persist_failed", "music_confirm_callback_unbound"}:
+        return "no"
+    return "unknown"
+
+
+def ensure_music_failed_no_charge_metadata(
+    job: dict | None = None,
+    *,
+    primary_blocker: str = "",
+    fail_stage: str = "",
+    detail: str = "",
+    provider_submit_called=None,
+    callback_name: str = "",
+    route_name: str = "",
+) -> dict:
+    current = dict(job or {})
+    blocker = str(primary_blocker or music_failed_no_charge_primary_blocker(current) or MUSIC_FAILED_NO_CHARGE_COMPAT_BLOCKER).strip()
+    stage = str(fail_stage or music_failed_no_charge_fail_stage(current, blocker) or "unknown").strip()
+    provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or current.get("music_task_id") or "").strip()
+    safe_detail = sanitize_provider_status_text(
+        detail
+        or current.get("fail_reason_safe")
+        or current.get("last_provider_status")
+        or current.get("provider_error")
+        or current.get("last_send_error")
+        or blocker,
+        provider_task_id,
+        240,
+    )
+    current["primary_blocker"] = blocker
+    current.setdefault("error_category", blocker)
+    current.setdefault("auto_delivery_blocker", blocker)
+    current["fail_stage"] = stage
+    current["fail_reason_safe"] = safe_detail or blocker
+    current.setdefault("failed_at", now_text())
+    current.setdefault("music_failed_at", current.get("failed_at") or now_text())
+    if provider_submit_called is not None:
+        current["provider_submit_called"] = bool(provider_submit_called)
+    elif "provider_submit_called" not in current and music_provider_submit_called_debug_value(current) != "unknown":
+        current["provider_submit_called"] = music_provider_submit_called_debug_value(current) == "yes"
+    current["provider_task_id_present"] = bool(provider_task_id)
+    current.setdefault("job_persisted", bool(current.get("persist_helper_called") or current.get("created_before_provider_submit") or current.get("internal_job_id")))
+    current.setdefault("registry_saved", bool(current.get("progress_registry_saved") or current.get("progress_registry_key")))
+    if callback_name:
+        current.setdefault("callback_name", sanitize_provider_status_text(callback_name, "", 120))
+    if route_name:
+        current.setdefault("route_name", sanitize_provider_status_text(route_name, "", 120))
+    return current
 
 def list_engine_async_jobs(feature: str = "", user_id="", limit: int = 5, active_only: bool = False) -> list[dict]:
     if user_id and feature:
@@ -7468,6 +7676,13 @@ async def music_progress_refresh_job_status(job_id: str = "", *, user_id=0, allo
             "progress_text": "TOAN AAS chưa xử lý được bài nhạc này lúc này. Hệ thống chưa trừ Xu.",
             "last_provider_status": "not_submitted",
         })
+        current = ensure_music_failed_no_charge_metadata(
+            current,
+            primary_blocker="music_provider_submit_not_called",
+            fail_stage="provider_submit",
+            detail="provider_job_missing",
+            provider_submit_called=False,
+        )
         save_engine_async_job(current)
         return current
     if not allow_provider_poll or not provider_task_id:
@@ -7644,6 +7859,13 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "provider_result_candidate_count": int(artifact.get("provider_result_candidate_count") or current.get("provider_result_candidate_count") or 0),
             "result_url_age_seconds": music_result_url_age_seconds(current),
         })
+        updated = ensure_music_failed_no_charge_metadata(
+            updated,
+            primary_blocker=blocker,
+            fail_stage="artifact",
+            detail=artifact.get("download_detail") or status,
+            provider_submit_called=True,
+        )
         if blocker in {KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER, KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER, KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER, KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER}:
             updated["progress_text"] = KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE
         if updated.get("internal_job_id"):
@@ -7663,6 +7885,13 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         updated["artifact_materialization_status"] = blocker
         updated["materialization_status"] = "failed"
         updated["lifecycle_status"] = "artifact_failed"
+        updated = ensure_music_failed_no_charge_metadata(
+            updated,
+            primary_blocker=blocker,
+            fail_stage="artifact",
+            detail=blocker,
+            provider_submit_called=True,
+        )
         if updated.get("internal_job_id"):
             save_engine_async_job(updated)
         return {"ok": False, "status": blocker.upper(), "job": updated, "artifact": artifact, "recovery_action": "materialize_failed"}
@@ -7849,6 +8078,13 @@ async def refresh_music_expired_result_url_for_job(
             "music_terminal_state": "failed_no_charge",
             "progress_text": "Link kết quả nhạc đã hết hạn trước khi TOAN AAS tải được file. Hệ thống chưa trừ Xu.",
         })
+        current = ensure_music_failed_no_charge_metadata(
+            current,
+            primary_blocker="result_url_expired",
+            fail_stage="artifact",
+            detail=str(exc),
+            provider_submit_called=True,
+        )
         if current.get("internal_job_id"):
             save_engine_async_job(current)
         return {"ok": False, "status": "RESULT_URL_EXPIRED", "job": current, "recovery_action": "refresh_url_failed"}
@@ -7934,6 +8170,13 @@ async def refresh_music_expired_result_url_for_job(
         "materialization_status": "failed",
         "progress_text": "TOAN AAS chưa tải được file nhạc hợp lệ từ kết quả provider. Hệ thống chưa trừ Xu.",
     })
+    current = ensure_music_failed_no_charge_metadata(
+        current,
+        primary_blocker=str(current.get("primary_blocker") or "result_url_forbidden_or_missing_auth"),
+        fail_stage="artifact",
+        detail=current.get("refresh_url_status") or current.get("last_provider_status") or "",
+        provider_submit_called=True,
+    )
     if current.get("internal_job_id"):
         save_engine_async_job(current)
     final_status = "RESULT_URL_EXPIRED" if str(current.get("primary_blocker") or "").strip().lower() == "result_url_expired" else "RESULT_URL_DOWNLOAD_FAILED"
@@ -8425,6 +8668,19 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     ).strip()
     product_video_registry_present = bool(auto_record)
     status_registry_missing_after_restart = bool(job_id and not product_video_registry_present and "no_registry_after_restart" in auto)
+    music_failure = music_failure_debug_fields(job, job_id, resolved_type) if progress_product_type_is_music(resolved_type, job_id) else {}
+    music_failure_text = ""
+    if music_failure:
+        music_failure_text = (
+            f"• primary_blocker: <code>{html.escape(str(music_failure.get('primary_blocker') or '-'))}</code>\n"
+            f"• fail_stage: <code>{html.escape(str(music_failure.get('fail_stage') or '-'))}</code>\n"
+            f"• fail_reason_safe: <code>{html.escape(str(music_failure.get('fail_reason_safe') or '-'))}</code>\n"
+            f"• provider_submit_called: <code>{html.escape(str(music_failure.get('provider_submit_called') or 'unknown'))}</code>\n"
+            f"• provider_task_id_present: <code>{'yes' if music_failure.get('provider_task_id_present') else 'no'}</code>\n"
+            f"• artifact_ready: <code>{'yes' if music_failure.get('artifact_ready') else 'no'}</code>\n"
+            f"• delivery_attempted: <code>{'yes' if music_failure.get('delivery_attempted') else 'no'}</code>\n"
+            f"• delivery_succeeded: <code>{'yes' if music_failure.get('delivery_succeeded') else 'no'}</code>\n"
+        )
     return (
         "📊 <b>TOAN AAS progress status</b>\n\n"
         f"• Product: <code>{html.escape(str(payload.get('product_type') or '-'))}</code>\n"
@@ -8432,7 +8688,8 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         f"• Stage: <code>{html.escape(str(payload.get('current_stage') or '-'))}</code>\n"
         f"• Percent: <code>{int(payload.get('percent') or 0)}%</code>\n"
         f"• Terminal: <code>{html.escape(str(payload.get('terminal_state') or '-'))}</code>\n"
-        f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>\n"
+        + music_failure_text
+        + f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>\n"
         f"• product_video_registry_present: <code>{'yes' if product_video_registry_present else 'no'}</code>\n"
         f"• status_panel_message_id: <code>{'present' if status_panel_message_id else 'no'}</code>\n"
         f"• status_registry_missing_after_restart: <code>{'yes' if status_registry_missing_after_restart else 'no'}</code>\n\n"
@@ -8483,10 +8740,14 @@ async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAUL
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
     product_type = str(args[1] if len(args) > 1 else "").strip()
-    if progress_product_type_is_music(product_type, job_id):
-        job_id = canonical_music_job_id(job_id) or job_id
-    job = get_engine_async_job(job_id) if job_id else {}
-    return await update.message.reply_text(product_progress_debug_text(job_id, product_type, job), parse_mode="HTML")
+    try:
+        if progress_product_type_is_music(product_type, job_id):
+            job_id = canonical_music_job_id(job_id) or job_id
+        job = get_engine_async_job(job_id) if job_id else {}
+        text = product_progress_debug_text(job_id, product_type, job)
+    except Exception as exc:
+        text = music_job_debug_exception_text(job_id, exc, stage="progress_status_debug")
+    return await update.message.reply_text(text, parse_mode="HTML")
 
 
 async def cmd_progress_auto_refresh_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -8574,7 +8835,108 @@ async def cmd_workflow_callback_audit(update: Update, context: ContextTypes.DEFA
     return await update.message.reply_text(workflow_graph_audit_text("callback"), parse_mode="HTML")
 
 
+def music_safe_local_artifact_label(value: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "-"
+    name = os.path.basename(raw.rstrip("/\\")) or "artifact"
+    return sanitize_provider_status_text(name, "", 160) or "artifact"
+
+
+def music_failure_debug_fields(job: dict | None = None, job_id: str = "", product_type: str = "") -> dict:
+    current = dict(job or {})
+    safe_job_id = canonical_music_job_id(job_id or current.get("internal_job_id") or current.get("job_id") or "") or str(job_id or "")
+    resolved_type = music_job_product_type(current, product_type if product_type in {"music_song", "music_bg"} else "music_bg")
+    try:
+        state = product_progress_state_from_job(resolved_type, current)
+    except Exception:
+        state = {"current_stage": str(current.get("stage") or current.get("current_stage") or "-"), "percent": int(current.get("progress_percent") or current.get("percent") or 0), "terminal_state": str(current.get("terminal_state") or current.get("music_terminal_state") or "")}
+    lifecycle = dict(state.get("music_lifecycle") or {})
+    auto_record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(progress_auto_refresh_key(resolved_type, safe_job_id)) or {})
+    primary = music_failed_no_charge_primary_blocker(current)
+    terminal = str(state.get("terminal_state") or current.get("terminal_state") or current.get("music_terminal_state") or "").strip()
+    provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or current.get("music_task_id") or "").strip()
+    delivery_attempted = bool(
+        current.get("delivery_attempted")
+        or current.get("music_delivery_started_at")
+        or current.get("music_delivery_message_id")
+        or current.get("delivery_message_id")
+        or int(current.get("delivery_attempt_count") or current.get("send_attempt_count") or 0) > 0
+    )
+    charged_xu = int(current.get("charged_xu") or current.get("music_charged_xu") or current.get("music_charge_amount_xu") or 0)
+    pending_xu = int(current.get("pending_charge_xu") or current.get("music_pending_charge_xu") or 0)
+    charge_status = "charged" if charged_xu > 0 else "pending_no_charge" if pending_xu > 0 else "no_charge"
+    registry_chat = str(auto_record.get("chat_id") or current.get("progress_chat_id") or current.get("panel_chat_id") or "").strip()
+    registry_message = str(auto_record.get("message_id") or current.get("progress_message_id") or current.get("panel_message_id") or "").strip()
+    fail_reason = sanitize_provider_status_text(
+        current.get("fail_reason_safe")
+        or current.get("last_provider_status")
+        or current.get("provider_error")
+        or current.get("last_send_error")
+        or primary
+        or "-",
+        provider_task_id,
+        240,
+    )
+    return {
+        "job_id": safe_job_id,
+        "product_type": str(state.get("product_type") or resolved_type or "-"),
+        "user_id_present": bool(str(current.get("user_id") or "").strip()),
+        "chat_id_present": bool(str(current.get("chat_id") or "").strip()),
+        "lifecycle_status": str(current.get("lifecycle_status") or current.get("status") or "-"),
+        "progress_stage": str(state.get("current_stage") or current.get("stage") or current.get("current_stage") or "-"),
+        "progress_percent": int(state.get("percent") or current.get("progress_percent") or current.get("percent") or 0),
+        "terminal_state": terminal,
+        "stopped_reason": str(auto_record.get("stopped_reason") or auto_record.get("stop_reason") or current.get("stopped_reason") or current.get("stop_reason") or "-"),
+        "primary_blocker": primary,
+        "fail_stage": music_failed_no_charge_fail_stage(current, primary),
+        "fail_reason_safe": fail_reason,
+        "provider_submit_called": music_provider_submit_called_debug_value(current),
+        "provider_task_id_present": bool(provider_task_id or lifecycle.get("provider_task_id")),
+        "provider_status": sanitize_provider_status_text(current.get("provider_status") or current.get("last_provider_status") or current.get("status") or "-", provider_task_id, 180),
+        "artifact_ready": bool(music_job_artifact_ready_value(current) or lifecycle.get("artifact_ready")),
+        "delivery_attempted": delivery_attempted,
+        "delivery_succeeded": bool(music_job_delivered(current)),
+        "charge_status": charge_status,
+        "registry_saved": bool(current.get("progress_registry_saved") or current.get("registry_saved") or auto_record.get("registry_saved")),
+        "registry_chat_id_present": bool(registry_chat),
+        "registry_message_id_present": bool(registry_message),
+        "last_tick_at": str(auto_record.get("last_tick_at") or current.get("last_tick_at") or "-"),
+        "last_update_at": str(auto_record.get("last_update_at") or current.get("updated_at") or "-"),
+        "task_started": bool(auto_record.get("task_started") or current.get("task_started")),
+        "task_alive": bool(auto_record.get("task_alive") or current.get("task_alive")),
+    }
+
+
+def music_job_debug_exception_text(job_id: str = "", exc: Exception | None = None, *, stage: str = "render") -> str:
+    partial_available = "no"
+    try:
+        lookup = get_engine_async_job_lookup(str(job_id or ""))
+        partial_available = "yes" if lookup.get("job") else "no"
+    except Exception:
+        partial_available = "no"
+    exc_type = type(exc).__name__ if exc else "Exception"
+    return (
+        "🎵 <b>Music job debug</b>\n\n"
+        f"• input_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
+        "• primary_blocker: <code>music_debug_command_exception</code>\n"
+        "• fail_stage: <code>debug</code>\n"
+        "• fail_reason_safe: <code>music_debug_command_exception</code>\n"
+        f"• music_debug_exception_type: <code>{html.escape(sanitize_provider_status_text(exc_type, '', 80))}</code>\n"
+        f"• music_debug_exception_stage: <code>{html.escape(sanitize_provider_status_text(stage, '', 80))}</code>\n"
+        f"• music_debug_partial_data_available: <code>{partial_available}</code>"
+    )
+
+
 def music_job_debug_text(job_id: str = "") -> str:
+    try:
+        return _music_job_debug_text(job_id)
+    except Exception as exc:
+        logger.warning("music job debug render failed | job=%s | %s", sanitize_log_text(str(job_id))[:80], sanitize_log_text(str(exc))[:180])
+        return music_job_debug_exception_text(job_id, exc, stage="render")
+
+
+def _music_job_debug_text(job_id: str = "") -> str:
     input_job_id = str(job_id or "").strip()
     lookup = get_engine_async_job_lookup(input_job_id) if input_job_id else {"job": {}, **music_job_lookup_identity(input_job_id, "", False)}
     job_id = str(lookup.get("canonical_job_id") or canonical_music_job_id(input_job_id) or input_job_id)
@@ -8607,13 +8969,14 @@ def music_job_debug_text(job_id: str = "") -> str:
     elif confirm_submit_blocker:
         primary_blocker = confirm_submit_blocker
     elif terminal == "failed_no_charge":
-        primary_blocker = str((job or {}).get("error_category") or "failed")
+        primary_blocker = music_failed_no_charge_primary_blocker(job)
     elif not provider_task_id and output_bytes <= 0:
         primary_blocker = "provider_job_missing"
     elif status in {"submitted", "queued", "processing"} and output_bytes <= 0:
         primary_blocker = "waiting_for_result"
     if not secondary_blocker and primary_blocker:
         secondary_blocker = music_job_artifact_secondary_blocker(job)
+    failure_fields = music_failure_debug_fields(job, job_id, product_type)
     duplicate_guard = "delivered" if music_job_delivered(job) else str((job or {}).get("music_delivery_lock") or (job or {}).get("music_result_delivery_lock") or "open")
     ignored_sources = ",".join(str(item) for item in ((job or {}).get("ignored_duplicate_sources") or [])) or "-"
     candidate_paths_text = str(
@@ -8634,6 +8997,8 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• id_mismatch_reason: <code>{html.escape(str(trace.get('id_mismatch_reason') or '-'))}</code>\n"
         f"• lookup_found: <code>{'yes' if lookup_found else 'no'}</code>\n"
         f"• user_id/chat_id: <code>{html.escape(str((job or {}).get('user_id') or '-'))}/{html.escape(str((job or {}).get('chat_id') or '-'))}</code>\n"
+        f"• user_id_present: <code>{'yes' if failure_fields.get('user_id_present') else 'no'}</code>\n"
+        f"• chat_id_present: <code>{'yes' if failure_fields.get('chat_id_present') else 'no'}</code>\n"
         f"• confirm_route: <code>{html.escape(str((job or {}).get('confirm_route') or '-'))}</code>\n"
         f"• confirm_callback_data: <code>{html.escape(str((job or {}).get('confirm_callback_data') or '-'))}</code>\n"
         f"• confirm_handler_name: <code>{html.escape(str((job or {}).get('confirm_handler_name') or '-'))}</code>\n"
@@ -8650,7 +9015,8 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
         f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
         f"• completed_steps: <code>{html.escape(completed_steps)}</code>\n"
-        f"• provider_submit_called: <code>{'yes' if lifecycle.get('provider_submit_called') else 'no'}</code>\n"
+        f"• provider_submit_called: <code>{html.escape(str(failure_fields.get('provider_submit_called') or 'unknown'))}</code>\n"
+        f"• provider_task_id_present: <code>{'yes' if failure_fields.get('provider_task_id_present') else 'no'}</code>\n"
         f"• lyrics_prepared: <code>{'yes' if lifecycle.get('lyrics_prepared') else 'no'}</code>\n"
         f"• style_prepared: <code>{'yes' if lifecycle.get('style_prepared') else 'no'}</code>\n"
         f"• provider_completed: <code>{'yes' if lifecycle.get('provider_completed') else 'no'}</code>\n"
@@ -8659,7 +9025,13 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• scheduler_mode: <code>{html.escape(str(auto_record.get('scheduler_mode') or '-'))}</code>\n"
         f"• scheduler_status: <code>{html.escape(str((job or {}).get('scheduler_status') or auto_record.get('scheduler_status') or '-'))}</code>\n"
         f"• task_started: <code>{'yes' if auto_record.get('task_started') else 'no'}</code>\n"
+        f"• task_alive: <code>{'yes' if auto_record.get('task_alive') else 'no'}</code>\n"
+        f"• registry_saved: <code>{'yes' if failure_fields.get('registry_saved') else 'no'}</code>\n"
+        f"• registry_chat_id_present: <code>{'yes' if failure_fields.get('registry_chat_id_present') else 'no'}</code>\n"
+        f"• registry_message_id_present: <code>{'yes' if failure_fields.get('registry_message_id_present') else 'no'}</code>\n"
         f"• last_tick_at: <code>{html.escape(str(auto_record.get('last_tick_at') or '-'))}</code>\n"
+        f"• last_update_at: <code>{html.escape(str(failure_fields.get('last_update_at') or '-'))}</code>\n"
+        f"• stopped_reason: <code>{html.escape(str(failure_fields.get('stopped_reason') or '-'))}</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_status') or (job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
         f"• provider_status_raw: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_status_raw') or (job or {}).get('last_provider_status') or '-', provider_task_id, 180))}</code>\n"
         f"• lifecycle_status: <code>{html.escape(str((job or {}).get('lifecycle_status') or '-'))}</code>\n"
@@ -8692,7 +9064,7 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• refreshed_result_url: <code>{'yes' if (job or {}).get('refreshed_result_url') else 'no'}</code>\n"
         f"• refreshed_candidate_count: <code>{int((job or {}).get('refreshed_candidate_count') or 0)}</code>\n"
         f"• refreshed_url_changed: <code>{'yes' if (job or {}).get('refreshed_url_changed') else 'no'}</code>\n"
-        f"• local_artifact_path: <code>{html.escape(local_artifact_path or '-')}</code>\n"
+        f"• local_artifact_path: <code>{html.escape(music_safe_local_artifact_label(local_artifact_path))}</code>\n"
         f"• artifact_state: <code>{html.escape(artifact_state or '-')}</code>\n"
         f"• artifact_candidates_count: <code>{int((job or {}).get('artifact_candidates_count') or 0)}</code>\n"
         f"• materialization_attempted: <code>{'yes' if (job or {}).get('artifact_materialization_attempted') or (job or {}).get('artifact_materialization_started_at') else 'no'}</code>\n"
@@ -8754,6 +9126,9 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• delivery_source_first: <code>{html.escape(str((job or {}).get('delivery_source_first') or (job or {}).get('music_delivery_path') or '-'))}</code>\n"
         f"• ignored_duplicate_sources: <code>{html.escape(ignored_sources)}</code>\n"
         f"• delivery_attempt_count: <code>{int((job or {}).get('delivery_attempt_count') or (job or {}).get('send_attempt_count') or 0)}</code>\n"
+        f"• delivery_attempted: <code>{'yes' if failure_fields.get('delivery_attempted') else 'no'}</code>\n"
+        f"• delivery_succeeded: <code>{'yes' if failure_fields.get('delivery_succeeded') else 'no'}</code>\n"
+        f"• charge_status: <code>{html.escape(str(failure_fields.get('charge_status') or '-'))}</code>\n"
         f"• last_duplicate_blocked_at: <code>{html.escape(str((job or {}).get('last_duplicate_blocked_at') or '-'))}</code>\n"
         f"• delivery_message_id: <code>{html.escape(str((job or {}).get('music_delivery_message_id') or (job or {}).get('delivery_message_id') or '-'))}</code>\n"
         f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
@@ -8762,6 +9137,8 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• terminal_locked_at: <code>{html.escape(str((job or {}).get('music_terminal_locked_at') or (job or {}).get('terminal_locked_at') or '-'))}</code>\n"
         f"• confirm_submit_phase: <code>{html.escape(str((job or {}).get('confirm_submit_phase') or '-'))}</code>\n"
         f"• primary_blocker: <code>{html.escape(primary_blocker or '-')}</code>\n"
+        f"• fail_stage: <code>{html.escape(str(failure_fields.get('fail_stage') or '-'))}</code>\n"
+        f"• fail_reason_safe: <code>{html.escape(str(failure_fields.get('fail_reason_safe') or '-'))}</code>\n"
         f"• secondary_blocker: <code>{html.escape(secondary_blocker or '-')}</code>\n"
         f"• blocker: <code>{html.escape(primary_blocker or '-')}</code>\n"
         f"• duplicate_guard_state: <code>{html.escape(duplicate_guard)}</code>"
@@ -8773,7 +9150,115 @@ async def cmd_music_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
-    return await update.message.reply_text(music_job_debug_text(job_id), parse_mode="HTML")
+    try:
+        text = music_job_debug_text(job_id)
+    except Exception as exc:
+        text = music_job_debug_exception_text(job_id, exc, stage="command")
+    return await update.message.reply_text(text, parse_mode="HTML")
+
+
+def music_failed_job_audit_payload(input_job_id: str = "") -> dict:
+    raw_job_id = str(input_job_id or "").strip()
+    lookup = get_engine_async_job_lookup(raw_job_id) if raw_job_id else {"job": {}, **music_job_lookup_identity(raw_job_id, "", False)}
+    job = dict(lookup.get("job") or {})
+    resolved_job_id = str(lookup.get("resolved_job_id") or lookup.get("canonical_job_id") or canonical_music_job_id(raw_job_id) or raw_job_id)
+    product_type = music_job_product_type(job, "music_bg")
+    fields = music_failure_debug_fields(job, resolved_job_id, product_type)
+    auto_record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(progress_auto_refresh_key(product_type, resolved_job_id)) or {})
+    terminal = str(fields.get("terminal_state") or job.get("terminal_state") or job.get("music_terminal_state") or "").strip().lower()
+    stage = str(fields.get("progress_stage") or job.get("stage") or job.get("current_stage") or "").strip()
+    primary = str(fields.get("primary_blocker") or "").strip()
+    fail_stage = str(fields.get("fail_stage") or "").strip()
+    provider_submit_called = str(fields.get("provider_submit_called") or "unknown").strip()
+    debug_command_safe = True
+    debug_exception_type = ""
+    try:
+        _music_job_debug_text(raw_job_id)
+    except Exception as exc:
+        debug_command_safe = False
+        debug_exception_type = type(exc).__name__
+    job_exists = bool(job)
+    registry_exists = bool(auto_record or job.get("progress_registry_saved") or job.get("progress_registry_key"))
+    stopped_reason = str(fields.get("stopped_reason") or "").strip()
+    primary_ok = bool(primary and primary != MUSIC_FAILED_NO_CHARGE_COMPAT_BLOCKER)
+    fail_stage_ok = bool(fail_stage and fail_stage != "unknown")
+    checks = [
+        {"name": "job_exists", "ok": job_exists},
+        {"name": "debug_command_safe", "ok": debug_command_safe},
+        {"name": "failed_no_charge_has_primary_blocker", "ok": not (terminal == "failed_no_charge" and not primary_ok)},
+        {"name": "received_request_terminal_has_fail_stage", "ok": not (terminal == "failed_no_charge" and stage == "received_request" and not fail_stage_ok)},
+        {"name": "provider_submit_called_known_for_terminal", "ok": not (terminal == "failed_no_charge" and provider_submit_called == "unknown")},
+        {"name": "registry_terminal_has_stopped_reason", "ok": not (registry_exists and terminal == "failed_no_charge" and stopped_reason in {"", "-"})},
+    ]
+    return {
+        "ok": all(item["ok"] for item in checks),
+        "checks": checks,
+        "input_job_id": raw_job_id,
+        "resolved_job_id": resolved_job_id,
+        "job_exists": job_exists,
+        "progress_exists": bool(stage or fields.get("progress_percent")),
+        "registry_exists": registry_exists,
+        "terminal_state": terminal or "-",
+        "stage": stage or "-",
+        "percent": int(fields.get("progress_percent") or 0),
+        "primary_blocker": primary,
+        "primary_blocker_present": primary_ok,
+        "fail_stage": fail_stage,
+        "fail_stage_present": fail_stage_ok,
+        "provider_submit_called": provider_submit_called,
+        "provider_task_id_present": bool(fields.get("provider_task_id_present")),
+        "artifact_ready": bool(fields.get("artifact_ready")),
+        "delivery_succeeded": bool(fields.get("delivery_succeeded")),
+        "debug_command_safe": debug_command_safe,
+        "debug_exception_type": debug_exception_type,
+        "stopped_reason": stopped_reason or "-",
+    }
+
+
+def music_failed_job_audit_text(input_job_id: str = "") -> str:
+    try:
+        payload = music_failed_job_audit_payload(input_job_id)
+    except Exception as exc:
+        return music_job_debug_exception_text(input_job_id, exc, stage="failed_job_audit")
+    lines = [
+        "🎵 <b>Music failed job audit</b>",
+        "",
+        f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>",
+        f"• input_job_id: <code>{html.escape(str(payload.get('input_job_id') or '-'))}</code>",
+        f"• resolved_job_id: <code>{html.escape(str(payload.get('resolved_job_id') or '-'))}</code>",
+        f"• job exists: <code>{'yes' if payload.get('job_exists') else 'no'}</code>",
+        f"• progress exists: <code>{'yes' if payload.get('progress_exists') else 'no'}</code>",
+        f"• registry exists: <code>{'yes' if payload.get('registry_exists') else 'no'}</code>",
+        f"• terminal_state: <code>{html.escape(str(payload.get('terminal_state') or '-'))}</code>",
+        f"• stage: <code>{html.escape(str(payload.get('stage') or '-'))}</code>",
+        f"• percent: <code>{int(payload.get('percent') or 0)}%</code>",
+        f"• primary_blocker present: <code>{'yes' if payload.get('primary_blocker_present') else 'no'}</code>",
+        f"• primary_blocker: <code>{html.escape(str(payload.get('primary_blocker') or '-'))}</code>",
+        f"• fail_stage present: <code>{'yes' if payload.get('fail_stage_present') else 'no'}</code>",
+        f"• fail_stage: <code>{html.escape(str(payload.get('fail_stage') or '-'))}</code>",
+        f"• provider_submit_called: <code>{html.escape(str(payload.get('provider_submit_called') or 'unknown'))}</code>",
+        f"• provider_task_id present: <code>{'yes' if payload.get('provider_task_id_present') else 'no'}</code>",
+        f"• artifact_ready: <code>{'yes' if payload.get('artifact_ready') else 'no'}</code>",
+        f"• delivery_succeeded: <code>{'yes' if payload.get('delivery_succeeded') else 'no'}</code>",
+        f"• debug_command_safe: <code>{'yes' if payload.get('debug_command_safe') else 'no'}</code>",
+        f"• stopped_reason: <code>{html.escape(str(payload.get('stopped_reason') or '-'))}</code>",
+        "",
+    ]
+    for check in payload.get("checks") or []:
+        lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
+    if payload.get("debug_exception_type"):
+        lines.append(f"• debug_exception_type: <code>{html.escape(str(payload.get('debug_exception_type')))}</code>")
+    return "\n".join(lines)
+
+
+async def cmd_music_failed_job_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    if not job_id:
+        return await update.message.reply_text("Dùng: /music_failed_job_audit <MUS_ID>")
+    return await update.message.reply_text(music_failed_job_audit_text(job_id), parse_mode="HTML")
 
 
 def music_delivery_recover_report_text(input_job_id: str = "", result: dict | None = None) -> str:
@@ -8788,14 +9273,30 @@ def music_delivery_recover_report_text(input_job_id: str = "", result: dict | No
     primary_blocker = str(data.get("primary_blocker") or music_job_artifact_primary_blocker(job) or job.get("auto_delivery_blocker") or job.get("music_delivery_blocker") or job.get("confirm_submit_blocker") or job.get("error_category") or data.get("status") or "-")
     secondary_blocker = str(data.get("secondary_blocker") or music_job_artifact_secondary_blocker(job) or "")
     recovery_action = str(data.get("recovery_action") or job.get("artifact_materialization_status") or "none")
+    provider_submit_called = music_provider_submit_called_debug_value(job)
+    status = str(data.get("status") or "-")
+    cannot_recover_reason = ""
+    if provider_submit_called == "no":
+        cannot_recover_reason = "provider_submit_called=no"
+    elif not music_job_provider_task_id(job) and not music_job_artifact_metadata_ready(job):
+        cannot_recover_reason = "provider_task_id_missing"
+    elif music_job_delivered(job):
+        cannot_recover_reason = "delivery_already_succeeded"
+    elif not music_job_ready_artifact_validated(job) and not music_job_artifact_metadata_ready(job):
+        cannot_recover_reason = "artifact_not_ready"
+    recover_possible = not cannot_recover_reason and not str(status or "").upper() in {"MISSING_JOB", "TERMINAL_FAILED"}
     attempted = recovery_action in {"materialize_success", "delivery_attempted"} or str(data.get("status") or "").upper() not in {"MISSING_JOB", "ALREADY_DELIVERED", "ARTIFACT_NOT_READY", "AUDIO_NOT_VALIDATED", "ARTIFACT_BYTES_MISSING", "ARTIFACT_DURATION_MISSING", "TERMINAL_FAILED", "ARTIFACT_MISSING", "ARTIFACT_ZERO_BYTES", "ARTIFACT_DOWNLOAD_FAILED", "ARTIFACT_MATERIALIZATION_FAILED"}
     return (
         "🎵 <b>Music delivery recovery</b>\n\n"
         f"• input_job_id: <code>{html.escape(str(input_job_id or '-'))}</code>\n"
+        f"• status: <code>{html.escape(status)}</code>\n"
         f"• lookup_found: <code>{'yes' if data.get('lookup_found') else 'no'}</code>\n"
         f"• resolved_job_id: <code>{html.escape(str(data.get('resolved_job_id') or '-'))}</code>\n"
         f"• canonical_job_id: <code>{html.escape(str(data.get('canonical_job_id') or '-'))}</code>\n"
         f"• legacy_job_id: <code>{html.escape(str(data.get('legacy_job_id') or '-'))}</code>\n"
+        f"• provider_submit_called: <code>{html.escape(provider_submit_called)}</code>\n"
+        f"• recover_possible: <code>{'yes' if recover_possible else 'no'}</code>\n"
+        f"• cannot_recover_reason: <code>{html.escape(cannot_recover_reason or '-')}</code>\n"
         f"• provider_task_id: <code>{html.escape(mask_provider_task_id(music_job_provider_task_id(job)) if music_job_provider_task_id(job) else '-')}</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text(job.get('provider_status') or job.get('last_provider_status') or job.get('status') or '-', music_job_provider_task_id(job), 180))}</code>\n"
         f"• provider_name_internal: <code>{html.escape(str(job.get('provider_name_internal') or job.get('provider') or '-'))}</code>\n"
@@ -101429,6 +101930,13 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
                 "progress_text": "Provider xử lý quá lâu, chưa có file nhạc. TOAN AAS chưa trừ Xu.",
                 "error_category": "timeout_provider_processing",
             })
+            job = ensure_music_failed_no_charge_metadata(
+                job,
+                primary_blocker="timeout_provider_processing",
+                fail_stage="provider_poll",
+                detail="timeout_provider_processing",
+                provider_submit_called=True,
+            )
             save_engine_async_job(job)
             return {"ok": False, "status": "TIMEOUT_PROVIDER_PROCESSING", "job": job, "audio_bytes": b""}
         progress_text = "Provider đang tạo nhạc. Thường mất vài phút."
@@ -101471,6 +101979,13 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             "setup_required": str(polled.get("setup_required") or (KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if blocker == KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER else "")),
             "rejected_candidate_reasons": list(polled.get("rejected_candidate_reasons") or job.get("rejected_candidate_reasons") or [])[-8:],
         })
+        job = ensure_music_failed_no_charge_metadata(
+            job,
+            primary_blocker=blocker,
+            fail_stage="artifact",
+            detail=recovery_action,
+            provider_submit_called=True,
+        )
         save_engine_async_job(job)
         status_name = "KEY4U_SUNO_DOWNLOAD_ENDPOINT_MISSING_FOR_BARE_CDN" if blocker == KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER else "RESULT_URL_FORBIDDEN_ACCESS_DENIED" if blocker == "result_url_forbidden_access_denied" else "RESULT_URL_MISSING"
         return {"ok": False, "status": status_name, "job": job, "audio_bytes": b""}
@@ -101483,6 +101998,13 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             "error_category": "provider_failed",
             "last_provider_status": sanitize_provider_status_text(polled.get("detail") or provider_status, provider_task_id),
         })
+        job = ensure_music_failed_no_charge_metadata(
+            job,
+            primary_blocker="provider_failed",
+            fail_stage="provider_poll",
+            detail=polled.get("detail") or provider_status,
+            provider_submit_called=True,
+        )
         save_engine_async_job(job)
         return {"ok": False, "status": "PROVIDER_FAILED", "job": job, "audio_bytes": b""}
     job.update({
@@ -103250,6 +103772,13 @@ async def deliver_music_result_once(
                 "auto_delivery_blocker": "artifact_bytes_missing",
                 "progress_text": "File nhạc chưa có dữ liệu hợp lệ; TOAN AAS chưa trừ Xu.",
             })
+            current_job = ensure_music_failed_no_charge_metadata(
+                current_job,
+                primary_blocker="artifact_bytes_missing",
+                fail_stage="artifact",
+                detail="empty_audio",
+                provider_submit_called=True,
+            )
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
         return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
@@ -103265,7 +103794,7 @@ async def deliver_music_result_once(
         })
         current_result["music_result_delivery_lock"] = "sending"
         current_result["music_delivery_lock"] = "sending"
-        save_engine_async_job(current_job)
+        current_job = save_music_engine_async_job_if_ready(current_job)
         pre_delivery_lock_set = True
     artifact = await select_music_delivery_artifact(current_result, current_job, audio_bytes)
     if not artifact.get("ok"):
@@ -103287,6 +103816,13 @@ async def deliver_music_result_once(
                     "error_category": artifact_status.lower(),
                     "progress_text": "File nhạc chưa sẵn sàng hợp lệ; TOAN AAS chưa trừ Xu.",
                 })
+                current_job = ensure_music_failed_no_charge_metadata(
+                    current_job,
+                    primary_blocker=artifact_status.lower(),
+                    fail_stage="artifact",
+                    detail=artifact_status,
+                    provider_submit_called=True,
+                )
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
         return {"ok": False, "status": artifact_status, "job": current_job, "result": current_result}
@@ -175724,6 +176260,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("workflow_callback_audit", cmd_workflow_callback_audit))
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
+    tg_app.add_handler(CommandHandler("music_failed_job_audit", cmd_music_failed_job_audit))
     tg_app.add_handler(CommandHandler("music_delivery_recover", cmd_music_delivery_recover))
     tg_app.add_handler(CommandHandler("music_retry_job", cmd_music_retry_job))
     tg_app.add_handler(CommandHandler("music_confirm_route_audit", cmd_music_confirm_route_audit))
