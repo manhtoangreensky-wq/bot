@@ -222,6 +222,11 @@ def _payload_debug(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _model_debug_value(env: dict[str, str] | os._Environ[str] | None, model_env: str) -> str:
+    data = env or os.environ
+    return str(data.get(model_env) or data.get("VIDEO_PROVIDER_MODEL") or "").strip()[:120]
+
+
 def _validated_prompt(request: VideoGenerationRequest) -> str:
     prompt = _safe_text(request.prompt, 4000)
     if not prompt:
@@ -433,6 +438,7 @@ class GenericHttpVideoProvider:
         config = self._config_validation()
         missing = list(config.get("missing") or [])
         name, value = self._auth_header()
+        submit_url = self._submit_url()
         submit_url_present = bool(self._submit_url())
         poll_url_present = bool(self._poll_url())
         auth_present = bool(name and value)
@@ -455,8 +461,15 @@ class GenericHttpVideoProvider:
             "endpoint_present": bool(submit_url_present or poll_url_present),
             "model_configured": model_present,
             "model_present": model_present,
+            "provider_model_present": model_present,
+            "provider_payload_model": _model_debug_value(self.env, self.model_env),
             "auth_configured": bool(config.get("auth_configured")),
             "auth_present": auth_present,
+            "provider_config_source": f"env:{self.provider_name}",
+            "provider_submit_url_host": _safe_url_host(submit_url),
+            "provider_auth_header_name": str(name or "")[:80],
+            "provider_auth_value_present": bool(str(value or "").strip()),
+            "provider_auth_scheme_prefix": _auth_scheme_prefix(value),
         }
 
     def _headers(self) -> dict[str, str]:
@@ -512,7 +525,36 @@ class GenericHttpVideoProvider:
     def submit_video_job(self, request: VideoGenerationRequest) -> VideoSubmitResult:
         caps = self.capabilities()
         if not caps.get("configured"):
-            return VideoSubmitResult(ok=False, provider_name=self.provider_name, error_code="provider_not_configured")
+            name, value = self._auth_header()
+            raw_debug = {
+                "smoke_stage": "config_validation",
+                "provider_config_source": caps.get("provider_config_source") or f"env:{self.provider_name}",
+                "selected_provider_before_submit": self.provider_name,
+                "submit_provider_key": self.provider_name,
+                "submit_url_configured": bool(caps.get("submit_url_configured")),
+                "provider_submit_url_configured": bool(caps.get("submit_url_configured")),
+                "provider_submit_url_host": caps.get("provider_submit_url_host") or _safe_url_host(self._submit_url()),
+                "poll_url_configured": bool(caps.get("poll_url_configured")),
+                "auth_configured": bool(caps.get("auth_configured")),
+                "auth_present": bool(str(value or "").strip()),
+                "auth_scheme": _auth_scheme_prefix(value),
+                "provider_auth_header_name": str(name or "")[:80],
+                "provider_auth_value_present": bool(str(value or "").strip()),
+                "provider_auth_scheme_prefix": _auth_scheme_prefix(value),
+                "provider_model_present": bool(caps.get("provider_model_present") or caps.get("model_present")),
+                "provider_payload_model": caps.get("provider_payload_model") or _model_debug_value(self.env, self.model_env),
+                "missing": list(caps.get("missing") or []),
+                "invalid_fields": list(caps.get("invalid_fields") or []),
+                "invalid_env": list(caps.get("invalid_env") or []),
+                "provider_submit_blocker": "provider_config_missing_at_submit",
+            }
+            return VideoSubmitResult(
+                ok=False,
+                provider_name=self.provider_name,
+                provider_status="config_invalid",
+                error_code="provider_config_missing_at_submit",
+                raw=raw_debug,
+            )
         try:
             payload = _build_provider_payload(self.provider_name, request, self.env)
         except VideoProviderContractError:
@@ -529,14 +571,20 @@ class GenericHttpVideoProvider:
         raw_debug = {
             "smoke_stage": "submit_response_parse",
             **_payload_debug(payload),
+            "provider_config_source": caps.get("provider_config_source") or f"env:{self.provider_name}",
+            "selected_provider_before_submit": self.provider_name,
+            "submit_provider_key": self.provider_name,
             "submit_url_configured": bool(caps.get("submit_url_configured")),
             "provider_submit_url_configured": bool(caps.get("submit_url_configured")),
             "provider_submit_url_host": _safe_url_host(submit_url),
             "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
+            "auth_present": bool(str(auth_value or "").strip()),
+            "auth_scheme": _auth_scheme_prefix(auth_value),
             "provider_auth_header_name": str(auth_name or "")[:80],
             "provider_auth_value_present": bool(str(auth_value or "").strip()),
             "provider_auth_scheme_prefix": _auth_scheme_prefix(auth_value),
+            "provider_model_present": bool(caps.get("provider_model_present") or caps.get("model_present")),
             "http_status": int(result.get("status_code") or 0),
             "submit_http_status": int(result.get("status_code") or 0),
             "provider_response_http_status": int(result.get("status_code") or 0),

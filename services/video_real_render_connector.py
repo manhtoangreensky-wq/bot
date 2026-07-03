@@ -766,7 +766,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         required_capability=required_capability,
     )
     output_dir = os.path.dirname(os.path.abspath(raw_path))
-    result = run_provider_generation(request, output_dir=output_dir)
+    result = run_provider_generation(request, output_dir=output_dir, environ=dict(os.environ))
     if not result.get("ok"):
         raise RealVideoRenderError(str(result.get("blocker") or result.get("provider_error") or REAL_VIDEO_RENDER_UNAVAILABLE), diagnostics=result)
     output_path = str(result.get("output_path") or result.get("local_path") or "")
