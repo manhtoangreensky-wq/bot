@@ -121,6 +121,17 @@ KEY4U_USAGE_AUTH_MODES = (
     "api_key",
     "authorization_raw",
 )
+KEY4U_BALANCE_FIELD_PATHS = (
+    ("balance",),
+    ("data", "balance"),
+    ("data", "credit"),
+    ("data", "amount"),
+    ("data", "wallet", "balance"),
+    ("data", "usd"),
+    ("credit",),
+    ("remaining",),
+    ("amount",),
+)
 
 
 def _is_group_or_channel_unavailable(status_code: int, message: Any) -> bool:
@@ -676,6 +687,44 @@ class Key4UProvider:
         return type(data).__name__
 
     @staticmethod
+    def _usage_endpoint_type(endpoint_path: str) -> str:
+        path = urlparse(safe_join_url("https://key4u.local", endpoint_path)).path.lower()
+        if "wallet" in path or "balance" in path:
+            return "balance"
+        if "log" in path or "usage" in path:
+            return "usage_log"
+        if "group" in path:
+            return "groups"
+        if "health" in path:
+            return "health"
+        return "unknown"
+
+    @staticmethod
+    def _numeric_balance_from_data(data: Any) -> tuple[float | None, str]:
+        if not isinstance(data, dict):
+            return None, ""
+        for path in KEY4U_BALANCE_FIELD_PATHS:
+            current: Any = data
+            for key in path:
+                if not isinstance(current, dict):
+                    current = None
+                    break
+                current = current.get(key)
+            if isinstance(current, bool) or current is None:
+                continue
+            if isinstance(current, (int, float)):
+                return float(current), ".".join(path)
+            if isinstance(current, str):
+                text = current.replace("$", "").replace(",", "").strip()
+                if not text:
+                    continue
+                try:
+                    return float(text), ".".join(path)
+                except ValueError:
+                    continue
+        return None, ""
+
+    @staticmethod
     def _safe_endpoint_host_path(base_url: str, endpoint_path: str) -> str:
         parsed = urlparse(safe_join_url(base_url, endpoint_path))
         return (parsed.netloc or "") + (parsed.path or "")
@@ -729,6 +778,7 @@ class Key4UProvider:
         auth_modes_tried: list[str] | None = None,
         success_endpoint_host_path: str = "",
         success_auth_mode: str = "",
+        extra_debug: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         debug = dict(result.get("raw_debug_admin_only") or {})
         debug.update(self._usage_endpoint_debug(endpoint_path, auth_mode))
@@ -741,6 +791,7 @@ class Key4UProvider:
         debug["usage_last_error_message_safe"] = str(result.get("error_message_safe") or "")[:220]
         debug["usage_success_endpoint_host_path"] = success_endpoint_host_path
         debug["usage_success_auth_mode"] = success_auth_mode
+        debug.update(extra_debug or {})
         result["raw_debug_admin_only"] = debug
         return result
 
@@ -750,11 +801,73 @@ class Key4UProvider:
         primary_mode = self._usage_auth_info()["auth_mode"]
         candidates_tried: list[str] = []
         auth_modes_tried: list[str] = []
+        diag: dict[str, Any] = {
+            "usage_connectivity_status": "UNKNOWN",
+            "usage_balance_status": "UNKNOWN",
+            "usage_balance_value": "",
+            "usage_success_endpoint_type": "",
+            "usage_health_status": "UNKNOWN",
+            "usage_health_http": 0,
+            "usage_health_endpoint_host_path": "",
+            "usage_balance_http": 0,
+            "usage_balance_parse_endpoint_host_path": "",
+            "usage_balance_parse_fields": "",
+            "usage_log_status": "UNKNOWN",
+            "usage_log_endpoint_host_path": "",
+            "usage_groups_status": "UNKNOWN",
+            "usage_groups_endpoint_host_path": "",
+            "usage_connectivity_endpoint_host_path": "",
+        }
+        last_result: dict[str, Any] | None = None
+        last_endpoint = primary_endpoint
+        last_mode = primary_mode
+        last_success_result: dict[str, Any] | None = None
+        last_success_endpoint = ""
+        last_success_mode = ""
+
+        def classify_attempt(endpoint: str, auth_mode: str, result: dict[str, Any]) -> bool:
+            nonlocal last_success_result, last_success_endpoint, last_success_mode
+            endpoint_type = self._usage_endpoint_type(endpoint)
+            http_status = int(result.get("http_status") or 0)
+            if endpoint_type == "balance":
+                diag["usage_balance_http"] = http_status
+            if not result.get("ok"):
+                return False
+            host_path = self._safe_endpoint_host_path(self.config.base_url, endpoint)
+            diag["usage_connectivity_status"] = "PASS"
+            diag["usage_connectivity_endpoint_host_path"] = host_path
+            diag["usage_success_endpoint_type"] = endpoint_type
+            last_success_result = result
+            last_success_endpoint = endpoint
+            last_success_mode = auth_mode
+            if endpoint_type == "health":
+                diag["usage_health_status"] = "PASS"
+                diag["usage_health_http"] = http_status
+                diag["usage_health_endpoint_host_path"] = host_path
+            elif endpoint_type == "usage_log":
+                diag["usage_log_status"] = "PASS"
+                diag["usage_log_endpoint_host_path"] = host_path
+            elif endpoint_type == "groups":
+                diag["usage_groups_status"] = "PASS"
+                diag["usage_groups_endpoint_host_path"] = host_path
+            balance_value, balance_field = self._numeric_balance_from_data(result.get("data"))
+            if balance_value is None:
+                return False
+            diag["usage_balance_status"] = "PASS"
+            diag["usage_balance_value"] = f"{balance_value:.6f}".rstrip("0").rstrip(".")
+            diag["usage_balance_parse_endpoint_host_path"] = host_path
+            diag["usage_balance_parse_fields"] = balance_field
+            result["usage_balance_value"] = balance_value
+            result["usage_balance_field"] = balance_field
+            return True
+
         result = await self.request_json("GET", primary_endpoint, headers=self._usage_headers(primary_mode))
         result["capability"] = capability
         candidates_tried.append(self._usage_attempt_label(primary_endpoint, primary_mode, result))
         auth_modes_tried.append(primary_mode)
-        if result.get("ok"):
+        last_result = result
+        balance_found = classify_attempt(primary_endpoint, primary_mode, result)
+        if balance_found:
             return self._apply_usage_debug(
                 result,
                 primary_endpoint,
@@ -763,19 +876,33 @@ class Key4UProvider:
                 auth_modes_tried=self._dedupe(auth_modes_tried),
                 success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, primary_endpoint),
                 success_auth_mode=primary_mode,
+                extra_debug=diag,
             )
         http_status = int(result.get("http_status") or 0)
-        if not self.config.usage_discovery_enabled or http_status not in KEY4U_USAGE_DISCOVERY_HTTP_STATUSES:
+        should_discover = self.config.usage_discovery_enabled and (
+            bool(result.get("ok")) or http_status in KEY4U_USAGE_DISCOVERY_HTTP_STATUSES
+        )
+        if not should_discover:
+            if diag["usage_connectivity_status"] == "PASS":
+                result = dict(result)
+                result.update({
+                    "ok": False,
+                    "status": "UNKNOWN",
+                    "error_class": "KEY4U_HEALTH_OK_BALANCE_ENDPOINT_NOT_FOUND"
+                    if diag.get("usage_health_status") == "PASS"
+                    else "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN",
+                    "error_message_safe": "balance_not_found",
+                })
             return self._apply_usage_debug(
                 result,
                 primary_endpoint,
                 primary_mode,
                 candidates_tried=candidates_tried,
                 auth_modes_tried=self._dedupe(auth_modes_tried),
+                success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, primary_endpoint) if diag["usage_connectivity_status"] == "PASS" else "",
+                success_auth_mode=primary_mode if diag["usage_connectivity_status"] == "PASS" else "",
+                extra_debug=diag,
             )
-        last_result = result
-        last_endpoint = primary_endpoint
-        last_mode = primary_mode
         for endpoint in self._usage_candidate_endpoints(primary_endpoint, capability):
             for auth_mode in KEY4U_USAGE_AUTH_MODES:
                 if endpoint == primary_endpoint and auth_mode == primary_mode:
@@ -784,7 +911,7 @@ class Key4UProvider:
                 current["capability"] = capability
                 candidates_tried.append(self._usage_attempt_label(endpoint, auth_mode, current))
                 auth_modes_tried.append(auth_mode)
-                if current.get("ok"):
+                if classify_attempt(endpoint, auth_mode, current):
                     return self._apply_usage_debug(
                         current,
                         endpoint,
@@ -793,17 +920,36 @@ class Key4UProvider:
                         auth_modes_tried=self._dedupe(auth_modes_tried),
                         success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, endpoint),
                         success_auth_mode=auth_mode,
+                        extra_debug=diag,
                     )
                 last_result = current
                 last_endpoint = endpoint
                 last_mode = auth_mode
-        last_result["error_class"] = "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN"
+        if diag["usage_connectivity_status"] == "PASS":
+            last_result = dict(last_success_result or last_result or {})
+            last_endpoint = last_success_endpoint or last_endpoint
+            last_mode = last_success_mode or last_mode
+            last_result.update({
+                "ok": False,
+                "status": "UNKNOWN",
+                "error_class": "KEY4U_HEALTH_OK_BALANCE_ENDPOINT_NOT_FOUND"
+                if diag.get("usage_health_status") == "PASS"
+                else "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN",
+                "error_message_safe": "balance_not_found",
+                "capability": capability,
+            })
+        else:
+            last_result = last_result or _result(ok=False, capability=capability, status="FAIL", error_class="KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN")
+            last_result["error_class"] = "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN"
         return self._apply_usage_debug(
             last_result,
             last_endpoint,
             last_mode,
             candidates_tried=candidates_tried,
             auth_modes_tried=self._dedupe(auth_modes_tried),
+            success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, last_success_endpoint) if last_success_endpoint else "",
+            success_auth_mode=last_success_mode,
+            extra_debug=diag,
         )
 
     def _minimax_url(self, endpoint: str) -> str:
