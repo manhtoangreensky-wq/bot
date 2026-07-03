@@ -1,5 +1,8 @@
 import inspect
+import os
 import subprocess
+
+import pytest
 
 import bot
 
@@ -10,6 +13,28 @@ def _job_key(name: str) -> str:
 
 def _clear_job(key: str) -> None:
     bot.SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
+
+
+def _current_branch_name():
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(
+        ["git", "branch", "--show-current"],
+        text=True,
+        encoding="utf-8",
+    ).strip()
+
+
+def _is_subdub_m4b_scope():
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-19m4b",
+        "subdub-long-video",
+        "long-video-over-30s",
+    )
+    return any(token in branch for token in branch_tokens)
 
 
 def test_short_subdub_auto_refresh_path_unchanged():
@@ -241,6 +266,9 @@ def test_subdub_long_video_audit_passes():
 
 
 def test_no_music_video_payos_pricing_changes():
+    if not _is_subdub_m4b_scope():
+        pytest.skip("SubDub M4B scope guard is not active for this branch")
+
     output = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     disallowed = ("providers/", "payos", "pricing", "music", "video_provider", "remote_worker.py", "local_worker.py")

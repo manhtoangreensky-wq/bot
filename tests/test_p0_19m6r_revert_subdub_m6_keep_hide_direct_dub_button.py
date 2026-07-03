@@ -1,5 +1,8 @@
 import subprocess
+import os
 from pathlib import Path
+
+import pytest
 
 import bot
 
@@ -23,6 +26,35 @@ def _changed_files_from_main():
         encoding="utf-8",
     )
     return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
+
+
+def _current_branch_name():
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(
+        ["git", "branch", "--show-current"],
+        cwd=REPO_ROOT,
+        text=True,
+        encoding="utf-8",
+    ).strip()
+
+
+def _is_subdub_m6_revert_scope():
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-19m6r",
+        "revert-subdub-m6",
+        "subdub-m6-revert",
+        "subdub-m6r",
+    )
+    return any(token in branch for token in branch_tokens)
+
+
+def _skip_unless_subdub_m6_revert_scope():
+    if not _is_subdub_m6_revert_scope():
+        pytest.skip("SubDub M6 revert scope guard is not active for this branch")
 
 
 def test_subdub_m6_reverted_contract():
@@ -62,15 +94,18 @@ def test_subdub_existing_m5_routes_still_present():
 
 
 def test_no_music_files_touched():
+    _skip_unless_subdub_m6_revert_scope()
     changed = _changed_files_from_main()
     assert not any("music" in path.lower() or "suno" in path.lower() for path in changed)
 
 
 def test_no_finance_files_touched():
+    _skip_unless_subdub_m6_revert_scope()
     changed = _changed_files_from_main()
     assert not any("finance" in path.lower() or "tax" in path.lower() for path in changed)
 
 
 def test_no_payos_files_touched():
+    _skip_unless_subdub_m6_revert_scope()
     changed = _changed_files_from_main()
     assert not any("payos" in path.lower() or "wallet" in path.lower() or "payment" in path.lower() for path in changed)
