@@ -62,7 +62,11 @@ def _join_url(base: str, endpoint: str) -> str:
     endpoint = str(endpoint or "").strip()
     if endpoint.startswith(("http://", "https://")):
         return endpoint
-    return base + "/" + endpoint.lstrip("/") if base and endpoint else base or endpoint
+    clean_endpoint = endpoint.lstrip("/")
+    base_last = base.rsplit("/", 1)[-1].strip().lower()
+    if base_last and clean_endpoint.lower().startswith(base_last + "/"):
+        clean_endpoint = clean_endpoint[len(base_last) + 1 :]
+    return base + "/" + clean_endpoint if base and clean_endpoint else base or clean_endpoint
 
 
 def _with_derived(env: dict[str, str], updates: dict[str, str]) -> dict[str, str]:
@@ -86,6 +90,14 @@ def _first_env(env: dict[str, str], *names: str) -> str:
         if value:
             return value
     return ""
+
+
+def _first_env_name_value(env: dict[str, str], *names: str) -> tuple[str, str]:
+    for name in names:
+        value = str(env.get(name) or "").strip()
+        if value:
+            return name, value
+    return "", ""
 
 
 def _normalize_credit_status(value: Any) -> str:
@@ -172,6 +184,80 @@ def _endpoint_alias(env: dict[str, str], direct_name: str, base_name: str, endpo
     if base and endpoint:
         return _join_url(base, endpoint)
     return ""
+
+
+VIDEO_PROVIDER_ENV_NAMESPACES: dict[str, dict[str, Any]] = {
+    "shopaikey_video": {
+        "canonical_prefix": "SHOPAIKEY_VIDEO",
+        "alias_prefixes": ["VIDEO_SHOPAIKEY"],
+        "enabled": ["SHOPAIKEY_VIDEO_ENABLED", "VIDEO_SHOPAIKEY_ENABLED"],
+        "submit_url": ["SHOPAIKEY_VIDEO_SUBMIT_URL", "VIDEO_SHOPAIKEY_SUBMIT_URL", "SHOPAIKEY_VIDEO_URL"],
+        "poll_url": ["SHOPAIKEY_VIDEO_POLL_URL", "VIDEO_SHOPAIKEY_POLL_URL", "SHOPAIKEY_VIDEO_STATUS_ENDPOINT"],
+        "auth_header_name": ["SHOPAIKEY_VIDEO_AUTH_HEADER_NAME", "VIDEO_SHOPAIKEY_AUTH_HEADER_NAME"],
+        "auth_header_value": ["SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE", "VIDEO_SHOPAIKEY_AUTH_HEADER_VALUE"],
+        "model": ["SHOPAIKEY_VIDEO_MODEL", "VIDEO_SHOPAIKEY_MODEL", "SHOPAIKEY_VIDEO_MODEL_PRIMARY"],
+        "capabilities": ["SHOPAIKEY_VIDEO_CAPABILITIES", "VIDEO_SHOPAIKEY_CAPABILITIES"],
+    },
+    "key4u_video": {
+        "canonical_prefix": "KEY4U_VIDEO",
+        "alias_prefixes": ["VIDEO_KEY4U"],
+        "enabled": ["KEY4U_VIDEO_ENABLED", "VIDEO_KEY4U_ENABLED"],
+        "submit_url": ["KEY4U_VIDEO_SUBMIT_URL", "VIDEO_KEY4U_SUBMIT_URL"],
+        "poll_url": ["KEY4U_VIDEO_POLL_URL", "VIDEO_KEY4U_POLL_URL"],
+        "auth_header_name": ["KEY4U_VIDEO_AUTH_HEADER_NAME", "VIDEO_KEY4U_AUTH_HEADER_NAME"],
+        "auth_header_value": ["KEY4U_VIDEO_AUTH_HEADER_VALUE", "VIDEO_KEY4U_AUTH_HEADER_VALUE"],
+        "model": ["KEY4U_VIDEO_MODEL", "VIDEO_KEY4U_MODEL"],
+        "capabilities": ["KEY4U_VIDEO_CAPABILITIES", "VIDEO_KEY4U_CAPABILITIES"],
+    },
+}
+
+
+def video_provider_namespace_config(provider: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    data = dict(env or os.environ)
+    spec = VIDEO_PROVIDER_ENV_NAMESPACES.get(str(provider or "").strip().lower(), {})
+    canonical_prefix = str(spec.get("canonical_prefix") or "").strip()
+    alias_prefixes = [str(item) for item in (spec.get("alias_prefixes") or []) if str(item).strip()]
+    namespaces_checked = [canonical_prefix, *alias_prefixes]
+    result: dict[str, Any] = {
+        "provider": provider,
+        "canonical_prefix": canonical_prefix,
+        "alias_prefixes": alias_prefixes,
+        "namespaces_checked": [item for item in namespaces_checked if item],
+        "source": "",
+        "source_prefix": "",
+        "namespace_mismatch": False,
+    }
+    for field in ("enabled", "submit_url", "poll_url", "auth_header_name", "auth_header_value", "model", "capabilities"):
+        env_name, value = _first_env_name_value(data, *(spec.get(field) or []))
+        result[field] = value
+        result[f"{field}_env"] = env_name
+        if value and not result["source"]:
+            result["source"] = f"worker_env:{env_name.rsplit('_', 1)[0] if '_' in env_name else env_name}"
+            for prefix in namespaces_checked:
+                if env_name.startswith(prefix):
+                    result["source_prefix"] = prefix
+                    break
+    result["source"] = result["source"] or f"worker_env:{canonical_prefix}" if canonical_prefix else "worker_env"
+    result["namespace_mismatch"] = bool(
+        result.get("submit_url")
+        and result.get("auth_header_value")
+        and result.get("submit_url_env")
+        and result.get("auth_header_value_env")
+        and str(result["submit_url_env"]).split("_", 2)[:2] != str(result["auth_header_value_env"]).split("_", 2)[:2]
+    )
+    return result
+
+
+def _provider_namespace_metadata(provider: str, cfg: dict[str, Any]) -> dict[str, str]:
+    namespaces_checked = ",".join(str(item) for item in (cfg.get("namespaces_checked") or []) if str(item))
+    alias_prefixes = ",".join(str(item) for item in (cfg.get("alias_prefixes") or []) if str(item))
+    return {
+        "_VIDEO_PROVIDER_NAMESPACES_CHECKED": namespaces_checked,
+        "_VIDEO_PROVIDER_ENV_PREFIX": str(cfg.get("canonical_prefix") or ""),
+        "_VIDEO_PROVIDER_ALIAS_PREFIXES_CHECKED": alias_prefixes,
+        "_VIDEO_PROVIDER_CONFIG_SOURCE": str(cfg.get("source") or f"worker_env:{provider}"),
+        "_VIDEO_PROVIDER_NAMESPACE_MISMATCH": "1" if cfg.get("namespace_mismatch") else "0",
+    }
 
 
 def _runtime_env_name(env: dict[str, str]) -> str:
@@ -301,27 +387,36 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             environ=derived,
         )
     if name == "shopaikey_video":
+        namespace_cfg = video_provider_namespace_config("shopaikey_video", env)
         submit_url = _endpoint_alias(
             env,
             "SHOPAIKEY_VIDEO_SUBMIT_URL",
             "SHOPAIKEY_BASE_URL",
             "SHOPAIKEY_VIDEO_ENDPOINT",
+            "VIDEO_SHOPAIKEY_SUBMIT_URL",
             "SHOPAIKEY_VIDEO_URL",
         )
+        submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
         poll_url = _endpoint_alias(
             env,
             "SHOPAIKEY_VIDEO_POLL_URL",
             "SHOPAIKEY_BASE_URL",
             "SHOPAIKEY_VIDEO_POLL_ENDPOINT",
+            "VIDEO_SHOPAIKEY_POLL_URL",
             "SHOPAIKEY_VIDEO_STATUS_ENDPOINT",
         )
+        poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
         derived = _with_derived(
             env,
             {
+                **_provider_namespace_metadata("shopaikey_video", namespace_cfg),
+                "SHOPAIKEY_VIDEO_ENABLED": str(env.get("SHOPAIKEY_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ""),
                 "SHOPAIKEY_VIDEO_SUBMIT_URL": submit_url,
                 "SHOPAIKEY_VIDEO_POLL_URL": poll_url,
-                "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_NAME") or "Authorization",
-                "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE") or _bearer(env.get("SHOPAIKEY_API_KEY") or ""),
+                "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization",
+                "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("SHOPAIKEY_API_KEY") or ""),
+                "SHOPAIKEY_VIDEO_MODEL": env.get("SHOPAIKEY_VIDEO_MODEL") or namespace_cfg.get("model") or "",
+                "SHOPAIKEY_VIDEO_CAPABILITIES": env.get("SHOPAIKEY_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "",
             },
         )
         return GenericHttpVideoProvider(
@@ -337,15 +432,22 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             environ=derived,
         )
     if name == "key4u_video":
-        submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT")
-        poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT")
+        namespace_cfg = video_provider_namespace_config("key4u_video", env)
+        submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT", "VIDEO_KEY4U_SUBMIT_URL")
+        submit_url = submit_url or str(namespace_cfg.get("submit_url") or "")
+        poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT", "VIDEO_KEY4U_POLL_URL")
+        poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
         derived = _with_derived(
             env,
             {
+                **_provider_namespace_metadata("key4u_video", namespace_cfg),
+                "KEY4U_VIDEO_ENABLED": str(env.get("KEY4U_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ""),
                 "KEY4U_VIDEO_SUBMIT_URL": submit_url,
                 "KEY4U_VIDEO_POLL_URL": poll_url,
-                "KEY4U_VIDEO_AUTH_HEADER_NAME": env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or "Authorization",
-                "KEY4U_VIDEO_AUTH_HEADER_VALUE": env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or ""),
+                "KEY4U_VIDEO_AUTH_HEADER_NAME": env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization",
+                "KEY4U_VIDEO_AUTH_HEADER_VALUE": env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or namespace_cfg.get("auth_header_value") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or ""),
+                "KEY4U_VIDEO_MODEL": env.get("KEY4U_VIDEO_MODEL") or namespace_cfg.get("model") or "",
+                "KEY4U_VIDEO_CAPABILITIES": env.get("KEY4U_VIDEO_CAPABILITIES") or namespace_cfg.get("capabilities") or "",
             },
         )
         return GenericHttpVideoProvider(
@@ -481,6 +583,16 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
                 "model_present": bool(caps.get("model_present") or caps.get("model_configured")),
                 "auth_configured": bool(caps.get("auth_configured")),
                 "auth_present": bool(caps.get("auth_present") or caps.get("auth_configured")),
+                "provider_config_namespaces_checked": list(caps.get("provider_config_namespaces_checked") or []),
+                "selected_provider_env_prefix": str(caps.get("selected_provider_env_prefix") or ""),
+                "selected_provider_alias_prefixes_checked": list(caps.get("selected_provider_alias_prefixes_checked") or []),
+                "selected_provider_config_source": str(caps.get("selected_provider_config_source") or caps.get("provider_config_source") or ""),
+                "provider_config_source": str(caps.get("provider_config_source") or ""),
+                "provider_submit_url_host": str(caps.get("provider_submit_url_host") or ""),
+                "provider_submit_url_path": str(caps.get("provider_submit_url_path") or ""),
+                "provider_env_namespace_mismatch": bool(caps.get("provider_env_namespace_mismatch")),
+                "provider_model_present": bool(caps.get("provider_model_present") or caps.get("model_present")),
+                "provider_payload_model": str(caps.get("provider_payload_model") or ""),
                 "stub_test_only": bool(caps.get("stub_test_only")),
                 "production_disabled": bool(caps.get("production_disabled")),
                 "credit_status": credit_status,
@@ -576,6 +688,56 @@ def select_video_provider(required_capability: str, environ: dict[str, str] | No
     return None, status
 
 
+def video_provider_env_audit_payload(environ: dict[str, str] | None = None) -> dict[str, Any]:
+    env = dict(environ or os.environ)
+    status = provider_status_payload(env)
+    provider_items = {str(item.get("provider") or ""): item for item in (status.get("providers") or []) if isinstance(item, dict)}
+    rows: list[dict[str, Any]] = []
+    ok = True
+    for provider in ("shopaikey_video", "key4u_video"):
+        adapter = _generic_adapter_for(provider, env)
+        caps = dict(adapter.capabilities())
+        item = dict(provider_items.get(provider) or {})
+        submit_path = str(caps.get("provider_submit_url_path") or "")
+        ready = bool(item.get("configured"))
+        submit_non_empty = bool(caps.get("submit_url_configured") and caps.get("auth_configured") and (caps.get("model_present") or caps.get("provider_payload_model")))
+        row = {
+            "provider": provider,
+            "status_configured": ready,
+            "submit_config_non_empty": submit_non_empty,
+            "status_submit_registry_aligned": bool((not ready) or submit_non_empty),
+            "namespaces_checked": list(caps.get("provider_config_namespaces_checked") or []),
+            "canonical_prefix": str(caps.get("selected_provider_env_prefix") or ""),
+            "alias_prefixes_checked": list(caps.get("selected_provider_alias_prefixes_checked") or []),
+            "config_source": str(caps.get("selected_provider_config_source") or caps.get("provider_config_source") or ""),
+            "submit_url_configured": bool(caps.get("submit_url_configured")),
+            "submit_url_host": str(caps.get("provider_submit_url_host") or ""),
+            "submit_url_path": submit_path,
+            "auth_header_name_present": bool(caps.get("provider_auth_header_name")),
+            "auth_header_value_present": bool(caps.get("provider_auth_value_present")),
+            "model_present": bool(caps.get("model_present") or caps.get("provider_payload_model")),
+            "no_v1_v1": "/v1/v1" not in submit_path.lower(),
+            "provider_env_namespace_mismatch": bool(caps.get("provider_env_namespace_mismatch")),
+        }
+        if not row["status_submit_registry_aligned"] or not row["no_v1_v1"]:
+            ok = False
+        rows.append(row)
+    selected = str(status.get("first_ready_provider") or status.get("selected_provider") or "")
+    selected_row = next((row for row in rows if row["provider"] == selected), {})
+    selected_submit_ready = bool(selected_row.get("submit_config_non_empty")) if selected else False
+    return {
+        "ok": bool(ok and ((not selected) or selected_submit_ready)),
+        "status_ready": bool(status.get("ready") or status.get("ok")),
+        "selected_provider": selected,
+        "selected_provider_submit_config_non_empty": selected_submit_ready,
+        "provider_chain": list(status.get("effective_provider_chain") or status.get("provider_chain") or []),
+        "rows": rows,
+        "worker_local_hydration_attempted": True,
+        "worker_local_hydration_success": selected_submit_ready,
+        "fallback_provider_attempted_if_selected_empty": bool(selected and not selected_submit_ready and any(row.get("submit_config_non_empty") for row in rows if row.get("provider") != selected)),
+    }
+
+
 def _safe_exception_message(value: Any, limit: int = 220) -> str:
     text = str(value or "").replace("\n", " ").replace("\r", " ")
     for marker in ("Bearer ", "token=", "key=", "secret=", "authorization="):
@@ -668,11 +830,27 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "provider_submit_exception_class",
         "provider_submit_exception_message_safe",
         "provider_config_source",
+        "provider_config_namespaces_checked",
+        "selected_provider_env_prefix",
+        "selected_provider_alias_prefixes_checked",
+        "selected_provider_config_source",
+        "provider_env_namespace_mismatch",
+        "provider_submit_url_path",
         "selected_provider_before_submit",
         "submit_provider_key",
         "auth_present",
         "auth_scheme",
         "provider_model_present",
+        "claim_payload_provider_key",
+        "claim_payload_has_provider_config",
+        "worker_local_hydration_attempted",
+        "worker_local_hydration_success",
+        "submit_url_present",
+        "auth_header_name_present",
+        "auth_header_value_present",
+        "model_present",
+        "provider_chain_fallback_attempted",
+        "fallback_provider_attempts",
     ):
         if key in raw and key not in target:
             target[key] = raw.get(key)
@@ -828,25 +1006,45 @@ def run_provider_generation(
             return ""
 
         def _attempt_base() -> dict[str, Any]:
+            metadata = dict(request.metadata or {})
+            submit_configured = _safe_cap_bool("submit_url_configured", "provider_submit_url_configured")
+            auth_value_present = _safe_cap_bool("provider_auth_value_present", "auth_present", "auth_configured")
+            model_present = _safe_cap_bool("provider_model_present", "model_present", "model_configured") or bool(_safe_cap_text("provider_payload_model"))
             return {
                 **base_debug,
                 "selected_provider": current_adapter.provider_name,
                 "selected_provider_before_submit": current_adapter.provider_name,
                 "submit_provider_key": current_adapter.provider_name,
+                "claim_payload_provider_key": str(metadata.get("claim_payload_provider_key") or metadata.get("selected_provider") or ""),
+                "claim_payload_has_provider_config": bool(metadata.get("provider_config") or metadata.get("claim_payload_has_provider_config")),
+                "worker_local_hydration_attempted": True,
+                "worker_local_hydration_success": bool(submit_configured and auth_value_present and model_present),
                 "selected_capability": selected_capability,
                 "provider": current_adapter.provider_name,
                 "provider_selection_blocker": "",
                 "provider_config_source": _safe_cap_text("provider_config_source") or f"env:{current_adapter.provider_name}",
-                "submit_url_configured": _safe_cap_bool("submit_url_configured", "provider_submit_url_configured"),
+                "provider_config_namespaces_checked": list(current_caps.get("provider_config_namespaces_checked") or []),
+                "selected_provider_env_prefix": _safe_cap_text("selected_provider_env_prefix"),
+                "selected_provider_alias_prefixes_checked": list(current_caps.get("selected_provider_alias_prefixes_checked") or []),
+                "selected_provider_config_source": _safe_cap_text("selected_provider_config_source", "provider_config_source") or f"env:{current_adapter.provider_name}",
+                "provider_env_namespace_mismatch": bool(current_caps.get("provider_env_namespace_mismatch")),
+                "submit_url_configured": submit_configured,
+                "submit_url_present": _safe_cap_bool("submit_url_present", "submit_url_configured", "provider_submit_url_configured"),
                 "provider_submit_url_configured": _safe_cap_bool("provider_submit_url_configured", "submit_url_configured"),
                 "provider_submit_url_host": _safe_cap_text("provider_submit_url_host"),
-                "auth_present": _safe_cap_bool("auth_present", "provider_auth_value_present", "auth_configured"),
+                "provider_submit_url_path": _safe_cap_text("provider_submit_url_path"),
+                "auth_present": auth_value_present,
                 "auth_scheme": _safe_cap_text("auth_scheme", "provider_auth_scheme_prefix"),
                 "provider_auth_header_name": _safe_cap_text("provider_auth_header_name"),
-                "provider_auth_value_present": _safe_cap_bool("provider_auth_value_present", "auth_present", "auth_configured"),
+                "auth_header_name_present": bool(_safe_cap_text("provider_auth_header_name")),
+                "auth_header_value_present": auth_value_present,
+                "provider_auth_value_present": auth_value_present,
                 "provider_auth_scheme_prefix": _safe_cap_text("provider_auth_scheme_prefix", "auth_scheme"),
-                "provider_model_present": _safe_cap_bool("provider_model_present", "model_present", "model_configured"),
+                "provider_model_present": model_present,
+                "model_present": model_present,
                 "provider_payload_model": _safe_cap_text("provider_payload_model"),
+                "provider_chain_fallback_attempted": bool(fallback_used),
+                "fallback_provider_attempts": list(attempt_failures),
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
                 "provider_attempted": True,
@@ -885,6 +1083,13 @@ def run_provider_generation(
                 _record_failure(blocker)
                 continue
             _record_failure(blocker)
+            final_blocker = blocker
+            if (
+                len(candidate_adapters) > 1
+                and attempt_failures
+                and all(str(item.get("reason") or "") == "provider_config_missing_at_submit" for item in attempt_failures)
+            ):
+                final_blocker = "all_video_providers_submit_config_missing"
             provider_task_ids = [submit.provider_task_id or submit.provider_video_id] if (submit.provider_task_id or submit.provider_video_id) else []
             payload = {
                 "ok": False,
@@ -894,8 +1099,8 @@ def run_provider_generation(
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(provider_task_ids),
-                "provider_error": blocker,
-                "blocker": blocker,
+                "provider_error": final_blocker,
+                "blocker": final_blocker,
                 "provider_status": submit.provider_status or "failed",
                 "provider_task_ids": provider_task_ids,
                 "provider_readiness": status,
