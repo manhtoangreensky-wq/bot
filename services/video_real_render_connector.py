@@ -777,22 +777,30 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     if os.path.abspath(output_path) != os.path.abspath(raw_path):
         shutil.copyfile(output_path, raw_path)
         output_path = raw_path
-    return {
-        "ok": True,
-        "provider": str(result.get("provider") or ""),
-        "task_id": str((result.get("provider_task_ids") or [""])[0] or ""),
-        "video_id": str((result.get("provider_video_ids") or [""])[0] or ""),
-        "status": "SUCCESS",
-        "output_path": ensure_video_output(output_path),
-        "model": str(result.get("model") or ""),
-        "mode": str(result.get("mode") or ""),
-        "duration": result.get("duration") or result.get("output_duration") or 0,
-        "download_url_present": bool(result.get("result_url_present")),
-        "artifact_hash": str(result.get("artifact_hash") or ""),
-    }
+    scene_result = dict(result)
+    scene_result.update(
+        {
+            "ok": True,
+            "provider": str(result.get("provider") or ""),
+            "task_id": str((result.get("provider_task_ids") or [""])[0] or ""),
+            "video_id": str((result.get("provider_video_ids") or [""])[0] or ""),
+            "status": "SUCCESS",
+            "output_path": ensure_video_output(output_path),
+            "model": str(result.get("model") or ""),
+            "mode": str(result.get("mode") or ""),
+            "duration": result.get("duration") or result.get("output_duration") or 0,
+            "download_url_present": bool(result.get("result_url_present")),
+            "artifact_hash": str(result.get("artifact_hash") or ""),
+        }
+    )
+    return scene_result
 
 
-def build_real_scene_renderer(job: dict | None = None, events: list[dict[str, Any]] | None = None):
+def build_real_scene_renderer(
+    job: dict | None = None,
+    events: list[dict[str, Any]] | None = None,
+    debug_results: list[dict[str, Any]] | None = None,
+):
     provider_order = _provider_order(job)
 
     def _render(scene, raw_path: str):
@@ -800,7 +808,30 @@ def build_real_scene_renderer(job: dict | None = None, events: list[dict[str, An
             setattr(scene, "_toan_aas_job", dict(job or {}))
         except Exception:
             pass
-        result = asyncio.run(_render_scene_async(scene, raw_path, provider_order))
+        try:
+            result = asyncio.run(_render_scene_async(scene, raw_path, provider_order))
+        except RealVideoRenderError as exc:
+            diagnostics = dict(getattr(exc, "diagnostics", {}) or {})
+            if isinstance(debug_results, list) and diagnostics:
+                debug_results.append(diagnostics)
+            if isinstance(events, list):
+                events.append(
+                    {
+                        "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
+                        "provider": str(diagnostics.get("selected_provider") or diagnostics.get("provider") or ""),
+                        "task_id": str((diagnostics.get("provider_task_ids") or [""])[0] or "")[:180],
+                        "video_id": str((diagnostics.get("provider_video_ids") or [""])[0] or "")[:180],
+                        "status": str(diagnostics.get("provider_status") or diagnostics.get("blocker") or "failed"),
+                        "model": str(diagnostics.get("provider_payload_model") or "")[:120],
+                        "mode": str(diagnostics.get("selected_capability") or "")[:80],
+                        "duration": diagnostics.get("output_duration") or 0,
+                        "download_url_present": bool(diagnostics.get("provider_result_url_present") or diagnostics.get("result_url_present")),
+                        "debug": diagnostics,
+                    }
+                )
+            raise
+        if isinstance(debug_results, list) and isinstance(result, dict):
+            debug_results.append(dict(result))
         if isinstance(events, list) and isinstance(result, dict):
             events.append(
                 {
@@ -813,6 +844,7 @@ def build_real_scene_renderer(job: dict | None = None, events: list[dict[str, An
                     "mode": str(result.get("mode") or "")[:80],
                     "duration": result.get("duration") or 0,
                     "download_url_present": bool(result.get("download_url_present")),
+                    "debug": dict(result),
                 }
             )
         return result
@@ -1160,6 +1192,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result: dict[str, Any] = {}
     provider_attempted = False
     provider_events: list[dict[str, Any]] = []
+    provider_runtime_debug: list[dict[str, Any]] = []
     provider_error = ""
     fallback_used = False
     fallback_reason = ""
@@ -1188,8 +1221,46 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     local_image_sequence_used = False
     local_scene_card_used = False
 
-    def _base_diagnostics(payload: dict[str, Any] | None = None, *, error: str = "") -> dict[str, Any]:
+    def _latest_provider_runtime_debug() -> dict[str, Any]:
+        for item in reversed(provider_runtime_debug):
+            if isinstance(item, dict) and item:
+                return dict(item)
+        for item in reversed(provider_events):
+            if isinstance(item, dict) and isinstance(item.get("debug"), dict) and item.get("debug"):
+                return dict(item.get("debug") or {})
+        return {}
+
+    def _merge_provider_runtime_debug(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         data = dict(payload or {})
+        provider_debug = _latest_provider_runtime_debug()
+        if not provider_debug:
+            return data
+        merged = dict(provider_debug)
+        for key, value in data.items():
+            if key in {
+                "ok",
+                "status",
+                "error",
+                "final_video_path",
+                "master_video_path",
+                "subtitle_path",
+                "manifest_path",
+                "scene_count",
+                "duration_sec",
+                "created_files",
+                "failed_scenes",
+                "stitch_attempted",
+                "downloaded_clip_paths",
+            }:
+                merged[key] = value
+            elif value not in (None, "", [], {}):
+                merged[key] = value
+            elif key not in merged:
+                merged[key] = value
+        return merged
+
+    def _base_diagnostics(payload: dict[str, Any] | None = None, *, error: str = "") -> dict[str, Any]:
+        data = _merge_provider_runtime_debug(payload)
         if error:
             data.setdefault("error", error)
         data["provider_attempted"] = bool(provider_attempted)
@@ -1236,7 +1307,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["provider_submit_called"] = bool(data.get("provider_submit_called") or provider_attempted)
         data["provider_submit_http_status"] = data.get("provider_submit_http_status") or data.get("provider_http_status") or 0
         data["provider_task_id_saved"] = bool(data.get("provider_task_id_saved") or data["provider_task_ids"])
-        data["provider_poll_called"] = bool(data.get("provider_poll_called") or provider_attempted)
+        data["provider_poll_called"] = bool(data.get("provider_poll_called")) if "provider_poll_called" in data else bool(provider_attempted)
         data["provider_result_url_present"] = bool(
             data.get("provider_result_url_present")
             or data.get("result_url_present")
@@ -1442,6 +1513,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["final_classification"] = result["visual_classification"]
         result["no_charge"] = True
     elif result and not local_image_sequence_used and not local_scene_card_used:
+        result = _merge_provider_runtime_debug(result)
         result["renderer"] = PROVIDER_SCENE_RENDERER
         result["connector_renderer"] = PROVIDER_BRIDGE_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
@@ -1462,6 +1534,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
         result["visual_classification"] = FINAL_AI_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
         result["final_classification"] = result["visual_classification"]
+    result = _merge_provider_runtime_debug(result)
     final_path = str(result.get("final_video_path") or "")
     if not result.get("ok") or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
         _raise_render_error(str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE), result)
@@ -1507,7 +1580,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["provider_submit_called"] = bool(result.get("provider_submit_called") or provider_attempted)
     result["provider_submit_http_status"] = result.get("provider_submit_http_status") or result.get("provider_http_status") or 0
     result["provider_task_id_saved"] = bool(result.get("provider_task_id_saved") or result.get("provider_task_ids"))
-    result["provider_poll_called"] = bool(result.get("provider_poll_called") or provider_attempted)
+    result["provider_poll_called"] = bool(result.get("provider_poll_called")) if "provider_poll_called" in result else bool(provider_attempted)
     result["provider_result_url_present"] = bool(
         result.get("provider_result_url_present")
         or result.get("result_url_present")
