@@ -85106,6 +85106,13 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• job id: <code>{esc(job.get('job_id') or job.get('internal_job_id'))}</code>",
         f"• mode: <code>{esc(job.get('mode'))}</code>",
         f"• product type: <code>{esc(job.get('product_type'))}</code>",
+        f"• selected public entrypoint: <code>{esc(job.get('selected_public_entrypoint'))}</code>",
+        f"• selected SubDub product: <code>{esc(job.get('selected_subdub_product'))}</code>",
+        f"• expected product type: <code>{esc(job.get('expected_product_type'))}</code>",
+        f"• resolved product type: <code>{esc(job.get('resolved_product_type'))}</code>",
+        f"• resolved mode: <code>{esc(job.get('resolved_mode'))}</code>",
+        f"• route state source: <code>{esc(job.get('route_state_source'))}</code>",
+        f"• route stale detected: <code>{yes_no(job.get('route_state_stale_detected'))}</code>",
         f"• status: <code>{esc(job.get('status'))}</code>",
         f"• stage: <code>{esc(job.get('stage'))}</code>",
         f"• lifecycle state: <code>{esc(job.get('lifecycle_state'))}</code>",
@@ -85173,6 +85180,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• TTS route called: <code>{yes_no(job.get('tts_route_called'))}</code>",
         f"• selected voice id: <code>{esc(job.get('selected_tts_voice_id'))}</code>",
         f"• selected voice label: <code>{esc(job.get('selected_voice_label'))}</code>",
+        f"• voice gender requested: <code>{esc(job.get('voice_gender_requested'))}</code>",
         f"• requested voice gender: <code>{esc(job.get('requested_voice_gender'))}</code>",
         f"• selected voice gender: <code>{esc(job.get('selected_voice_gender'))}</code>",
         f"• selected voice raw id: <code>{esc(job.get('selected_voice_id'))}</code>",
@@ -161356,8 +161364,42 @@ SUBDUB_PRODUCT_TYPES = {
     SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB,
 }
 
+def subdub_expected_product_type_from_state(mode: str = "", state: dict | None = None) -> str:
+    state = dict(state or {})
+    direct = str(mode or "").strip().lower()
+    if direct in SUBDUB_PRODUCT_TYPES:
+        return direct
+    requested = normalize_video_translate_mode(state.get("requested_mode") or "")
+    active_flow = str(state.get("active_flow") or "").strip().lower()
+    product = str(state.get("product") or "").strip().lower()
+    source_entry = normalize_video_translate_mode(state.get("source_entry") or state.get("entry_surface") or "")
+    if (
+        requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        or active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+        or source_entry == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        or "subtitle_plus" in product
+    ):
+        return SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB
+    safe_mode = normalize_video_translate_mode(
+        mode
+        or state.get("video_processing_mode")
+        or state.get("mode")
+        or state.get("process_type")
+    )
+    if safe_mode == VIDEO_SUBTITLE_MODE_DUB:
+        return SUBDUB_PRODUCT_TYPE_DUB_ONLY
+    if safe_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB
+    if safe_mode:
+        return SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY
+    existing = str(state.get("product_type") or "").strip().lower()
+    return existing if existing in SUBDUB_PRODUCT_TYPES else ""
+
 def subdub_product_type_from_mode(mode: str = "", state: dict | None = None) -> str:
     state = dict(state or {})
+    expected = subdub_expected_product_type_from_state(mode, state)
+    if expected in SUBDUB_PRODUCT_TYPES:
+        return expected
     existing = str(state.get("product_type") or "").strip().lower()
     if existing in SUBDUB_PRODUCT_TYPES:
         return existing
@@ -161375,6 +161417,62 @@ def subdub_product_type_from_mode(mode: str = "", state: dict | None = None) -> 
     if safe_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB
     return SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY
+
+def subdub_resolved_route_mode(mode: str = "", state: dict | None = None) -> str:
+    state = dict(state or {})
+    requested = normalize_video_translate_mode(state.get("requested_mode") or "")
+    active_flow = str(state.get("active_flow") or "").strip().lower()
+    source_entry = normalize_video_translate_mode(state.get("source_entry") or "")
+    if (
+        requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        or active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+        or source_entry == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    ):
+        return VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    return normalize_video_translate_mode(
+        mode
+        or state.get("video_processing_mode")
+        or state.get("mode")
+        or state.get("process_type")
+    )
+
+def subdub_route_state_debug_fields(mode: str = "", state: dict | None = None, voice_resolution: dict | None = None) -> dict:
+    state = dict(state or {})
+    voice = dict(voice_resolution or state.get("_subdub_voice_resolution") or {})
+    expected_product = subdub_expected_product_type_from_state(mode, state)
+    resolved_product = subdub_product_type_from_mode(mode, state)
+    existing_product = str(state.get("product_type") or "").strip().lower()
+    selected_voice_id = str(
+        voice.get("selected_voice_id")
+        or state.get("selected_voice_id")
+        or state.get("voice_id")
+        or state.get("provider_voice_id")
+        or state.get("selected_tts_voice_id")
+        or ""
+    ).strip()
+    requested_mode = normalize_video_translate_mode(state.get("requested_mode") or "")
+    active_flow = str(state.get("active_flow") or "").strip().lower()
+    if requested_mode:
+        route_source = "requested_mode"
+    elif active_flow:
+        route_source = "active_flow"
+    elif mode or state.get("mode") or state.get("video_processing_mode"):
+        route_source = "mode"
+    elif existing_product:
+        route_source = "product_type"
+    else:
+        route_source = "missing"
+    return {
+        "selected_public_entrypoint": str(state.get("source_entry") or state.get("entry_surface") or mode or "")[:120],
+        "selected_subdub_product": str(state.get("product") or existing_product or resolved_product or "")[:120],
+        "expected_product_type": expected_product,
+        "resolved_product_type": resolved_product,
+        "resolved_mode": subdub_resolved_route_mode(mode, state),
+        "voice_gender_requested": str(voice.get("requested_voice_gender") or state.get("requested_voice_gender") or state.get("selected_voice_gender") or subdub_voice_gender_from_state(state) or "")[:40],
+        "selected_voice_id_present": bool(selected_voice_id),
+        "route_state_source": route_source,
+        "route_state_stale_detected": bool(existing_product in SUBDUB_PRODUCT_TYPES and expected_product in SUBDUB_PRODUCT_TYPES and existing_product != expected_product),
+    }
 
 def subdub_expected_media_for_product(product_type: str = "") -> str:
     return "video" if str(product_type or "").strip().lower() in SUBDUB_PRODUCT_TYPES else ""
@@ -165866,6 +165964,7 @@ def subtitle_dub_debug_job_payload(
     render_debug = dict(state.get("_subdub_render_debug") or {})
     voice_resolution = dict(state.get("_subdub_voice_resolution") or {})
     voice_config = subdub_default_voice_config_payload()
+    route_debug = subdub_route_state_debug_fields(mode, state, voice_resolution)
     input_save_debug = subdub_input_save_debug_fields(input_save, state)
     blocker = video_dubbing_pipeline_blocker(
         input_save=input_save,
@@ -165881,6 +165980,7 @@ def subtitle_dub_debug_job_payload(
         "job_id": str(state.get("_pipeline_job_id") or ""),
         "mode": normalize_video_translate_mode(mode),
         "product_type": subdub_product_type_from_mode(mode, state),
+        **route_debug,
         "status": str(status or "failed"),
         "stage": str(stage or ""),
         "lifecycle_state": subdub_canonical_lifecycle_state(state.get("lifecycle_state") or state.get("progress_stage") or stage),

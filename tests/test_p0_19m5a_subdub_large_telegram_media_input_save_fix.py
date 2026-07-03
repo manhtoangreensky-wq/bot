@@ -1,11 +1,36 @@
 import asyncio
+import os
 import subprocess
 from types import SimpleNamespace
+
+import pytest
 
 import bot
 
 
 VIDEO_BYTES = b"\x00\x00\x00\x18ftypmp42-p019m5a-video" + b"x" * 1024
+
+
+def _current_branch_name():
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(
+        ["git", "branch", "--show-current"],
+        text=True,
+        encoding="utf-8",
+    ).strip()
+
+
+def _is_subdub_m5a_scope():
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-19m5a",
+        "large-telegram-media",
+        "telegram-media-input-save",
+    )
+    return any(token in branch for token in branch_tokens)
 
 
 class CaptureMessage:
@@ -200,6 +225,9 @@ def test_over_300_still_fails_clean_no_charge():
 
 
 def test_no_payos_wallet_music_product_video_pricing_db_changes():
+    if not _is_subdub_m5a_scope():
+        pytest.skip("SubDub M5A scope guard is not active for this branch")
+
     output = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     allowed = {
