@@ -97,6 +97,7 @@ def test_only_subdub_files_changed_no_unrelated_modules():
         "services/product_progress_status.py",
         "tests/test_p0_19d_live_subtitle_dub_blackbox_engine_fix_only.py",
         "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
+        "tests/test_p0_19m4b_subdub_long_video_over_30s_progress_duration_gate_fix.py",
         "tests/test_p0_19m8_real_subdub_baseline_30s_multilingual_female_voice_delivery_fix.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
         "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",

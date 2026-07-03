@@ -1840,6 +1840,8 @@ PIPELINE_MAX_INPUT_MB_ADMIN = max(1, env_int("PIPELINE_MAX_INPUT_MB_ADMIN", 100)
 PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50))
 PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 300))
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 300))
+SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
+SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
 TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
 TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_MAX_TELEGRAM_OUTPUT_MB))
@@ -85075,19 +85077,41 @@ def subtitle_dub_debug_text(job: dict) -> str:
         "🛠 <b>SUBTITLE/DUB DEBUG</b>",
         "",
         f"• job: <code>{esc(job.get('internal_job_id'))}</code>",
+        f"• job id: <code>{esc(job.get('job_id') or job.get('internal_job_id'))}</code>",
         f"• mode: <code>{esc(job.get('mode'))}</code>",
+        f"• product type: <code>{esc(job.get('product_type'))}</code>",
         f"• status: <code>{esc(job.get('status'))}</code>",
         f"• stage: <code>{esc(job.get('stage'))}</code>",
         f"• lifecycle state: <code>{esc(job.get('lifecycle_state'))}</code>",
         f"• current stage: <code>{esc(job.get('current_stage') or job.get('progress_stage'))}</code>",
         f"• progress percent: <code>{int(job.get('progress_percent') or 0)}</code>",
         f"• pipeline attempted: <code>{yes_no(job.get('pipeline_attempted'))}</code>",
+        f"• pipeline started: <code>{yes_no(job.get('pipeline_started'))}</code>",
         f"• input file path: <code>{esc_path(job.get('input_file_path'))}</code>",
         f"• input file id: <code>{esc(job.get('input_file_id'))}</code>",
         f"• input file exists: <code>{yes_no(job.get('input_file_exists'))}</code>",
         f"• file size: <code>{int(job.get('input_file_size') or 0)}</code>",
         f"• duration: <code>{int(job.get('duration_seconds') or 0)}</code>",
-        f"• duration limit: <code>{int(job.get('duration_limit_seconds') or pipeline_duration_limit_seconds(False))}</code>",
+        f"• input duration: <code>{int(job.get('input_duration') or job.get('duration_seconds') or 0)}</code>",
+        f"• detected duration source: <code>{esc(job.get('detected_duration_source'))}</code>",
+        f"• telegram duration: <code>{int(job.get('telegram_duration') or 0)}</code>",
+        f"• ffprobe duration: <code>{int(job.get('ffprobe_duration') or 0)}</code>",
+        f"• duration limit: <code>{int(job.get('duration_limit') or job.get('duration_limit_seconds') or subdub_full_duration_limit_seconds(False))}</code>",
+        f"• duration gate result: <code>{esc(job.get('duration_gate_result'))}</code>",
+        f"• duration guard stage: <code>{esc(job.get('duration_guard_stage'))}</code>",
+        f"• is long media: <code>{yes_no(job.get('is_long_media'))}</code>",
+        f"• long media allowed: <code>{yes_no(job.get('long_media_allowed'))}</code>",
+        f"• worker claim required: <code>{yes_no(job.get('worker_claim_required'))}</code>",
+        f"• worker claimed: <code>{yes_no(job.get('worker_claimed'))}</code>",
+        f"• asr started: <code>{yes_no(job.get('asr_started'))}</code>",
+        f"• translation started: <code>{yes_no(job.get('translation_started'))}</code>",
+        f"• tts started: <code>{yes_no(job.get('tts_started'))}</code>",
+        f"• mux started: <code>{yes_no(job.get('mux_started'))}</code>",
+        f"• artifact started: <code>{yes_no(job.get('artifact_started'))}</code>",
+        f"• last completed step: <code>{esc(job.get('last_completed_step'))}</code>",
+        f"• registry job id: <code>{esc(job.get('registry_job_id'))}</code>",
+        f"• registry chat id present: <code>{yes_no(job.get('registry_chat_id_present'))}</code>",
+        f"• status panel message id: <code>{esc(job.get('status_panel_message_id'))}</code>",
         f"• chunking enabled: <code>{yes_no(job.get('chunking_enabled'))}</code>",
         f"• chunk count: <code>{int(job.get('chunk_count') or 0)}</code>",
         f"• gate product route allowed: <code>{yes_no(matrix.get('product_route_allowed'))}</code>",
@@ -85170,6 +85194,9 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• route translation: <code>{esc(route.get('translation'))}</code>",
         f"• route TTS: <code>{esc(route.get('tts'))}</code>",
         f"• route mux: <code>{esc(route.get('mux') or job.get('mux_status'))}</code>",
+        f"• last error stage: <code>{esc(job.get('last_error_stage'))}</code>",
+        f"• last error safe: <code>{esc(job.get('last_error_safe'))}</code>",
+        f"• charge status: <code>{esc(job.get('charge_status'))}</code>",
         f"• last technical error: <code>{esc(job.get('last_technical_error'))}</code>",
         f"• public-safe error: <code>{esc(job.get('public_safe_error'))}</code>",
     ])
@@ -85646,6 +85673,44 @@ def subdub_duration_audit_payload() -> dict:
         "kept_language_detection": "subdub_detect_language_from_text" in globals(),
     }
 
+def subdub_long_video_audit_payload() -> dict:
+    full_limit = int(subdub_full_duration_limit_seconds(False))
+    preview_limit = int(subdub_preview_duration_seconds())
+    source = "\n".join([
+        inspect.getsource(subdub_duration_gate_payload),
+        inspect.getsource(subdub_duration_gate_payload_for_saved_input),
+        inspect.getsource(_execute_video_dubbing_pipeline_core),
+        inspect.getsource(subdub_send_progress_update),
+        inspect.getsource(subdub_progress_job_for_user),
+    ])
+    full_job_30_patterns = (
+        r"min\s*\(\s*30",
+        r"max_seconds\s*=\s*30",
+        r"duration\s*[<>]=?\s*30",
+    )
+    hardcoded_30_full_job = any(re.search(pattern, source) for pattern in full_job_30_patterns)
+    accepted_31 = subdub_duration_gate_payload({"duration": 31}, {}, is_admin=False)
+    accepted_60 = subdub_duration_gate_payload({"duration": 60}, {}, is_admin=False)
+    accepted_299 = subdub_duration_gate_payload({"duration": min(299, full_limit)}, {}, is_admin=False)
+    over_limit = subdub_duration_gate_payload({"duration": full_limit + 1}, {}, is_admin=False)
+    long_stage_percent = subdub_progress_percent_for_lifecycle("extracting_audio")
+    sample_public_text = subdub_progress_text("extracting_audio", "AUDITJOB", "vi")
+    return {
+        "preview_limit_seconds": preview_limit,
+        "full_duration_limit_seconds": full_limit,
+        "preview_limit_separate_from_full_job": bool(preview_limit == 30 and full_limit > preview_limit),
+        "supports_31s": bool(accepted_31.get("duration_gate_result") == "pass_long" and accepted_31.get("long_media_allowed")),
+        "supports_60s": bool(accepted_60.get("duration_gate_result") == "pass_long" and accepted_60.get("long_media_allowed")),
+        "supports_299s": bool(accepted_299.get("duration_gate_result") in {"pass_long", "pass"} and not str(accepted_299.get("duration_gate_result")).startswith("fail")),
+        "over_limit_fails_clean_no_charge": bool(over_limit.get("duration_gate_result") == "fail_over_limit"),
+        "accepted_long_progress_beyond_5": bool(long_stage_percent > 5),
+        "progress_registry_available": "SUBTITLE_DUB_PIPELINE_JOBS" in globals() and callable(subdub_progress_job_for_user),
+        "status_refresh_uses_existing_job": "subdub_progress_job_for_user" in inspect.getsource(handle_video_dubbing_callback),
+        "worker_claim_fields_present": all(key in inspect.getsource(acquire_subtitle_dub_pipeline_job) for key in ("worker_claim_required", "worker_claimed")),
+        "full_job_hardcoded_30_gate_absent": not hardcoded_30_full_job,
+        "public_long_status_no_debug_terms": not product_progress_status.public_copy_has_technical_words(sample_public_text),
+    }
+
 def subdub_audit_text(title: str, payload: dict) -> str:
     lines = [f"🧾 <b>{html.escape(title)}</b>", ""]
     for key, value in payload.items():
@@ -85798,6 +85863,14 @@ async def cmd_subdub_duration_audit(update: Update, context: ContextTypes.DEFAUL
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     return await update.message.reply_text(
         subdub_audit_text("SUBDUB DURATION AUDIT", subdub_duration_audit_payload()),
+        parse_mode="HTML",
+    )
+
+async def cmd_subdub_long_video_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    return await update.message.reply_text(
+        subdub_audit_text("SUBDUB LONG VIDEO AUDIT", subdub_long_video_audit_payload()),
         parse_mode="HTML",
     )
 
@@ -164862,6 +164935,7 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
 
 async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: str, lang: str = "vi") -> None:
     canonical_stage = subdub_canonical_lifecycle_state(stage)
+    lifecycle_debug = subdub_lifecycle_debug_fields(canonical_stage)
     update_subtitle_dub_pipeline_job(
         job_key,
         lifecycle_state=canonical_stage,
@@ -164869,14 +164943,20 @@ async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: s
         progress_stage=canonical_stage,
         progress_percent=subdub_progress_percent_for_lifecycle(canonical_stage),
         completed_steps=subdub_completed_steps_for_lifecycle(canonical_stage),
+        registry_job_id=str(job_id or ""),
+        registry_chat_id_present=bool(getattr(getattr(query, "message", None), "chat_id", "")),
+        **lifecycle_debug,
     )
     try:
-        await safe_edit_or_send(
+        rendered = await safe_edit_or_send(
             query,
             subdub_progress_text(canonical_stage, job_id, lang),
             parse_mode="HTML",
             reply_markup=subdub_progress_keyboard(job_id, lang),
         )
+        message_id = str(getattr(rendered, "message_id", "") or getattr(getattr(query, "message", None), "message_id", "") or "")
+        if message_id:
+            update_subtitle_dub_pipeline_job(job_key, status_panel_message_id=message_id)
     except Exception as exc:
         logger.warning("subtitle/dub progress update skipped | %s", sanitize_log_text(str(exc))[:120])
 
@@ -164910,6 +164990,110 @@ def pipeline_input_limit_mb(is_admin: bool = False) -> int:
 
 def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
+
+def subdub_full_duration_limit_seconds(is_admin: bool = False) -> int:
+    if is_admin:
+        return max(int(SUBDUB_MAX_DURATION_SECONDS), int(PIPELINE_MAX_DURATION_SECONDS_ADMIN))
+    return int(SUBDUB_MAX_DURATION_SECONDS)
+
+def subdub_preview_duration_seconds() -> int:
+    return int(SUBDUB_PREVIEW_DURATION_SECONDS)
+
+def subdub_duration_over_limit_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "This video is longer than the current processing limit. TOAN AAS has not charged Xu. "
+            "Please send a shorter video or try again later."
+        )
+    return "Video này dài hơn giới hạn xử lý hiện tại. TOAN AAS chưa trừ Xu. Anh/chị có thể gửi video ngắn hơn hoặc thử lại sau."
+
+def subdub_duration_gate_payload(
+    input_save: dict | None = None,
+    state: dict | None = None,
+    *,
+    is_admin: bool = False,
+    ffprobe_duration: float | int = 0,
+) -> dict:
+    current = dict(input_save or {})
+    state = dict(state or {})
+    telegram_duration = _safe_int(
+        current.get("telegram_duration")
+        or state.get("telegram_duration")
+        or state.get("video_duration")
+        or state.get("source_duration"),
+        0,
+    )
+    ffprobe_seconds = max(0, _safe_int(ffprobe_duration or current.get("ffprobe_duration"), 0))
+    input_duration = ffprobe_seconds or telegram_duration or _safe_int(current.get("duration"), 0)
+    duration_source = "ffprobe" if ffprobe_seconds else ("telegram" if telegram_duration else ("saved_input" if input_duration else "missing"))
+    limit = subdub_full_duration_limit_seconds(is_admin)
+    preview = subdub_preview_duration_seconds()
+    over_limit = bool(input_duration and input_duration > limit)
+    is_long = bool(input_duration and input_duration > preview)
+    long_allowed = bool(is_long and not over_limit)
+    gate_result = "fail_over_limit" if over_limit else ("pass_long" if long_allowed else ("pass_unknown_duration" if not input_duration else "pass"))
+    return {
+        "input_duration": int(input_duration or 0),
+        "duration_seconds": int(input_duration or 0),
+        "detected_duration_source": duration_source,
+        "telegram_duration": int(telegram_duration or 0),
+        "ffprobe_duration": int(ffprobe_seconds or 0),
+        "duration_limit": int(limit),
+        "duration_limit_seconds": int(limit),
+        "duration_gate_result": gate_result,
+        "duration_guard_stage": "after_input_save",
+        "is_long_media": is_long,
+        "long_media_allowed": long_allowed,
+        "preview_duration_seconds": int(preview),
+    }
+
+async def subdub_duration_gate_payload_for_saved_input(
+    input_save: dict | None = None,
+    state: dict | None = None,
+    *,
+    is_admin: bool = False,
+) -> dict:
+    current = dict(input_save or {})
+    content_type = str(current.get("content_type") or (state or {}).get("source_mime_type") or "").lower()
+    ffprobe_duration = 0
+    source_bytes = current.get("source_bytes")
+    if content_type.startswith("video/") and isinstance(source_bytes, (bytes, bytearray)) and source_bytes:
+        try:
+            probe = await subdub_probe_video_bytes(bytes(source_bytes))
+            if probe.get("ok") or float(probe.get("duration") or 0) > 0:
+                ffprobe_duration = int(round(float(probe.get("duration") or 0)))
+        except Exception:
+            ffprobe_duration = 0
+    return subdub_duration_gate_payload(current, state, is_admin=is_admin, ffprobe_duration=ffprobe_duration)
+
+def subdub_lifecycle_debug_fields(stage: str = "", terminal_state: str = "") -> dict:
+    terminal = str(terminal_state or "").strip().lower()
+    canonical = subdub_canonical_lifecycle_state(stage or terminal or "received_file")
+    order = [
+        "received_file",
+        "extracting_audio",
+        "transcribing",
+        "translating",
+        "generating_voice",
+        "muxing_video",
+        "validating_output",
+        "delivering",
+        "delivered",
+    ]
+    try:
+        index = order.index(canonical)
+    except ValueError:
+        index = 0
+    completed = subdub_completed_steps_for_lifecycle(canonical, terminal)
+    return {
+        "pipeline_started": bool(canonical in order or terminal),
+        "asr_started": bool(index >= order.index("transcribing") or terminal == "delivered"),
+        "translation_started": bool(index >= order.index("translating") or terminal == "delivered"),
+        "tts_started": bool(index >= order.index("generating_voice") or terminal == "delivered"),
+        "mux_started": bool(index >= order.index("muxing_video") or terminal == "delivered"),
+        "artifact_started": bool(index >= order.index("validating_output") or terminal == "delivered"),
+        "last_completed_step": str(completed[-1] if completed else ""),
+    }
 
 def subtitle_dub_pipeline_job_key(user_id, chat_id, state: dict | None = None) -> str:
     state = dict(state or {})
@@ -164948,6 +165132,7 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         SUBTITLE_DUB_PIPELINE_JOBS[key] = existing
         return False, existing
     now_ts = time.time()
+    lifecycle_debug = subdub_lifecycle_debug_fields("received_file")
     job = {
         "job_key": key,
         "job_id": hashlib.sha256(f"{key}:{now_ts}".encode("utf-8")).hexdigest()[:20],
@@ -164958,7 +165143,26 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         "progress_stage": "received_file",
         "progress_percent": subdub_progress_percent_for_lifecycle("received_file"),
         "completed_steps": [],
-        "duration_limit_seconds": int(pipeline_duration_limit_seconds(bool(fields.get("is_admin")))),
+        "input_duration": 0,
+        "duration_seconds": 0,
+        "detected_duration_source": "missing",
+        "telegram_duration": 0,
+        "ffprobe_duration": 0,
+        "duration_limit": int(subdub_full_duration_limit_seconds(bool(fields.get("is_admin")))),
+        "duration_limit_seconds": int(subdub_full_duration_limit_seconds(bool(fields.get("is_admin")))),
+        "duration_gate_result": "pending",
+        "duration_guard_stage": "created",
+        "is_long_media": False,
+        "long_media_allowed": False,
+        "worker_claim_required": False,
+        "worker_claimed": False,
+        "registry_job_id": hashlib.sha256(f"{key}:{now_ts}".encode("utf-8")).hexdigest()[:20],
+        "registry_chat_id_present": bool(fields.get("chat_id")),
+        "status_panel_message_id": "",
+        "last_error_stage": "",
+        "last_error_safe": "",
+        "charge_status": "not_charged",
+        **lifecycle_debug,
         "chunking_enabled": False,
         "chunk_count": 0,
         "delivery_attempted": False,
@@ -165417,6 +165621,7 @@ def subtitle_dub_debug_job_payload(
         "user_id": str(user_id or ""),
         "chat_id": str(chat_id or ""),
         "internal_job_id": str(state.get("_pipeline_job_id") or ""),
+        "job_id": str(state.get("_pipeline_job_id") or ""),
         "mode": normalize_video_translate_mode(mode),
         "product_type": subdub_product_type_from_mode(mode, state),
         "status": str(status or "failed"),
@@ -165425,7 +165630,25 @@ def subtitle_dub_debug_job_payload(
         "current_stage": subdub_canonical_lifecycle_state(state.get("current_stage") or state.get("progress_stage") or stage),
         "progress_stage": subdub_canonical_lifecycle_state(state.get("progress_stage") or stage),
         "progress_percent": subdub_progress_percent_for_lifecycle(state.get("progress_stage") or stage, state.get("_subdub_terminal_state") or ""),
-        "duration_limit_seconds": int(pipeline_duration_limit_seconds(bool(is_admin_user(user_id)))),
+        "input_duration": int(state.get("input_duration") or input_save.get("input_duration") or input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "detected_duration_source": str(state.get("detected_duration_source") or input_save.get("detected_duration_source") or ""),
+        "telegram_duration": int(state.get("telegram_duration") or input_save.get("telegram_duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "ffprobe_duration": int(state.get("ffprobe_duration") or input_save.get("ffprobe_duration") or 0),
+        "duration_limit": int(state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(user_id)))),
+        "duration_limit_seconds": int(state.get("duration_limit_seconds") or state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(user_id)))),
+        "duration_gate_result": str(state.get("duration_gate_result") or "unknown"),
+        "duration_guard_stage": str(state.get("duration_guard_stage") or stage or ""),
+        "is_long_media": bool(state.get("is_long_media")),
+        "long_media_allowed": bool(state.get("long_media_allowed")),
+        "worker_claim_required": bool(state.get("worker_claim_required")),
+        "worker_claimed": bool(state.get("worker_claimed")),
+        **subdub_lifecycle_debug_fields(state.get("progress_stage") or stage, state.get("_subdub_terminal_state") or ""),
+        "registry_job_id": str(state.get("registry_job_id") or state.get("_pipeline_job_id") or ""),
+        "registry_chat_id_present": bool(state.get("registry_chat_id_present") or chat_id),
+        "status_panel_message_id": str(state.get("status_panel_message_id") or ""),
+        "last_error_stage": str(state.get("last_error_stage") or stage or ""),
+        "last_error_safe": public_safe_error,
+        "charge_status": str(state.get("charge_status") or ("charged" if int(charged or 0) > 0 else "not_charged")),
         "chunking_enabled": False,
         "chunk_count": 0,
         "pipeline_attempted": bool(pipeline_attempted),
@@ -168189,6 +168412,87 @@ async def _execute_video_dubbing_pipeline_core(
             "duration": int(input_validation.get("duration") or 0),
             "size": int(input_validation.get("size") or input_save.get("size") or 0),
         }
+    chat_id = getattr(getattr(query, "message", None), "chat_id", uid)
+    duration_gate = await subdub_duration_gate_payload_for_saved_input(
+        input_save,
+        state,
+        is_admin=bool(is_admin_user(uid)),
+    )
+    input_save = {
+        **dict(input_save or {}),
+        "duration": int(duration_gate.get("input_duration") or input_save.get("duration") or 0),
+        "telegram_duration": int(duration_gate.get("telegram_duration") or 0),
+        "ffprobe_duration": int(duration_gate.get("ffprobe_duration") or 0),
+        "detected_duration_source": str(duration_gate.get("detected_duration_source") or ""),
+    }
+    state = {**state, **duration_gate}
+    if str(state.get("_pipeline_job_key") or ""):
+        update_subtitle_dub_pipeline_job(
+            str(state.get("_pipeline_job_key") or ""),
+            **duration_gate,
+            registry_job_id=str(state.get("_pipeline_job_id") or ""),
+            registry_chat_id_present=bool(chat_id),
+            charge_status="not_charged",
+        )
+    if str(duration_gate.get("duration_gate_result") or "") == "fail_over_limit":
+        safe_text = subdub_duration_over_limit_text(lang)
+        debug_state = {
+            **state,
+            "_subdub_terminal_state": "failed_no_charge",
+            "last_error_stage": "duration_gate",
+            "last_error_safe": safe_text,
+            "charge_status": "not_charged",
+        }
+        gate_matrix = {
+            "product_route_allowed": bool(input_save.get("file_saved") and input_save.get("exists")),
+            "blackbox_enabled": False,
+            "duration_gate_result": str(duration_gate.get("duration_gate_result") or ""),
+            "duration_limit": int(duration_gate.get("duration_limit") or 0),
+            "gate_blockers": ["duration_limit_exceeded"],
+            "technical_missing": [],
+            "public_blockers": [],
+        }
+        debug_job = subtitle_dub_debug_job_payload(
+            user_id=uid,
+            chat_id=chat_id,
+            mode=mode,
+            state=debug_state,
+            status="DURATION_LIMIT_EXCEEDED",
+            stage="duration_gate",
+            input_save=input_save,
+            gate_matrix=gate_matrix,
+            workspace_artifacts=workspace_artifacts,
+            detail="duration_limit_exceeded",
+            pipeline_attempted=False,
+            public_safe_error=safe_text,
+        )
+        if str(state.get("_pipeline_job_key") or ""):
+            update_subtitle_dub_pipeline_job(
+                str(state.get("_pipeline_job_key") or ""),
+                status="failed",
+                terminal_state="failed_no_charge",
+                lifecycle_state="failed_no_charge",
+                current_stage="failed_no_charge",
+                progress_stage="failed_no_charge",
+                progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                last_error_stage="duration_gate",
+                last_error_safe=safe_text,
+                charge_status="not_charged",
+                debug_job=debug_job,
+            )
+        return {
+            "ok": False,
+            "status": "DURATION_LIMIT_EXCEEDED",
+            "text": safe_text,
+            "detail": "duration_limit_exceeded",
+            "workspace_artifacts": workspace_artifacts,
+            "input_save": input_save,
+            "gate_matrix": gate_matrix,
+            "debug_job": debug_job,
+            "pipeline_attempted": False,
+        }
+    if duration_gate.get("is_long_media") and duration_gate.get("long_media_allowed") and input_save.get("ok"):
+        await _progress("extracting_audio")
     if input_save.get("ok") and input_save.get("source_bytes"):
         state = {
             **state,
@@ -168208,7 +168512,6 @@ async def _execute_video_dubbing_pipeline_core(
     )
     gate_matrix = video_dubbing_product_gate_matrix(uid, mode, state, access=access, input_save=input_save)
     public_failure = video_dubbing_product_public_failure_text(mode, state, gate_matrix, lang)
-    chat_id = getattr(getattr(query, "message", None), "chat_id", uid)
     if not input_save.get("ok"):
         detail = sanitize_log_text(str(input_save.get("detail") or input_save.get("error") or "input_save_failed"))[:180]
         debug_job = subtitle_dub_debug_job_payload(
@@ -168419,6 +168722,9 @@ async def _execute_video_dubbing_pipeline_core(
             **state,
             "_subdub_render_debug": dict(render_debug),
             "_subdub_terminal_state": "failed_no_charge",
+            "last_error_stage": stage,
+            "last_error_safe": text,
+            "charge_status": "not_charged",
         }
         debug_job = subtitle_dub_debug_job_payload(
             user_id=uid,
@@ -168647,7 +168953,7 @@ async def _execute_video_dubbing_pipeline_core(
     product_context = normalize_product_context(state.get("product_context") or (PRODUCT_CONTEXT_VIDEO_ADDON if str(state.get("origin") or "") == "video_addon" else PRODUCT_CONTEXT_SHOWROOM))
     source_ref = str(state.get("source_file_id") or state.get("video_file_id") or state.get("source_ref") or "")[:600]
     linked_session_id = media_asset_video_session_id(uid, product_context, state)
-    duration_seconds = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
+    duration_seconds = _safe_int(state.get("input_duration") or state.get("video_duration") or state.get("source_duration"), 0)
     subtitle_asset_ids: list[str] = []
     translation_asset_ids: list[str] = []
     subtitle_asset_paths: list[str] = []
@@ -168888,6 +169194,24 @@ async def _execute_video_dubbing_pipeline_core(
             "input_file_exists": bool(source_path and os.path.exists(source_path)),
             "input_file_size": len(video_bytes or b""),
             "duration_seconds": duration_seconds,
+            "input_duration": int(state.get("input_duration") or duration_seconds or 0),
+            "detected_duration_source": str(state.get("detected_duration_source") or ""),
+            "telegram_duration": int(state.get("telegram_duration") or 0),
+            "ffprobe_duration": int(state.get("ffprobe_duration") or 0),
+            "duration_limit": int(state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
+            "duration_gate_result": str(state.get("duration_gate_result") or ""),
+            "duration_guard_stage": str(state.get("duration_guard_stage") or ""),
+            "is_long_media": bool(state.get("is_long_media")),
+            "long_media_allowed": bool(state.get("long_media_allowed")),
+            "worker_claim_required": bool(state.get("worker_claim_required")),
+            "worker_claimed": bool(state.get("worker_claimed")),
+            **subdub_lifecycle_debug_fields("delivered" if result_terminal_state == "delivered" else result_terminal_state, result_terminal_state),
+            "registry_job_id": str(state.get("_pipeline_job_id") or ""),
+            "registry_chat_id_present": bool(getattr(query.message, "chat_id", "")),
+            "status_panel_message_id": str(state.get("status_panel_message_id") or ""),
+            "last_error_stage": "",
+            "last_error_safe": "",
+            "charge_status": "charged" if int(charged or 0) > 0 else "not_charged",
             "source_language": str(prepared.get("detected_language") or state.get("source_language") or "auto"),
             "detected_language": str(prepared.get("detected_language") or ""),
             "target_language": str(prepared.get("target_language") or state.get("target_language") or ""),
@@ -168930,7 +169254,7 @@ async def _execute_video_dubbing_pipeline_core(
             "duplicate_delivery_prevented": False,
             "public_error_sent": False,
             "error_sent_after_delivery": False,
-            "duration_limit_seconds": int(pipeline_duration_limit_seconds(bool(is_admin_user(uid)))),
+            "duration_limit_seconds": int(state.get("duration_limit_seconds") or state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
             "chunking_enabled": False,
             "chunk_count": 0,
             "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
@@ -169070,6 +169394,8 @@ async def execute_video_dubbing_pipeline(
         )
         artifacts = dict(result.get("workspace_artifacts") or {})
         input_save = {key: value for key, value in dict(result.get("input_save") or {}).items() if key != "source_bytes"}
+        result_state = dict(result.get("state") or {})
+        runtime_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
         debug_job = dict(result.get("debug_job") or {})
         gate_matrix = dict(result.get("gate_matrix") or debug_job.get("gate_matrix") or {})
         manifest = {
@@ -169128,7 +169454,30 @@ async def execute_video_dubbing_pipeline(
             "pipeline_attempted": bool(result.get("pipeline_attempted") or debug_job.get("pipeline_attempted")),
             "delivery_method": str(result.get("delivery_method") or debug_job.get("delivery_method") or ""),
             "output_validation": dict(result.get("output_validation") or debug_job.get("output_validation") or {}),
+            "input_duration": int(result_state.get("input_duration") or input_save.get("input_duration") or input_save.get("duration") or debug_job.get("input_duration") or 0),
+            "duration_seconds": int(result_state.get("input_duration") or input_save.get("duration") or debug_job.get("duration_seconds") or 0),
+            "detected_duration_source": str(result_state.get("detected_duration_source") or input_save.get("detected_duration_source") or debug_job.get("detected_duration_source") or ""),
+            "telegram_duration": int(result_state.get("telegram_duration") or input_save.get("telegram_duration") or debug_job.get("telegram_duration") or 0),
+            "ffprobe_duration": int(result_state.get("ffprobe_duration") or input_save.get("ffprobe_duration") or debug_job.get("ffprobe_duration") or 0),
+            "duration_limit": int(result_state.get("duration_limit") or debug_job.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
+            "duration_limit_seconds": int(result_state.get("duration_limit_seconds") or result_state.get("duration_limit") or debug_job.get("duration_limit_seconds") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
+            "duration_gate_result": str(result_state.get("duration_gate_result") or debug_job.get("duration_gate_result") or ""),
+            "duration_guard_stage": str(result_state.get("duration_guard_stage") or debug_job.get("duration_guard_stage") or ""),
+            "is_long_media": bool(result_state.get("is_long_media") or debug_job.get("is_long_media")),
+            "long_media_allowed": bool(result_state.get("long_media_allowed") or debug_job.get("long_media_allowed")),
+            "worker_claim_required": bool(result_state.get("worker_claim_required") or debug_job.get("worker_claim_required")),
+            "worker_claimed": bool(result_state.get("worker_claimed") or debug_job.get("worker_claimed")),
+            "registry_job_id": str(result_state.get("_pipeline_job_id") or debug_job.get("registry_job_id") or runtime_job.get("registry_job_id") or job.get("job_id") or ""),
+            "registry_chat_id_present": bool(chat_id or debug_job.get("registry_chat_id_present")),
+            "status_panel_message_id": str(result_state.get("status_panel_message_id") or debug_job.get("status_panel_message_id") or runtime_job.get("status_panel_message_id") or ""),
+            "last_error_stage": str(debug_job.get("last_error_stage") or ("" if result.get("ok") else result.get("status") or "")),
+            "last_error_safe": str(debug_job.get("last_error_safe") or ("" if result.get("ok") else result.get("text") or "")),
+            "charge_status": str(debug_job.get("charge_status") or ("charged" if int(result.get("charged") or 0) > 0 else "not_charged")),
         }
+        update_fields.update(subdub_lifecycle_debug_fields(
+            update_fields.get("progress_stage") or debug_job.get("progress_stage") or ("delivered" if result.get("ok") else "failed_no_charge"),
+            str(result.get("terminal_state") or ("failed_no_charge" if not result.get("ok") else "delivered")),
+        ))
         if not update_fields.get("internal_job_id"):
             update_fields["internal_job_id"] = str(result.get("internal_job_id") or job.get("job_id") or "")
         update_fields.pop("status", None)
@@ -174185,6 +174534,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
     tg_app.add_handler(CommandHandler("subdub_language_debug", cmd_subdub_language_debug))
     tg_app.add_handler(CommandHandler("subdub_duration_audit", cmd_subdub_duration_audit))
+    tg_app.add_handler(CommandHandler("subdub_long_video_audit", cmd_subdub_long_video_audit))
     tg_app.add_handler(CommandHandler("subdub_pipeline_audit", cmd_subdub_pipeline_audit))
     tg_app.add_handler(CommandHandler("subdub_back_route_audit", cmd_subdub_back_route_audit))
     tg_app.add_handler(CommandHandler("subdub_render_style_audit", cmd_subdub_render_style_audit))
