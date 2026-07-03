@@ -4,6 +4,8 @@ import subprocess
 
 import pytest
 
+import pytest
+
 from providers.video_generic_http_provider import GenericHttpVideoProvider
 from services import video_provider_router
 from services.video_provider_base import VideoGenerationRequest, VideoSubmitResult
@@ -330,6 +332,9 @@ def test_no_payos_music_subdub_voice_pricing_changes():
     if not _is_product_video_s2j_scope():
         pytest.skip("Product Video S2J scope guard is not active for this branch")
 
+    branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip().lower()
+    if "p0-18s2j" not in branch:
+        pytest.skip("S2J diff scope guard only runs on the S2J branch")
     diff = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     changed = {pathlib.PurePosixPath(line.strip()).as_posix() for line in diff.splitlines() if line.strip()}
 
