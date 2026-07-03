@@ -276,6 +276,7 @@ def test_no_music_video_payos_pricing_changes():
     assert changed <= {
         "bot.py",
         "tests/test_p0_19m4b_subdub_long_video_over_30s_progress_duration_gate_fix.py",
+        "tests/test_p0_19m5a_subdub_large_telegram_media_input_save_fix.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
     }
     assert not any(any(token in path.lower() for token in disallowed) for path in changed)

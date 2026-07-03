@@ -85117,6 +85117,17 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• input file id: <code>{esc(job.get('input_file_id'))}</code>",
         f"• input file exists: <code>{yes_no(job.get('input_file_exists'))}</code>",
         f"• file size: <code>{int(job.get('input_file_size') or 0)}</code>",
+        f"• input save attempted: <code>{yes_no(job.get('input_save_attempted'))}</code>",
+        f"• input save success: <code>{yes_no(job.get('input_save_success'))}</code>",
+        f"• telegram file size: <code>{int(job.get('telegram_file_size') or 0)}</code>",
+        f"• telegram download method: <code>{esc(job.get('telegram_download_method'))}</code>",
+        f"• telegram download limit hit: <code>{yes_no(job.get('telegram_download_limit_hit'))}</code>",
+        f"• large telegram media detected: <code>{yes_no(job.get('large_telegram_media_detected'))}</code>",
+        f"• large media intake supported: <code>{yes_no(job.get('large_media_intake_supported'))}</code>",
+        f"• large media intake source: <code>{esc(job.get('large_media_intake_source'))}</code>",
+        f"• input save blocker: <code>{esc(job.get('input_save_blocker'))}</code>",
+        f"• input save public action: <code>{esc(job.get('input_save_public_action'))}</code>",
+        f"• no charge reason: <code>{esc(job.get('no_charge_reason'))}</code>",
         f"• duration: <code>{int(job.get('duration_seconds') or 0)}</code>",
         f"• input duration: <code>{int(job.get('input_duration') or job.get('duration_seconds') or 0)}</code>",
         f"• detected duration source: <code>{esc(job.get('detected_duration_source'))}</code>",
@@ -85206,6 +85217,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• duplicate delivery prevented: <code>{yes_no(job.get('duplicate_delivery_prevented'))}</code>",
         f"• public error sent: <code>{yes_no(job.get('public_error_sent'))}</code>",
         f"• error sent after delivery: <code>{yes_no(job.get('error_sent_after_delivery'))}</code>",
+        f"• status panel terminalized: <code>{yes_no(job.get('status_panel_terminalized'))}</code>",
+        f"• refresh stopped after terminal: <code>{yes_no(job.get('refresh_stopped_after_terminal'))}</code>",
         f"• terminal artifact type: <code>{esc(job.get('terminal_artifact_type'))}</code>",
         f"• video delivery message id: <code>{esc(job.get('video_delivery_message_id'))}</code>",
         f"• audio delivery message id: <code>{esc(job.get('audio_delivery_message_id'))}</code>",
@@ -165006,6 +165019,9 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
     if status.startswith("failed") or terminal.startswith("failed"):
+        safe = sanitize_public_copy(str(job.get("last_error_safe") or job.get("public_safe_error") or ""), "")
+        if safe:
+            return safe
         return subdub_clean_failure_text(lang)
     return subdub_progress_text(str(job.get("progress_stage") or job.get("stage") or "saved_input"), job_id, lang)
 
@@ -165414,6 +165430,77 @@ def video_dubbing_sync_state_fields(state: dict | None = None, *, exclude: set[s
         and not isinstance(value, (bytes, bytearray))
     }
 
+def subdub_telegram_file_too_big(detail: str = "") -> bool:
+    normalized = str(detail or "").strip().lower()
+    if not normalized:
+        return False
+    markers = (
+        "file is too big",
+        "file too big",
+        "request entity too large",
+        "telegram_download_failed:file is too big",
+        "bad request: file is too big",
+    )
+    return any(marker in normalized for marker in markers)
+
+def subdub_large_telegram_media_public_text(lang: str = "vi") -> str:
+    return (
+        "TOAN AAS chưa tải được video này vì file quá lớn để lấy trực tiếp từ Telegram. "
+        "Hệ thống chưa trừ Xu. Anh/chị hãy gửi video nén nhẹ hơn hoặc dùng phương thức tải lên được hỗ trợ."
+    )
+
+def subdub_input_save_failure_public_text(input_save: dict | None = None, lang: str = "vi") -> str:
+    item = dict(input_save or {})
+    detail = str(item.get("detail") or item.get("input_save_blocker") or item.get("error") or "")
+    if (
+        item.get("telegram_download_limit_hit")
+        or str(item.get("input_save_blocker") or "") == "large_telegram_download_unsupported"
+        or subdub_telegram_file_too_big(detail)
+    ):
+        return subdub_large_telegram_media_public_text(lang)
+    return ""
+
+def subdub_input_save_debug_fields(input_save: dict | None = None, state: dict | None = None) -> dict:
+    item = dict(input_save or {})
+    state = dict(state or {})
+    detail = str(item.get("detail") or item.get("error") or "")
+    file_size = _safe_int(
+        item.get("telegram_file_size")
+        or state.get("video_file_size")
+        or state.get("source_file_size")
+        or item.get("size"),
+        0,
+    )
+    method = str(item.get("telegram_download_method") or ("source_bytes_override" if item.get("source_bytes") else "bot_api_direct"))
+    limit_hit = bool(item.get("telegram_download_limit_hit") or subdub_telegram_file_too_big(detail))
+    supported_source = str(item.get("large_media_intake_source") or "")
+    supported = bool(item.get("large_media_intake_supported") or supported_source in {"source_bytes_override", "local_path_override"})
+    blocker = str(item.get("input_save_blocker") or "")
+    if not blocker:
+        if limit_hit and not supported:
+            blocker = "large_telegram_download_unsupported"
+        elif not item.get("file_saved"):
+            blocker = str(item.get("detail") or "file_not_saved")
+    action = str(item.get("input_save_public_action") or "")
+    if not action and blocker == "large_telegram_download_unsupported":
+        action = "send_smaller_or_supported_upload"
+    no_charge_reason = str(item.get("no_charge_reason") or "")
+    if not no_charge_reason and not item.get("ok"):
+        no_charge_reason = blocker or "input_save_failed"
+    return {
+        "input_save_attempted": True,
+        "input_save_success": bool(item.get("ok") and item.get("file_saved") and item.get("exists") and int(item.get("size") or 0) > 0),
+        "telegram_file_size": file_size,
+        "telegram_download_method": method,
+        "telegram_download_limit_hit": limit_hit,
+        "large_telegram_media_detected": bool(limit_hit or item.get("large_telegram_media_detected")),
+        "large_media_intake_supported": supported,
+        "large_media_intake_source": supported_source or ("source_bytes_override" if method == "source_bytes_override" else ""),
+        "input_save_blocker": blocker,
+        "input_save_public_action": action,
+        "no_charge_reason": no_charge_reason,
+    }
+
 async def video_dubbing_save_input_for_pipeline(
     context: ContextTypes.DEFAULT_TYPE,
     state: dict,
@@ -165433,6 +165520,17 @@ async def video_dubbing_save_input_for_pipeline(
         "error": "",
         "detail": "",
         "source_bytes": b"",
+        "input_save_attempted": True,
+        "input_save_success": False,
+        "telegram_file_size": _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0),
+        "telegram_download_method": "",
+        "telegram_download_limit_hit": False,
+        "large_telegram_media_detected": False,
+        "large_media_intake_supported": False,
+        "large_media_intake_source": "",
+        "input_save_blocker": "",
+        "input_save_public_action": "",
+        "no_charge_reason": "",
     }
     source_bytes = state.get("_pipeline_source_bytes_override")
     if isinstance(source_bytes, bytearray):
@@ -165440,34 +165538,101 @@ async def video_dubbing_save_input_for_pipeline(
     if not isinstance(source_bytes, bytes):
         source_bytes = b""
     content_type = str(state.get("_pipeline_source_content_type_override") or result["content_type"])
+    if source_bytes:
+        result.update({
+            "telegram_download_method": "source_bytes_override",
+            "large_media_intake_supported": True,
+            "large_media_intake_source": "source_bytes_override",
+        })
+    if not source_bytes:
+        source_path_override = str(
+            state.get("_pipeline_source_path_override")
+            or state.get("_pipeline_large_media_local_path")
+            or ""
+        ).strip()
+        if source_path_override and os.path.exists(source_path_override) and os.path.isfile(source_path_override):
+            source_size = os.path.getsize(source_path_override)
+            max_input_mb = pipeline_input_limit_mb(bool(state.get("_pipeline_is_admin")))
+            if source_size > max_input_mb * 1024 * 1024:
+                result.update({
+                    "error": "RuntimeError",
+                    "detail": "video_too_large",
+                    "content_type": content_type,
+                    "telegram_download_method": "local_path_override",
+                    "large_media_intake_supported": True,
+                    "large_media_intake_source": "local_path_override",
+                    "input_save_blocker": "video_too_large",
+                    "no_charge_reason": "video_too_large",
+                })
+                return result
+            with open(source_path_override, "rb") as handle:
+                source_bytes = handle.read()
+            result.update({
+                "telegram_download_method": "local_path_override",
+                "large_media_intake_supported": True,
+                "large_media_intake_source": "local_path_override",
+                "original_filename": str(state.get("source_file_name") or os.path.basename(source_path_override) or "source.mp4"),
+            })
     if not source_bytes:
         if not result["file_id"]:
-            result.update({"error": "RuntimeError", "detail": "missing_video_file_id", "content_type": content_type})
+            result.update({
+                "error": "RuntimeError",
+                "detail": "missing_video_file_id",
+                "content_type": content_type,
+                "telegram_download_method": "missing_file_id",
+                "input_save_blocker": "missing_video_file_id",
+                "no_charge_reason": "missing_video_file_id",
+            })
             return result
         try:
             source_bytes, content_type = await video_dubbing_download_source(context, state)
         except Exception as exc:
+            safe_detail = sanitize_log_text(str(exc))[:140]
+            limit_hit = subdub_telegram_file_too_big(safe_detail)
+            blocker = "large_telegram_download_unsupported" if limit_hit else "telegram_download_failed"
             result.update({
                 "error": type(exc).__name__,
-                "detail": "telegram_download_failed:" + sanitize_log_text(str(exc))[:140],
+                "detail": "telegram_download_failed:" + safe_detail,
                 "content_type": content_type,
+                "telegram_download_method": "bot_api_direct",
+                "telegram_download_limit_hit": limit_hit,
+                "large_telegram_media_detected": limit_hit,
+                "large_media_intake_supported": False,
+                "large_media_intake_source": "",
+                "input_save_blocker": blocker,
+                "input_save_public_action": "send_smaller_or_supported_upload" if limit_hit else "",
+                "no_charge_reason": blocker,
             })
             return result
     if not source_bytes:
-        result.update({"error": "RuntimeError", "detail": "file_not_saved", "content_type": content_type})
+        result.update({
+            "error": "RuntimeError",
+            "detail": "file_not_saved",
+            "content_type": content_type,
+            "input_save_blocker": "file_not_saved",
+            "no_charge_reason": "file_not_saved",
+        })
         return result
     result.update({
         "ok": True,
         "source_bytes": bytes(source_bytes),
         "content_type": str(content_type or result["content_type"]),
         "size": len(source_bytes),
+        "input_save_success": True,
     })
     if workspace and source_bytes:
         source_name = os.path.basename(str(state.get("source_file_name") or "source.mp4")) or "source.mp4"
         try:
             source_path = write_subtitle_dub_pipeline_artifact(workspace, source_name, source_bytes)
         except Exception as exc:
-            result.update({"ok": False, "error": type(exc).__name__, "detail": sanitize_log_text(str(exc))[:180]})
+            result.update({
+                "ok": False,
+                "error": type(exc).__name__,
+                "detail": sanitize_log_text(str(exc))[:180],
+                "input_save_success": False,
+                "input_save_blocker": "file_not_saved",
+                "no_charge_reason": "file_not_saved",
+            })
             return result
         result.update({
             "path": source_path,
@@ -165475,7 +165640,16 @@ async def video_dubbing_save_input_for_pipeline(
             "file_saved": bool(source_path and os.path.exists(source_path) and os.path.getsize(source_path) > 0),
         })
     if not result.get("file_saved"):
-        result.update({"ok": False, "error": "RuntimeError", "detail": "file_not_saved"})
+        result.update({
+            "ok": False,
+            "error": "RuntimeError",
+            "detail": "file_not_saved",
+            "input_save_success": False,
+            "input_save_blocker": "file_not_saved",
+            "no_charge_reason": "file_not_saved",
+        })
+    else:
+        result.update(subdub_input_save_debug_fields(result, state))
     return result
 
 def video_dubbing_product_gate_matrix(
@@ -165612,6 +165786,12 @@ def video_dubbing_pipeline_blocker(
     input_save = dict(input_save or {})
     matrix = dict(gate_matrix or {})
     normalized = str(detail or "").strip().lower()
+    if (
+        str(input_save.get("input_save_blocker") or "") == "large_telegram_download_unsupported"
+        or input_save.get("telegram_download_limit_hit")
+        or subdub_telegram_file_too_big(normalized)
+    ):
+        return "large_telegram_download_unsupported"
     if "telegram_download_failed" in normalized:
         return "telegram_download_failed"
     if not (
@@ -165686,6 +165866,7 @@ def subtitle_dub_debug_job_payload(
     render_debug = dict(state.get("_subdub_render_debug") or {})
     voice_resolution = dict(state.get("_subdub_voice_resolution") or {})
     voice_config = subdub_default_voice_config_payload()
+    input_save_debug = subdub_input_save_debug_fields(input_save, state)
     blocker = video_dubbing_pipeline_blocker(
         input_save=input_save,
         gate_matrix=gate_matrix,
@@ -165732,6 +165913,7 @@ def subtitle_dub_debug_job_payload(
         "input_file_path": source_path,
         "input_file_exists": bool(source_path and os.path.exists(source_path)),
         "input_file_size": int(input_save.get("size") or (os.path.getsize(source_path) if source_path and os.path.exists(source_path) else 0)),
+        **input_save_debug,
         "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "extracted_audio_path": str(artifacts.get("audio") or ""),
         "extracted_audio_exists": bool(artifacts.get("audio") and os.path.exists(str(artifacts.get("audio")))),
@@ -165786,6 +165968,8 @@ def subtitle_dub_debug_job_payload(
         "duplicate_delivery_prevented": bool(state.get("duplicate_delivery_prevented")),
         "public_error_sent": bool(state.get("public_error_sent")),
         "error_sent_after_delivery": bool(state.get("error_sent_after_delivery")),
+        "status_panel_terminalized": bool(state.get("status_panel_terminalized")),
+        "refresh_stopped_after_terminal": bool(state.get("refresh_stopped_after_terminal")),
         "terminal_state": str(state.get("_subdub_terminal_state") or ""),
         "terminal_state_history": list(state.get("terminal_state_history") or []),
         "public_messages_sent": int(state.get("public_messages_sent") or 0),
@@ -168589,12 +168773,27 @@ async def _execute_video_dubbing_pipeline_core(
     gate_matrix = video_dubbing_product_gate_matrix(uid, mode, state, access=access, input_save=input_save)
     public_failure = video_dubbing_product_public_failure_text(mode, state, gate_matrix, lang)
     if not input_save.get("ok"):
+        input_public_failure = subdub_input_save_failure_public_text(input_save, lang)
+        if input_public_failure:
+            public_failure = input_public_failure
         detail = sanitize_log_text(str(input_save.get("detail") or input_save.get("error") or "input_save_failed"))[:180]
+        input_save_fields = subdub_input_save_debug_fields(input_save, state)
+        terminal_state_update = {
+            **state,
+            "_subdub_terminal_state": "failed_no_charge",
+            "last_error_stage": "input_save",
+            "last_error_safe": public_failure,
+            "charge_status": "not_charged",
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
+            "public_error_sent": False,
+            **input_save_fields,
+        }
         debug_job = subtitle_dub_debug_job_payload(
             user_id=uid,
             chat_id=chat_id,
             mode=mode,
-            state=state,
+            state=terminal_state_update,
             status="INPUT_SAVE_FAILED",
             stage="input_save",
             input_save=input_save,
@@ -168604,6 +168803,25 @@ async def _execute_video_dubbing_pipeline_core(
             pipeline_attempted=False,
             public_safe_error=public_failure,
         )
+        if str(state.get("_pipeline_job_key") or ""):
+            update_subtitle_dub_pipeline_job(
+                str(state.get("_pipeline_job_key") or ""),
+                status="failed",
+                terminal_state="failed_no_charge",
+                lifecycle_state="failed_no_charge",
+                current_stage="failed_no_charge",
+                progress_stage="failed_no_charge",
+                progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                last_error_stage="input_save",
+                last_error_safe=public_failure,
+                charge_status="not_charged",
+                status_panel_terminalized=True,
+                refresh_stopped_after_terminal=True,
+                public_error_sent=False,
+                **input_save_fields,
+                debug_job=debug_job,
+            )
         return {
             "ok": False,
             "status": "INPUT_SAVE_FAILED",
@@ -168613,6 +168831,9 @@ async def _execute_video_dubbing_pipeline_core(
             "input_save": input_save,
             "gate_matrix": gate_matrix,
             "debug_job": debug_job,
+            "terminal_state": "failed_no_charge",
+            "state": terminal_state_update,
+            "pipeline_attempted": False,
         }
     if not video_dubbing_product_gate_allows_pipeline(access, gate_matrix):
         detail = sanitize_log_text(str(access.get("reason") or access.get("status") or "gate_blocked"))[:180]
