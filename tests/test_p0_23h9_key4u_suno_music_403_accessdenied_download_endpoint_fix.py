@@ -89,14 +89,18 @@ def test_key4u_fetch_retries_when_only_bare_cdn_url(monkeypatch):
     ])
     monkeypatch.setattr(bot, "key4u_provider_instance", lambda: provider)
     monkeypatch.setattr(bot, "record_music_provider_attempt", lambda **kwargs: None)
+    monkeypatch.setattr(bot, "KEY4U_SUNO_DOWNLOAD_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_ENDPOINT", "")
 
     result = asyncio.run(bot.poll_music_generation_job({"music_provider": "key4u_suno", "music_task_id": TASK_ID}, updated_by=USER_ID))
 
     assert provider.calls == [TASK_ID, TASK_ID]
     assert result["ok"] is False
     assert result["status"] == "COMPLETED_NO_DOWNLOADABLE_AUDIO"
-    assert result["primary_blocker"] == "result_url_forbidden_access_denied"
-    assert result["recovery_action"] == "need_key4u_signed_download_field_or_proxy"
+    assert result["primary_blocker"] == bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
+    assert result["recovery_action"] == "setup_required_key4u_suno_download_url"
+    assert result["setup_required"] == bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED
     assert result["key4u_suno_fetch_retried"] is True
     assert "data.music_output_url" in result["key4u_suno_fetch_candidate_paths_text"]
 
@@ -133,15 +137,19 @@ def test_completed_only_bare_cdn_sets_failed_no_charge(monkeypatch):
     monkeypatch.setattr(bot, "record_music_provider_attempt", lambda **kwargs: None)
     monkeypatch.setattr(bot, "get_engine_async_job", lambda job_id: dict(store.get(job_id) or {}))
     monkeypatch.setattr(bot, "save_engine_async_job", fake_save)
+    monkeypatch.setattr(bot, "KEY4U_SUNO_DOWNLOAD_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_ENDPOINT", "")
 
     result = asyncio.run(bot.poll_music_suno_async_job(JOB_ID, updated_by=USER_ID))
     job = result["job"]
 
-    assert result["status"] == "RESULT_URL_FORBIDDEN_ACCESS_DENIED"
+    assert result["status"] == "KEY4U_SUNO_DOWNLOAD_ENDPOINT_MISSING_FOR_BARE_CDN"
     assert job["terminal_state"] == "failed_no_charge"
-    assert job["primary_blocker"] == "result_url_forbidden_access_denied"
+    assert job["primary_blocker"] == bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
     assert job["charged_xu"] == 0
-    assert job["progress_text"] == "Bài hát đã tạo xong nhưng hệ thống chưa lấy được file nhạc từ nhà cung cấp. Bot chưa trừ Xu."
+    assert job["progress_text"] == bot.KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE
+    assert job["setup_required"] == bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED
     assert "cdn" not in job["progress_text"].lower()
     assert "api" not in job["progress_text"].lower()
 
@@ -255,13 +263,18 @@ def test_music_job_debug_lists_candidate_paths_safely(monkeypatch):
 def test_music_provider_audit_admin_only_and_shows_key4u_fetch_config(monkeypatch):
     source = inspect.getsource(bot.cmd_music_provider_audit)
     assert "is_admin_user" in source
+    monkeypatch.setattr(bot, "KEY4U_SUNO_DOWNLOAD_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_ENDPOINT", "")
     monkeypatch.setattr(bot, "list_engine_async_jobs", lambda feature="", limit=1, active_only=False: [_job(
         key4u_suno_fetch_candidate_paths_text="data.music_output_url|cdn1.suno.ai.mp3|cdn1.suno.ai|.mp3|no-query|bare_suno_cdn_no_query",
-        primary_blocker="result_url_forbidden_access_denied",
+        primary_blocker=bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER,
+        setup_required=bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED,
     )])
     text = bot.music_provider_audit_text()
     assert "submit URL configured" in text
     assert "fetch URL configured" in text
     assert "download endpoint configured" in text
     assert "data.music_output_url" in text
-    assert "result_url_forbidden_access_denied" in text
+    assert bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER in text
+    assert bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED in text
