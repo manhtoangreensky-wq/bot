@@ -427,6 +427,21 @@ def product_video_job_allowed(job: dict | None = None) -> bool:
     )
 
 
+def product_video_provider_hint(job: dict | None = None) -> str:
+    data = dict(job or {})
+    for key in ("selected_provider", "submit_provider_key", "selected_provider_before_submit", "provider"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        from services.video_provider_router import provider_status_payload
+
+        status = provider_status_payload(os.environ)
+        return str(status.get("first_ready_provider") or status.get("selected_provider") or "").strip()
+    except Exception:
+        return ""
+
+
 def local_ffmpeg_path() -> str:
     if FFMPEG_PATH and os.path.exists(FFMPEG_PATH):
         return FFMPEG_PATH
@@ -687,7 +702,7 @@ def process_claimed_job(job: dict) -> dict:
         print(
             "[remote_worker] provider submit start "
             f"job_id={job_id} "
-            f"provider={job.get('selected_provider') or '-'} "
+            f"provider={product_video_provider_hint(job) or '-'} "
             f"service_mode={trace.get('worker_service_mode') or '-'}"
         )
         final_path = render_real_video(job, work_dir)
@@ -723,7 +738,10 @@ def process_claimed_job(job: dict) -> dict:
             "provider_router_called": bool(connector_result.get("provider_router_called")),
             "provider_candidates_count": int(connector_result.get("provider_candidates_count") or 0),
             "selected_provider": str(connector_result.get("selected_provider") or ""),
+            "selected_provider_before_submit": str(connector_result.get("selected_provider_before_submit") or ""),
+            "submit_provider_key": str(connector_result.get("submit_provider_key") or ""),
             "provider_selection_blocker": str(connector_result.get("provider_selection_blocker") or ""),
+            "provider_config_source": str(connector_result.get("provider_config_source") or ""),
             "provider_attempted": bool(connector_result.get("provider_attempted")),
             "provider_route_selected": bool(connector_result.get("provider_route_selected")),
             "provider_submit_called": bool(connector_result.get("provider_submit_called")),
@@ -735,6 +753,9 @@ def process_claimed_job(job: dict) -> dict:
             "provider_auth_header_name": str(connector_result.get("provider_auth_header_name") or ""),
             "provider_auth_value_present": bool(connector_result.get("provider_auth_value_present") or connector_result.get("auth_configured")),
             "provider_auth_scheme_prefix": str(connector_result.get("provider_auth_scheme_prefix") or ""),
+            "auth_present": bool(connector_result.get("auth_present") or connector_result.get("provider_auth_value_present") or connector_result.get("auth_configured")),
+            "auth_scheme": str(connector_result.get("auth_scheme") or connector_result.get("provider_auth_scheme_prefix") or ""),
+            "provider_model_present": bool(connector_result.get("provider_model_present")),
             "provider_payload_keys": connector_result.get("provider_payload_keys") or connector_result.get("payload_keys") or [],
             "provider_payload_model": str(connector_result.get("provider_payload_model") or ""),
             "provider_response_http_status": connector_result.get("provider_response_http_status") or connector_result.get("provider_submit_http_status") or 0,
@@ -966,7 +987,7 @@ def run_once(
             print(
                 "[remote_worker] provider submit/render failed "
                 f"job_id={job_id} "
-                f"provider={diagnostics.get('selected_provider') or diagnostics.get('provider') or '-'} "
+                f"provider={diagnostics.get('submit_provider_key') or diagnostics.get('selected_provider_before_submit') or diagnostics.get('selected_provider') or diagnostics.get('provider') or '-'} "
                 f"submit_url_host={diagnostics.get('provider_submit_url_host') or '-'} "
                 f"exception_class={type(exc).__name__} "
                 f"exception_message_safe={first_line(message)}"

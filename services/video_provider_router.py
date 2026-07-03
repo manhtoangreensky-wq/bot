@@ -667,6 +667,12 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "provider_response_body_shape",
         "provider_submit_exception_class",
         "provider_submit_exception_message_safe",
+        "provider_config_source",
+        "selected_provider_before_submit",
+        "submit_provider_key",
+        "auth_present",
+        "auth_scheme",
+        "provider_model_present",
     ):
         if key in raw and key not in target:
             target[key] = raw.get(key)
@@ -809,14 +815,38 @@ def run_provider_generation(
         fallback_reason = first_fallback_reason if fallback_used else ""
         selected_capability = preferred_provider_capability(current_adapter, request.required_capability)
         provider_request = dataclasses.replace(request, required_capability=selected_capability)
+        current_caps = dict(current_adapter.capabilities() or {})
+
+        def _safe_cap_bool(*keys: str) -> bool:
+            return any(bool(current_caps.get(key)) for key in keys)
+
+        def _safe_cap_text(*keys: str) -> str:
+            for key in keys:
+                value = str(current_caps.get(key) or "").strip()
+                if value:
+                    return value
+            return ""
 
         def _attempt_base() -> dict[str, Any]:
             return {
                 **base_debug,
                 "selected_provider": current_adapter.provider_name,
+                "selected_provider_before_submit": current_adapter.provider_name,
+                "submit_provider_key": current_adapter.provider_name,
                 "selected_capability": selected_capability,
                 "provider": current_adapter.provider_name,
                 "provider_selection_blocker": "",
+                "provider_config_source": _safe_cap_text("provider_config_source") or f"env:{current_adapter.provider_name}",
+                "submit_url_configured": _safe_cap_bool("submit_url_configured", "provider_submit_url_configured"),
+                "provider_submit_url_configured": _safe_cap_bool("provider_submit_url_configured", "submit_url_configured"),
+                "provider_submit_url_host": _safe_cap_text("provider_submit_url_host"),
+                "auth_present": _safe_cap_bool("auth_present", "provider_auth_value_present", "auth_configured"),
+                "auth_scheme": _safe_cap_text("auth_scheme", "provider_auth_scheme_prefix"),
+                "provider_auth_header_name": _safe_cap_text("provider_auth_header_name"),
+                "provider_auth_value_present": _safe_cap_bool("provider_auth_value_present", "auth_present", "auth_configured"),
+                "provider_auth_scheme_prefix": _safe_cap_text("provider_auth_scheme_prefix", "auth_scheme"),
+                "provider_model_present": _safe_cap_bool("provider_model_present", "model_present", "model_configured"),
+                "provider_payload_model": _safe_cap_text("provider_payload_model"),
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
                 "provider_attempted": True,
@@ -855,6 +885,7 @@ def run_provider_generation(
                 _record_failure(blocker)
                 continue
             _record_failure(blocker)
+            provider_task_ids = [submit.provider_task_id or submit.provider_video_id] if (submit.provider_task_id or submit.provider_video_id) else []
             payload = {
                 "ok": False,
                 **_attempt_base(),
@@ -862,12 +893,13 @@ def run_provider_generation(
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
-                "provider_task_id_saved": bool(submit.provider_task_id),
+                "provider_task_id_saved": bool(provider_task_ids),
                 "provider_error": blocker,
                 "blocker": blocker,
                 "provider_status": submit.provider_status or "failed",
-                "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                "provider_task_ids": provider_task_ids,
                 "provider_readiness": status,
+                "no_charge": bool(allow_pending_result or (request.metadata or {}).get("product_video")),
             }
             return _merge_contract_debug(payload, submit.raw)
         result_url = submit.result_url or submit.file_url
@@ -935,6 +967,7 @@ def run_provider_generation(
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             else:
                 if allow_pending_result and (submit.provider_task_id or submit.provider_video_id) and poll_result.status in {"queued", "running"}:
+                    provider_task_ids = [submit.provider_task_id or submit.provider_video_id]
                     payload = {
                         "ok": False,
                         **_attempt_base(),
@@ -942,7 +975,7 @@ def run_provider_generation(
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                         "provider_submit_called": True,
                         "provider_submit_http_status": submit_http_status,
-                        "provider_task_id_saved": bool(submit.provider_task_id or submit.provider_video_id),
+                        "provider_task_id_saved": bool(provider_task_ids),
                         "provider_poll_called": True,
                         "provider_result_url_present": False,
                         "provider_error": "provider_in_progress",
@@ -950,7 +983,7 @@ def run_provider_generation(
                         "continue_polling": True,
                         "normalized_provider_status": poll_result.status,
                         "provider_status": poll_result.status,
-                        "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                        "provider_task_ids": provider_task_ids,
                         "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
                         "provider_readiness": status,
                         "no_charge": True,
