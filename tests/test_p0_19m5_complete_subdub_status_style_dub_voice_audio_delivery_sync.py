@@ -198,7 +198,8 @@ def test_receipt_does_not_show_fail_after_video_delivery():
         {"mode": bot.VIDEO_SUBTITLE_MODE_DUB},
         {"video_delivered": True, "charged": 12, "terminal_state": "delivered"},
     )
-    assert "Đã tạo video lồng tiếng." in text
+    assert "Kết quả đã gửi phía trên" in text
+    assert "Đã tạo video lồng tiếng." not in text
     assert "chưa" not in text.lower()
     assert "lỗi" not in text.lower()
 

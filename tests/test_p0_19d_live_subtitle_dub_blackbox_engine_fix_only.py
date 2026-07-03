@@ -19,15 +19,19 @@ class CaptureMessage:
 
     async def reply_text(self, text, **kwargs):
         self.outputs.append({"text": str(text), **kwargs})
+        return SimpleNamespace(message_id=len(self.outputs))
 
     async def reply_document(self, **kwargs):
         self.outputs.append({"document": True, **kwargs})
+        return SimpleNamespace(message_id=len(self.outputs))
 
     async def reply_audio(self, **kwargs):
         self.outputs.append({"audio": True, **kwargs})
+        return SimpleNamespace(message_id=len(self.outputs))
 
     async def reply_video(self, **kwargs):
         self.outputs.append({"video": True, **kwargs})
+        return SimpleNamespace(message_id=len(self.outputs))
 
 
 class CaptureQuery:
@@ -137,7 +141,7 @@ def test_p0_19d_locked_flow_not_changed():
     assert "🎞 Video đã có phụ đề" in source_labels
     assert "🎧 Video chưa có phụ đề" in source_labels
     assert "🎬 Tạo phụ đề rồi lồng tiếng" in no_subtitle_labels
-    assert "🎙 Lồng tiếng trực tiếp" in no_subtitle_labels
+    assert "🎙 Lồng tiếng trực tiếp" not in no_subtitle_labels
     assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
     assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in _callbacks(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
 
