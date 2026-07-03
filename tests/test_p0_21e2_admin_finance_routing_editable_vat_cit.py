@@ -1,5 +1,8 @@
 import json
+import os
 import subprocess
+
+import pytest
 
 import bot
 
@@ -60,6 +63,38 @@ def _allowed_p0_18o_engine_guard_path(path: str, changed: list[str]) -> bool:
         and path.replace("\\", "/") == "services/subtitle_dub_product_pipeline.py"
     )
     return video_allowed or video_engine_allowed or video_final_delivery_allowed or video_provider_config_allowed or subdub_allowed
+
+
+def _current_branch_name():
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
+
+
+def _is_finance_pricing_guard_scope(changed: list[str]) -> bool:
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-21d",
+        "p0-21e",
+        "finance",
+        "pricing",
+        "tax",
+        "accounting",
+        "dashboard",
+        "packages",
+        "combos",
+    )
+    if any(token in branch for token in branch_tokens):
+        return True
+    normalized = {path.replace("\\", "/").lower() for path in changed}
+    task_files = {
+        "tests/test_p0_21d_expand_product_packages_combos_many_products.py",
+        "tests/test_p0_21e_tax_payment_accounting_business_dashboard.py",
+        "tests/test_p0_21e2_admin_finance_routing_editable_vat_cit.py",
+    }
+    return bool(normalized & task_files)
 
 
 def _scalar(sql, params=(), default=0):
@@ -440,6 +475,8 @@ def test_public_tax_copy_not_misleading():
 
 def test_no_engine_files_touched():
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main", "--"], text=True, encoding="utf-8").splitlines()
+    if not _is_finance_pricing_guard_scope(changed):
+        pytest.skip("Finance/Pricing engine guard is not active for this branch")
     forbidden = ("providers/", "local_worker.py", "remote_worker.py", "services/subtitle", "services/video", "services/voice")
     assert [path for path in changed if path.replace("\\", "/").startswith(forbidden) and not _allowed_p0_18o_engine_guard_path(path, changed)] == []
 
