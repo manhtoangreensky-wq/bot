@@ -563,6 +563,8 @@ KEY4U_MUSIC_FETCH_URL = _env("KEY4U_MUSIC_FETCH_URL", "")
 KEY4U_SUNO_WAV_SETUP_REQUIRED = "KEY4U_SUNO_FETCH_URL or KEY4U_MUSIC_FETCH_URL or KEY4U_SUNO_WAV_RESULT_URL"
 KEY4U_SUNO_WAV_RESULT_BLOCKER = "key4u_suno_wav_result_endpoint_missing"
 KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER = "key4u_suno_wav_json_object_missing_audio_url_or_task_id"
+KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER = "key4u_suno_clip_id_missing_from_provider_result"
+KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER = "key4u_suno_wav_clip_id_rejected_by_provider"
 KEY4U_SUNO_WAV_ENDPOINT = _env("KEY4U_SUNO_WAV_ENDPOINT", "/act/wav/{clipId}")
 KEY4U_SUNO_TIMING_ENDPOINT = _env("KEY4U_SUNO_TIMING_ENDPOINT", "/act/timing/{clipId}")
 KEY4U_RERANK_ENDPOINT = _env("KEY4U_RERANK_ENDPOINT", "")
@@ -7556,11 +7558,13 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "result_url_signature_lost_or_invalid", "provider_auth_required",
             "provider_result_missing_or_expired", "result_url_missing",
             "download_http_failed", "download_failed", KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER, KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER,
+            KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER, KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER,
         }:
             blocker = download_error if download_error in {
                 "result_url_forbidden", "result_url_forbidden_access_denied", "result_url_forbidden_or_missing_auth",
                 "result_url_signature_lost_or_invalid", "provider_auth_required",
                 "provider_result_missing_or_expired", "result_url_missing", KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER, KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER,
+                KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER, KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER,
             } else "artifact_download_failed"
             if download_error == "result_url_expired" and "http=" in str(artifact.get("download_detail") or "").lower():
                 blocker = "result_url_expired"
@@ -7609,6 +7613,15 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "wav_request_http_status": int(artifact.get("wav_request_http_status") or current.get("wav_request_http_status") or 0),
             "wav_response_shape": str(artifact.get("wav_response_shape") or current.get("wav_response_shape") or ""),
             "wav_task_id_present": bool(artifact.get("wav_task_id_present") or current.get("wav_task_id_present")),
+            "provider_result_item_count": int(artifact.get("provider_result_item_count") or current.get("provider_result_item_count") or 0),
+            "provider_result_item0_keys": str(artifact.get("provider_result_item0_keys") or current.get("provider_result_item0_keys") or ""),
+            "provider_result_item1_keys": str(artifact.get("provider_result_item1_keys") or current.get("provider_result_item1_keys") or ""),
+            "clip_id_candidates_found": int(artifact.get("clip_id_candidates_found") or current.get("clip_id_candidates_found") or 0),
+            "selected_clip_id_source_path": str(artifact.get("selected_clip_id_source_path") or current.get("selected_clip_id_source_path") or ""),
+            "selected_clip_id_present": bool(artifact.get("selected_clip_id_present") or current.get("selected_clip_id_present")),
+            "wav_request_clip_id_source": str(artifact.get("wav_request_clip_id_source") or current.get("wav_request_clip_id_source") or ""),
+            "wav_request_used_provider_task_id_fallback": bool(artifact.get("wav_request_used_provider_task_id_fallback") or current.get("wav_request_used_provider_task_id_fallback")),
+            "clip_id_candidate_statuses": str(artifact.get("clip_id_candidate_statuses") or current.get("clip_id_candidate_statuses") or ""),
             "final_audio_download_status": str(artifact.get("final_audio_download_status") or current.get("final_audio_download_status") or ""),
             "wav_response_top_level_keys": str(artifact.get("wav_response_top_level_keys") or current.get("wav_response_top_level_keys") or ""),
             "wav_response_data_keys": str(artifact.get("wav_response_data_keys") or current.get("wav_response_data_keys") or ""),
@@ -7629,7 +7642,7 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "provider_result_candidate_count": int(artifact.get("provider_result_candidate_count") or current.get("provider_result_candidate_count") or 0),
             "result_url_age_seconds": music_result_url_age_seconds(current),
         })
-        if blocker in {KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER, KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER}:
+        if blocker in {KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER, KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER, KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER, KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER}:
             updated["progress_text"] = KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE
         if updated.get("internal_job_id"):
             save_engine_async_job(updated)
@@ -7730,6 +7743,15 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "wav_request_http_status": int(artifact.get("wav_request_http_status") or current.get("wav_request_http_status") or 0),
         "wav_response_shape": str(artifact.get("wav_response_shape") or current.get("wav_response_shape") or ""),
         "wav_task_id_present": bool(artifact.get("wav_task_id_present") or current.get("wav_task_id_present")),
+        "provider_result_item_count": int(artifact.get("provider_result_item_count") or current.get("provider_result_item_count") or 0),
+        "provider_result_item0_keys": str(artifact.get("provider_result_item0_keys") or current.get("provider_result_item0_keys") or ""),
+        "provider_result_item1_keys": str(artifact.get("provider_result_item1_keys") or current.get("provider_result_item1_keys") or ""),
+        "clip_id_candidates_found": int(artifact.get("clip_id_candidates_found") or current.get("clip_id_candidates_found") or 0),
+        "selected_clip_id_source_path": str(artifact.get("selected_clip_id_source_path") or current.get("selected_clip_id_source_path") or ""),
+        "selected_clip_id_present": bool(artifact.get("selected_clip_id_present") or current.get("selected_clip_id_present")),
+        "wav_request_clip_id_source": str(artifact.get("wav_request_clip_id_source") or current.get("wav_request_clip_id_source") or ""),
+        "wav_request_used_provider_task_id_fallback": bool(artifact.get("wav_request_used_provider_task_id_fallback") or current.get("wav_request_used_provider_task_id_fallback")),
+        "clip_id_candidate_statuses": str(artifact.get("clip_id_candidate_statuses") or current.get("clip_id_candidate_statuses") or ""),
         "final_audio_download_status": str(artifact.get("final_audio_download_status") or current.get("final_audio_download_status") or ("PASS" if payload else "")),
         "wav_response_top_level_keys": str(artifact.get("wav_response_top_level_keys") or current.get("wav_response_top_level_keys") or ""),
         "wav_response_data_keys": str(artifact.get("wav_response_data_keys") or current.get("wav_response_data_keys") or ""),
@@ -8676,6 +8698,15 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• wav_request_http_status: <code>{int((job or {}).get('wav_request_http_status') or 0)}</code>\n"
         f"• wav_response_shape: <code>{html.escape(str((job or {}).get('wav_response_shape') or '-'))}</code>\n"
         f"• wav_task_id_present: <code>{'yes' if (job or {}).get('wav_task_id_present') else 'no'}</code>\n"
+        f"• provider_result_item_count: <code>{int((job or {}).get('provider_result_item_count') or 0)}</code>\n"
+        f"• provider_result_item0_keys: <code>{html.escape(str((job or {}).get('provider_result_item0_keys') or '-'))}</code>\n"
+        f"• provider_result_item1_keys: <code>{html.escape(str((job or {}).get('provider_result_item1_keys') or '-'))}</code>\n"
+        f"• clip_id_candidates_found: <code>{int((job or {}).get('clip_id_candidates_found') or 0)}</code>\n"
+        f"• selected_clip_id_source_path: <code>{html.escape(str((job or {}).get('selected_clip_id_source_path') or '-'))}</code>\n"
+        f"• selected_clip_id_present: <code>{'yes' if (job or {}).get('selected_clip_id_present') else 'no'}</code>\n"
+        f"• wav_request_clip_id_source: <code>{html.escape(str((job or {}).get('wav_request_clip_id_source') or '-'))}</code>\n"
+        f"• wav_request_used_provider_task_id_fallback: <code>{'yes' if (job or {}).get('wav_request_used_provider_task_id_fallback') else 'no'}</code>\n"
+        f"• clip_id_candidate_statuses: <code>{html.escape(str((job or {}).get('clip_id_candidate_statuses') or '-'))}</code>\n"
         f"• wav_response_top_level_keys: <code>{html.escape(str((job or {}).get('wav_response_top_level_keys') or '-'))}</code>\n"
         f"• wav_response_data_keys: <code>{html.escape(str((job or {}).get('wav_response_data_keys') or '-'))}</code>\n"
         f"• wav_response_result_keys: <code>{html.escape(str((job or {}).get('wav_response_result_keys') or '-'))}</code>\n"
@@ -8790,6 +8821,15 @@ def music_delivery_recover_report_text(input_job_id: str = "", result: dict | No
         f"• wav_request_http_status: <code>{int(job.get('wav_request_http_status') or 0)}</code>\n"
         f"• wav_response_shape: <code>{html.escape(str(job.get('wav_response_shape') or '-'))}</code>\n"
         f"• wav_task_id_present: <code>{'yes' if job.get('wav_task_id_present') else 'no'}</code>\n"
+        f"• provider_result_item_count: <code>{int(job.get('provider_result_item_count') or 0)}</code>\n"
+        f"• provider_result_item0_keys: <code>{html.escape(str(job.get('provider_result_item0_keys') or '-'))}</code>\n"
+        f"• provider_result_item1_keys: <code>{html.escape(str(job.get('provider_result_item1_keys') or '-'))}</code>\n"
+        f"• clip_id_candidates_found: <code>{int(job.get('clip_id_candidates_found') or 0)}</code>\n"
+        f"• selected_clip_id_source_path: <code>{html.escape(str(job.get('selected_clip_id_source_path') or '-'))}</code>\n"
+        f"• selected_clip_id_present: <code>{'yes' if job.get('selected_clip_id_present') else 'no'}</code>\n"
+        f"• wav_request_clip_id_source: <code>{html.escape(str(job.get('wav_request_clip_id_source') or '-'))}</code>\n"
+        f"• wav_request_used_provider_task_id_fallback: <code>{'yes' if job.get('wav_request_used_provider_task_id_fallback') else 'no'}</code>\n"
+        f"• clip_id_candidate_statuses: <code>{html.escape(str(job.get('clip_id_candidate_statuses') or '-'))}</code>\n"
         f"• wav_response_top_level_keys: <code>{html.escape(str(job.get('wav_response_top_level_keys') or '-'))}</code>\n"
         f"• wav_response_data_keys: <code>{html.escape(str(job.get('wav_response_data_keys') or '-'))}</code>\n"
         f"• wav_response_result_keys: <code>{html.escape(str(job.get('wav_response_result_keys') or '-'))}</code>\n"
@@ -53909,6 +53949,10 @@ def music_download_error_category(detail: str = "", http_status: int = 0) -> str
         return KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
     if KEY4U_SUNO_WAV_RESULT_BLOCKER in lowered:
         return KEY4U_SUNO_WAV_RESULT_BLOCKER
+    if KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER in lowered:
+        return KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER
+    if KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER in lowered:
+        return KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER
     if KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER in lowered:
         return KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER
     if status == 401:
@@ -86150,6 +86194,15 @@ def music_provider_audit_text() -> str:
         f"• wav_request_http_status: <code>{int(latest_job.get('wav_request_http_status') or 0)}</code>",
         f"• wav_response_shape: <code>{html.escape(str(latest_job.get('wav_response_shape') or '-'))}</code>",
         f"• wav_task_id_present: <code>{'yes' if latest_job.get('wav_task_id_present') else 'no'}</code>",
+        f"• provider_result_item_count: <code>{int(latest_job.get('provider_result_item_count') or 0)}</code>",
+        f"• provider_result_item0_keys: <code>{html.escape(str(latest_job.get('provider_result_item0_keys') or '-'))}</code>",
+        f"• provider_result_item1_keys: <code>{html.escape(str(latest_job.get('provider_result_item1_keys') or '-'))}</code>",
+        f"• clip_id_candidates_found: <code>{int(latest_job.get('clip_id_candidates_found') or 0)}</code>",
+        f"• selected_clip_id_source_path: <code>{html.escape(str(latest_job.get('selected_clip_id_source_path') or '-'))}</code>",
+        f"• selected_clip_id_present: <code>{'yes' if latest_job.get('selected_clip_id_present') else 'no'}</code>",
+        f"• wav_request_clip_id_source: <code>{html.escape(str(latest_job.get('wav_request_clip_id_source') or '-'))}</code>",
+        f"• wav_request_used_provider_task_id_fallback: <code>{'yes' if latest_job.get('wav_request_used_provider_task_id_fallback') else 'no'}</code>",
+        f"• clip_id_candidate_statuses: <code>{html.escape(str(latest_job.get('clip_id_candidate_statuses') or '-'))}</code>",
         f"• wav_response_top_level_keys: <code>{html.escape(str(latest_job.get('wav_response_top_level_keys') or '-'))}</code>",
         f"• wav_response_data_keys: <code>{html.escape(str(latest_job.get('wav_response_data_keys') or '-'))}</code>",
         f"• wav_response_result_keys: <code>{html.escape(str(latest_job.get('wav_response_result_keys') or '-'))}</code>",
@@ -101438,6 +101491,15 @@ def apply_music_provider_result_metadata(target: dict | None = None, polled: dic
         "wav_request_http_status",
         "wav_response_shape",
         "wav_task_id_present",
+        "provider_result_item_count",
+        "provider_result_item0_keys",
+        "provider_result_item1_keys",
+        "clip_id_candidates_found",
+        "selected_clip_id_source_path",
+        "selected_clip_id_present",
+        "wav_request_clip_id_source",
+        "wav_request_used_provider_task_id_fallback",
+        "clip_id_candidate_statuses",
         "final_audio_download_status",
         "wav_response_top_level_keys",
         "wav_response_data_keys",
@@ -101503,40 +101565,158 @@ def music_key4u_suno_safe_id(value: str = "") -> str:
         return ""
     return text[:160]
 
-def music_key4u_suno_clip_id_from_payload(payload=None, *, raw_url: str = "", provider_task_id: str = "") -> str:
+KEY4U_SUNO_TRACK_ITEM_PATHS = (
+    "data.data",
+    "data",
+    "result.data",
+    "result",
+    "clips",
+    "songs",
+    "items",
+)
+KEY4U_SUNO_CLIP_ID_FIELD_PATHS = (
+    "id",
+    "clip_id",
+    "clipId",
+    "audio_id",
+    "audioId",
+    "song_id",
+    "songId",
+    "task_id",
+    "taskId",
+    "data.id",
+    "data.clip_id",
+    "data.clipId",
+)
+
+def music_key4u_suno_provider_result_track_items(payload=None) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[int] = set()
+
+    def add_item(path: str, item):
+        if not isinstance(item, dict):
+            return
+        marker = id(item)
+        if marker in seen:
+            return
+        seen.add(marker)
+        rows.append({
+            "path": str(path or "result"),
+            "item": item,
+            "keys": music_key4u_suno_json_keys_text(item),
+        })
+
+    if isinstance(payload, list):
+        for index, item in enumerate(payload):
+            add_item(f"data[{index}]", item)
+    if not isinstance(payload, dict):
+        return rows
+    for path in KEY4U_SUNO_TRACK_ITEM_PATHS:
+        value = music_result_field_path_value(payload, path)
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                add_item(f"{path}[{index}]", item)
+        elif isinstance(value, dict) and any(music_result_field_path_value(value, key) is not None for key in KEY4U_SUNO_CLIP_ID_FIELD_PATHS):
+            add_item(path, value)
+    return rows
+
+def music_key4u_suno_clip_id_candidates_from_payload(payload=None, *, raw_url: str = "", provider_task_id: str = "") -> list[dict]:
+    task = music_key4u_suno_safe_id(str(provider_task_id or ""))
+    rows = music_key4u_suno_provider_result_track_items(payload)
+    candidates: list[dict] = []
+    seen: set[str] = set()
+
+    def add_candidate(value, source_path: str, *, item_keys: str = "", provider_task_fallback: bool = False):
+        candidate = music_key4u_suno_safe_id(str(value or ""))
+        if not candidate or candidate in seen:
+            return
+        seen.add(candidate)
+        candidates.append({
+            "clip_id": candidate,
+            "source_path": str(source_path or "-"),
+            "item_keys": str(item_keys or "-"),
+            "provider_task_fallback": bool(provider_task_fallback or (task and candidate == task and "provider_task_id" in str(source_path or ""))),
+        })
+
+    for row in rows:
+        item = row.get("item") or {}
+        for field_path in KEY4U_SUNO_CLIP_ID_FIELD_PATHS:
+            value = music_result_field_path_value(item, field_path)
+            if isinstance(value, (str, int)):
+                add_candidate(
+                    value,
+                    f"{row.get('path')}.{field_path}",
+                    item_keys=str(row.get("keys") or "-"),
+                    provider_task_fallback=bool(task and music_key4u_suno_safe_id(str(value)) == task),
+                )
     url_clip = key4u_suno_clip_id_from_url(raw_url)
-    if url_clip:
-        return url_clip
-    task = str(provider_task_id or "").strip()
-    preferred_keys = {"clip_id", "clipid", "audio_id", "audioid", "song_id", "songid"}
-    fallback_keys = {"id", "uuid"}
+    if url_clip and not rows:
+        add_candidate(url_clip, "raw_url", item_keys="-")
+    if task and not candidates and not rows:
+        add_candidate(task, "provider_task_id_fallback", item_keys="-", provider_task_fallback=True)
+    return candidates
 
-    def visit(value):
-        if isinstance(value, dict):
-            for key, child in value.items():
-                normalized = re.sub(r"[^a-z0-9]", "", str(key or "").lower())
-                if normalized in preferred_keys and isinstance(child, (str, int)):
-                    candidate = music_key4u_suno_safe_id(str(child))
-                    if candidate and candidate != task:
-                        return candidate
-            for key, child in value.items():
-                normalized = re.sub(r"[^a-z0-9]", "", str(key or "").lower())
-                if normalized in fallback_keys and isinstance(child, (str, int)):
-                    candidate = music_key4u_suno_safe_id(str(child))
-                    if candidate and candidate != task:
-                        return candidate
-            for child in value.values():
-                found = visit(child)
-                if found:
-                    return found
-        elif isinstance(value, list):
-            for item in value:
-                found = visit(item)
-                if found:
-                    return found
-        return ""
+def music_key4u_suno_clip_debug_metadata(payload=None, candidates: list[dict] | None = None, *, selected: dict | None = None) -> dict:
+    rows = music_key4u_suno_provider_result_track_items(payload)
+    selected_item = dict(selected or {})
+    selected_source = str(selected_item.get("source_path") or "")
+    return {
+        "provider_result_item_count": len(rows),
+        "provider_result_item0_keys": str((rows[0] or {}).get("keys") if len(rows) > 0 else "-"),
+        "provider_result_item1_keys": str((rows[1] or {}).get("keys") if len(rows) > 1 else "-"),
+        "clip_id_candidates_found": len(candidates or []),
+        "selected_clip_id_source_path": selected_source,
+        "selected_clip_id_present": bool(selected_item.get("clip_id")),
+        "wav_request_clip_id_source": selected_source,
+        "wav_request_used_provider_task_id_fallback": bool(selected_item.get("provider_task_fallback")),
+    }
 
-    return visit(payload)
+def music_key4u_suno_clip_debug_detail(metadata: dict | None = None) -> str:
+    data = dict(metadata or {})
+    return (
+        f"provider_result_item_count={int(data.get('provider_result_item_count') or 0)}; "
+        f"provider_result_item0_keys={data.get('provider_result_item0_keys') or '-'}; "
+        f"provider_result_item1_keys={data.get('provider_result_item1_keys') or '-'}; "
+        f"clip_id_candidates_found={int(data.get('clip_id_candidates_found') or 0)}; "
+        f"selected_clip_id_source_path={data.get('selected_clip_id_source_path') or '-'}; "
+        f"selected_clip_id_present={'yes' if data.get('selected_clip_id_present') else 'no'}; "
+        f"wav_request_clip_id_source={data.get('wav_request_clip_id_source') or '-'}; "
+        f"wav_request_used_provider_task_id_fallback={'yes' if data.get('wav_request_used_provider_task_id_fallback') else 'no'}"
+    )
+
+def music_key4u_suno_clip_candidate_status_text(rows: list[dict] | None = None, *, limit: int = 6) -> str:
+    values: list[str] = []
+    for row in rows or []:
+        current = dict(row or {})
+        source = re.sub(r"[^A-Za-z0-9_.\[\]-]+", "_", str(current.get("clip_id_source_path") or "-"))[:90]
+        shape = re.sub(r"[^A-Za-z0-9_-]+", "_", str(current.get("wav_response_shape") or "-"))[:40]
+        status = re.sub(r"[^A-Za-z0-9_-]+", "_", str(current.get("wav_response_status") or "-"))[:40]
+        message = re.sub(r"[|;]+", ",", str(current.get("wav_response_message_safe") or "-"))[:80]
+        try:
+            http_status = int(current.get("wav_http_status") or 0)
+        except Exception:
+            http_status = 0
+        try:
+            final_bytes = int(current.get("final_audio_bytes") or 0)
+        except Exception:
+            final_bytes = 0
+        values.append(f"{source}|http={http_status}|shape={shape}|status={status}|msg={message}|bytes={final_bytes}")
+        if len(values) >= max(1, int(limit or 6)):
+            break
+    return " || ".join(values) if values else "-"
+
+def music_key4u_suno_wav_clip_id_rejected(detail: str = "") -> bool:
+    lowered = str(detail or "").lower()
+    return bool(
+        "wav_response_status=1010" in lowered
+        or "no found clipid" in lowered
+        or "no_found_clipid" in lowered
+        or "nofoundclipid" in lowered
+    )
+
+def music_key4u_suno_clip_id_from_payload(payload=None, *, raw_url: str = "", provider_task_id: str = "") -> str:
+    candidates = music_key4u_suno_clip_id_candidates_from_payload(payload, raw_url=raw_url, provider_task_id=provider_task_id)
+    return str((candidates[0] or {}).get("clip_id") or "") if candidates else ""
 
 def music_key4u_suno_wav_task_id_from_json(payload=None) -> str:
     if isinstance(payload, dict):
@@ -101680,6 +101860,15 @@ def music_key4u_suno_wav_detail_fields(detail: str = "", *, payload_bytes: int =
         "wav_request_http_status": wav_status,
         "wav_response_shape": next((item for item in reversed(shapes) if item), ""),
         "wav_task_id_present": "yes" in task_flags,
+        "provider_result_item_count": int(music_download_detail_field(text, "provider_result_item_count") or 0),
+        "provider_result_item0_keys": music_download_detail_field(text, "provider_result_item0_keys"),
+        "provider_result_item1_keys": music_download_detail_field(text, "provider_result_item1_keys"),
+        "clip_id_candidates_found": int(music_download_detail_field(text, "clip_id_candidates_found") or 0),
+        "selected_clip_id_source_path": music_download_detail_field(text, "selected_clip_id_source_path"),
+        "selected_clip_id_present": music_download_detail_field(text, "selected_clip_id_present") == "yes",
+        "wav_request_clip_id_source": music_download_detail_field(text, "wav_request_clip_id_source"),
+        "wav_request_used_provider_task_id_fallback": music_download_detail_field(text, "wav_request_used_provider_task_id_fallback") == "yes",
+        "clip_id_candidate_statuses": music_download_detail_field(text, "clip_id_candidate_statuses"),
         "wav_response_top_level_keys": music_download_detail_field(text, "wav_response_top_level_keys"),
         "wav_response_data_keys": music_download_detail_field(text, "wav_response_data_keys"),
         "wav_response_result_keys": music_download_detail_field(text, "wav_response_result_keys"),
@@ -101859,17 +102048,15 @@ async def music_provider_proxy_download_audio(
     task_id = str(provider_task_id or "").strip()
     if provider != "key4u_suno":
         return b"", "provider_proxy_unavailable", 0
-    clip_id = music_key4u_suno_clip_id_from_payload(raw_provider_result, raw_url=raw_url, provider_task_id=task_id)
-    endpoint = (
-        key4u_suno_download_final_url(task_id, audio_id=clip_id, raw_url=raw_url)
-        or key4u_suno_wav_final_url(clip_id, task_id=task_id, raw_url=raw_url)
+    clip_candidates = music_key4u_suno_clip_id_candidates_from_payload(raw_provider_result, raw_url=raw_url, provider_task_id=task_id)
+    download_template = str(KEY4U_SUNO_DOWNLOAD_URL or "").strip()
+    download_needs_clip_id = bool(
+        "/act/wav" in download_template.lower()
+        or any(token in download_template for token in ("{clip_id}", "{clipId}", "{audio_id}", "{audioId}", "{id}"))
     )
-    wav_endpoint_configured = bool(key4u_suno_wav_final_url(clip_id or "{clip_id}", task_id=task_id or "{taskId}", raw_url=raw_url))
-    if not endpoint:
-        return b"", (
-            "provider_proxy_unavailable; provider_download_endpoint_configured=no; "
-            f"wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}"
-        ), 0
+    wav_endpoint_configured = bool(key4u_suno_wav_final_url("{clip_id}", task_id=task_id or "{taskId}", raw_url=raw_url))
+    provider_download_without_clip = key4u_suno_download_final_url(task_id, audio_id="", raw_url=raw_url)
+    candidate_statuses: list[dict] = []
     headers = music_provider_auth_download_headers("key4u_suno")
     headers = {
         **headers,
@@ -101877,19 +102064,91 @@ async def music_provider_proxy_download_audio(
         "User-Agent": "TOAN-AAS/1.0",
         "Referer": "https://api.key4u.shop/",
     }
-    role = "wav_request" if "/act/wav" in urlparse(endpoint).path.lower() or bool(KEY4U_SUNO_WAV_URL) else "provider_download"
-    audio_bytes, detail, status = await music_key4u_suno_audio_from_endpoint(
-        endpoint,
-        headers=headers,
-        timeout_seconds=timeout_seconds,
-        role=role,
-        task_id=task_id,
-        clip_id=clip_id,
-        allow_wav_task_followup=True,
-    )
+
+    def debug_detail(selected: dict | None = None) -> str:
+        metadata = music_key4u_suno_clip_debug_metadata(raw_provider_result, clip_candidates, selected=selected)
+        detail = music_key4u_suno_clip_debug_detail(metadata)
+        return f"{detail}; clip_id_candidate_statuses={music_key4u_suno_clip_candidate_status_text(candidate_statuses)}"
+
+    if not clip_candidates and provider_download_without_clip and not download_needs_clip_id:
+        audio_bytes, detail, status = await music_key4u_suno_audio_from_endpoint(
+            provider_download_without_clip,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            role="provider_download",
+            task_id=task_id,
+            clip_id="",
+            allow_wav_task_followup=True,
+        )
+        if "wav_endpoint_configured=" not in detail:
+            detail = f"{detail}; wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}"
+        return audio_bytes, f"{detail}; {debug_detail({})}", status
+
+    if not clip_candidates:
+        return b"", (
+            "provider_download_endpoint_attempted=no; final_audio_download_status=FAIL; "
+            f"wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}; "
+            f"{debug_detail({})}; category={KEY4U_SUNO_CLIP_ID_MISSING_BLOCKER}"
+        ), 0
+
+    if not (
+        key4u_suno_download_final_url(task_id, audio_id="{clip_id}", raw_url=raw_url)
+        or key4u_suno_wav_final_url("{clip_id}", task_id=task_id or "{taskId}", raw_url=raw_url)
+    ):
+        return b"", (
+            "provider_proxy_unavailable; provider_download_endpoint_configured=no; "
+            f"wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}; {debug_detail({})}"
+        ), 0
+
+    last_detail = ""
+    last_status = 0
+    for candidate in clip_candidates:
+        current = dict(candidate or {})
+        clip_id = str(current.get("clip_id") or "").strip()
+        if not clip_id:
+            continue
+        endpoint = (
+            key4u_suno_download_final_url(task_id, audio_id=clip_id, raw_url=raw_url)
+            or key4u_suno_wav_final_url(clip_id, task_id=task_id, raw_url=raw_url)
+        )
+        if not endpoint:
+            continue
+        role = "wav_request" if "/act/wav" in urlparse(endpoint).path.lower() or bool(KEY4U_SUNO_WAV_URL) else "provider_download"
+        audio_bytes, detail, status = await music_key4u_suno_audio_from_endpoint(
+            endpoint,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            role=role,
+            task_id=task_id,
+            clip_id=clip_id,
+            allow_wav_task_followup=True,
+        )
+        last_detail = detail
+        last_status = status
+        try:
+            final_bytes = int(music_download_detail_field(detail, "final_audio_bytes") or len(audio_bytes) or 0)
+        except Exception:
+            final_bytes = len(audio_bytes or b"")
+        candidate_statuses.append({
+            "clip_id_source_path": str(current.get("source_path") or "-"),
+            "wav_http_status": int(status or 0),
+            "wav_response_shape": music_download_detail_field(detail, "wav_response_shape") or "-",
+            "wav_response_status": music_download_detail_field(detail, "wav_response_status") or "-",
+            "wav_response_message_safe": music_download_detail_field(detail, "wav_response_message_safe") or "-",
+            "final_audio_bytes": final_bytes,
+            "clip_rejected": music_key4u_suno_wav_clip_id_rejected(detail),
+        })
+        if audio_bytes:
+            if "wav_endpoint_configured=" not in detail:
+                detail = f"{detail}; wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}"
+            return audio_bytes, f"{detail}; {debug_detail(current)}", status
+
+    all_rejected = bool(candidate_statuses) and all(bool(item.get("clip_rejected")) for item in candidate_statuses)
+    category = KEY4U_SUNO_WAV_CLIP_ID_REJECTED_BLOCKER if all_rejected else (music_download_error_category(last_detail, last_status) or "provider_download_error")
+    detail = last_detail or "provider_download_endpoint_attempted=yes; final_audio_download_status=FAIL"
     if "wav_endpoint_configured=" not in detail:
         detail = f"{detail}; wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}"
-    return audio_bytes, detail, status
+    return b"", f"{detail}; {debug_detail({})}; category={category}", last_status
 
 async def music_download_artifact_candidate(
     candidate: dict | None = None,
@@ -102329,6 +102588,15 @@ async def select_music_delivery_artifact(
         wav_request_http_status = 0
         wav_response_shape = ""
         wav_task_id_present = False
+        provider_result_item_count = 0
+        provider_result_item0_keys = ""
+        provider_result_item1_keys = ""
+        clip_id_candidates_found = 0
+        selected_clip_id_source_path = ""
+        selected_clip_id_present = False
+        wav_request_clip_id_source = ""
+        wav_request_used_provider_task_id_fallback = False
+        clip_id_candidate_statuses = ""
         final_audio_download_status = ""
         wav_response_top_level_keys = ""
         wav_response_data_keys = ""
@@ -102364,6 +102632,15 @@ async def select_music_delivery_artifact(
             wav_request_http_status = int(downloaded.get("wav_request_http_status") or 0)
             wav_response_shape = str(downloaded.get("wav_response_shape") or "")
             wav_task_id_present = bool(downloaded.get("wav_task_id_present"))
+            provider_result_item_count = int(downloaded.get("provider_result_item_count") or 0)
+            provider_result_item0_keys = str(downloaded.get("provider_result_item0_keys") or "")
+            provider_result_item1_keys = str(downloaded.get("provider_result_item1_keys") or "")
+            clip_id_candidates_found = int(downloaded.get("clip_id_candidates_found") or 0)
+            selected_clip_id_source_path = str(downloaded.get("selected_clip_id_source_path") or "")
+            selected_clip_id_present = bool(downloaded.get("selected_clip_id_present"))
+            wav_request_clip_id_source = str(downloaded.get("wav_request_clip_id_source") or "")
+            wav_request_used_provider_task_id_fallback = bool(downloaded.get("wav_request_used_provider_task_id_fallback"))
+            clip_id_candidate_statuses = str(downloaded.get("clip_id_candidate_statuses") or "")
             final_audio_download_status = str(downloaded.get("final_audio_download_status") or "")
             wav_response_top_level_keys = str(downloaded.get("wav_response_top_level_keys") or "")
             wav_response_data_keys = str(downloaded.get("wav_response_data_keys") or "")
@@ -102412,6 +102689,15 @@ async def select_music_delivery_artifact(
                     "wav_request_http_status": wav_request_http_status,
                     "wav_response_shape": wav_response_shape,
                     "wav_task_id_present": wav_task_id_present,
+                    "provider_result_item_count": provider_result_item_count,
+                    "provider_result_item0_keys": provider_result_item0_keys,
+                    "provider_result_item1_keys": provider_result_item1_keys,
+                    "clip_id_candidates_found": clip_id_candidates_found,
+                    "selected_clip_id_source_path": selected_clip_id_source_path,
+                    "selected_clip_id_present": selected_clip_id_present,
+                    "wav_request_clip_id_source": wav_request_clip_id_source,
+                    "wav_request_used_provider_task_id_fallback": wav_request_used_provider_task_id_fallback,
+                    "clip_id_candidate_statuses": clip_id_candidate_statuses,
                     "final_audio_download_status": final_audio_download_status,
                     "wav_response_top_level_keys": wav_response_top_level_keys,
                     "wav_response_data_keys": wav_response_data_keys,
@@ -102468,6 +102754,15 @@ async def select_music_delivery_artifact(
                 "wav_request_http_status": wav_request_http_status,
                 "wav_response_shape": wav_response_shape,
                 "wav_task_id_present": wav_task_id_present,
+                "provider_result_item_count": provider_result_item_count,
+                "provider_result_item0_keys": provider_result_item0_keys,
+                "provider_result_item1_keys": provider_result_item1_keys,
+                "clip_id_candidates_found": clip_id_candidates_found,
+                "selected_clip_id_source_path": selected_clip_id_source_path,
+                "selected_clip_id_present": selected_clip_id_present,
+                "wav_request_clip_id_source": wav_request_clip_id_source,
+                "wav_request_used_provider_task_id_fallback": wav_request_used_provider_task_id_fallback,
+                "clip_id_candidate_statuses": clip_id_candidate_statuses,
                 "final_audio_download_status": final_audio_download_status,
                 "wav_response_top_level_keys": wav_response_top_level_keys,
                 "wav_response_data_keys": wav_response_data_keys,
@@ -102524,6 +102819,15 @@ async def select_music_delivery_artifact(
             "wav_request_http_status": wav_request_http_status,
             "wav_response_shape": wav_response_shape,
             "wav_task_id_present": wav_task_id_present,
+            "provider_result_item_count": provider_result_item_count,
+            "provider_result_item0_keys": provider_result_item0_keys,
+            "provider_result_item1_keys": provider_result_item1_keys,
+            "clip_id_candidates_found": clip_id_candidates_found,
+            "selected_clip_id_source_path": selected_clip_id_source_path,
+            "selected_clip_id_present": selected_clip_id_present,
+            "wav_request_clip_id_source": wav_request_clip_id_source,
+            "wav_request_used_provider_task_id_fallback": wav_request_used_provider_task_id_fallback,
+            "clip_id_candidate_statuses": clip_id_candidate_statuses,
             "final_audio_download_status": final_audio_download_status,
             "wav_response_top_level_keys": wav_response_top_level_keys,
             "wav_response_data_keys": wav_response_data_keys,
