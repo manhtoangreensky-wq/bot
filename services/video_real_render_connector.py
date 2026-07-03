@@ -762,6 +762,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "product_video": bool(str((job or {}).get("source") or "") == "product_video" or (job or {}).get("product_video")),
             "render_mode": str((job or {}).get("render_mode") or ""),
             "allow_provider_pending": True,
+            "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
+            "claim_payload_has_provider_config": bool((job or {}).get("provider_config") or (job or {}).get("provider_submit_url") or (job or {}).get("provider_auth_header_value")),
         },
         required_capability=required_capability,
     )

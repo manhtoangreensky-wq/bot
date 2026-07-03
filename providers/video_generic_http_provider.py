@@ -194,6 +194,14 @@ def _safe_url_host(value: Any) -> str:
         return ""
 
 
+def _safe_url_path(value: Any) -> str:
+    try:
+        parsed = urllib.parse.urlparse(str(value or "").strip())
+        return str(parsed.path or "").strip()[:180]
+    except Exception:
+        return ""
+
+
 def _auth_scheme_prefix(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -467,9 +475,15 @@ class GenericHttpVideoProvider:
             "auth_present": auth_present,
             "provider_config_source": f"env:{self.provider_name}",
             "provider_submit_url_host": _safe_url_host(submit_url),
+            "provider_submit_url_path": _safe_url_path(submit_url),
             "provider_auth_header_name": str(name or "")[:80],
             "provider_auth_value_present": bool(str(value or "").strip()),
             "provider_auth_scheme_prefix": _auth_scheme_prefix(value),
+            "provider_config_namespaces_checked": list(self.env.get("_VIDEO_PROVIDER_NAMESPACES_CHECKED", "").split(",")) if self.env.get("_VIDEO_PROVIDER_NAMESPACES_CHECKED") else [],
+            "selected_provider_env_prefix": str(self.env.get("_VIDEO_PROVIDER_ENV_PREFIX") or "").strip(),
+            "selected_provider_alias_prefixes_checked": list(self.env.get("_VIDEO_PROVIDER_ALIAS_PREFIXES_CHECKED", "").split(",")) if self.env.get("_VIDEO_PROVIDER_ALIAS_PREFIXES_CHECKED") else [],
+            "selected_provider_config_source": str(self.env.get("_VIDEO_PROVIDER_CONFIG_SOURCE") or f"env:{self.provider_name}").strip(),
+            "provider_env_namespace_mismatch": str(self.env.get("_VIDEO_PROVIDER_NAMESPACE_MISMATCH") or "0").strip().lower() in {"1", "true", "yes", "on"},
         }
 
     def _headers(self) -> dict[str, str]:
@@ -529,11 +543,17 @@ class GenericHttpVideoProvider:
             raw_debug = {
                 "smoke_stage": "config_validation",
                 "provider_config_source": caps.get("provider_config_source") or f"env:{self.provider_name}",
+                "selected_provider_config_source": caps.get("selected_provider_config_source") or caps.get("provider_config_source") or f"env:{self.provider_name}",
+                "provider_config_namespaces_checked": list(caps.get("provider_config_namespaces_checked") or []),
+                "selected_provider_env_prefix": caps.get("selected_provider_env_prefix") or "",
+                "selected_provider_alias_prefixes_checked": list(caps.get("selected_provider_alias_prefixes_checked") or []),
+                "provider_env_namespace_mismatch": bool(caps.get("provider_env_namespace_mismatch")),
                 "selected_provider_before_submit": self.provider_name,
                 "submit_provider_key": self.provider_name,
                 "submit_url_configured": bool(caps.get("submit_url_configured")),
                 "provider_submit_url_configured": bool(caps.get("submit_url_configured")),
                 "provider_submit_url_host": caps.get("provider_submit_url_host") or _safe_url_host(self._submit_url()),
+                "provider_submit_url_path": caps.get("provider_submit_url_path") or _safe_url_path(self._submit_url()),
                 "poll_url_configured": bool(caps.get("poll_url_configured")),
                 "auth_configured": bool(caps.get("auth_configured")),
                 "auth_present": bool(str(value or "").strip()),
@@ -543,6 +563,9 @@ class GenericHttpVideoProvider:
                 "provider_auth_scheme_prefix": _auth_scheme_prefix(value),
                 "provider_model_present": bool(caps.get("provider_model_present") or caps.get("model_present")),
                 "provider_payload_model": caps.get("provider_payload_model") or _model_debug_value(self.env, self.model_env),
+                "submit_accepted": False,
+                "poll_allowed": False,
+                "poll_skipped_reason": "submit_not_accepted",
                 "missing": list(caps.get("missing") or []),
                 "invalid_fields": list(caps.get("invalid_fields") or []),
                 "invalid_env": list(caps.get("invalid_env") or []),
@@ -572,11 +595,17 @@ class GenericHttpVideoProvider:
             "smoke_stage": "submit_response_parse",
             **_payload_debug(payload),
             "provider_config_source": caps.get("provider_config_source") or f"env:{self.provider_name}",
+            "selected_provider_config_source": caps.get("selected_provider_config_source") or caps.get("provider_config_source") or f"env:{self.provider_name}",
+            "provider_config_namespaces_checked": list(caps.get("provider_config_namespaces_checked") or []),
+            "selected_provider_env_prefix": caps.get("selected_provider_env_prefix") or "",
+            "selected_provider_alias_prefixes_checked": list(caps.get("selected_provider_alias_prefixes_checked") or []),
+            "provider_env_namespace_mismatch": bool(caps.get("provider_env_namespace_mismatch")),
             "selected_provider_before_submit": self.provider_name,
             "submit_provider_key": self.provider_name,
             "submit_url_configured": bool(caps.get("submit_url_configured")),
             "provider_submit_url_configured": bool(caps.get("submit_url_configured")),
             "provider_submit_url_host": _safe_url_host(submit_url),
+            "provider_submit_url_path": _safe_url_path(submit_url),
             "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
             "auth_present": bool(str(auth_value or "").strip()),
@@ -595,6 +624,9 @@ class GenericHttpVideoProvider:
             "provider_status_raw": raw_status,
             "provider_status_path": status_path,
             "result_url_present": bool(result_url),
+            "submit_accepted": bool(result.get("ok") and (task_id or video_id or result_url)),
+            "poll_allowed": bool(result.get("ok") and (task_id or video_id) and not result_url),
+            "poll_skipped_reason": "" if bool(result.get("ok") and (task_id or video_id) and not result_url) else ("result_url_from_submit" if result_url else "provider_task_id_missing"),
             "result_field_path": result_url_path,
             "task_id_field_path": task_path,
             "video_id_field_path": video_path,

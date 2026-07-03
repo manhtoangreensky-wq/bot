@@ -44960,26 +44960,40 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• selected provider before submit: <code>{html.escape(str(result.get('selected_provider_before_submit') or '-'))}</code>",
         f"• submit provider key: <code>{html.escape(str(result.get('submit_provider_key') or '-'))}</code>",
         f"• provider config source: <code>{html.escape(str(result.get('provider_config_source') or '-'))}</code>",
+        f"• provider namespaces checked: <code>{html.escape(','.join(str(item) for item in (result.get('provider_config_namespaces_checked') or [])) or '-')}</code>",
+        f"• selected provider env prefix: <code>{html.escape(str(result.get('selected_provider_env_prefix') or '-'))}</code>",
+        f"• selected provider alias prefixes: <code>{html.escape(','.join(str(item) for item in (result.get('selected_provider_alias_prefixes_checked') or [])) or '-')}</code>",
+        f"• selected provider config source: <code>{html.escape(str(result.get('selected_provider_config_source') or '-'))}</code>",
+        f"• claim payload provider key: <code>{html.escape(str(result.get('claim_payload_provider_key') or '-'))}</code>",
+        f"• claim payload has provider config: <code>{'yes' if result.get('claim_payload_has_provider_config') else 'no'}</code>",
+        f"• worker local hydration attempted: <code>{'yes' if result.get('worker_local_hydration_attempted') else 'no'}</code>",
+        f"• worker local hydration success: <code>{'yes' if result.get('worker_local_hydration_success') else 'no'}</code>",
         f"• provider selection blocker: <code>{html.escape(str(result.get('provider_selection_blocker') or '-')[:220])}</code>",
         f"• provider route selected: <code>{'yes' if result.get('provider_route_selected') else 'no'}</code>",
         f"• provider smoke contract available: <code>yes</code>",
         f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• provider submit stage: <code>{html.escape(str(result.get('provider_submit_stage') or result.get('smoke_stage') or '-'))}</code>",
         f"• provider submit blocker: <code>{html.escape(str(result.get('provider_submit_blocker') or '-')[:220])}</code>",
         f"• provider submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• provider submit exception: <code>{html.escape(str(result.get('provider_submit_exception_class') or result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('provider_submit_exception_message_safe') or result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• provider submit url configured: <code>{'yes' if result.get('provider_submit_url_configured') or result.get('submit_url_configured') else 'no'}</code>",
+        f"• provider submit url present: <code>{'yes' if result.get('submit_url_present') or result.get('provider_submit_url_configured') else 'no'}</code>",
         f"• provider submit url host: <code>{html.escape(str(result.get('provider_submit_url_host') or '-'))}</code>",
-        f"• provider auth header: <code>{html.escape(str(result.get('provider_auth_header_name') or '-'))}</code> present=<code>{'yes' if result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{html.escape(str(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme') or '-'))}</code>",
+        f"• provider auth header: <code>{html.escape(str(result.get('provider_auth_header_name') or '-'))}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{html.escape(str(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme') or '-'))}</code> name_present=<code>{'yes' if result.get('auth_header_name_present') or result.get('provider_auth_header_name') else 'no'}</code> value_present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
+        f"• provider env namespace mismatch: <code>{'yes' if result.get('provider_env_namespace_mismatch') else 'no'}</code>",
+        f"• provider fallback attempts: <code>{html.escape(str(result.get('fallback_provider_attempts') or result.get('provider_attempts') or [])[:500])}</code>",
         f"• provider payload keys: <code>{html.escape(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or []))[:500] or '-')}</code>",
         f"• provider payload model: <code>{html.escape(str(result.get('provider_payload_model') or '-')[:160])}</code>",
         f"• provider response http: <code>{safe_int(result.get('provider_response_http_status') or result.get('provider_submit_http_status'), 0)}</code>",
         f"• provider response shape: <code>{html.escape(str(result.get('provider_response_body_shape') or result.get('submit_response_shape') or '-')[:500])}</code>",
         f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') else 'no'}</code>",
         f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
+        f"• poll allowed: <code>{'yes' if result.get('poll_allowed') else 'no'}</code>",
+        f"• poll skipped reason: <code>{html.escape(str(result.get('poll_skipped_reason') or '-')[:160])}</code>",
         f"• provider poll blocker: <code>{html.escape(str(result.get('provider_poll_blocker') or '-')[:220])}</code>",
         f"• provider result blocker: <code>{html.escape(str(result.get('provider_result_blocker') or '-')[:220])}</code>",
         f"• provider exception: <code>{html.escape(str(result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('exception_message_safe') or '-')[:220])}</code>",
@@ -45071,9 +45085,18 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• selected provider before submit: <code>{html.escape(str(result.get('selected_provider_before_submit') or '-'))}</code>",
         f"• submit provider key: <code>{html.escape(str(result.get('submit_provider_key') or '-'))}</code>",
         f"• provider config source: <code>{html.escape(str(result.get('provider_config_source') or '-'))}</code>",
+        f"• provider namespaces checked: <code>{html.escape(','.join(str(item) for item in (result.get('provider_config_namespaces_checked') or [])) or '-')}</code>",
+        f"• selected provider env prefix: <code>{html.escape(str(result.get('selected_provider_env_prefix') or '-'))}</code>",
+        f"• selected provider alias prefixes: <code>{html.escape(','.join(str(item) for item in (result.get('selected_provider_alias_prefixes_checked') or [])) or '-')}</code>",
+        f"• selected provider config source: <code>{html.escape(str(result.get('selected_provider_config_source') or '-'))}</code>",
+        f"• claim payload provider key: <code>{html.escape(str(result.get('claim_payload_provider_key') or '-'))}</code>",
+        f"• claim payload has provider config: <code>{'yes' if result.get('claim_payload_has_provider_config') else 'no'}</code>",
+        f"• worker local hydration attempted: <code>{'yes' if result.get('worker_local_hydration_attempted') else 'no'}</code>",
+        f"• worker local hydration success: <code>{'yes' if result.get('worker_local_hydration_success') else 'no'}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• actual processor: <code>{html.escape(str(result.get('actual_processor') or '-'))}</code>",
         f"• worker service mode: <code>{html.escape(str(result.get('worker_service_mode') or '-'))}</code>",
@@ -45083,8 +45106,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• submit exception: <code>{html.escape(str(result.get('provider_submit_exception_class') or result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('provider_submit_exception_message_safe') or result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• submit url configured: <code>{'yes' if result.get('provider_submit_url_configured') or result.get('submit_url_configured') else 'no'}</code>",
         f"• submit url host: <code>{html.escape(str(result.get('provider_submit_url_host') or '-'))}</code>",
-        f"• auth header: <code>{html.escape(str(result.get('provider_auth_header_name') or '-'))}</code> present=<code>{'yes' if result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{html.escape(str(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme') or '-'))}</code>",
+        f"• auth header: <code>{html.escape(str(result.get('provider_auth_header_name') or '-'))}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{html.escape(str(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme') or '-'))}</code> name_present=<code>{'yes' if result.get('auth_header_name_present') or result.get('provider_auth_header_name') else 'no'}</code> value_present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
+        f"• provider env namespace mismatch: <code>{'yes' if result.get('provider_env_namespace_mismatch') else 'no'}</code>",
         f"• payload keys: <code>{html.escape(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or []))[:500] or '-')}</code>",
         f"• payload model: <code>{html.escape(str(result.get('provider_payload_model') or '-')[:160])}</code>",
         f"• response http: <code>{safe_int(result.get('provider_response_http_status') or result.get('provider_submit_http_status'), 0)}</code>",
@@ -45093,6 +45117,8 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider task id: <code>{html.escape(masked_tasks)}</code>",
         f"• provider video id: <code>{html.escape(masked_videos)}</code>",
         f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
+        f"• poll allowed: <code>{'yes' if result.get('poll_allowed') else 'no'}</code>",
+        f"• poll skipped reason: <code>{html.escape(str(result.get('poll_skipped_reason') or '-')[:160])}</code>",
         f"• poll count: <code>{poll_count}</code>",
         f"• last poll raw status: <code>{html.escape(str(result.get('provider_status_raw') or result.get('provider_status') or '-'))}</code>",
         f"• normalized status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
@@ -137870,6 +137896,11 @@ def video_provider_status_text(status: dict | None = None, key4u_credit: dict | 
             f"poll=<code>{'yes' if provider.get('poll_url_present') else 'no'}</code> "
             f"auth=<code>{'yes' if provider.get('auth_present') else 'no'}</code> "
             f"model=<code>{'yes' if provider.get('model_present') else 'no'}</code> "
+            f"source=<code>{html.escape(str(provider.get('selected_provider_config_source') or provider.get('provider_config_source') or '-'))}</code> "
+            f"namespaces=<code>{html.escape(','.join(str(item) for item in (provider.get('provider_config_namespaces_checked') or [])) or '-')}</code> "
+            f"alias=<code>{html.escape(','.join(str(item) for item in (provider.get('selected_provider_alias_prefixes_checked') or [])) or '-')}</code> "
+            f"submit_host=<code>{html.escape(str(provider.get('provider_submit_url_host') or '-'))}</code> "
+            f"namespace_mismatch=<code>{'yes' if provider.get('provider_env_namespace_mismatch') else 'no'}</code> "
             f"credit=<code>{html.escape(str(provider.get('credit_status') or 'unknown'))}</code> "
             f"{key4u_usage_suffix}"
             f"fallback_only=<code>{'yes' if provider.get('fallback_only') else 'no'}</code> "
@@ -137880,6 +137911,45 @@ def video_provider_status_text(status: dict | None = None, key4u_credit: dict | 
         )
     lines.append("")
     lines.append("Nếu không có provider phù hợp, video product phải fail sạch với provider_capability_missing và chưa trừ Xu.")
+    return "\n".join(lines)
+
+
+def video_provider_env_audit_text(audit: dict | None = None) -> str:
+    audit = dict(audit or video_provider_router.video_provider_env_audit_payload())
+    rows = [item for item in (audit.get("rows") or []) if isinstance(item, dict)]
+    lines = [
+        "🧪 <b>Video Provider ENV Audit</b>",
+        "",
+        f"• Audit: <code>{'PASS' if audit.get('ok') else 'FAIL'}</code>",
+        f"• Provider được chọn: <code>{html.escape(str(audit.get('selected_provider') or '-'))}</code>",
+        f"• Submit config provider được chọn: <code>{'có' if audit.get('selected_provider_submit_config_non_empty') else 'không'}</code>",
+        f"• Status ready khớp submit config: <code>{'có' if audit.get('status_ready_implies_submit_config_non_empty') else 'không'}</code>",
+        f"• Worker hydrate local: <code>{'có' if audit.get('worker_local_hydration_success') else 'không'}</code>",
+        f"• Fallback nếu selected rỗng: <code>{'có' if audit.get('fallback_provider_attempted_if_selected_empty') else 'không'}</code>",
+        f"• Chain: <code>{html.escape(','.join(str(item) for item in (audit.get('provider_chain') or [])) or '-')}</code>",
+        "",
+        "Providers:",
+    ]
+    for row in rows:
+        lines.append(
+            "• "
+            f"<code>{html.escape(str(row.get('provider') or '-'))}</code> "
+            f"status_configured=<code>{'yes' if row.get('status_configured') else 'no'}</code> "
+            f"submit_config=<code>{'yes' if row.get('submit_config_non_empty') else 'no'}</code> "
+            f"aligned=<code>{'yes' if row.get('status_submit_registry_aligned') else 'no'}</code> "
+            f"source=<code>{html.escape(str(row.get('config_source') or '-'))}</code> "
+            f"namespaces=<code>{html.escape(','.join(str(item) for item in (row.get('namespaces_checked') or [])) or '-')}</code> "
+            f"alias=<code>{html.escape(','.join(str(item) for item in (row.get('alias_prefixes_checked') or [])) or '-')}</code> "
+            f"host=<code>{html.escape(str(row.get('submit_url_host') or '-'))}</code> "
+            f"path=<code>{html.escape(str(row.get('submit_url_path') or '-'))}</code> "
+            f"auth_name=<code>{'yes' if row.get('auth_header_name_present') else 'no'}</code> "
+            f"auth_value=<code>{'yes' if row.get('auth_header_value_present') else 'no'}</code> "
+            f"model=<code>{'yes' if row.get('model_present') else 'no'}</code> "
+            f"no_v1_v1=<code>{'yes' if row.get('no_v1_v1') else 'no'}</code> "
+            f"namespace_mismatch=<code>{'yes' if row.get('provider_env_namespace_mismatch') else 'no'}</code>"
+        )
+    lines.append("")
+    lines.append("Lệnh này chỉ hiển thị host/path/header-present/model-present, không hiển thị token hoặc URL ký.")
     return "\n".join(lines)
 
 
@@ -137963,6 +138033,12 @@ async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAUL
     key4u_credit = await key4u_credit_diagnostic(refresh_remote=True)
     status["key4u_credit_diagnostic"] = key4u_credit
     await update.message.reply_text(video_provider_status_text(status, key4u_credit), parse_mode="HTML")
+
+
+async def cmd_video_provider_env_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(video_provider_env_audit_text(), parse_mode="HTML")
 
 
 async def cmd_video_provider_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174973,6 +175049,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
     tg_app.add_handler(CommandHandler("video_provider_audit", cmd_video_provider_audit))
+    tg_app.add_handler(CommandHandler("video_provider_env_audit", cmd_video_provider_env_audit))
     tg_app.add_handler(CommandHandler("video_provider_setup", cmd_video_provider_setup))
     tg_app.add_handler(CommandHandler("video_provider_smoke", cmd_video_provider_smoke))
     tg_app.add_handler(CommandHandler("video_provider_curl", cmd_video_provider_curl))
