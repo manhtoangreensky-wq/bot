@@ -315,7 +315,19 @@ STAGE_ALIASES = {
         "success": "delivered",
     },
     "subdub": {
+        "received": "received_file",
+        "received_video": "received_file",
         "saved_input": "received_file",
+        "extracting": "extracting_audio",
+        "translate": "translating",
+        "generating_subtitle": "generating_voice",
+        "creating_subtitle": "generating_voice",
+        "tts": "generating_voice",
+        "muxing": "muxing_video",
+        "rendering": "muxing_video",
+        "validating": "validating_output",
+        "checking_file": "validating_output",
+        "output": "validating_output",
         "processing": "generating_voice",
         "running": "generating_voice",
         "completed": "delivered",
@@ -444,6 +456,13 @@ def _as_bool(value: Any) -> bool:
         return value
     text = str(value or "").strip().lower()
     return text in {"1", "true", "yes", "ok", "done", "ready", "completed", "success", "sent"}
+
+
+def _as_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(round(float(value)))
+    except Exception:
+        return int(fallback or 0)
 
 
 def _first_text(job: dict[str, Any], *keys: str) -> str:
@@ -614,9 +633,16 @@ def job_has_final_artifact(job: dict[str, Any] | None = None) -> bool:
         "video_output_file_id",
         "music_output_file_id",
         "output_path",
+        "final_mp4",
+        "final_mp4_path",
+        "dubbed_audio_path",
+        "generated_audio_path",
         "storage_ref",
     ):
         if str(current.get(key) or "").strip():
+            return True
+    for key in ("final_mp4_exists", "dubbed_audio_exists", "output_validated"):
+        if _as_bool(current.get(key)):
             return True
     for key in ("output_bytes", "uploaded_file_bytes", "music_result_size_bytes", "bytes"):
         try:
@@ -644,7 +670,7 @@ def render_product_progress_panel(
     if terminal == "delivered":
         current_stage = "delivered"
     elif str(current_stage or "").strip().lower().replace("-", "_") == "delivered":
-        current_stage = "validating_output" if canonical in VIDEO_PROGRESS_TYPES else "validating_audio"
+        current_stage = "validating_output" if canonical in VIDEO_PROGRESS_TYPES or canonical == "subdub" else "validating_audio"
     stage = product_progress_stage(canonical, current_stage)
     progress = product_progress_percent(canonical, stage.get("key"), percent, terminal)
     status_text = product_progress_terminal_label(terminal) or sanitize_public_copy(status_override, "") or str(stage.get("status") or "")
@@ -843,6 +869,46 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             "terminal_state": terminal,
             "completed_steps": completed_steps,
             "music_lifecycle": lifecycle,
+            "status_text": status_text,
+        }
+    if canonical == "subdub":
+        stage_key = str(
+            job.get("lifecycle_state")
+            or job.get("progress_stage")
+            or job.get("stage")
+            or job.get("current_stage")
+            or status
+            or "received_file"
+        ).strip().lower().replace("-", "_")
+        stage_key = STAGE_ALIASES.get(canonical, {}).get(stage_key, stage_key)
+        if terminal == "delivered":
+            stage_key = "delivered"
+            progress = 100
+            completed_steps = [
+                str(item.get("key") or "")
+                for item in product_progress_spec(canonical).get("steps") or []
+                if item.get("key") != "delivered"
+            ]
+            status_text = "Đã gửi kết quả"
+        elif terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+            if stage_key in {"delivered", "success", "completed", "failed", "failed_no_charge", "failed_refunded", "needs_admin_review"}:
+                stage_key = "validating_output"
+            progress = max(5, min(95, _as_int(progress, int(product_progress_stage(canonical, stage_key).get("percent") or 90))))
+            completed_steps = list(job.get("completed_steps") or [])
+            status_text = "Chưa xử lý được lúc này, TOAN AAS chưa trừ Xu."
+        else:
+            stage = product_progress_stage(canonical, stage_key)
+            stage_key = str(stage.get("key") or stage_key)
+            progress = max(5, min(95, _as_int(progress, int(stage.get("percent") or 5))))
+            completed_steps = list(job.get("completed_steps") or [])
+            status_text = "TOAN AAS đang xử lý, anh/chị kiểm tra lại sau." if status in {"running", "processing", "queued", "submitted"} else ""
+        stage = product_progress_stage(canonical, stage_key)
+        return {
+            "product_type": canonical,
+            "current_stage": str(stage.get("key") or stage_key),
+            "percent": product_progress_percent(canonical, str(stage.get("key") or stage_key), progress if progress is not None else None, terminal),
+            "terminal_state": terminal,
+            "completed_steps": completed_steps,
             "status_text": status_text,
         }
     stage_key = STAGE_ALIASES.get(canonical, {}).get(status, "")

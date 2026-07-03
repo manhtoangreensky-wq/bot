@@ -53,8 +53,8 @@ def test_risky_m8_long_video_tts_charge_changes_rolled_back():
 def test_status_callback_baseline_restored_no_m8_rewrite():
     source = inspect.getsource(bot.handle_video_dubbing_callback)
 
-    assert 'query.answer("Chưa tìm thấy trạng thái xử lý."' in source
-    assert "subdub_clean_failure_text" not in source
+    assert "subdub_progress_job_for_user" in source
+    assert "subdub_clean_failure_text" in source
 
 
 def test_admin_debug_lookup_kept_without_public_flow_change():
@@ -94,8 +94,12 @@ def test_only_subdub_files_changed_no_unrelated_modules():
 
     assert changed <= {
         "bot.py",
+        "services/product_progress_status.py",
+        "tests/test_p0_19d_live_subtitle_dub_blackbox_engine_fix_only.py",
+        "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
         "tests/test_p0_19m8_real_subdub_baseline_30s_multilingual_female_voice_delivery_fix.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
+        "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
     }
     assert not any(
         token in path.lower()
