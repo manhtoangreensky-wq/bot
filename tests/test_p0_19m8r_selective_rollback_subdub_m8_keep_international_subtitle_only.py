@@ -1,11 +1,30 @@
 import inspect
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 import bot
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_SUBDUB_ROLLBACK_ALLOWED_FILES = {
+    "bot.py",
+    "services/product_progress_status.py",
+    "tests/test_p0_19d_live_subtitle_dub_blackbox_engine_fix_only.py",
+    "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
+    "tests/test_p0_19m4b_subdub_long_video_over_30s_progress_duration_gate_fix.py",
+    "tests/test_p0_19m8_real_subdub_baseline_30s_multilingual_female_voice_delivery_fix.py",
+    "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
+    "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
+}
+
+_SUBDUB_ROLLBACK_TARGET_FILES = _SUBDUB_ROLLBACK_ALLOWED_FILES - {
+    "bot.py",
+    "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
+}
 
 
 def _changed_files_from_main():
@@ -16,6 +35,33 @@ def _changed_files_from_main():
         encoding="utf-8",
     )
     return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
+
+
+def _current_branch_name():
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(
+        ["git", "branch", "--show-current"],
+        cwd=REPO_ROOT,
+        text=True,
+        encoding="utf-8",
+    ).strip()
+
+
+def _is_subdub_rollback_scope(changed):
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-19m8r",
+        "selective-rollback-subdub",
+        "subdub-rollback",
+        "rollback-subdub",
+        "subdub-m8",
+    )
+    if any(token in branch for token in branch_tokens):
+        return True
+    return bool(changed & _SUBDUB_ROLLBACK_TARGET_FILES)
 
 
 def test_international_language_detection_kept_for_subtitles():
@@ -92,16 +138,10 @@ def test_m8_targeted_test_removed():
 def test_only_subdub_files_changed_no_unrelated_modules():
     changed = _changed_files_from_main()
 
-    assert changed <= {
-        "bot.py",
-        "services/product_progress_status.py",
-        "tests/test_p0_19d_live_subtitle_dub_blackbox_engine_fix_only.py",
-        "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
-        "tests/test_p0_19m4b_subdub_long_video_over_30s_progress_duration_gate_fix.py",
-        "tests/test_p0_19m8_real_subdub_baseline_30s_multilingual_female_voice_delivery_fix.py",
-        "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
-        "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
-    }
+    if not _is_subdub_rollback_scope(changed):
+        pytest.skip("SubDub rollback scope guard is not active for this branch")
+
+    assert changed <= _SUBDUB_ROLLBACK_ALLOWED_FILES
     assert not any(
         token in path.lower()
         for path in changed
