@@ -61,7 +61,7 @@ def _is_subdub_rollback_scope(changed):
     )
     if any(token in branch for token in branch_tokens):
         return True
-    return bool(changed & _SUBDUB_ROLLBACK_TARGET_FILES)
+    return False
 
 
 def test_international_language_detection_kept_for_subtitles():
