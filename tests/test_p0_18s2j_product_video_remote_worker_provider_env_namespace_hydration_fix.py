@@ -1,4 +1,8 @@
 import json
+import os
+import subprocess
+
+import pytest
 
 from providers.video_generic_http_provider import GenericHttpVideoProvider
 from services import video_provider_router
@@ -16,6 +20,31 @@ def _request(provider: str = "shopaikey_video") -> VideoGenerationRequest:
         required_capability="text_to_video",
         metadata={"product_video": True, "allow_provider_pending": True, "claim_payload_provider_key": provider},
     )
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(
+        ["git", "branch", "--show-current"],
+        text=True,
+        encoding="utf-8",
+    ).strip()
+
+
+def _is_product_video_s2j_scope() -> bool:
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-18s2j",
+        "s2j-product-video",
+        "product-video-remote-worker-provider",
+        "remote-worker-provider-env",
+        "provider-env-namespace-hydration",
+        "video-provider-submit-config-hydration",
+    )
+    return any(token in branch for token in branch_tokens)
 
 
 def _shopaikey_env(prefix: str = "SHOPAIKEY_VIDEO") -> dict[str, str]:
@@ -297,7 +326,9 @@ def test_video_provider_env_audit_passes():
 
 def test_no_payos_music_subdub_voice_pricing_changes():
     import pathlib
-    import subprocess
+
+    if not _is_product_video_s2j_scope():
+        pytest.skip("Product Video S2J scope guard is not active for this branch")
 
     diff = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     changed = {pathlib.PurePosixPath(line.strip()).as_posix() for line in diff.splitlines() if line.strip()}
