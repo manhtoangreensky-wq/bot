@@ -406,11 +406,17 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             "SHOPAIKEY_VIDEO_STATUS_ENDPOINT",
         )
         poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+        generic_ready = bool(
+            submit_url
+            and poll_url
+            and (namespace_cfg.get("auth_header_value") or env.get("SHOPAIKEY_API_KEY"))
+            and (namespace_cfg.get("model") or env.get("SHOPAIKEY_VIDEO_MODEL_PRIMARY") or env.get("SHOPAIKEY_VIDEO_MODEL"))
+        )
         derived = _with_derived(
             env,
             {
                 **_provider_namespace_metadata("shopaikey_video", namespace_cfg),
-                "SHOPAIKEY_VIDEO_ENABLED": str(env.get("SHOPAIKEY_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ""),
+                "SHOPAIKEY_VIDEO_ENABLED": str(env.get("SHOPAIKEY_VIDEO_ENABLED") or namespace_cfg.get("enabled") or ("1" if generic_ready else "")),
                 "SHOPAIKEY_VIDEO_SUBMIT_URL": submit_url,
                 "SHOPAIKEY_VIDEO_POLL_URL": poll_url,
                 "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_NAME") or namespace_cfg.get("auth_header_name") or "Authorization",
@@ -730,6 +736,7 @@ def video_provider_env_audit_payload(environ: dict[str, str] | None = None) -> d
         "status_ready": bool(status.get("ready") or status.get("ok")),
         "selected_provider": selected,
         "selected_provider_submit_config_non_empty": selected_submit_ready,
+        "status_ready_implies_submit_config_non_empty": bool((not (status.get("ready") or status.get("ok"))) or selected_submit_ready),
         "provider_chain": list(status.get("effective_provider_chain") or status.get("provider_chain") or []),
         "rows": rows,
         "worker_local_hydration_attempted": True,
@@ -851,6 +858,9 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "model_present",
         "provider_chain_fallback_attempted",
         "fallback_provider_attempts",
+        "submit_accepted",
+        "poll_allowed",
+        "poll_skipped_reason",
     ):
         if key in raw and key not in target:
             target[key] = raw.get(key)
@@ -899,6 +909,34 @@ def _config_validation_blocker_from_status(status: dict[str, Any], required_capa
             "invalid_env": [str(env_name) for env_name in (item.get("invalid_env") or [])],
         }
     return {}
+
+
+def _missing_submit_config_blocker_from_status(status: dict[str, Any], required_capability: str) -> dict[str, Any]:
+    providers: list[str] = []
+    missing_env: dict[str, list[str]] = {}
+    for item in status.get("providers") or []:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("enabled"):
+            continue
+        if item.get("configured"):
+            continue
+        supported = set(normalize_capability_values(item.get("capabilities") or []))
+        if not any(cap in supported for cap in capability_options(required_capability)):
+            continue
+        provider = str(item.get("provider") or "")
+        if not provider:
+            continue
+        providers.append(provider)
+        missing_env[provider] = [str(env_name) for env_name in (item.get("missing") or [])]
+    if not providers:
+        return {}
+    return {
+        "provider": providers[0],
+        "providers": providers,
+        "blocker": "all_video_providers_submit_config_missing",
+        "missing_env": missing_env,
+    }
 
 
 def run_provider_generation(
@@ -966,6 +1004,37 @@ def run_provider_generation(
                 "payload_has_ratio": False,
                 "invalid_fields": list(config_blocker.get("invalid_fields") or []),
                 "invalid_env": list(config_blocker.get("invalid_env") or []),
+                "no_charge": True,
+                "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY,
+                "provider_readiness": status,
+            }
+        missing_config = _missing_submit_config_blocker_from_status(status, request.required_capability)
+        if missing_config:
+            selected = str(missing_config.get("provider") or "")
+            return {
+                "ok": False,
+                **base_debug,
+                "selected_provider": selected,
+                "provider": selected,
+                "provider_selection_blocker": "all_video_providers_submit_config_missing",
+                "provider_attempted": False,
+                "provider_error": "all_video_providers_submit_config_missing",
+                "blocker": "all_video_providers_submit_config_missing",
+                "provider_status": "config_missing",
+                "smoke_stage": "config_validation",
+                "submit_url_configured": False,
+                "poll_url_configured": False,
+                "auth_configured": False,
+                "payload_has_prompt": False,
+                "payload_has_duration": False,
+                "payload_has_ratio": False,
+                "provider_submit_called": False,
+                "provider_task_id_saved": False,
+                "submit_accepted": False,
+                "provider_poll_called": False,
+                "poll_allowed": False,
+                "poll_skipped_reason": "submit_config_missing",
+                "missing_env": dict(missing_config.get("missing_env") or {}),
                 "no_charge": True,
                 "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY,
                 "provider_readiness": status,
@@ -1099,6 +1168,9 @@ def run_provider_generation(
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(provider_task_ids),
+                "submit_accepted": False,
+                "poll_allowed": False,
+                "poll_skipped_reason": "submit_not_accepted",
                 "provider_error": final_blocker,
                 "blocker": final_blocker,
                 "provider_status": submit.provider_status or "failed",
@@ -1119,6 +1191,33 @@ def run_provider_generation(
             raw_status=submit.provider_status,
         )
         if not result_url:
+            provider_task_key = str(submit.provider_task_id or submit.provider_video_id or "").strip()
+            if not provider_task_key:
+                blocker = "provider_task_id_missing"
+                if attempt_index + 1 < len(candidate_adapters):
+                    _record_failure(blocker)
+                    continue
+                _record_failure(blocker)
+                payload = {
+                    "ok": False,
+                    **_attempt_base(),
+                    "fallback_used": attempt_index > 0,
+                    "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                    "provider_submit_called": True,
+                    "provider_submit_http_status": submit_http_status,
+                    "provider_task_id_saved": False,
+                    "submit_accepted": False,
+                    "provider_poll_called": False,
+                    "poll_allowed": False,
+                    "poll_skipped_reason": "provider_task_id_missing",
+                    "provider_error": blocker,
+                    "blocker": blocker,
+                    "provider_status": submit.provider_status or "failed",
+                    "provider_task_ids": [],
+                    "provider_readiness": status,
+                    "no_charge": bool(allow_pending_result or (request.metadata or {}).get("product_video")),
+                }
+                return _merge_contract_debug(payload, submit.raw)
             max_attempts = max(1, _env_int(env, "VIDEO_PROVIDER_MAX_POLL_ATTEMPTS", 90))
             interval = max(0, _env_int(env, "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", 10))
             for attempt in range(1, max_attempts + 1):
@@ -1135,7 +1234,10 @@ def run_provider_generation(
                         "provider_submit_called": True,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(submit.provider_task_id),
+                        "submit_accepted": True,
                         "provider_poll_called": True,
+                        "poll_allowed": True,
+                        "poll_skipped_reason": "",
                         "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                     }
                     blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
@@ -1162,7 +1264,10 @@ def run_provider_generation(
                         "provider_submit_called": True,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(submit.provider_task_id),
+                        "submit_accepted": True,
                         "provider_poll_called": True,
+                        "poll_allowed": True,
+                        "poll_skipped_reason": "",
                         "provider_error": blocker,
                         "blocker": blocker,
                         "provider_status": poll_result.status,
@@ -1181,7 +1286,10 @@ def run_provider_generation(
                         "provider_submit_called": True,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(provider_task_ids),
+                        "submit_accepted": True,
                         "provider_poll_called": True,
+                        "poll_allowed": True,
+                        "poll_skipped_reason": "",
                         "provider_result_url_present": False,
                         "provider_error": "provider_in_progress",
                         "blocker": "provider_in_progress",
@@ -1207,7 +1315,10 @@ def run_provider_generation(
                     "provider_submit_called": True,
                     "provider_submit_http_status": submit_http_status,
                     "provider_task_id_saved": bool(submit.provider_task_id),
+                    "submit_accepted": True,
                     "provider_poll_called": True,
+                    "poll_allowed": True,
+                    "poll_skipped_reason": "",
                     "provider_error": blocker,
                     "blocker": blocker,
                     "provider_status": "timeout",
@@ -1231,7 +1342,10 @@ def run_provider_generation(
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
+                "submit_accepted": True,
                 "provider_poll_called": bool(not result_url),
+                "poll_allowed": bool(not result_url),
+                "poll_skipped_reason": "" if not result_url else "result_url_from_submit",
                 "provider_result_url_present": False,
                 "provider_error": blocker,
                 "blocker": blocker,
@@ -1251,7 +1365,10 @@ def run_provider_generation(
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
+                "submit_accepted": True,
                 "provider_poll_called": bool(not result_url),
+                "poll_allowed": bool(not result_url),
+                "poll_skipped_reason": "" if not result_url else "result_url_from_submit",
                 "provider_result_url_present": bool(poll_result.result_url or poll_result.file_url),
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
             }
@@ -1276,7 +1393,10 @@ def run_provider_generation(
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
+                "submit_accepted": True,
                 "provider_poll_called": bool(not result_url),
+                "poll_allowed": bool(not result_url),
+                "poll_skipped_reason": "" if not result_url else "result_url_from_submit",
                 "provider_result_url_present": True,
                 "provider_error": blocker,
                 "blocker": blocker,
@@ -1296,7 +1416,10 @@ def run_provider_generation(
             "provider_submit_called": True,
             "provider_submit_http_status": submit_http_status,
             "provider_task_id_saved": bool(submit.provider_task_id),
+            "submit_accepted": True,
             "provider_poll_called": bool(not result_url),
+            "poll_allowed": bool(not result_url),
+            "poll_skipped_reason": "" if not result_url else "result_url_from_submit",
             "provider_result_url_present": True,
             "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
             "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
