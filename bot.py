@@ -88447,6 +88447,7 @@ def key4u_alert_level(remaining_usd: float | None, thresholds: dict | None = Non
 def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> dict:
     local = key4u_local_usage_estimate(24)
     manual = key4u_manual_usage_snapshot()
+    credit = key4u_credit_diagnostic_from_results(remote_usage, remote_balance_result)
     remote_balance = key4u_extract_balance_usd(remote_balance_result or {})
     if remote_balance is None:
         remote_balance = key4u_extract_balance_usd(remote_usage or {})
@@ -88471,6 +88472,18 @@ def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result
         "source": "remote_api" if remote_balance is not None else manual.get("source", "not_set"),
         "remote_usage": remote_text,
         "remote_balance": f"{key4u_format_usd_amount(remote_balance)} USD" if remote_balance is not None else "unknown",
+        "remote_connectivity_status": credit.get("usage_connectivity_status") or "UNKNOWN",
+        "remote_balance_status": credit.get("usage_balance_status") or ("PASS" if remote_balance is not None else "UNKNOWN"),
+        "remote_balance_value": credit.get("usage_balance_value") or "",
+        "usage_success_endpoint_type": credit.get("usage_success_endpoint_type") or "",
+        "usage_health_status": credit.get("usage_health_status") or "UNKNOWN",
+        "usage_health_http": int(credit.get("usage_health_http") or 0),
+        "usage_health_endpoint_host_path": credit.get("usage_health_endpoint_host_path") or "",
+        "usage_balance_http": int(credit.get("usage_balance_http") or 0),
+        "usage_balance_parse_endpoint_host_path": credit.get("usage_balance_parse_endpoint_host_path") or "",
+        "usage_balance_parse_fields": credit.get("usage_balance_parse_fields") or "",
+        "usage_log_status": credit.get("usage_log_status") or "UNKNOWN",
+        "usage_log_endpoint_host_path": credit.get("usage_log_endpoint_host_path") or "",
         "manual_balance": manual.get("balance_display") or "not_set",
         "manual_source": manual.get("source") or "not_set",
         "manual_updated_at": manual.get("updated_at") or "-",
@@ -88554,6 +88567,11 @@ def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_re
         "",
         f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
         f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
+        f"• Remote connectivity: <code>{html.escape(str(snapshot.get('remote_connectivity_status') or 'UNKNOWN'))}</code>",
+        f"• Remote balance status: <code>{html.escape(str(snapshot.get('remote_balance_status') or 'UNKNOWN'))}</code>",
+        f"• Health endpoint: <code>{html.escape(str(snapshot.get('usage_health_status') or 'UNKNOWN'))}</code> | http <code>{int(snapshot.get('usage_health_http') or 0)}</code>",
+        f"• Balance endpoint: <code>{html.escape(str(snapshot.get('usage_balance_parse_endpoint_host_path') or 'not_found'))}</code> | http <code>{int(snapshot.get('usage_balance_http') or 0)}</code> | fields <code>{html.escape(str(snapshot.get('usage_balance_parse_fields') or '-'))}</code>",
+        f"• Usage log endpoint: <code>{html.escape(str(snapshot.get('usage_log_status') or 'UNKNOWN'))}</code>",
         f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
         f"• Nguồn manual: <code>{html.escape(str(snapshot['manual_source']))}</code>",
         f"• Local estimated used: <code>{html.escape(str(snapshot['local_estimated_used']))}</code>",
@@ -88581,7 +88599,11 @@ def key4u_provider_usage_lines_for_admin() -> list[str]:
         f"• Usage auth: source <code>{html.escape(str(credit.get('usage_auth_source') or '-'))}</code> | header <code>{html.escape(str(credit.get('usage_auth_header_name') or '-'))}</code> | scheme <code>{html.escape(str(credit.get('usage_auth_scheme_prefix') or '-'))}</code> | mode <code>{html.escape(str(credit.get('usage_auth_mode') or '-'))}</code>",
         f"• Usage HTTP: <code>{html.escape(str(credit.get('usage_http_status') or 0))}</code> | host <code>{html.escape(str(credit.get('usage_endpoint_host') or '-'))}</code> | path <code>{html.escape(str(credit.get('usage_endpoint_path') or '-'))}</code>",
         f"• Discovery: tried <code>{len(credit.get('usage_endpoint_candidates_tried') or [])}</code> | modes <code>{html.escape(','.join(str(x) for x in (credit.get('usage_auth_modes_tried') or [])) or '-')}</code> | last_http <code>{html.escape(str(credit.get('usage_last_http_status') or 0))}</code>",
-        f"• Success endpoint: <code>{html.escape(str(credit.get('usage_success_endpoint_host_path') or '-'))}</code> | success mode <code>{html.escape(str(credit.get('usage_success_auth_mode') or '-'))}</code>",
+        f"• Connectivity: <code>{html.escape(str(credit.get('usage_connectivity_status') or 'UNKNOWN'))}</code> | endpoint <code>{html.escape(str(credit.get('usage_connectivity_endpoint_host_path') or '-'))}</code>",
+        f"• Health endpoint: <code>{html.escape(str(credit.get('usage_health_status') or 'UNKNOWN'))}</code> | http <code>{int(credit.get('usage_health_http') or 0)}</code> | path <code>{html.escape(str(credit.get('usage_health_endpoint_host_path') or '-'))}</code>",
+        f"• Balance endpoint: <code>{html.escape(str(credit.get('usage_balance_status') or 'UNKNOWN'))}</code> | http <code>{int(credit.get('usage_balance_http') or 0)}</code> | parse path <code>{html.escape(str(credit.get('usage_balance_parse_endpoint_host_path') or '-'))}</code> | fields <code>{html.escape(str(credit.get('usage_balance_parse_fields') or '-'))}</code>",
+        f"• Usage log endpoint: <code>{html.escape(str(credit.get('usage_log_status') or 'UNKNOWN'))}</code> | path <code>{html.escape(str(credit.get('usage_log_endpoint_host_path') or '-'))}</code>",
+        f"• Success endpoint: <code>{html.escape(str(credit.get('usage_success_endpoint_host_path') or '-'))}</code> | type <code>{html.escape(str(credit.get('usage_success_endpoint_type') or '-'))}</code> | success mode <code>{html.escape(str(credit.get('usage_success_auth_mode') or '-'))}</code>",
         f"• Usage response shape: <code>{html.escape(str(credit.get('usage_response_shape') or '-'))}</code>",
         f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
         f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
@@ -88718,6 +88740,11 @@ def key4u_credit_diagnostic_from_results(remote_usage: dict | None = None, remot
     safe_reason = str(usage_debug.get("usage_reason") or reason)
     if usage_debug.get("usage_endpoint_candidates_tried") and not balance and safe_reason in {"FAIL_AUTH", "NOT_FOUND", "FAIL", "FAIL_HTTP"}:
         safe_reason = "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN"
+    connectivity_status = str(usage_debug.get("usage_connectivity_status") or "UNKNOWN")
+    balance_status = str(usage_debug.get("usage_balance_status") or ("PASS" if balance is not None else "UNKNOWN"))
+    health_status = str(usage_debug.get("usage_health_status") or "UNKNOWN")
+    if balance is None and connectivity_status == "PASS" and balance_status != "PASS" and health_status == "PASS":
+        safe_reason = "KEY4U_HEALTH_OK_BALANCE_ENDPOINT_NOT_FOUND"
     return {
         "provider": "key4u",
         "endpoint_configured": endpoint_configured,
@@ -88739,6 +88766,21 @@ def key4u_credit_diagnostic_from_results(remote_usage: dict | None = None, remot
         "usage_last_error_message_safe": usage_debug.get("usage_last_error_message_safe") or "",
         "usage_success_endpoint_host_path": usage_debug.get("usage_success_endpoint_host_path") or "",
         "usage_success_auth_mode": usage_debug.get("usage_success_auth_mode") or "",
+        "usage_connectivity_status": connectivity_status,
+        "usage_balance_status": balance_status,
+        "usage_balance_value": usage_debug.get("usage_balance_value") or (key4u_format_usd_amount(balance) if balance is not None else ""),
+        "usage_success_endpoint_type": usage_debug.get("usage_success_endpoint_type") or "",
+        "usage_health_status": health_status,
+        "usage_health_http": int(usage_debug.get("usage_health_http") or 0),
+        "usage_health_endpoint_host_path": usage_debug.get("usage_health_endpoint_host_path") or "",
+        "usage_balance_http": int(usage_debug.get("usage_balance_http") or 0),
+        "usage_balance_parse_endpoint_host_path": usage_debug.get("usage_balance_parse_endpoint_host_path") or "",
+        "usage_balance_parse_fields": usage_debug.get("usage_balance_parse_fields") or "",
+        "usage_log_status": usage_debug.get("usage_log_status") or "UNKNOWN",
+        "usage_log_endpoint_host_path": usage_debug.get("usage_log_endpoint_host_path") or "",
+        "usage_groups_status": usage_debug.get("usage_groups_status") or "UNKNOWN",
+        "usage_groups_endpoint_host_path": usage_debug.get("usage_groups_endpoint_host_path") or "",
+        "usage_connectivity_endpoint_host_path": usage_debug.get("usage_connectivity_endpoint_host_path") or "",
         "usage_response_shape": usage_debug.get("usage_response_shape") or "",
         "usage_reason": safe_reason,
         "usage_status": str((remote_usage or {}).get("status") or ("UNKNOWN" if not endpoint_configured else "-")),
@@ -88865,6 +88907,7 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
     smoke = key4u_smoke_status_map()
     warning = key4u_warning_text(remote_balance, manual_balance, estimated_used)
     alert = key4u_usage_alert_snapshot(remote_usage, remote_balance_result)
+    credit = key4u_credit_diagnostic_from_results(remote_usage, remote_balance_result)
     usage_status = str((remote_usage or {}).get("status") or "NEED_ENDPOINT")
     balance_status = str((remote_balance_result or {}).get("status") or "NEED_ENDPOINT")
     lines = [
@@ -88880,6 +88923,12 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
         "<b>Balance</b>",
         f"• Remote usage: <code>{html.escape(usage_status)}</code>",
         f"• Remote balance: <code>{html.escape(str(remote_balance if remote_balance is not None else balance_status))}</code>",
+        f"• Remote connectivity: <code>{html.escape(str(credit.get('usage_connectivity_status') or 'UNKNOWN'))}</code>",
+        f"• Remote balance status: <code>{html.escape(str(credit.get('usage_balance_status') or 'UNKNOWN'))}</code>",
+        f"• Health endpoint: <code>{html.escape(str(credit.get('usage_health_status') or 'UNKNOWN'))}</code> | http <code>{int(credit.get('usage_health_http') or 0)}</code> | path <code>{html.escape(str(credit.get('usage_health_endpoint_host_path') or '-'))}</code>",
+        f"• Balance endpoint: <code>{html.escape(str(credit.get('usage_balance_parse_endpoint_host_path') or 'not_found'))}</code> | http <code>{int(credit.get('usage_balance_http') or 0)}</code> | fields <code>{html.escape(str(credit.get('usage_balance_parse_fields') or '-'))}</code>",
+        f"• Usage log endpoint: <code>{html.escape(str(credit.get('usage_log_status') or 'UNKNOWN'))}</code> | path <code>{html.escape(str(credit.get('usage_log_endpoint_host_path') or '-'))}</code>",
+        f"• Usage reason: <code>{html.escape(str(credit.get('reason') or '-'))}</code>",
         f"• Manual/Dashboard balance: <code>{html.escape(f'{manual_balance:.2f} USD' if manual_balance is not None else 'not_set')}</code>",
         f"• Local estimated used: <code>{estimated_used:.4f} USD</code>",
         f"• Estimated remaining: <code>{html.escape(f'{estimated_remaining:.4f} USD' if estimated_remaining is not None else 'unknown')}</code>",
@@ -136975,7 +137024,12 @@ def video_provider_status_text(status: dict | None = None, key4u_credit: dict | 
                 f"usage_path=<code>{html.escape(str(key4u_credit.get('usage_endpoint_path') or '-'))}</code> "
                 f"usage_http=<code>{html.escape(str(key4u_credit.get('usage_http_status') or 0))}</code> "
                 f"usage_tried=<code>{len(key4u_credit.get('usage_endpoint_candidates_tried') or [])}</code> "
+                f"usage_connectivity=<code>{html.escape(str(key4u_credit.get('usage_connectivity_status') or 'UNKNOWN'))}</code> "
+                f"usage_balance=<code>{html.escape(str(key4u_credit.get('usage_balance_status') or 'UNKNOWN'))}</code> "
+                f"usage_health_http=<code>{html.escape(str(key4u_credit.get('usage_health_http') or 0))}</code> "
+                f"usage_balance_http=<code>{html.escape(str(key4u_credit.get('usage_balance_http') or 0))}</code> "
                 f"usage_success=<code>{html.escape(str(key4u_credit.get('usage_success_endpoint_host_path') or '-'))}</code> "
+                f"usage_success_type=<code>{html.escape(str(key4u_credit.get('usage_success_endpoint_type') or '-'))}</code> "
                 f"usage_success_mode=<code>{html.escape(str(key4u_credit.get('usage_success_auth_mode') or '-'))}</code> "
                 f"usage_shape=<code>{html.escape(str(key4u_credit.get('usage_response_shape') or '-'))}</code> "
             )
