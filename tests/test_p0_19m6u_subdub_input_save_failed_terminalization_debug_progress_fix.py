@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -9,6 +10,22 @@ import bot
 
 PUBLIC_CODE = "257E5B0216"
 JOB_ID = "257e5b0216b699877c2b"
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _is_subdub_m6u_scope() -> bool:
+    branch = _current_branch_name().lower()
+    return bool("subdub" in branch and ("m6u" in branch or "input-save" in branch or "input_save" in branch))
 
 
 class CaptureMessage:
@@ -182,6 +199,8 @@ def test_no_video_success_without_delivered_mp4_still_enforced():
 
 
 def test_no_product_video_music_payos_pricing_db_changes():
+    if not _is_subdub_m6u_scope():
+        pytest.skip("SubDub M6U scope guard is enforced only on SubDub M6U/input-save branches.")
     output = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     allowed = {
