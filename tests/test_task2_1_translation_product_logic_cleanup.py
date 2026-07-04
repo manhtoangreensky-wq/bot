@@ -279,6 +279,12 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
         captured.update({"text": text, "voice_style": voice_style, "voice_id": voice_id, "voice_speed": voice_speed})
         return "TTS", b"audio", "ok"
 
+    async def fake_render_video(*_args, **_kwargs):
+        return b"\x00\x00\x00\x18ftypmp42-task21" + b"x" * 4096, "fake_render"
+
+    async def fake_validate_video(*_args, **_kwargs):
+        return {"ok": True, "detail": "test_valid"}
+
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
@@ -286,6 +292,8 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "video_dubbing_render_video", fake_render_video)
+    monkeypatch.setattr(bot, "subdub_validate_video_output", fake_validate_video)
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     monkeypatch.setattr(bot, "apply_member_service_discount", lambda _uid, amount, _event: {"final_cost": amount})
@@ -297,6 +305,9 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 
         async def reply_audio(self, **_kwargs):
             return None
+
+        async def reply_video(self, **_kwargs):
+            return SimpleNamespace(message_id=991203)
 
     query = SimpleNamespace(from_user=SimpleNamespace(id=991203), message=OutputMessage())
     result = asyncio.run(

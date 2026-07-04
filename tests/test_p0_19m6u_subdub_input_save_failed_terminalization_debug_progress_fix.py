@@ -190,6 +190,11 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "tests/test_p0_19m5a_subdub_large_telegram_media_input_save_fix.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6u_subdub_input_save_failed_terminalization_debug_progress_fix.py",
+        "tests/test_p0_19m6v_subdub_final_delivery_report_font2x_female_voice_fix.py",
+        "tests/test_p0_19n_subdub_original_voice_retention_volume_mix_controls.py",
+        "tests/test_task2_1_translation_product_logic_cleanup.py",
+        "tests/test_task2_4_public_product_screens.py",
+        "tests/test_task2_5_user_ux_confirmation_cleanup.py",
     }
     assert changed <= allowed
     disallowed = ("payos", "wallet", "pricing", "finance", "music", "suno", "video_provider", "remote_worker.py", "local_worker.py")
