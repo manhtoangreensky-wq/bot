@@ -222,15 +222,16 @@ def test_get_wav_json_uuid_without_followup_url_sets_setup_required(monkeypatch,
     assert job["artifact_ready"] is False
 
 
-def test_bare_cdn_no_query_remains_rejected():
+def test_bare_cdn_no_query_is_kept_for_direct_validation_before_wav_fallback():
     candidates = bot.extract_shopaikey_suno_audio_candidates(
         {"data": {"data": [{"cld2AudioUrl": BARE_CDN}]}},
         provider_name="key4u_suno",
     )
 
-    assert candidates[0]["rejected"] is True
-    assert candidates[0]["reject_reason"] == "bare_suno_cdn_no_query"
-    assert bot.select_music_provider_audio_candidate(candidates) == {}
+    assert candidates[0]["rejected"] is False
+    assert candidates[0]["selected_reason"] == "cld2_audio_url_candidate"
+    selected = bot.select_music_provider_audio_candidate(candidates)
+    assert selected["url"] == BARE_CDN
 
 
 def test_no_charge_before_telegram_delivery(monkeypatch, tmp_path):

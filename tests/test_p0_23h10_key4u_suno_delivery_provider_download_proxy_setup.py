@@ -63,19 +63,20 @@ def _patch_success_materialize(monkeypatch, tmp_path, *, duration=188):
     monkeypatch.setattr(bot, "save_engine_async_job", lambda payload: dict(payload))
 
 
-def test_cld2_audio_url_bare_cdn_rejected_not_selected():
+def test_cld2_audio_url_bare_cdn_selected_for_direct_validation():
     payload = {"data": {"data": [{"cld2AudioUrl": BARE_CDN}]}}
     candidates = bot.extract_shopaikey_suno_audio_candidates(payload, provider_name="key4u_suno")
 
     assert candidates
     assert candidates[0]["field_path"] == "data.data[0].cld2AudioUrl"
-    assert candidates[0]["rejected"] is True
-    assert candidates[0]["reject_reason"] == "bare_suno_cdn_no_query"
-    assert bot.select_music_provider_audio_candidate(candidates) == {}
-    assert "rejected_bare_suno_cdn_no_query" in bot.music_provider_candidate_paths_text(candidates)
+    assert candidates[0]["rejected"] is False
+    assert candidates[0]["selected_reason"] == "cld2_audio_url_candidate"
+    selected = bot.select_music_provider_audio_candidate(candidates)
+    assert selected["url"] == BARE_CDN
+    assert "cld2_audio_url_candidate" in bot.music_provider_candidate_paths_text(candidates)
 
 
-def test_no_download_endpoint_sets_setup_required_blocker(monkeypatch):
+def test_no_download_endpoint_attempts_direct_bare_cdn_before_clean_no_charge(monkeypatch):
     class FakeProvider:
         async def suno_query(self, task_id):
             return {
@@ -103,12 +104,17 @@ def test_no_download_endpoint_sets_setup_required_blocker(monkeypatch):
     result = asyncio.run(bot.poll_music_suno_async_job(JOB_ID, updated_by=USER_ID))
     job = result["job"]
 
-    assert result["status"] == "KEY4U_SUNO_DOWNLOAD_ENDPOINT_MISSING_FOR_BARE_CDN"
+    assert result["status"] == "RESULT_URL_DOWNLOAD_FAILED"
     assert job["terminal_state"] == "failed_no_charge"
-    assert job["primary_blocker"] == bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
-    assert job["setup_required"] == bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED
+    assert job["primary_blocker"] in {
+        "artifact_download_failed",
+        "result_url_expired",
+        "artifact_invalid_content_type",
+        "result_url_forbidden_access_denied",
+    }
+    assert job["candidate_attempted"] is True
+    assert job["candidate_bare_url_allowed_for_validation"] is True
     assert job["charged_xu"] == 0
-    assert job["progress_text"] == bot.KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE
 
 
 def test_download_endpoint_with_task_and_url_materializes(monkeypatch, tmp_path):

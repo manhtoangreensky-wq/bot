@@ -53,7 +53,7 @@ def _completed(payload):
     }
 
 
-def test_candidate_ranking_rejects_bare_music_output_url_over_signed_download_url():
+def test_candidate_ranking_prefers_signed_download_url_but_keeps_bare_for_validation():
     payload = {
         "data": {
             "music_output_url": BARE_CDN,
@@ -63,8 +63,8 @@ def test_candidate_ranking_rejects_bare_music_output_url_over_signed_download_ur
     candidates = bot.extract_shopaikey_suno_audio_candidates(payload, provider_name="key4u_suno")
     bare = next(item for item in candidates if item["field_path"] == "data.music_output_url")
     selected = bot.select_music_provider_audio_candidate(candidates)
-    assert bare["rejected"] is True
-    assert bare["reject_reason"] == "bare_suno_cdn_no_query"
+    assert bare["rejected"] is False
+    assert bare["selected_reason"] == "direct_suno_cdn_candidate"
     assert selected["field_path"] == "data.download_url"
     assert selected["selected_reason"] in {"signed_url_candidate", "query_url_candidate", "download_url_candidate"}
 
@@ -82,7 +82,7 @@ def test_signed_url_candidate_priority():
     assert selected["url"] == SIGNED_URL
 
 
-def test_key4u_fetch_retries_when_only_bare_cdn_url(monkeypatch):
+def test_key4u_fetch_uses_bare_cdn_for_direct_validation(monkeypatch):
     provider = _FakeKey4U([
         _completed({"data": {"music_output_url": BARE_CDN}}),
         _completed({"data": {"music_output_url": BARE_CDN}}),
@@ -95,13 +95,11 @@ def test_key4u_fetch_retries_when_only_bare_cdn_url(monkeypatch):
 
     result = asyncio.run(bot.poll_music_generation_job({"music_provider": "key4u_suno", "music_task_id": TASK_ID}, updated_by=USER_ID))
 
-    assert provider.calls == [TASK_ID, TASK_ID]
-    assert result["ok"] is False
-    assert result["status"] == "COMPLETED_NO_DOWNLOADABLE_AUDIO"
-    assert result["primary_blocker"] == bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
-    assert result["recovery_action"] == "setup_required_key4u_suno_download_url"
-    assert result["setup_required"] == bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED
-    assert result["key4u_suno_fetch_retried"] is True
+    assert provider.calls == [TASK_ID]
+    assert result["ok"] is True
+    assert result["output_url"] == BARE_CDN
+    assert result["selected_artifact_field_path"] == "data.music_output_url"
+    assert result["selected_artifact_selected_reason"] == "direct_suno_cdn_candidate"
     assert "data.music_output_url" in result["key4u_suno_fetch_candidate_paths_text"]
 
 
@@ -116,12 +114,12 @@ def test_key4u_fetch_second_attempt_uses_download_url(monkeypatch):
     result = asyncio.run(bot.poll_music_generation_job({"music_provider": "key4u_suno", "music_task_id": TASK_ID}, updated_by=USER_ID))
 
     assert result["ok"] is True
-    assert result["output_url"] == SIGNED_URL
-    assert result["key4u_suno_fetch_retried"] is True
-    assert result["selected_artifact_field_path"] == "data.download_url"
+    assert result["output_url"] == BARE_CDN
+    assert result.get("key4u_suno_fetch_retried") in (False, None)
+    assert result["selected_artifact_field_path"] == "data.music_output_url"
 
 
-def test_completed_only_bare_cdn_sets_failed_no_charge(monkeypatch):
+def test_completed_only_bare_cdn_attempts_direct_download_no_charge_on_failure(monkeypatch):
     store = {JOB_ID: _job()}
     provider = _FakeKey4U([
         _completed({"data": {"music_output_url": BARE_CDN}}),
@@ -144,12 +142,17 @@ def test_completed_only_bare_cdn_sets_failed_no_charge(monkeypatch):
     result = asyncio.run(bot.poll_music_suno_async_job(JOB_ID, updated_by=USER_ID))
     job = result["job"]
 
-    assert result["status"] == "KEY4U_SUNO_DOWNLOAD_ENDPOINT_MISSING_FOR_BARE_CDN"
+    assert result["status"] == "RESULT_URL_DOWNLOAD_FAILED"
     assert job["terminal_state"] == "failed_no_charge"
-    assert job["primary_blocker"] == bot.KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
+    assert job["primary_blocker"] in {
+        "artifact_download_failed",
+        "result_url_expired",
+        "artifact_invalid_content_type",
+        "result_url_forbidden_access_denied",
+    }
     assert job["charged_xu"] == 0
-    assert job["progress_text"] == bot.KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE
-    assert job["setup_required"] == bot.KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED
+    assert job["candidate_attempted"] is True
+    assert job["candidate_bare_url_allowed_for_validation"] is True
     assert "cdn" not in job["progress_text"].lower()
     assert "api" not in job["progress_text"].lower()
 
