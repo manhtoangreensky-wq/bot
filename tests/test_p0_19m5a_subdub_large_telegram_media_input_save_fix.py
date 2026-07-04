@@ -147,7 +147,7 @@ def test_file_too_big_terminalizes_status_panel_and_stops_refresh(tmp_path, monk
     assert stored["status_panel_terminalized"] is True
     assert stored["refresh_stopped_after_terminal"] is True
     assert snapshot["terminal_state"] == "failed_no_charge"
-    assert snapshot["percent"] >= 90
+    assert snapshot["percent"] == 5
 
 
 def test_file_too_big_public_message_no_debug_terms(tmp_path, monkeypatch):

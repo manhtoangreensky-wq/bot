@@ -288,6 +288,7 @@ def test_no_product_video_music_payos_pricing_db_changes():
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     allowed = {
         "bot.py",
+        "services/product_progress_status.py",
         "tests/test_p0_17b_subtitle_translation_dubbing.py",
         "tests/test_p0_17b12_2_live_hotfix_contract.py",
         "tests/test_p0_17b6_2_final_product_pipeline.py",
@@ -299,11 +300,13 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "tests/test_p0_19h_restore_subdub_engine_professional_status.py",
         "tests/test_p0_19j_restore_subdub_real_video_engine_delivery.py",
         "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
+        "tests/test_p0_19m5a_subdub_large_telegram_media_input_save_fix.py",
         "tests/test_p0_19m5c_subdub_mode_route_female_voice_state_fix.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6r_subdub_live_runtime_terminal_outcome_path_fix.py",
         "tests/test_p0_19m6s_subdub_live_job_registry_partial_audio_debug_fix.py",
         "tests/test_p0_19m6t_subdub_final_video_only_delivery_no_public_audio_fallback.py",
+        "tests/test_p0_19m6u_subdub_input_save_failed_terminalization_debug_progress_fix.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
     }
     assert changed <= allowed
