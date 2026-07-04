@@ -858,9 +858,21 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "model_present",
         "provider_chain_fallback_attempted",
         "fallback_provider_attempts",
+        "configured_provider_chain",
+        "initial_selected_provider",
+        "selected_provider_after_fallback",
+        "provider_selection_reason",
+        "provider_fallback_attempted",
+        "provider_fallback_attempts",
+        "provider_fallback_reason",
+        "skipped_provider_reasons",
+        "fallback_only_respected",
         "submit_accepted",
         "poll_allowed",
         "poll_skipped_reason",
+        "provider_submit_http_5xx",
+        "provider_submit_retriable",
+        "provider_error_message_safe",
     ):
         if key in raw and key not in target:
             target[key] = raw.get(key)
@@ -953,6 +965,29 @@ def run_provider_generation(
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
     adapter = candidate_adapters[0] if candidate_adapters else None
     provider_candidates = [item.provider_name for item in candidate_adapters]
+    configured_chain = list(status.get("configured_providers") or status.get("effective_provider_chain") or status.get("provider_chain") or [])
+    skipped_provider_reasons = [
+        {
+            "provider": str(item.get("provider") or ""),
+            "reason": str(item.get("reason") or item.get("selection_blocker") or "-"),
+        }
+        for item in (status.get("skipped_providers") or [])
+        if isinstance(item, dict)
+    ]
+    configured_status_items = {
+        str(item.get("provider") or ""): item
+        for item in (status.get("providers") or [])
+        if isinstance(item, dict)
+    }
+    fallback_only_respected = not any(
+        str(item.get("provider") or "") == "key4u_video"
+        and bool(item.get("fallback_only"))
+        and adapter
+        and adapter.provider_name == "key4u_video"
+        and bool(configured_status_items.get("shopaikey_video", {}).get("configured"))
+        and bool(configured_status_items.get("shopaikey_video", {}).get("credit_ok"))
+        for item in configured_status_items.values()
+    )
     allow_pending_result = bool(
         (request.metadata or {}).get("product_video")
         or (request.metadata or {}).get("allow_provider_pending")
@@ -964,8 +999,11 @@ def run_provider_generation(
         "normalized_capability_candidates": list(normalized_capability_candidates),
         "provider_candidates_count": len([item for item in provider_candidates if item]),
         "selected_provider": adapter.provider_name if adapter else "",
+        "initial_selected_provider": adapter.provider_name if adapter else "",
         "selected_capability": preferred_provider_capability(adapter, request.required_capability) if adapter else "",
         "provider_selection_blocker": "" if adapter else "provider_capability_missing",
+        "provider_selection_reason": str(status.get("selection_reason") or status.get("reason") or ("provider_ready_and_has_credit" if adapter else "provider_capability_missing")),
+        "configured_provider_chain": configured_chain,
         "provider_chain": list(status.get("provider_chain") or []),
         "effective_provider_chain": list(status.get("effective_provider_chain") or status.get("provider_chain") or []),
         "fallback_order": list(status.get("fallback_order") or []),
@@ -973,6 +1011,12 @@ def run_provider_generation(
         "fallback_used": False,
         "fallback_reason": "",
         "skipped_providers": list(status.get("skipped_providers") or []),
+        "skipped_provider_reasons": skipped_provider_reasons,
+        "fallback_only_respected": bool(fallback_only_respected),
+        "provider_fallback_attempted": False,
+        "provider_fallback_attempts": [],
+        "provider_fallback_reason": "",
+        "selected_provider_after_fallback": "",
         "provider_submit_called": False,
         "provider_submit_http_status": 0,
         "provider_task_id_saved": False,
@@ -1051,9 +1095,36 @@ def run_provider_generation(
 
     def _submit_http_status(raw: dict[str, Any] | None) -> int:
         try:
-            return int((raw or {}).get("http_status") or (raw or {}).get("status_code") or 0)
+            return int((raw or {}).get("submit_http_status") or (raw or {}).get("provider_response_http_status") or (raw or {}).get("http_status") or (raw or {}).get("status_code") or 0)
         except Exception:
             return 0
+
+    def _is_submit_5xx(raw: dict[str, Any] | None, blocker: str = "", status_code: int = 0) -> bool:
+        raw = dict(raw or {})
+        try:
+            status_int = int(status_code or raw.get("submit_http_status") or raw.get("provider_response_http_status") or raw.get("http_status") or raw.get("status_code") or 0)
+        except Exception:
+            status_int = 0
+        return bool(raw.get("provider_submit_http_5xx") or blocker in {"provider_temporarily_unavailable", "provider_submit_http_5xx"} or 500 <= status_int <= 599)
+
+    def _final_submit_blocker() -> str:
+        if not attempt_failures:
+            return "provider_submit_failed"
+        reasons = [str(item.get("reason") or "") for item in attempt_failures]
+        if len(attempt_failures) > 1 and all(reason == "provider_config_missing_at_submit" for reason in reasons):
+            return "all_video_providers_submit_config_missing"
+        if all(
+            str(item.get("reason") or "") in {
+                "provider_submit_failed",
+                "provider_submit_http_error",
+                "provider_submit_http_5xx",
+                "provider_temporarily_unavailable",
+                "provider_submit_url_missing",
+            }
+            for item in attempt_failures
+        ):
+            return "all_video_providers_submit_failed"
+        return reasons[-1] or "provider_submit_failed"
 
     attempt_failures: list[dict[str, Any]] = []
     first_fallback_reason = ""
@@ -1114,16 +1185,34 @@ def run_provider_generation(
                 "provider_payload_model": _safe_cap_text("provider_payload_model"),
                 "provider_chain_fallback_attempted": bool(fallback_used),
                 "fallback_provider_attempts": list(attempt_failures),
+                "provider_fallback_attempted": bool(attempt_failures or fallback_used),
+                "provider_fallback_attempts": list(attempt_failures),
+                "provider_fallback_reason": fallback_reason or first_fallback_reason,
+                "selected_provider_after_fallback": current_adapter.provider_name if fallback_used else "",
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
                 "provider_attempted": True,
                 "provider_attempts": list(attempt_failures),
             }
 
-        def _record_failure(reason: str) -> None:
+        def _record_failure(reason: str, raw: dict[str, Any] | None = None, *, submit_failure: bool = False) -> None:
             nonlocal first_fallback_reason
             clean_reason = str(reason or "provider_failed").strip() or "provider_failed"
-            attempt_failures.append({"provider": current_adapter.provider_name, "reason": clean_reason})
+            raw = dict(raw or {})
+            submit_status = _submit_http_status(raw)
+            attempt = {
+                "provider": current_adapter.provider_name,
+                "reason": clean_reason,
+                "submit_failure": bool(submit_failure),
+                "submit_http_status": submit_status,
+                "retriable": bool(raw.get("provider_submit_retriable") or _is_submit_5xx(raw, clean_reason, submit_status)),
+                "submit_5xx": bool(_is_submit_5xx(raw, clean_reason, submit_status)),
+            }
+            if raw.get("provider_submit_blocker"):
+                attempt["submit_blocker"] = str(raw.get("provider_submit_blocker") or "")
+            if raw.get("provider_error_message_safe"):
+                attempt["provider_error_message_safe"] = str(raw.get("provider_error_message_safe") or "")[:220]
+            attempt_failures.append(attempt)
             if not first_fallback_reason:
                 first_fallback_reason = clean_reason
 
@@ -1138,35 +1227,40 @@ def run_provider_generation(
             }
             blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
             if attempt_index + 1 < len(candidate_adapters):
-                _record_failure(blocker)
+                _record_failure(blocker, exc_payload, submit_failure=True)
                 continue
-            _record_failure(blocker)
+            _record_failure(blocker, exc_payload, submit_failure=True)
             if allow_pending_result:
                 exc_payload["no_charge"] = True
             exc_payload["provider_attempts"] = list(attempt_failures)
+            exc_payload["provider_fallback_attempts"] = list(attempt_failures)
+            exc_payload["fallback_provider_attempts"] = list(attempt_failures)
+            exc_payload["provider_fallback_attempted"] = bool(len(attempt_failures) > 1)
+            exc_payload["provider_fallback_reason"] = first_fallback_reason
             return exc_payload
         submit_http_status = _submit_http_status(submit.raw)
         if not submit.ok:
             blocker = submit.error_code or "provider_submit_failed"
             if attempt_index + 1 < len(candidate_adapters):
-                _record_failure(blocker)
+                _record_failure(blocker, submit.raw, submit_failure=True)
                 continue
-            _record_failure(blocker)
-            final_blocker = blocker
-            if (
-                len(candidate_adapters) > 1
-                and attempt_failures
-                and all(str(item.get("reason") or "") == "provider_config_missing_at_submit" for item in attempt_failures)
-            ):
-                final_blocker = "all_video_providers_submit_config_missing"
+            _record_failure(blocker, submit.raw, submit_failure=True)
+            final_blocker = _final_submit_blocker()
             provider_task_ids = [submit.provider_task_id or submit.provider_video_id] if (submit.provider_task_id or submit.provider_video_id) else []
             payload = {
                 "ok": False,
                 **_attempt_base(),
                 "fallback_used": attempt_index > 0,
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "provider_fallback_attempted": bool(len(attempt_failures) > 1 or attempt_index > 0),
+                "provider_fallback_attempts": list(attempt_failures),
+                "provider_fallback_reason": first_fallback_reason,
+                "fallback_provider_attempts": list(attempt_failures),
+                "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
                 "provider_submit_called": True,
                 "provider_submit_http_status": submit_http_status,
+                "provider_submit_http_5xx": _is_submit_5xx(submit.raw, blocker, submit_http_status),
+                "provider_submit_retriable": bool((submit.raw or {}).get("provider_submit_retriable") or _is_submit_5xx(submit.raw, blocker, submit_http_status)),
                 "provider_task_id_saved": bool(provider_task_ids),
                 "submit_accepted": False,
                 "poll_allowed": False,
@@ -1195,14 +1289,19 @@ def run_provider_generation(
             if not provider_task_key:
                 blocker = "provider_task_id_missing"
                 if attempt_index + 1 < len(candidate_adapters):
-                    _record_failure(blocker)
+                    _record_failure(blocker, submit.raw, submit_failure=True)
                     continue
-                _record_failure(blocker)
+                _record_failure(blocker, submit.raw, submit_failure=True)
                 payload = {
                     "ok": False,
                     **_attempt_base(),
                     "fallback_used": attempt_index > 0,
                     "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                    "provider_fallback_attempted": bool(len(attempt_failures) > 1 or attempt_index > 0),
+                    "provider_fallback_attempts": list(attempt_failures),
+                    "provider_fallback_reason": first_fallback_reason,
+                    "fallback_provider_attempts": list(attempt_failures),
+                    "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
                     "provider_submit_called": True,
                     "provider_submit_http_status": submit_http_status,
                     "provider_task_id_saved": False,

@@ -186,6 +186,44 @@ def _safe_exception_message(value: Any, limit: int = 220) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
+def _safe_provider_error_message(payload: Any, limit: int = 220) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    candidates: list[Any] = []
+    for key in ("message", "error", "detail", "type", "reason"):
+        candidates.append(payload.get(key))
+    for nested_key in ("data", "error", "errors", "result"):
+        nested = payload.get(nested_key)
+        if isinstance(nested, dict):
+            for key in ("message", "error", "detail", "type", "reason"):
+                candidates.append(nested.get(key))
+    for value in candidates:
+        if value in (None, ""):
+            continue
+        if isinstance(value, (dict, list, tuple)):
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        else:
+            text = str(value)
+        text = _safe_exception_message(text, limit=limit)
+        if text:
+            return text
+    return ""
+
+
+def _submit_error_classification(status_code: int, error: Any = "") -> tuple[str, bool, bool]:
+    try:
+        status = int(status_code or 0)
+    except Exception:
+        status = 0
+    if status == 503:
+        return "provider_temporarily_unavailable", True, True
+    if 500 <= status <= 599:
+        return "provider_submit_http_5xx", True, True
+    if str(error or "") == "url_missing":
+        return "provider_submit_url_missing", False, False
+    return "provider_submit_http_error", False, False
+
+
 def _safe_url_host(value: Any) -> str:
     try:
         parsed = urllib.parse.urlparse(str(value or "").strip())
@@ -619,6 +657,7 @@ class GenericHttpVideoProvider:
             "provider_response_http_status": int(result.get("status_code") or 0),
             "submit_response_shape": result.get("response_shape") or _response_shape(body),
             "provider_response_body_shape": result.get("response_shape") or _response_shape(body),
+            "provider_error_message_safe": _safe_provider_error_message(body),
             "provider_task_id_present": bool(task_id or video_id),
             "provider_task_id_masked": (str(task_id or video_id)[:4] + "***") if (task_id or video_id) else "",
             "provider_status_raw": raw_status,
@@ -635,11 +674,19 @@ class GenericHttpVideoProvider:
             raw_debug["exception_class"] = result.get("exception_class")
             raw_debug["exception_message_safe"] = result.get("exception_message_safe") or ""
         if result.get("error") in {"invalid_json", "http_error_invalid_json"}:
+            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), result.get("error"))
+            if is_5xx:
+                raw_debug["provider_submit_blocker"] = blocker
+                raw_debug["provider_submit_http_5xx"] = True
+                raw_debug["provider_submit_retriable"] = True
+                return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status or "failed", error_code=blocker, raw=raw_debug)
             raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_json"
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status="failed", error_code="provider_submit_response_invalid_json", raw=raw_debug)
         if not result.get("ok"):
-            blocker = "provider_submit_url_missing" if result.get("error") == "url_missing" else "provider_submit_http_error"
+            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), result.get("error"))
             raw_debug["provider_submit_blocker"] = blocker
+            raw_debug["provider_submit_http_5xx"] = bool(is_5xx)
+            raw_debug["provider_submit_retriable"] = bool(retriable)
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status or "failed", error_code=blocker, raw=raw_debug)
         if not isinstance(body, dict):
             raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_shape"
