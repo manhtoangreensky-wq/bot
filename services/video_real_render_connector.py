@@ -78,6 +78,20 @@ RAW_PROMPT_FRAME_MARKERS = (
 
 
 LAST_RENDER_DIAGNOSTICS: dict[str, Any] = {}
+PROVIDER_PENDING_BLOCKERS = {"provider_in_progress", "provider_pending", "provider_status_unknown"}
+PROVIDER_PENDING_STATUS_MARKERS = {
+    "not_start",
+    "queued",
+    "running",
+    "processing",
+    "in_progress",
+    "pending",
+    "media_generation_status_pending",
+    "media_generation_status_in_progress",
+    "media_generation_status_processing",
+    "media_generation_status_running",
+}
+DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
 
 
 class RealVideoRenderError(RuntimeError):
@@ -92,6 +106,176 @@ def _record_render_diagnostics(payload: dict[str, Any] | None = None) -> dict[st
     global LAST_RENDER_DIAGNOSTICS
     LAST_RENDER_DIAGNOSTICS = dict(payload or {})
     return LAST_RENDER_DIAGNOSTICS
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, "", {}):
+        return []
+    return [value]
+
+
+def _first_nonempty(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = dict(payload or {})
+    candidates: list[dict[str, Any]] = []
+
+    def _add(item: Any) -> None:
+        if isinstance(item, dict) and item:
+            candidates.append(dict(item))
+
+    _add(data)
+    for item in _as_list(data.get("provider_attempts")):
+        _add(item)
+    for item in _as_list(data.get("provider_pending_attempts")):
+        _add(item)
+    for item in _as_list(data.get("provider_events")):
+        if isinstance(item, dict):
+            _add(item)
+            _add(item.get("debug"))
+
+    for item in candidates:
+        provider = _first_nonempty(
+            item.get("provider"),
+            item.get("selected_provider"),
+            item.get("provider_pending_provider"),
+            item.get("selected_provider_before_submit"),
+        )
+        task_id = _first_nonempty(
+            item.get("provider_pending_task_id"),
+            item.get("provider_task_id"),
+            item.get("task_id"),
+            *(_as_list(item.get("provider_task_ids"))[:1]),
+        )
+        video_id = _first_nonempty(
+            item.get("provider_pending_video_id"),
+            item.get("provider_video_id"),
+            item.get("video_id"),
+            *(_as_list(item.get("provider_video_ids"))[:1]),
+        )
+        accepted_task = bool(
+            item.get("submit_accepted")
+            or item.get("provider_task_id_saved")
+            or item.get("task_id_present")
+            or task_id
+            or video_id
+        )
+        status_text = " ".join(
+            str(value or "").strip().lower()
+            for value in (
+                item.get("normalized_provider_status"),
+                item.get("provider_status"),
+                item.get("status"),
+                item.get("provider_status_raw"),
+                item.get("poll_raw_status"),
+                item.get("nonterminal_provider_status"),
+            )
+            if str(value or "").strip()
+        )
+        blocker_text = " ".join(
+            str(value or "").strip().lower()
+            for value in (
+                item.get("blocker"),
+                item.get("provider_error"),
+                item.get("provider_poll_blocker"),
+                item.get("safe_error"),
+                item.get("provider_error_message_safe"),
+                item.get("exception_message_safe"),
+            )
+            if str(value or "").strip()
+        )
+        has_pending_status = any(marker in status_text for marker in PROVIDER_PENDING_STATUS_MARKERS)
+        has_pending_blocker = any(marker in blocker_text for marker in PROVIDER_PENDING_BLOCKERS) or "in_progress" in blocker_text
+        result_url_present = bool(item.get("provider_result_url_present") or item.get("result_url_present") or item.get("download_url_present"))
+        download_called = bool(item.get("download_called") or item.get("download_status") == "downloaded")
+        if accepted_task and not result_url_present and not download_called and (item.get("continue_polling") or has_pending_status or has_pending_blocker):
+            return {
+                "provider": provider or "shopaikey_video",
+                "task_id": task_id,
+                "video_id": video_id,
+                "status": status_text or "running",
+                "request_job_id": _first_nonempty(
+                    item.get("provider_pending_request_job_id"),
+                    item.get("provider_request_job_id"),
+                    item.get("request_job_id"),
+                ),
+            }
+    return {}
+
+
+def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None = None) -> dict[str, Any]:
+    pending = _pending_attempt_from_payload(data)
+    if not pending:
+        return data
+    provider = str(pending.get("provider") or data.get("selected_provider") or "shopaikey_video")
+    task_id = str(pending.get("task_id") or "")
+    video_id = str(pending.get("video_id") or "")
+    wait_max = max(60, _env_int("PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
+    data.update(
+        {
+            "ok": False,
+            "continue_polling": True,
+            "provider_pending_deferred": True,
+            "provider_error": "provider_in_progress",
+            "blocker": "provider_in_progress",
+            "provider_status": "running",
+            "normalized_provider_status": "running",
+            "nonterminal_provider_status": str(pending.get("status") or "running"),
+            "selected_provider": provider,
+            "initial_selected_provider": str(data.get("initial_selected_provider") or provider),
+            "selected_provider_before_submit": provider,
+            "selected_provider_after_fallback": "",
+            "provider_attempted": True,
+            "provider_router_called": True,
+            "provider_submit_called": True,
+            "submit_accepted": True,
+            "provider_task_id_saved": bool(task_id or video_id or data.get("provider_task_id_saved")),
+            "provider_poll_called": True,
+            "poll_allowed": True,
+            "provider_result_url_present": False,
+            "result_url_present": False,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "provider_fallback_attempted": False,
+            "provider_fallback_reason": "",
+            "fallback_allowed": False,
+            "fallback_blocked_reason": "primary_provider_in_progress",
+            "primary_provider_continue_polling": True,
+            "primary_provider_task_alive": True,
+            "primary_provider_task_id_present": bool(task_id or video_id or data.get("provider_task_ids") or data.get("provider_video_ids")),
+            "key4u_submit_suppressed": True,
+            "next_poll_scheduled": True,
+            "provider_wait_elapsed_seconds": int(data.get("provider_wait_elapsed_seconds") or 0),
+            "provider_wait_max_seconds": int(data.get("provider_wait_max_seconds") or wait_max),
+            "terminal_state": "final_rendering",
+            "progress_message": "provider_in_progress",
+            "public_message": "TOAN AAS đang dựng video. Anh/chị vui lòng kiểm tra lại sau.",
+            "no_charge": True,
+        }
+    )
+    if task_id:
+        data["provider_pending_task_id"] = task_id
+        ids = [str(item) for item in _as_list(data.get("provider_task_ids")) if str(item or "").strip()]
+        data["provider_task_ids"] = ids or [task_id]
+    if video_id:
+        data["provider_pending_video_id"] = video_id
+        ids = [str(item) for item in _as_list(data.get("provider_video_ids")) if str(item or "").strip()]
+        data["provider_video_ids"] = ids or [video_id]
+    request_job_id = str(pending.get("request_job_id") or "")
+    if request_job_id:
+        data["provider_pending_request_job_id"] = request_job_id
+        data["provider_request_job_id"] = request_job_id
+        data["request_job_id"] = request_job_id
+    data["provider_pending_provider"] = provider
+    return data
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -1365,6 +1549,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["logo_requested"] = bool(addon.get("logo_enabled"))
         if bgm_audio_path:
             data["bgm_audio_path"] = bgm_audio_path
+        data = _apply_pending_provider_dominance(data, job=job)
         return _record_render_diagnostics(data)
 
     def _raise_render_error(reason: str, payload: dict[str, Any] | None = None) -> None:
@@ -1440,10 +1625,14 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     elif readiness.get("ok") or not is_product_video:
         provider_attempted = True
         try:
+            try:
+                real_scene_renderer = build_real_scene_renderer(job, provider_events, provider_runtime_debug)
+            except TypeError:
+                real_scene_renderer = build_real_scene_renderer(job, provider_events)
             result = _run_multiscene_render(
                 job,
                 workspace,
-                render_video_func=build_real_scene_renderer(job, provider_events),
+                render_video_func=real_scene_renderer,
                 bgm_audio_path=bgm_audio_path,
             )
         except RealVideoRenderError as exc:
@@ -1625,5 +1814,6 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["final_classification"] = result["visual_classification"]
     if result["visual_classification"] != FINAL_AI_VIDEO:
         result["no_charge"] = True
+    result = _apply_pending_provider_dominance(result, job=job)
     _record_render_diagnostics(result)
     return result

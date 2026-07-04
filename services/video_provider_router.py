@@ -45,6 +45,9 @@ VIDEO_CREDIT_BLOCKED_STATUSES = {
     "health_bad",
     "unhealthy",
 }
+PROVIDER_NONTERMINAL_STATUSES = {"not_start", "queued", "running", "processing", "in_progress", "pending"}
+PROVIDER_PENDING_BLOCKERS = {"provider_in_progress", "provider_pending", "provider_status_unknown"}
+DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
 
 
 def _env_flag(env: dict[str, str], name: str, default: str = "0") -> bool:
@@ -1334,6 +1337,13 @@ def run_provider_generation(
                 normalized_status = "running"
             result_url_present = bool(poll_result.result_url or poll_result.file_url)
             fallback_blocked_reason = "primary_provider_in_progress" if attempt_index == 0 else "selected_provider_in_progress"
+            wait_max = max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
+            wait_started_raw = (request.metadata or {}).get("provider_wait_started_at") or (request.metadata or {}).get("provider_wait_started_epoch")
+            try:
+                wait_started = float(wait_started_raw or 0)
+            except Exception:
+                wait_started = 0.0
+            wait_elapsed = max(0, int(time.time() - wait_started)) if wait_started > 0 else 0
             payload = {
                 "ok": False,
                 **_attempt_base(),
@@ -1368,13 +1378,21 @@ def run_provider_generation(
                 "provider_pending_task_id": provider_task_key if provider_task_key == str(submit.provider_task_id or "").strip() else str(submit.provider_task_id or "").strip(),
                 "provider_pending_video_id": str(submit.provider_video_id or poll_result.provider_video_id or "").strip(),
                 "provider_pending_request_job_id": str(request.job_id or ""),
+                "provider_request_job_id": str(request.job_id or ""),
+                "request_job_id": str(request.job_id or ""),
                 "provider_pending_attempts": _copy_attempt_traces(),
                 "provider_pending_deferred": True,
                 "fallback_allowed": False,
                 "fallback_blocked_reason": fallback_blocked_reason,
                 "primary_provider_continue_polling": True,
                 "primary_provider_task_id_present": bool(provider_task_ids),
+                "primary_provider_task_alive": attempt_index == 0,
+                "key4u_submit_suppressed": attempt_index == 0,
                 "next_poll_scheduled": True,
+                "provider_wait_elapsed_seconds": wait_elapsed,
+                "provider_wait_max_seconds": wait_max,
+                "terminal_state": "final_rendering",
+                "progress_message": "provider_in_progress",
                 "provider_readiness": status,
                 "no_charge": True,
             }
@@ -1551,6 +1569,27 @@ def run_provider_generation(
                         "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                     }
                     blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
+                    safe_exc_text = str(
+                        exc_payload.get("provider_error_message_safe")
+                        or exc_payload.get("exception_message_safe")
+                        or exc_payload.get("safe_error")
+                        or ""
+                    ).lower()
+                    if (
+                        allow_pending_result
+                        and (submit.provider_task_id or submit.provider_video_id)
+                        and (blocker in PROVIDER_PENDING_BLOCKERS or "in_progress" in safe_exc_text or "pending" in safe_exc_text)
+                    ):
+                        pending_poll = VideoPollResult(
+                            ok=True,
+                            status="running",
+                            provider_name=current_adapter.provider_name,
+                            provider_task_id=submit.provider_task_id,
+                            provider_video_id=submit.provider_video_id,
+                            raw_status="in_progress",
+                            raw=exc_payload,
+                        )
+                        return _provider_pending_payload(submit, pending_poll, poll_blocker=blocker)
                     if attempt_index + 1 < len(candidate_adapters):
                         _record_failure(blocker, exc_payload, submit_failure=False)
                         break
@@ -1570,7 +1609,7 @@ def run_provider_generation(
                 if (
                     allow_pending_result
                     and (submit.provider_task_id or submit.provider_video_id)
-                    and poll_result.status in {"queued", "running"}
+                    and poll_result.status in PROVIDER_NONTERMINAL_STATUSES
                 ):
                     return _provider_pending_payload(
                         submit,
@@ -1640,7 +1679,7 @@ def run_provider_generation(
                     payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             else:
-                if allow_pending_result and (submit.provider_task_id or submit.provider_video_id) and poll_result.status in {"queued", "running"}:
+                if allow_pending_result and (submit.provider_task_id or submit.provider_video_id) and poll_result.status in PROVIDER_NONTERMINAL_STATUSES:
                     provider_task_ids = [submit.provider_task_id or submit.provider_video_id]
                     payload = {
                         "ok": False,
@@ -1662,6 +1701,22 @@ def run_provider_generation(
                         "provider_status": poll_result.status,
                         "provider_task_ids": provider_task_ids,
                         "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
+                        "provider_pending_provider": current_adapter.provider_name,
+                        "provider_pending_task_id": str(submit.provider_task_id or "").strip(),
+                        "provider_pending_video_id": str(submit.provider_video_id or "").strip(),
+                        "provider_pending_request_job_id": str(request.job_id or ""),
+                        "provider_request_job_id": str(request.job_id or ""),
+                        "request_job_id": str(request.job_id or ""),
+                        "provider_pending_deferred": True,
+                        "fallback_allowed": False,
+                        "fallback_blocked_reason": "primary_provider_in_progress" if attempt_index == 0 else "selected_provider_in_progress",
+                        "primary_provider_continue_polling": True,
+                        "primary_provider_task_alive": attempt_index == 0,
+                        "primary_provider_task_id_present": True,
+                        "key4u_submit_suppressed": attempt_index == 0,
+                        "next_poll_scheduled": True,
+                        "provider_wait_elapsed_seconds": 0,
+                        "provider_wait_max_seconds": max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS)),
                         "provider_readiness": status,
                         "no_charge": True,
                     }
@@ -1699,7 +1754,7 @@ def run_provider_generation(
         if (
             allow_pending_result
             and (submit.provider_task_id or submit.provider_video_id)
-            and poll_result.status in {"queued", "running"}
+            and poll_result.status in PROVIDER_NONTERMINAL_STATUSES
         ):
             return _provider_pending_payload(submit, poll_result, poll_blocker="provider_in_progress")
         if not (poll_result.result_url or poll_result.file_url):

@@ -830,7 +830,8 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             or ""
         ).strip()
         pending_request_job_id = str(
-            persisted_result.get("provider_request_job_id")
+            persisted_result.get("provider_pending_request_job_id")
+            or persisted_result.get("provider_request_job_id")
             or persisted_result.get("request_job_id")
             or ""
         ).strip()
