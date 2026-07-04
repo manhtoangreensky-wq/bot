@@ -1,6 +1,22 @@
+import os
 import subprocess
 
+import pytest
+
 import bot
+
+
+def _current_branch_name():
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
+
+
+def _is_subdub_m5c_scope():
+    branch = _current_branch_name().lower()
+    return "p0-19m5c" in branch or "mode-route-female-voice" in branch
 
 
 def test_subtitle_only_entrypoint_resolves_subtitle_only_mode():
@@ -108,6 +124,9 @@ def test_public_labels_short_no_debug_terms():
 
 
 def test_no_product_video_music_payos_changes():
+    if not _is_subdub_m5c_scope():
+        pytest.skip("SubDub M5C scope guard is not active for this branch")
+
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True).splitlines()
     allowed = {
         "bot.py",
