@@ -774,11 +774,35 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         or job.get("output_file_id")
         or job.get("music_output_file_id")
     )
+    music_artifact_waiting = bool(
+        canonical in {"music_bg", "music_song"}
+        and not bool(job.get("terminal_after_wait_exhausted"))
+        and (
+            job.get("artifact_waiting")
+            or job.get("music_artifact_waiting")
+            or str(job.get("final_audio_download_status") or "").strip().upper() == "PENDING"
+            or str(job.get("artifact_materialization_status") or "").strip().lower() in {"waiting_for_provider_audio", "waiting"}
+            or str(job.get("materialization_status") or "").strip().lower() in {"waiting_for_provider_audio", "waiting"}
+            or str(job.get("lifecycle_status") or "").strip().lower() == "artifact_waiting"
+            or any(
+                str(job.get(key) or "").strip().lower() == "artifact_not_ready"
+                for key in (
+                    "primary_blocker",
+                    "artifact_blocker",
+                    "auto_delivery_blocker",
+                    "artifact_download_error_category",
+                    "download_error_category",
+                    "last_download_error_category",
+                    "error_category",
+                )
+            )
+        )
+    )
     terminal = ""
     explicit_terminal = str(job.get("terminal_state") or job.get("music_terminal_state") or "").strip().lower()
-    if explicit_terminal in TERMINAL_STATES:
+    if explicit_terminal in TERMINAL_STATES and not music_artifact_waiting:
         terminal = explicit_terminal
-    elif canonical in {"music_bg", "music_song"} and status in {"completed", "complete", "success", "succeeded"} and output_bytes <= 0 and not has_delivery:
+    elif canonical in {"music_bg", "music_song"} and status in {"completed", "complete", "success", "succeeded"} and output_bytes <= 0 and not has_delivery and not music_artifact_waiting:
         terminal = "failed_no_charge"
         status = "failed"
         progress = max(85, int(progress or 85))
@@ -831,6 +855,10 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             if lifecycle.get("provider_completed") and not lifecycle.get("audio_validated"):
                 status_text = "Chưa tải được file nhạc. Hệ thống chưa trừ Xu."
                 progress = max(85, int(progress or 85))
+        elif music_artifact_waiting:
+            stage_key = "validating_audio"
+            progress = max(80, min(90, int(progress if progress is not None else 85)))
+            status_text = "Đang kiểm tra file nhạc"
         elif lifecycle.get("audio_validated"):
             stage_key = "delivering"
             progress = max(90, min(95, int(progress if progress is not None else 95)))

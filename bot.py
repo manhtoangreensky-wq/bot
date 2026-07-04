@@ -7231,6 +7231,8 @@ def music_job_scheduler_artifact_recoverable(job: dict | None = None) -> bool:
 
 def music_job_terminal_failed(job: dict | None = None) -> bool:
     current = dict(job or {})
+    if music_job_artifact_materialization_waiting(current):
+        return False
     if music_job_scheduler_artifact_recoverable(current):
         return False
     status = str(current.get("status") or current.get("music_status") or "").strip().lower()
@@ -7748,6 +7750,31 @@ def music_artifact_materialization_pending(artifact: dict | None = None) -> bool
         or music_key4u_suno_wav_pending_detail(current.get("download_detail") or "")
     )
 
+def music_job_artifact_materialization_waiting(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    if not current or bool(current.get("terminal_after_wait_exhausted")):
+        return False
+    blocker_keys = (
+        "primary_blocker",
+        "artifact_blocker",
+        "auto_delivery_blocker",
+        "artifact_download_error_category",
+        "download_error_category",
+        "last_download_error_category",
+        "error_category",
+    )
+    return bool(
+        current.get("artifact_waiting")
+        or current.get("music_artifact_waiting")
+        or str(current.get("final_audio_download_status") or "").strip().upper() == "PENDING"
+        or str(current.get("artifact_materialization_status") or "").strip().lower() in {"waiting_for_provider_audio", "waiting"}
+        or str(current.get("materialization_status") or "").strip().lower() in {"waiting_for_provider_audio", "waiting"}
+        or str(current.get("lifecycle_status") or "").strip().lower() == "artifact_waiting"
+        or any(str(current.get(key) or "").strip().lower() == MUSIC_ARTIFACT_NOT_READY_BLOCKER for key in blocker_keys)
+        or bool(current.get("wav_1102_treated_as_pending"))
+        or music_key4u_suno_wav_pending_detail(current.get("download_detail") or current.get("last_artifact_error") or "")
+    )
+
 def music_artifact_wait_max_attempts() -> int:
     try:
         return max(1, int(MUSIC_ARTIFACT_WAIT_MAX_ATTEMPTS or 8))
@@ -7772,11 +7799,21 @@ def mark_music_artifact_materialization_waiting(
     max_attempts = music_artifact_wait_max_attempts()
     raw_progress = str(current.get("progress_percent") or current.get("percent") or "0").strip().rstrip("%")
     progress = int(raw_progress) if raw_progress.isdigit() else 0
-    progress = max(65, min(90, progress or 65))
+    provider_done = bool(
+        current.get("provider_completed")
+        or current.get("music_provider_completed")
+        or str(current.get("provider_status") or "").strip().lower() in {"completed", "complete", "success", "succeeded"}
+        or details.get("selected_artifact_url")
+        or music_job_result_url(current)
+    )
+    progress_floor = 85 if provider_done else 65
+    progress = max(progress_floor, min(90, progress or progress_floor))
     current.update({
         "status": "processing",
         "terminal_state": "",
         "music_terminal_state": "",
+        "stopped_reason": "",
+        "stop_reason": "",
         "artifact_ready": False,
         "music_artifact_ready": False,
         "artifact_validated": False,
@@ -7792,9 +7829,15 @@ def mark_music_artifact_materialization_waiting(
         "artifact_wait_last_at": now,
         "next_artifact_retry_at": next_retry_at,
         "artifact_wait_source": str(source or "recovery"),
+        "artifact_wait_scheduler_registered": True,
+        "artifact_wait_terminal_exhausted": False,
         "artifact_materialization_status": "waiting_for_provider_audio",
         "materialization_status": "waiting",
         "lifecycle_status": "artifact_waiting",
+        "scheduler_status": str(current.get("scheduler_status") or "waiting"),
+        "scheduler_mode": str(current.get("scheduler_mode") or "music_auto_delivery"),
+        "task_started": bool(current.get("task_started")) or True,
+        "task_alive": bool(current.get("task_alive")) or True,
         "primary_blocker": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
         "artifact_blocker": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
         "auto_delivery_blocker": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
@@ -7844,6 +7887,13 @@ def mark_music_artifact_materialization_waiting(
         "candidate_content_type": str(details.get("candidate_content_type") or current.get("candidate_content_type") or ""),
         "candidate_bytes": int(details.get("candidate_bytes") or current.get("candidate_bytes") or 0),
         "candidate_validation_passed": False,
+        "provider_auth_bypassed_for_direct_cdn": bool(details.get("provider_auth_bypassed_for_direct_cdn") or current.get("provider_auth_bypassed_for_direct_cdn")),
+        "provider_auth_bypassed_for_direct_suno_cdn": bool(details.get("provider_auth_bypassed_for_direct_suno_cdn") or current.get("provider_auth_bypassed_for_direct_suno_cdn")),
+        "direct_cdn_download_attempted": bool(details.get("direct_cdn_download_attempted") or current.get("direct_cdn_download_attempted")),
+        "direct_cdn_download_http_status": int(details.get("direct_cdn_download_http_status") or current.get("direct_cdn_download_http_status") or 0),
+        "direct_cdn_download_content_type": str(details.get("direct_cdn_download_content_type") or current.get("direct_cdn_download_content_type") or ""),
+        "direct_cdn_download_bytes": int(details.get("direct_cdn_download_bytes") or current.get("direct_cdn_download_bytes") or 0),
+        "direct_cdn_validation_passed": bool(details.get("direct_cdn_validation_passed") or current.get("direct_cdn_validation_passed")),
         "candidate_order": int(details.get("candidate_order") or current.get("candidate_order") or 0),
         "charge_status": str(current.get("charge_status") or "pending_no_charge"),
         "recovery_action": "artifact_waiting_retry_later",
@@ -7989,6 +8039,13 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "candidate_content_type": str(artifact.get("candidate_content_type") or current.get("candidate_content_type") or ""),
             "candidate_bytes": int(artifact.get("candidate_bytes") or current.get("candidate_bytes") or 0),
             "candidate_validation_passed": bool(artifact.get("candidate_validation_passed") or current.get("candidate_validation_passed")),
+            "provider_auth_bypassed_for_direct_cdn": bool(artifact.get("provider_auth_bypassed_for_direct_cdn") or current.get("provider_auth_bypassed_for_direct_cdn")),
+            "provider_auth_bypassed_for_direct_suno_cdn": bool(artifact.get("provider_auth_bypassed_for_direct_suno_cdn") or current.get("provider_auth_bypassed_for_direct_suno_cdn")),
+            "direct_cdn_download_attempted": bool(artifact.get("direct_cdn_download_attempted") or current.get("direct_cdn_download_attempted")),
+            "direct_cdn_download_http_status": int(artifact.get("direct_cdn_download_http_status") or current.get("direct_cdn_download_http_status") or 0),
+            "direct_cdn_download_content_type": str(artifact.get("direct_cdn_download_content_type") or current.get("direct_cdn_download_content_type") or ""),
+            "direct_cdn_download_bytes": int(artifact.get("direct_cdn_download_bytes") or current.get("direct_cdn_download_bytes") or 0),
+            "direct_cdn_validation_passed": bool(artifact.get("direct_cdn_validation_passed") or current.get("direct_cdn_validation_passed")),
             "candidate_order": int(artifact.get("candidate_order") or current.get("candidate_order") or 0),
             "selected_artifact_field_path": str(artifact.get("selected_artifact_field_path") or current.get("selected_artifact_field_path") or ""),
             "selected_artifact_url_label": str(artifact.get("selected_artifact_url_label") or current.get("selected_artifact_url_label") or music_result_url_debug_label(artifact.get("selected_artifact_url") or music_job_result_url(current) or "")),
@@ -8184,6 +8241,13 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "candidate_content_type": str(artifact.get("candidate_content_type") or current.get("candidate_content_type") or ""),
         "candidate_bytes": int(artifact.get("candidate_bytes") or current.get("candidate_bytes") or len(payload) or 0),
         "candidate_validation_passed": bool(artifact.get("candidate_validation_passed") or current.get("candidate_validation_passed") or True),
+        "provider_auth_bypassed_for_direct_cdn": bool(artifact.get("provider_auth_bypassed_for_direct_cdn") or current.get("provider_auth_bypassed_for_direct_cdn")),
+        "provider_auth_bypassed_for_direct_suno_cdn": bool(artifact.get("provider_auth_bypassed_for_direct_suno_cdn") or current.get("provider_auth_bypassed_for_direct_suno_cdn")),
+        "direct_cdn_download_attempted": bool(artifact.get("direct_cdn_download_attempted") or current.get("direct_cdn_download_attempted")),
+        "direct_cdn_download_http_status": int(artifact.get("direct_cdn_download_http_status") or current.get("direct_cdn_download_http_status") or 0),
+        "direct_cdn_download_content_type": str(artifact.get("direct_cdn_download_content_type") or current.get("direct_cdn_download_content_type") or ""),
+        "direct_cdn_download_bytes": int(artifact.get("direct_cdn_download_bytes") or current.get("direct_cdn_download_bytes") or 0),
+        "direct_cdn_validation_passed": bool(artifact.get("direct_cdn_validation_passed") or current.get("direct_cdn_validation_passed")),
         "candidate_order": int(artifact.get("candidate_order") or current.get("candidate_order") or 0),
         "artifact_waiting": False,
         "music_artifact_waiting": False,
@@ -100855,6 +100919,19 @@ def music_confirm_route_audit_text() -> str:
     lines.append("• panel_created_by: <code>handle_music_product_confirm</code>")
     return "\n".join(lines)
 
+def music_product_text_looks_like_lyrics(text: str = "") -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    lowered = raw.lower()
+    section_pattern = r"(?im)^\s*[\[\(（]?\s*(verse|chorus|hook|bridge|intro|outro|pre[- ]?chorus|điệp khúc|diep khuc|đoạn|doan|lời|loi)\s*[\]\)）:]?"
+    if re.search(section_pattern, raw):
+        return True
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) >= 4 and not any(token in lowered for token in ("genre:", "style:", "mood:", "thể loại:", "phong cách:", "cảm xúc:")):
+        return True
+    return False
+
 def music_product_parse_details(text: str = "", mode: str = "background", tier: str = "", vocal_mode: str = "auto") -> dict:
     raw_text = str(text or "").strip()
     parsed: dict[str, str] = {}
@@ -100905,7 +100982,7 @@ def music_product_parse_details(text: str = "", mode: str = "background", tier: 
     if not parsed:
         if mode_key == "song":
             parsed["theme"] = raw_text
-            parsed["lyrics"] = raw_text if "[" in raw_text and "]" in raw_text else ""
+            parsed["lyrics"] = raw_text if music_product_text_looks_like_lyrics(raw_text) else ""
         else:
             parsed["description"] = raw_text
     duration_default = MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode_key == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS
@@ -103641,6 +103718,63 @@ async def music_download_artifact_candidate(
         return {"ok": False, "status": "MISSING_URL", "download_strategy_used": "", "provider_auth_header_used": False, "provider_proxy_attempted": False, "provider_download_endpoint_configured": provider_download_endpoint_configured, "provider_download_endpoint_attempted": False}
 
     is_key4u_bare_suno_cdn = bool(provider_name == "key4u_suno" and music_url_is_bare_suno_cdn(url))
+    force_direct_suno_cdn = bool(provider_name == "key4u_suno" and music_artifact_candidate_is_direct_suno_audio(item))
+
+    if force_direct_suno_cdn:
+        payload, detail, status, content_type, downloaded, category = await run_strategy("direct_cdn")
+        common = {
+            "download_detail": detail,
+            "download_http_status": int(status or 0),
+            "download_content_type": content_type,
+            "downloaded_bytes": int(downloaded or len(payload) or 0),
+            "download_strategy_used": "direct_cdn",
+            "provider_auth_header_used": False,
+            "provider_proxy_attempted": False,
+            "provider_download_endpoint_configured": provider_download_endpoint_configured,
+            "provider_download_endpoint_attempted": False,
+            "provider_download_http_status": 0,
+            "provider_download_content_type": "",
+            "provider_download_bytes": 0,
+            "provider_auth_bypassed_for_direct_cdn": True,
+            "provider_auth_bypassed_for_direct_suno_cdn": True,
+            "direct_cdn_download_attempted": True,
+            "direct_cdn_download_http_status": int(status or 0),
+            "direct_cdn_download_content_type": content_type,
+            "direct_cdn_download_bytes": int(downloaded or len(payload) or 0),
+            "candidate_attempted": True,
+            "candidate_field_path": str(item.get("field_path") or item.get("source") or ""),
+            "candidate_host": urlparse(url).netloc,
+            "candidate_bare_url_allowed_for_validation": True,
+            "candidate_http_status": int(status or 0),
+            "candidate_content_type": content_type,
+            "candidate_bytes": int(downloaded or len(payload) or 0),
+            "download_attempts": attempts,
+        }
+        if payload:
+            return {
+                "ok": True,
+                "audio_bytes": payload,
+                "download_error_category": "",
+                "candidate_validation_passed": True,
+                "direct_cdn_validation_passed": True,
+                "final_audio_download_status": "PASS",
+                "final_audio_content_type": content_type,
+                "final_audio_bytes": len(payload),
+                **common,
+            }
+        return {
+            "ok": False,
+            "status": "ARTIFACT_DOWNLOAD_FAILED",
+            "audio_bytes": b"",
+            "download_error_category": category or "download_failed",
+            "candidate_validation_passed": False,
+            "direct_cdn_validation_passed": False,
+            "final_audio_download_status": "FAIL",
+            "final_audio_content_type": content_type,
+            "final_audio_bytes": 0,
+            "setup_required": "",
+            **common,
+        }
 
     if provider_name == "key4u_suno" and item.get("provider_download_endpoint_candidate"):
         proxy_payload, proxy_detail, proxy_status = await music_provider_proxy_download_audio(
@@ -104078,6 +104212,26 @@ def music_artifact_candidate_is_preview(candidate: dict | None = None) -> bool:
     text = " ".join(str(item.get(key) or "") for key in ("role", "kind", "type", "source", "status", "name", "local_path", "url")).lower()
     return any(token in text for token in ("preview", "partial", "temp", "tmp", "sample"))
 
+def music_artifact_candidate_is_direct_suno_audio(candidate: dict | None = None) -> bool:
+    item = dict(candidate or {})
+    if item.get("provider_download_endpoint_candidate"):
+        return False
+    url = str(item.get("url") or item.get("artifact_url") or item.get("output_url") or item.get("download_url") or "").strip()
+    host, extension = music_url_host_extension(url)
+    path = str(item.get("field_path") or item.get("source") or "").lower().replace(".", "_")
+    if not (host == "suno.ai" or host.endswith(".suno.ai")):
+        return False
+    if extension not in SUNO_AUDIO_EXTENSIONS:
+        return False
+    return bool(
+        music_url_is_bare_suno_cdn(url)
+        or "cld2audiourl" in path
+        or "music_output_url" in path
+        or "output_url" in path
+        or "result_url" in path
+        or "audio_url" in path
+    )
+
 def music_artifact_candidate_priority(candidate: dict | None = None) -> int:
     item = dict(candidate or {})
     if music_artifact_candidate_is_preview(item):
@@ -104088,6 +104242,10 @@ def music_artifact_candidate_priority(candidate: dict | None = None) -> int:
         explicit_rank = 0
     text = " ".join(str(item.get(key) or "") for key in ("role", "kind", "type", "source", "status")).lower()
     score = explicit_rank
+    if music_artifact_candidate_is_direct_suno_audio(item):
+        score += 2400
+    if item.get("provider_download_endpoint_candidate"):
+        score -= 250
     if any(token in text for token in ("final", "master", "full")):
         score += 1000
     if any(token in text for token in ("completed", "complete", "success", "downloaded_validated")):
@@ -104125,6 +104283,12 @@ async def select_music_delivery_artifact(
         }
     last_failure: dict = {}
     rejected_reasons: list[str] = []
+    direct_cdn_any_attempted = False
+    direct_cdn_any_validation_passed = False
+    direct_cdn_last_http_status = 0
+    direct_cdn_last_content_type = ""
+    direct_cdn_last_bytes = 0
+    provider_auth_any_bypassed_for_direct_cdn = False
     for candidate_order, selected in enumerate(final_candidates, start=1):
         payload = music_artifact_candidate_bytes(selected.get("audio_bytes") or selected.get("bytes"))
         local_path = str(selected.get("local_path") or selected.get("path") or "").strip()
@@ -104185,6 +104349,13 @@ async def select_music_delivery_artifact(
         candidate_bytes = 0
         candidate_validation_passed = False
         setup_required = ""
+        provider_auth_bypassed_for_direct_cdn = False
+        provider_auth_bypassed_for_direct_suno_cdn = False
+        direct_cdn_download_attempted = False
+        direct_cdn_download_http_status = 0
+        direct_cdn_download_content_type = ""
+        direct_cdn_download_bytes = 0
+        direct_cdn_validation_passed = False
         if not payload and url:
             downloaded = await music_download_artifact_candidate(selected, {**dict(job or {}), **dict(result or {})}, timeout_seconds=60.0)
             payload = bytes(downloaded.get("audio_bytes") or b"")
@@ -104238,6 +104409,22 @@ async def select_music_delivery_artifact(
             candidate_bytes = int(downloaded.get("candidate_bytes") or 0)
             candidate_validation_passed = bool(downloaded.get("candidate_validation_passed"))
             setup_required = str(downloaded.get("setup_required") or selected.get("setup_required") or "")
+            provider_auth_bypassed_for_direct_cdn = bool(downloaded.get("provider_auth_bypassed_for_direct_cdn"))
+            provider_auth_bypassed_for_direct_suno_cdn = bool(downloaded.get("provider_auth_bypassed_for_direct_suno_cdn"))
+            direct_cdn_download_attempted = bool(downloaded.get("direct_cdn_download_attempted"))
+            direct_cdn_download_http_status = int(downloaded.get("direct_cdn_download_http_status") or 0)
+            direct_cdn_download_content_type = str(downloaded.get("direct_cdn_download_content_type") or "")
+            direct_cdn_download_bytes = int(downloaded.get("direct_cdn_download_bytes") or 0)
+            direct_cdn_validation_passed = bool(downloaded.get("direct_cdn_validation_passed"))
+            if direct_cdn_download_attempted:
+                direct_cdn_any_attempted = True
+                direct_cdn_last_http_status = direct_cdn_download_http_status
+                direct_cdn_last_content_type = direct_cdn_download_content_type
+                direct_cdn_last_bytes = direct_cdn_download_bytes
+            if direct_cdn_validation_passed:
+                direct_cdn_any_validation_passed = True
+            if provider_auth_bypassed_for_direct_cdn or provider_auth_bypassed_for_direct_suno_cdn:
+                provider_auth_any_bypassed_for_direct_cdn = True
         if not payload:
             if url:
                 if download_error_category in {"", "download_failed"} and int(download_status or 0) and int(download_status or 0) < 400 and int(downloaded_bytes or 0) <= 0:
@@ -104303,6 +104490,13 @@ async def select_music_delivery_artifact(
                     "candidate_content_type": candidate_content_type,
                     "candidate_bytes": candidate_bytes,
                     "candidate_validation_passed": candidate_validation_passed,
+                    "provider_auth_bypassed_for_direct_cdn": provider_auth_bypassed_for_direct_cdn or provider_auth_any_bypassed_for_direct_cdn,
+                    "provider_auth_bypassed_for_direct_suno_cdn": provider_auth_bypassed_for_direct_suno_cdn or provider_auth_any_bypassed_for_direct_cdn,
+                    "direct_cdn_download_attempted": direct_cdn_download_attempted or direct_cdn_any_attempted,
+                    "direct_cdn_download_http_status": direct_cdn_download_http_status or direct_cdn_last_http_status,
+                    "direct_cdn_download_content_type": direct_cdn_download_content_type or direct_cdn_last_content_type,
+                    "direct_cdn_download_bytes": direct_cdn_download_bytes or direct_cdn_last_bytes,
+                    "direct_cdn_validation_passed": direct_cdn_validation_passed or direct_cdn_any_validation_passed,
                     "setup_required": setup_required,
                     "selected_artifact_selected_reason": str(selected.get("selected_reason") or ""),
                     "candidate_order": candidate_order,
@@ -104311,6 +104505,11 @@ async def select_music_delivery_artifact(
                     "rejected_candidates": rejected_reasons[-8:],
                 }
                 rejected_reasons.append(f"{selected.get('field_path') or selected.get('source') or 'url'}:{download_error_category or 'download_failed'}")
+                if (
+                    download_error_category in {"result_url_expired", "result_url_signature_lost_or_invalid"}
+                    and bool(music_url_query_metadata(url).get("query_present"))
+                ):
+                    return last_failure
                 continue
             last_failure = {
                 "ok": False,
@@ -104444,6 +104643,13 @@ async def select_music_delivery_artifact(
             "candidate_content_type": candidate_content_type,
             "candidate_bytes": candidate_bytes,
             "candidate_validation_passed": True,
+            "provider_auth_bypassed_for_direct_cdn": provider_auth_bypassed_for_direct_cdn or provider_auth_any_bypassed_for_direct_cdn,
+            "provider_auth_bypassed_for_direct_suno_cdn": provider_auth_bypassed_for_direct_suno_cdn or provider_auth_any_bypassed_for_direct_cdn,
+            "direct_cdn_download_attempted": direct_cdn_download_attempted or direct_cdn_any_attempted,
+            "direct_cdn_download_http_status": direct_cdn_download_http_status or direct_cdn_last_http_status,
+            "direct_cdn_download_content_type": direct_cdn_download_content_type or direct_cdn_last_content_type,
+            "direct_cdn_download_bytes": direct_cdn_download_bytes or direct_cdn_last_bytes,
+            "direct_cdn_validation_passed": direct_cdn_validation_passed or direct_cdn_any_validation_passed,
             "setup_required": setup_required,
             "selected_artifact_selected_reason": str(selected.get("selected_reason") or ""),
             "music_output_url_reject_reason": str(selected.get("reject_reason") or ""),
@@ -112264,7 +112470,28 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             )
             return True
         parsed = music_product_parse_details(text, mode, tier, vocal_mode)
+        partial_details = dict(result.get("music_product_partial_details") or {}) if isinstance(result.get("music_product_partial_details"), dict) else {}
+        if mode == "song" and str(parsed.get("lyrics") or "").strip() and partial_details:
+            lyrics_text = str(parsed.get("lyrics") or "").strip()
+            merged = {**partial_details, **parsed}
+            for key in ("title", "theme", "description", "genre", "style", "mood", "language", "duration"):
+                previous_value = str(partial_details.get(key) or "").strip()
+                parsed_value = str(parsed.get(key) or "").strip()
+                if previous_value and (not parsed_value or parsed_value == lyrics_text):
+                    merged[key] = previous_value
+            parsed = merged
         if mode == "song" and not str(parsed.get("lyrics") or "").strip():
+            result.update({
+                **parsed,
+                "music_product_partial_details": parsed,
+                "music_product_partial_text": text,
+                "music_product_pending_lyrics": True,
+                "music_product_mode": mode,
+                "music_product_tier": tier,
+                "vocal_mode": vocal_mode,
+                "song_vocal": vocal_mode,
+            })
+            save_music_guided_result(uid, result)
             set_music_guided_pending(uid, action, product_context=ctx, previous_screen=str(state.get("previous_screen") or ""), return_to=str(state.get("return_to") or "music_product_back_details"))
             await update.message.reply_text(
                 "⚠️ Anh/chị gửi thêm phần <b>Lời hát</b> để TOAN AAS tạo bài hát có lời. Hệ thống chưa xử lý và chưa trừ Xu.",
@@ -112273,6 +112500,9 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             )
             return True
         product_result = music_product_result_from_input({**result, **parsed})
+        product_result.pop("music_product_partial_details", None)
+        product_result.pop("music_product_partial_text", None)
+        product_result.pop("music_product_pending_lyrics", None)
         save_music_guided_result(uid, product_result)
         await update.message.reply_text(
             music_product_invoice_text(product_result, lang),

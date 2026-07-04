@@ -165,7 +165,7 @@ def test_fetch_result_data_data_id_used_for_wav_not_provider_task(monkeypatch, t
     job = result["job"]
 
     assert result["ok"] is True
-    assert calls == [BARE_CDN, BARE_CDN, f"https://api.key4u.shop/suno/act/wav/{TRACK_ID}"]
+    assert calls == [BARE_CDN, f"https://api.key4u.shop/suno/act/wav/{TRACK_ID}"]
     assert job["selected_clip_id_source_path"] == "data.data[0].id"
     assert job["wav_request_clip_id_source"] == "data.data[0].id"
     assert job["selected_clip_id_present"] is True
@@ -212,7 +212,7 @@ def test_fetch_result_data_data_clipid_used_for_wav(monkeypatch, tmp_path):
     job = result["job"]
 
     assert result["ok"] is True
-    assert calls == [BARE_CDN, BARE_CDN, f"https://api.key4u.shop/suno/act/wav/{TRACK_ID}"]
+    assert calls == [BARE_CDN, f"https://api.key4u.shop/suno/act/wav/{TRACK_ID}"]
     assert job["selected_clip_id_source_path"] == "data.data[0].clipId"
     assert job["clip_id_candidates_found"] == 1
 
@@ -263,8 +263,6 @@ def test_first_clip_candidate_rejected_second_candidate_succeeds(monkeypatch, tm
     assert result["ok"] is True
     assert calls == [
         BARE_CDN,
-        BARE_CDN,
-        f"https://cdn1.suno.ai/{TRACK_ID_2}.mp3",
         f"https://cdn1.suno.ai/{TRACK_ID_2}.mp3",
         f"https://api.key4u.shop/suno/act/wav/{TRACK_ID}",
         f"https://api.key4u.shop/suno/act/wav/{TRACK_ID_2}",
@@ -362,8 +360,6 @@ def test_all_clip_id_candidates_rejected_sets_rejected_blocker(monkeypatch, tmp_
     assert result["ok"] is False
     assert calls == [
         BARE_CDN,
-        BARE_CDN,
-        f"https://cdn1.suno.ai/{TRACK_ID_2}.mp3",
         f"https://cdn1.suno.ai/{TRACK_ID_2}.mp3",
         f"https://api.key4u.shop/suno/act/wav/{TRACK_ID}",
         f"https://api.key4u.shop/suno/act/wav/{TRACK_ID_2}",
