@@ -98,7 +98,8 @@ def test_dub_video_delivery_does_not_send_audio_after_mp4():
     assert [kind for kind, _payload in message.calls] == ["video"]
 
 
-def test_audio_fallback_only_when_no_video_delivered():
+def test_audio_fallback_only_when_no_video_delivered(monkeypatch):
+    monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", True)
     message = CaptureMessage()
     sent = asyncio.run(
         bot.send_public_subtitle_dub_final_outputs(

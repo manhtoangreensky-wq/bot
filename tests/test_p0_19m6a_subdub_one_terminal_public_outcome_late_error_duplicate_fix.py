@@ -107,7 +107,12 @@ def test_public_error_then_success_not_both_sent():
 def test_duplicate_success_message_prevented():
     key, _job = _fresh_job("p019m6a-duplicate-success")
 
-    assert bot.mark_subtitle_dub_pipeline_output_sent(key, terminal_state="delivered", delivery_message_id="111")
+    assert bot.mark_subtitle_dub_pipeline_output_sent(
+        key,
+        terminal_state="delivered",
+        delivery_message_id="111",
+        video_delivery_message_id="111",
+    )
     assert bot.mark_subtitle_dub_pipeline_output_sent(key, terminal_state="delivered", delivery_message_id="222") is False
 
     stored = bot.SUBTITLE_DUB_PIPELINE_JOBS[key]
@@ -283,11 +288,22 @@ def test_no_product_video_music_payos_pricing_db_changes():
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     allowed = {
         "bot.py",
+        "tests/test_p0_17b_subtitle_translation_dubbing.py",
+        "tests/test_p0_17b12_2_live_hotfix_contract.py",
+        "tests/test_p0_17b6_2_final_product_pipeline.py",
+        "tests/test_p0_18q_video_ui_polish_back_routing_5_option_buttons.py",
+        "tests/test_p0_19b3_subtitle_dub_clean_product_ux_two_path_flow.py",
+        "tests/test_p0_19b7_restore_pr38_subtitle_dub_engine_no_subtitle_branch.py",
+        "tests/test_p0_19d_live_subtitle_dub_blackbox_engine_fix_only.py",
+        "tests/test_p0_19g_professional_subtitle_dub_overlay_voice_delivery.py",
+        "tests/test_p0_19h_restore_subdub_engine_professional_status.py",
+        "tests/test_p0_19j_restore_subdub_real_video_engine_delivery.py",
         "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
         "tests/test_p0_19m5c_subdub_mode_route_female_voice_state_fix.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6r_subdub_live_runtime_terminal_outcome_path_fix.py",
         "tests/test_p0_19m6s_subdub_live_job_registry_partial_audio_debug_fix.py",
+        "tests/test_p0_19m6t_subdub_final_video_only_delivery_no_public_audio_fallback.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
     }
     assert changed <= allowed

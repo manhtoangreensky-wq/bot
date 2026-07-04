@@ -198,7 +198,8 @@ def test_large_telegram_unsupported_refresh_stops_and_no_pipeline_started():
     assert "file quá lớn" in panel
 
 
-def test_partial_audio_fallback_not_sent_after_public_failure():
+def test_partial_audio_fallback_not_sent_after_public_failure(monkeypatch):
+    monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", True)
     key, _job = _fresh_job("p019m6s-partial-after-failure")
     message = CaptureMessage()
     asyncio.run(bot.send_subdub_fail_once(message, key, mode=bot.VIDEO_SUBTITLE_MODE_DUB, reason="known_failure"))
@@ -218,7 +219,8 @@ def test_partial_audio_fallback_not_sent_after_public_failure():
     assert bot.SUBTITLE_DUB_PIPELINE_JOBS[key]["terminal_public_outcome_type"] == "failure"
 
 
-def test_partial_audio_delivered_is_single_terminal_outcome():
+def test_partial_audio_delivered_is_single_terminal_outcome(monkeypatch):
+    monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", True)
     key, _job = _fresh_job("p019m6s-partial-terminal")
 
     assert bot.mark_subtitle_dub_pipeline_output_sent(
@@ -301,8 +303,8 @@ def test_subdub_voice_debug_maps_public_code_to_internal_dub_job():
 
 def test_badrequest_classified_safely():
     assert bot.subdub_classify_bad_request("BadRequest: message is not modified", stage="panel_edit") == "panel_edit_bad_request"
-    assert bot.subdub_classify_bad_request("BadRequest: failed to send audio", stage="delivery") == "delivery_bad_request"
-    assert bot.subdub_classify_bad_request("BadRequest", stage="tts") == "tts_bad_request"
+    assert bot.subdub_classify_bad_request("BadRequest: failed to send audio", stage="delivery") == "audio_delivery_bad_request"
+    assert bot.subdub_classify_bad_request("BadRequest", stage="tts") == "unknown_bad_request"
 
 
 def test_no_product_video_music_payos_pricing_db_changes():

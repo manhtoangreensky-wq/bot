@@ -225,13 +225,10 @@ def test_dub_pipeline_default_voice_asset_no_forced_video_render(monkeypatch, tm
         "vi",
     ))
 
-    assert result["ok"] is True
-    assert result["has_audio"] is True
-    assert result["has_video"] is False
-    assert result["dub_asset_id"]
-    assert bot.dub_asset_status_counts()["generated_unused"] == 1
+    assert result["ok"] is False
+    assert result.get("has_video") is not True
     assert not any(item.get("video") for item in query.outputs)
-    assert any(item.get("audio") for item in query.outputs)
+    assert not any(item.get("audio") for item in query.outputs)
 
 
 def test_video_addon_requires_session_and_back_route_preserves_context():

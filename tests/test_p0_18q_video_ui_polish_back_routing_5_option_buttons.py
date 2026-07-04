@@ -97,8 +97,8 @@ def test_video_status_panel_compact_public_copy():
     assert "🎬 <b>Trạng thái tạo video</b>" in text
     assert "Mã xử lý: <b>#37</b>" in text
     assert "<b>Thông tin video:</b>" in text
-    assert "TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh." in text
-    assert "Anh/chị không cần bấm nhiều lần." in text
+    assert "TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4)." in text
+    assert "Hệ thống chưa trừ Xu hoặc đã hoàn Xu nếu cần." in text
     assert "Giai đoạn:" not in text
     assert "Tùy chọn thêm:" not in text
     assert "Thời gian chờ dự kiến:" not in text
