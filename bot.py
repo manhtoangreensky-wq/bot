@@ -9409,6 +9409,15 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• provider_job_id: <code>{html.escape(mask_provider_task_id(provider_task_id) if provider_task_id else '-')}</code>\n"
         f"• provider_name_internal: <code>{html.escape(str((job or {}).get('provider_name_internal') or (job or {}).get('provider') or '-'))}</code>\n"
         f"• product_type: <code>{html.escape(str(state.get('product_type') or '-'))}</code>\n"
+        f"• requested_vocal_mode: <code>{html.escape(str((job or {}).get('requested_vocal_mode') or '-'))}</code>\n"
+        f"• selected_vocal_mode: <code>{html.escape(str((job or {}).get('selected_vocal_mode') or (job or {}).get('song_vocal') or '-'))}</code>\n"
+        f"• vocal_mode_source: <code>{html.escape(str((job or {}).get('vocal_mode_source') or '-'))}</code>\n"
+        f"• vocal_mode_persisted: <code>{html.escape(str((job or {}).get('vocal_mode_persisted') or '-'))}</code>\n"
+        f"• style_preset_id: <code>{html.escape(str((job or {}).get('style_preset_id') or '-'))}</code>\n"
+        f"• provider_prompt_contains_voice_hint: <code>{'yes' if (job or {}).get('provider_prompt_contains_voice_hint') else 'no'}</code>\n"
+        f"• duet_enabled: <code>{'yes' if (job or {}).get('duet_enabled') else 'no'}</code>\n"
+        f"• duet_prompt_applied: <code>{'yes' if (job or {}).get('duet_prompt_applied') else 'no'}</code>\n"
+        f"• duet_lyrics_structure: <code>{html.escape(str((job or {}).get('duet_lyrics_structure') or '-'))}</code>\n"
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
         f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
         f"• completed_steps: <code>{html.escape(completed_steps)}</code>\n"
@@ -9486,6 +9495,13 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• wav_response_shape: <code>{html.escape(str((job or {}).get('wav_response_shape') or '-'))}</code>\n"
         f"• wav_task_id_present: <code>{'yes' if (job or {}).get('wav_task_id_present') else 'no'}</code>\n"
         f"• provider_result_item_count: <code>{int((job or {}).get('provider_result_item_count') or 0)}</code>\n"
+        f"• selected_track_index: <code>{int((job or {}).get('selected_track_index') or 0)}</code>\n"
+        f"• selected_track_reason: <code>{html.escape(str((job or {}).get('selected_track_reason') or '-'))}</code>\n"
+        f"• multi_track_concat_attempted: <code>{'yes' if (job or {}).get('multi_track_concat_attempted') else 'no'}</code>\n"
+        f"• delivered_track_count: <code>{int((job or {}).get('delivered_track_count') or 0)}</code>\n"
+        f"• delivered_duration_seconds: <code>{int((job or {}).get('delivered_duration_seconds') or 0)}</code>\n"
+        f"• package_expected_duration_seconds: <code>{int((job or {}).get('package_expected_duration_seconds') or 0)}</code>\n"
+        f"• duration_policy_result: <code>{html.escape(str((job or {}).get('duration_policy_result') or '-'))}</code>\n"
         f"• provider_result_item0_keys: <code>{html.escape(str((job or {}).get('provider_result_item0_keys') or '-'))}</code>\n"
         f"• provider_result_item1_keys: <code>{html.escape(str((job or {}).get('provider_result_item1_keys') or '-'))}</code>\n"
         f"• clip_id_candidates_found: <code>{int((job or {}).get('clip_id_candidates_found') or 0)}</code>\n"
@@ -43855,6 +43871,52 @@ def completed_music_job_for_callback_error(update: object) -> dict | None:
         if music_delivery_should_suppress_public_fail({}, job) or music_confirm_submit_blocker_from_job(job):
             return job
     return None
+
+def record_music_runtime_error_suppressed(
+    job: dict | None,
+    *,
+    reason: str = "",
+    callback_data: str = "",
+    status_panel: bool = False,
+    updated_by="",
+) -> dict:
+    current = dict(job or {})
+    if not current:
+        return {}
+    current.update({
+        "last_runtime_error_reason": str(reason or "music_late_error_after_delivery")[:180],
+        "last_runtime_error_callback_data": str(callback_data or "")[:160],
+        "last_runtime_error_at": time.time(),
+        "late_error_suppressed": True,
+        "late_public_error_suppressed": True,
+        "generic_error_after_delivery_prevented": True,
+        "terminal_public_outcome_sent": bool(current.get("terminal_public_outcome_sent") or music_delivery_should_suppress_public_fail({}, current)),
+        "terminal_public_outcome_type": str(current.get("terminal_public_outcome_type") or ("success" if music_delivery_should_suppress_public_fail({}, current) else "")),
+    })
+    if status_panel:
+        current["status_panel_edit_failed_nonterminal"] = True
+        current["public_panel_update_failed_nonterminal"] = True
+        current["status_panel_edit_failed"] = True
+        current["status_panel_edit_failed_count"] = int(current.get("status_panel_edit_failed_count") or 0) + 1
+    if current.get("internal_job_id"):
+        try:
+            save_engine_async_job(current)
+        except Exception:
+            pass
+    user_id = current.get("user_id")
+    if user_id:
+        try:
+            guided = get_music_guided_result(user_id) or {}
+            if guided:
+                guided.update({
+                    "late_error_suppressed": True,
+                    "generic_error_after_delivery_prevented": True,
+                    "status_panel_edit_failed_nonterminal": bool(status_panel),
+                })
+                save_music_guided_result(user_id, guided)
+        except Exception:
+            pass
+    return current
 
 def subdub_callback_data(update: object) -> str:
     query = getattr(update, "callback_query", None)
@@ -80978,6 +81040,13 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if completed_music_job:
+        completed_music_job = record_music_runtime_error_suppressed(
+            completed_music_job,
+            reason=error_name,
+            callback_data=callback_data,
+            status_panel=callback_data.startswith("progress|status|"),
+            updated_by=getattr(update.effective_user, "id", 0) if isinstance(update, Update) and update.effective_user else "",
+        )
         logger.warning(
             "suppressed public error after terminal music callback | job_id=%s | callback=%s | blocker=%s",
             sanitize_log_text(str(completed_music_job.get("internal_job_id") or completed_music_job.get("music_internal_job_id") or ""))[:80],
@@ -101187,6 +101256,52 @@ def music_product_vocal_instructions(vocal_mode: str = "auto") -> str:
         return "male and female duet, alternating male and female vocals, duet chorus, harmony vocals"
     return ""
 
+def music_product_prompt_contains_vocal_hint(prompt: str = "", vocal_mode: str = "auto") -> bool:
+    text = str(prompt or "").lower()
+    mode = normalize_song_vocal_mode(vocal_mode)
+    if mode == "male":
+        return any(token in text for token in ("male vocal", "male lead", "male singer", "giọng nam", "giong nam"))
+    if mode == "female":
+        return any(token in text for token in ("female vocal", "female lead", "female singer", "giọng nữ", "giong nu"))
+    if mode == "duet":
+        return any(token in text for token in ("duet", "male and female", "song ca", "nam nữ", "nam nu"))
+    return True
+
+def music_product_duet_lyrics_structure(lyrics: str = "") -> str:
+    text = str(lyrics or "")
+    if re.search(r"\[(male|female|duet)[^\]]*\]", text, flags=re.I):
+        return "tagged"
+    if text.strip():
+        return "natural"
+    return "none"
+
+def music_product_vocal_state_fields(
+    current: dict | None = None,
+    *,
+    requested_vocal_mode: str = "",
+    selected_vocal_mode: str = "",
+    vocal_mode_source: str = "",
+    style_preset_id: str = "",
+    prompt_after_preset: str = "",
+) -> dict:
+    data = dict(current or {})
+    requested = normalize_song_vocal_mode(requested_vocal_mode or data.get("requested_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or "auto")
+    selected = normalize_song_vocal_mode(selected_vocal_mode or data.get("selected_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or requested)
+    prompt = str(prompt_after_preset or data.get("provider_style_prompt") or data.get("selected_prompt") or data.get("description") or "")
+    return {
+        "requested_vocal_mode": requested,
+        "selected_vocal_mode": selected,
+        "vocal_mode": selected,
+        "song_vocal": selected,
+        "vocal_mode_source": str(vocal_mode_source or data.get("vocal_mode_source") or "music_product_state")[:80],
+        "vocal_mode_persisted": "yes" if selected == requested and selected in {"male", "female", "duet", "auto"} else "no",
+        "style_preset_id": str(style_preset_id or data.get("style_preset_id") or "")[:80],
+        "prompt_after_preset": prompt[:1200],
+        "provider_prompt_contains_voice_hint": music_product_prompt_contains_vocal_hint(prompt, selected),
+        "duet_enabled": selected == "duet",
+        "duet_prompt_applied": bool(selected == "duet" and music_product_prompt_contains_vocal_hint(prompt, "duet")),
+    }
+
 def music_product_duet_lyrics(lyrics: str = "") -> str:
     text = str(lyrics or "").strip()
     if not text:
@@ -101325,6 +101440,15 @@ def music_product_result_from_input(data: dict | None = None) -> dict:
             "song_vocal": normalize_song_vocal_mode(data.get("vocal_mode") or data.get("song_vocal") or "auto"),
             "lyrics": built["provider_lyrics"],
         })
+        result.update(music_product_vocal_state_fields(
+            result,
+            requested_vocal_mode=data.get("requested_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or "auto",
+            selected_vocal_mode=result.get("song_vocal") or "auto",
+            vocal_mode_source=str(data.get("vocal_mode_source") or "manual_input"),
+            style_preset_id=str(data.get("style_preset_id") or ""),
+            prompt_after_preset=music_provider_prompt_for_result(result),
+        ))
+        result["duet_lyrics_structure"] = music_product_duet_lyrics_structure(result.get("provider_lyrics") or result.get("lyrics") or "")
     return result
 
 def music_confirm_tier_from_legacy_price(result: dict | None = None, mode: str = "background") -> str:
@@ -101611,6 +101735,7 @@ def music_product_idea_input_text(mode: str = "background", tier: str = "", voca
             "Anh/chị mô tả ngắn bài hát muốn tạo.\n"
             "Ví dụ:\n"
             "“Bài hát thương hiệu TOAN AAS, vui tươi, công nghệ AI, tinh thần bứt phá.”\n\n"
+            "Nếu anh/chị đã có lời bài hát, có thể chọn Tự nhập lời bài hát.\n\n"
             "TOAN AAS sẽ tạo 3 gợi ý hoàn chỉnh để anh/chị chọn."
         )
     return (
@@ -101631,13 +101756,18 @@ def music_product_idea_keyboard(
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     mode_key = normalize_music_product_mode(mode)
     back_action = "music_product_change_vocal" if mode_key == "song" else "music_product_change_tier"
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton("✨ Dùng ý tưởng mẫu TOAN AAS" if is_vi else "✨ Use TOAN AAS sample idea", callback_data=cb("music_product_sample_idea"))],
+    ]
+    if mode_key == "song":
+        rows.append([InlineKeyboardButton("✍️ Tự nhập lời bài hát" if is_vi else "✍️ Enter lyrics", callback_data=cb("music_product_manual"))])
+    rows.append(
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb(back_action)),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
-    ])
+    )
+    return InlineKeyboardMarkup(rows)
 
 def music_product_clean_idea(value: str = "") -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
@@ -101727,8 +101857,16 @@ def build_music_product_suggestions(
                 "mood": mood,
                 "tempo": tempo,
                 "vocal_mode": vocal,
+                "song_vocal": vocal,
+                "requested_vocal_mode": vocal,
+                "selected_vocal_mode": vocal,
+                "vocal_mode_source": "suggestion_builder",
+                "vocal_mode_persisted": "yes",
                 "vocal_direction": vocal_direction,
                 "lyrics_structure": structure,
+                "duet_enabled": vocal == "duet",
+                "duet_prompt_applied": vocal == "duet",
+                "duet_lyrics_structure": "natural" if vocal == "duet" else "none",
                 "lyrics": lyrics,
                 "lyrics_prompt": lyrics,
                 "style_prompt": style_prompt,
@@ -101795,6 +101933,10 @@ def music_product_prompt_preset_audit(
                 "label": str(item.get("title") or item.get("genre") or f"Gợi ý {preset_id}"),
                 "package": music_product_tier_label(tier_key, lang),
                 "price_xu": price,
+                "requested_vocal_mode": normalize_song_vocal_mode(vocal_mode),
+                "selected_vocal_mode": normalize_song_vocal_mode(item.get("vocal_mode") or vocal_mode),
+                "vocal_mode_source": str(item.get("vocal_mode_source") or "suggestion_builder"),
+                "provider_prompt_contains_voice_hint": music_product_prompt_contains_vocal_hint(style_prompt, item.get("vocal_mode") or vocal_mode),
                 "has_lyrics_required": mode_key == "song",
                 "lyrics_present": bool(lyrics) if mode_key == "song" else True,
                 "style_prompt_present": bool(style_prompt),
@@ -101842,7 +101984,13 @@ def music_product_prepare_suggestions_result(
         "music_confirmed": False,
     })
     if mode == "song":
-        current.update({"song_vocal": vocal_mode, "vocal_mode": vocal_mode})
+        current.update(music_product_vocal_state_fields(
+            current,
+            requested_vocal_mode=vocal_mode,
+            selected_vocal_mode=vocal_mode,
+            vocal_mode_source="prepare_suggestions",
+            prompt_after_preset=" ".join(str(item.get("style_prompt") or "") for item in suggestions[:3]),
+        ))
     return current
 
 def music_product_suggestion_by_index(result: dict | None = None, index: int = 1) -> dict:
@@ -101857,7 +102005,9 @@ def music_product_result_from_suggestion(result: dict | None = None, suggestion:
     item = dict(suggestion or {})
     mode = music_product_mode_from_result(current)
     tier = normalize_music_product_tier(current.get("music_product_tier"))
-    vocal_mode = normalize_song_vocal_mode(item.get("vocal_mode") or current.get("song_vocal") or current.get("vocal_mode") or "auto")
+    raw_current_vocal = str(current.get("song_vocal") or current.get("vocal_mode") or "").strip()
+    raw_item_vocal = str(item.get("vocal_mode") or item.get("song_vocal") or "").strip()
+    vocal_mode = normalize_song_vocal_mode(raw_current_vocal) if raw_current_vocal else normalize_song_vocal_mode(raw_item_vocal or "auto")
     payload = {
         **current,
         **item,
@@ -101874,6 +102024,7 @@ def music_product_result_from_suggestion(result: dict | None = None, suggestion:
     }
     product_result = music_product_result_from_input(payload)
     selected_id = str(item.get("id") or current.get("music_selected_suggestion_id") or "")
+    style_preset_id = f"{tier}:{mode}:{music_product_suggestion_offset(current)}:{selected_id}" if selected_id else ""
     product_result.update({
         "music_product_flow": "p0_20b1_suggestions",
         "music_user_idea": str(current.get("music_user_idea") or item.get("theme") or "").strip(),
@@ -101883,9 +102034,19 @@ def music_product_result_from_suggestion(result: dict | None = None, suggestion:
         "music_selected_title": str(item.get("title") or product_result.get("title") or "").strip(),
         "music_selected_style_prompt": str(item.get("style_prompt") or product_result.get("provider_style_prompt") or "").strip(),
         "music_selected_lyrics_prompt": str(item.get("lyrics_prompt") or item.get("lyrics") or product_result.get("provider_lyrics") or "").strip(),
+        "style_preset_id": style_preset_id,
         "music_invoice_id": music_product_hash_text(f"{time.time_ns()}:{selected_id}:{product_result.get('provider_style_prompt')}"),
         "music_confirmed": False,
     })
+    product_result.update(music_product_vocal_state_fields(
+        product_result,
+        requested_vocal_mode=current.get("requested_vocal_mode") or current.get("song_vocal") or current.get("vocal_mode") or vocal_mode,
+        selected_vocal_mode=vocal_mode,
+        vocal_mode_source="selected_suggestion",
+        style_preset_id=style_preset_id,
+        prompt_after_preset=music_provider_prompt_for_result(product_result),
+    ))
+    product_result["duet_lyrics_structure"] = music_product_duet_lyrics_structure(product_result.get("provider_lyrics") or product_result.get("lyrics") or "")
     return product_result
 
 def music_product_suggestions_text(result: dict | None = None, lang: str = "vi") -> str:
@@ -102965,6 +103126,15 @@ def create_music_suno_async_job(
         "music_product_tier": str(payload.get("music_product_tier") or ""),
         "music_product_mode": str(payload.get("music_product_mode") or ""),
         "song_vocal": str(payload.get("song_vocal") or payload.get("vocal_mode") or ""),
+        "requested_vocal_mode": str(payload.get("requested_vocal_mode") or payload.get("song_vocal") or payload.get("vocal_mode") or ""),
+        "selected_vocal_mode": str(payload.get("selected_vocal_mode") or payload.get("song_vocal") or payload.get("vocal_mode") or ""),
+        "vocal_mode_source": str(payload.get("vocal_mode_source") or ""),
+        "vocal_mode_persisted": str(payload.get("vocal_mode_persisted") or ""),
+        "style_preset_id": str(payload.get("style_preset_id") or ""),
+        "provider_prompt_contains_voice_hint": bool(payload.get("provider_prompt_contains_voice_hint")),
+        "duet_enabled": bool(payload.get("duet_enabled")),
+        "duet_prompt_applied": bool(payload.get("duet_prompt_applied")),
+        "duet_lyrics_structure": str(payload.get("duet_lyrics_structure") or ""),
         "provider_metadata": dict(payload.get("provider_metadata") or {}),
         "duration_seconds": music_result_duration_seconds(payload) if payload else 0,
         "preview_seconds": music_preview_seconds(),
@@ -105336,6 +105506,13 @@ async def select_music_delivery_artifact(
             "selected_artifact_duration": duration,
             "selected_artifact_bytes": len(payload),
             "selected_artifact_source": str(selected.get("source") or selected.get("role") or "artifact"),
+            "selected_track_index": candidate_order,
+            "selected_track_reason": str(selected.get("selected_reason") or selected.get("source") or selected.get("role") or "first_valid_audio_candidate"),
+            "multi_track_concat_attempted": False,
+            "delivered_track_count": 1,
+            "delivered_duration_seconds": duration,
+            "package_expected_duration_seconds": music_result_duration_seconds({**dict(job or {}), **dict(result or {})}),
+            "duration_policy_result": "single_track_actual_duration",
             "candidate_order": candidate_order,
             "download_detail": sanitize_provider_status_text(download_detail, "", 180),
             "download_http_status": int(download_status or 0),
@@ -105745,6 +105922,14 @@ async def deliver_music_result_once(
         "audio_validated": True,
         "music_audio_validated": True,
         "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
+        "provider_result_item_count": int(artifact.get("provider_result_item_count") or current_result.get("provider_result_item_count") or 0),
+        "selected_track_index": int(artifact.get("selected_track_index") or 1),
+        "selected_track_reason": str(artifact.get("selected_track_reason") or "first_valid_audio_candidate"),
+        "multi_track_concat_attempted": False,
+        "delivered_track_count": 1,
+        "delivered_duration_seconds": actual_duration,
+        "package_expected_duration_seconds": int(artifact.get("package_expected_duration_seconds") or music_result_duration_seconds(current_result)),
+        "duration_policy_result": str(artifact.get("duration_policy_result") or "single_track_actual_duration"),
     })
     if user_id:
         save_music_guided_result(user_id, current_result)
@@ -105772,6 +105957,14 @@ async def deliver_music_result_once(
             "audio_validated": True,
             "music_audio_validated": True,
             "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
+            "provider_result_item_count": int(artifact.get("provider_result_item_count") or current_job.get("provider_result_item_count") or 0),
+            "selected_track_index": int(artifact.get("selected_track_index") or 1),
+            "selected_track_reason": str(artifact.get("selected_track_reason") or "first_valid_audio_candidate"),
+            "multi_track_concat_attempted": False,
+            "delivered_track_count": 1,
+            "delivered_duration_seconds": actual_duration,
+            "package_expected_duration_seconds": int(artifact.get("package_expected_duration_seconds") or music_result_duration_seconds({**current_result, **current_job})),
+            "duration_policy_result": str(artifact.get("duration_policy_result") or "single_track_actual_duration"),
             "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
             "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
             "selected_artifact_duration": int(artifact.get("selected_artifact_duration") or 0),
@@ -105862,6 +106055,13 @@ async def deliver_music_result_once(
                 "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
                 "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
                 "selected_artifact_duration": actual_duration,
+                "selected_track_index": int(artifact.get("selected_track_index") or current_job.get("selected_track_index") or 1),
+                "selected_track_reason": str(artifact.get("selected_track_reason") or current_job.get("selected_track_reason") or "first_valid_audio_candidate"),
+                "multi_track_concat_attempted": False,
+                "delivered_track_count": 1,
+                "delivered_duration_seconds": actual_duration,
+                "package_expected_duration_seconds": int(artifact.get("package_expected_duration_seconds") or current_job.get("package_expected_duration_seconds") or music_result_duration_seconds({**current_result, **current_job})),
+                "duration_policy_result": str(artifact.get("duration_policy_result") or current_job.get("duration_policy_result") or "single_track_actual_duration"),
                 "terminal_public_outcome_sent": True,
                 "terminal_public_outcome_type": "success",
             })
@@ -105934,6 +106134,13 @@ async def deliver_music_result_once(
             "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
             "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
             "selected_artifact_duration": actual_duration,
+            "selected_track_index": int(artifact.get("selected_track_index") or current_result.get("selected_track_index") or 1),
+            "selected_track_reason": str(artifact.get("selected_track_reason") or current_result.get("selected_track_reason") or "first_valid_audio_candidate"),
+            "multi_track_concat_attempted": False,
+            "delivered_track_count": 1,
+            "delivered_duration_seconds": actual_duration,
+            "package_expected_duration_seconds": int(artifact.get("package_expected_duration_seconds") or current_result.get("package_expected_duration_seconds") or music_result_duration_seconds(current_result)),
+            "duration_policy_result": str(artifact.get("duration_policy_result") or current_result.get("duration_policy_result") or "single_track_actual_duration"),
             "terminal_public_outcome_sent": True,
             "terminal_public_outcome_type": "success",
             "terminal_public_outcome_message_id": delivery_message_id,
@@ -109813,7 +110020,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "return_to": "song_menu",
         }
         if vocal_mode in {"male", "female", "duet", "auto"}:
-            result.update({"song_vocal": vocal_mode, "vocal_mode": vocal_mode})
+            result.update(music_product_vocal_state_fields(
+                result,
+                requested_vocal_mode=vocal_mode,
+                selected_vocal_mode=vocal_mode,
+                vocal_mode_source="tier_song_existing_state",
+            ))
         if str(existing.get("music_user_idea") or "").strip() and vocal_mode in {"male", "female", "duet", "auto"}:
             result = music_product_prepare_suggestions_result(result, idea=str(existing.get("music_user_idea") or ""), offset=music_product_suggestion_offset(existing), lang=lang)
             save_music_guided_result(user_id, result)
@@ -109842,6 +110054,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "music_product_price_xu": music_product_tier_price_xu(tier, "song"),
             "vocal_mode": vocal_mode,
             "song_vocal": vocal_mode,
+            "requested_vocal_mode": vocal_mode,
+            "selected_vocal_mode": vocal_mode,
+            "vocal_mode_source": "music_vocal_callback",
+            "vocal_mode_persisted": "yes",
             "previous_screen": "music_product_vocal",
             "return_to": "music_product_change_vocal",
         })
@@ -109972,11 +110188,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         tier = normalize_music_product_tier(result.get("music_product_tier"))
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
         pending_action = "music_product_song_details" if mode == "song" else "music_product_background_details"
-        set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen="music_product_invoice", return_to="music_product_back_details")
+        from_idea_screen = bool(mode == "song" and action == "music_product_manual" and not result.get("music_suggestions") and not result.get("music_selected_suggestion_id"))
+        back_action = "music_product_back_idea" if from_idea_screen else ("music_product_change_vocal" if mode == "song" else "music_product_change_tier")
+        previous_screen = "music_product_idea" if from_idea_screen else "music_product_invoice"
+        set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen=previous_screen, return_to=back_action)
         return await query.message.reply_text(
             music_product_details_input_text(mode, tier, vocal_mode, lang),
             parse_mode="HTML",
-            reply_markup=music_flow_back_keyboard("music_product_change_vocal" if mode == "song" else "music_product_change_tier", lang, ctx),
+            reply_markup=music_flow_back_keyboard(back_action, lang, ctx),
         )
     if action == "song_back_duration":
         await query.answer()
@@ -113282,6 +113501,10 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             "music_product_price_xu": music_product_tier_price_xu(tier, mode),
             "vocal_mode": vocal_mode,
             "song_vocal": vocal_mode if mode == "song" else "",
+            "requested_vocal_mode": vocal_mode if mode == "song" else "",
+            "selected_vocal_mode": vocal_mode if mode == "song" else "",
+            "vocal_mode_source": "idea_text_pending",
+            "vocal_mode_persisted": "yes" if mode == "song" else "",
         })
         product_result = music_product_prepare_suggestions_result(result, idea=text, offset=0, lang=lang)
         save_music_guided_result(uid, product_result)
@@ -113329,6 +113552,10 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
                 "music_product_tier": tier,
                 "vocal_mode": vocal_mode,
                 "song_vocal": vocal_mode,
+                "requested_vocal_mode": vocal_mode,
+                "selected_vocal_mode": vocal_mode,
+                "vocal_mode_source": "manual_details_pending",
+                "vocal_mode_persisted": "yes",
             })
             save_music_guided_result(uid, result)
             set_music_guided_pending(uid, action, product_context=ctx, previous_screen=str(state.get("previous_screen") or ""), return_to=str(state.get("return_to") or "music_product_back_details"))

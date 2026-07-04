@@ -497,12 +497,16 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
     canonical = normalize_product_type(product_type)
     status = str(job.get("status") or job.get("music_status") or "").strip().lower()
     output_bytes = _positive_int(job, "output_bytes", "music_result_size_bytes", "music_output_size_bytes")
+    if output_bytes <= 0:
+        output_bytes = _positive_int(job, "selected_artifact_bytes", "delivered_artifact_bytes", "final_audio_bytes")
     duration = _positive_int(
         job,
         "artifact_duration",
         "artifact_duration_seconds",
         "music_artifact_duration",
         "selected_artifact_duration",
+        "delivered_duration_seconds",
+        "delivered_track_duration_seconds",
         "music_result_duration_seconds",
         "music_output_duration_seconds",
         "duration_seconds",
@@ -518,6 +522,9 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
         or job.get("delivery_message_id")
         or job.get("output_file_id")
         or job.get("music_output_file_id")
+        or job.get("delivery_succeeded")
+        or job.get("telegram_delivery_confirmed")
+        or job.get("delivery_confirmed")
     )
     style_prepared = bool(
         _as_bool(job.get("style_prepared"))
@@ -627,6 +634,8 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
         "output_bytes": output_bytes,
         "duration_seconds": duration,
         "completed_steps": completed_steps,
+        "delivery_succeeded": has_delivery,
+        "progress_step_source": "music_real_lifecycle",
     }
 
 
