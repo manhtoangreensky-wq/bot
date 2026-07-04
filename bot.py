@@ -8930,16 +8930,21 @@ def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, s
         return {}, ""
     result = _video_debug_json((video_job or {}).get("result_json"), {})
     product_type = video_final_output.product_type_from_project(project or {}, result or {}) or "multiscene_video"
+    provider_telemetry = video_b14_provider_telemetry(video_job, result, refresh_source="progress_status_debug")
+    provider_alive = bool(provider_telemetry.get("provider_task_alive"))
+    reconciled_progress = safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 0)
+    reconciled_status = str(provider_telemetry.get("final_status_after_reconcile") or (video_job or {}).get("status") or "")
+    reconciled_stage = "generating_video" if provider_alive else str(result.get("stage") or result.get("current_stage") or "")
     recovered = {
         "internal_job_id": str(jid),
         "job_id": str(jid),
         "product_type": product_type,
         "feature": "video_single",
-        "status": str((video_job or {}).get("status") or result.get("provider_status") or ""),
-        "progress_percent": safe_int((video_job or {}).get("progress_percent") or result.get("progress_percent"), 0),
-        "stage": str(result.get("stage") or result.get("current_stage") or ""),
-        "current_stage": str(result.get("current_stage") or ""),
-        "terminal_state": str((project or {}).get("video_terminal_state") or result.get("terminal_state") or ""),
+        "status": reconciled_status,
+        "progress_percent": max(safe_int((video_job or {}).get("progress_percent") or result.get("progress_percent"), 0), reconciled_progress),
+        "stage": reconciled_stage,
+        "current_stage": reconciled_stage,
+        "terminal_state": "final_rendering" if provider_alive else str((project or {}).get("video_terminal_state") or result.get("terminal_state") or ""),
         "output_path": str((project or {}).get("final_video_path") or result.get("final_video_path") or result.get("output_path") or ""),
         "final_video_path": str((project or {}).get("final_video_path") or result.get("final_video_path") or ""),
         "output_bytes": safe_int(result.get("bytes") or result.get("output_bytes"), 0),
@@ -8948,6 +8953,7 @@ def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, s
         "progress_message_id": str(result.get("progress_message_id") or ""),
         "persisted_job_status": str((video_job or {}).get("status") or ""),
         "persisted_job_progress": safe_int((video_job or {}).get("progress_percent"), 0),
+        **provider_telemetry,
     }
     return recovered, product_type
 
@@ -9015,6 +9021,21 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     status_registry_missing_after_restart = bool(job_id and not product_video_registry_present and "no_registry_after_restart" in auto)
     persisted_job_status = str((job or {}).get("persisted_job_status") or (job or {}).get("status") or "").strip()
     persisted_job_progress = safe_int((job or {}).get("persisted_job_progress") or (job or {}).get("progress_percent"), 0)
+    video_provider_debug_text = ""
+    if product_progress_status.normalize_product_type(resolved_type) in product_progress_status.VIDEO_PROGRESS_TYPES:
+        video_provider_debug_text = (
+            f"• status_source_priority_used: <code>{html.escape(str((job or {}).get('status_source_priority_used') or '-'))}</code>\n"
+            f"• provider_state_overrode_registry: <code>{'yes' if (job or {}).get('provider_state_overrode_registry') else 'no'}</code>\n"
+            f"• provider_state_overrode_persisted_status: <code>{'yes' if (job or {}).get('provider_state_overrode_persisted_status') else 'no'}</code>\n"
+            f"• persisted_status_before_reconcile: <code>{html.escape(str((job or {}).get('persisted_status_before_reconcile') or '-'))}</code>\n"
+            f"• persisted_progress_before_reconcile: <code>{safe_int((job or {}).get('persisted_progress_before_reconcile'), 0)}%</code>\n"
+            f"• final_status_after_reconcile: <code>{html.escape(str((job or {}).get('final_status_after_reconcile') or '-'))}</code>\n"
+            f"• final_progress_after_reconcile: <code>{safe_int((job or {}).get('final_progress_after_reconcile'), 0)}%</code>\n"
+            f"• provider_progress_percent: <code>{safe_int((job or {}).get('provider_progress_percent'), 0)}%</code>\n"
+            f"• provider_poll_count: <code>{safe_int((job or {}).get('provider_poll_count'), 0)}</code>\n"
+            f"• provider_elapsed_seconds: <code>{safe_int((job or {}).get('provider_elapsed_seconds'), 0)}</code>\n"
+            f"• provider_wait_max_seconds: <code>{safe_int((job or {}).get('provider_wait_max_seconds'), 0)}</code>\n"
+        )
     music_failure = music_failure_debug_fields(job, job_id, resolved_type) if progress_product_type_is_music(resolved_type, job_id) else {}
     music_failure_text = ""
     if music_failure:
@@ -9061,6 +9082,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         f"• persisted_job_status: <code>{html.escape(persisted_job_status or '-')}</code>\n"
         f"• persisted_job_progress: <code>{persisted_job_progress}%</code>\n"
         f"• recovered_from_db_for_status_debug: <code>{'yes' if recovered_from_db_for_status_debug else 'no'}</code>\n\n"
+        + video_provider_debug_text
         + auto
     )
 
@@ -46113,6 +46135,10 @@ def video_render_debug_compact_text(
         f"• Engine adapter: <code>{_video_debug_safe_value((engine_route or {}).get('adapter'), 100)}</code>",
         f"• Job status: <code>{_video_debug_safe_value((job or {}).get('status'), 80)}</code>",
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
+        f"• provider progress percent: <code>{safe_int((result or {}).get('provider_progress_percent'), 0)}%</code>",
+        f"• provider elapsed/max: <code>{safe_int((result or {}).get('provider_elapsed_seconds') or (result or {}).get('provider_wait_elapsed_seconds'), 0)}/{safe_int((result or {}).get('provider_wait_max_seconds'), 0)}</code>",
+        f"• provider poll count: <code>{safe_int((result or {}).get('provider_poll_count'), 0)}</code>",
+        f"• progress monotonic applied: <code>{'yes' if (result or {}).get('progress_monotonic_applied') else 'no'}</code>",
         f"• claimable owner-product: <code>{'yes' if (claim_debug or {}).get('claimable') else 'no'}</code>",
         f"• claim reason: <code>{_video_debug_safe_value((claim_debug or {}).get('reason'), 120)}</code>",
         f"• voice: <code>{'on' if addon_plan.get('voice_enabled') else 'off'}</code>",
@@ -46193,6 +46219,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     asset_pack = _video_debug_json((project or {}).get("asset_pack_json"), {})
     addon_plan = _video_debug_json((project or {}).get("addon_plan_json"), {})
     result = _video_debug_json((job or {}).get("result_json"), {})
+    result = video_b14_reconciled_provider_debug(job, project, result, refresh_source="video_render_debug")
     final_info = _video_debug_file_info(str((project or {}).get("final_video_path") or result.get("final_video_path") or ""))
     product_type = video_final_output.product_type_from_project(project, result)
     engine_route = video_final_output.route_for_product_type(product_type)
@@ -46232,6 +46259,19 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• Job status: <code>{html.escape(str((job or {}).get('status') or '-'))}</code>",
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
         f"• Progress message: <code>{html.escape(str((job or {}).get('progress_message') or '-')[:160])}</code>",
+        f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
+        f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
+        f"• provider progress estimated: <code>{'yes' if result.get('provider_progress_estimated') else 'no'}</code>",
+        f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
+        f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
+        f"• next poll scheduled at: <code>{html.escape(str(result.get('next_poll_scheduled_at') or '-'))}</code>",
+        f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
+        f"• stage_monotonic_applied: <code>{'yes' if result.get('stage_monotonic_applied') else 'no'}</code>",
+        f"• status_source_priority_used: <code>{html.escape(str(result.get('status_source_priority_used') or '-'))}</code>",
+        f"• final progress after reconcile: <code>{safe_int(result.get('final_progress_after_reconcile'), 0)}%</code>",
+        f"• summary provider attempt source: <code>{html.escape(str(result.get('summary_provider_attempt_source') or '-'))}</code>",
+        f"• summary fields from primary alive task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
+        f"• stale failed attempt ignored: <code>{'yes' if result.get('stale_failed_attempt_ignored') else 'no'}</code>",
         f"• Worker: <code>{html.escape(str((job or {}).get('locked_by') or '-'))}</code>",
         f"• actual processor: <code>{html.escape(str(result.get('actual_processor') or '-'))}</code>",
         f"• worker service mode: <code>{html.escape(str(result.get('worker_service_mode') or '-'))}</code>",
@@ -46393,6 +46433,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
     if not job:
         return f"⚠️ Không tìm thấy video job <code>{jid}</code>."
     result = _video_debug_json((job or {}).get("result_json"), {})
+    result = video_b14_reconciled_provider_debug(job, project, result, refresh_source="video_provider_job_debug")
     events = [item for item in (result.get("provider_events") or []) if isinstance(item, dict)]
     provider = str(result.get("selected_provider") or result.get("provider") or (events[0].get("provider") if events else "") or "-")
     task_ids = [str(item or "") for item in (result.get("provider_task_ids") or []) if str(item or "").strip()]
@@ -46447,6 +46488,20 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
+        f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
+        f"• provider progress estimated: <code>{'yes' if result.get('provider_progress_estimated') else 'no'}</code>",
+        f"• provider started at: <code>{html.escape(str(result.get('provider_started_at') or '-'))}</code>",
+        f"• provider started source: <code>{html.escape(str(result.get('provider_started_at_source') or '-'))}</code>",
+        f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
+        f"• next poll scheduled at: <code>{html.escape(str(result.get('next_poll_scheduled_at') or '-'))}</code>",
+        f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
+        f"• status_source_priority_used: <code>{html.escape(str(result.get('status_source_priority_used') or '-'))}</code>",
+        f"• final_status_after_reconcile: <code>{html.escape(str(result.get('final_status_after_reconcile') or '-'))}</code>",
+        f"• final_progress_after_reconcile: <code>{safe_int(result.get('final_progress_after_reconcile'), 0)}%</code>",
+        f"• summary_provider_attempt_source: <code>{html.escape(str(result.get('summary_provider_attempt_source') or '-'))}</code>",
+        f"• summary_fields_from_primary_alive_task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
+        f"• stale_failed_attempt_ignored: <code>{'yes' if result.get('stale_failed_attempt_ignored') else 'no'}</code>",
         f"• actual processor: <code>{html.escape(str(result.get('actual_processor') or '-'))}</code>",
         f"• worker service mode: <code>{html.escape(str(result.get('worker_service_mode') or '-'))}</code>",
         f"• worker claim route: <code>{html.escape(str(result.get('worker_claim_route') or '-'))}</code>",
@@ -46512,6 +46567,11 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
+        f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
+        f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
+        f"• progress monotonic applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
+        f"• summary fields from primary alive task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
         f"• provider fallback reason: <code>{_video_debug_safe_value(result.get('provider_fallback_reason') or result.get('fallback_reason'), 120)}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
@@ -66365,6 +66425,117 @@ VIDEO_B14_STATUS_STEP_LABELS = (
 )
 
 
+def video_b14_provider_telemetry(job: dict | None = None, payload: dict | None = None, *, refresh_source: str = "panel") -> dict:
+    try:
+        return video_project_queue.reconcile_provider_progress_telemetry(
+            dict(job or {}),
+            dict(payload or {}),
+            refresh_source=refresh_source,
+        )
+    except Exception:
+        return {
+            "provider_task_alive": False,
+            "final_progress_after_reconcile": safe_int((job or {}).get("progress_percent"), 0),
+            "provider_poll_count": 0,
+            "provider_elapsed_seconds": 0,
+            "provider_wait_max_seconds": 0,
+            "status_source_priority_used": "fallback_initial_state",
+            "refresh_source": refresh_source,
+        }
+
+
+def video_b14_human_elapsed(seconds: int | float | str = 0) -> str:
+    total = max(0, safe_int(seconds, 0))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} giờ {minutes} phút {secs} giây"
+    if minutes:
+        return f"{minutes} phút {secs} giây"
+    return f"{secs} giây"
+
+
+def video_b14_render_bar(percent: int) -> str:
+    value = max(0, min(100, safe_int(percent, 0)))
+    filled = max(0, min(10, int(round(value / 10))))
+    return "▰" * filled + "▱" * (10 - filled)
+
+
+def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
+    telemetry = dict(telemetry or {})
+    progress = max(20, min(85, safe_int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or telemetry.get("provider_progress_percent"), 20)))
+    poll_count = safe_int(telemetry.get("provider_poll_count"), 0)
+    elapsed = safe_int(telemetry.get("provider_elapsed_seconds") or telemetry.get("provider_wait_elapsed_seconds"), 0)
+    lines = [
+        "<b>Dựng video:</b>",
+        f"{video_b14_render_bar(progress)} <b>{progress}%</b>",
+        f"⏱ Đã xử lý: <b>{html.escape(video_b14_human_elapsed(elapsed))}</b>",
+    ]
+    if poll_count > 0:
+        lines.append(f"🔄 Đã kiểm tra: <b>{poll_count} lần</b>")
+    lines.append("Hệ thống đang dựng video. Anh/chị có thể quay lại kiểm tra sau.")
+    lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
+    return "\n".join(lines)
+
+
+def video_b14_primary_alive_attempt(result: dict | None = None) -> dict:
+    result = dict(result or {})
+    attempts = result.get("provider_attempts") or result.get("provider_pending_attempts") or result.get("provider_fallback_attempts") or []
+    if not isinstance(attempts, list):
+        attempts = []
+    selected = str(result.get("selected_provider") or result.get("selected_provider_before_submit") or result.get("provider_pending_provider") or "").strip()
+    fallback = {}
+    for item in attempts:
+        if not isinstance(item, dict):
+            continue
+        provider = str(item.get("provider") or "").strip()
+        alive = bool(
+            item.get("continue_polling")
+            or item.get("task_id_present")
+            or item.get("submit_accepted")
+            or str(item.get("normalized_status") or item.get("poll_raw_status") or "").strip().lower() in {"running", "queued", "pending", "in_progress", "processing"}
+        )
+        if alive and selected and provider == selected:
+            return dict(item)
+        if alive and not fallback:
+            fallback = dict(item)
+    return fallback
+
+
+def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict | None = None, result: dict | None = None, *, refresh_source: str = "debug") -> dict:
+    del project
+    data = dict(result or {})
+    telemetry = video_b14_provider_telemetry(job, data, refresh_source=refresh_source)
+    data.update(telemetry)
+    if telemetry.get("provider_task_alive"):
+        primary = video_b14_primary_alive_attempt(data)
+        primary_http = safe_int(primary.get("submit_http_status"), 0)
+        current_http = safe_int(data.get("provider_submit_http_status"), 0)
+        accepted = bool(data.get("submit_accepted") or data.get("provider_task_id_saved") or primary.get("submit_accepted") or primary.get("task_id_present"))
+        if accepted and primary_http and (current_http <= 0 or data.get("provider_submit_http_5xx")):
+            data["provider_submit_http_status"] = primary_http
+            data["provider_response_http_status"] = primary_http
+        if accepted:
+            data["provider_submit_http_5xx"] = False
+            data["provider_submit_retriable"] = False
+            data["submit_accepted"] = True
+        data["summary_provider_attempt_source"] = str(primary.get("provider") or data.get("selected_provider") or data.get("provider_pending_provider") or "-")
+        data["summary_fields_from_primary_alive_task"] = True
+        data["stale_failed_attempt_ignored"] = bool(
+            any(
+                isinstance(item, dict)
+                and item is not primary
+                and safe_int(item.get("submit_http_status"), 0) >= 400
+                for item in (data.get("provider_attempts") or [])
+            )
+        )
+    else:
+        data.setdefault("summary_provider_attempt_source", "result_json")
+        data.setdefault("summary_fields_from_primary_alive_task", False)
+        data.setdefault("stale_failed_attempt_ignored", False)
+    return data
+
+
 def video_b14_compact_postproduction_label(addon_plan: dict | None) -> str:
     addon_plan = dict(addon_plan or {})
     items: list[str] = []
@@ -66480,8 +66651,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         except Exception:
             project = {}
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
+    job_result = video_b14_job_result_payload(job)
+    provider_telemetry = video_b14_provider_telemetry(job, job_result, refresh_source="public_panel")
+    provider_task_alive = bool(provider_telemetry.get("provider_task_alive"))
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
+    if provider_task_alive and status not in {"completed", "success", "failed", "error"}:
+        status = "processing"
+        progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
     stage = "chưa bắt đầu xử lý"
     if status in {"queued", "queued_for_worker"}:
         status_label = "Đang chuẩn bị"
@@ -66520,6 +66697,11 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or job.get("final_video_file_id")
         or legacy_artifact_only_status
     )
+    if provider_task_alive and not has_final_artifact and status not in {"failed", "error"}:
+        status = "processing"
+        progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
+        status_label = "Đang dựng video"
+        stage = "hệ thống đang dựng video"
     if not has_final_artifact and progress >= 95:
         progress = 85
         if status in {"failed", "error"}:
@@ -66533,9 +66715,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             stage = "hệ thống đang dựng video"
     error_log = str(project.get("error_log") or job.get("last_error") or "")
     render_mode = video_b14_render_mode_from_job(job, project)
-    job_result = video_b14_job_result_payload(job)
     blocked_reason = video_b14_product_result_block_reason(job, project)
     visual_classification = video_b14_result_visual_classification(job)
+    if provider_task_alive:
+        blocked_reason = ""
+        if visual_classification in {"partial_simple_video", "failed_no_real_visual"}:
+            visual_classification = ""
     real_renderer_unavailable = "real_video_renderer_unavailable" in error_log
     if real_renderer_unavailable:
         render_mode = "unavailable"
@@ -66582,6 +66767,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     elif status in {"completed", "success"} and has_final_artifact:
         lines.append("TOAN AAS đang gửi file kết quả cuối.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
+    elif provider_task_alive:
+        lines.extend(video_b14_provider_rendering_block(provider_telemetry).splitlines())
     else:
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
         lines.append("Anh/chị không cần bấm nhiều lần.")

@@ -61,6 +61,115 @@ def _env_int(env: dict[str, str], name: str, default: int) -> int:
         return int(default)
 
 
+def _progress_value(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        raw = float(str(value).strip().rstrip("%"))
+    except Exception:
+        return 0
+    if 0 < raw <= 1:
+        raw *= 100
+    return max(0, min(100, int(raw)))
+
+
+def _progress_from_raw(raw: Any) -> Any:
+    if raw in (None, ""):
+        return None
+    if isinstance(raw, dict):
+        for key in ("provider_progress_percent", "progress_percent", "progress", "percent", "percentage"):
+            value = raw.get(key)
+            if value not in (None, ""):
+                return value
+        for value in raw.values():
+            nested = _progress_from_raw(value)
+            if nested not in (None, ""):
+                return nested
+    if isinstance(raw, (list, tuple)):
+        for value in raw:
+            nested = _progress_from_raw(value)
+            if nested not in (None, ""):
+                return nested
+    return raw if isinstance(raw, (int, float, str)) and str(raw).strip().rstrip("%").replace(".", "", 1).isdigit() else None
+
+
+def _epoch_text(epoch: float) -> str:
+    try:
+        if float(epoch) > 0:
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(epoch)))
+    except Exception:
+        pass
+    return ""
+
+
+def _metadata_epoch(metadata: dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = metadata.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            epoch = float(value)
+            if epoch > 0:
+                return epoch
+        except Exception:
+            pass
+    return 0.0
+
+
+def _provider_pending_telemetry(
+    request: VideoGenerationRequest,
+    poll_result: VideoPollResult,
+    *,
+    attempt_traces: list[dict[str, Any]],
+    wait_max: int,
+) -> dict[str, Any]:
+    metadata = dict(request.metadata or {})
+    now_epoch = time.time()
+    started_epoch = _metadata_epoch(
+        metadata,
+        "provider_started_at_epoch",
+        "provider_wait_started_epoch",
+    )
+    if started_epoch <= 0:
+        started_epoch = now_epoch
+        started_source = "current_accept_time"
+        elapsed_estimated = False
+    else:
+        started_source = "metadata"
+        elapsed_estimated = False
+    raw_progress = poll_result.progress_percent
+    if raw_progress in (None, ""):
+        raw_progress = _progress_from_raw(getattr(poll_result, "raw", {}) or {})
+    normalized_progress = _progress_value(raw_progress)
+    elapsed = max(0, int(now_epoch - started_epoch))
+    if normalized_progress > 0:
+        provider_progress = max(20, min(85, normalized_progress))
+        estimated = False
+    else:
+        provider_progress = 20 + min(65, int((min(elapsed, wait_max) / max(1, wait_max)) * 65))
+        provider_progress = max(20, min(85, provider_progress))
+        estimated = True
+    poll_count = sum(1 for item in attempt_traces if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll"))
+    poll_count = max(1, poll_count)
+    poll_interval = _env_int(dict(os.environ), "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", 25)
+    return {
+        "provider_started_at": metadata.get("provider_started_at") or _epoch_text(started_epoch),
+        "provider_started_at_epoch": started_epoch,
+        "provider_started_at_source": started_source,
+        "provider_elapsed_estimated": elapsed_estimated,
+        "provider_progress_raw": raw_progress if raw_progress not in (None, "") else "",
+        "provider_progress_normalized": normalized_progress,
+        "provider_progress_estimated": estimated,
+        "provider_progress_percent": provider_progress,
+        "provider_poll_count": poll_count,
+        "provider_last_poll_at": _epoch_text(now_epoch),
+        "provider_elapsed_seconds": elapsed,
+        "provider_wait_elapsed_seconds": elapsed,
+        "provider_wait_max_seconds": wait_max,
+        "next_poll_scheduled_at": _epoch_text(now_epoch + max(1, poll_interval)),
+    }
+
+
 def _join_url(base: str, endpoint: str) -> str:
     base = str(base or "").strip().rstrip("/")
     endpoint = str(endpoint or "").strip()
@@ -1338,15 +1447,16 @@ def run_provider_generation(
             result_url_present = bool(poll_result.result_url or poll_result.file_url)
             fallback_blocked_reason = "primary_provider_in_progress" if attempt_index == 0 else "selected_provider_in_progress"
             wait_max = max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
-            wait_started_raw = (request.metadata or {}).get("provider_wait_started_at") or (request.metadata or {}).get("provider_wait_started_epoch")
-            try:
-                wait_started = float(wait_started_raw or 0)
-            except Exception:
-                wait_started = 0.0
-            wait_elapsed = max(0, int(time.time() - wait_started)) if wait_started > 0 else 0
+            telemetry = _provider_pending_telemetry(
+                request,
+                poll_result,
+                attempt_traces=_copy_attempt_traces(),
+                wait_max=wait_max,
+            )
             payload = {
                 "ok": False,
                 **_attempt_base(),
+                **telemetry,
                 "fallback_used": attempt_index > 0,
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                 "provider_fallback_attempted": bool(attempt_index > 0),
@@ -1389,8 +1499,6 @@ def run_provider_generation(
                 "primary_provider_task_alive": attempt_index == 0,
                 "key4u_submit_suppressed": attempt_index == 0,
                 "next_poll_scheduled": True,
-                "provider_wait_elapsed_seconds": wait_elapsed,
-                "provider_wait_max_seconds": wait_max,
                 "terminal_state": "final_rendering",
                 "progress_message": "provider_in_progress",
                 "provider_readiness": status,
@@ -1624,9 +1732,17 @@ def run_provider_generation(
                     and poll_result.error_code == "provider_status_unknown"
                 ):
                     provider_task_ids = [submit.provider_task_id or submit.provider_video_id]
+                    wait_max = max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
+                    telemetry = _provider_pending_telemetry(
+                        request,
+                        poll_result,
+                        attempt_traces=_copy_attempt_traces(),
+                        wait_max=wait_max,
+                    )
                     payload = {
                         "ok": False,
                         **_attempt_base(),
+                        **telemetry,
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                         "provider_submit_called": submit_called_flag,
@@ -1681,9 +1797,17 @@ def run_provider_generation(
             else:
                 if allow_pending_result and (submit.provider_task_id or submit.provider_video_id) and poll_result.status in PROVIDER_NONTERMINAL_STATUSES:
                     provider_task_ids = [submit.provider_task_id or submit.provider_video_id]
+                    wait_max = max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
+                    telemetry = _provider_pending_telemetry(
+                        request,
+                        poll_result,
+                        attempt_traces=_copy_attempt_traces(),
+                        wait_max=wait_max,
+                    )
                     payload = {
                         "ok": False,
                         **_attempt_base(),
+                        **telemetry,
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                         "provider_submit_called": submit_called_flag,
@@ -1715,8 +1839,6 @@ def run_provider_generation(
                         "primary_provider_task_id_present": True,
                         "key4u_submit_suppressed": attempt_index == 0,
                         "next_poll_scheduled": True,
-                        "provider_wait_elapsed_seconds": 0,
-                        "provider_wait_max_seconds": max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS)),
                         "provider_readiness": status,
                         "no_charge": True,
                     }

@@ -73,6 +73,219 @@ def _json_loads(value: str | None, fallback: Any = None) -> Any:
         return {} if fallback is None else fallback
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        if isinstance(value, bool):
+            return int(value)
+        text = str(value).strip().rstrip("%")
+        if not text:
+            return int(default)
+        return int(float(text))
+    except Exception:
+        return int(default)
+
+
+def _parse_time_epoch(value: Any) -> float:
+    if value in (None, ""):
+        return 0.0
+    try:
+        numeric = float(value)
+        if numeric > 0:
+            return numeric
+    except Exception:
+        pass
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        try:
+            return datetime.strptime(text.replace("Z", "").split("+", 1)[0], fmt).timestamp()
+        except Exception:
+            continue
+    return 0.0
+
+
+def _format_epoch(epoch: float) -> str:
+    try:
+        if float(epoch) > 0:
+            return datetime.fromtimestamp(float(epoch)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+    return ""
+
+
+def _progress_from_value(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        raw = float(str(value).strip().rstrip("%"))
+    except Exception:
+        return 0
+    if 0 < raw <= 1:
+        raw *= 100
+    return max(0, min(100, int(raw)))
+
+
+def _extract_progress_raw(payload: dict[str, Any]) -> Any:
+    for key in (
+        "provider_progress_raw",
+        "provider_progress_percent",
+        "provider_progress_normalized",
+        "progress_percent",
+        "progress",
+        "percent",
+        "percentage",
+    ):
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    for source_key in ("provider_raw", "poll_raw", "raw", "response"):
+        value = payload.get(source_key)
+        if isinstance(value, dict):
+            nested = _extract_progress_raw(value)
+            if nested not in (None, ""):
+                return nested
+    return None
+
+
+def _provider_poll_count(payload: dict[str, Any]) -> int:
+    count = _as_int(payload.get("provider_poll_count") or payload.get("poll_count"), 0)
+    attempts = payload.get("provider_attempts") or payload.get("provider_pending_attempts") or []
+    if isinstance(attempts, list):
+        poll_attempts = sum(1 for item in attempts if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll"))
+        count = max(count, poll_attempts)
+    if not count and payload.get("provider_poll_called"):
+        count = 1
+    return max(0, count)
+
+
+def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
+    payload = dict(payload or {})
+    status_text = " ".join(
+        str(payload.get(key) or "").strip().lower()
+        for key in (
+            "normalized_provider_status",
+            "provider_status",
+            "provider_status_raw",
+            "nonterminal_provider_status",
+            "provider_error",
+            "blocker",
+            "provider_poll_blocker",
+            "terminal_state",
+        )
+        if str(payload.get(key) or "").strip()
+    )
+    task_present = bool(
+        payload.get("provider_task_id_saved")
+        or payload.get("primary_provider_task_id_present")
+        or payload.get("provider_task_ids")
+        or payload.get("provider_video_ids")
+        or payload.get("provider_pending_task_id")
+        or payload.get("provider_pending_video_id")
+    )
+    return bool(
+        payload.get("continue_polling")
+        or payload.get("primary_provider_continue_polling")
+        or payload.get("provider_pending_deferred")
+        or payload.get("primary_provider_task_alive")
+        or (task_present and any(marker in status_text for marker in ("running", "queued", "pending", "in_progress", "processing", "final_rendering")))
+    )
+
+
+def reconcile_provider_progress_telemetry(
+    job: dict[str, Any] | None,
+    payload: dict[str, Any] | None = None,
+    *,
+    now: datetime | None = None,
+    refresh_source: str = "queue",
+) -> dict[str, Any]:
+    """Return monotonic Product Video progress telemetry without changing provider state."""
+    job = dict(job or {})
+    payload = dict(payload or {})
+    current_dt = now or datetime.now()
+    current_epoch = current_dt.timestamp()
+    persisted_status = str(job.get("status") or "").strip().lower()
+    persisted_progress = max(_as_int(job.get("progress_percent"), 0), _as_int(payload.get("progress_percent"), 0))
+    alive = provider_task_alive(payload)
+    wait_max = max(60, _as_int(payload.get("provider_wait_max_seconds"), 20 * 60))
+    started_source = "payload"
+    started_epoch = _parse_time_epoch(payload.get("provider_started_at_epoch") or payload.get("provider_started_at"))
+    if started_epoch <= 0:
+        started_source = "provider_wait_started"
+        started_epoch = _parse_time_epoch(payload.get("provider_wait_started_epoch") or payload.get("provider_wait_started_at"))
+    if started_epoch <= 0:
+        started_source = "job_started_at"
+        started_epoch = _parse_time_epoch(job.get("started_at"))
+    if started_epoch <= 0:
+        started_source = "job_updated_at"
+        started_epoch = _parse_time_epoch(job.get("updated_at"))
+    if started_epoch <= 0:
+        started_source = "job_created_at"
+        started_epoch = _parse_time_epoch(job.get("created_at"))
+    estimated_started = started_source != "payload"
+    if started_epoch <= 0:
+        started_source = "now"
+        started_epoch = current_epoch
+        estimated_started = True
+    elapsed = max(_as_int(payload.get("provider_wait_elapsed_seconds") or payload.get("provider_elapsed_seconds"), 0), int(max(0, current_epoch - started_epoch)))
+    raw_progress = _extract_progress_raw(payload)
+    normalized_progress = _progress_from_value(raw_progress)
+    estimated = False
+    if alive:
+        if normalized_progress > 0:
+            requested = max(20, min(85, normalized_progress))
+            progress_source = "provider_raw"
+        else:
+            requested = 20 + min(65, int((min(elapsed, wait_max) / max(1, wait_max)) * 65))
+            requested = max(20, min(85, requested))
+            estimated = True
+            progress_source = "elapsed_estimate"
+    else:
+        requested = max(persisted_progress, _as_int(payload.get("provider_progress_percent"), 0))
+        progress_source = "persisted"
+    final_progress = max(persisted_progress, requested)
+    if alive:
+        final_progress = max(20, min(85, final_progress))
+    else:
+        final_progress = max(0, min(100, final_progress))
+    final_status = "processing" if alive else (persisted_status or "queued")
+    return {
+        "provider_task_alive": bool(alive),
+        "progress_monotonic_applied": bool(final_progress > requested or final_progress > persisted_progress),
+        "previous_progress": persisted_progress,
+        "requested_progress": requested,
+        "final_progress": final_progress,
+        "progress_source": progress_source,
+        "provider_progress_raw": raw_progress if raw_progress not in (None, "") else "",
+        "provider_progress_normalized": normalized_progress,
+        "provider_progress_estimated": bool(estimated),
+        "provider_progress_percent": final_progress if alive and not normalized_progress else normalized_progress,
+        "provider_poll_count": _provider_poll_count(payload),
+        "provider_last_poll_at": payload.get("provider_last_poll_at") or payload.get("last_poll_at") or now_text(current_dt),
+        "provider_started_at": payload.get("provider_started_at") or _format_epoch(started_epoch),
+        "provider_started_at_epoch": started_epoch,
+        "provider_started_at_source": started_source,
+        "provider_elapsed_seconds": elapsed,
+        "provider_wait_elapsed_seconds": elapsed,
+        "provider_wait_max_seconds": wait_max,
+        "provider_elapsed_estimated": bool(estimated_started),
+        "provider_status_raw": payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or "",
+        "provider_status_normalized": payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
+        "next_poll_scheduled": bool(payload.get("next_poll_scheduled") or alive),
+        "next_poll_scheduled_at": payload.get("next_poll_scheduled_at") or "",
+        "panel_last_updated_at": now_text(current_dt),
+        "refresh_source": refresh_source,
+        "stage_monotonic_applied": bool(alive),
+        "status_source_priority_used": "provider_task_alive" if alive else "persisted_status",
+        "provider_state_overrode_registry": bool(alive),
+        "provider_state_overrode_persisted_status": bool(alive and persisted_status in {"", "queued", "queued_for_worker", "draft"}),
+        "persisted_status_before_reconcile": persisted_status,
+        "persisted_progress_before_reconcile": persisted_progress,
+        "final_status_after_reconcile": final_status,
+        "final_progress_after_reconcile": final_progress,
+    }
+
+
 def _columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
@@ -997,11 +1210,10 @@ def defer_video_job_for_provider_polling(
             "no_charge": True,
         }
     )
-    try:
-        progress = max(int(job.get("progress_percent") or 0), int(payload.get("progress_percent") or 0), 65)
-    except Exception:
-        progress = 65
     current = now_text()
+    telemetry = reconcile_provider_progress_telemetry(job, payload, refresh_source="defer_provider_polling")
+    payload.update(telemetry)
+    progress = int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or 20)
     conn.execute(
         """UPDATE video_jobs
            SET status='queued', locked_by='', locked_at=NULL, lease_expires_at=NULL,
