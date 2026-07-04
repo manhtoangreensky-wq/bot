@@ -8630,6 +8630,45 @@ def product_progress_matrix_text() -> str:
     return "\n".join(product_progress_status.product_progress_matrix_lines())
 
 
+def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, str]:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {}, ""
+    try:
+        conn = db_connect()
+        try:
+            video_job = video_project_queue.get_video_render_job(conn, jid)
+            project = video_project_queue.get_video_project(conn, safe_int((video_job or {}).get("project_id"), 0)) if video_job else {}
+        finally:
+            conn.close()
+    except Exception:
+        return {}, ""
+    if not video_job:
+        return {}, ""
+    result = _video_debug_json((video_job or {}).get("result_json"), {})
+    product_type = video_final_output.product_type_from_project(project or {}, result or {}) or "multiscene_video"
+    recovered = {
+        "internal_job_id": str(jid),
+        "job_id": str(jid),
+        "product_type": product_type,
+        "feature": "video_single",
+        "status": str((video_job or {}).get("status") or result.get("provider_status") or ""),
+        "progress_percent": safe_int((video_job or {}).get("progress_percent") or result.get("progress_percent"), 0),
+        "stage": str(result.get("stage") or result.get("current_stage") or ""),
+        "current_stage": str(result.get("current_stage") or ""),
+        "terminal_state": str((project or {}).get("video_terminal_state") or result.get("terminal_state") or ""),
+        "output_path": str((project or {}).get("final_video_path") or result.get("final_video_path") or result.get("output_path") or ""),
+        "final_video_path": str((project or {}).get("final_video_path") or result.get("final_video_path") or ""),
+        "output_bytes": safe_int(result.get("bytes") or result.get("output_bytes"), 0),
+        "visual_classification": str(result.get("visual_classification") or result.get("final_classification") or ""),
+        "status_panel_message_id": str(result.get("status_panel_message_id") or ""),
+        "progress_message_id": str(result.get("progress_message_id") or ""),
+        "persisted_job_status": str((video_job or {}).get("status") or ""),
+        "persisted_job_progress": safe_int((video_job or {}).get("progress_percent"), 0),
+    }
+    return recovered, product_type
+
+
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
     input_job_id = str(job_id or "").strip()
     if progress_product_type_is_music(product_type, job_id):
@@ -8653,6 +8692,14 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• Callback: <code>{html.escape(str(product_progress_status.product_progress_update_callback(resolved_type, job_id)))}</code>\n\n"
             + auto
         )
+    recovered_from_db_for_status_debug = False
+    recovered_job = {}
+    if job_id and not job and not progress_product_type_is_music(resolved_type, job_id):
+        recovered_job, recovered_type = _video_progress_debug_recover_job_from_db(job_id)
+        if recovered_job:
+            job = recovered_job
+            resolved_type = recovered_type or resolved_type or "multiscene_video"
+            recovered_from_db_for_status_debug = True
     payload = product_progress_status.product_progress_debug_payload(resolved_type, job_id, job)
     auto = progress_auto_refresh_status_text(job_id)
     auto_key = progress_auto_refresh_key(resolved_type, job_id) if job_id else ""
@@ -8668,6 +8715,8 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     ).strip()
     product_video_registry_present = bool(auto_record)
     status_registry_missing_after_restart = bool(job_id and not product_video_registry_present and "no_registry_after_restart" in auto)
+    persisted_job_status = str((job or {}).get("persisted_job_status") or (job or {}).get("status") or "").strip()
+    persisted_job_progress = safe_int((job or {}).get("persisted_job_progress") or (job or {}).get("progress_percent"), 0)
     music_failure = music_failure_debug_fields(job, job_id, resolved_type) if progress_product_type_is_music(resolved_type, job_id) else {}
     music_failure_text = ""
     if music_failure:
@@ -8693,6 +8742,9 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         f"• product_video_registry_present: <code>{'yes' if product_video_registry_present else 'no'}</code>\n"
         f"• status_panel_message_id: <code>{'present' if status_panel_message_id else 'no'}</code>\n"
         f"• status_registry_missing_after_restart: <code>{'yes' if status_registry_missing_after_restart else 'no'}</code>\n\n"
+        f"• persisted_job_status: <code>{html.escape(persisted_job_status or '-')}</code>\n"
+        f"• persisted_job_progress: <code>{persisted_job_progress}%</code>\n"
+        f"• recovered_from_db_for_status_debug: <code>{'yes' if recovered_from_db_for_status_debug else 'no'}</code>\n\n"
         + auto
     )
 
@@ -45380,6 +45432,47 @@ def _video_debug_file_info(path: str) -> dict:
         return {"path": clean, "exists": False, "size": 0}
 
 
+def _video_provider_attempt_summary_lines(result: dict | None = None, *, limit: int = 6) -> list[str]:
+    current = dict(result or {})
+    attempts = current.get("provider_attempts") or []
+    if not isinstance(attempts, list):
+        attempts = []
+    if not attempts:
+        attempts = current.get("provider_fallback_attempts") or current.get("fallback_provider_attempts") or []
+    rows = [dict(item) for item in attempts if isinstance(item, dict)][: max(1, int(limit or 6))]
+    lines = ["", "Provider attempts:"]
+    if not rows:
+        lines.append("• <code>-</code>")
+        return lines
+    for item in rows:
+        provider = html.escape(str(item.get("provider") or "-"))
+        phase = html.escape(str(item.get("phase") or ("submit" if item.get("submit_failure") else "-")))
+        blocker = html.escape(str(item.get("blocker") or item.get("reason") or "-")[:180])
+        safe_error = html.escape(str(item.get("safe_error") or item.get("provider_error_message_safe") or "-")[:180])
+        task_source = html.escape(str(item.get("task_id_source") or "-")[:80])
+        content_type = html.escape(str(item.get("download_content_type") or "-")[:80])
+        lines.append(
+            "• "
+            f"<code>{provider}</code> "
+            f"phase=<code>{phase}</code> "
+            f"submit=<code>{'yes' if item.get('submit_called') else 'no'}</code>/<code>{safe_int(item.get('submit_http_status'), 0)}</code> "
+            f"accepted=<code>{'yes' if item.get('submit_accepted') else 'no'}</code> "
+            f"task=<code>{'yes' if item.get('task_id_present') else 'no'}</code> source=<code>{task_source}</code> "
+            f"poll=<code>{'yes' if item.get('poll_called') else 'no'}</code>/<code>{safe_int(item.get('poll_http_status'), 0)}</code> "
+            f"raw=<code>{html.escape(str(item.get('poll_raw_status') or '-')[:80])}</code> "
+            f"norm=<code>{html.escape(str(item.get('normalized_status') or '-')[:80])}</code> "
+            f"continue=<code>{'yes' if item.get('continue_polling') else 'no'}</code> "
+            f"url=<code>{'yes' if item.get('result_url_present') else 'no'}</code> "
+            f"download=<code>{'yes' if item.get('download_called') else 'no'}</code>/<code>{safe_int(item.get('download_http_status'), 0)}</code> "
+            f"type=<code>{content_type}</code> "
+            f"bytes=<code>{safe_int(item.get('downloaded_file_size'), 0)}</code> "
+            f"valid=<code>{'yes' if item.get('validation_passed') else 'no'}</code> "
+            f"blocker=<code>{blocker}</code> "
+            f"safe=<code>{safe_error}</code>"
+        )
+    return lines
+
+
 def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     jid = safe_int(job_id, 0)
     if jid <= 0:
@@ -45560,6 +45653,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• last error: <code>{html.escape(str((job or {}).get('last_error') or (project or {}).get('error_log') or '-')[:500])}</code>",
         f"• charged Xu: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
     ]
+    lines.extend(_video_provider_attempt_summary_lines(result))
     return "\n".join(lines)
 
 
@@ -45671,6 +45765,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
         f"• blocker: <code>{html.escape(blocker[:240])}</code>",
     ]
+    lines.extend(_video_provider_attempt_summary_lines(result))
     return "\n".join(lines)
 
 
