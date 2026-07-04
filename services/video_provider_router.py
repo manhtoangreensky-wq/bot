@@ -1127,13 +1127,46 @@ def run_provider_generation(
         return reasons[-1] or "provider_submit_failed"
 
     attempt_failures: list[dict[str, Any]] = []
+    attempt_traces: list[dict[str, Any]] = []
     first_fallback_reason = ""
+
+    def _new_attempt_trace(provider_name: str, capability: str) -> dict[str, Any]:
+        return {
+            "provider": provider_name,
+            "phase": "selected",
+            "capability": capability,
+            "submit_called": False,
+            "submit_http_status": 0,
+            "submit_response_shape": {},
+            "submit_accepted": False,
+            "task_id_present": False,
+            "task_id_source": "",
+            "poll_called": False,
+            "poll_http_status": 0,
+            "poll_raw_status": "",
+            "normalized_status": "",
+            "continue_polling": False,
+            "result_url_present": False,
+            "download_called": False,
+            "download_http_status": 0,
+            "download_content_type": "",
+            "downloaded_file_size": 0,
+            "validation_passed": False,
+            "blocker": "",
+            "safe_error": "",
+        }
+
+    def _copy_attempt_traces() -> list[dict[str, Any]]:
+        return [dict(item) for item in attempt_traces if isinstance(item, dict)]
+
     for attempt_index, current_adapter in enumerate(candidate_adapters):
         fallback_used = attempt_index > 0
         fallback_reason = first_fallback_reason if fallback_used else ""
         selected_capability = preferred_provider_capability(current_adapter, request.required_capability)
         provider_request = dataclasses.replace(request, required_capability=selected_capability)
         current_caps = dict(current_adapter.capabilities() or {})
+        current_trace = _new_attempt_trace(current_adapter.provider_name, selected_capability)
+        attempt_traces.append(current_trace)
 
         def _safe_cap_bool(*keys: str) -> bool:
             return any(bool(current_caps.get(key)) for key in keys)
@@ -1192,7 +1225,7 @@ def run_provider_generation(
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
                 "provider_attempted": True,
-                "provider_attempts": list(attempt_failures),
+                "provider_attempts": _copy_attempt_traces(),
             }
 
         def _record_failure(reason: str, raw: dict[str, Any] | None = None, *, submit_failure: bool = False) -> None:
@@ -1200,6 +1233,15 @@ def run_provider_generation(
             clean_reason = str(reason or "provider_failed").strip() or "provider_failed"
             raw = dict(raw or {})
             submit_status = _submit_http_status(raw)
+            if current_trace is not None:
+                current_trace["blocker"] = clean_reason
+                if submit_failure:
+                    current_trace["phase"] = "submit"
+                elif raw.get("provider_poll_blocker"):
+                    current_trace["phase"] = "poll"
+                elif raw.get("provider_result_blocker") and current_trace.get("phase") not in {"download", "validate", "final"}:
+                    current_trace["phase"] = "result"
+                current_trace["safe_error"] = str(raw.get("provider_error_message_safe") or raw.get("exception_message_safe") or "")[:220]
             attempt = {
                 "provider": current_adapter.provider_name,
                 "reason": clean_reason,
@@ -1216,7 +1258,47 @@ def run_provider_generation(
             if not first_fallback_reason:
                 first_fallback_reason = clean_reason
 
+        def _mark_trace(phase: str = "", raw: dict[str, Any] | None = None, **updates: Any) -> None:
+            if phase:
+                current_trace["phase"] = phase
+            raw = dict(raw or {})
+            if raw:
+                if raw.get("submit_response_shape") or raw.get("provider_response_body_shape"):
+                    current_trace["submit_response_shape"] = raw.get("submit_response_shape") or raw.get("provider_response_body_shape")
+                if raw.get("poll_response_shape"):
+                    current_trace["poll_response_shape"] = raw.get("poll_response_shape")
+                submit_status = _submit_http_status(raw)
+                if submit_status:
+                    current_trace["submit_http_status"] = submit_status
+                poll_status = _debug_http_status(raw, "poll_http_status")
+                if poll_status:
+                    current_trace["poll_http_status"] = poll_status
+                if raw.get("provider_status_raw") is not None:
+                    current_trace["poll_raw_status"] = str(raw.get("provider_status_raw") or "")
+                if raw.get("provider_status") or raw.get("normalized_provider_status"):
+                    current_trace["normalized_status"] = str(raw.get("normalized_provider_status") or raw.get("provider_status") or "")
+                if raw.get("result_url_present") is not None:
+                    current_trace["result_url_present"] = bool(raw.get("result_url_present"))
+                if raw.get("task_id_field_path") or raw.get("video_id_field_path"):
+                    current_trace["task_id_source"] = str(raw.get("task_id_field_path") or raw.get("video_id_field_path") or "")
+                if raw.get("provider_task_id_present") is not None:
+                    current_trace["task_id_present"] = bool(raw.get("provider_task_id_present"))
+                if raw.get("provider_submit_blocker") or raw.get("provider_poll_blocker") or raw.get("provider_result_blocker") or raw.get("blocker"):
+                    current_trace["blocker"] = str(raw.get("provider_submit_blocker") or raw.get("provider_poll_blocker") or raw.get("provider_result_blocker") or raw.get("blocker") or "")
+                if raw.get("provider_error_message_safe") or raw.get("exception_message_safe"):
+                    current_trace["safe_error"] = str(raw.get("provider_error_message_safe") or raw.get("exception_message_safe") or "")[:220]
+                if raw.get("download_content_type") is not None:
+                    current_trace["download_content_type"] = str(raw.get("download_content_type") or "")
+                if raw.get("downloaded_file_size") is not None:
+                    try:
+                        current_trace["downloaded_file_size"] = int(raw.get("downloaded_file_size") or 0)
+                    except Exception:
+                        current_trace["downloaded_file_size"] = 0
+            for key, value in updates.items():
+                current_trace[key] = value
+
         try:
+            _mark_trace("submit", submit_called=True)
             submit = current_adapter.submit_video_job(provider_request)
         except Exception as exc:
             exc_payload = {
@@ -1232,13 +1314,24 @@ def run_provider_generation(
             _record_failure(blocker, exc_payload, submit_failure=True)
             if allow_pending_result:
                 exc_payload["no_charge"] = True
-            exc_payload["provider_attempts"] = list(attempt_failures)
+            exc_payload["provider_attempts"] = _copy_attempt_traces()
             exc_payload["provider_fallback_attempts"] = list(attempt_failures)
             exc_payload["fallback_provider_attempts"] = list(attempt_failures)
             exc_payload["provider_fallback_attempted"] = bool(len(attempt_failures) > 1)
             exc_payload["provider_fallback_reason"] = first_fallback_reason
             return exc_payload
         submit_http_status = _submit_http_status(submit.raw)
+        _mark_trace(
+            "submit",
+            raw=submit.raw,
+            submit_called=True,
+            submit_http_status=submit_http_status,
+            submit_accepted=bool(submit.ok),
+            task_id_present=bool(submit.provider_task_id or submit.provider_video_id),
+            task_id_source=str((submit.raw or {}).get("task_id_field_path") or (submit.raw or {}).get("video_id_field_path") or ""),
+            normalized_status=normalize_provider_status(submit.provider_status, has_result_url=bool(submit.result_url or submit.file_url)),
+            result_url_present=bool(submit.result_url or submit.file_url),
+        )
         if not submit.ok:
             blocker = submit.error_code or "provider_submit_failed"
             if attempt_index + 1 < len(candidate_adapters):
@@ -1323,6 +1416,7 @@ def run_provider_generation(
                 if attempt > 1 and interval:
                     sleep_func(interval)
                 try:
+                    _mark_trace("poll", poll_called=True)
                     poll_result = current_adapter.poll_video_job(submit.provider_task_id or submit.provider_video_id)
                 except Exception as exc:
                     exc_payload = {
@@ -1344,9 +1438,18 @@ def run_provider_generation(
                         _record_failure(blocker, exc_payload, submit_failure=False)
                         break
                     _record_failure(blocker, exc_payload, submit_failure=False)
-                    exc_payload["provider_attempts"] = list(attempt_failures)
+                    exc_payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(exc_payload, submit.raw)
                 poll_result.status = normalize_provider_status(poll_result.status, has_result_url=bool(poll_result.result_url or poll_result.file_url))
+                _mark_trace(
+                    "poll",
+                    raw=getattr(poll_result, "raw", {}),
+                    poll_called=True,
+                    poll_http_status=_debug_http_status(getattr(poll_result, "raw", {}), "poll_http_status"),
+                    poll_raw_status=str(poll_result.raw_status or ""),
+                    normalized_status=poll_result.status,
+                    result_url_present=bool(poll_result.result_url or poll_result.file_url),
+                )
                 if poll_result.status == "succeeded" and (poll_result.result_url or poll_result.file_url):
                     break
                 if (
@@ -1379,6 +1482,8 @@ def run_provider_generation(
                         "provider_readiness": status,
                         "no_charge": True,
                     }
+                    _mark_trace("poll", continue_polling=True, blocker="provider_in_progress", normalized_status="running")
+                    payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 if poll_result.status in {"failed", "cancelled"}:
                     blocker = poll_result.error_code or f"provider_poll_{poll_result.status}"
@@ -1404,6 +1509,8 @@ def run_provider_generation(
                         "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                         "provider_readiness": status,
                     }
+                    _mark_trace("poll", blocker=blocker, normalized_status=poll_result.status)
+                    payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             else:
                 if allow_pending_result and (submit.provider_task_id or submit.provider_video_id) and poll_result.status in {"queued", "running"}:
@@ -1431,6 +1538,8 @@ def run_provider_generation(
                         "provider_readiness": status,
                         "no_charge": True,
                     }
+                    _mark_trace("poll", continue_polling=True, blocker="provider_in_progress", normalized_status=poll_result.status)
+                    payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 blocker = "provider_timeout"
                 if attempt_index + 1 < len(candidate_adapters):
@@ -1455,6 +1564,8 @@ def run_provider_generation(
                     "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                     "provider_readiness": status,
                 }
+                _mark_trace("poll", blocker=blocker, normalized_status="timeout")
+                payload["provider_attempts"] = _copy_attempt_traces()
                 return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             if attempt_failures and attempt_failures[-1].get("provider") == current_adapter.provider_name:
                 continue
@@ -1483,8 +1594,11 @@ def run_provider_generation(
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                 "provider_readiness": status,
             }
+            _mark_trace("result", blocker=blocker, result_url_present=False, normalized_status=poll_result.status)
+            payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
         try:
+            _mark_trace("download", download_called=True, result_url_present=True)
             artifact: VideoArtifactResult = current_adapter.materialize_result(poll_result, str(request.job_id or submit.provider_task_id))
         except Exception as exc:
             exc_payload = {
@@ -1507,14 +1621,44 @@ def run_provider_generation(
                 _record_failure(blocker)
                 continue
             _record_failure(blocker)
-            exc_payload["provider_attempts"] = list(attempt_failures)
+            _mark_trace("download", blocker=blocker, validation_passed=False, safe_error=str(exc_payload.get("exception_message_safe") or "")[:220])
+            exc_payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(exc_payload, submit.raw), getattr(poll_result, "raw", {}))
         if not artifact.ok:
             blocker = artifact.error_code or "provider_download_failed"
+            _mark_trace(
+                "validate",
+                download_called=True,
+                download_content_type=str(artifact.content_type or ""),
+                downloaded_file_size=int(artifact.bytes or 0),
+                validation_passed=False,
+                blocker=blocker,
+                safe_error=str(artifact.error_message or blocker)[:220],
+            )
             if attempt_index + 1 < len(candidate_adapters):
-                _record_failure(blocker)
+                _record_failure(
+                    blocker,
+                    {
+                        **(getattr(poll_result, "raw", {}) or {}),
+                        "provider_result_blocker": blocker,
+                        "result_url_present": True,
+                        "download_content_type": artifact.content_type,
+                        "downloaded_file_size": artifact.bytes,
+                        "provider_error_message_safe": artifact.error_message or blocker,
+                    },
+                )
                 continue
-            _record_failure(blocker)
+            _record_failure(
+                blocker,
+                {
+                    **(getattr(poll_result, "raw", {}) or {}),
+                    "provider_result_blocker": blocker,
+                    "result_url_present": True,
+                    "download_content_type": artifact.content_type,
+                    "downloaded_file_size": artifact.bytes,
+                    "provider_error_message_safe": artifact.error_message or blocker,
+                },
+            )
             payload = {
                 "ok": False,
                 **_attempt_base(),
@@ -1540,6 +1684,15 @@ def run_provider_generation(
             }
             payload["provider_result_blocker"] = payload["blocker"]
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+        _mark_trace(
+            "final",
+            download_called=True,
+            download_content_type=str(artifact.content_type or ""),
+            downloaded_file_size=int(artifact.bytes or 0),
+            validation_passed=True,
+            result_url_present=True,
+            normalized_status="downloaded",
+        )
         payload = {
             "ok": True,
             **_attempt_base(),
