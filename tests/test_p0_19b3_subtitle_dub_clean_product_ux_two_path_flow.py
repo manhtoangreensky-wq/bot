@@ -305,8 +305,13 @@ def test_partial_result_sends_audio_and_subtitle():
             lang="vi",
         )
     )
-    assert sent["documents"] == 1
-    assert sent["audio"] == 1
+    assert sent["documents"] == 0
+    assert sent["audio"] == 0
     assert sent["video"] == 0
-    assert any(item.get("audio") for item in message.outputs)
-    assert any(item.get("document") for item in message.outputs)
+    assert sent["partial_audio_available"] is True
+    assert sent["partial_audio_delivered"] is False
+    assert sent["audio_fallback_suppressed"] is True
+    assert sent["audio_artifact_internal_only"] is True
+    assert sent["success_blocked_reason"] == "missing_valid_delivered_mp4"
+    assert not any(item.get("audio") for item in message.outputs)
+    assert not any(item.get("document") for item in message.outputs)

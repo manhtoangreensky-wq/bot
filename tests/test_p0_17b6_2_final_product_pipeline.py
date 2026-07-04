@@ -238,8 +238,12 @@ def test_public_output_matches_tool():
         subtitle_items=subtitle_items,
     ))
     assert result["documents"] == 0
-    assert result["audio"] == 1
+    assert result["audio"] == 0
     assert result["video"] == 0
+    assert result["audio_fallback_suppressed"] is True
+    assert result["audio_artifact_internal_only"] is True
+    assert result["terminal_public_outcome_type"] == "failure"
+    assert dub.outputs == []
 
 
 def test_mux_unavailable_no_fake_mp4():
@@ -251,12 +255,17 @@ def test_mux_unavailable_no_fake_mp4():
         subtitle_items=[{"output_type": "srt", "bytes": b"srt", "filename": "result.srt"}],
         video_bytes=b"",
     ))
-    assert result["documents"] == 1
-    assert result["audio"] == 1
+    assert result["documents"] == 0
+    assert result["audio"] == 0
     assert result["video"] == 0
+    assert result["partial_audio_available"] is True
+    assert result["partial_audio_delivered"] is False
+    assert result["audio_fallback_suppressed"] is True
+    assert result["audio_artifact_internal_only"] is True
+    assert result["success_blocked_reason"] == "missing_valid_delivered_mp4"
     assert "video" not in [kind for kind, _ in message.outputs]
-    assert "document" in [kind for kind, _ in message.outputs]
-    assert "text" not in [kind for kind, _ in message.outputs]
+    assert "document" not in [kind for kind, _ in message.outputs]
+    assert "audio" not in [kind for kind, _ in message.outputs]
 
 
 def test_no_duplicate_job():
@@ -296,8 +305,8 @@ def test_media_handler_checks_active_flow_first():
 def test_no_global_15mb_limit():
     assert bot.PIPELINE_MAX_INPUT_MB_PUBLIC == 50
     assert bot.PIPELINE_MAX_INPUT_MB_ADMIN == 100
-    assert bot.PIPELINE_MAX_DURATION_SECONDS_PUBLIC == 90
-    assert bot.PIPELINE_MAX_DURATION_SECONDS_ADMIN == 180
+    assert bot.PIPELINE_MAX_DURATION_SECONDS_PUBLIC == 300
+    assert bot.PIPELINE_MAX_DURATION_SECONDS_ADMIN == 300
 
 
 def test_public_no_technical_terms():

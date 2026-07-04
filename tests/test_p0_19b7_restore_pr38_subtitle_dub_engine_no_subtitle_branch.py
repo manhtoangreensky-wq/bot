@@ -232,9 +232,14 @@ def test_direct_dub_partial_audio_does_not_send_subtitle_document():
         )
     )
     assert sent["documents"] == 0
-    assert sent["audio"] == 1
+    assert sent["audio"] == 0
     assert sent["video"] == 0
+    assert sent["partial_audio_available"] is True
+    assert sent["partial_audio_delivered"] is False
+    assert sent["audio_fallback_suppressed"] is True
+    assert sent["audio_artifact_internal_only"] is True
     assert not any(item.get("document") for item in message.outputs)
+    assert not any(item.get("audio") for item in message.outputs)
 
 
 def test_product_failure_copy_clean_for_admin_guard(monkeypatch):

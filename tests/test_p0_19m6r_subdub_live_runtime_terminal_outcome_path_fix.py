@@ -111,7 +111,12 @@ def test_status_panel_edit_failure_does_not_send_generic_job_failure(monkeypatch
 
 def test_result_delivery_success_then_late_exception_suppressed(monkeypatch):
     key, job = _fresh_job("p019m6r-delivery-late")
-    bot.mark_subtitle_dub_pipeline_output_sent(key, terminal_state="delivered", delivery_message_id="888")
+    bot.mark_subtitle_dub_pipeline_output_sent(
+        key,
+        terminal_state="delivered",
+        delivery_message_id="888",
+        video_delivery_message_id="888",
+    )
     fake = CaptureBot()
 
     update = _update(monkeypatch, callback=f"videodub|download_final_video|{job['job_id']}")

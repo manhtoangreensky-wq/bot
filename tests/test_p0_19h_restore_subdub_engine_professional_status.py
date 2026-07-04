@@ -203,7 +203,7 @@ def test_subdub_no_success_without_delivery():
     bot.update_subtitle_dub_pipeline_job(job_key, status="completed", terminal_state="delivered")
 
     assert bot.SUBTITLE_DUB_PIPELINE_JOBS[job_key]["terminal_state"] == "failed_no_charge"
-    assert bot.SUBTITLE_DUB_PIPELINE_JOBS[job_key]["status"] == "failed"
+    assert bot.SUBTITLE_DUB_PIPELINE_JOBS[job_key]["status"] == "failed_no_charge"
 
 
 def test_subdub_no_zero_duration_delivery():

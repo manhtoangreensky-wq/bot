@@ -334,11 +334,9 @@ def test_full_dub_requires_mp4_for_video_success(monkeypatch):
         )
     )
 
-    assert result["ok"] is True
-    assert result["has_audio"] is True
-    assert result["has_video"] is False
-    assert result["partial_result"] is True
-    assert result["charged"] == 0
+    assert result["ok"] is False
+    assert result.get("has_video") is not True
+    assert result.get("charged", 0) == 0
     assert charge_calls == []
 
 
@@ -449,9 +447,9 @@ def test_no_charge_without_final_mp4_for_video_flow(monkeypatch):
         )
     )
 
-    assert result["partial_result"] is True
-    assert result["has_video"] is False
-    assert result["charged"] == 0
+    assert result["ok"] is False
+    assert result.get("has_video") is not True
+    assert result.get("charged", 0) == 0
     assert charge_calls == []
 
 

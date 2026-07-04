@@ -7,6 +7,9 @@ import bot
 from services import dubbing_pipeline as dp
 
 
+MP4_BYTES = b"\x00\x00\x00\x18ftypmp42-p017b12" + b"x" * 4096
+
+
 def _labels(markup):
     return [button.text for row in markup.inline_keyboard for button in row]
 
@@ -106,7 +109,8 @@ def test_final_outputs_send_mp4_first_for_all_video_product_modes():
             mode=mode,
             subtitle_items=[{"output_type": "srt", "filename": "x.srt", "bytes": b"1\n00:00:00,000 --> 00:00:01,000\nXin chao\n"}],
             audio_bytes=b"audio",
-            video_bytes=b"mp4",
+            video_bytes=MP4_BYTES,
+            include_subtitle_outputs=False,
             lang="vi",
         )
         return message, sent
@@ -128,7 +132,9 @@ def test_final_outputs_send_mp4_first_for_all_video_product_modes():
         assert message.documents == []
 
 
-def test_voice_video_sends_audio_fallback_only_when_mp4_missing():
+def test_voice_video_blocks_public_audio_fallback_when_mp4_missing(monkeypatch):
+    monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", False)
+
     async def run_case():
         message = CaptureMessage()
         sent = await bot.send_public_subtitle_dub_final_outputs(
@@ -143,11 +149,16 @@ def test_voice_video_sends_audio_fallback_only_when_mp4_missing():
     message, sent = asyncio.run(run_case())
 
     assert sent["documents"] == 0
-    assert sent["audio"] == 1
+    assert sent["audio"] == 0
     assert sent["video"] == 0
+    assert sent["partial_audio_available"] is True
+    assert sent["partial_audio_delivered"] is False
+    assert sent["audio_fallback_suppressed"] is True
+    assert sent["audio_artifact_internal_only"] is True
+    assert sent["terminal_public_outcome_type"] == "failure"
+    assert sent["success_blocked_reason"] == "missing_valid_delivered_mp4"
     assert message.video == []
-    assert len(message.audio) == 1
-    assert "chưa ghép được thành video hoàn chỉnh" in message.audio[0]["caption"]
+    assert message.audio == []
 
 
 def test_b12_4_confirm_texts_have_price_and_final_product_contract():

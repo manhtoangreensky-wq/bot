@@ -120,8 +120,13 @@ def test_delivery_rejects_invalid_video_and_returns_partial_audio(monkeypatch):
     ))
 
     assert sent["video"] == 0
-    assert sent["audio"] == 1
-    assert [kind for kind, _kwargs in message.calls] == ["audio"]
+    assert sent["audio"] == 0
+    assert sent["partial_audio_available"] is True
+    assert sent["partial_audio_delivered"] is False
+    assert sent["audio_fallback_suppressed"] is True
+    assert sent["audio_artifact_internal_only"] is True
+    assert sent["success_blocked_reason"] == "missing_valid_delivered_mp4"
+    assert [kind for kind, _kwargs in message.calls] == []
 
 
 def test_delivery_sends_large_video_as_document_when_needed(monkeypatch):
