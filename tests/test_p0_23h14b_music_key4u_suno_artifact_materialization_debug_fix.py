@@ -232,6 +232,8 @@ def test_wav_request_uses_selected_clip_id_not_provider_task_id_when_clip_exists
 
         async def get(self, url, headers=None):
             calls.append(url)
+            if "cdn1.suno.ai" in url:
+                return _JsonInvalidAudioResponse()
             return _AudioResponse()
 
     _patch_key4u_env(monkeypatch)
@@ -243,9 +245,9 @@ def test_wav_request_uses_selected_clip_id_not_provider_task_id_when_clip_exists
     job = result["job"]
 
     assert result["ok"] is True
-    assert calls == [f"https://api.key4u.shop/suno/act/wav/{CLIP_ID}"]
-    assert TASK_ID not in calls[0]
-    assert WRONG_ITEM_ID not in calls[0]
+    assert calls == [BARE_CDN, f"https://api.key4u.shop/suno/act/wav/{CLIP_ID}"]
+    assert TASK_ID not in calls[-1]
+    assert WRONG_ITEM_ID not in calls[-1]
     assert job["selected_clip_id_source_path"] == "data.data[0].clipId"
     assert job["wav_request_used_provider_task_id_fallback"] is False
 
