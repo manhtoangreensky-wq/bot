@@ -280,6 +280,8 @@ def test_wav_json_status_message_only_sets_specific_no_charge_blocker(monkeypatc
 
 
 def test_provider_download_url_json_object_not_accepted_without_audio_bytes(monkeypatch, tmp_path):
+    calls = []
+
     class JsonResponse:
         status_code = 200
         content = b'{"code":"success","data":{"status":"ready","message":"still preparing"}}'
@@ -299,7 +301,7 @@ def test_provider_download_url_json_object_not_accepted_without_audio_bytes(monk
             return False
 
         async def get(self, url, headers=None):
-            assert "api.key4u.shop" in url
+            calls.append(url)
             return JsonResponse()
 
     _patch_key4u_wav_env(monkeypatch)
@@ -317,6 +319,8 @@ def test_provider_download_url_json_object_not_accepted_without_audio_bytes(monk
     job = result["job"]
 
     assert result["ok"] is False
+    assert any("api.key4u.shop" in url for url in calls)
+    assert any("cdn1.suno.ai" in url for url in calls)
     assert job["selected_artifact_field_path"] == "provider_download_url"
     assert job["selected_artifact_url_label"] == "api.key4u.shop"
     assert job["primary_blocker"] == bot.KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER
