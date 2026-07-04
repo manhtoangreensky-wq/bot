@@ -44871,7 +44871,10 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     try:
         job = video_project_queue.get_video_render_job(conn, jid)
         project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0)) if job else {}
-        claim_debug = remote_worker_api.explain_product_video_claimability(conn, jid, owner_only=True, public_enabled=False) if job else {}
+        try:
+            claim_debug = remote_worker_api.explain_product_video_claimability(conn, jid, owner_only=True, public_enabled=False) if job else {}
+        except Exception as exc:
+            claim_debug = {"claimable": False, "reason": f"claim_debug_unavailable:{type(exc).__name__}"}
     finally:
         conn.close()
     if not job:
@@ -44949,15 +44952,20 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• ffmpeg available: <code>{'yes' if ffmpeg else 'no'}</code>",
         f"• provider ready: <code>{'yes' if readiness.get('ok') else 'no'}</code>",
         f"• provider chain: <code>{html.escape(provider_chain_text)}</code>",
+        f"• configured provider chain: <code>{html.escape(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-')}</code>",
         f"• fallback order: <code>{html.escape(fallback_order_text)}</code>",
         f"• skipped providers: <code>{html.escape(skipped_provider_text)}</code>",
+        f"• skipped provider reasons: <code>{html.escape(str(result.get('skipped_provider_reasons') or [])[:500])}</code>",
         f"• required capability: <code>{html.escape(str(result.get('required_capability') or engine_route.get('provider_capability') or '-'))}</code>",
         f"• route requires provider: <code>{'yes' if result.get('route_requires_provider') else 'no'}</code>",
         f"• local fallback allowed: <code>{'yes' if result.get('local_fallback_allowed') else 'no'}</code>",
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider candidates: <code>{safe_int(result.get('provider_candidates_count'), 0)}</code>",
+        f"• initial selected provider: <code>{html.escape(str(result.get('initial_selected_provider') or '-'))}</code>",
         f"• selected provider: <code>{html.escape(str(result.get('selected_provider') or '-'))}</code>",
         f"• selected provider before submit: <code>{html.escape(str(result.get('selected_provider_before_submit') or '-'))}</code>",
+        f"• selected provider after fallback: <code>{html.escape(str(result.get('selected_provider_after_fallback') or '-'))}</code>",
+        f"• provider selection reason: <code>{html.escape(str(result.get('provider_selection_reason') or '-')[:220])}</code>",
         f"• submit provider key: <code>{html.escape(str(result.get('submit_provider_key') or '-'))}</code>",
         f"• provider config source: <code>{html.escape(str(result.get('provider_config_source') or '-'))}</code>",
         f"• provider namespaces checked: <code>{html.escape(','.join(str(item) for item in (result.get('provider_config_namespaces_checked') or [])) or '-')}</code>",
@@ -44978,6 +44986,9 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• provider submit stage: <code>{html.escape(str(result.get('provider_submit_stage') or result.get('smoke_stage') or '-'))}</code>",
         f"• provider submit blocker: <code>{html.escape(str(result.get('provider_submit_blocker') or '-')[:220])}</code>",
         f"• provider submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• provider submit 5xx: <code>{'yes' if result.get('provider_submit_http_5xx') else 'no'}</code>",
+        f"• provider submit retriable: <code>{'yes' if result.get('provider_submit_retriable') else 'no'}</code>",
+        f"• provider error safe: <code>{html.escape(str(result.get('provider_error_message_safe') or '-')[:220])}</code>",
         f"• provider submit exception: <code>{html.escape(str(result.get('provider_submit_exception_class') or result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('provider_submit_exception_message_safe') or result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• provider submit url configured: <code>{'yes' if result.get('provider_submit_url_configured') or result.get('submit_url_configured') else 'no'}</code>",
         f"• provider submit url present: <code>{'yes' if result.get('submit_url_present') or result.get('provider_submit_url_configured') else 'no'}</code>",
@@ -44985,7 +44996,10 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• provider auth header: <code>{html.escape(str(result.get('provider_auth_header_name') or '-'))}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{html.escape(str(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme') or '-'))}</code> name_present=<code>{'yes' if result.get('auth_header_name_present') or result.get('provider_auth_header_name') else 'no'}</code> value_present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
         f"• provider env namespace mismatch: <code>{'yes' if result.get('provider_env_namespace_mismatch') else 'no'}</code>",
-        f"• provider fallback attempts: <code>{html.escape(str(result.get('fallback_provider_attempts') or result.get('provider_attempts') or [])[:500])}</code>",
+        f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
+        f"• provider fallback reason: <code>{html.escape(str(result.get('provider_fallback_reason') or result.get('fallback_reason') or '-')[:220])}</code>",
+        f"• fallback-only respected: <code>{'yes' if result.get('fallback_only_respected') is not False else 'no'}</code>",
+        f"• provider fallback attempts: <code>{html.escape(str(result.get('provider_fallback_attempts') or result.get('fallback_provider_attempts') or result.get('provider_attempts') or [])[:500])}</code>",
         f"• provider payload keys: <code>{html.escape(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or []))[:500] or '-')}</code>",
         f"• provider payload model: <code>{html.escape(str(result.get('provider_payload_model') or '-')[:160])}</code>",
         f"• provider response http: <code>{safe_int(result.get('provider_response_http_status') or result.get('provider_submit_http_status'), 0)}</code>",
@@ -45082,7 +45096,11 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• provider: <code>{html.escape(provider)}</code>",
+        f"• configured provider chain: <code>{html.escape(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-')}</code>",
+        f"• initial selected provider: <code>{html.escape(str(result.get('initial_selected_provider') or '-'))}</code>",
         f"• selected provider before submit: <code>{html.escape(str(result.get('selected_provider_before_submit') or '-'))}</code>",
+        f"• selected provider after fallback: <code>{html.escape(str(result.get('selected_provider_after_fallback') or '-'))}</code>",
+        f"• provider selection reason: <code>{html.escape(str(result.get('provider_selection_reason') or '-')[:220])}</code>",
         f"• submit provider key: <code>{html.escape(str(result.get('submit_provider_key') or '-'))}</code>",
         f"• provider config source: <code>{html.escape(str(result.get('provider_config_source') or '-'))}</code>",
         f"• provider namespaces checked: <code>{html.escape(','.join(str(item) for item in (result.get('provider_config_namespaces_checked') or [])) or '-')}</code>",
@@ -45109,10 +45127,18 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• auth header: <code>{html.escape(str(result.get('provider_auth_header_name') or '-'))}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{html.escape(str(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme') or '-'))}</code> name_present=<code>{'yes' if result.get('auth_header_name_present') or result.get('provider_auth_header_name') else 'no'}</code> value_present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
         f"• provider env namespace mismatch: <code>{'yes' if result.get('provider_env_namespace_mismatch') else 'no'}</code>",
+        f"• skipped provider reasons: <code>{html.escape(str(result.get('skipped_provider_reasons') or [])[:500])}</code>",
+        f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
+        f"• provider fallback reason: <code>{html.escape(str(result.get('provider_fallback_reason') or result.get('fallback_reason') or '-')[:220])}</code>",
+        f"• fallback-only respected: <code>{'yes' if result.get('fallback_only_respected') is not False else 'no'}</code>",
+        f"• provider fallback attempts: <code>{html.escape(str(result.get('provider_fallback_attempts') or result.get('fallback_provider_attempts') or result.get('provider_attempts') or [])[:500])}</code>",
         f"• payload keys: <code>{html.escape(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or []))[:500] or '-')}</code>",
         f"• payload model: <code>{html.escape(str(result.get('provider_payload_model') or '-')[:160])}</code>",
         f"• response http: <code>{safe_int(result.get('provider_response_http_status') or result.get('provider_submit_http_status'), 0)}</code>",
         f"• response shape: <code>{html.escape(str(result.get('provider_response_body_shape') or result.get('submit_response_shape') or '-')[:500])}</code>",
+        f"• submit 5xx: <code>{'yes' if result.get('provider_submit_http_5xx') else 'no'}</code>",
+        f"• submit retriable: <code>{'yes' if result.get('provider_submit_retriable') else 'no'}</code>",
+        f"• provider error safe: <code>{html.escape(str(result.get('provider_error_message_safe') or '-')[:220])}</code>",
         f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') or task_ids or video_ids else 'no'}</code>",
         f"• provider task id: <code>{html.escape(masked_tasks)}</code>",
         f"• provider video id: <code>{html.escape(masked_videos)}</code>",
