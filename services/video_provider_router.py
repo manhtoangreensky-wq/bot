@@ -1341,20 +1341,51 @@ def run_provider_generation(
                     }
                     blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
                     if attempt_index + 1 < len(candidate_adapters):
-                        _record_failure(blocker)
+                        _record_failure(blocker, exc_payload, submit_failure=False)
                         break
-                    _record_failure(blocker)
+                    _record_failure(blocker, exc_payload, submit_failure=False)
                     exc_payload["provider_attempts"] = list(attempt_failures)
                     return _merge_contract_debug(exc_payload, submit.raw)
                 poll_result.status = normalize_provider_status(poll_result.status, has_result_url=bool(poll_result.result_url or poll_result.file_url))
                 if poll_result.status == "succeeded" and (poll_result.result_url or poll_result.file_url):
                     break
+                if (
+                    allow_pending_result
+                    and (submit.provider_task_id or submit.provider_video_id)
+                    and poll_result.error_code == "provider_status_unknown"
+                ):
+                    provider_task_ids = [submit.provider_task_id or submit.provider_video_id]
+                    payload = {
+                        "ok": False,
+                        **_attempt_base(),
+                        "fallback_used": attempt_index > 0,
+                        "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_submit_called": True,
+                        "provider_submit_http_status": submit_http_status,
+                        "provider_task_id_saved": bool(provider_task_ids),
+                        "submit_accepted": True,
+                        "provider_poll_called": True,
+                        "poll_allowed": True,
+                        "poll_skipped_reason": "",
+                        "provider_result_url_present": False,
+                        "provider_error": "provider_in_progress",
+                        "blocker": "provider_in_progress",
+                        "provider_poll_blocker": "provider_status_unknown",
+                        "continue_polling": True,
+                        "normalized_provider_status": "running",
+                        "provider_status": "running",
+                        "provider_task_ids": provider_task_ids,
+                        "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
+                        "provider_readiness": status,
+                        "no_charge": True,
+                    }
+                    return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 if poll_result.status in {"failed", "cancelled"}:
                     blocker = poll_result.error_code or f"provider_poll_{poll_result.status}"
                     if attempt_index + 1 < len(candidate_adapters):
-                        _record_failure(blocker)
+                        _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
                         break
-                    _record_failure(blocker)
+                    _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
                     payload = {
                         "ok": False,
                         **_attempt_base(),

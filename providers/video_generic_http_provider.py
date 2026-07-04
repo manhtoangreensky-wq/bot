@@ -186,15 +186,24 @@ def _safe_exception_message(value: Any, limit: int = 220) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
-def _safe_provider_error_message(payload: Any, limit: int = 220) -> str:
+def _safe_provider_error_message(payload: Any, limit: int = 180) -> str:
     if not isinstance(payload, dict):
         return ""
     candidates: list[Any] = []
+    context_parts: list[str] = []
+    for key in ("status", "code", "type"):
+        value = payload.get(key)
+        if value not in (None, ""):
+            context_parts.append(f"{key}={_safe_exception_message(value, limit=60)}")
     for key in ("message", "error", "detail", "type", "reason"):
         candidates.append(payload.get(key))
     for nested_key in ("data", "error", "errors", "result"):
         nested = payload.get(nested_key)
         if isinstance(nested, dict):
+            for key in ("status", "code", "type"):
+                value = nested.get(key)
+                if value not in (None, ""):
+                    context_parts.append(f"{key}={_safe_exception_message(value, limit=60)}")
             for key in ("message", "error", "detail", "type", "reason"):
                 candidates.append(nested.get(key))
     for value in candidates:
@@ -206,8 +215,10 @@ def _safe_provider_error_message(payload: Any, limit: int = 220) -> str:
             text = str(value)
         text = _safe_exception_message(text, limit=limit)
         if text:
-            return text
-    return ""
+            if context_parts:
+                text = "; ".join([*context_parts[:3], f"message={text}"])
+            return text[:limit]
+    return "; ".join(context_parts[:3])[:limit] if context_parts else ""
 
 
 def _submit_error_classification(status_code: int, error: Any = "") -> tuple[str, bool, bool]:

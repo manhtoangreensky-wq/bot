@@ -8412,6 +8412,19 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         )
     payload = product_progress_status.product_progress_debug_payload(resolved_type, job_id, job)
     auto = progress_auto_refresh_status_text(job_id)
+    auto_key = progress_auto_refresh_key(resolved_type, job_id) if job_id else ""
+    auto_record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(auto_key) or {}) if auto_key else {}
+    status_panel_message_id = str(
+        auto_record.get("message_id")
+        or auto_record.get("progress_message_id")
+        or auto_record.get("panel_message_id")
+        or (job or {}).get("status_panel_message_id")
+        or (job or {}).get("progress_message_id")
+        or (job or {}).get("panel_message_id")
+        or ""
+    ).strip()
+    product_video_registry_present = bool(auto_record)
+    status_registry_missing_after_restart = bool(job_id and not product_video_registry_present and "no_registry_after_restart" in auto)
     return (
         "📊 <b>TOAN AAS progress status</b>\n\n"
         f"• Product: <code>{html.escape(str(payload.get('product_type') or '-'))}</code>\n"
@@ -8419,7 +8432,10 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         f"• Stage: <code>{html.escape(str(payload.get('current_stage') or '-'))}</code>\n"
         f"• Percent: <code>{int(payload.get('percent') or 0)}%</code>\n"
         f"• Terminal: <code>{html.escape(str(payload.get('terminal_state') or '-'))}</code>\n"
-        f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>\n\n"
+        f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>\n"
+        f"• product_video_registry_present: <code>{'yes' if product_video_registry_present else 'no'}</code>\n"
+        f"• status_panel_message_id: <code>{'present' if status_panel_message_id else 'no'}</code>\n"
+        f"• status_registry_missing_after_restart: <code>{'yes' if status_registry_missing_after_restart else 'no'}</code>\n\n"
         + auto
     )
 
@@ -137873,13 +137889,28 @@ async def cmd_trend_source_add(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def video_provider_status_text(status: dict | None = None, key4u_credit: dict | None = None) -> str:
     status = dict(status or video_provider_router.provider_status_payload())
-    key4u_credit = dict(key4u_credit or status.get("key4u_credit_diagnostic") or {})
-    providers = list(status.get("providers") or [])
-    missing_env = dict(status.get("missing_env") or {})
-    invalid_env = dict(status.get("invalid_env") or {})
-    provider_chain_text = ",".join(str(item) for item in (status.get("effective_provider_chain") or status.get("provider_chain") or [])) or "-"
+    key4u_credit = dict(key4u_credit or status.get("key4u_credit_diagnostic") or {}) if isinstance(key4u_credit or status.get("key4u_credit_diagnostic") or {}, dict) else {}
+    providers = [dict(item) for item in (status.get("providers") or []) if isinstance(item, dict)]
+    missing_env = dict(status.get("missing_env") or {}) if isinstance(status.get("missing_env") or {}, dict) else {}
+    invalid_env = dict(status.get("invalid_env") or {}) if isinstance(status.get("invalid_env") or {}, dict) else {}
+    provider_chain_raw = status.get("effective_provider_chain") or status.get("provider_chain") or []
+    if isinstance(provider_chain_raw, str):
+        provider_chain_iter = [item.strip() for item in provider_chain_raw.split(",") if item.strip()]
+    else:
+        try:
+            provider_chain_iter = list(provider_chain_raw)
+        except TypeError:
+            provider_chain_iter = []
+    provider_chain_text = ",".join(str(item) for item in provider_chain_iter) or "-"
     selection_reason = str(status.get("selection_reason") or status.get("summary_reason") or "-")
-    fallback_order = list(status.get("fallback_order") or [])
+    fallback_raw = status.get("fallback_order") or []
+    if isinstance(fallback_raw, str):
+        fallback_order = [item.strip() for item in fallback_raw.split(",") if item.strip()]
+    else:
+        try:
+            fallback_order = list(fallback_raw)
+        except TypeError:
+            fallback_order = []
     first_fallback = str(fallback_order[0]) if fallback_order else "-"
     lines = [
         "🎬 <b>Trạng thái nhà cung cấp video</b>",
@@ -138076,8 +138107,22 @@ async def cmd_video_provider_setup(update: Update, context: ContextTypes.DEFAULT
 async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
-    status = video_provider_router.provider_status_payload()
-    key4u_credit = await key4u_credit_diagnostic(refresh_remote=True)
+    try:
+        status = video_provider_router.provider_status_payload()
+    except Exception as exc:
+        status = {
+            "ready": False,
+            "ok": False,
+            "reason": f"provider_status_unavailable:{type(exc).__name__}",
+            "summary_reason": f"provider_status_unavailable:{type(exc).__name__}",
+            "providers": [],
+            "provider_chain": [],
+            "fallback_order": [],
+        }
+    try:
+        key4u_credit = await key4u_credit_diagnostic(refresh_remote=True)
+    except Exception as exc:
+        key4u_credit = {"reason": f"key4u_credit_unavailable:{type(exc).__name__}"}
     status["key4u_credit_diagnostic"] = key4u_credit
     await update.message.reply_text(video_provider_status_text(status, key4u_credit), parse_mode="HTML")
 
