@@ -737,12 +737,17 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     product_type = _product_type(job)
     route = video_final_output.route_for_product_type(product_type)
     required_capability = str(route.get("provider_capability") or "text_to_video")
+    request_job_id = (
+        str((job or {}).get("id") or (job or {}).get("job_id") or "video_job")
+        + "-"
+        + str(_safe_int(getattr(scene, "scene_id", 0), 0) or 1)
+    )
+    pending_request_job_id = str((job or {}).get("provider_pending_request_job_id") or "").strip()
+    pending_matches_request = bool(
+        (job or {}).get("provider_pending_task_id") or (job or {}).get("provider_pending_video_id")
+    ) and (not pending_request_job_id or pending_request_job_id == request_job_id)
     request = VideoGenerationRequest(
-        job_id=(
-            str((job or {}).get("id") or (job or {}).get("job_id") or "video_job")
-            + "-"
-            + str(_safe_int(getattr(scene, "scene_id", 0), 0) or 1)
-        ),
+        job_id=request_job_id,
         product_type=product_type or "video_ai_prompt",
         video_flow_type=str((job or {}).get("video_flow") or product_type or ""),
         prompt=prompt,
@@ -764,6 +769,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
             "claim_payload_has_provider_config": bool((job or {}).get("provider_config") or (job or {}).get("provider_submit_url") or (job or {}).get("provider_auth_header_value")),
+            "provider_pending_provider": str((job or {}).get("provider_pending_provider") or "") if pending_matches_request else "",
+            "provider_pending_task_id": str((job or {}).get("provider_pending_task_id") or "") if pending_matches_request else "",
+            "provider_pending_video_id": str((job or {}).get("provider_pending_video_id") or "") if pending_matches_request else "",
+            "provider_pending_request_job_id": pending_request_job_id if pending_matches_request else "",
+            "provider_pending_attempts": ((job or {}).get("provider_pending_attempts") or []) if pending_matches_request else [],
         },
         required_capability=required_capability,
     )
