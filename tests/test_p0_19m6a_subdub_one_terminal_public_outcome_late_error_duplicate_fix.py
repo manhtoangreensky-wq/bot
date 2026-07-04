@@ -282,6 +282,7 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "bot.py",
         "tests/test_p0_19m5c_subdub_mode_route_female_voice_state_fix.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
+        "tests/test_p0_19m6r_subdub_live_runtime_terminal_outcome_path_fix.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
     }
     assert changed <= allowed

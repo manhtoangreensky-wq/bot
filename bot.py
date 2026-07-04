@@ -7409,18 +7409,14 @@ def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
     for candidate in list_engine_async_jobs("subtitle_dub", limit=120):
         if _matches(candidate):
             candidates.append(subdub_merge_debug_job(candidate))
+    for candidate in subdub_engine_async_persisted_scan(limit=240):
+        if _matches(candidate):
+            candidates.append(subdub_merge_debug_job(candidate, lookup_store_hit="engine_async_persisted_scan"))
     if not candidates:
         return {}
 
     def _sort_time(item: dict) -> float:
-        raw = item.get("updated_at") or item.get("started_at") or item.get("created_at") or 0
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            try:
-                return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
-            except (TypeError, ValueError):
-                return 0.0
+        return subdub_job_timestamp(item.get("updated_at") or item.get("started_at") or item.get("created_at") or 0)
 
     return max(candidates, key=_sort_time)
 
@@ -43490,6 +43486,117 @@ def completed_music_job_for_callback_error(update: object) -> dict | None:
         if music_delivery_should_suppress_public_fail({}, job) or music_confirm_submit_blocker_from_job(job):
             return job
     return None
+
+def subdub_callback_data(update: object) -> str:
+    query = getattr(update, "callback_query", None)
+    return str(getattr(query, "data", "") or "").strip()
+
+def subdub_message_text(update: object) -> str:
+    message = getattr(update, "effective_message", None)
+    return str(getattr(message, "text", "") or "").strip()
+
+def subdub_update_user_id(update: object) -> int:
+    user = getattr(update, "effective_user", None)
+    try:
+        return int(getattr(user, "id", 0) or 0)
+    except Exception:
+        return 0
+
+def subdub_update_is_runtime_path(update: object) -> bool:
+    callback_data = subdub_callback_data(update)
+    message_text = subdub_message_text(update)
+    if callback_data.startswith("videodub|"):
+        return True
+    if message_text.startswith(("/subdub_", "/subtitle_dub", "/subtitle_job", "/subtitle_jobs")):
+        return True
+    try:
+        state = get_video_dubbing_pending(subdub_update_user_id(update))
+        return bool(state and state.get("type") == "video_dubbing")
+    except Exception:
+        return False
+
+def subdub_job_from_error_update(update: object) -> dict:
+    user_id = subdub_update_user_id(update)
+    callback_data = subdub_callback_data(update)
+    message_text = subdub_message_text(update)
+    lookup_id = ""
+    if callback_data.startswith("videodub|"):
+        parts = callback_data.split("|")
+        if len(parts) >= 3 and parts[1] in {"subdub_status", "job_status", "download_final_video", "download_final_subtitle"}:
+            lookup_id = str(parts[2] or "").strip()
+    if not lookup_id and message_text.startswith("/subdub_"):
+        pieces = message_text.split(maxsplit=1)
+        lookup_id = pieces[1].strip() if len(pieces) > 1 else ""
+    job = subdub_progress_job_for_user(lookup_id or "latest", user_id) if (lookup_id or callback_data.startswith("videodub|")) else {}
+    if not job and lookup_id:
+        job = subtitle_dub_debug_lookup_job(lookup_id)
+    return dict(job or {})
+
+def subdub_is_status_panel_error(update: object, error_text: str = "") -> bool:
+    callback_data = subdub_callback_data(update)
+    lowered = str(error_text or "").lower()
+    return bool(
+        callback_data.startswith("videodub|subdub_status|")
+        or "message is not modified" in lowered
+        or "message to edit" in lowered
+        or "message can't be edited" in lowered
+        or "message identifier is not specified" in lowered
+    )
+
+def record_subdub_runtime_error_suppressed(
+    job: dict | None,
+    *,
+    reason: str = "",
+    status_panel: bool = False,
+    late_after_success: bool = False,
+) -> dict:
+    current = dict(job or {})
+    if not current:
+        return {}
+    current["last_runtime_error_reason"] = str(reason or "")[:180]
+    current["last_runtime_error_at"] = time.time()
+    if status_panel:
+        current["status_panel_edit_failed"] = True
+        current["public_panel_update_failed_nonterminal"] = True
+        current["status_panel_edit_failed_count"] = int(current.get("status_panel_edit_failed_count") or 0) + 1
+    if late_after_success or subdub_job_blocks_public_fail(current):
+        current["late_fail_suppressed"] = True
+        current["late_public_error_suppressed"] = True
+        current["duplicate_error_prevented"] = True
+        current["error_sent_after_delivery"] = False
+        current["ignored_late_error_count"] = int(current.get("ignored_late_error_count") or 0) + 1
+    job_key = str(current.get("job_key") or "").strip()
+    if job_key:
+        SUBTITLE_DUB_PIPELINE_JOBS[job_key] = current
+    try:
+        persist_subtitle_dub_pipeline_job_snapshot(job_key, current, reason="runtime_error_suppressed")
+    except Exception:
+        pass
+    return current
+
+def subdub_should_suppress_outer_error(update: object, error_text: str = "") -> tuple[bool, dict, str]:
+    if not subdub_update_is_runtime_path(update):
+        return False, {}, ""
+    job = subdub_job_from_error_update(update)
+    if subdub_is_status_panel_error(update, error_text):
+        return True, job, "status_panel_edit_failed"
+    if job and subdub_job_blocks_public_fail(job):
+        return True, job, "late_error_after_terminal_success"
+    if job and subdub_job_has_failure_public_outcome(job):
+        return True, job, "terminal_failure_already_sent"
+    if subdub_message_text(update).startswith("/subdub_"):
+        return True, job, "subdub_debug_command_failed"
+    return True, job, "subdub_runtime_failure"
+
+def subdub_debug_command_safe_error_text(command: str = "", error_name: str = "") -> str:
+    command = str(command or "subdub_debug").split()[0].lstrip("/") or "subdub_debug"
+    return (
+        "⚠️ <b>SUBDUB DEBUG SAFE ERROR</b>\n\n"
+        f"• command: <code>{html.escape(command)}</code>\n"
+        "• status: <code>debug_read_failed</code>\n"
+        f"• blocker: <code>{html.escape(str(error_name or 'debug_exception'))}</code>\n"
+        "• public generic error: <code>suppressed</code>"
+    )
 
 def record_video_post_output_error(exc: Exception | None, job: dict, callback_data: str = "") -> dict:
     trace = sanitize_log_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)) if exc else "post_output_error")[:1200]
@@ -80090,6 +80197,7 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         callback_data = str(update.callback_query.data or "").strip()
     completed_video_job = completed_video_job_for_callback_error(update)
     completed_music_job = completed_music_job_for_callback_error(update)
+    suppress_subdub_error, subdub_error_job, subdub_error_reason = subdub_should_suppress_outer_error(update, error_text)
     image_to_pdf_safe_error = (
         message_text.startswith("/image_to_pdf")
         or ('unsupported start tag "yêu"' in error_text.lower())
@@ -80131,6 +80239,54 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
             sanitize_log_text(callback_data)[:120],
             sanitize_log_text(music_confirm_submit_blocker_from_job(completed_music_job) or music_job_delivery_state(completed_music_job))[:120],
         )
+        return
+
+    if suppress_subdub_error:
+        record_subdub_runtime_error_suppressed(
+            subdub_error_job,
+            reason=subdub_error_reason or error_name,
+            status_panel=subdub_error_reason == "status_panel_edit_failed",
+            late_after_success=subdub_error_reason == "late_error_after_terminal_success",
+        )
+        logger.warning(
+            "suppressed public error in SubDub runtime path | reason=%s | callback=%s | command=%s",
+            sanitize_log_text(subdub_error_reason or error_name)[:120],
+            sanitize_log_text(callback_data)[:120],
+            sanitize_log_text(message_text)[:120],
+        )
+        if subdub_error_reason == "subdub_debug_command_failed" and isinstance(update, Update) and update.effective_chat:
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=subdub_debug_command_safe_error_text(message_text, error_name),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                logger.exception("Failed to send SubDub debug safe error")
+        elif subdub_error_reason == "subdub_runtime_failure" and isinstance(update, Update) and update.effective_chat:
+            try:
+                job_key = str((subdub_error_job or {}).get("job_key") or "").strip()
+                if job_key:
+                    update_subtitle_dub_pipeline_job(
+                        job_key,
+                        status="failed",
+                        terminal_state="failed_no_charge",
+                        public_error_sent=True,
+                        terminal_public_outcome_sent=True,
+                        terminal_public_outcome_type="failure",
+                        public_error_sent_count=max(1, _safe_int((subdub_error_job or {}).get("public_error_sent_count"), 0)),
+                        success_sent_count=0,
+                        pipeline_blocker=sanitize_log_text(error_name)[:180],
+                        charge_status="not_charged",
+                        no_charge_reason=sanitize_log_text(error_name)[:180],
+                    )
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=subdub_clean_failure_text(get_user_language(subdub_update_user_id(update)) or "vi"),
+                    parse_mode=None,
+                )
+            except Exception:
+                logger.exception("Failed to send SubDub clean runtime failure")
         return
 
     if shopaikey_image_error_already_notified:
@@ -85714,11 +85870,24 @@ def subtitle_dub_debug_text(job: dict) -> str:
         return "⚠️ Chưa có subtitle/dub job để debug."
     if job.get("_lookup_missing"):
         searched = ", ".join(job.get("searched") or []) or "-"
+        stores = ", ".join(job.get("lookup_stores_checked") or []) or "-"
         return "\n".join([
             "⚠️ <b>Chưa có subtitle/dub job để debug.</b>",
             "",
             f"• input: <code>{html.escape(str(job.get('lookup_input') or '-'))}</code>",
             f"• searched: <code>{html.escape(searched)}</code>",
+            f"• lookup store hit: <code>{html.escape(str(job.get('lookup_store_hit') or '-'))}</code>",
+            f"• lookup stores checked: <code>{html.escape(stores)}</code>",
+            f"• public code: <code>{html.escape(str(job.get('public_code') or '-'))}</code>",
+            f"• internal job id: <code>{html.escape(str(job.get('internal_job_id') or '-'))}</code>",
+            f"• persisted job status: <code>{html.escape(str(job.get('persisted_job_status') or '-'))}</code>",
+            f"• terminal public outcome sent: <code>{'yes' if job.get('terminal_public_outcome_sent') else 'no'}</code>",
+            f"• success sent count: <code>{int(job.get('success_sent_count') or 0)}</code>",
+            f"• public error sent count: <code>{int(job.get('public_error_sent_count') or 0)}</code>",
+            f"• success after error prevented: <code>{'yes' if job.get('success_after_error_prevented') else 'no'}</code>",
+            f"• late fail suppressed: <code>{'yes' if job.get('late_fail_suppressed') else 'no'}</code>",
+            f"• status panel edit failed: <code>{'yes' if job.get('status_panel_edit_failed') else 'no'}</code>",
+            f"• result delivery failed: <code>{'yes' if job.get('result_delivery_failed') else 'no'}</code>",
             f"• persistence: <code>{html.escape(str(job.get('persistence_backend') or 'memory_and_engine_async_jobs'))}</code>",
             "• blocker: <code>job_lookup_missing</code>",
         ])
@@ -85726,6 +85895,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
     matrix = dict(job.get("gate_matrix") or {})
     def yes_no(value) -> str:
         return "yes" if value else "no"
+    def intval(value, default: int = 0) -> int:
+        return _safe_int(value, default)
     def esc(value) -> str:
         return html.escape(str(value if value not in (None, "") else "-"))
     def esc_path(value) -> str:
@@ -85755,16 +85926,20 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• stage: <code>{esc(job.get('stage'))}</code>",
         f"• lifecycle state: <code>{esc(job.get('lifecycle_state'))}</code>",
         f"• current stage: <code>{esc(job.get('current_stage') or job.get('progress_stage'))}</code>",
-        f"• progress percent: <code>{int(job.get('progress_percent') or 0)}</code>",
+        f"• lookup store hit: <code>{esc(job.get('lookup_store_hit'))}</code>",
+        f"• lookup stores checked: <code>{esc(', '.join(job.get('lookup_stores_checked') or []))}</code>",
+        f"• public code: <code>{esc(job.get('public_code'))}</code>",
+        f"• persisted job status: <code>{esc(job.get('persisted_job_status'))}</code>",
+        f"• progress percent: <code>{intval(job.get('progress_percent'))}</code>",
         f"• pipeline attempted: <code>{yes_no(job.get('pipeline_attempted'))}</code>",
         f"• pipeline started: <code>{yes_no(job.get('pipeline_started'))}</code>",
         f"• input file path: <code>{esc_path(job.get('input_file_path'))}</code>",
         f"• input file id: <code>{esc(job.get('input_file_id'))}</code>",
         f"• input file exists: <code>{yes_no(job.get('input_file_exists'))}</code>",
-        f"• file size: <code>{int(job.get('input_file_size') or 0)}</code>",
+        f"• file size: <code>{intval(job.get('input_file_size'))}</code>",
         f"• input save attempted: <code>{yes_no(job.get('input_save_attempted'))}</code>",
         f"• input save success: <code>{yes_no(job.get('input_save_success'))}</code>",
-        f"• telegram file size: <code>{int(job.get('telegram_file_size') or 0)}</code>",
+        f"• telegram file size: <code>{intval(job.get('telegram_file_size'))}</code>",
         f"• telegram download method: <code>{esc(job.get('telegram_download_method'))}</code>",
         f"• telegram download limit hit: <code>{yes_no(job.get('telegram_download_limit_hit'))}</code>",
         f"• large telegram media detected: <code>{yes_no(job.get('large_telegram_media_detected'))}</code>",
@@ -85773,12 +85948,12 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• input save blocker: <code>{esc(job.get('input_save_blocker'))}</code>",
         f"• input save public action: <code>{esc(job.get('input_save_public_action'))}</code>",
         f"• no charge reason: <code>{esc(job.get('no_charge_reason'))}</code>",
-        f"• duration: <code>{int(job.get('duration_seconds') or 0)}</code>",
-        f"• input duration: <code>{int(job.get('input_duration') or job.get('duration_seconds') or 0)}</code>",
+        f"• duration: <code>{intval(job.get('duration_seconds'))}</code>",
+        f"• input duration: <code>{intval(job.get('input_duration') or job.get('duration_seconds'))}</code>",
         f"• detected duration source: <code>{esc(job.get('detected_duration_source'))}</code>",
-        f"• telegram duration: <code>{int(job.get('telegram_duration') or 0)}</code>",
-        f"• ffprobe duration: <code>{int(job.get('ffprobe_duration') or 0)}</code>",
-        f"• duration limit: <code>{int(job.get('duration_limit') or job.get('duration_limit_seconds') or subdub_full_duration_limit_seconds(False))}</code>",
+        f"• telegram duration: <code>{intval(job.get('telegram_duration'))}</code>",
+        f"• ffprobe duration: <code>{intval(job.get('ffprobe_duration'))}</code>",
+        f"• duration limit: <code>{intval(job.get('duration_limit') or job.get('duration_limit_seconds') or subdub_full_duration_limit_seconds(False))}</code>",
         f"• duration gate result: <code>{esc(job.get('duration_gate_result'))}</code>",
         f"• duration guard stage: <code>{esc(job.get('duration_guard_stage'))}</code>",
         f"• is long media: <code>{yes_no(job.get('is_long_media'))}</code>",
@@ -85795,7 +85970,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• registry chat id present: <code>{yes_no(job.get('registry_chat_id_present'))}</code>",
         f"• status panel message id: <code>{esc(job.get('status_panel_message_id'))}</code>",
         f"• chunking enabled: <code>{yes_no(job.get('chunking_enabled'))}</code>",
-        f"• chunk count: <code>{int(job.get('chunk_count') or 0)}</code>",
+        f"• chunk count: <code>{intval(job.get('chunk_count'))}</code>",
         f"• gate product route allowed: <code>{yes_no(matrix.get('product_route_allowed'))}</code>",
         f"• gate blackbox enabled: <code>{yes_no(matrix.get('blackbox_enabled'))}</code>",
         f"• gate ASR enabled: <code>{yes_no(matrix.get('asr_enabled'))}</code>",
@@ -85812,7 +85987,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• extracted audio path: <code>{esc_path(job.get('extracted_audio_path'))}</code>",
         f"• extracted audio exists: <code>{yes_no(job.get('extracted_audio_exists'))}</code>",
         f"• ASR route called: <code>{yes_no(job.get('asr_route_called'))}</code>",
-        f"• transcript length: <code>{int(job.get('transcript_length') or 0)}</code>",
+        f"• transcript length: <code>{intval(job.get('transcript_length'))}</code>",
         f"• original SRT path: <code>{esc_path(job.get('original_srt_path'))}</code>",
         f"• translated SRT path: <code>{esc_path(job.get('translated_srt_path'))}</code>",
         f"• TTS route called: <code>{yes_no(job.get('tts_route_called'))}</code>",
@@ -85836,8 +86011,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• mux/render route called: <code>{yes_no(job.get('mux_render_called'))}</code>",
         f"• final MP4 path: <code>{esc_path(job.get('final_mp4_path'))}</code>",
         f"• final MP4 exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
-        f"• final MP4 size: <code>{int(job.get('final_mp4_size') or job.get('video_bytes') or 0)}</code>",
-        f"• final MP4 duration: <code>{int(job.get('final_mp4_duration') or job.get('duration_seconds') or 0)}</code>",
+        f"• final MP4 size: <code>{intval(job.get('final_mp4_size') or job.get('video_bytes'))}</code>",
+        f"• final MP4 duration: <code>{intval(job.get('final_mp4_duration') or job.get('duration_seconds'))}</code>",
         f"• subtitle style: <code>{esc(job.get('subtitle_style_preset'))}</code>",
         f"• subtitle font multiplier: <code>{esc(job.get('subtitle_font_multiplier'))}</code>",
         f"• subtitle render font size: <code>{esc(job.get('subtitle_render_font_size'))}</code>",
@@ -85866,8 +86041,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• terminal public outcome sent: <code>{yes_no(job.get('terminal_public_outcome_sent'))}</code>",
         f"• terminal public outcome type: <code>{esc(job.get('terminal_public_outcome_type'))}</code>",
         f"• terminal public outcome message id: <code>{esc(job.get('terminal_public_outcome_message_id'))}</code>",
-        f"• public error sent count: <code>{int(job.get('public_error_sent_count') or 0)}</code>",
-        f"• success sent count: <code>{int(job.get('success_sent_count') or 0)}</code>",
+        f"• public error sent count: <code>{intval(job.get('public_error_sent_count'))}</code>",
+        f"• success sent count: <code>{intval(job.get('success_sent_count'))}</code>",
         f"• duplicate success prevented: <code>{yes_no(job.get('duplicate_success_prevented'))}</code>",
         f"• duplicate error prevented: <code>{yes_no(job.get('duplicate_error_prevented'))}</code>",
         f"• output validated before success: <code>{yes_no(job.get('output_validated_before_success'))}</code>",
@@ -85877,7 +86052,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• delivery started: <code>{yes_no(job.get('delivery_started'))}</code>",
         f"• delivery success: <code>{yes_no(job.get('delivery_success'))}</code>",
         f"• panel finalized: <code>{yes_no(job.get('panel_finalized'))}</code>",
-        f"• panel final percent: <code>{int(job.get('panel_final_percent') or 0)}</code>",
+        f"• panel final percent: <code>{intval(job.get('panel_final_percent'))}</code>",
         f"• panel final message id: <code>{esc(job.get('panel_final_message_id'))}</code>",
         f"• status panel terminalized: <code>{yes_no(job.get('status_panel_terminalized'))}</code>",
         f"• refresh stopped after terminal: <code>{yes_no(job.get('refresh_stopped_after_terminal'))}</code>",
@@ -85888,8 +86063,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• terminal state: <code>{esc(job.get('terminal_state'))}</code>",
         f"• late fail suppressed: <code>{yes_no(job.get('late_fail_suppressed'))}</code>",
         f"• terminal history: <code>{esc(json.dumps(job.get('terminal_state_history') or [], ensure_ascii=False)[:240])}</code>",
-        f"• public messages sent: <code>{int(job.get('public_messages_sent') or 0)}</code>",
-        f"• delivery attempts: <code>{int(job.get('delivery_attempts') or 0)}</code>",
+        f"• public messages sent: <code>{intval(job.get('public_messages_sent'))}</code>",
+        f"• delivery attempts: <code>{intval(job.get('delivery_attempts'))}</code>",
         f"• output validation: <code>{esc(json.dumps(job.get('output_validation') or {}, ensure_ascii=False)[:240])}</code>",
         f"• route ASR: <code>{esc(route.get('asr'))}</code>",
         f"• route translation: <code>{esc(route.get('translation'))}</code>",
@@ -85898,7 +86073,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• last error stage: <code>{esc(job.get('last_error_stage'))}</code>",
         f"• last error safe: <code>{esc(job.get('last_error_safe'))}</code>",
         f"• charge status: <code>{esc(job.get('charge_status'))}</code>",
-        f"• charged xu: <code>{int(job.get('charged_xu') or 0)}</code>",
+        f"• charged xu: <code>{intval(job.get('charged_xu'))}</code>",
         f"• charge after delivery: <code>{yes_no(job.get('charge_after_delivery'))}</code>",
         f"• success cost line: <code>{esc(job.get('success_cost_line'))}</code>",
         f"• cost line rendered: <code>{yes_no(job.get('cost_line_rendered'))}</code>",
@@ -85912,11 +86087,14 @@ def subdub_voice_debug_text(job: dict) -> str:
         return "⚠️ Chưa có SubDub voice job để debug."
     if job.get("_lookup_missing"):
         searched = ", ".join(job.get("searched") or []) or "-"
+        stores = ", ".join(job.get("lookup_stores_checked") or []) or "-"
         return "\n".join([
             "⚠️ <b>Chưa có SubDub voice job để debug.</b>",
             "",
             f"• input: <code>{html.escape(str(job.get('lookup_input') or '-'))}</code>",
             f"• searched: <code>{html.escape(searched)}</code>",
+            f"• lookup stores checked: <code>{html.escape(stores)}</code>",
+            f"• public code: <code>{html.escape(str(job.get('public_code') or '-'))}</code>",
             f"• persistence: <code>{html.escape(str(job.get('persistence_backend') or 'memory_and_engine_async_jobs'))}</code>",
             "• blocker: <code>voice_job_lookup_missing</code>",
         ])
@@ -85931,6 +86109,8 @@ def subdub_voice_debug_text(job: dict) -> str:
         return html.escape(name or "path_hidden")
     def yes_no(value) -> str:
         return "yes" if value else "no"
+    def intval(value, default: int = 0) -> int:
+        return _safe_int(value, default)
     return "\n".join([
         "🎙 <b>SUBDUB VOICE DEBUG</b>",
         "",
@@ -85958,7 +86138,7 @@ def subdub_voice_debug_text(job: dict) -> str:
         f"• voxcpm2_fallback_reason: <code>{esc(job.get('voxcpm2_fallback_reason'))}</code>",
         f"• voxcpm2_error_code: <code>{esc(job.get('voxcpm2_error_code'))}</code>",
         f"• tts_audio_path: <code>{esc_path(job.get('generated_audio_path') or job.get('dubbed_audio_path'))}</code>",
-        f"• tts_audio_bytes: <code>{int(job.get('audio_bytes') or 0)}</code>",
+        f"• tts_audio_bytes: <code>{intval(job.get('audio_bytes'))}</code>",
         f"• tts_audio_duration: <code>{esc(job.get('generated_audio_duration'))}</code>",
         f"• tts_audio_volume_gain: <code>{esc(job.get('tts_audio_volume_gain') or SUBDUB_DUB_VOICE_GAIN)}</code>",
         f"• blocker: <code>{esc(job.get('voice_blocker') or job.get('pipeline_blocker'))}</code>",
@@ -86345,6 +86525,8 @@ def subdub_language_debug_text(job: dict | None = None) -> str:
     route = dict(job.get("provider_route") or {})
     def esc(value) -> str:
         return html.escape(str(value if value not in (None, "") else "-"))
+    def intval(value, default: int = 0) -> int:
+        return _safe_int(value, default)
     return "\n".join([
         "🌐 <b>SUBDUB LANGUAGE DEBUG</b>",
         "",
@@ -86353,11 +86535,11 @@ def subdub_language_debug_text(job: dict | None = None) -> str:
         f"• source language: <code>{esc(job.get('source_language') or job.get('detected_language'))}</code>",
         f"• detected language: <code>{esc(job.get('detected_language'))}</code>",
         f"• target language: <code>{esc(job.get('target_language'))}</code>",
-        f"• source segments: <code>{int(job.get('source_segment_count') or job.get('srt_blocks') or 0)}</code>",
-        f"• translated segments: <code>{int(job.get('translated_segment_count') or 0)}</code>",
+        f"• source segments: <code>{intval(job.get('source_segment_count') or job.get('srt_blocks'))}</code>",
+        f"• translated segments: <code>{intval(job.get('translated_segment_count'))}</code>",
         f"• ASR route: <code>{esc(route.get('asr') or job.get('asr_provider'))}</code>",
         f"• translation route: <code>{esc(route.get('translation') or job.get('translation_provider'))}</code>",
-        f"• transcript length: <code>{int(job.get('transcript_length') or 0)}</code>",
+        f"• transcript length: <code>{intval(job.get('transcript_length'))}</code>",
         f"• blocker: <code>{esc(job.get('pipeline_blocker') or job.get('last_technical_error'))}</code>",
     ])
 
@@ -86442,15 +86624,56 @@ def subdub_lookup_variants(value: str = "") -> set[str]:
 def subdub_job_identifier_variants(job: dict | None = None) -> set[str]:
     current = dict(job or {})
     ids: set[str] = set()
-    for key in ("internal_job_id", "job_id", "public_job_id", "public_code", "job_key", "provider_task_id", "pipeline_job_id"):
+    for key in (
+        "internal_job_id", "job_id", "public_job_id", "public_code",
+        "job_key", "provider_task_id", "pipeline_job_id", "registry_job_id",
+        "subdub_public_job_id", "terminal_public_outcome_message_id",
+    ):
         value = str(current.get(key) or "").strip()
         if value:
             ids.update(subdub_lookup_variants(value))
     return {item for item in ids if item}
 
-def subdub_merge_debug_job(job: dict | None = None) -> dict:
+def subdub_merge_debug_job(job: dict | None = None, *, lookup_store_hit: str = "") -> dict:
     current = dict(job or {})
-    return {**current, **dict(current.get("debug_job") or {})}
+    merged = {**current, **dict(current.get("debug_job") or {})}
+    if lookup_store_hit and not merged.get("lookup_store_hit"):
+        merged["lookup_store_hit"] = lookup_store_hit
+    checked = list(merged.get("lookup_stores_checked") or [])
+    if lookup_store_hit and lookup_store_hit not in checked:
+        checked.append(lookup_store_hit)
+        merged["lookup_stores_checked"] = checked
+    merged.setdefault("public_code", product_progress_status.product_progress_public_job_code(merged.get("job_id") or merged.get("internal_job_id") or ""))
+    merged.setdefault("persisted_job_status", str(merged.get("status") or ""))
+    return merged
+
+def subdub_engine_async_persisted_scan(limit: int = 240) -> list[dict]:
+    jobs: list[dict] = []
+    conn = None
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            "SELECT value FROM system_settings WHERE key LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            (ENGINE_ASYNC_JOB_PREFIX + "%", max(1, int(limit or 240))),
+        )
+        for row in c.fetchall() or []:
+            raw = row[0] if row else ""
+            try:
+                value = json.loads(raw or "{}")
+            except Exception:
+                continue
+            if isinstance(value, dict) and str(value.get("feature") or "").strip().lower() == "subtitle_dub":
+                jobs.append(value)
+    except sqlite3.OperationalError as exc:
+        if "no such table: system_settings" not in str(exc).lower():
+            logger.warning("subtitle/dub persisted scan failed | %s", sanitize_log_text(str(exc))[:160])
+    except Exception as exc:
+        logger.warning("subtitle/dub persisted scan failed | %s", sanitize_log_text(str(exc))[:160])
+    finally:
+        if conn:
+            conn.close()
+    return jobs
 
 def subdub_debug_missing_payload(arg: str = "", command: str = "") -> dict:
     return {
@@ -86458,7 +86681,19 @@ def subdub_debug_missing_payload(arg: str = "", command: str = "") -> dict:
         "lookup_input": str(arg or "").strip(),
         "command": str(command or "").strip(),
         "searched": sorted(subdub_lookup_variants(arg)),
-        "persistence_backend": "memory_and_engine_async_jobs",
+        "lookup_store_hit": "",
+        "lookup_stores_checked": ["engine_async_direct", "subtitle_dub_memory", "engine_async_feature_index", "engine_async_persisted_scan"],
+        "public_code": product_progress_status.product_progress_public_job_code(arg),
+        "internal_job_id": "",
+        "persisted_job_status": "",
+        "terminal_public_outcome_sent": False,
+        "success_sent_count": 0,
+        "public_error_sent_count": 0,
+        "success_after_error_prevented": False,
+        "late_fail_suppressed": False,
+        "status_panel_edit_failed": False,
+        "result_delivery_failed": False,
+        "persistence_backend": "memory_engine_async_and_persisted_scan",
         "pipeline_blocker": "job_lookup_missing",
         "status": "missing",
     }
@@ -86471,32 +86706,34 @@ def subtitle_dub_debug_lookup_job(arg: str = "") -> dict:
         for lookup_id in direct_ids:
             job = get_engine_async_job(lookup_id)
             if job:
-                return subdub_merge_debug_job(job)
+                return subdub_merge_debug_job(job, lookup_store_hit="engine_async_direct")
         for candidate in SUBTITLE_DUB_PIPELINE_JOBS.values():
-            merged = subdub_merge_debug_job(candidate)
+            merged = subdub_merge_debug_job(candidate, lookup_store_hit="subtitle_dub_memory")
             if wanted_variants & subdub_job_identifier_variants(merged):
                 return merged
         for candidate in list_engine_async_jobs("subtitle_dub", limit=80):
-            merged = subdub_merge_debug_job(candidate)
+            merged = subdub_merge_debug_job(candidate, lookup_store_hit="engine_async_feature_index")
+            if wanted_variants & subdub_job_identifier_variants(merged):
+                return merged
+        for candidate in subdub_engine_async_persisted_scan(limit=240):
+            merged = subdub_merge_debug_job(candidate, lookup_store_hit="engine_async_persisted_scan")
             if wanted_variants & subdub_job_identifier_variants(merged):
                 return merged
         return {}
-    candidates = [subdub_merge_debug_job(item) for item in list_engine_async_jobs("subtitle_dub", limit=12)]
+    candidates = [subdub_merge_debug_job(item, lookup_store_hit="engine_async_feature_index") for item in list_engine_async_jobs("subtitle_dub", limit=12)]
     candidates.extend(
-        subdub_merge_debug_job(item)
+        subdub_merge_debug_job(item, lookup_store_hit="subtitle_dub_memory")
         for item in SUBTITLE_DUB_PIPELINE_JOBS.values()
     )
     if not candidates:
+        candidates.extend(
+            subdub_merge_debug_job(item, lookup_store_hit="engine_async_persisted_scan")
+            for item in subdub_engine_async_persisted_scan(limit=12)
+        )
+    if not candidates:
         return {}
     def _sort_time(item: dict) -> float:
-        raw = item.get("updated_at") or item.get("started_at") or item.get("created_at") or 0
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            try:
-                return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
-            except (TypeError, ValueError):
-                return 0.0
+        return subdub_job_timestamp(item.get("updated_at") or item.get("started_at") or item.get("created_at") or 0)
     return max(candidates, key=_sort_time)
 
 async def cmd_subtitle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86529,8 +86766,13 @@ async def cmd_subtitle_dub_debug(update: Update, context: ContextTypes.DEFAULT_T
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
-    job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subtitle_dub_debug")
-    return await update.message.reply_text(subtitle_dub_debug_text(job), parse_mode="HTML")
+    try:
+        job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subtitle_dub_debug")
+        text = subtitle_dub_debug_text(job)
+    except Exception as exc:
+        logger.warning("subtitle/dub debug command safe failure | %s", sanitize_log_text(str(exc))[:180])
+        text = subdub_debug_command_safe_error_text("/subtitle_dub_debug", type(exc).__name__)
+    return await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_subtitle_dub_last_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
@@ -86554,15 +86796,25 @@ async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_T
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
-    job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subdub_voice_debug")
-    return await update.message.reply_text(subdub_voice_debug_text(job), parse_mode="HTML")
+    try:
+        job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subdub_voice_debug")
+        text = subdub_voice_debug_text(job)
+    except Exception as exc:
+        logger.warning("subdub voice debug command safe failure | %s", sanitize_log_text(str(exc))[:180])
+        text = subdub_debug_command_safe_error_text("/subdub_voice_debug", type(exc).__name__)
+    return await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_subdub_language_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
-    job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subdub_language_debug")
-    return await update.message.reply_text(subdub_language_debug_text(job), parse_mode="HTML")
+    try:
+        job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subdub_language_debug")
+        text = subdub_language_debug_text(job)
+    except Exception as exc:
+        logger.warning("subdub language debug command safe failure | %s", sanitize_log_text(str(exc))[:180])
+        text = subdub_debug_command_safe_error_text("/subdub_language_debug", type(exc).__name__)
+    return await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_subdub_duration_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -165973,6 +166225,13 @@ async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: s
         if message_id:
             update_subtitle_dub_pipeline_job(job_key, status_panel_message_id=message_id)
     except Exception as exc:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            status_panel_edit_failed=True,
+            public_panel_update_failed_nonterminal=True,
+            status_panel_edit_failed_count=int((SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}).get("status_panel_edit_failed_count") or 0) + 1,
+            last_runtime_error_reason=sanitize_log_text(type(exc).__name__)[:120],
+        )
         logger.warning("subtitle/dub progress update skipped | %s", sanitize_log_text(str(exc))[:120])
 
 def video_dubbing_job_status_text(job: dict | None = None, lang: str = "vi") -> str:
@@ -166125,10 +166384,19 @@ def subtitle_dub_pipeline_job_key(user_id, chat_id, state: dict | None = None) -
     active_flow = str(state.get("active_flow") or mode or "pipeline")
     return "|".join((str(user_id or 0), str(chat_id or user_id or 0), source[:160], active_flow[:80]))
 
+def subdub_job_timestamp(value, default: float = 0.0) -> float:
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        try:
+            return datetime.fromisoformat(str(value or "").replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            return float(default or 0.0)
+
 def _prune_subtitle_dub_pipeline_jobs(now_ts: float | None = None) -> None:
     now_ts = float(now_ts or time.time())
     for key, job in list(SUBTITLE_DUB_PIPELINE_JOBS.items()):
-        age = now_ts - float(job.get("updated_at") or job.get("started_at") or 0)
+        age = now_ts - subdub_job_timestamp(job.get("updated_at") or job.get("started_at") or 0)
         if age > PIPELINE_JOB_LOCK_TTL_SECONDS:
             SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
 
@@ -166194,6 +166462,7 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         **fields,
     }
     SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+    persist_subtitle_dub_pipeline_job_snapshot(key, job, reason="pipeline_job_acquired")
     return True, dict(job)
 
 def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
@@ -166229,7 +166498,46 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
     job.update(fields)
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
+    persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="pipeline_job_update")
     return dict(job)
+
+def persist_subtitle_dub_pipeline_job_snapshot(job_key: str, job: dict | None = None, *, reason: str = "") -> bool:
+    current = dict(job or {})
+    if not current:
+        return False
+    job_id = str(current.get("internal_job_id") or current.get("job_id") or current.get("registry_job_id") or "").strip()
+    if not job_id:
+        return False
+    status = str(current.get("status") or "").strip().lower() or "running"
+    output_bytes = _safe_int(
+        current.get("output_bytes")
+        or current.get("final_mp4_size")
+        or current.get("video_bytes")
+        or current.get("audio_bytes")
+        or 0,
+        0,
+    )
+    provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or f"subdub:{job_id}").strip()
+    payload = {
+        **current,
+        "feature": "subtitle_dub",
+        "internal_job_id": job_id,
+        "provider": str(current.get("provider") or "subtitle_dub_product_pipeline"),
+        "provider_task_id": provider_task_id,
+        "status": status,
+        "output_bytes": output_bytes,
+        "progress_text": str(current.get("progress_text") or current.get("progress_stage") or current.get("current_stage") or status),
+        "last_provider_status": str(current.get("last_provider_status") or current.get("pipeline_blocker") or reason or status),
+        "error_category": str(current.get("error_category") or current.get("pipeline_blocker") or ""),
+    }
+    if job_key:
+        payload["job_key"] = str(job_key)
+    try:
+        save_engine_async_job(payload)
+        return True
+    except Exception as exc:
+        logger.warning("subtitle/dub pipeline snapshot persist failed | %s", sanitize_log_text(str(exc))[:180])
+        return False
 
 def mark_subtitle_dub_pipeline_output_sent(
     job_key: str,
@@ -166321,6 +166629,7 @@ def mark_subtitle_dub_pipeline_output_sent(
     job["cost_line_reason"] = "after_delivery" if job.get("delivery_message_id") else "delivery_message_missing"
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
+    persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="pipeline_output_sent")
     return True
 
 def create_subtitle_dub_pipeline_workspace(job_id: str) -> str:
