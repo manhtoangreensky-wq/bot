@@ -20,6 +20,7 @@ from services.video_provider_base import (
     VideoGenerationRequest,
     VideoPollResult,
     VideoProviderAdapter,
+    VideoSubmitResult,
     mask_provider_task_id,
     normalize_provider_status,
     split_provider_chain,
@@ -993,8 +994,15 @@ def run_provider_generation(
         or (request.metadata or {}).get("allow_provider_pending")
         or (request.metadata or {}).get("interactive_product")
     )
+    metadata = dict(request.metadata or {})
+    pending_provider = str(metadata.get("provider_pending_provider") or "").strip()
+    pending_task_id = str(metadata.get("provider_pending_task_id") or "").strip()
+    pending_video_id = str(metadata.get("provider_pending_video_id") or "").strip()
+    pending_request_job_id = str(metadata.get("provider_pending_request_job_id") or "").strip()
+    pending_attempts = [dict(item) for item in (metadata.get("provider_pending_attempts") or []) if isinstance(item, dict)]
     base_debug = {
         "provider_router_called": True,
+        "provider_request_job_id": str(request.job_id or ""),
         "required_capability_original": required_capability_original,
         "normalized_capability_candidates": list(normalized_capability_candidates),
         "provider_candidates_count": len([item for item in provider_candidates if item]),
@@ -1127,7 +1135,7 @@ def run_provider_generation(
         return reasons[-1] or "provider_submit_failed"
 
     attempt_failures: list[dict[str, Any]] = []
-    attempt_traces: list[dict[str, Any]] = []
+    attempt_traces: list[dict[str, Any]] = list(pending_attempts[:12])
     first_fallback_reason = ""
 
     def _new_attempt_trace(provider_name: str, capability: str) -> dict[str, Any]:
@@ -1167,6 +1175,12 @@ def run_provider_generation(
         current_caps = dict(current_adapter.capabilities() or {})
         current_trace = _new_attempt_trace(current_adapter.provider_name, selected_capability)
         attempt_traces.append(current_trace)
+        poll_existing_task = bool(
+            (pending_task_id or pending_video_id)
+            and pending_provider == current_adapter.provider_name
+            and (not pending_request_job_id or pending_request_job_id == str(request.job_id or ""))
+        )
+        submit_called_flag = not poll_existing_task
 
         def _safe_cap_bool(*keys: str) -> bool:
             return any(bool(current_caps.get(key)) for key in keys)
@@ -1297,34 +1311,57 @@ def run_provider_generation(
             for key, value in updates.items():
                 current_trace[key] = value
 
-        try:
-            _mark_trace("submit", submit_called=True)
-            submit = current_adapter.submit_video_job(provider_request)
-        except Exception as exc:
-            exc_payload = {
-                **_attempt_base(),
-                **provider_exception_result(exc, provider=current_adapter.provider_name, stage="submit_request", status=status),
-                "fallback_used": attempt_index > 0,
-                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-            }
-            blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
-            if attempt_index + 1 < len(candidate_adapters):
+        if poll_existing_task:
+            _mark_trace(
+                "poll",
+                submit_called=False,
+                submit_accepted=True,
+                task_id_present=True,
+                task_id_source="persisted_result_json.provider_task_ids.0" if pending_task_id else "persisted_result_json.provider_video_ids.0",
+                normalized_status="running",
+            )
+            submit = VideoSubmitResult(
+                ok=True,
+                provider_name=current_adapter.provider_name,
+                provider_task_id=pending_task_id,
+                provider_video_id=pending_video_id,
+                provider_status="running",
+                raw={
+                    "provider_task_id_present": True,
+                    "task_id_field_path": "persisted_result_json.provider_task_ids.0" if pending_task_id else "",
+                    "video_id_field_path": "persisted_result_json.provider_video_ids.0" if pending_video_id else "",
+                    "submit_response_shape": {"type": "persisted_provider_task"},
+                },
+            )
+        else:
+            try:
+                _mark_trace("submit", submit_called=True)
+                submit = current_adapter.submit_video_job(provider_request)
+            except Exception as exc:
+                exc_payload = {
+                    **_attempt_base(),
+                    **provider_exception_result(exc, provider=current_adapter.provider_name, stage="submit_request", status=status),
+                    "fallback_used": attempt_index > 0,
+                    "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                }
+                blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
+                if attempt_index + 1 < len(candidate_adapters):
+                    _record_failure(blocker, exc_payload, submit_failure=True)
+                    continue
                 _record_failure(blocker, exc_payload, submit_failure=True)
-                continue
-            _record_failure(blocker, exc_payload, submit_failure=True)
-            if allow_pending_result:
-                exc_payload["no_charge"] = True
-            exc_payload["provider_attempts"] = _copy_attempt_traces()
-            exc_payload["provider_fallback_attempts"] = list(attempt_failures)
-            exc_payload["fallback_provider_attempts"] = list(attempt_failures)
-            exc_payload["provider_fallback_attempted"] = bool(len(attempt_failures) > 1)
-            exc_payload["provider_fallback_reason"] = first_fallback_reason
-            return exc_payload
+                if allow_pending_result:
+                    exc_payload["no_charge"] = True
+                exc_payload["provider_attempts"] = _copy_attempt_traces()
+                exc_payload["provider_fallback_attempts"] = list(attempt_failures)
+                exc_payload["fallback_provider_attempts"] = list(attempt_failures)
+                exc_payload["provider_fallback_attempted"] = bool(len(attempt_failures) > 1)
+                exc_payload["provider_fallback_reason"] = first_fallback_reason
+                return exc_payload
         submit_http_status = _submit_http_status(submit.raw)
         _mark_trace(
-            "submit",
+            "poll" if poll_existing_task else "submit",
             raw=submit.raw,
-            submit_called=True,
+            submit_called=submit_called_flag,
             submit_http_status=submit_http_status,
             submit_accepted=bool(submit.ok),
             task_id_present=bool(submit.provider_task_id or submit.provider_video_id),
@@ -1350,14 +1387,14 @@ def run_provider_generation(
                 "provider_fallback_reason": first_fallback_reason,
                 "fallback_provider_attempts": list(attempt_failures),
                 "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
-                "provider_submit_called": True,
+                "provider_submit_called": submit_called_flag,
                 "provider_submit_http_status": submit_http_status,
                 "provider_submit_http_5xx": _is_submit_5xx(submit.raw, blocker, submit_http_status),
                 "provider_submit_retriable": bool((submit.raw or {}).get("provider_submit_retriable") or _is_submit_5xx(submit.raw, blocker, submit_http_status)),
                 "provider_task_id_saved": bool(provider_task_ids),
                 "submit_accepted": False,
                 "poll_allowed": False,
-                "poll_skipped_reason": "submit_not_accepted",
+                "poll_skipped_reason": "provider_task_id_missing" if blocker == "provider_task_id_missing" else "submit_not_accepted",
                 "provider_error": final_blocker,
                 "blocker": final_blocker,
                 "provider_status": submit.provider_status or "failed",
@@ -1395,7 +1432,7 @@ def run_provider_generation(
                     "provider_fallback_reason": first_fallback_reason,
                     "fallback_provider_attempts": list(attempt_failures),
                     "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
-                    "provider_submit_called": True,
+                    "provider_submit_called": submit_called_flag,
                     "provider_submit_http_status": submit_http_status,
                     "provider_task_id_saved": False,
                     "submit_accepted": False,
@@ -1424,7 +1461,7 @@ def run_provider_generation(
                         **provider_exception_result(exc, provider=current_adapter.provider_name, stage="poll_request", status=status),
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                        "provider_submit_called": True,
+                    "provider_submit_called": submit_called_flag,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(submit.provider_task_id),
                         "submit_accepted": True,
@@ -1463,7 +1500,7 @@ def run_provider_generation(
                         **_attempt_base(),
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                        "provider_submit_called": True,
+                        "provider_submit_called": submit_called_flag,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(provider_task_ids),
                         "submit_accepted": True,
@@ -1496,7 +1533,7 @@ def run_provider_generation(
                         **_attempt_base(),
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                        "provider_submit_called": True,
+                        "provider_submit_called": submit_called_flag,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(submit.provider_task_id),
                         "submit_accepted": True,
@@ -1520,7 +1557,7 @@ def run_provider_generation(
                         **_attempt_base(),
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                        "provider_submit_called": True,
+                        "provider_submit_called": submit_called_flag,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(provider_task_ids),
                         "submit_accepted": True,
@@ -1551,7 +1588,7 @@ def run_provider_generation(
                     **_attempt_base(),
                     "fallback_used": attempt_index > 0,
                     "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                    "provider_submit_called": True,
+                        "provider_submit_called": submit_called_flag,
                     "provider_submit_http_status": submit_http_status,
                     "provider_task_id_saved": bool(submit.provider_task_id),
                     "submit_accepted": True,
@@ -1580,7 +1617,7 @@ def run_provider_generation(
                 **_attempt_base(),
                 "fallback_used": attempt_index > 0,
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                "provider_submit_called": True,
+                "provider_submit_called": submit_called_flag,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
                 "submit_accepted": True,
@@ -1606,7 +1643,7 @@ def run_provider_generation(
                 **provider_exception_result(exc, provider=current_adapter.provider_name, stage="download", status=status),
                 "fallback_used": attempt_index > 0,
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                "provider_submit_called": True,
+                "provider_submit_called": submit_called_flag,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
                 "submit_accepted": True,
@@ -1664,7 +1701,7 @@ def run_provider_generation(
                 **_attempt_base(),
                 "fallback_used": attempt_index > 0,
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
-                "provider_submit_called": True,
+                "provider_submit_called": submit_called_flag,
                 "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
                 "submit_accepted": True,
@@ -1696,7 +1733,7 @@ def run_provider_generation(
         payload = {
             "ok": True,
             **_attempt_base(),
-            "provider_submit_called": True,
+            "provider_submit_called": submit_called_flag,
             "provider_submit_http_status": submit_http_status,
             "provider_task_id_saved": bool(submit.provider_task_id),
             "submit_accepted": True,

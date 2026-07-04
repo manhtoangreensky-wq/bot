@@ -648,6 +648,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     project = dict(hydrated_job.get("project") or {})
     scenes = list(hydrated_job.get("scenes") or [])
     scene_cards = _scene_cards_from_project(project, scenes)
+    persisted_result = _json_loads(hydrated_job.get("result_json"), {})
+    if not isinstance(persisted_result, dict):
+        persisted_result = {}
     asset_pack = strip_secret_fields(_json_loads(project.get("asset_pack_json"), {}))
     invoice = strip_secret_fields(_json_loads(project.get("invoice_json"), {}))
     addon_plan = strip_secret_fields(_json_loads(project.get("addon_plan_json"), {}))
@@ -805,6 +808,53 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "claim_only_diagnostic": claim_only,
             }
         )
+        pending_task_ids = [
+            str(item or "").strip()
+            for item in (persisted_result.get("provider_task_ids") or [])
+            if str(item or "").strip()
+        ]
+        pending_video_ids = [
+            str(item or "").strip()
+            for item in (persisted_result.get("provider_video_ids") or [])
+            if str(item or "").strip()
+        ]
+        provider_events = [item for item in (persisted_result.get("provider_events") or []) if isinstance(item, dict)]
+        if not pending_task_ids:
+            pending_task_ids = [str(item.get("task_id") or "").strip() for item in provider_events if str(item.get("task_id") or "").strip()]
+        if not pending_video_ids:
+            pending_video_ids = [str(item.get("video_id") or "").strip() for item in provider_events if str(item.get("video_id") or "").strip()]
+        pending_provider = str(
+            persisted_result.get("selected_provider")
+            or persisted_result.get("provider")
+            or (provider_events[0].get("provider") if provider_events else "")
+            or ""
+        ).strip()
+        pending_request_job_id = str(
+            persisted_result.get("provider_request_job_id")
+            or persisted_result.get("request_job_id")
+            or ""
+        ).strip()
+        has_pending_provider = bool(
+            persisted_result.get("continue_polling")
+            or persisted_result.get("provider_pending_deferred")
+            or str(persisted_result.get("blocker") or persisted_result.get("provider_error") or "").strip() == "provider_in_progress"
+        )
+        if has_pending_provider and pending_provider and (pending_task_ids or pending_video_ids):
+            payload.update(
+                {
+                    "provider_pending_provider": pending_provider,
+                    "provider_pending_task_id": pending_task_ids[0] if pending_task_ids else "",
+                    "provider_pending_video_id": pending_video_ids[0] if pending_video_ids else "",
+                    "provider_pending_request_job_id": pending_request_job_id,
+                    "provider_pending_attempts": [
+                        dict(item)
+                        for item in (persisted_result.get("provider_attempts") or [])
+                        if isinstance(item, dict)
+                    ][:12],
+                    "provider_pending_deferred": True,
+                    "continue_polling": True,
+                }
+            )
     if is_remote_worker_admin_video_job(hydrated_job, project) or _is_admin_fake_video_job(project):
         safety = _admin_video_safety_flags(project)
         admin_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if (_is_admin_fake_video_job(project) or safety["test_pattern"]) else (safety["render_mode"] or RENDER_MODE_REAL)
