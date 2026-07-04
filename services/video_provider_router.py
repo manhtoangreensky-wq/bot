@@ -1314,6 +1314,83 @@ def run_provider_generation(
             for key, value in updates.items():
                 current_trace[key] = value
 
+        def _provider_pending_payload(
+            submit: VideoSubmitResult,
+            poll_result: VideoPollResult,
+            *,
+            poll_blocker: str = "",
+        ) -> dict[str, Any]:
+            provider_task_key = str(submit.provider_task_id or submit.provider_video_id or poll_result.provider_task_id or poll_result.provider_video_id or "").strip()
+            provider_task_ids = [provider_task_key] if provider_task_key else []
+            provider_video_ids = [submit.provider_video_id or poll_result.provider_video_id] if (submit.provider_video_id or poll_result.provider_video_id) else []
+            raw_status = str(
+                poll_result.raw_status
+                or (getattr(poll_result, "raw", {}) or {}).get("provider_status_raw")
+                or poll_result.status
+                or ""
+            ).strip()
+            normalized_status = normalize_provider_status(poll_result.status or raw_status, has_result_url=False)
+            if normalized_status not in {"queued", "running"}:
+                normalized_status = "running"
+            result_url_present = bool(poll_result.result_url or poll_result.file_url)
+            fallback_blocked_reason = "primary_provider_in_progress" if attempt_index == 0 else "selected_provider_in_progress"
+            payload = {
+                "ok": False,
+                **_attempt_base(),
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "provider_fallback_attempted": bool(attempt_index > 0),
+                "provider_fallback_attempts": list(attempt_failures),
+                "provider_fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "fallback_provider_attempts": list(attempt_failures),
+                "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
+                "provider_submit_called": submit_called_flag,
+                "provider_submit_http_status": submit_http_status,
+                "provider_task_id_saved": bool(provider_task_ids),
+                "submit_accepted": True,
+                "provider_poll_called": True,
+                "poll_allowed": True,
+                "poll_skipped_reason": "",
+                "provider_result_url_present": result_url_present,
+                "provider_pending_result_url_present": result_url_present,
+                "provider_error": "provider_in_progress",
+                "blocker": "provider_in_progress",
+                "provider_poll_blocker": poll_blocker or "provider_in_progress",
+                "continue_polling": True,
+                "normalized_provider_status": normalized_status,
+                "provider_status": normalized_status,
+                "provider_status_raw": raw_status,
+                "nonterminal_provider_status": raw_status or normalized_status,
+                "provider_task_ids": provider_task_ids,
+                "provider_video_ids": provider_video_ids,
+                "provider_task_id_masked": mask_provider_task_id(provider_task_key),
+                "provider_pending_provider": current_adapter.provider_name,
+                "provider_pending_task_id": provider_task_key if provider_task_key == str(submit.provider_task_id or "").strip() else str(submit.provider_task_id or "").strip(),
+                "provider_pending_video_id": str(submit.provider_video_id or poll_result.provider_video_id or "").strip(),
+                "provider_pending_request_job_id": str(request.job_id or ""),
+                "provider_pending_attempts": _copy_attempt_traces(),
+                "provider_pending_deferred": True,
+                "fallback_allowed": False,
+                "fallback_blocked_reason": fallback_blocked_reason,
+                "primary_provider_continue_polling": True,
+                "primary_provider_task_id_present": bool(provider_task_ids),
+                "next_poll_scheduled": True,
+                "provider_readiness": status,
+                "no_charge": True,
+            }
+            _mark_trace(
+                "poll",
+                continue_polling=True,
+                blocker="provider_in_progress",
+                normalized_status=normalized_status,
+                fallback_allowed=False,
+                fallback_blocked_reason=fallback_blocked_reason,
+                nonterminal_provider_status=raw_status or normalized_status,
+                result_url_present=result_url_present,
+            )
+            payload["provider_attempts"] = _copy_attempt_traces()
+            return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+
         if poll_existing_task:
             _mark_trace(
                 "poll",
@@ -1490,6 +1567,16 @@ def run_provider_generation(
                     normalized_status=poll_result.status,
                     result_url_present=bool(poll_result.result_url or poll_result.file_url),
                 )
+                if (
+                    allow_pending_result
+                    and (submit.provider_task_id or submit.provider_video_id)
+                    and poll_result.status in {"queued", "running"}
+                ):
+                    return _provider_pending_payload(
+                        submit,
+                        poll_result,
+                        poll_blocker="provider_status_unknown" if poll_result.error_code == "provider_status_unknown" else "provider_in_progress",
+                    )
                 if poll_result.status == "succeeded" and (poll_result.result_url or poll_result.file_url):
                     break
                 if (
@@ -1609,6 +1696,12 @@ def run_provider_generation(
                 return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             if attempt_failures and attempt_failures[-1].get("provider") == current_adapter.provider_name:
                 continue
+        if (
+            allow_pending_result
+            and (submit.provider_task_id or submit.provider_video_id)
+            and poll_result.status in {"queued", "running"}
+        ):
+            return _provider_pending_payload(submit, poll_result, poll_blocker="provider_in_progress")
         if not (poll_result.result_url or poll_result.file_url):
             blocker = "provider_result_url_missing"
             if attempt_index + 1 < len(candidate_adapters):
