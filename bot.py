@@ -46200,6 +46200,12 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• provider env namespace mismatch: <code>{'yes' if result.get('provider_env_namespace_mismatch') else 'no'}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
         f"• provider fallback reason: <code>{html.escape(str(result.get('provider_fallback_reason') or result.get('fallback_reason') or '-')[:220])}</code>",
+        f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
+        f"• fallback blocked reason: <code>{html.escape(str(result.get('fallback_blocked_reason') or '-')[:160])}</code>",
+        f"• primary provider continue polling: <code>{'yes' if result.get('primary_provider_continue_polling') else 'no'}</code>",
+        f"• primary provider task id present: <code>{'yes' if result.get('primary_provider_task_id_present') else 'no'}</code>",
+        f"• nonterminal provider status: <code>{html.escape(str(result.get('nonterminal_provider_status') or '-')[:160])}</code>",
+        f"• next poll scheduled: <code>{'yes' if result.get('next_poll_scheduled') else 'no'}</code>",
         f"• fallback-only respected: <code>{'yes' if result.get('fallback_only_respected') is not False else 'no'}</code>",
         f"• provider fallback attempts: <code>{html.escape(str(result.get('provider_fallback_attempts') or result.get('fallback_provider_attempts') or result.get('provider_attempts') or [])[:500])}</code>",
         f"• provider payload keys: <code>{html.escape(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or []))[:500] or '-')}</code>",
@@ -46346,6 +46352,12 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• skipped provider reasons: <code>{html.escape(str(result.get('skipped_provider_reasons') or [])[:500])}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
         f"• provider fallback reason: <code>{html.escape(str(result.get('provider_fallback_reason') or result.get('fallback_reason') or '-')[:220])}</code>",
+        f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
+        f"• fallback blocked reason: <code>{html.escape(str(result.get('fallback_blocked_reason') or '-')[:160])}</code>",
+        f"• primary provider continue polling: <code>{'yes' if result.get('primary_provider_continue_polling') else 'no'}</code>",
+        f"• primary provider task id present: <code>{'yes' if result.get('primary_provider_task_id_present') else 'no'}</code>",
+        f"• nonterminal provider status: <code>{html.escape(str(result.get('nonterminal_provider_status') or '-')[:160])}</code>",
+        f"• next poll scheduled: <code>{'yes' if result.get('next_poll_scheduled') else 'no'}</code>",
         f"• fallback-only respected: <code>{'yes' if result.get('fallback_only_respected') is not False else 'no'}</code>",
         f"• provider fallback attempts: <code>{html.escape(str(result.get('provider_fallback_attempts') or result.get('fallback_provider_attempts') or result.get('provider_attempts') or [])[:500])}</code>",
         f"• payload keys: <code>{html.escape(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or []))[:500] or '-')}</code>",
@@ -46392,7 +46404,7 @@ async def cmd_video_provider_job_debug(update: Update, context: ContextTypes.DEF
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
     job_id = safe_int(args[0] if args else 0, 0)
-    return await update.message.reply_text(video_provider_job_debug_text(job_id), parse_mode="HTML")
+    return await video_debug_safe_reply_text(update.message, video_provider_job_debug_text(job_id))
 
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
