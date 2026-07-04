@@ -112,7 +112,8 @@ def test_audio_fallback_only_when_no_video_delivered():
     assert sent["video"] == 0
     assert sent["audio"] == 1
     assert sent["terminal_artifact_type"] == "audio_fallback"
-    assert "đã tạo audio lồng tiếng" in message.calls[0][1]["caption"]
+    assert "chưa tạo được video hoàn chỉnh" in message.calls[0][1]["caption"]
+    assert "đã tạo được file audio lồng tiếng" in message.calls[0][1]["caption"]
 
 
 def test_auto_subtitle_sends_video_and_srt_without_audio():

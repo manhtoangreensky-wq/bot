@@ -23,7 +23,10 @@ def _branch_name():
         value = os.environ.get(key, "").strip()
         if value:
             return value
-    return subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
+    except Exception:
+        return ""
 
 
 def _is_m6_scope():
@@ -280,9 +283,11 @@ def test_no_product_video_music_payos_pricing_db_changes():
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     allowed = {
         "bot.py",
+        "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
         "tests/test_p0_19m5c_subdub_mode_route_female_voice_state_fix.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6r_subdub_live_runtime_terminal_outcome_path_fix.py",
+        "tests/test_p0_19m6s_subdub_live_job_registry_partial_audio_debug_fix.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
     }
     assert changed <= allowed

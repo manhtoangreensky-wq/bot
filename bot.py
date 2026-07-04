@@ -6880,6 +6880,17 @@ def progress_job_id_is_music(job_id: str = "") -> bool:
     return bool(canonical_music_job_id(job_id))
 
 
+def progress_job_id_maybe_subdub(job_id: str = "") -> bool:
+    text = str(job_id or "").strip().lstrip("#").lower()
+    if not text or text == "latest":
+        return False
+    if text.startswith("dub-"):
+        return True
+    if len(text) >= 8 and any(ch.isalpha() for ch in text):
+        return bool(re.fullmatch(r"[a-z0-9_.:-]+", text))
+    return False
+
+
 def resolve_progress_product_type(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
     current = dict(job or {})
     requested = str(product_type or "").strip().lower()
@@ -6887,6 +6898,21 @@ def resolve_progress_product_type(job_id: str = "", product_type: str = "", job:
         return music_job_product_type(current, "music_bg" if requested != "music_song" else "music_song")
     if progress_job_id_is_music(job_id) or canonical_music_job_id(current.get("internal_job_id") or current.get("job_id") or ""):
         return music_job_product_type(current, "music_bg")
+    subdub_tokens = {"subdub", "subtitle_dub", "video_dub", "subtitle_only", "dub_only"}
+    if (
+        requested in subdub_tokens
+        or str(current.get("feature") or "").strip().lower() == "subtitle_dub"
+        or str(current.get("product_type") or "").strip().lower() in {"subtitle_only", "dub_only", "subtitle_dub"}
+        or normalize_video_translate_mode(current.get("mode") or current.get("video_processing_mode") or current.get("process_type"))
+        in VIDEO_SUBTITLE_MODES
+    ):
+        return "subdub"
+    if job_id and not requested and progress_job_id_maybe_subdub(job_id):
+        try:
+            if subdub_progress_job_for_user(job_id, 0):
+                return "subdub"
+        except Exception:
+            pass
     return product_progress_status.normalize_product_type(product_type)
 
 
@@ -8695,7 +8721,22 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             + auto
         )
     recovered_from_db_for_status_debug = False
+    recovered_from_persisted_subdub_job = False
     recovered_job = {}
+    if (
+        job_id
+        and not progress_product_type_is_music(resolved_type, job_id)
+        and (resolved_type == "subdub" or progress_job_id_maybe_subdub(job_id))
+    ):
+        subdub_job = {}
+        try:
+            subdub_job = subdub_progress_job_for_user(job_id, 0) or subtitle_dub_debug_lookup_job(job_id)
+        except Exception:
+            subdub_job = {}
+        if subdub_job:
+            job = subdub_enrich_job_identity(subdub_job)
+            resolved_type = "subdub"
+            recovered_from_persisted_subdub_job = str(job.get("lookup_store_hit") or "") == "engine_async_persisted_scan"
     if job_id and not job and not progress_product_type_is_music(resolved_type, job_id):
         recovered_job, recovered_type = _video_progress_debug_recover_job_from_db(job_id)
         if recovered_job:
@@ -8732,6 +8773,19 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• delivery_attempted: <code>{'yes' if music_failure.get('delivery_attempted') else 'no'}</code>\n"
             f"• delivery_succeeded: <code>{'yes' if music_failure.get('delivery_succeeded') else 'no'}</code>\n"
         )
+    subdub_debug_text = ""
+    if resolved_type == "subdub":
+        current = subdub_enrich_job_identity(job or {})
+        stores = ", ".join(current.get("lookup_stores_checked") or []) or "-"
+        subdub_debug_text = (
+            f"• public_code: <code>{html.escape(str(current.get('public_code') or '-'))}</code>\n"
+            f"• internal_job_id: <code>{html.escape(str(current.get('internal_job_id') or current.get('job_id') or '-'))}</code>\n"
+            f"• lookup_store_hit: <code>{html.escape(str(current.get('lookup_store_hit') or '-'))}</code>\n"
+            f"• lookup_stores_checked: <code>{html.escape(stores)}</code>\n"
+            f"• mapped_product_type: <code>{html.escape(str(current.get('mapped_product_type') or current.get('product_type') or '-'))}</code>\n"
+            f"• mapped_mode: <code>{html.escape(str(current.get('mapped_mode') or current.get('mode') or '-'))}</code>\n"
+            f"• recovered_from_persisted_subdub_job: <code>{'yes' if recovered_from_persisted_subdub_job else 'no'}</code>\n"
+        )
     return (
         "📊 <b>TOAN AAS progress status</b>\n\n"
         f"• Product: <code>{html.escape(str(payload.get('product_type') or '-'))}</code>\n"
@@ -8740,6 +8794,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         f"• Percent: <code>{int(payload.get('percent') or 0)}%</code>\n"
         f"• Terminal: <code>{html.escape(str(payload.get('terminal_state') or '-'))}</code>\n"
         + music_failure_text
+        + subdub_debug_text
         + f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>\n"
         f"• product_video_registry_present: <code>{'yes' if product_video_registry_present else 'no'}</code>\n"
         f"• status_panel_message_id: <code>{'present' if status_panel_message_id else 'no'}</code>\n"
@@ -85978,6 +86033,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• lookup store hit: <code>{esc(job.get('lookup_store_hit'))}</code>",
         f"• lookup stores checked: <code>{esc(', '.join(job.get('lookup_stores_checked') or []))}</code>",
         f"• public code: <code>{esc(job.get('public_code'))}</code>",
+        f"• mapped product type: <code>{esc(job.get('mapped_product_type'))}</code>",
+        f"• mapped mode: <code>{esc(job.get('mapped_mode'))}</code>",
         f"• persisted job status: <code>{esc(job.get('persisted_job_status'))}</code>",
         f"• progress percent: <code>{intval(job.get('progress_percent'))}</code>",
         f"• pipeline attempted: <code>{yes_no(job.get('pipeline_attempted'))}</code>",
@@ -86106,6 +86163,11 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• status panel terminalized: <code>{yes_no(job.get('status_panel_terminalized'))}</code>",
         f"• refresh stopped after terminal: <code>{yes_no(job.get('refresh_stopped_after_terminal'))}</code>",
         f"• terminal artifact type: <code>{esc(job.get('terminal_artifact_type'))}</code>",
+        f"• partial audio available: <code>{yes_no(job.get('partial_audio_available'))}</code>",
+        f"• partial audio delivered: <code>{yes_no(job.get('partial_audio_delivered'))}</code>",
+        f"• partial audio message id: <code>{esc(job.get('partial_audio_message_id'))}</code>",
+        f"• full video failed: <code>{yes_no(job.get('full_video_failed'))}</code>",
+        f"• partial audio after failure prevented: <code>{yes_no(job.get('partial_audio_after_failure_prevented'))}</code>",
         f"• video delivery message id: <code>{esc(job.get('video_delivery_message_id'))}</code>",
         f"• audio delivery message id: <code>{esc(job.get('audio_delivery_message_id'))}</code>",
         f"• srt delivery message id: <code>{esc(job.get('srt_delivery_message_id'))}</code>",
@@ -86128,6 +86190,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• cost line rendered: <code>{yes_no(job.get('cost_line_rendered'))}</code>",
         f"• cost line reason: <code>{esc(job.get('cost_line_reason'))}</code>",
         f"• last technical error: <code>{esc(job.get('last_technical_error'))}</code>",
+        f"• bad request classification: <code>{esc(job.get('bad_request_classification') or subdub_classify_bad_request(job.get('pipeline_blocker') or job.get('last_technical_error') or '', stage=job.get('last_error_stage') or job.get('stage') or '', job=job))}</code>",
         f"• public-safe error: <code>{esc(job.get('public_safe_error'))}</code>",
     ])
 
@@ -86164,6 +86227,10 @@ def subdub_voice_debug_text(job: dict) -> str:
         "🎙 <b>SUBDUB VOICE DEBUG</b>",
         "",
         f"• job: <code>{esc(job.get('internal_job_id') or job.get('job_id'))}</code>",
+        f"• public code: <code>{esc(job.get('public_code'))}</code>",
+        f"• lookup store hit: <code>{esc(job.get('lookup_store_hit'))}</code>",
+        f"• mapped product type: <code>{esc(job.get('mapped_product_type') or job.get('product_type'))}</code>",
+        f"• mapped mode: <code>{esc(job.get('mapped_mode') or job.get('mode'))}</code>",
         f"• mode: <code>{esc(job.get('mode'))}</code>",
         f"• product type: <code>{esc(job.get('product_type'))}</code>",
         f"• requested_gender: <code>{esc(job.get('requested_voice_gender') or job.get('selected_voice_gender'))}</code>",
@@ -86178,6 +86245,7 @@ def subdub_voice_debug_text(job: dict) -> str:
         f"• default_female_configured: <code>{yes_no(job.get('default_female_configured'))}</code>",
         f"• default_male_configured: <code>{yes_no(job.get('default_male_configured'))}</code>",
         f"• default_voices_distinct: <code>{yes_no(job.get('default_voices_distinct'))}</code>",
+        f"• config_source: <code>{esc(job.get('voice_config_source') or 'subdub_runtime_default_voice_config')}</code>",
         f"• fallback_used: <code>{yes_no(job.get('fallback_used'))}</code>",
         f"• fallback_reason: <code>{esc(job.get('fallback_reason'))}</code>",
         f"• tts_backend: <code>{esc(job.get('tts_backend') or job.get('voice_backend'))}</code>",
@@ -86190,6 +86258,7 @@ def subdub_voice_debug_text(job: dict) -> str:
         f"• tts_audio_bytes: <code>{intval(job.get('audio_bytes'))}</code>",
         f"• tts_audio_duration: <code>{esc(job.get('generated_audio_duration'))}</code>",
         f"• tts_audio_volume_gain: <code>{esc(job.get('tts_audio_volume_gain') or SUBDUB_DUB_VOICE_GAIN)}</code>",
+        f"• bad_request_classification: <code>{esc(job.get('bad_request_classification') or subdub_classify_bad_request(job.get('pipeline_blocker') or job.get('last_technical_error') or '', stage=job.get('last_error_stage') or job.get('stage') or '', job=job))}</code>",
         f"• blocker: <code>{esc(job.get('voice_blocker') or job.get('pipeline_blocker'))}</code>",
     ])
 
@@ -86409,6 +86478,7 @@ def subdub_voice_style_state_fields(
         "auto_detected_gender": str(voice.get("auto_detected_gender") or current.get("auto_detected_gender") or "")[:40],
         "voice_confidence": str(voice.get("confidence") or current.get("voice_confidence") or "")[:20],
         **voice_config,
+        "voice_config_source": "subdub_runtime_default_voice_config",
         "voice_fallback_used": bool(voice.get("fallback_used")),
         "voice_fallback_reason": str(voice.get("fallback_reason") or voice.get("reason") or "")[:180],
         "tts_audio_volume_gain": float(SUBDUB_DUB_VOICE_GAIN),
@@ -86683,17 +86753,61 @@ def subdub_job_identifier_variants(job: dict | None = None) -> set[str]:
             ids.update(subdub_lookup_variants(value))
     return {item for item in ids if item}
 
+def subdub_classify_bad_request(reason: str = "", *, stage: str = "", job: dict | None = None) -> str:
+    current = dict(job or {})
+    text = " ".join(
+        str(item or "")
+        for item in (
+            reason,
+            stage,
+            current.get("last_error_stage"),
+            current.get("pipeline_blocker"),
+            current.get("last_technical_error"),
+            current.get("delivery_reason"),
+            current.get("render_detail"),
+            current.get("mux_status"),
+        )
+    ).lower()
+    if "badrequest" not in text and "bad request" not in text:
+        return ""
+    if any(token in text for token in ("edit", "panel", "message is not modified", "message to edit", "status_panel")):
+        return "panel_edit_bad_request"
+    if any(token in text for token in ("send", "reply", "delivery", "document", "video", "audio", "telegram", "file")):
+        return "delivery_bad_request"
+    if any(token in text for token in ("mux", "ffmpeg", "render", "mp4")):
+        return "mux_bad_request"
+    if any(token in text for token in ("tts", "voice", "dub", "synthesize", "speech")):
+        return "tts_bad_request"
+    if "telegram" in text:
+        return "telegram_bad_request"
+    return "unknown_bad_request"
+
 def subdub_merge_debug_job(job: dict | None = None, *, lookup_store_hit: str = "") -> dict:
     current = dict(job or {})
     merged = {**current, **dict(current.get("debug_job") or {})}
+    merged = subdub_enrich_job_identity(merged, job_key=str(current.get("job_key") or ""))
     if lookup_store_hit and not merged.get("lookup_store_hit"):
         merged["lookup_store_hit"] = lookup_store_hit
     checked = list(merged.get("lookup_stores_checked") or [])
     if lookup_store_hit and lookup_store_hit not in checked:
         checked.append(lookup_store_hit)
         merged["lookup_stores_checked"] = checked
-    merged.setdefault("public_code", product_progress_status.product_progress_public_job_code(merged.get("job_id") or merged.get("internal_job_id") or ""))
+    public_code = subdub_existing_public_code(merged) or subdub_public_code_value(merged.get("job_id") or merged.get("internal_job_id") or "")
+    if public_code:
+        merged["public_code"] = public_code
+        merged["public_job_id"] = public_code
+        merged["subdub_public_job_id"] = public_code
+        merged["progress_public_code"] = f"#{public_code}"
     merged.setdefault("persisted_job_status", str(merged.get("status") or ""))
+    merged["bad_request_classification"] = subdub_classify_bad_request(
+        merged.get("pipeline_blocker")
+        or merged.get("last_technical_error")
+        or merged.get("last_error_safe")
+        or merged.get("status")
+        or "",
+        stage=merged.get("last_error_stage") or merged.get("stage") or "",
+        job=merged,
+    )
     return merged
 
 def subdub_engine_async_persisted_scan(limit: int = 240) -> list[dict]:
@@ -165175,6 +165289,8 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
     outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
     public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
+    if outcome_type == "partial_audio_delivered" or result.get("partial_audio_delivered") or state.get("partial_audio_delivered"):
+        return subdub_audio_fallback_text(mode, lang)
     if outcome_type == "failure" or (
         public_error_already_sent
         and not bool(result.get("late_fail_suppressed") or state.get("late_fail_suppressed"))
@@ -166005,6 +166121,68 @@ def subdub_progress_steps_for_product(product_type_or_mode: str = "", state: dic
 def subdub_public_job_code(job_id: str = "") -> str:
     return product_progress_status.product_progress_public_job_code(job_id)
 
+def subdub_public_code_value(job_id: str = "") -> str:
+    return product_progress_status.product_progress_public_job_code(job_id).lstrip("#").upper()
+
+def subdub_existing_public_code(job: dict | None = None) -> str:
+    current = dict(job or {})
+    for key in ("public_code", "subdub_public_job_id", "progress_public_code", "public_job_id"):
+        value = str(current.get(key) or "").strip()
+        if value:
+            return value.lstrip("#").upper()
+    return ""
+
+def subdub_identity_fields(job: dict | None = None, *, job_key: str = "", mode: str = "", state: dict | None = None) -> dict:
+    current = dict(job or {})
+    state = {**dict(state or {}), **current}
+    normalized_mode = normalize_video_translate_mode(
+        mode
+        or current.get("mode")
+        or current.get("video_processing_mode")
+        or current.get("process_type")
+        or state.get("mode")
+        or state.get("video_processing_mode")
+        or state.get("process_type")
+    )
+    internal_job_id = str(
+        current.get("internal_job_id")
+        or current.get("job_id")
+        or current.get("registry_job_id")
+        or ""
+    ).strip()
+    visible_job_id = str(current.get("job_id") or current.get("registry_job_id") or internal_job_id or "").strip()
+    public_code = subdub_existing_public_code(current) or subdub_public_code_value(visible_job_id or internal_job_id)
+    product_type = subdub_product_type_from_mode(normalized_mode, state)
+    mapped_mode = normalized_mode or str(current.get("mode") or state.get("mode") or "").strip()
+    return {
+        "feature": "subtitle_dub",
+        "internal_job_id": internal_job_id,
+        "job_id": visible_job_id or internal_job_id,
+        "job_key": str(job_key or current.get("job_key") or ""),
+        "public_code": public_code,
+        "public_job_id": public_code,
+        "subdub_public_job_id": public_code,
+        "progress_public_code": f"#{public_code}" if public_code else "",
+        "product_type": product_type,
+        "mapped_product_type": product_type,
+        "mapped_mode": mapped_mode,
+        "mode": mapped_mode,
+    }
+
+def subdub_enrich_job_identity(job: dict | None = None, *, job_key: str = "", mode: str = "", state: dict | None = None) -> dict:
+    current = dict(job or {})
+    identity = subdub_identity_fields(current, job_key=job_key, mode=mode, state=state)
+    for key, value in identity.items():
+        if key in {"internal_job_id", "job_id", "mode", "product_type"} and current.get(key):
+            continue
+        current[key] = value
+    for key in ("mapped_product_type", "mapped_mode", "public_code", "public_job_id", "subdub_public_job_id", "progress_public_code", "feature"):
+        if identity.get(key):
+            current[key] = identity[key]
+    checked = list(current.get("lookup_stores_checked") or [])
+    current["lookup_stores_checked"] = checked
+    return current
+
 def subdub_progress_stage_payload(stage: str = "") -> dict:
     token = str(stage or "saved_input").strip().lower()
     percent, label, status = SUBDUB_PROGRESS_STAGES.get(token, SUBDUB_PROGRESS_STAGES["saved_input"])
@@ -166065,12 +166243,14 @@ def subdub_mode_success_text(mode: str = "", lang: str = "vi") -> str:
 def subdub_audio_fallback_text(mode: str = "", lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "TOAN AAS created the dubbing audio, but could not create the final video this time.\n\n"
-            "The audio is sent first so you can download it."
+            "TOAN AAS could not create the complete video, but the dubbing audio was created.\n\n"
+            "The system only sends the temporary audio file for download.\n"
+            "No Xu was charged for the complete video."
         )
     return (
-        "TOAN AAS đã tạo audio lồng tiếng, nhưng chưa tạo được video hoàn chỉnh lúc này.\n\n"
-        "Hệ thống gửi audio trước để anh/chị tải về."
+        "TOAN AAS chưa tạo được video hoàn chỉnh, nhưng đã tạo được file audio lồng tiếng.\n\n"
+        "Hệ thống chỉ gửi audio tạm thời để anh/chị tải về.\n"
+        "Hệ thống chưa trừ Xu cho video hoàn chỉnh."
     )
 
 def subdub_subtitle_fallback_text(mode: str = "", lang: str = "vi") -> str:
@@ -166121,15 +166301,14 @@ def subdub_result_terminal_state(result: dict | None = None) -> str:
     current = dict(result or {})
     if not current.get("ok"):
         return "failed_no_charge"
-    if current.get("delivery_partial_result"):
-        return "failed_refunded"
-    if current.get("partial_result"):
+    if current.get("partial_audio_delivered") or current.get("delivery_partial_result") or current.get("partial_result"):
         return "needs_admin_review"
     return "delivered"
 
 def subdub_terminal_blocks_late_delivery(job: dict | None = None) -> bool:
     terminal = str((job or {}).get("terminal_state") or "").strip().lower()
-    return terminal in {"delivered", "failed_no_charge", "failed_refunded"}
+    outcome = str((job or {}).get("terminal_public_outcome_type") or "").strip().lower()
+    return terminal in {"delivered", "failed_no_charge", "failed_refunded", "needs_admin_review"} or outcome == "partial_audio_delivered"
 
 def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
     current = dict(job or {})
@@ -166137,7 +166316,7 @@ def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
     outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
     if terminal == "delivered" or bool(current.get("output_sent")):
         return True
-    if outcome == "success":
+    if outcome in {"success", "partial_audio_delivered"}:
         return True
     if (
         current.get("subdub_delivered_at")
@@ -166182,6 +166361,11 @@ def subdub_terminal_outcome_debug_defaults() -> dict:
         "success_cost_line": "",
         "cost_line_rendered": False,
         "cost_line_reason": "",
+        "partial_audio_available": False,
+        "partial_audio_delivered": False,
+        "partial_audio_message_id": "",
+        "full_video_failed": False,
+        "partial_audio_after_failure_prevented": False,
     }
 
 def subdub_success_cost_line(charged_xu: int | float | str = 0, lang: str = "vi") -> str:
@@ -166197,6 +166381,8 @@ def subdub_public_outcome_allows_success(job: dict | None = None) -> bool:
     current = dict(job or {})
     if not current:
         return True
+    if str(current.get("terminal_public_outcome_type") or "").strip().lower() == "partial_audio_delivered":
+        return False
     if subdub_job_has_failure_public_outcome(current):
         return False
     return True
@@ -166326,6 +166512,12 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
     status = str(job.get("status") or "").lower()
     terminal = str(job.get("terminal_state") or "").lower()
     job_id = str(job.get("job_id") or job.get("internal_job_id") or "")
+    outcome = str(job.get("terminal_public_outcome_type") or "").strip().lower()
+    blocker = str(job.get("pipeline_blocker") or job.get("input_save_blocker") or job.get("no_charge_reason") or "").strip()
+    if outcome == "partial_audio_delivered" or job.get("partial_audio_delivered"):
+        return subdub_audio_fallback_text(str(job.get("mode") or ""), lang)
+    if blocker == "large_telegram_download_unsupported":
+        return subdub_large_telegram_media_public_text(lang)
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
     if status.startswith("failed") or terminal.startswith("failed"):
@@ -166596,6 +166788,7 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         "duplicate_count": 0,
         **fields,
     }
+    job = subdub_enrich_job_identity(job, job_key=key, mode=str(fields.get("mode") or ""), state=fields)
     SUBTITLE_DUB_PIPELINE_JOBS[key] = job
     persist_subtitle_dub_pipeline_job_snapshot(key, job, reason="pipeline_job_acquired")
     return True, dict(job)
@@ -166631,13 +166824,14 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
         if desired_terminal == "delivered":
             fields.setdefault("status", "completed")
     job.update(fields)
+    job = subdub_enrich_job_identity(job, job_key=str(job_key or ""), mode=str(job.get("mode") or fields.get("mode") or ""), state=job)
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
     persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="pipeline_job_update")
     return dict(job)
 
 def persist_subtitle_dub_pipeline_job_snapshot(job_key: str, job: dict | None = None, *, reason: str = "") -> bool:
-    current = dict(job or {})
+    current = subdub_enrich_job_identity(job or {}, job_key=str(job_key or ""))
     if not current:
         return False
     job_id = str(current.get("internal_job_id") or current.get("job_id") or current.get("registry_job_id") or "").strip()
@@ -166653,10 +166847,19 @@ def persist_subtitle_dub_pipeline_job_snapshot(job_key: str, job: dict | None = 
         0,
     )
     provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or f"subdub:{job_id}").strip()
+    public_code = str(current.get("public_code") or subdub_public_code_value(current.get("job_id") or job_id))
+    progress_public_code = str(current.get("progress_public_code") or (f"#{public_code}" if public_code else ""))
     payload = {
         **current,
         "feature": "subtitle_dub",
         "internal_job_id": job_id,
+        "job_id": str(current.get("job_id") or job_id),
+        "public_code": public_code,
+        "public_job_id": str(current.get("public_job_id") or public_code),
+        "subdub_public_job_id": str(current.get("subdub_public_job_id") or public_code),
+        "progress_public_code": progress_public_code,
+        "mapped_product_type": str(current.get("mapped_product_type") or current.get("product_type") or ""),
+        "mapped_mode": str(current.get("mapped_mode") or current.get("mode") or ""),
         "provider": str(current.get("provider") or "subtitle_dub_product_pipeline"),
         "provider_task_id": provider_task_id,
         "status": status,
@@ -166690,19 +166893,39 @@ def mark_subtitle_dub_pipeline_output_sent(
         if job:
             job["duplicate_delivery_prevented"] = True
             subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="output_already_sent")
+            persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="duplicate_delivery_prevented")
         return False
     desired_terminal = str(terminal_state or "delivered").strip().lower()
     if desired_terminal not in SUBDUB_TERMINAL_STATES:
         desired_terminal = "delivered"
     current_terminal = str(job.get("terminal_state") or "")
+    artifact_type = str(terminal_artifact_type or ("video" if video_delivery_message_id else "")).strip().lower()
+    partial_audio_terminal = bool(
+        artifact_type == "audio_fallback"
+        or (
+            audio_delivery_message_id
+            and not video_delivery_message_id
+            and desired_terminal != "delivered"
+        )
+    )
+    if partial_audio_terminal:
+        desired_terminal = "needs_admin_review"
+        if subdub_job_has_failure_public_outcome(job):
+            job["partial_audio_after_failure_prevented"] = True
+            job["duplicate_delivery_prevented"] = True
+            subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="partial_audio_after_failure_public_outcome")
+            persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="partial_audio_after_failure_prevented")
+            return False
     if desired_terminal == "delivered" and not subdub_public_outcome_allows_success(job):
         job["success_after_error_prevented"] = True
         job["duplicate_delivery_prevented"] = True
         subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="failure_public_outcome_already_sent")
+        persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="success_after_error_prevented")
         return False
     if current_terminal and not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
         job["duplicate_delivery_prevented"] = True
         subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="terminal_transition_blocked")
+        persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="terminal_transition_blocked")
         return False
     job["output_sent"] = True
     job["output_validated"] = True
@@ -166720,7 +166943,6 @@ def mark_subtitle_dub_pipeline_output_sent(
         job["srt_delivery_message_id"] = str(srt_delivery_message_id)
     if success_message_id:
         job["subdub_success_message_id"] = str(success_message_id)
-    artifact_type = str(terminal_artifact_type or ("video" if video_delivery_message_id else "")).strip().lower()
     if artifact_type:
         job["terminal_artifact_type"] = artifact_type[:80]
     if desired_terminal == "delivered":
@@ -166748,20 +166970,27 @@ def mark_subtitle_dub_pipeline_output_sent(
     job["output_validated_before_success"] = True
     job["delivery_confirmed_before_success"] = bool(job.get("delivery_message_id"))
     job["terminal_public_outcome_sent"] = True
-    job["terminal_public_outcome_type"] = "success" if desired_terminal == "delivered" else desired_terminal
+    job["terminal_public_outcome_type"] = "partial_audio_delivered" if partial_audio_terminal else ("success" if desired_terminal == "delivered" else desired_terminal)
     job["terminal_public_outcome_message_id"] = str(success_message_id or job.get("delivery_message_id") or "")
-    job["success_sent_count"] = max(1, int(job.get("success_sent_count") or 0))
-    job["late_fail_suppressed"] = desired_terminal == "delivered"
+    job["success_sent_count"] = 0 if partial_audio_terminal else max(1, int(job.get("success_sent_count") or 0))
+    job["partial_audio_available"] = bool(partial_audio_terminal)
+    job["partial_audio_delivered"] = bool(partial_audio_terminal and audio_delivery_message_id)
+    job["partial_audio_message_id"] = str(audio_delivery_message_id or "") if partial_audio_terminal else str(job.get("partial_audio_message_id") or "")
+    job["full_video_failed"] = bool(partial_audio_terminal)
+    if partial_audio_terminal:
+        job["charge_status"] = "not_charged_partial_audio"
+        job["charged_xu"] = 0
+    job["late_fail_suppressed"] = desired_terminal == "delivered" or partial_audio_terminal
     job["error_sent_after_delivery"] = False
     job["panel_finalized"] = True
     job["panel_final_percent"] = int(job.get("progress_percent") or 0)
     job["panel_final_message_id"] = str(job.get("status_panel_message_id") or "")
     job["status_panel_terminalized"] = True
     job["refresh_stopped_after_terminal"] = True
-    job["charge_after_delivery"] = bool(int(job.get("charged_xu") or 0) > 0 and job.get("delivery_message_id"))
-    job["cost_line_rendered"] = bool(int(job.get("charged_xu") or 0) >= 0)
-    job["success_cost_line"] = subdub_success_cost_line(job.get("charged_xu") or 0)
-    job["cost_line_reason"] = "after_delivery" if job.get("delivery_message_id") else "delivery_message_missing"
+    job["charge_after_delivery"] = bool(int(job.get("charged_xu") or 0) > 0 and job.get("delivery_message_id") and not partial_audio_terminal)
+    job["cost_line_rendered"] = False if partial_audio_terminal else bool(int(job.get("charged_xu") or 0) >= 0)
+    job["success_cost_line"] = "" if partial_audio_terminal else subdub_success_cost_line(job.get("charged_xu") or 0)
+    job["cost_line_reason"] = "partial_audio_no_full_video_charge" if partial_audio_terminal else ("after_delivery" if job.get("delivery_message_id") else "delivery_message_missing")
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
     persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="pipeline_output_sent")
@@ -166835,8 +167064,9 @@ def subdub_telegram_file_too_big(detail: str = "") -> bool:
 
 def subdub_large_telegram_media_public_text(lang: str = "vi") -> str:
     return (
-        "TOAN AAS chưa tải được video này vì file quá lớn để lấy trực tiếp từ Telegram. "
-        "Hệ thống chưa trừ Xu. Anh/chị hãy gửi video nén nhẹ hơn hoặc dùng phương thức tải lên được hỗ trợ."
+        "TOAN AAS chưa tải được video này vì file quá lớn để lấy trực tiếp từ Telegram.\n"
+        "Hệ thống chưa trừ Xu.\n"
+        "Anh/chị có thể gửi video ngắn/nhẹ hơn hoặc gửi qua nguồn tải khác nếu được hỗ trợ."
     )
 
 def subdub_input_save_failure_public_text(input_save: dict | None = None, lang: str = "vi") -> str:
@@ -168472,6 +168702,7 @@ async def send_public_subtitle_dub_final_outputs(
     lang: str = "vi",
     include_subtitle_outputs: bool = True,
     strict_validation: bool = False,
+    job_key: str = "",
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
@@ -168490,6 +168721,14 @@ async def send_public_subtitle_dub_final_outputs(
         "audio_delivery_message_id": "",
         "srt_delivery_message_id": "",
         "terminal_artifact_type": "",
+        "partial_audio_available": False,
+        "partial_audio_delivered": False,
+        "partial_audio_message_id": "",
+        "terminal_public_outcome_type": "",
+        "full_video_failed": False,
+        "partial_audio_after_failure_prevented": False,
+        "charge_status": "",
+        "charged_xu": 0,
     }
     if video_bytes:
         if metadata_enabled:
@@ -168565,6 +168804,16 @@ async def send_public_subtitle_dub_final_outputs(
                     if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
                         return sent
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and audio_bytes:
+        existing_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
+        if existing_job and subdub_job_has_failure_public_outcome(existing_job):
+            existing_job["partial_audio_after_failure_prevented"] = True
+            existing_job["duplicate_delivery_prevented"] = True
+            existing_job["updated_at"] = time.time()
+            SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = existing_job
+            persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), existing_job, reason="partial_audio_after_failure_prevented")
+            sent["partial_audio_after_failure_prevented"] = True
+            sent["terminal_public_outcome_type"] = "failure"
+            return sent
         sent_msg = await message.reply_audio(
             audio=video_dubbing_output_file(audio_bytes, "toan_aas_dub_audio.mp3"),
             filename="toan_aas_dub_audio.mp3",
@@ -168576,6 +168825,13 @@ async def send_public_subtitle_dub_final_outputs(
             sent["audio_delivery_message_id"] = str(message_id)
             sent["telegram_message_id"] = sent.get("telegram_message_id") or str(message_id)
             sent["terminal_artifact_type"] = sent.get("terminal_artifact_type") or "audio_fallback"
+            sent["partial_audio_available"] = True
+            sent["partial_audio_delivered"] = True
+            sent["partial_audio_message_id"] = str(message_id)
+            sent["terminal_public_outcome_type"] = "partial_audio_delivered"
+            sent["full_video_failed"] = True
+            sent["charge_status"] = "not_charged_partial_audio"
+            sent["charged_xu"] = 0
         if metadata_enabled and "delivery_method" in sent:
             sent["delivery_method"] = sent.get("delivery_method") or "partial_audio"
     if not include_subtitle_outputs:
@@ -170803,6 +171059,7 @@ async def _execute_video_dubbing_pipeline_core(
             lang=lang,
             include_subtitle_outputs=include_subtitle_outputs,
             strict_validation=bool(render_supports_validation),
+            job_key=delivery_job_key,
         )
         state = {
             **state,
@@ -170842,8 +171099,20 @@ async def _execute_video_dubbing_pipeline_core(
         )
     await _progress("delivered")
     delivered_video = int(delivery.get("video") or 0) + int(delivery.get("video_document") or 0) > 0
+    partial_audio_delivered = bool(delivery.get("partial_audio_delivered"))
     delivery_partial_result = False
-    if video_output and not delivered_video:
+    if partial_audio_delivered:
+        refund_charged_credit(
+            uid,
+            charged,
+            event_type=f"video_{mode}_partial_audio_no_video_refund",
+            note="Subtitle/dub delivered audio fallback without final video",
+            was_charged=charged > 0,
+        )
+        charged = 0
+        delivery_partial_result = True
+        partial_reason = partial_reason or "partial_audio_delivered"
+    elif video_output and not delivered_video:
         refund_charged_credit(
             uid,
             charged,
@@ -170858,6 +171127,7 @@ async def _execute_video_dubbing_pipeline_core(
         "ok": True,
         "partial_result": bool(partial_result),
         "delivery_partial_result": bool(delivery_partial_result),
+        "partial_audio_delivered": bool(partial_audio_delivered),
     })
     if str(state.get("_pipeline_job_key") or ""):
         mark_subtitle_dub_pipeline_output_sent(
@@ -170878,6 +171148,13 @@ async def _execute_video_dubbing_pipeline_core(
         translated_paths = list(translation_asset_paths or [])
         job = save_engine_async_job({
             "feature": "subtitle_dub",
+            "job_id": str(state.get("_pipeline_job_id") or ""),
+            "public_code": subdub_public_code_value(str(state.get("_pipeline_job_id") or "")),
+            "public_job_id": subdub_public_code_value(str(state.get("_pipeline_job_id") or "")),
+            "subdub_public_job_id": subdub_public_code_value(str(state.get("_pipeline_job_id") or "")),
+            "progress_public_code": subdub_public_job_code(str(state.get("_pipeline_job_id") or "")),
+            "mapped_product_type": subdub_product_type_from_mode(mode, state),
+            "mapped_mode": mode,
             "user_id": str(uid or ""),
             "chat_id": str(getattr(query.message, "chat_id", "") or ""),
             "provider": ",".join(item for item in (asr_provider, tts_provider) if item) or "subtitle_pipeline",
@@ -170921,7 +171198,7 @@ async def _execute_video_dubbing_pipeline_core(
             "status_panel_message_id": str(state.get("status_panel_message_id") or ""),
             "last_error_stage": "",
             "last_error_safe": "",
-            "charge_status": "charged" if int(charged or 0) > 0 else "not_charged",
+            "charge_status": str(delivery.get("charge_status") or ("charged" if int(charged or 0) > 0 else "not_charged")),
             "source_language": str(prepared.get("detected_language") or state.get("source_language") or "auto"),
             "detected_language": str(prepared.get("detected_language") or ""),
             "target_language": str(prepared.get("target_language") or state.get("target_language") or ""),
@@ -170960,21 +171237,21 @@ async def _execute_video_dubbing_pipeline_core(
             "delivery_method": str(delivery.get("delivery_method") or ""),
             "delivery_attempted": True,
             "delivery_message_id": str(delivery.get("telegram_message_id") or ""),
-            "output_validated": bool(delivered_video or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
+            "output_validated": bool(delivered_video or partial_audio_delivered or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
             "duplicate_delivery_prevented": False,
             "public_error_sent": False,
             "error_sent_after_delivery": False,
             "terminal_public_outcome_sent": True,
-            "terminal_public_outcome_type": "success" if result_terminal_state == "delivered" else result_terminal_state,
+            "terminal_public_outcome_type": "partial_audio_delivered" if partial_audio_delivered else ("success" if result_terminal_state == "delivered" else result_terminal_state),
             "terminal_public_outcome_message_id": str(delivery.get("telegram_message_id") or ""),
             "public_error_sent_count": 0,
-            "success_sent_count": 1 if result_terminal_state == "delivered" else 0,
+            "success_sent_count": 1 if result_terminal_state == "delivered" and not partial_audio_delivered else 0,
             "duplicate_success_prevented": False,
             "duplicate_error_prevented": False,
-            "output_validated_before_success": bool(delivered_video or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
+            "output_validated_before_success": bool(delivered_video and not partial_audio_delivered),
             "delivery_confirmed_before_success": bool(delivery.get("telegram_message_id")),
             "validation_started": True,
-            "validation_passed": bool(delivered_video or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
+            "validation_passed": bool(delivered_video or partial_audio_delivered or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
             "delivery_started": True,
             "delivery_success": bool(delivery.get("telegram_message_id")),
             "panel_finalized": True,
@@ -170988,19 +171265,24 @@ async def _execute_video_dubbing_pipeline_core(
             "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
             "srt_delivery_message_id": str(delivery.get("srt_delivery_message_id") or ""),
             "terminal_artifact_type": str(delivery.get("terminal_artifact_type") or ""),
+            "partial_audio_available": bool(delivery.get("partial_audio_available") or (audio_bytes and not delivered_video)),
+            "partial_audio_delivered": bool(partial_audio_delivered),
+            "partial_audio_message_id": str(delivery.get("partial_audio_message_id") or delivery.get("audio_delivery_message_id") or ""),
+            "full_video_failed": bool(partial_audio_delivered or (final_video_required and not delivered_video)),
+            "partial_audio_after_failure_prevented": bool(delivery.get("partial_audio_after_failure_prevented")),
             "delivered_at": time.time() if result_terminal_state == "delivered" else "",
             "terminal_locked_at": time.time(),
-            "late_fail_suppressed": bool(result_terminal_state == "delivered"),
+            "late_fail_suppressed": bool(result_terminal_state == "delivered" or partial_audio_delivered),
             "status_panel_terminalized": True,
             "refresh_stopped_after_terminal": True,
             "output_validation": dict(delivery.get("output_validation") or {}),
             "subtitle_text_validation": dict(state.get("_subdub_subtitle_readability") or subtitle_readability),
             "last_technical_error": sanitize_log_text(partial_reason or product_result.get("error_code") or "")[:180],
-            "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if (partial_result or delivery_partial_result) else "",
-            "charge_after_delivery": bool(int(charged or 0) > 0 and delivery.get("telegram_message_id")),
-            "success_cost_line": subdub_success_cost_line(charged, lang),
-            "cost_line_rendered": True,
-            "cost_line_reason": "after_delivery" if delivery.get("telegram_message_id") else "delivery_message_missing",
+            "public_safe_error": subdub_audio_fallback_text(mode, lang) if partial_audio_delivered else (subtitle_plus_dub_clean_failure_text(lang) if (partial_result or delivery_partial_result) else ""),
+            "charge_after_delivery": bool(int(charged or 0) > 0 and delivery.get("telegram_message_id") and not partial_audio_delivered),
+            "success_cost_line": "" if partial_audio_delivered else subdub_success_cost_line(charged, lang),
+            "cost_line_rendered": False if partial_audio_delivered else True,
+            "cost_line_reason": "partial_audio_no_full_video_charge" if partial_audio_delivered else ("after_delivery" if delivery.get("telegram_message_id") else "delivery_message_missing"),
             "stage": "completed" if delivered_video else ("partial" if (partial_result or delivery_partial_result) else "output"),
             "pipeline_attempted": True,
             "input_file_id": str(input_save.get("file_id") or source_ref or ""),
@@ -171028,6 +171310,13 @@ async def _execute_video_dubbing_pipeline_core(
         "video_delivered": bool(delivered_video),
         "partial_result": bool(partial_result),
         "delivery_partial_result": bool(delivery_partial_result),
+        "partial_audio_available": bool(delivery.get("partial_audio_available")),
+        "partial_audio_delivered": bool(partial_audio_delivered),
+        "partial_audio_message_id": str(delivery.get("partial_audio_message_id") or ""),
+        "terminal_public_outcome_type": "partial_audio_delivered" if partial_audio_delivered else ("success" if result_terminal_state == "delivered" else result_terminal_state),
+        "full_video_failed": bool(partial_audio_delivered or (final_video_required and not delivered_video)),
+        "partial_audio_after_failure_prevented": bool(delivery.get("partial_audio_after_failure_prevented")),
+        "charge_status": str(delivery.get("charge_status") or ("not_charged_partial_audio" if partial_audio_delivered else ("charged" if int(charged or 0) > 0 else "not_charged"))),
         "partial_reason": partial_reason,
         "sent_documents": int(delivery.get("documents") or 0),
         "sent_audio": int(delivery.get("audio") or 0),
@@ -171204,7 +171493,20 @@ async def execute_video_dubbing_pipeline(
             "status_panel_message_id": str(result_state.get("status_panel_message_id") or debug_job.get("status_panel_message_id") or runtime_job.get("status_panel_message_id") or ""),
             "last_error_stage": str(debug_job.get("last_error_stage") or ("" if result.get("ok") else result.get("status") or "")),
             "last_error_safe": str(debug_job.get("last_error_safe") or ("" if result.get("ok") else result.get("text") or "")),
-            "charge_status": str(debug_job.get("charge_status") or ("charged" if int(result.get("charged") or 0) > 0 else "not_charged")),
+            "charge_status": str(result.get("charge_status") or debug_job.get("charge_status") or ("charged" if int(result.get("charged") or 0) > 0 else "not_charged")),
+            "public_code": subdub_public_code_value(str(job.get("job_id") or "")),
+            "public_job_id": subdub_public_code_value(str(job.get("job_id") or "")),
+            "subdub_public_job_id": subdub_public_code_value(str(job.get("job_id") or "")),
+            "progress_public_code": subdub_public_job_code(str(job.get("job_id") or "")),
+            "mapped_product_type": subdub_product_type_from_mode(str(result.get("mode") or state.get("mode") or ""), state),
+            "mapped_mode": normalize_video_translate_mode(str(result.get("mode") or state.get("mode") or "")),
+            "partial_audio_available": bool(result.get("partial_audio_available") or debug_job.get("partial_audio_available")),
+            "partial_audio_delivered": bool(result.get("partial_audio_delivered") or debug_job.get("partial_audio_delivered")),
+            "partial_audio_message_id": str(result.get("partial_audio_message_id") or debug_job.get("partial_audio_message_id") or ""),
+            "terminal_public_outcome_type": str(result.get("terminal_public_outcome_type") or debug_job.get("terminal_public_outcome_type") or ""),
+            "full_video_failed": bool(result.get("full_video_failed") or debug_job.get("full_video_failed")),
+            "partial_audio_after_failure_prevented": bool(result.get("partial_audio_after_failure_prevented") or debug_job.get("partial_audio_after_failure_prevented")),
+            "charged_xu": int(result.get("charged") or debug_job.get("charged_xu") or 0),
         }
         update_fields.update(subdub_lifecycle_debug_fields(
             update_fields.get("progress_stage") or debug_job.get("progress_stage") or ("delivered" if result.get("ok") else "failed_no_charge"),
@@ -174380,6 +174682,59 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     reply_markup=video_dubbing_receipt_keyboard(lang, origin, state),
                 )
             set_video_dubbing_pending(uid, "guarded", processing="0")
+            result_blocker = str(
+                (result.get("debug_job") or {}).get("pipeline_blocker")
+                or (result.get("debug_job") or {}).get("input_save_blocker")
+                or (result.get("input_save") or {}).get("input_save_blocker")
+                or result.get("detail")
+                or result.get("status")
+                or ""
+            )
+            if result_blocker == "large_telegram_download_unsupported":
+                public_text = str(result.get("text") or subdub_large_telegram_media_public_text(lang))
+                rendered = await safe_edit_or_send(
+                    query,
+                    public_text,
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
+                )
+                message_id = str(
+                    getattr(rendered, "message_id", "")
+                    or getattr(getattr(query, "message", None), "message_id", "")
+                    or ""
+                )
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    status="failed",
+                    terminal_state="failed_no_charge",
+                    lifecycle_state="failed_no_charge",
+                    current_stage="failed_no_charge",
+                    progress_stage="failed_no_charge",
+                    progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                    completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                    last_error_stage="input_save",
+                    last_error_safe=public_text,
+                    pipeline_blocker="large_telegram_download_unsupported",
+                    input_save_blocker="large_telegram_download_unsupported",
+                    no_charge_reason="large_telegram_download_unsupported",
+                    charge_status="not_charged",
+                    terminal_public_outcome_sent=True,
+                    terminal_public_outcome_type="failure",
+                    terminal_public_outcome_message_id=message_id,
+                    public_error_sent=True,
+                    public_error_sent_count=1,
+                    success_sent_count=0,
+                    status_panel_terminalized=True,
+                    refresh_stopped_after_terminal=True,
+                    panel_finalized=True,
+                    panel_final_percent=95,
+                    panel_final_message_id=message_id,
+                    delivery_success=False,
+                    charge_after_delivery=False,
+                    cost_line_rendered=False,
+                    cost_line_reason="large_telegram_download_unsupported",
+                )
+                return rendered
             if str(result.get("status") or "") == "DIALOGUE_UNAVAILABLE":
                 await send_subdub_fail_once(
                     query.message,
@@ -174430,6 +174785,22 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "completed",
             **completed_fields,
         )
+        if result.get("partial_audio_delivered") or str(result.get("terminal_public_outcome_type") or "").strip().lower() == "partial_audio_delivered":
+            if pipeline_job_key:
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    terminal_public_outcome_type="partial_audio_delivered",
+                    partial_audio_delivered=True,
+                    partial_audio_available=True,
+                    partial_audio_message_id=str(result.get("partial_audio_message_id") or result.get("audio_delivery_message_id") or ""),
+                    full_video_failed=True,
+                    charge_status="not_charged_partial_audio",
+                    charged_xu=0,
+                    success_sent_count=0,
+                    cost_line_rendered=False,
+                    cost_line_reason="partial_audio_no_full_video_charge",
+                )
+            return None
         receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
         sent_receipt = await query.message.reply_text(
             receipt_text,
