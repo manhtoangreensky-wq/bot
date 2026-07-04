@@ -1123,6 +1123,7 @@ def run_provider_generation(
             return "all_video_providers_submit_config_missing"
         if all(
             str(item.get("reason") or "") in {
+                "provider_capacity_unavailable",
                 "provider_submit_failed",
                 "provider_submit_http_error",
                 "provider_submit_http_5xx",
@@ -1131,6 +1132,8 @@ def run_provider_generation(
             }
             for item in attempt_failures
         ):
+            if any(str(item.get("reason") or "") == "provider_capacity_unavailable" for item in attempt_failures):
+                return "all_video_providers_submit_unavailable"
             return "all_video_providers_submit_failed"
         return reasons[-1] or "provider_submit_failed"
 
