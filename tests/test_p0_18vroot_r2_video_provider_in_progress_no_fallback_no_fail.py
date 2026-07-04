@@ -308,7 +308,8 @@ def test_video_provider_job_debug_never_generic_fails_for_job_72_shape(monkeypat
     assert "Video Provider Job Debug" in text
     assert "primary_provider_in_progress" in text
     assert "Có lỗi khi xử lý lệnh" not in text
-    assert len(text) > bot.VIDEO_DEBUG_REPLY_LIMIT
+    assert "debug_truncated" in text
+    assert len(text) <= bot.VIDEO_DEBUG_REPLY_LIMIT
     assert "video_debug_safe_reply_text" in inspect.getsource(bot.cmd_video_provider_job_debug)
 
 

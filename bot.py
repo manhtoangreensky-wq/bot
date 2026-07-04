@@ -45994,6 +45994,27 @@ def _video_debug_compact_attempt_lines(result: dict | None = None, *, limit: int
     return lines
 
 
+def _video_debug_plain_compact_text(text: str, *, reason: str = "message_too_long") -> str:
+    raw = str(text or "")
+    raw = re.sub(r"</?(?:b|code)>", "", raw)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    raw = html.unescape(raw)
+    safe_lines = []
+    for line in raw.splitlines():
+        clean = sanitize_provider_status_text(line, "", 260)
+        if len(clean) > 260:
+            clean = clean[:257] + "..."
+        safe_lines.append(clean)
+        if len("\n".join(safe_lines)) > VIDEO_DEBUG_REPLY_LIMIT - 220:
+            break
+    safe_lines.append(f"debug_truncated=yes reason={reason}")
+    safe_lines.append("Bot chưa trừ Xu.")
+    compact = "\n".join(safe_lines)
+    if len(compact) > VIDEO_DEBUG_REPLY_LIMIT:
+        compact = compact[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\ndebug_truncated=yes"
+    return compact
+
+
 def video_render_debug_compact_text(
     job_id: int,
     job: dict,
@@ -46076,16 +46097,11 @@ def video_render_debug_compact_text(
 async def video_debug_safe_reply_text(message, text: str):
     clean = str(text or "")
     if len(clean) > VIDEO_DEBUG_REPLY_LIMIT:
-        clean = clean[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\n• debug_truncated=<code>hard_limit</code>"
+        return await message.reply_text(_video_debug_plain_compact_text(clean, reason="message_too_long"))
     try:
         return await message.reply_text(clean, parse_mode="HTML")
     except Exception as exc:
-        fallback = (
-            "⚠️ Video diagnostic partial\n"
-            f"debug_reply_error={type(exc).__name__}\n"
-            "Bot chưa trừ Xu."
-        )
-        return await message.reply_text(fallback[:3900])
+        return await message.reply_text(_video_debug_plain_compact_text(clean, reason=f"html_send_{type(exc).__name__}"))
 
 
 def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
@@ -46406,7 +46422,50 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• blocker: <code>{html.escape(blocker[:240])}</code>",
     ]
     lines.extend(_video_provider_attempt_summary_lines(result))
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if len(text) <= VIDEO_DEBUG_REPLY_LIMIT:
+        return text
+    compact_lines = [
+        "🎬 <b>Video Provider Job Debug</b>",
+        "Provider job diagnostic partial",
+        "",
+        "• debug_truncated: <code>yes</code>",
+        "• truncate_reason: <code>message_too_long</code>",
+        f"• job id: <code>{jid}</code>",
+        f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        f"• provider: <code>{_video_debug_safe_value(provider, 80)}</code>",
+        f"• configured provider chain: <code>{_video_debug_safe_value(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-', 180)}</code>",
+        f"• selected provider before submit: <code>{_video_debug_safe_value(result.get('selected_provider_before_submit'), 80)}</code>",
+        f"• selected provider after fallback: <code>{_video_debug_safe_value(result.get('selected_provider_after_fallback'), 80)}</code>",
+        f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
+        f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
+        f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
+        f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
+        f"• provider fallback reason: <code>{_video_debug_safe_value(result.get('provider_fallback_reason') or result.get('fallback_reason'), 120)}</code>",
+        f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
+        f"• fallback blocked reason: <code>{_video_debug_safe_value(result.get('fallback_blocked_reason'), 120)}</code>",
+        f"• primary provider continue polling: <code>{'yes' if result.get('primary_provider_continue_polling') else 'no'}</code>",
+        f"• primary provider task alive: <code>{'yes' if result.get('primary_provider_task_alive') else 'no'}</code>",
+        f"• primary provider task id present: <code>{'yes' if result.get('primary_provider_task_id_present') else 'no'}</code>",
+        f"• key4u submit suppressed: <code>{'yes' if result.get('key4u_submit_suppressed') else 'no'}</code>",
+        f"• next poll scheduled: <code>{'yes' if result.get('next_poll_scheduled') else 'no'}</code>",
+        f"• provider wait: <code>{safe_int(result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
+        f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') or task_ids or video_ids else 'no'}</code>",
+        f"• provider task id: <code>{_video_debug_safe_value(masked_tasks, 160)}</code>",
+        f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
+        f"• normalized status: <code>{_video_debug_safe_value(result.get('normalized_provider_status') or result.get('provider_status'), 80)}</code>",
+        f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
+        f"• terminal state: <code>{_video_debug_safe_value(terminal_state, 80)}</code>",
+        f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
+        f"• blocker: <code>{_video_debug_safe_value(blocker, 160)}</code>",
+        "",
+        *_video_debug_compact_attempt_lines(result, limit=5),
+    ]
+    compact_text = "\n".join(compact_lines)
+    return compact_text if len(compact_text) <= VIDEO_DEBUG_REPLY_LIMIT else _video_debug_plain_compact_text(compact_text, reason="provider_job_debug_hard_limit")
 
 
 async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
