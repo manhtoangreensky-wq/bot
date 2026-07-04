@@ -226,6 +226,9 @@ def _submit_error_classification(status_code: int, error: Any = "") -> tuple[str
         status = int(status_code or 0)
     except Exception:
         status = 0
+    error_text = str(error or "").lower()
+    if any(marker in error_text for marker in ("get_channel_failed", "no available channel", "no channel")):
+        return "provider_capacity_unavailable", True, True
     if status == 503:
         return "provider_temporarily_unavailable", True, True
     if 500 <= status <= 599:
@@ -684,8 +687,9 @@ class GenericHttpVideoProvider:
         if result.get("exception_class"):
             raw_debug["exception_class"] = result.get("exception_class")
             raw_debug["exception_message_safe"] = result.get("exception_message_safe") or ""
+        error_probe = result.get("error") or _safe_provider_error_message(body)
         if result.get("error") in {"invalid_json", "http_error_invalid_json"}:
-            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), result.get("error"))
+            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), error_probe)
             if is_5xx:
                 raw_debug["provider_submit_blocker"] = blocker
                 raw_debug["provider_submit_http_5xx"] = True
@@ -694,7 +698,7 @@ class GenericHttpVideoProvider:
             raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_json"
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status="failed", error_code="provider_submit_response_invalid_json", raw=raw_debug)
         if not result.get("ok"):
-            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), result.get("error"))
+            blocker, retriable, is_5xx = _submit_error_classification(int(result.get("status_code") or 0), error_probe)
             raw_debug["provider_submit_blocker"] = blocker
             raw_debug["provider_submit_http_5xx"] = bool(is_5xx)
             raw_debug["provider_submit_retriable"] = bool(retriable)

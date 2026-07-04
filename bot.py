@@ -45684,6 +45684,145 @@ def _video_provider_attempt_summary_lines(result: dict | None = None, *, limit: 
     return lines
 
 
+VIDEO_DEBUG_REPLY_LIMIT = 3900
+
+
+def _video_debug_safe_value(value, limit: int = 180) -> str:
+    safe_limit = max(1, int(limit or 180))
+    try:
+        text = sanitize_provider_status_text(str(value if value not in (None, "") else "-"), "", safe_limit)
+    except Exception:
+        text = str(value if value not in (None, "") else "-")
+        text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._:-]+", r"\1***", text)
+        text = re.sub(r"(?i)(authorization|api[_-]?key|token|secret)=?[A-Za-z0-9._:-]+", r"\1=***", text)
+        text = re.sub(r"https?://\S+", "[url]", text)
+        text = text[:safe_limit]
+    return html.escape(text[:safe_limit])
+
+
+def _video_debug_compact_attempt_lines(result: dict | None = None, *, limit: int = 4) -> list[str]:
+    current = dict(result or {})
+    attempts = current.get("provider_attempts") or current.get("provider_fallback_attempts") or current.get("fallback_provider_attempts") or []
+    if not isinstance(attempts, list):
+        attempts = []
+    rows = [dict(item) for item in attempts if isinstance(item, dict)][: max(1, int(limit or 4))]
+    lines = ["Provider attempts:"]
+    if not rows:
+        return [*lines, "• <code>-</code>"]
+    for item in rows:
+        safe_error = (
+            item.get("safe_error")
+            or item.get("provider_error_message_safe")
+            or item.get("exception_message_safe")
+            or "-"
+        )
+        lines.append(
+            "• "
+            f"<code>{_video_debug_safe_value(item.get('provider'), 80)}</code> "
+            f"phase=<code>{_video_debug_safe_value(item.get('phase') or ('submit' if item.get('submit_failure') else '-'), 40)}</code> "
+            f"submit=<code>{'yes' if item.get('submit_called') else 'no'}</code>/<code>{safe_int(item.get('submit_http_status'), 0)}</code> "
+            f"accepted=<code>{'yes' if item.get('submit_accepted') else 'no'}</code> "
+            f"task=<code>{'yes' if item.get('task_id_present') else 'no'}</code> "
+            f"blocker=<code>{_video_debug_safe_value(item.get('blocker') or item.get('reason'), 120)}</code> "
+            f"safe=<code>{_video_debug_safe_value(safe_error, 180)}</code>"
+        )
+    return lines
+
+
+def video_render_debug_compact_text(
+    job_id: int,
+    job: dict,
+    project: dict,
+    result: dict,
+    claim_debug: dict,
+    product_type: str,
+    engine_route: dict,
+    final_info: dict,
+    *,
+    mode: str = "render",
+    reason: str = "message_too_long",
+) -> str:
+    addon_plan = _video_debug_json((project or {}).get("addon_plan_json"), {}) if isinstance(project, dict) else {}
+    final_path = str((final_info or {}).get("path") or (project or {}).get("final_video_path") or (result or {}).get("final_video_path") or "")
+    lines = [
+        "🧪 <b>Video Render Debug</b>",
+        "Provider status diagnostic partial",
+        "",
+        f"• debug_truncated: <code>yes</code>",
+        f"• truncate_reason: <code>{_video_debug_safe_value(reason, 80)}</code>",
+        f"• Mode: <code>{_video_debug_safe_value(mode, 40)}</code>",
+        f"• Job: <code>{safe_int(job_id, 0)}</code>",
+        f"• Project: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        f"• Product type: <code>{_video_debug_safe_value(product_type, 80)}</code>",
+        f"• Engine adapter: <code>{_video_debug_safe_value((engine_route or {}).get('adapter'), 100)}</code>",
+        f"• Job status: <code>{_video_debug_safe_value((job or {}).get('status'), 80)}</code>",
+        f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
+        f"• claimable owner-product: <code>{'yes' if (claim_debug or {}).get('claimable') else 'no'}</code>",
+        f"• claim reason: <code>{_video_debug_safe_value((claim_debug or {}).get('reason'), 120)}</code>",
+        f"• voice: <code>{'on' if addon_plan.get('voice_enabled') else 'off'}</code>",
+        f"• music: <code>{'on' if addon_plan.get('music_enabled') else 'off'}</code>",
+        f"• subtitle: <code>{'on' if addon_plan.get('subtitle_enabled') else 'off'}</code>",
+        f"• logo: <code>{'on' if addon_plan.get('logo_enabled') else 'off'}</code>",
+        f"• ffmpeg available: <code>unknown</code>",
+        f"• configured provider chain: <code>{_video_debug_safe_value(','.join(str(item) for item in ((result or {}).get('configured_provider_chain') or (result or {}).get('effective_provider_chain') or (result or {}).get('provider_chain') or [])) or '-', 220)}</code>",
+        f"• route requires provider: <code>{'yes' if (result or {}).get('route_requires_provider') else 'no'}</code>",
+        f"• provider router called: <code>{'yes' if (result or {}).get('provider_router_called') else 'no'}</code>",
+        f"• provider candidates: <code>{safe_int((result or {}).get('provider_candidates_count'), 0)}</code>",
+        f"• initial selected provider: <code>{_video_debug_safe_value((result or {}).get('initial_selected_provider'), 80)}</code>",
+        f"• selected provider: <code>{_video_debug_safe_value((result or {}).get('selected_provider'), 80)}</code>",
+        f"• selected provider before submit: <code>{_video_debug_safe_value((result or {}).get('selected_provider_before_submit'), 80)}</code>",
+        f"• selected provider after fallback: <code>{_video_debug_safe_value((result or {}).get('selected_provider_after_fallback'), 80)}</code>",
+        f"• provider route selected: <code>{'yes' if (result or {}).get('provider_route_selected') else 'no'}</code>",
+        f"• provider attempted: <code>{'yes' if (result or {}).get('provider_attempted') else 'no'}</code>",
+        f"• provider fallback attempted: <code>{'yes' if (result or {}).get('provider_fallback_attempted') else 'no'}</code>",
+        f"• provider fallback reason: <code>{_video_debug_safe_value((result or {}).get('provider_fallback_reason') or (result or {}).get('fallback_reason'), 120)}</code>",
+        f"• fallback reason: <code>{_video_debug_safe_value((result or {}).get('fallback_reason'), 120)}</code>",
+        f"• provider submit called: <code>{'yes' if (result or {}).get('provider_submit_called') else 'no'}</code>",
+        f"• provider submit http: <code>{safe_int((result or {}).get('provider_submit_http_status'), 0)}</code>",
+        f"• provider submit 5xx: <code>{'yes' if (result or {}).get('provider_submit_http_5xx') else 'no'}</code>",
+        f"• submit provider key: <code>{_video_debug_safe_value((result or {}).get('submit_provider_key'), 80)}</code>",
+        f"• provider config source: <code>{_video_debug_safe_value((result or {}).get('provider_config_source'), 120)}</code>",
+        f"• provider submit url configured: <code>{'yes' if (result or {}).get('provider_submit_url_configured') or (result or {}).get('submit_url_configured') else 'no'}</code>",
+        f"• provider auth header: <code>{_video_debug_safe_value((result or {}).get('provider_auth_header_name'), 80)}</code> present=<code>{'yes' if (result or {}).get('provider_auth_value_present') or (result or {}).get('auth_header_value_present') or (result or {}).get('provider_auth_present') or (result or {}).get('auth_present') or (result or {}).get('auth_configured') else 'no'}</code>",
+        f"• provider model present: <code>{'yes' if (result or {}).get('provider_model_present') or (result or {}).get('provider_payload_model') else 'no'}</code>",
+        f"• provider payload model: <code>{_video_debug_safe_value((result or {}).get('provider_payload_model'), 80)}</code>",
+        f"• submit accepted: <code>{'yes' if (result or {}).get('submit_accepted') else 'no'}</code>",
+        f"• provider task id saved: <code>{'yes' if (result or {}).get('provider_task_id_saved') else 'no'}</code>",
+        f"• provider poll called: <code>{'yes' if (result or {}).get('provider_poll_called') else 'no'}</code>",
+        f"• poll allowed: <code>{'yes' if (result or {}).get('poll_allowed') else 'no'}</code>",
+        f"• poll skipped reason: <code>{_video_debug_safe_value((result or {}).get('poll_skipped_reason'), 100)}</code>",
+        f"• provider error safe: <code>{_video_debug_safe_value((result or {}).get('provider_error_message_safe'), 180)}</code>",
+        f"• provider error: <code>{_video_debug_safe_value((result or {}).get('provider_error'), 160)}</code>",
+        f"• final blocker: <code>{_video_debug_safe_value((result or {}).get('blocker') or (result or {}).get('provider_error') or (job or {}).get('last_error'), 180)}</code>",
+        f"• visual source: <code>{_video_debug_safe_value((result or {}).get('visual_source'), 80)}</code>",
+        f"• final classified as: <code>{_video_debug_safe_value((result or {}).get('visual_classification') or (result or {}).get('final_classification'), 80)}</code>",
+        f"• terminal state: <code>{_video_debug_safe_value((project or {}).get('video_terminal_state') or (result or {}).get('terminal_state'), 80)}</code>",
+        f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
+        f"• artifact path: <code>{_video_debug_safe_value(final_path, 160)}</code>",
+        f"• artifact exists: <code>{'yes' if (final_info or {}).get('exists') else 'no'}</code>",
+        f"• artifact size: <code>{safe_int((final_info or {}).get('size'), 0)}</code>",
+        "",
+        *_video_debug_compact_attempt_lines(result, limit=4),
+    ]
+    text = "\n".join(lines)
+    return text if len(text) <= VIDEO_DEBUG_REPLY_LIMIT else text[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\n• debug_truncated=<code>hard_limit</code>"
+
+
+async def video_debug_safe_reply_text(message, text: str):
+    clean = str(text or "")
+    if len(clean) > VIDEO_DEBUG_REPLY_LIMIT:
+        clean = clean[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\n• debug_truncated=<code>hard_limit</code>"
+    try:
+        return await message.reply_text(clean, parse_mode="HTML")
+    except Exception as exc:
+        fallback = (
+            "⚠️ Video diagnostic partial\n"
+            f"debug_reply_error={type(exc).__name__}\n"
+            "Bot chưa trừ Xu."
+        )
+        return await message.reply_text(fallback[:3900])
+
+
 def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     jid = safe_int(job_id, 0)
     if jid <= 0:
@@ -45865,7 +46004,20 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• charged Xu: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
     ]
     lines.extend(_video_provider_attempt_summary_lines(result))
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if len(text) > VIDEO_DEBUG_REPLY_LIMIT:
+        return video_render_debug_compact_text(
+            jid,
+            job,
+            project,
+            result,
+            claim_debug,
+            product_type,
+            engine_route,
+            final_info,
+            mode=mode,
+        )
+    return text
 
 
 def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
@@ -45986,8 +46138,10 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
     job_id = safe_int(args[0] if args else 0, 0)
-    text = video_render_debug_text(job_id, mode=str(getattr(update.message, "text", "") or "").split()[0].lstrip("/") or "render")
-    return await update.message.reply_text(text, parse_mode="HTML")
+    command_parts = str(getattr(update.message, "text", "") or "").split()
+    command_name = command_parts[0].lstrip("/") if command_parts else "render"
+    text = video_render_debug_text(job_id, mode=command_name or "render")
+    return await video_debug_safe_reply_text(update.message, text)
 
 
 async def cmd_video_provider_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66552,6 +66706,135 @@ def video_b14_public_render_guard(user_id=0) -> tuple[bool, str]:
     return True, ""
 
 
+PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI = (
+    "TOAN AAS chưa thể tạo video lúc này vì hệ thống tạo video đang bận. "
+    "Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+)
+try:
+    VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS = max(30, int(os.getenv("VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS", "900") or 900))
+except Exception:
+    VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS = 900
+
+
+def _video_provider_unavailable_reason_from_attempt(attempt: dict | None = None) -> str:
+    item = dict(attempt or {})
+    text = " ".join(
+        str(item.get(key) or "")
+        for key in (
+            "blocker",
+            "reason",
+            "provider_submit_blocker",
+            "provider_error",
+            "provider_error_message_safe",
+            "safe_error",
+            "exception_message_safe",
+        )
+    ).lower()
+    status = safe_int(item.get("submit_http_status") or item.get("provider_submit_http_status"), 0)
+    if any(marker in text for marker in ("provider_capacity_unavailable", "get_channel_failed", "no available channel", "no channel")):
+        return "provider_capacity_unavailable"
+    if "provider_temporarily_unavailable" in text or status == 503:
+        return "provider_temporarily_unavailable"
+    if 500 <= status <= 599 or "provider_submit_http_5xx" in text:
+        return "provider_submit_http_5xx"
+    return ""
+
+
+def _video_provider_preflight_recent_failure(conn, *, ttl_seconds: int = VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS) -> dict:
+    try:
+        rows = conn.execute(
+            """SELECT j.id,j.result_json,j.updated_at,p.project_id,p.video_terminal_state,p.error_log
+               FROM video_jobs j
+               JOIN video_projects p ON p.project_id=j.project_id
+               WHERE j.job_type=? AND j.status IN ('failed','completed')
+               ORDER BY j.id DESC LIMIT 20""",
+            (video_project_queue.VIDEO_RENDER_JOB_TYPE,),
+        ).fetchall()
+    except Exception as exc:
+        return {"ok": True, "source": "skip", "reason": f"preflight_db_unavailable:{type(exc).__name__}"}
+    now_dt = datetime.now()
+    for row in rows:
+        try:
+            result = json.loads(str(row[1] or "{}"))
+        except Exception:
+            result = {}
+        if not isinstance(result, dict):
+            continue
+        if not (
+            str(result.get("blocker") or result.get("provider_error") or "").strip()
+            in {"all_video_providers_submit_failed", "all_video_providers_submit_unavailable"}
+            or bool(result.get("provider_fallback_attempted"))
+        ):
+            continue
+        updated_raw = str(row[2] or "")
+        if updated_raw:
+            try:
+                updated_dt = datetime.fromisoformat(updated_raw.replace("Z", "+00:00")[:19])
+                if (now_dt - updated_dt.replace(tzinfo=None)).total_seconds() > max(30, int(ttl_seconds or 900)):
+                    continue
+            except Exception:
+                pass
+        chain = [
+            str(item or "").strip()
+            for item in (
+                result.get("configured_provider_chain")
+                or result.get("effective_provider_chain")
+                or result.get("provider_chain")
+                or []
+            )
+            if str(item or "").strip()
+        ]
+        attempts = result.get("provider_attempts") or result.get("provider_fallback_attempts") or result.get("fallback_provider_attempts") or []
+        if not isinstance(attempts, list):
+            attempts = []
+        reason_by_provider: dict[str, str] = {}
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            provider = str(attempt.get("provider") or "").strip()
+            reason = _video_provider_unavailable_reason_from_attempt(attempt)
+            if provider and reason in {"provider_capacity_unavailable", "provider_temporarily_unavailable"}:
+                reason_by_provider[provider] = reason
+        if not chain:
+            chain = list(reason_by_provider.keys())
+        configured_chain = [provider for provider in chain if provider in reason_by_provider]
+        if chain and configured_chain and len(configured_chain) >= len(chain):
+            return {
+                "ok": False,
+                "provider_preflight_checked": True,
+                "provider_preflight_source": "cache",
+                "provider_preflight_result": "all_providers_unavailable",
+                "unavailable_providers": configured_chain,
+                "unavailable_reason_by_provider": reason_by_provider,
+                "preflight_ttl_seconds": max(30, int(ttl_seconds or 900)),
+                "job_creation_blocked_by_provider_availability": True,
+                "no_charge_reason": "provider_preflight_all_unavailable",
+                "source_job_id": safe_int(row[0], 0),
+                "source_project_id": safe_int(row[3], 0),
+            }
+    return {
+        "ok": True,
+        "provider_preflight_checked": True,
+        "provider_preflight_source": "cache",
+        "provider_preflight_result": "no_recent_all_unavailable",
+        "job_creation_blocked_by_provider_availability": False,
+        "preflight_ttl_seconds": max(30, int(ttl_seconds or 900)),
+    }
+
+
+def product_video_provider_availability_preflight(conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        result = _video_provider_preflight_recent_failure(db)
+        if not result.get("ok"):
+            return result
+        return result
+    finally:
+        if owned:
+            db.close()
+
+
 def video_engine_product_type_for_session(session: dict | None = None) -> str:
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
@@ -69567,6 +69850,22 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, guard_message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
         is_internal = video_b14_is_admin_or_owner(uid)
         credits, _, _ = get_user(uid)
+        provider_preflight = product_video_provider_availability_preflight()
+        if not provider_preflight.get("ok"):
+            draft["b14_provider_preflight"] = provider_preflight
+            draft["provider_called"] = False
+            draft["xu_charged"] = 0
+            session["draft"] = draft
+            save_video_session(uid, session)
+            return await safe_edit_or_send(
+                query,
+                PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
         result = confirm_video_project_invoice(
             project_id,
             uid,
@@ -139142,7 +139441,75 @@ def video_provider_status_text(status: dict | None = None, key4u_credit: dict | 
         )
     lines.append("")
     lines.append("Nếu không có provider phù hợp, video product phải fail sạch với provider_capability_missing và chưa trừ Xu.")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    if len(text) > VIDEO_DEBUG_REPLY_LIMIT:
+        return video_provider_status_compact_text(status, key4u_credit, reason="message_too_long")
+    return text
+
+
+def video_provider_status_compact_text(status: dict | None = None, key4u_credit: dict | None = None, *, reason: str = "partial") -> str:
+    status = dict(status or {})
+    key4u_credit = dict(key4u_credit or status.get("key4u_credit_diagnostic") or {}) if isinstance(key4u_credit or status.get("key4u_credit_diagnostic") or {}, dict) else {}
+    providers = [dict(item) for item in (status.get("providers") or []) if isinstance(item, dict)]
+    provider_chain_raw = status.get("effective_provider_chain") or status.get("provider_chain") or []
+    if isinstance(provider_chain_raw, str):
+        provider_chain = [item.strip() for item in provider_chain_raw.split(",") if item.strip()]
+    else:
+        try:
+            provider_chain = [str(item) for item in provider_chain_raw]
+        except TypeError:
+            provider_chain = []
+    fallback_raw = status.get("fallback_order") or []
+    if isinstance(fallback_raw, str):
+        fallback_order = [item.strip() for item in fallback_raw.split(",") if item.strip()]
+    else:
+        try:
+            fallback_order = [str(item) for item in fallback_raw]
+        except TypeError:
+            fallback_order = []
+    missing_env = status.get("missing_env") if isinstance(status.get("missing_env"), dict) else {}
+    invalid_env = status.get("invalid_env") if isinstance(status.get("invalid_env"), dict) else {}
+    lines = [
+        "🎬 <b>Trạng thái nhà cung cấp video</b>",
+        "Provider status diagnostic partial",
+        "",
+        f"• debug_truncated: <code>yes</code>",
+        f"• truncate_reason: <code>{_video_debug_safe_value(reason, 80)}</code>",
+        f"• Sẵn sàng: <code>{'có' if status.get('ready') or status.get('ok') else 'không'}</code>",
+        f"• Lý do: <code>{_video_debug_safe_value(status.get('summary_reason') or status.get('reason'), 160)}</code>",
+        f"• Thứ tự provider: <code>{_video_debug_safe_value(','.join(provider_chain) or '-', 220)}</code>",
+        f"• Provider đầu tiên: <code>{_video_debug_safe_value(status.get('first_ready_provider'), 80)}</code>",
+        f"• Lý do chọn: <code>{_video_debug_safe_value(status.get('selection_reason') or status.get('summary_reason'), 160)}</code>",
+        f"• Fallback tiếp theo: <code>{_video_debug_safe_value(fallback_order[0] if fallback_order else '-', 80)}</code>",
+        f"• Provider đang bật: <code>{safe_int(status.get('enabled_count'), 0)}</code>",
+        f"• Provider đủ cấu hình: <code>{safe_int(status.get('configured_count'), 0)}</code>",
+        f"• Missing groups: <code>{safe_int(len(missing_env), 0)}</code>",
+        f"• Invalid groups: <code>{safe_int(len(invalid_env), 0)}</code>",
+        f"• Key4U credit: <code>{_video_debug_safe_value(key4u_credit.get('credit') or key4u_credit.get('usage_balance_status') or 'unknown', 80)}</code>",
+        f"• Key4U reason: <code>{_video_debug_safe_value(key4u_credit.get('reason'), 140)}</code>",
+        "",
+        "Providers:",
+    ]
+    for provider in providers[:8]:
+        provider_name = str(provider.get("provider") or "-")
+        lines.append(
+            "• "
+            f"<code>{_video_debug_safe_value(provider_name, 80)}</code> "
+            f"enabled=<code>{'yes' if provider.get('enabled') else 'no'}</code> "
+            f"configured=<code>{'yes' if provider.get('configured') else 'no'}</code> "
+            f"submit=<code>{'yes' if provider.get('submit_url_present') else 'no'}</code> "
+            f"poll=<code>{'yes' if provider.get('poll_url_present') else 'no'}</code> "
+            f"auth=<code>{'yes' if provider.get('auth_present') else 'no'}</code> "
+            f"model=<code>{'yes' if provider.get('model_present') else 'no'}</code> "
+            f"credit=<code>{_video_debug_safe_value(provider.get('credit_status') or 'unknown', 60)}</code> "
+            f"fallback_only=<code>{'yes' if provider.get('fallback_only') else 'no'}</code> "
+            f"blocker=<code>{_video_debug_safe_value(provider.get('blocker') or provider.get('selection_blocker'), 120)}</code> "
+            f"caps=<code>{_video_debug_safe_value(','.join(str(item) for item in (provider.get('capabilities') or [])), 160)}</code>"
+        )
+    lines.append("")
+    lines.append("Nếu không có provider phù hợp, video product fail sạch với provider_capability_missing và chưa trừ Xu.")
+    text = "\n".join(lines)
+    return text if len(text) <= VIDEO_DEBUG_REPLY_LIMIT else text[: VIDEO_DEBUG_REPLY_LIMIT - 80] + "\n• debug_truncated=<code>hard_limit</code>"
 
 
 def video_provider_env_audit_text(audit: dict | None = None) -> str:
@@ -139277,7 +139644,7 @@ async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAUL
     except Exception as exc:
         key4u_credit = {"reason": f"key4u_credit_unavailable:{type(exc).__name__}"}
     status["key4u_credit_diagnostic"] = key4u_credit
-    await update.message.reply_text(video_provider_status_text(status, key4u_credit), parse_mode="HTML")
+    await video_debug_safe_reply_text(update.message, video_provider_status_text(status, key4u_credit))
 
 
 async def cmd_video_provider_env_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
