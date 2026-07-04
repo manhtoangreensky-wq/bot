@@ -70,8 +70,8 @@ def test_custom_lyrics_button_visible_on_music_idea_screen_after_voice_selection
     update = _select_voice_to_idea(vocal="female")
     output = update.callback_query.message.outputs[-1]
     assert "Ý tưởng bài hát" in output["text"]
-    assert "Tự nhập lời bài hát" in output["text"]
-    assert "✍️ Tự nhập lời bài hát" in _labels(output["reply_markup"])
+    assert "nhập lời có sẵn" in output["text"]
+    assert "✍️ Nhập lời" in _labels(output["reply_markup"])
 
 
 def test_custom_lyrics_button_reuses_existing_lyrics_input_flow():

@@ -9415,6 +9415,12 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• vocal_mode_persisted: <code>{html.escape(str((job or {}).get('vocal_mode_persisted') or '-'))}</code>\n"
         f"• style_preset_id: <code>{html.escape(str((job or {}).get('style_preset_id') or '-'))}</code>\n"
         f"• provider_prompt_contains_voice_hint: <code>{'yes' if (job or {}).get('provider_prompt_contains_voice_hint') else 'no'}</code>\n"
+        f"• prompt_contains_female_vocal_hint: <code>{'yes' if (job or {}).get('prompt_contains_female_vocal_hint') else 'no'}</code>\n"
+        f"• lyrics_present: <code>{'yes' if (job or {}).get('lyrics_present') else 'no'}</code>\n"
+        f"• style_prompt_present: <code>{'yes' if (job or {}).get('style_prompt_present') else 'no'}</code>\n"
+        f"• provider_payload_valid: <code>{'yes' if (job or {}).get('provider_payload_valid') else 'no'}</code>\n"
+        f"• female_flow_source: <code>{html.escape(str((job or {}).get('female_flow_source') or '-'))}</code>\n"
+        f"• female_regression_fixed: <code>{html.escape(str((job or {}).get('female_regression_fixed') or '-'))}</code>\n"
         f"• duet_enabled: <code>{'yes' if (job or {}).get('duet_enabled') else 'no'}</code>\n"
         f"• duet_prompt_applied: <code>{'yes' if (job or {}).get('duet_prompt_applied') else 'no'}</code>\n"
         f"• duet_lyrics_structure: <code>{html.escape(str((job or {}).get('duet_lyrics_structure') or '-'))}</code>\n"
@@ -101215,6 +101221,14 @@ def normalize_song_vocal_mode(value: str = "") -> str:
         return "duet"
     return "auto"
 
+def music_product_canonical_vocal_mode(data: dict | None = None, default: str = "auto") -> str:
+    current = dict(data or {})
+    for key in ("selected_vocal_mode", "requested_vocal_mode", "song_vocal", "vocal_mode"):
+        raw = str(current.get(key) or "").strip()
+        if raw:
+            return normalize_song_vocal_mode(raw)
+    return normalize_song_vocal_mode(default)
+
 def music_product_vocal_label(value: str = "", lang: str = "vi") -> str:
     mode = normalize_song_vocal_mode(value)
     if music_ui_lang(lang=lang) != "vi":
@@ -101285,9 +101299,26 @@ def music_product_vocal_state_fields(
     prompt_after_preset: str = "",
 ) -> dict:
     data = dict(current or {})
-    requested = normalize_song_vocal_mode(requested_vocal_mode or data.get("requested_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or "auto")
-    selected = normalize_song_vocal_mode(selected_vocal_mode or data.get("selected_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or requested)
+    requested = music_product_canonical_vocal_mode({
+        "selected_vocal_mode": requested_vocal_mode or data.get("requested_vocal_mode"),
+        "requested_vocal_mode": data.get("requested_vocal_mode"),
+        "song_vocal": data.get("song_vocal"),
+        "vocal_mode": data.get("vocal_mode"),
+    })
+    selected = music_product_canonical_vocal_mode({
+        "selected_vocal_mode": selected_vocal_mode or data.get("selected_vocal_mode"),
+        "requested_vocal_mode": requested,
+        "song_vocal": data.get("song_vocal"),
+        "vocal_mode": data.get("vocal_mode"),
+    }, requested)
     prompt = str(prompt_after_preset or data.get("provider_style_prompt") or data.get("selected_prompt") or data.get("description") or "")
+    lyrics = str(data.get("provider_lyrics") or data.get("lyrics") or data.get("song_lyrics") or "").strip()
+    style_present = bool(prompt.strip())
+    lyrics_present = bool(lyrics)
+    provider_payload_valid = bool(style_present and (lyrics_present or normalize_music_product_mode(data.get("music_product_mode") or data.get("mode")) != "song"))
+    female_hint = music_product_prompt_contains_vocal_hint(prompt, "female") if selected == "female" else False
+    male_hint = music_product_prompt_contains_vocal_hint(prompt, "male") if selected == "male" else False
+    duet_hint = music_product_prompt_contains_vocal_hint(prompt, "duet") if selected == "duet" else False
     return {
         "requested_vocal_mode": requested,
         "selected_vocal_mode": selected,
@@ -101298,6 +101329,14 @@ def music_product_vocal_state_fields(
         "style_preset_id": str(style_preset_id or data.get("style_preset_id") or "")[:80],
         "prompt_after_preset": prompt[:1200],
         "provider_prompt_contains_voice_hint": music_product_prompt_contains_vocal_hint(prompt, selected),
+        "prompt_contains_female_vocal_hint": female_hint,
+        "prompt_contains_male_vocal_hint": male_hint,
+        "prompt_contains_duet_vocal_hint": duet_hint,
+        "lyrics_present": lyrics_present,
+        "style_prompt_present": style_present,
+        "provider_payload_valid": provider_payload_valid,
+        "female_flow_source": "restored_pr173/current_shared_path" if selected == "female" else "",
+        "female_regression_fixed": "yes" if selected == "female" else "",
         "duet_enabled": selected == "duet",
         "duet_prompt_applied": bool(selected == "duet" and music_product_prompt_contains_vocal_hint(prompt, "duet")),
     }
@@ -101336,7 +101375,7 @@ def build_music_product_prompt(
     data = dict(data or {})
     mode = normalize_music_product_mode(data.get("music_product_mode") or data.get("mode") or ("song" if data.get("song_product") else "background"))
     tier = normalize_music_product_tier(data.get("music_product_tier") or data.get("tier"))
-    vocal_mode = normalize_song_vocal_mode(data.get("vocal_mode") or data.get("song_vocal") or "auto")
+    vocal_mode = music_product_canonical_vocal_mode(data)
     duration = normalize_music_duration_seconds(
         data.get("duration_seconds") or data.get("guided_duration_seconds") or (MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS),
         MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS,
@@ -101413,6 +101452,7 @@ def music_product_result_from_input(data: dict | None = None) -> dict:
     data = dict(data or {})
     mode = normalize_music_product_mode(data.get("music_product_mode") or data.get("mode"))
     tier = normalize_music_product_tier(data.get("music_product_tier") or data.get("tier"))
+    canonical_vocal = music_product_canonical_vocal_mode(data)
     duration = normalize_music_duration_seconds(
         data.get("duration_seconds") or (MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS),
         MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS,
@@ -101437,13 +101477,14 @@ def music_product_result_from_input(data: dict | None = None) -> dict:
         result.update({
             "song_product": "full",
             "song_length_mode": "full",
-            "song_vocal": normalize_song_vocal_mode(data.get("vocal_mode") or data.get("song_vocal") or "auto"),
+            "song_vocal": canonical_vocal,
+            "vocal_mode": canonical_vocal,
             "lyrics": built["provider_lyrics"],
         })
         result.update(music_product_vocal_state_fields(
             result,
-            requested_vocal_mode=data.get("requested_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or "auto",
-            selected_vocal_mode=result.get("song_vocal") or "auto",
+            requested_vocal_mode=data.get("requested_vocal_mode") or canonical_vocal,
+            selected_vocal_mode=canonical_vocal,
             vocal_mode_source=str(data.get("vocal_mode_source") or "manual_input"),
             style_preset_id=str(data.get("style_preset_id") or ""),
             prompt_after_preset=music_provider_prompt_for_result(result),
@@ -101499,7 +101540,10 @@ def music_confirm_result_for_real_job_persist(result: dict | None = None) -> dic
             "song_product": current.get("song_product") or "full",
             "song_length_mode": current.get("song_length_mode") or "full",
             "lyrics": current.get("lyrics") or current.get("song_lyrics") or current.get("provider_lyrics") or source_prompt,
-            "vocal_mode": current.get("vocal_mode") or current.get("song_vocal") or "auto",
+            "vocal_mode": music_product_canonical_vocal_mode(current),
+            "song_vocal": music_product_canonical_vocal_mode(current),
+            "requested_vocal_mode": music_product_canonical_vocal_mode(current),
+            "selected_vocal_mode": music_product_canonical_vocal_mode(current),
         })
     normalized = music_product_result_from_input(payload)
     return {**current, **normalized, "legacy_music_confirm_wrapper": True}
@@ -101732,11 +101776,8 @@ def music_product_idea_input_text(mode: str = "background", tier: str = "", voca
     if mode_key == "song":
         return (
             "🎼 <b>Ý tưởng bài hát</b>\n\n"
-            "Anh/chị mô tả ngắn bài hát muốn tạo.\n"
-            "Ví dụ:\n"
-            "“Bài hát thương hiệu TOAN AAS, vui tươi, công nghệ AI, tinh thần bứt phá.”\n\n"
-            "Nếu anh/chị đã có lời bài hát, có thể chọn Tự nhập lời bài hát.\n\n"
-            "TOAN AAS sẽ tạo 3 gợi ý hoàn chỉnh để anh/chị chọn."
+            "Anh/chị mô tả ý tưởng bài hát, hoặc nhập lời có sẵn.\n"
+            "Ví dụ: “Bài hát thương hiệu TOAN AAS, vui tươi, công nghệ AI.”"
         )
     return (
         "🎼 <b>Ý tưởng nhạc nền</b>\n\n"
@@ -101756,11 +101797,16 @@ def music_product_idea_keyboard(
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     mode_key = normalize_music_product_mode(mode)
     back_action = "music_product_change_vocal" if mode_key == "song" else "music_product_change_tier"
-    rows = [
-        [InlineKeyboardButton("✨ Dùng ý tưởng mẫu TOAN AAS" if is_vi else "✨ Use TOAN AAS sample idea", callback_data=cb("music_product_sample_idea"))],
-    ]
+    sample_label = "✨ Gợi ý mẫu" if is_vi else "✨ Sample"
+    manual_label = "✍️ Nhập lời" if is_vi else "✍️ Lyrics"
+    rows = []
     if mode_key == "song":
-        rows.append([InlineKeyboardButton("✍️ Tự nhập lời bài hát" if is_vi else "✍️ Enter lyrics", callback_data=cb("music_product_manual"))])
+        rows.append([
+            InlineKeyboardButton(sample_label, callback_data=cb("music_product_sample_idea")),
+            InlineKeyboardButton(manual_label, callback_data=cb("music_product_manual")),
+        ])
+    else:
+        rows.append([InlineKeyboardButton(sample_label, callback_data=cb("music_product_sample_idea"))])
     rows.append(
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb(back_action)),
@@ -103168,6 +103214,11 @@ def create_music_pending_submit_job(
     product_type = music_product_progress_type(payload)
     lifecycle_fields = music_result_lifecycle_fields(payload)
     internal_job_id = engine_async_job_id("music_suno", user_id)
+    selected_vocal_mode = music_product_canonical_vocal_mode(payload)
+    requested_vocal_mode = normalize_song_vocal_mode(payload.get("requested_vocal_mode") or selected_vocal_mode)
+    provider_style_prompt = str(lifecycle_fields.get("provider_style_prompt") or "")
+    provider_lyrics = str(lifecycle_fields.get("provider_lyrics") or "")
+    provider_payload_valid = bool(provider_style_prompt and (product_type != "music_song" or provider_lyrics))
     pending = {
         "feature": "music_suno",
         "internal_job_id": internal_job_id,
@@ -103211,10 +103262,27 @@ def create_music_pending_submit_job(
         "music_product_flow": str(payload.get("music_product_flow") or ""),
         "music_product_tier": str(payload.get("music_product_tier") or ""),
         "music_product_mode": str(payload.get("music_product_mode") or ""),
-        "song_vocal": str(payload.get("song_vocal") or payload.get("vocal_mode") or ""),
+        "song_vocal": str(selected_vocal_mode or payload.get("song_vocal") or payload.get("vocal_mode") or ""),
+        "requested_vocal_mode": str(requested_vocal_mode or ""),
+        "selected_vocal_mode": str(selected_vocal_mode or ""),
+        "vocal_mode_source": str(payload.get("vocal_mode_source") or ("user_selection" if selected_vocal_mode in {"male", "female", "duet", "auto"} else "")),
+        "vocal_mode_persisted": str(payload.get("vocal_mode_persisted") or ("yes" if selected_vocal_mode == requested_vocal_mode else "no")),
+        "style_preset_id": str(payload.get("style_preset_id") or ""),
+        "provider_prompt_contains_voice_hint": bool(payload.get("provider_prompt_contains_voice_hint") or music_product_prompt_contains_vocal_hint(provider_style_prompt, selected_vocal_mode)),
+        "prompt_contains_female_vocal_hint": bool(payload.get("prompt_contains_female_vocal_hint") or (selected_vocal_mode == "female" and music_product_prompt_contains_vocal_hint(provider_style_prompt, "female"))),
+        "prompt_contains_male_vocal_hint": bool(payload.get("prompt_contains_male_vocal_hint") or (selected_vocal_mode == "male" and music_product_prompt_contains_vocal_hint(provider_style_prompt, "male"))),
+        "prompt_contains_duet_vocal_hint": bool(payload.get("prompt_contains_duet_vocal_hint") or (selected_vocal_mode == "duet" and music_product_prompt_contains_vocal_hint(provider_style_prompt, "duet"))),
+        "lyrics_present": bool(payload.get("lyrics_present") or provider_lyrics),
+        "style_prompt_present": bool(payload.get("style_prompt_present") or provider_style_prompt),
+        "provider_payload_valid": bool(payload.get("provider_payload_valid") or provider_payload_valid),
+        "female_flow_source": str(payload.get("female_flow_source") or ("restored_pr173/current_shared_path" if selected_vocal_mode == "female" else "")),
+        "female_regression_fixed": str(payload.get("female_regression_fixed") or ("yes" if selected_vocal_mode == "female" else "")),
+        "duet_enabled": bool(payload.get("duet_enabled") or selected_vocal_mode == "duet"),
+        "duet_prompt_applied": bool(payload.get("duet_prompt_applied") or (selected_vocal_mode == "duet" and music_product_prompt_contains_vocal_hint(provider_style_prompt, "duet"))),
+        "duet_lyrics_structure": str(payload.get("duet_lyrics_structure") or music_product_duet_lyrics_structure(provider_lyrics)),
         "provider_metadata": dict(payload.get("provider_metadata") or {}),
-        "provider_style_prompt": str(lifecycle_fields.get("provider_style_prompt") or ""),
-        "provider_lyrics": str(lifecycle_fields.get("provider_lyrics") or ""),
+        "provider_style_prompt": provider_style_prompt,
+        "provider_lyrics": provider_lyrics,
         "lyrics_prepared": bool(lifecycle_fields.get("lyrics_prepared")),
         "music_lyrics_prepared": bool(lifecycle_fields.get("music_lyrics_prepared")),
         "style_prepared": bool(lifecycle_fields.get("style_prepared")),
@@ -110056,11 +110124,17 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "song_vocal": vocal_mode,
             "requested_vocal_mode": vocal_mode,
             "selected_vocal_mode": vocal_mode,
-            "vocal_mode_source": "music_vocal_callback",
+            "vocal_mode_source": "user_selection",
             "vocal_mode_persisted": "yes",
             "previous_screen": "music_product_vocal",
             "return_to": "music_product_change_vocal",
         })
+        result.update(music_product_vocal_state_fields(
+            result,
+            requested_vocal_mode=vocal_mode,
+            selected_vocal_mode=vocal_mode,
+            vocal_mode_source="user_selection",
+        ))
         if str(result.get("music_user_idea") or "").strip():
             result = music_product_prepare_suggestions_result(result, idea=str(result.get("music_user_idea") or ""), offset=music_product_suggestion_offset(result), lang=lang)
             save_music_guided_result(user_id, result)
