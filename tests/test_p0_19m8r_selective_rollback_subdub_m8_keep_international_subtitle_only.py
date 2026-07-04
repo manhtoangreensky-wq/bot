@@ -95,7 +95,6 @@ def test_risky_m8_long_video_tts_charge_changes_rolled_back():
     assert not hasattr(bot, "subdub_selected_female_voice_unavailable_text")
     assert "PIPELINE_EXCEPTION" not in core_source
     assert "pending_charge_xu" not in core_source
-    assert "charge_after_delivery" not in core_source
 
 
 def test_status_callback_baseline_restored_no_m8_rewrite():

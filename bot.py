@@ -85267,6 +85267,22 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• duplicate delivery prevented: <code>{yes_no(job.get('duplicate_delivery_prevented'))}</code>",
         f"• public error sent: <code>{yes_no(job.get('public_error_sent'))}</code>",
         f"• error sent after delivery: <code>{yes_no(job.get('error_sent_after_delivery'))}</code>",
+        f"• terminal public outcome sent: <code>{yes_no(job.get('terminal_public_outcome_sent'))}</code>",
+        f"• terminal public outcome type: <code>{esc(job.get('terminal_public_outcome_type'))}</code>",
+        f"• terminal public outcome message id: <code>{esc(job.get('terminal_public_outcome_message_id'))}</code>",
+        f"• public error sent count: <code>{int(job.get('public_error_sent_count') or 0)}</code>",
+        f"• success sent count: <code>{int(job.get('success_sent_count') or 0)}</code>",
+        f"• duplicate success prevented: <code>{yes_no(job.get('duplicate_success_prevented'))}</code>",
+        f"• duplicate error prevented: <code>{yes_no(job.get('duplicate_error_prevented'))}</code>",
+        f"• output validated before success: <code>{yes_no(job.get('output_validated_before_success'))}</code>",
+        f"• delivery confirmed before success: <code>{yes_no(job.get('delivery_confirmed_before_success'))}</code>",
+        f"• validation started: <code>{yes_no(job.get('validation_started'))}</code>",
+        f"• validation passed: <code>{yes_no(job.get('validation_passed'))}</code>",
+        f"• delivery started: <code>{yes_no(job.get('delivery_started'))}</code>",
+        f"• delivery success: <code>{yes_no(job.get('delivery_success'))}</code>",
+        f"• panel finalized: <code>{yes_no(job.get('panel_finalized'))}</code>",
+        f"• panel final percent: <code>{int(job.get('panel_final_percent') or 0)}</code>",
+        f"• panel final message id: <code>{esc(job.get('panel_final_message_id'))}</code>",
         f"• status panel terminalized: <code>{yes_no(job.get('status_panel_terminalized'))}</code>",
         f"• refresh stopped after terminal: <code>{yes_no(job.get('refresh_stopped_after_terminal'))}</code>",
         f"• terminal artifact type: <code>{esc(job.get('terminal_artifact_type'))}</code>",
@@ -85286,6 +85302,11 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• last error stage: <code>{esc(job.get('last_error_stage'))}</code>",
         f"• last error safe: <code>{esc(job.get('last_error_safe'))}</code>",
         f"• charge status: <code>{esc(job.get('charge_status'))}</code>",
+        f"• charged xu: <code>{int(job.get('charged_xu') or 0)}</code>",
+        f"• charge after delivery: <code>{yes_no(job.get('charge_after_delivery'))}</code>",
+        f"• success cost line: <code>{esc(job.get('success_cost_line'))}</code>",
+        f"• cost line rendered: <code>{yes_no(job.get('cost_line_rendered'))}</code>",
+        f"• cost line reason: <code>{esc(job.get('cost_line_reason'))}</code>",
         f"• last technical error: <code>{esc(job.get('last_technical_error'))}</code>",
         f"• public-safe error: <code>{esc(job.get('public_safe_error'))}</code>",
     ])
@@ -164134,30 +164155,38 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     state = state or {}
     result = result or {}
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
+    outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
+    public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
+    if outcome_type == "failure" or (
+        public_error_already_sent
+        and not bool(result.get("late_fail_suppressed") or state.get("late_fail_suppressed"))
+    ):
+        return subdub_mode_fail_text(mode, lang)
     delivered_video = bool(result.get("video_delivered") or result.get("video_delivery_message_id") or int(result.get("sent_video") or 0) or int(result.get("sent_video_document") or 0))
     terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
+    cost_line = subdub_success_cost_line(result.get("charged") or 0, lang)
     if delivered_video or terminal_delivered:
-        return f"Kết quả đã gửi phía trên.\n\nChi phí: <b>{int(result.get('charged') or 0)} Xu</b>" if normalize_user_language(lang) == "vi" else f"The result was sent above.\n\nCost: <b>{int(result.get('charged') or 0)} Xu</b>"
+        return f"Kết quả đã gửi phía trên.\n\n{cost_line}" if normalize_user_language(lang) == "vi" else f"The result was sent above.\n\n{cost_line}"
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_completed_text(state, result, lang)
     sent_count = sum(int(result.get(key) or 0) for key in ("sent_documents", "sent_audio", "sent_video", "sent_video_document"))
     if normalize_user_language(lang) != "vi":
         if sent_count > 0:
-            return f"The result was sent above.\n\nCost: <b>{int(result.get('charged') or 0)} Xu</b>"
+            return f"The result was sent above.\n\n{cost_line}"
         _filename, caption, _button = video_dubbing_final_video_label(mode, lang)
         if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not result.get("has_video") and result.get("has_subtitle"):
             caption = subdub_subtitle_fallback_text(mode, lang)
         if mode == VIDEO_SUBTITLE_MODE_DUB and not result.get("has_video") and result.get("has_audio"):
             caption = subdub_audio_fallback_text(mode, lang)
-        return f"{caption}\n\nCost: <b>{int(result.get('charged') or 0)} Xu</b>"
+        return f"{caption}\n\n{cost_line}"
     if sent_count > 0:
-        return f"Kết quả đã gửi phía trên.\n\nChi phí: <b>{int(result.get('charged') or 0)} Xu</b>"
+        return f"Kết quả đã gửi phía trên.\n\n{cost_line}"
     _filename, caption, _button = video_dubbing_final_video_label(mode, lang)
     if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not result.get("has_video") and result.get("has_subtitle"):
         caption = subdub_subtitle_fallback_text(mode, lang)
     if mode == VIDEO_SUBTITLE_MODE_DUB and not result.get("has_video") and result.get("has_audio"):
         caption = subdub_audio_fallback_text(mode, lang)
-    return f"{caption}\n\nChi phí: <b>{int(result.get('charged') or 0)} Xu</b>"
+    return f"{caption}\n\n{cost_line}"
 
 def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -165087,17 +165116,87 @@ def subdub_terminal_blocks_late_delivery(job: dict | None = None) -> bool:
 def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
     current = dict(job or {})
     terminal = str(current.get("terminal_state") or "").strip().lower()
+    outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
     if terminal == "delivered" or bool(current.get("output_sent")):
+        return True
+    if outcome == "success":
         return True
     if (
         current.get("subdub_delivered_at")
         or current.get("delivered_at")
         or current.get("subdub_success_message_id")
         or current.get("video_delivery_message_id")
-        or current.get("terminal_locked_at")
     ):
         return True
     return False
+
+def subdub_job_has_failure_public_outcome(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    return bool(
+        outcome == "failure"
+        or int(current.get("public_error_sent_count") or 0) > 0
+        or (current.get("public_error_sent") and outcome != "success")
+        or terminal.startswith("failed")
+    )
+
+def subdub_terminal_outcome_debug_defaults() -> dict:
+    return {
+        "terminal_public_outcome_sent": False,
+        "terminal_public_outcome_type": "",
+        "terminal_public_outcome_message_id": "",
+        "public_error_sent_count": 0,
+        "success_sent_count": 0,
+        "late_fail_suppressed": False,
+        "duplicate_success_prevented": False,
+        "duplicate_error_prevented": False,
+        "output_validated_before_success": False,
+        "delivery_confirmed_before_success": False,
+        "validation_started": False,
+        "validation_passed": False,
+        "delivery_started": False,
+        "delivery_success": False,
+        "panel_finalized": False,
+        "panel_final_percent": 0,
+        "panel_final_message_id": "",
+        "charge_after_delivery": False,
+        "success_cost_line": "",
+        "cost_line_rendered": False,
+        "cost_line_reason": "",
+    }
+
+def subdub_success_cost_line(charged_xu: int | float | str = 0, lang: str = "vi") -> str:
+    try:
+        charged = int(float(charged_xu or 0))
+    except Exception:
+        charged = 0
+    if normalize_user_language(lang) != "vi":
+        return f"Cost: <b>{charged} Xu</b>"
+    return f"Chi phí: <b>{charged} Xu</b>"
+
+def subdub_public_outcome_allows_success(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    if not current:
+        return True
+    if subdub_job_has_failure_public_outcome(current):
+        return False
+    return True
+
+def subdub_record_duplicate_terminal(job_key: str, job: dict, *, outcome: str, reason: str = "") -> dict:
+    current = dict(job or {})
+    if outcome == "success":
+        current["duplicate_success_prevented"] = True
+        current["duplicate_success_prevented_count"] = int(current.get("duplicate_success_prevented_count") or 0) + 1
+    elif outcome == "failure":
+        current["duplicate_error_prevented"] = True
+        current["duplicate_error_prevented_count"] = int(current.get("duplicate_error_prevented_count") or current.get("duplicate_fail_prevented_count") or 0) + 1
+    if reason:
+        current["last_duplicate_terminal_reason"] = str(reason or "")[:160]
+    current["updated_at"] = time.time()
+    if job_key:
+        SUBTITLE_DUB_PIPELINE_JOBS[str(job_key)] = current
+    return current
 
 def subdub_begin_delivery_once(job_key: str) -> bool:
     key = str(job_key or "")
@@ -165137,14 +165236,14 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
         job["late_public_error_suppressed"] = True
+        job["late_fail_suppressed"] = True
+        job["duplicate_error_prevented"] = True
         job["error_sent_after_delivery"] = False
         job["updated_at"] = time.time()
         SUBTITLE_DUB_PIPELINE_JOBS[key] = job
         return {"sent": False, "suppressed": True, "reason": "terminal_delivered"}
-    if job and str(job.get("terminal_state") or "").strip().lower().startswith("failed"):
-        job["duplicate_fail_prevented_count"] = int(job.get("duplicate_fail_prevented_count") or 0) + 1
-        job["updated_at"] = time.time()
-        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+    if job and subdub_job_has_failure_public_outcome(job):
+        subdub_record_duplicate_terminal(key, job, outcome="failure", reason="failure_public_outcome_already_sent")
         return {"sent": False, "suppressed": True, "reason": "already_failed"}
     text = subdub_mode_fail_text(mode, lang)
     message_id = ""
@@ -165160,10 +165259,34 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
             current_stage="failed_no_charge",
             progress_stage="failed_no_charge",
             progress_percent=95,
+            completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
             public_error_sent=True,
+            terminal_public_outcome_sent=True,
+            terminal_public_outcome_type="failure",
+            terminal_public_outcome_message_id=message_id,
+            public_error_sent_count=1,
+            success_sent_count=0,
+            duplicate_error_prevented=False,
+            duplicate_success_prevented=False,
+            late_fail_suppressed=False,
             error_sent_after_delivery=False,
             subdub_fail_message_id=message_id,
             pipeline_blocker=str(reason or "subdub_failed")[:180],
+            charge_status="not_charged",
+            no_charge_reason=str(reason or "subdub_failed")[:180],
+            status_panel_terminalized=True,
+            refresh_stopped_after_terminal=True,
+            panel_finalized=True,
+            panel_final_percent=95,
+            panel_final_message_id=str(job.get("status_panel_message_id") or ""),
+            validation_started=bool(subdub_canonical_lifecycle_state(job.get("progress_stage") or "") == "validating_output"),
+            validation_passed=False,
+            delivery_started=bool(job.get("delivery_attempted")),
+            delivery_success=False,
+            charge_after_delivery=False,
+            cost_line_rendered=False,
+            success_cost_line="",
+            cost_line_reason="failed_no_charge",
         )
     return {"sent": True, "suppressed": False, "reason": reason}
 
@@ -165433,6 +165556,7 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
         "error_sent_after_delivery": False,
         "output_validated": False,
         "output_sent": False,
+        **subdub_terminal_outcome_debug_defaults(),
         "started_at": now_ts,
         "updated_at": now_ts,
         "duplicate_count": 0,
@@ -165490,24 +165614,26 @@ def mark_subtitle_dub_pipeline_output_sent(
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
     if not job or job.get("output_sent"):
         if job:
-            job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
             job["duplicate_delivery_prevented"] = True
-            job["updated_at"] = time.time()
-            SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
+            subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="output_already_sent")
         return False
     desired_terminal = str(terminal_state or "delivered").strip().lower()
     if desired_terminal not in SUBDUB_TERMINAL_STATES:
         desired_terminal = "delivered"
     current_terminal = str(job.get("terminal_state") or "")
-    if current_terminal and not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
-        job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
+    if desired_terminal == "delivered" and not subdub_public_outcome_allows_success(job):
+        job["success_after_error_prevented"] = True
         job["duplicate_delivery_prevented"] = True
-        job["updated_at"] = time.time()
-        SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
+        subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="failure_public_outcome_already_sent")
+        return False
+    if current_terminal and not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
+        job["duplicate_delivery_prevented"] = True
+        subdub_record_duplicate_terminal(str(job_key or ""), job, outcome="success", reason="terminal_transition_blocked")
         return False
     job["output_sent"] = True
     job["output_validated"] = True
     job["delivery_attempted"] = True
+    job["delivery_started"] = True
     job["delivery_attempt_count"] = int(job.get("delivery_attempt_count") or 0) + 1
     job["subdub_delivery_started_at"] = job.get("subdub_delivery_started_at") or time.time()
     if delivery_message_id:
@@ -165542,6 +165668,26 @@ def mark_subtitle_dub_pipeline_output_sent(
     job["completed_steps"] = subdub_completed_steps_for_lifecycle(job["current_stage"], desired_terminal)
     job["status"] = "completed" if desired_terminal == "delivered" else str(job.get("status") or "")
     job["delivery_message_id"] = str(delivery_message_id or video_delivery_message_id or audio_delivery_message_id or srt_delivery_message_id or job.get("delivery_message_id") or "")
+    job["delivery_success"] = bool(job.get("delivery_message_id"))
+    job["validation_started"] = True
+    job["validation_passed"] = True
+    job["output_validated_before_success"] = True
+    job["delivery_confirmed_before_success"] = bool(job.get("delivery_message_id"))
+    job["terminal_public_outcome_sent"] = True
+    job["terminal_public_outcome_type"] = "success" if desired_terminal == "delivered" else desired_terminal
+    job["terminal_public_outcome_message_id"] = str(success_message_id or job.get("delivery_message_id") or "")
+    job["success_sent_count"] = max(1, int(job.get("success_sent_count") or 0))
+    job["late_fail_suppressed"] = desired_terminal == "delivered"
+    job["error_sent_after_delivery"] = False
+    job["panel_finalized"] = True
+    job["panel_final_percent"] = int(job.get("progress_percent") or 0)
+    job["panel_final_message_id"] = str(job.get("status_panel_message_id") or "")
+    job["status_panel_terminalized"] = True
+    job["refresh_stopped_after_terminal"] = True
+    job["charge_after_delivery"] = bool(int(job.get("charged_xu") or 0) > 0 and job.get("delivery_message_id"))
+    job["cost_line_rendered"] = bool(int(job.get("charged_xu") or 0) >= 0)
+    job["success_cost_line"] = subdub_success_cost_line(job.get("charged_xu") or 0)
+    job["cost_line_reason"] = "after_delivery" if job.get("delivery_message_id") else "delivery_message_missing"
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
     return True
@@ -166139,6 +166285,23 @@ def subtitle_dub_debug_job_payload(
         "duplicate_delivery_prevented": bool(state.get("duplicate_delivery_prevented")),
         "public_error_sent": bool(state.get("public_error_sent")),
         "error_sent_after_delivery": bool(state.get("error_sent_after_delivery")),
+        "terminal_public_outcome_sent": bool(state.get("terminal_public_outcome_sent")),
+        "terminal_public_outcome_type": str(state.get("terminal_public_outcome_type") or ""),
+        "terminal_public_outcome_message_id": str(state.get("terminal_public_outcome_message_id") or ""),
+        "public_error_sent_count": int(state.get("public_error_sent_count") or 0),
+        "success_sent_count": int(state.get("success_sent_count") or 0),
+        "late_fail_suppressed": bool(state.get("late_fail_suppressed") or state.get("late_public_error_suppressed")),
+        "duplicate_success_prevented": bool(state.get("duplicate_success_prevented")),
+        "duplicate_error_prevented": bool(state.get("duplicate_error_prevented")),
+        "output_validated_before_success": bool(state.get("output_validated_before_success")),
+        "delivery_confirmed_before_success": bool(state.get("delivery_confirmed_before_success")),
+        "validation_started": bool(state.get("validation_started")),
+        "validation_passed": bool(state.get("validation_passed")),
+        "delivery_started": bool(state.get("delivery_started") or state.get("delivery_attempted")),
+        "delivery_success": bool(state.get("delivery_success") or state.get("delivery_message_id") or state.get("video_delivery_message_id") or state.get("audio_delivery_message_id") or state.get("srt_delivery_message_id")),
+        "panel_finalized": bool(state.get("panel_finalized") or state.get("status_panel_terminalized")),
+        "panel_final_percent": int(state.get("panel_final_percent") or state.get("progress_percent") or 0),
+        "panel_final_message_id": str(state.get("panel_final_message_id") or state.get("status_panel_message_id") or ""),
         "status_panel_terminalized": bool(state.get("status_panel_terminalized")),
         "refresh_stopped_after_terminal": bool(state.get("refresh_stopped_after_terminal")),
         "terminal_state": str(state.get("_subdub_terminal_state") or ""),
@@ -166146,6 +166309,10 @@ def subtitle_dub_debug_job_payload(
         "public_messages_sent": int(state.get("public_messages_sent") or 0),
         "delivery_attempts": int(state.get("delivery_attempts") or 0),
         "charged_xu": int(charged or 0),
+        "charge_after_delivery": bool(state.get("charge_after_delivery")),
+        "success_cost_line": str(state.get("success_cost_line") or subdub_success_cost_line(charged, "vi")),
+        "cost_line_rendered": bool(state.get("cost_line_rendered")),
+        "cost_line_reason": str(state.get("cost_line_reason") or ""),
         "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
         "public_safe_error": public_safe_error,
         "pipeline_blocker": blocker,
@@ -169722,6 +169889,22 @@ async def _execute_video_dubbing_pipeline_core(
             "duplicate_delivery_prevented": False,
             "public_error_sent": False,
             "error_sent_after_delivery": False,
+            "terminal_public_outcome_sent": True,
+            "terminal_public_outcome_type": "success" if result_terminal_state == "delivered" else result_terminal_state,
+            "terminal_public_outcome_message_id": str(delivery.get("telegram_message_id") or ""),
+            "public_error_sent_count": 0,
+            "success_sent_count": 1 if result_terminal_state == "delivered" else 0,
+            "duplicate_success_prevented": False,
+            "duplicate_error_prevented": False,
+            "output_validated_before_success": bool(delivered_video or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
+            "delivery_confirmed_before_success": bool(delivery.get("telegram_message_id")),
+            "validation_started": True,
+            "validation_passed": bool(delivered_video or (audio_bytes and not video_output) or (srt_bytes and not video_output and not audio_bytes)),
+            "delivery_started": True,
+            "delivery_success": bool(delivery.get("telegram_message_id")),
+            "panel_finalized": True,
+            "panel_final_percent": subdub_progress_percent_for_lifecycle("delivered" if result_terminal_state == "delivered" else result_terminal_state, result_terminal_state),
+            "panel_final_message_id": str(state.get("status_panel_message_id") or ""),
             "duration_limit_seconds": int(state.get("duration_limit_seconds") or state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
             "chunking_enabled": False,
             "chunk_count": 0,
@@ -169733,10 +169916,16 @@ async def _execute_video_dubbing_pipeline_core(
             "delivered_at": time.time() if result_terminal_state == "delivered" else "",
             "terminal_locked_at": time.time(),
             "late_fail_suppressed": bool(result_terminal_state == "delivered"),
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
             "output_validation": dict(delivery.get("output_validation") or {}),
             "subtitle_text_validation": dict(state.get("_subdub_subtitle_readability") or subtitle_readability),
             "last_technical_error": sanitize_log_text(partial_reason or product_result.get("error_code") or "")[:180],
             "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if (partial_result or delivery_partial_result) else "",
+            "charge_after_delivery": bool(int(charged or 0) > 0 and delivery.get("telegram_message_id")),
+            "success_cost_line": subdub_success_cost_line(charged, lang),
+            "cost_line_rendered": True,
+            "cost_line_reason": "after_delivery" if delivery.get("telegram_message_id") else "delivery_message_missing",
             "stage": "completed" if delivered_video else ("partial" if (partial_result or delivery_partial_result) else "output"),
             "pipeline_attempted": True,
             "input_file_id": str(input_save.get("file_id") or source_ref or ""),
@@ -173135,6 +173324,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
             return None
+        latest_pipeline_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
+        if subdub_job_has_failure_public_outcome(latest_pipeline_job):
+            set_video_dubbing_pending(uid, "confirm", processing="0")
+            return None
         result_state = dict(result.get("state") or {})
         completed_fields = {
             "processing": "0",
@@ -173162,11 +173355,24 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "completed",
             **completed_fields,
         )
-        return await query.message.reply_text(
-            video_dubbing_receipt_text(completed_state, result, lang),
+        receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
+        sent_receipt = await query.message.reply_text(
+            receipt_text,
             parse_mode="HTML",
             reply_markup=video_dubbing_receipt_keyboard(lang, origin, completed_state),
         )
+        if pipeline_job_key:
+            receipt_message_id = str(getattr(sent_receipt, "message_id", "") or "")
+            if receipt_message_id:
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    subdub_success_message_id=receipt_message_id,
+                    success_sent_count=max(1, int((SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {}).get("success_sent_count") or 0)),
+                    success_cost_line=subdub_success_cost_line(result.get("charged") or 0, lang),
+                    cost_line_rendered="Chi phí:" in receipt_text or "Cost:" in receipt_text,
+                    cost_line_reason="after_delivery" if result.get("telegram_message_id") or result.get("video_delivery_message_id") or result.get("audio_delivery_message_id") or result.get("srt_delivery_message_id") else "receipt_sent",
+                )
+        return sent_receipt
     return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
 
 def marketing_pending_key(user_id) -> str:
