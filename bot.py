@@ -6924,9 +6924,20 @@ def music_job_delivery_state(job: dict | None = None) -> str:
     terminal = str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower()
     delivery_state = str(current.get("delivery_state") or "").strip().lower()
     lock = str(current.get("music_delivery_lock") or current.get("music_result_delivery_lock") or "").strip().lower()
+    terminal_public_success = (
+        bool(current.get("terminal_public_outcome_sent"))
+        and str(current.get("terminal_public_outcome_type") or "").strip().lower() == "success"
+    )
     if terminal == "delivered" or delivery_state == "delivered" or lock == "sent":
         return "delivered"
-    if current.get("sent_full_at") or current.get("music_delivered_at") or current.get("music_result_delivered_at") or current.get("output_file_id"):
+    if (
+        current.get("sent_full_at")
+        or current.get("music_delivered_at")
+        or current.get("music_result_delivered_at")
+        or current.get("output_file_id")
+        or current.get("delivery_succeeded")
+        or terminal_public_success
+    ):
         return "delivered"
     if lock:
         return lock
@@ -9507,13 +9518,21 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• delivery_lock_state: <code>{html.escape(duplicate_guard)}</code>\n"
         f"• delivery_source_first: <code>{html.escape(str((job or {}).get('delivery_source_first') or (job or {}).get('music_delivery_path') or '-'))}</code>\n"
         f"• ignored_duplicate_sources: <code>{html.escape(ignored_sources)}</code>\n"
+        f"• duplicate_delivery_prevented: <code>{'yes' if (job or {}).get('duplicate_delivery_prevented') else 'no'}</code>\n"
         f"• delivery_attempt_count: <code>{int((job or {}).get('delivery_attempt_count') or (job or {}).get('send_attempt_count') or 0)}</code>\n"
         f"• delivery_attempted: <code>{'yes' if failure_fields.get('delivery_attempted') else 'no'}</code>\n"
         f"• delivery_succeeded: <code>{'yes' if failure_fields.get('delivery_succeeded') else 'no'}</code>\n"
         f"• charge_status: <code>{html.escape(str(failure_fields.get('charge_status') or '-'))}</code>\n"
+        f"• price_xu: <code>{html.escape(str((job or {}).get('price_xu') or (job or {}).get('music_product_price_xu') or music_result_price_xu(job or {}) or 0))}</code>\n"
+        f"• charged_xu: <code>{html.escape(str((job or {}).get('charged_xu') or (job or {}).get('music_charged_xu') or 0))}</code>\n"
+        f"• charge_after_delivery: <code>{'yes' if (job or {}).get('charge_after_delivery') else 'no'}</code>\n"
+        f"• charge_reason: <code>{html.escape(str((job or {}).get('charge_reason') or '-'))}</code>\n"
+        f"• success_charge_line: <code>{html.escape(str((job or {}).get('success_charge_line') or '-'))}</code>\n"
         f"• last_duplicate_blocked_at: <code>{html.escape(str((job or {}).get('last_duplicate_blocked_at') or '-'))}</code>\n"
         f"• delivery_message_id: <code>{html.escape(str((job or {}).get('music_delivery_message_id') or (job or {}).get('delivery_message_id') or '-'))}</code>\n"
         f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
+        f"• delivered_artifact_hash: <code>{html.escape(str((job or {}).get('delivered_artifact_hash') or '-'))}</code>\n"
+        f"• delivered_artifact_path: <code>{html.escape('present' if str((job or {}).get('delivered_artifact_path') or '').strip() else '-')}</code>\n"
         f"• retry_job_id: <code>{html.escape(str((job or {}).get('retry_job_id') or '-'))}</code>\n"
         f"• terminal_state: <code>{html.escape(terminal or '-')}</code>\n"
         f"• terminal_locked_at: <code>{html.escape(str((job or {}).get('music_terminal_locked_at') or (job or {}).get('terminal_locked_at') or '-'))}</code>\n"
@@ -101614,8 +101633,48 @@ def build_music_product_suggestions(
                 "lyrics_prompt": "",
                 "language": "",
                 "provider_tags": genre,
-            })
+        })
     return suggestions
+
+def music_product_prompt_preset_audit(
+    *,
+    mode: str = "song",
+    tier: str = MUSIC_PRODUCT_TIER_BASIC,
+    vocal_mode: str = "female",
+    idea: str = "Bài hát quảng cáo thương hiệu TOAN AAS",
+    lang: str = "vi",
+) -> list[dict]:
+    mode_key = normalize_music_product_mode(mode)
+    tier_key = normalize_music_product_tier(tier)
+    price = music_product_tier_price_xu(tier_key, mode_key)
+    rows: list[dict] = []
+    for offset in (0, 3, 6):
+        for item in build_music_product_suggestions(
+            mode=mode_key,
+            tier=tier_key,
+            vocal_mode=vocal_mode,
+            idea=idea,
+            offset=offset,
+            lang=lang,
+        ):
+            preset_id = str(item.get("id") or len(rows) + 1)
+            style_prompt = str(item.get("style_prompt") or "").strip()
+            lyrics = str(item.get("lyrics") or item.get("lyrics_prompt") or "").strip()
+            rows.append({
+                "preset_id": f"{tier_key}:{mode_key}:{offset}:{preset_id}",
+                "label": str(item.get("title") or item.get("genre") or f"Gợi ý {preset_id}"),
+                "package": music_product_tier_label(tier_key, lang),
+                "price_xu": price,
+                "has_lyrics_required": mode_key == "song",
+                "lyrics_present": bool(lyrics) if mode_key == "song" else True,
+                "style_prompt_present": bool(style_prompt),
+                "expected_route": "music_product_song_details -> invoice -> music_ai_confirm" if mode_key == "song" else "music_product_background_details -> invoice -> music_ai_confirm",
+                "fixed": bool(style_prompt and (lyrics or mode_key != "song")),
+            })
+    unique: dict[str, dict] = {}
+    for row in rows:
+        unique[str(row["preset_id"])] = row
+    return list(unique.values())
 
 def music_product_prepare_suggestions_result(
     result: dict | None = None,
@@ -101841,6 +101900,58 @@ def format_music_duration_mmss(seconds) -> str:
     secs = total % 60
     return f"{minutes}:{secs:02d}"
 
+def music_product_charge_public_reason(result: dict | None = None) -> str:
+    data = dict(result or {})
+    explicit = str(data.get("charge_reason_public") or data.get("no_charge_reason_public") or "").strip()
+    if explicit:
+        return explicit[:80]
+    return "miễn phí/thử nghiệm"
+
+def music_product_success_charge_line(result: dict | None = None, charged_xu: int = 0, lang: str = "vi") -> str:
+    result = dict(result or {})
+    charged = int(charged_xu if charged_xu is not None else result.get("music_charged_xu") or result.get("charged_xu") or 0)
+    price = music_result_price_xu(result)
+    if music_ui_lang(lang=lang) != "vi":
+        if charged > 0:
+            return f"• Charged: {charged} Xu"
+        if price > 0:
+            return "• Charged: 0 Xu (free/test)"
+        return "• Charged: 0 Xu"
+    if charged > 0:
+        return f"• Đã trừ: {charged} Xu"
+    if price > 0:
+        return f"• Đã trừ: 0 Xu ({music_product_charge_public_reason(result)})"
+    return "• Đã trừ: 0 Xu"
+
+def music_product_charge_debug_fields(charge_result: dict | None = None, *, price_xu: int = 0, charged_xu: int = 0) -> dict:
+    charge_result = dict(charge_result or {})
+    price = int(price_xu or 0)
+    charged = int(charged_xu or 0)
+    if charged > 0:
+        status = "charged"
+        reason = "charged_after_delivery"
+        public_reason = ""
+    elif not charge_result.get("ok"):
+        status = "charge_pending"
+        reason = "charge_after_delivery_failed_no_extra_charge"
+        public_reason = "chưa trừ Xu"
+    elif price > 0:
+        status = "no_charge"
+        reason = "free_or_test"
+        public_reason = "miễn phí/thử nghiệm"
+    else:
+        status = "no_charge"
+        reason = "free_product"
+        public_reason = "miễn phí"
+    return {
+        "price_xu": price,
+        "charged_xu": charged,
+        "charge_status": status,
+        "charge_after_delivery": True,
+        "charge_reason": reason,
+        "charge_reason_public": public_reason,
+    }
+
 def music_product_success_text(result: dict | None = None, charged_xu: int = 0, lang: str = "vi") -> str:
     result = dict(result or {})
     if music_ui_lang(lang=lang) != "vi":
@@ -101848,6 +101959,7 @@ def music_product_success_text(result: dict | None = None, charged_xu: int = 0, 
     duration = music_result_duration_seconds(result)
     price = music_result_price_xu(result)
     vocal = "Không lời" if music_product_mode_from_result(result) == "background" else music_product_vocal_label(result.get("song_vocal") or "auto", lang)
+    charge_line = str(result.get("success_charge_line") or music_product_success_charge_line(result, charged_xu, lang)).strip()
     return (
         "✅ <b>Đã tạo nhạc thành công.</b>\n"
         f"• Loại: {html.escape(music_product_type_label(result, lang))}\n"
@@ -101855,7 +101967,7 @@ def music_product_success_text(result: dict | None = None, charged_xu: int = 0, 
         f"• Giá: {price} Xu\n"
         f"• Giọng hát: {html.escape(vocal)}\n"
         f"• Thời lượng: {format_music_duration_mmss(duration)}\n"
-        f"• Đã trừ: {int(charged_xu or 0)} Xu\n"
+        f"{html.escape(charge_line)}\n"
         "• Trạng thái: Đã gửi file nhạc"
     )
 
@@ -103230,6 +103342,129 @@ def music_product_delivery_lock_key(user_id, result: dict | None = None, job: di
             return f"music-delivery:{value}"
     sha = music_audio_sha256(audio_bytes)
     return f"music-delivery:{user_id}:{sha or music_product_hash_text(str(result)[:500])}"
+
+def music_delivery_identity_values(result: dict | None = None, job: dict | None = None, audio_bytes: bytes | bytearray | None = None) -> set[str]:
+    data = {**dict(job or {}), **dict(result or {})}
+    values: set[str] = set()
+    for key in (
+        "internal_job_id", "job_id", "music_job_id", "music_internal_job_id",
+        "provider_task_id", "task_id", "music_task_id",
+        "selected_artifact_id", "music_artifact_id", "artifact_id",
+        "vault_id", "music_vault_id",
+        "output_sha256", "music_output_sha256", "selected_artifact_hash",
+        "music_artifact_hash", "delivered_artifact_hash",
+    ):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(f"{key}:{value}")
+    for key in ("output_url", "music_output_url", "result_url", "music_artifact_url"):
+        value = music_normalized_artifact_url(str(data.get(key) or "").strip())
+        if value:
+            values.add(f"url:{value}")
+    for key in ("local_artifact_path", "music_result_path", "output_path", "storage_ref", "delivered_artifact_path"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(f"path:{os.path.normcase(os.path.abspath(value)) if not value.startswith('telegram_file_id:') else value}")
+    sha = music_audio_sha256(audio_bytes)
+    if sha:
+        values.add(f"sha:{sha}")
+        values.add(f"output_sha256:{sha}")
+        values.add(f"music_output_sha256:{sha}")
+        values.add(f"selected_artifact_hash:{sha}")
+        values.add(f"music_artifact_hash:{sha}")
+        values.add(f"delivered_artifact_hash:{sha}")
+    return values
+
+def music_delivery_core_identity_values(result: dict | None = None, job: dict | None = None) -> set[str]:
+    data = {**dict(job or {}), **dict(result or {})}
+    values: set[str] = set()
+    for key in ("internal_job_id", "job_id", "music_job_id", "music_internal_job_id", "provider_task_id", "task_id", "music_task_id"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(f"{key}:{value}")
+            values.add(f"core:{value}")
+    return values
+
+def music_delivery_job_identity_values(result: dict | None = None, job: dict | None = None) -> set[str]:
+    data = {**dict(job or {}), **dict(result or {})}
+    values: set[str] = set()
+    for key in ("internal_job_id", "job_id", "music_job_id", "music_internal_job_id"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(value)
+    return values
+
+def music_delivery_provider_identity_values(result: dict | None = None, job: dict | None = None) -> set[str]:
+    data = {**dict(job or {}), **dict(result or {})}
+    values: set[str] = set()
+    for key in ("provider_task_id", "task_id", "music_task_id"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(value)
+    return values
+
+def music_delivery_explicit_artifact_identity_values(result: dict | None = None, job: dict | None = None) -> set[str]:
+    data = {**dict(job or {}), **dict(result or {})}
+    values: set[str] = set()
+    for key in (
+        "selected_artifact_id", "music_artifact_id", "artifact_id",
+        "vault_id", "music_vault_id",
+        "output_sha256", "music_output_sha256", "selected_artifact_hash",
+        "music_artifact_hash", "delivered_artifact_hash",
+    ):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(f"{key}:{value}")
+    for key in ("output_url", "music_output_url", "result_url", "music_artifact_url"):
+        value = music_normalized_artifact_url(str(data.get(key) or "").strip())
+        if value:
+            values.add(f"url:{value}")
+    for key in ("local_artifact_path", "music_result_path", "output_path", "storage_ref", "delivered_artifact_path"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            values.add(f"path:{os.path.normcase(os.path.abspath(value)) if not value.startswith('telegram_file_id:') else value}")
+    return values
+
+def music_delivery_same_identity(
+    delivered_result: dict | None = None,
+    candidate_result: dict | None = None,
+    candidate_job: dict | None = None,
+    audio_bytes: bytes | bytearray | None = None,
+) -> bool:
+    delivered_job_ids = music_delivery_job_identity_values(delivered_result, None)
+    candidate_job_ids = music_delivery_job_identity_values(candidate_result, candidate_job)
+    if delivered_job_ids and candidate_job_ids:
+        return bool(delivered_job_ids.intersection(candidate_job_ids))
+    delivered_provider_ids = music_delivery_provider_identity_values(delivered_result, None)
+    candidate_provider_ids = music_delivery_provider_identity_values(candidate_result, candidate_job)
+    if delivered_provider_ids and candidate_provider_ids:
+        return bool(delivered_provider_ids.intersection(candidate_provider_ids))
+    delivered_core = music_delivery_core_identity_values(delivered_result, None)
+    candidate_core = music_delivery_core_identity_values(candidate_result, candidate_job)
+    if delivered_core and candidate_core:
+        return bool(delivered_core.intersection(candidate_core))
+    delivered_values = music_delivery_identity_values(delivered_result, None, None)
+    candidate_values = music_delivery_identity_values(candidate_result, candidate_job, audio_bytes)
+    return bool(delivered_values and candidate_values and delivered_values.intersection(candidate_values))
+
+def music_existing_delivered_result_for_attempt(user_id, result: dict | None = None, job: dict | None = None, audio_bytes: bytes | bytearray | None = None) -> dict:
+    if not user_id:
+        return {}
+    if not (
+        music_delivery_job_identity_values(result, job)
+        or music_delivery_provider_identity_values(result, job)
+        or music_delivery_explicit_artifact_identity_values(result, job)
+    ):
+        return {}
+    try:
+        saved = get_music_guided_result(user_id) or {}
+    except Exception:
+        saved = {}
+    if not saved or not music_delivery_should_suppress_public_fail(saved, job):
+        return {}
+    if music_delivery_same_identity(saved, result, job, audio_bytes):
+        return dict(saved)
+    return {}
 
 def music_product_audio_has_partial_marker(result: dict | None = None, job: dict | None = None) -> bool:
     data = {**dict(job or {}), **dict(result or {})}
@@ -105048,10 +105283,13 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
     if source_token not in ignored:
         ignored.append(source_token)
     now = now_text()
+    previous_attempts = int(current.get("delivery_attempt_count") or current.get("send_attempt_count") or 0)
     current.update({
         "ignored_duplicate_sources": ignored[-12:],
         "last_duplicate_blocked_at": now,
         "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
+        "duplicate_delivery_prevented": True,
+        "delivery_attempt_count": max(previous_attempts + 1, 1),
     })
     if current.get("internal_job_id"):
         save_engine_async_job(current)
@@ -105060,10 +105298,13 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
         result_ignored = list(current_result.get("ignored_duplicate_sources") or [])
         if source_token not in result_ignored:
             result_ignored.append(source_token)
+        result_attempts = int(current_result.get("delivery_attempt_count") or current_result.get("music_delivery_attempts") or current.get("delivery_attempt_count") or 0)
         current_result.update({
             "ignored_duplicate_sources": result_ignored[-12:],
             "last_duplicate_blocked_at": now,
             "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
+            "duplicate_delivery_prevented": True,
+            "delivery_attempt_count": max(result_attempts + 1, 1),
         })
         if current_result.get("user_id"):
             save_music_guided_result(current_result.get("user_id"), current_result)
@@ -105073,7 +105314,18 @@ def music_delivery_should_suppress_public_fail(result: dict | None = None, job: 
     data = {**dict(job or {}), **dict(result or {})}
     if music_job_delivered(data):
         return True
-    return bool(data.get("music_delivery_message_id") or data.get("delivery_message_id") or data.get("music_success_message_id") or data.get("success_message_id"))
+    terminal_public_success = (
+        bool(data.get("terminal_public_outcome_sent"))
+        and str(data.get("terminal_public_outcome_type") or "").strip().lower() == "success"
+    )
+    return bool(
+        data.get("music_delivery_message_id")
+        or data.get("delivery_message_id")
+        or data.get("music_success_message_id")
+        or data.get("success_message_id")
+        or data.get("delivery_succeeded")
+        or terminal_public_success
+    )
 
 async def music_audio_real_duration_seconds(audio_bytes: bytes | bytearray | None = None, fallback: int = 0) -> int:
     payload = bytes(audio_bytes or b"")
@@ -105125,8 +105377,15 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "telegram_delivery_confirmed": True,
         "telegram_delivered_at": delivered_at,
         "delivery_state": "delivered",
+        "delivery_succeeded": True,
         "music_delivery_message_id": message_id,
         "delivery_message_id": message_id,
+        "delivery_source_first": str(current.get("delivery_source_first") or current.get("music_delivery_path") or ""),
+        "delivered_artifact_hash": output_sha or str(current.get("delivered_artifact_hash") or current.get("music_artifact_hash") or current.get("selected_artifact_hash") or ""),
+        "delivered_artifact_path": str(current.get("delivered_artifact_path") or current.get("music_result_path") or current.get("output_path") or current.get("storage_ref") or ""),
+        "terminal_public_outcome_sent": True,
+        "terminal_public_outcome_type": "success",
+        "terminal_public_outcome_message_id": str(current.get("terminal_public_outcome_message_id") or message_id or ""),
         "progress_percent": 100,
         "output_file_id": file_id,
         "output_sha256": output_sha or str(current.get("output_sha256") or ""),
@@ -105225,6 +105484,18 @@ async def deliver_music_result_once(
             current_job = {**current_job, **fresh_job}
     if music_job_terminal_failed(current_job):
         return {"ok": False, "status": "TERMINAL_FAILED", "job": current_job}
+    previous_delivered = music_existing_delivered_result_for_attempt(user_id, current_result, current_job, audio_bytes)
+    if previous_delivered:
+        merged_result = {**current_result, **previous_delivered}
+        updated_job = music_delivery_record_duplicate(current_job or previous_delivered, source_token, "already_delivered", merged_result, updated_by=updated_by or user_id)
+        return {
+            "ok": True,
+            "status": "ALREADY_DELIVERED",
+            "duplicate": True,
+            "charged_xu": int(merged_result.get("music_charged_xu") or merged_result.get("charged_xu") or updated_job.get("charged_xu") or 0),
+            "result": merged_result,
+            "job": updated_job or current_job,
+        }
     if music_delivery_should_suppress_public_fail(current_result, current_job) or current_result.get("music_result_delivered_at") or current_result.get("music_full_sent_at"):
         updated_job = music_delivery_record_duplicate(current_job, source_token, "already_delivered", current_result, updated_by=updated_by or user_id)
         return {
@@ -105421,9 +105692,14 @@ async def deliver_music_result_once(
 
         charge_result = music_product_charge_after_delivery(user_id, current_result, music_result_price_xu(current_result), current_job)
         charged = int(charge_result.get("charged_xu") or 0)
+        price_xu = music_result_price_xu(current_result)
+        charge_fields = music_product_charge_debug_fields(charge_result, price_xu=price_xu, charged_xu=charged)
+        success_charge_line = music_product_success_charge_line({**current_result, **charge_fields}, charged, lang)
         vault_entry = {}
         if current_job:
             current_job["charged_xu"] = charged
+            current_job.update(charge_fields)
+            current_job["success_charge_line"] = success_charge_line
             current_job["pending_charge_xu"] = 0
             current_job["output_bytes"] = max(int(current_job.get("output_bytes") or 0), len(payload))
             current_job["duration_seconds"] = actual_duration
@@ -105438,6 +105714,7 @@ async def deliver_music_result_once(
             current_job["terminal_state"] = "delivered"
             current_job["delivery_confirmed"] = True
             current_job["telegram_delivery_confirmed"] = True
+            current_job["delivery_succeeded"] = True
             current_job["delivery_state"] = "delivered"
             current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
             current_job.update({
@@ -105449,10 +105726,14 @@ async def deliver_music_result_once(
                 "music_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
                 "music_artifact_duration": actual_duration,
                 "music_artifact_url": str(artifact.get("selected_artifact_url") or ""),
+                "delivered_artifact_hash": str(artifact.get("selected_artifact_hash") or music_audio_sha256(payload) or ""),
+                "delivered_artifact_path": str(artifact.get("selected_artifact_path") or artifact.get("artifact_path") or current_job.get("music_result_path") or current_job.get("output_path") or current_job.get("storage_ref") or ""),
                 "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
                 "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
                 "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
                 "selected_artifact_duration": actual_duration,
+                "terminal_public_outcome_sent": True,
+                "terminal_public_outcome_type": "success",
             })
             vault_entry = get_music_vault_entry(str(current_job.get("vault_id") or "")) if current_job.get("vault_id") else {}
             if current_job.get("internal_job_id"):
@@ -105478,6 +105759,9 @@ async def deliver_music_result_once(
         current_result.update({
             "music_status": "completed",
             "music_charged_xu": charged,
+            **charge_fields,
+            "music_charged_xu": charged,
+            "success_charge_line": success_charge_line,
             "music_pending_charge_xu": 0,
             "music_charge_failed": not bool(charge_result.get("ok")),
             "music_refunded": False,
@@ -105489,6 +105773,7 @@ async def deliver_music_result_once(
             "music_delivery_lock": "sent",
             "delivery_confirmed": True,
             "telegram_delivery_confirmed": True,
+            "delivery_succeeded": True,
             "telegram_delivered_at": delivered_at,
             "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("send_attempt_count") or 1),
             "music_result_file_id": file_id,
@@ -105513,10 +105798,15 @@ async def deliver_music_result_once(
             "music_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
             "music_artifact_duration": actual_duration,
             "music_artifact_url": str(artifact.get("selected_artifact_url") or ""),
+            "delivered_artifact_hash": str(artifact.get("selected_artifact_hash") or music_audio_sha256(payload) or ""),
+            "delivered_artifact_path": str(artifact.get("selected_artifact_path") or artifact.get("artifact_path") or vault_entry.get("storage_ref") or current_job.get("music_result_path") or current_job.get("output_path") or current_job.get("storage_ref") or ""),
             "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
             "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
             "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
             "selected_artifact_duration": actual_duration,
+            "terminal_public_outcome_sent": True,
+            "terminal_public_outcome_type": "success",
+            "terminal_public_outcome_message_id": delivery_message_id,
         })
         if current_job.get("internal_job_id"):
             current_result["music_job_id"] = str(current_job.get("internal_job_id") or "")
@@ -105541,9 +105831,11 @@ async def deliver_music_result_once(
                 success_message_id = str(getattr(success_message, "message_id", "") or "")
                 current_result["music_success_message_id"] = success_message_id
                 current_result["success_message_id"] = success_message_id
+                current_result["terminal_public_outcome_message_id"] = success_message_id or current_result.get("terminal_public_outcome_message_id") or delivery_message_id
                 if current_job:
                     current_job["music_success_message_id"] = success_message_id
                     current_job["success_message_id"] = success_message_id
+                    current_job["terminal_public_outcome_message_id"] = success_message_id or current_job.get("terminal_public_outcome_message_id") or delivery_message_id
                     if current_job.get("internal_job_id"):
                         save_engine_async_job(current_job)
             except Exception as exc:
@@ -112884,6 +113176,10 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             return True
         parsed = music_product_parse_details(text, mode, tier, vocal_mode)
         partial_details = dict(result.get("music_product_partial_details") or {}) if isinstance(result.get("music_product_partial_details"), dict) else {}
+        if mode == "song" and partial_details and result.get("music_product_pending_lyrics") and not str(parsed.get("lyrics") or "").strip():
+            parsed["lyrics"] = text
+            if str(parsed.get("theme") or "").strip() == text:
+                parsed["theme"] = ""
         if mode == "song" and str(parsed.get("lyrics") or "").strip() and partial_details:
             lyrics_text = str(parsed.get("lyrics") or "").strip()
             merged = {**partial_details, **parsed}
