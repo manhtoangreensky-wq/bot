@@ -191,6 +191,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "back_callback": "videodub|type|subtitle_plus_dub",
         "steps": [
             _stage("received_file", "Nhận video", "Đã nhận video", 5),
+            _stage("input_save_failed", "Nhận video", "Chưa tải được video", 5),
             _stage("extracting_audio", "Tách âm thanh", "Đang tách âm thanh", 20),
             _stage("transcribing", "Nhận diện lời thoại", "Đang nhận diện lời thoại", 35),
             _stage("translating", "Dịch nội dung", "Đang dịch nội dung", 50),
@@ -318,6 +319,11 @@ STAGE_ALIASES = {
         "received": "received_file",
         "received_video": "received_file",
         "saved_input": "received_file",
+        "input_save": "input_save_failed",
+        "input_save_failed": "input_save_failed",
+        "received_file_failed": "input_save_failed",
+        "telegram_download_failed": "input_save_failed",
+        "large_telegram_download_unsupported": "input_save_failed",
         "extracting": "extracting_audio",
         "translate": "translating",
         "generating_subtitle": "generating_voice",
@@ -919,11 +925,27 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             ]
             status_text = "Đã gửi kết quả"
         elif terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
-            if stage_key in {"delivered", "success", "completed", "failed", "failed_no_charge", "failed_refunded", "needs_admin_review"}:
+            input_save_failed = bool(
+                stage_key in {"input_save", "input_save_failed", "received_file_failed", "telegram_download_failed", "large_telegram_download_unsupported"}
+                or str(job.get("last_error_stage") or "").strip().lower() == "input_save"
+                or str(job.get("input_save_blocker") or job.get("pipeline_blocker") or "").strip().lower()
+                in {"telegram_download_failed", "large_telegram_download_unsupported", "file_not_saved", "local_input_missing", "input_file_size_0"}
+                or str(job.get("status") or "").strip().upper() == "INPUT_SAVE_FAILED"
+            )
+            if input_save_failed:
+                stage_key = "input_save_failed"
+                progress = 5
+                completed_steps = []
+                status_text = "Chưa tải được video. Hệ thống chưa trừ Xu."
+            elif stage_key in {"delivered", "success", "completed", "failed", "failed_no_charge", "failed_refunded", "needs_admin_review"}:
                 stage_key = "validating_output"
-            progress = max(5, min(95, _as_int(progress, int(product_progress_stage(canonical, stage_key).get("percent") or 90))))
-            completed_steps = list(job.get("completed_steps") or [])
-            status_text = "Chưa xử lý được lúc này, TOAN AAS chưa trừ Xu."
+                progress = max(5, min(95, _as_int(progress, int(product_progress_stage(canonical, stage_key).get("percent") or 90))))
+                completed_steps = list(job.get("completed_steps") or [])
+                status_text = "Chưa xử lý được lúc này, TOAN AAS chưa trừ Xu."
+            else:
+                progress = max(5, min(95, _as_int(progress, int(product_progress_stage(canonical, stage_key).get("percent") or 90))))
+                completed_steps = list(job.get("completed_steps") or [])
+                status_text = "Chưa xử lý được lúc này, TOAN AAS chưa trừ Xu."
         else:
             stage = product_progress_stage(canonical, stage_key)
             stage_key = str(stage.get("key") or stage_key)

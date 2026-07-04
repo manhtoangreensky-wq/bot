@@ -9038,6 +9038,10 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• mapped_product_type: <code>{html.escape(str(current.get('mapped_product_type') or current.get('product_type') or '-'))}</code>\n"
             f"• mapped_mode: <code>{html.escape(str(current.get('mapped_mode') or current.get('mode') or '-'))}</code>\n"
             f"• recovered_from_persisted_subdub_job: <code>{'yes' if recovered_from_persisted_subdub_job else 'no'}</code>\n"
+            f"• input_save_success: <code>{'yes' if current.get('input_save_success') else 'no'}</code>\n"
+            f"• input_save_blocker: <code>{html.escape(str(current.get('input_save_blocker') or '-'))}</code>\n"
+            f"• panel_terminalized: <code>{'yes' if current.get('status_panel_terminalized') or current.get('panel_finalized') else 'no'}</code>\n"
+            f"• refresh_stopped: <code>{'yes' if current.get('refresh_stopped_after_terminal') else 'no'}</code>\n"
         )
     return (
         "📊 <b>TOAN AAS progress status</b>\n\n"
@@ -86903,6 +86907,50 @@ def subdub_delivery_debug_text(job: dict | None = None, arg: str = "") -> str:
     return text[:3600]
 
 
+def subdub_job_debug_text(job: dict | None = None, arg: str = "") -> str:
+    job = subdub_merge_debug_job(job or subdub_debug_missing_payload(arg, "subdub_job_debug"))
+    def esc(value) -> str:
+        return html.escape(str(value if value not in (None, "") else "-"))
+    def yes_no(value) -> str:
+        return "yes" if value else "no"
+    def intval(value, default: int = 0) -> int:
+        return _safe_int(value, default)
+    blocker = str(job.get("input_save_blocker") or job.get("pipeline_blocker") or job.get("no_charge_reason") or "")
+    telegram_failed = bool("telegram_download_failed" in blocker or blocker == "large_telegram_download_unsupported")
+    text = "\n".join([
+        "🛠 <b>SUBDUB JOB DEBUG</b>",
+        "",
+        f"• public_code: <code>{esc(job.get('public_code'))}</code>",
+        f"• internal_job_id: <code>{esc(job.get('internal_job_id') or job.get('job_id'))}</code>",
+        f"• lookup_store_hit: <code>{esc(job.get('lookup_store_hit'))}</code>",
+        f"• mapped_product_type: <code>{esc(job.get('mapped_product_type') or job.get('product_type'))}</code>",
+        f"• mapped_mode: <code>{esc(job.get('mapped_mode') or job.get('mode'))}</code>",
+        f"• status: <code>{esc(job.get('status'))}</code>",
+        f"• stage: <code>{esc(job.get('stage') or job.get('progress_stage') or job.get('current_stage'))}</code>",
+        f"• progress_percent: <code>{intval(job.get('progress_percent'))}%</code>",
+        f"• terminal_state: <code>{esc(job.get('terminal_state'))}</code>",
+        f"• input_save_attempted: <code>{yes_no(job.get('input_save_attempted'))}</code>",
+        f"• input_save_success: <code>{yes_no(job.get('input_save_success'))}</code>",
+        f"• input_save_blocker: <code>{esc(blocker)}</code>",
+        f"• telegram_download_failed: <code>{yes_no(telegram_failed)}</code>",
+        f"• large_media_detected: <code>{yes_no(job.get('large_telegram_media_detected') or job.get('telegram_download_limit_hit'))}</code>",
+        f"• pipeline_started: <code>{yes_no(job.get('pipeline_started'))}</code>",
+        f"• asr_started: <code>{yes_no(job.get('asr_started'))}</code>",
+        f"• translation_started: <code>{yes_no(job.get('translation_started'))}</code>",
+        f"• tts_started: <code>{yes_no(job.get('tts_started'))}</code>",
+        f"• mux_started: <code>{yes_no(job.get('mux_started'))}</code>",
+        f"• final_mp4_exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
+        f"• delivery_attempted: <code>{yes_no(job.get('delivery_attempted'))}</code>",
+        f"• charge_status: <code>{esc(job.get('charge_status'))}</code>",
+        f"• public_error_sent_count: <code>{intval(job.get('public_error_sent_count'))}</code>",
+        f"• success_sent_count: <code>{intval(job.get('success_sent_count'))}</code>",
+        f"• status_panel_terminalized: <code>{yes_no(job.get('status_panel_terminalized'))}</code>",
+        f"• refresh_stopped_after_terminal: <code>{yes_no(job.get('refresh_stopped_after_terminal'))}</code>",
+        f"• bad_request_classification: <code>{esc(job.get('bad_request_classification') or subdub_classify_bad_request(blocker, stage=job.get('last_error_stage') or job.get('stage') or '', job=job))}</code>",
+    ])
+    return text[:3400]
+
+
 VOICE_TTS_BACKEND_CHOICES = ("auto", "paid_provider", "voxcpm2_local")
 
 
@@ -87592,7 +87640,18 @@ async def cmd_subdub_status_debug(update: Update, context: ContextTypes.DEFAULT_
     return await cmd_subtitle_dub_debug(update, context)
 
 async def cmd_subdub_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await cmd_subtitle_dub_debug(update, context)
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    if not arg:
+        return await update.message.reply_text("Cách dùng: /subdub_job_debug <mã xử lý>")
+    try:
+        job = subtitle_dub_debug_lookup_job(arg) or subdub_debug_missing_payload(arg, "subdub_job_debug")
+        text = subdub_job_debug_text(job, arg)
+    except Exception as exc:
+        logger.warning("subdub job debug command safe failure | %s", sanitize_log_text(str(exc))[:180])
+        text = subdub_debug_command_safe_error_text("/subdub_job_debug", type(exc).__name__)
+    return await update.message.reply_text(text[:3600], parse_mode="HTML")
 
 async def cmd_subdub_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
@@ -167253,6 +167312,11 @@ SUBDUB_LIFECYCLE_STAGE_MAP = {
     "received": "received_file",
     "received_video": "received_file",
     "saved_input": "received_file",
+    "input_save": "input_save_failed",
+    "input_save_failed": "input_save_failed",
+    "received_file_failed": "input_save_failed",
+    "telegram_download_failed": "input_save_failed",
+    "large_telegram_download_unsupported": "input_save_failed",
     "received_file": "received_file",
     "extracting": "extracting_audio",
     "extracting_audio": "extracting_audio",
@@ -167283,6 +167347,15 @@ SUBDUB_LIFECYCLE_STAGE_MAP = {
     "failed_no_charge": "failed_no_charge",
 }
 
+SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS = {
+    "telegram_download_failed",
+    "large_telegram_download_unsupported",
+    "file_not_saved",
+    "local_input_missing",
+    "input_file_size_0",
+    "missing_video_file_id",
+}
+
 
 def subdub_canonical_lifecycle_state(value: str = "") -> str:
     token = str(value or "").strip().lower().replace("-", "_")
@@ -167291,11 +167364,13 @@ def subdub_canonical_lifecycle_state(value: str = "") -> str:
 
 def subdub_progress_percent_for_lifecycle(value: str = "", terminal_state: str = "") -> int:
     terminal = str(terminal_state or "").strip().lower()
+    stage = subdub_canonical_lifecycle_state(value)
     if terminal == "delivered" or subdub_canonical_lifecycle_state(value) == "delivered":
         return 100
     if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+        if stage in {"input_save_failed", "received_file"}:
+            return 5
         return 95
-    stage = subdub_canonical_lifecycle_state(value)
     try:
         return int(product_progress_status.product_progress_stage("subdub", stage).get("percent") or 5)
     except Exception:
@@ -167313,6 +167388,74 @@ def subdub_completed_steps_for_lifecycle(value: str = "", terminal_state: str = 
         return []
     index = keys.index(current)
     return keys[:index]
+
+def subdub_input_save_failure_detected(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    status = str(current.get("status") or "").strip().upper()
+    stage_values = {
+        str(current.get("stage") or "").strip().lower(),
+        str(current.get("last_error_stage") or "").strip().lower(),
+        str(current.get("current_stage") or "").strip().lower(),
+        str(current.get("progress_stage") or "").strip().lower(),
+        str(current.get("lifecycle_state") or "").strip().lower(),
+    }
+    blockers = {
+        str(current.get("input_save_blocker") or "").strip().lower(),
+        str(current.get("pipeline_blocker") or "").strip().lower(),
+        str(current.get("no_charge_reason") or "").strip().lower(),
+        str(current.get("detail") or "").strip().lower(),
+    }
+    if status == "INPUT_SAVE_FAILED" or "input_save" in stage_values:
+        return True
+    if stage_values & {"input_save_failed", "received_file_failed", "telegram_download_failed", "large_telegram_download_unsupported"}:
+        return True
+    if blockers & SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS:
+        return True
+    return any("telegram_download_failed" in item or "file is too big" in item for item in blockers if item)
+
+def subdub_normalize_input_save_failed_terminal(job: dict | None = None) -> dict:
+    current = dict(job or {})
+    if not current or not subdub_input_save_failure_detected(current):
+        return current
+    blocker = str(
+        current.get("input_save_blocker")
+        or current.get("pipeline_blocker")
+        or current.get("no_charge_reason")
+        or "telegram_download_failed"
+    ).strip()
+    if "file is too big" in blocker.lower():
+        blocker = "large_telegram_download_unsupported"
+    current.update(
+        {
+            "status": "failed_no_charge",
+            "terminal_state": "failed_no_charge",
+            "lifecycle_state": "input_save_failed",
+            "current_stage": "input_save_failed",
+            "progress_stage": "input_save_failed",
+            "progress_percent": 5,
+            "completed_steps": [],
+            "last_error_stage": "input_save",
+            "pipeline_blocker": blocker,
+            "input_save_blocker": blocker,
+            "no_charge_reason": blocker,
+            "charge_status": "not_charged",
+            "pipeline_started": False,
+            "asr_started": False,
+            "translation_started": False,
+            "tts_started": False,
+            "mux_started": False,
+            "delivery_attempted": False,
+            "delivery_success": False,
+            "audio_fallback_suppressed": True,
+            "audio_artifact_internal_only": bool(current.get("audio_artifact_exists") or current.get("partial_audio_available")),
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
+            "panel_finalized": True,
+            "panel_final_percent": 5,
+            "terminal_public_outcome_type": "failure",
+        }
+    )
+    return current
 
 SUBDUB_PRODUCT_PROGRESS_STAGE_TOKENS = {
     SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY: (
@@ -167503,7 +167646,7 @@ def subdub_enrich_job_identity(job: dict | None = None, *, job_key: str = "", mo
             current[key] = identity[key]
     checked = list(current.get("lookup_stores_checked") or [])
     current["lookup_stores_checked"] = checked
-    return current
+    return subdub_normalize_input_save_failed_terminal(current)
 
 def subdub_progress_stage_payload(stage: str = "") -> dict:
     token = str(stage or "saved_input").strip().lower()
@@ -167801,15 +167944,25 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
         sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
         message_id = str(getattr(sent_msg, "message_id", "") or "")
     if key:
+        input_save_fail = subdub_input_save_failure_detected(
+            {
+                **job,
+                "pipeline_blocker": str(reason or ""),
+                "input_save_blocker": str(reason or ""),
+                "last_error_stage": "input_save" if str(reason or "").strip() in SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS else job.get("last_error_stage"),
+            }
+        )
+        fail_stage = "input_save_failed" if input_save_fail else "failed_no_charge"
+        fail_percent = subdub_progress_percent_for_lifecycle(fail_stage, "failed_no_charge")
         update_subtitle_dub_pipeline_job(
             key,
             status="failed",
             terminal_state="failed_no_charge",
-            lifecycle_state="failed_no_charge",
-            current_stage="failed_no_charge",
-            progress_stage="failed_no_charge",
-            progress_percent=95,
-            completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+            lifecycle_state=fail_stage,
+            current_stage=fail_stage,
+            progress_stage=fail_stage,
+            progress_percent=fail_percent,
+            completed_steps=subdub_completed_steps_for_lifecycle(fail_stage, "failed_no_charge"),
             public_error_sent=True,
             terminal_public_outcome_sent=True,
             terminal_public_outcome_type="failure",
@@ -168172,6 +168325,7 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
         elif desired_terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
             fields["status"] = desired_terminal
     job.update(fields)
+    job = subdub_normalize_input_save_failed_terminal(job)
     job = subdub_enrich_job_identity(job, job_key=str(job_key or ""), mode=str(job.get("mode") or fields.get("mode") or ""), state=job)
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
@@ -168179,7 +168333,9 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
     return dict(job)
 
 def persist_subtitle_dub_pipeline_job_snapshot(job_key: str, job: dict | None = None, *, reason: str = "") -> bool:
-    current = subdub_enrich_job_identity(job or {}, job_key=str(job_key or ""))
+    current = subdub_normalize_input_save_failed_terminal(
+        subdub_enrich_job_identity(job or {}, job_key=str(job_key or ""))
+    )
     if not current:
         return False
     job_id = str(current.get("internal_job_id") or current.get("job_id") or current.get("registry_job_id") or "").strip()
@@ -168460,7 +168616,7 @@ def subdub_telegram_file_too_big(detail: str = "") -> bool:
 
 def subdub_large_telegram_media_public_text(lang: str = "vi") -> str:
     return (
-        "TOAN AAS chưa tải được video này vì file quá lớn để lấy trực tiếp từ Telegram.\n"
+        "TOAN AAS chưa tải được video này vì file quá lớn hoặc Telegram chưa cho hệ thống tải trực tiếp.\n"
         "Hệ thống chưa trừ Xu.\n"
         "Anh/chị có thể gửi video ngắn/nhẹ hơn hoặc gửi qua nguồn tải khác nếu được hỗ trợ."
     )
@@ -171888,6 +172044,13 @@ async def _execute_video_dubbing_pipeline_core(
         terminal_state_update = {
             **state,
             "_subdub_terminal_state": "failed_no_charge",
+            "status": "failed_no_charge",
+            "terminal_state": "failed_no_charge",
+            "lifecycle_state": "input_save_failed",
+            "current_stage": "input_save_failed",
+            "progress_stage": "input_save_failed",
+            "progress_percent": subdub_progress_percent_for_lifecycle("input_save_failed", "failed_no_charge"),
+            "completed_steps": subdub_completed_steps_for_lifecycle("input_save_failed", "failed_no_charge"),
             "last_error_stage": "input_save",
             "last_error_safe": public_failure,
             "charge_status": "not_charged",
@@ -171913,13 +172076,13 @@ async def _execute_video_dubbing_pipeline_core(
         if str(state.get("_pipeline_job_key") or ""):
             update_subtitle_dub_pipeline_job(
                 str(state.get("_pipeline_job_key") or ""),
-                status="failed",
+                status="failed_no_charge",
                 terminal_state="failed_no_charge",
-                lifecycle_state="failed_no_charge",
-                current_stage="failed_no_charge",
-                progress_stage="failed_no_charge",
-                progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
-                completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                lifecycle_state="input_save_failed",
+                current_stage="input_save_failed",
+                progress_stage="input_save_failed",
+                progress_percent=subdub_progress_percent_for_lifecycle("input_save_failed", "failed_no_charge"),
+                completed_steps=subdub_completed_steps_for_lifecycle("input_save_failed", "failed_no_charge"),
                 last_error_stage="input_save",
                 last_error_safe=public_failure,
                 charge_status="not_charged",
@@ -171939,6 +172102,7 @@ async def _execute_video_dubbing_pipeline_core(
             "gate_matrix": gate_matrix,
             "debug_job": debug_job,
             "terminal_state": "failed_no_charge",
+            "charge_status": "not_charged",
             "state": terminal_state_update,
             "pipeline_attempted": False,
         }
@@ -176170,7 +176334,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 or result.get("status")
                 or ""
             )
-            if result_blocker == "large_telegram_download_unsupported":
+            if result_blocker in {"large_telegram_download_unsupported", "telegram_download_failed", "file_not_saved", "local_input_missing", "input_file_size_0"} or "telegram_download_failed" in result_blocker:
                 public_text = str(result.get("text") or subdub_large_telegram_media_public_text(lang))
                 rendered = await safe_edit_or_send(
                     query,
@@ -176185,18 +176349,18 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 )
                 update_subtitle_dub_pipeline_job(
                     pipeline_job_key,
-                    status="failed",
+                    status="failed_no_charge",
                     terminal_state="failed_no_charge",
-                    lifecycle_state="failed_no_charge",
-                    current_stage="failed_no_charge",
-                    progress_stage="failed_no_charge",
-                    progress_percent=subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
-                    completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                    lifecycle_state="input_save_failed",
+                    current_stage="input_save_failed",
+                    progress_stage="input_save_failed",
+                    progress_percent=subdub_progress_percent_for_lifecycle("input_save_failed", "failed_no_charge"),
+                    completed_steps=subdub_completed_steps_for_lifecycle("input_save_failed", "failed_no_charge"),
                     last_error_stage="input_save",
                     last_error_safe=public_text,
-                    pipeline_blocker="large_telegram_download_unsupported",
-                    input_save_blocker="large_telegram_download_unsupported",
-                    no_charge_reason="large_telegram_download_unsupported",
+                    pipeline_blocker=result_blocker if result_blocker else "telegram_download_failed",
+                    input_save_blocker=result_blocker if result_blocker else "telegram_download_failed",
+                    no_charge_reason=result_blocker if result_blocker else "telegram_download_failed",
                     charge_status="not_charged",
                     terminal_public_outcome_sent=True,
                     terminal_public_outcome_type="failure",
@@ -176207,7 +176371,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     status_panel_terminalized=True,
                     refresh_stopped_after_terminal=True,
                     panel_finalized=True,
-                    panel_final_percent=95,
+                    panel_final_percent=5,
                     panel_final_message_id=message_id,
                     delivery_success=False,
                     charge_after_delivery=False,
