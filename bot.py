@@ -9492,7 +9492,7 @@ def _music_job_debug_text(job_id: str = "") -> str:
     if not secondary_blocker and primary_blocker:
         secondary_blocker = music_job_artifact_secondary_blocker(job)
     failure_fields = music_failure_debug_fields(job, job_id, product_type)
-    duplicate_guard = "delivered" if music_job_delivered(job) else str((job or {}).get("music_delivery_lock") or (job or {}).get("music_result_delivery_lock") or "open")
+    duplicate_guard = str((job or {}).get("duplicate_guard_state") or ("closed" if music_job_delivered(job) else ((job or {}).get("music_delivery_lock") or (job or {}).get("music_result_delivery_lock") or "open")))
     ignored_sources = ",".join(str(item) for item in ((job or {}).get("ignored_duplicate_sources") or [])) or "-"
     candidate_paths_text = str(
         (job or {}).get("key4u_suno_fetch_candidate_paths_text")
@@ -9673,6 +9673,15 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• delivery_attempt_count: <code>{int((job or {}).get('delivery_attempt_count') or (job or {}).get('send_attempt_count') or 0)}</code>\n"
         f"• delivery_attempted: <code>{'yes' if failure_fields.get('delivery_attempted') else 'no'}</code>\n"
         f"• delivery_succeeded: <code>{'yes' if failure_fields.get('delivery_succeeded') else 'no'}</code>\n"
+        f"• telegram_send_returned_message: <code>{'yes' if (job or {}).get('telegram_send_returned_message') else 'no'}</code>\n"
+        f"• telegram_send_success_detected: <code>{'yes' if (job or {}).get('telegram_send_success_detected') else 'no'}</code>\n"
+        f"• delivery_success_detection_source: <code>{html.escape(str((job or {}).get('delivery_success_detection_source') or '-'))}</code>\n"
+        f"• delivery_state_final: <code>{html.escape(str((job or {}).get('delivery_state_final') or music_job_delivery_state(job)))}</code>\n"
+        f"• delivery_succeeded_final: <code>{'yes' if (job or {}).get('delivery_succeeded_final') or music_job_delivered(job) else 'no'}</code>\n"
+        f"• duplicate_prevention_reason: <code>{html.escape(str((job or {}).get('duplicate_prevention_reason') or '-'))}</code>\n"
+        f"• late_error_after_delivery_suppressed: <code>{'yes' if (job or {}).get('late_error_after_delivery_suppressed') or (job or {}).get('late_error_suppressed') else 'no'}</code>\n"
+        f"• public_x_suppressed: <code>{'yes' if (job or {}).get('public_x_suppressed') or (job or {}).get('late_public_error_suppressed') else 'no'}</code>\n"
+        f"• suppress_reason: <code>{html.escape(str((job or {}).get('suppress_reason') or '-'))}</code>\n"
         f"• charge_status: <code>{html.escape(str(failure_fields.get('charge_status') or '-'))}</code>\n"
         f"• price_xu: <code>{html.escape(str((job or {}).get('price_xu') or (job or {}).get('music_product_price_xu') or music_result_price_xu(job or {}) or 0))}</code>\n"
         f"• charged_xu: <code>{html.escape(str((job or {}).get('charged_xu') or (job or {}).get('music_charged_xu') or 0))}</code>\n"
@@ -44019,7 +44028,10 @@ def record_music_runtime_error_suppressed(
         "last_runtime_error_callback_data": str(callback_data or "")[:160],
         "last_runtime_error_at": time.time(),
         "late_error_suppressed": True,
+        "late_error_after_delivery_suppressed": True,
         "late_public_error_suppressed": True,
+        "public_x_suppressed": True,
+        "suppress_reason": "late_error_after_terminal_music",
         "generic_error_after_delivery_prevented": True,
         "terminal_public_outcome_sent": bool(current.get("terminal_public_outcome_sent") or music_delivery_should_suppress_public_fail({}, current)),
         "terminal_public_outcome_type": str(current.get("terminal_public_outcome_type") or ("success" if music_delivery_should_suppress_public_fail({}, current) else "")),
@@ -106329,6 +106341,86 @@ async def select_music_delivery_artifact(
         "rejected_candidates": rejected_reasons[-8:],
     }
 
+def music_telegram_success_like(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        if value.get("ok") is True or value.get("success") is True:
+            return True
+        if value.get("message_id") or value.get("id"):
+            return True
+        for key in ("status", "code", "message", "description", "result"):
+            if music_telegram_success_like(value.get(key)):
+                return True
+        return False
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    if text in {"ok", "success", "sent", "true", "pass", "passed", "done"}:
+        return True
+    return text.startswith(("success:", "ok:", "sent:"))
+
+
+def music_telegram_message_id(message_obj) -> str:
+    if isinstance(message_obj, dict):
+        for key in ("message_id", "id", "telegram_message_id"):
+            value = str(message_obj.get(key) or "").strip()
+            if value:
+                return value
+        result = message_obj.get("result")
+        if isinstance(result, dict):
+            value = music_telegram_message_id(result)
+            if value:
+                return value
+    return telegram_delivery_message_id(message_obj)
+
+
+def music_telegram_audio_file_id(message_obj) -> str:
+    if isinstance(message_obj, dict):
+        for key in ("audio", "voice", "document"):
+            media = message_obj.get(key)
+            if isinstance(media, dict):
+                value = str(media.get("file_id") or media.get("id") or "").strip()
+                if value:
+                    return value
+        for key in ("file_id", "audio_file_id", "telegram_file_id"):
+            value = str(message_obj.get(key) or "").strip()
+            if value:
+                return value
+        result = message_obj.get("result")
+        if isinstance(result, dict):
+            value = music_telegram_audio_file_id(result)
+            if value:
+                return value
+    return telegram_delivery_file_id(message_obj, "audio")
+
+
+def music_mark_progress_refresh_terminal(job: dict | None = None, *, terminal: str = "delivered") -> None:
+    current = dict(job or {})
+    job_id = str(current.get("internal_job_id") or current.get("music_internal_job_id") or current.get("music_job_id") or "").strip()
+    if not job_id:
+        return
+    product_type = music_job_product_type(current, "music_song")
+    key = progress_auto_refresh_key(product_type, job_id)
+    record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
+    if not record:
+        return
+    record.update({
+        "stopped": True,
+        "task_alive": False,
+        "terminal_state": str(terminal or "delivered"),
+        "current_stage": str(terminal or "delivered"),
+        "percent": 100 if terminal == "delivered" else int(record.get("percent") or 0),
+        "last_percent": 100 if terminal == "delivered" else int(record.get("last_percent") or 0),
+        "stop_reason": str(terminal or "terminal"),
+        "stopped_reason": str(terminal or "terminal"),
+        "scheduler_status": "stopped",
+        "refresh_stopped_after_terminal": True,
+        "last_update_at": now_text(),
+    })
+    PROGRESS_AUTO_REFRESH_JOBS[key] = record
+
+
 def music_delivery_record_duplicate(job: dict | None = None, source: str = "", reason: str = "", result: dict | None = None, updated_by="") -> dict:
     current = dict(job or {})
     source_token = music_delivery_source_token(source)
@@ -106337,13 +106429,34 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
         ignored.append(source_token)
     now = now_text()
     previous_attempts = int(current.get("delivery_attempt_count") or current.get("send_attempt_count") or 0)
+    already_delivered = (
+        reason in {"already_delivered", "same_job_same_artifact_already_delivered", "delivery_succeeded", "success_already_recorded"}
+        or music_delivery_should_suppress_public_fail(result, current)
+        or music_job_delivered(current)
+    )
     current.update({
         "ignored_duplicate_sources": ignored[-12:],
         "last_duplicate_blocked_at": now,
         "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
         "duplicate_delivery_prevented": True,
-        "delivery_attempt_count": max(previous_attempts + 1, 1),
+        "duplicate_guard_state": "closed" if already_delivered else str(current.get("duplicate_guard_state") or "open"),
+        "duplicate_prevention_reason": "same_job_same_artifact_already_delivered" if already_delivered else str(reason or "duplicate_delivery")[:120],
+        "delivery_attempt_count": previous_attempts if already_delivered else max(previous_attempts + 1, 1),
     })
+    if already_delivered:
+        current.update({
+            "delivery_state": "delivered",
+            "delivery_succeeded": True,
+            "music_delivery_lock": "sent",
+            "music_result_delivery_lock": "sent",
+            "terminal_state": "delivered",
+            "music_terminal_state": "delivered",
+            "terminal_public_outcome_sent": True,
+            "terminal_public_outcome_type": "success",
+            "public_x_suppressed": True,
+            "suppress_reason": "already_delivered",
+        })
+        music_mark_progress_refresh_terminal(current, terminal="delivered")
     if current.get("internal_job_id"):
         save_engine_async_job(current)
     current_result = dict(result or {})
@@ -106357,8 +106470,23 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
             "last_duplicate_blocked_at": now,
             "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
             "duplicate_delivery_prevented": True,
-            "delivery_attempt_count": max(result_attempts + 1, 1),
+            "duplicate_guard_state": "closed" if already_delivered else str(current_result.get("duplicate_guard_state") or "open"),
+            "duplicate_prevention_reason": "same_job_same_artifact_already_delivered" if already_delivered else str(reason or "duplicate_delivery")[:120],
+            "delivery_attempt_count": result_attempts if already_delivered else max(result_attempts + 1, 1),
         })
+        if already_delivered:
+            current_result.update({
+                "delivery_state": "delivered",
+                "delivery_succeeded": True,
+                "music_delivery_lock": "sent",
+                "music_result_delivery_lock": "sent",
+                "terminal_state": "delivered",
+                "music_terminal_state": "delivered",
+                "terminal_public_outcome_sent": True,
+                "terminal_public_outcome_type": "success",
+                "public_x_suppressed": True,
+                "suppress_reason": "already_delivered",
+            })
         if current_result.get("user_id"):
             save_music_guided_result(current_result.get("user_id"), current_result)
     return current or current_result
@@ -106377,6 +106505,8 @@ def music_delivery_should_suppress_public_fail(result: dict | None = None, job: 
         or data.get("music_success_message_id")
         or data.get("success_message_id")
         or data.get("delivery_succeeded")
+        or (data.get("public_x_suppressed") and data.get("telegram_send_success_detected"))
+        or str(data.get("delivery_state") or "").strip().lower() == "send_unconfirmed_success_like"
         or terminal_public_success
     )
 
@@ -106404,8 +106534,8 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
     if not current:
         return {}
     output_sha = music_audio_sha256(audio_bytes)
-    file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
-    message_id = str(getattr(sent_message, "message_id", "") or "")
+    file_id = music_telegram_audio_file_id(sent_message)
+    message_id = music_telegram_message_id(sent_message)
     delivered_at = now_text()
     previous_send_count = int(current.get("send_attempt_count") or 0)
     previous_delivery_attempt_count = int(current.get("delivery_attempt_count") or 0)
@@ -106439,7 +106569,21 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "terminal_public_outcome_sent": True,
         "terminal_public_outcome_type": "success",
         "terminal_public_outcome_message_id": str(current.get("terminal_public_outcome_message_id") or message_id or ""),
+        "telegram_send_returned_message": bool(message_id),
+        "telegram_send_success_detected": True,
+        "delivery_success_detection_source": "telegram_message_id" if message_id else "telegram_success_like",
+        "delivery_state_final": "delivered",
+        "delivery_succeeded_final": True,
+        "duplicate_guard_state": "closed",
+        "duplicate_prevention_reason": "",
+        "public_x_suppressed": True,
+        "suppress_reason": "delivery_success",
+        "fail_reason_safe": "",
         "progress_percent": 100,
+        "panel_finalized": True,
+        "panel_final_percent": 100,
+        "status_panel_terminalized": True,
+        "refresh_stopped_after_terminal": True,
         "output_file_id": file_id,
         "output_sha256": output_sha or str(current.get("output_sha256") or ""),
         "send_attempt_count": previous_send_count + 1,
@@ -106451,6 +106595,7 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "music_delivery_blocker": "",
         "vault_id": str(vault_entry.get("vault_id") or current.get("vault_id") or ""),
     })
+    music_mark_progress_refresh_terminal(current, terminal="delivered")
     if current.get("internal_job_id"):
         save_engine_async_job(current)
     if current.get("vault_id"):
@@ -106461,6 +106606,54 @@ def record_music_job_full_send_error(job: dict | None, error: str, updated_by=""
     current = dict(job or {})
     if not current:
         return {}
+    already_delivered = music_delivery_should_suppress_public_fail({}, current)
+    success_like = music_telegram_success_like(error)
+    if already_delivered:
+        current.update({
+            "last_send_error": sanitize_provider_status_text(error, current.get("provider_task_id") or "", 220),
+            "late_error_after_delivery_suppressed": True,
+            "late_error_suppressed": True,
+            "public_x_suppressed": True,
+            "suppress_reason": "already_delivered",
+            "generic_error_after_delivery_prevented": True,
+            "delivery_state": "delivered",
+            "delivery_succeeded": True,
+            "delivery_state_final": "delivered",
+            "delivery_succeeded_final": True,
+            "music_delivery_lock": "sent",
+            "music_result_delivery_lock": "sent",
+            "terminal_state": "delivered",
+            "music_terminal_state": "delivered",
+            "terminal_public_outcome_sent": True,
+            "terminal_public_outcome_type": "success",
+            "auto_delivery_blocker": "",
+            "music_delivery_blocker": "",
+            "last_delivery_error_category": "",
+            "duplicate_guard_state": "closed",
+        })
+        music_mark_progress_refresh_terminal(current, terminal="delivered")
+        if current.get("internal_job_id"):
+            save_engine_async_job(current)
+        return current
+    if success_like:
+        current.update({
+            "status": str(current.get("status") or "completed"),
+            "delivery_state": "send_unconfirmed_success_like",
+            "telegram_send_success_detected": True,
+            "delivery_success_detection_source": "success_like_error",
+            "public_x_suppressed": True,
+            "suppress_reason": "telegram_success_like_unconfirmed",
+            "auto_delivery_blocker": "",
+            "music_delivery_blocker": "",
+            "last_delivery_error_category": "telegram_success_like_unconfirmed",
+            "music_delivery_lock": "",
+            "music_result_delivery_lock": "",
+            "fail_reason_safe": "SUCCESS",
+            "last_send_error": sanitize_provider_status_text(error, current.get("provider_task_id") or "", 220),
+        })
+        if current.get("internal_job_id"):
+            save_engine_async_job(current)
+        return current
     scheduler_recoverable = music_job_scheduler_artifact_recoverable(current)
     previous_send_count = int(current.get("send_attempt_count") or 0)
     previous_delivery_attempt_count = int(current.get("delivery_attempt_count") or 0)
@@ -106756,19 +106949,30 @@ async def deliver_music_result_once(
                 current_job = record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
             return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180), "job": current_job, "result": current_result}
 
-        delivery_message_id_raw = str(getattr(sent_message, "message_id", "") or "").strip()
+        delivery_message_id_raw = music_telegram_message_id(sent_message)
         if not delivery_message_id_raw:
+            success_like_response = music_telegram_success_like(sent_message)
             current_result["music_result_delivery_lock"] = ""
             current_result["music_delivery_lock"] = ""
             current_result["music_delivery_blocker"] = "telegram_message_id_missing"
+            current_result["telegram_send_returned_message"] = False
+            current_result["telegram_send_success_detected"] = bool(success_like_response)
+            current_result["delivery_success_detection_source"] = "success_like_response" if success_like_response else "missing_message_id"
+            current_result["public_x_suppressed"] = bool(success_like_response)
+            current_result["suppress_reason"] = "telegram_success_like_unconfirmed" if success_like_response else ""
             save_music_guided_result(user_id, current_result)
             if current_job:
                 current_job["music_delivery_lock"] = ""
                 current_job["music_result_delivery_lock"] = ""
-                current_job["delivery_state"] = "send_unconfirmed"
-                current_job["auto_delivery_blocker"] = "telegram_message_id_missing"
-                record_music_job_full_send_error(current_job, "telegram_message_id_missing", updated_by=updated_by or user_id)
-            return {"ok": False, "status": "TELEGRAM_MESSAGE_ID_MISSING", "job": current_job, "result": current_result}
+                current_job["delivery_state"] = "send_unconfirmed_success_like" if success_like_response else "send_unconfirmed"
+                current_job["auto_delivery_blocker"] = "" if success_like_response else "telegram_message_id_missing"
+                current_job["telegram_send_returned_message"] = False
+                current_job["telegram_send_success_detected"] = bool(success_like_response)
+                current_job["delivery_success_detection_source"] = "success_like_response" if success_like_response else "missing_message_id"
+                current_job["public_x_suppressed"] = bool(success_like_response)
+                current_job["suppress_reason"] = "telegram_success_like_unconfirmed" if success_like_response else ""
+                record_music_job_full_send_error(current_job, "SUCCESS" if success_like_response else "telegram_message_id_missing", updated_by=updated_by or user_id)
+            return {"ok": False, "status": "TELEGRAM_SUCCESS_UNCONFIRMED" if success_like_response else "TELEGRAM_MESSAGE_ID_MISSING", "job": current_job, "result": current_result}
 
         charge_result = music_product_charge_after_delivery(user_id, current_result, music_result_price_xu(current_result), current_job)
         charged = int(charge_result.get("charged_xu") or 0)
@@ -106796,6 +107000,14 @@ async def deliver_music_result_once(
             current_job["telegram_delivery_confirmed"] = True
             current_job["delivery_succeeded"] = True
             current_job["delivery_state"] = "delivered"
+            current_job["telegram_send_returned_message"] = True
+            current_job["telegram_send_success_detected"] = True
+            current_job["delivery_success_detection_source"] = "telegram_message_id"
+            current_job["delivery_state_final"] = "delivered"
+            current_job["delivery_succeeded_final"] = True
+            current_job["duplicate_guard_state"] = "closed"
+            current_job["public_x_suppressed"] = True
+            current_job["suppress_reason"] = "delivery_success"
             current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
             current_job.update({
                 "terminal_locked_at": now_text(),
@@ -106821,6 +107033,10 @@ async def deliver_music_result_once(
                 "duration_policy_result": str(artifact.get("duration_policy_result") or current_job.get("duration_policy_result") or "single_track_actual_duration"),
                 "terminal_public_outcome_sent": True,
                 "terminal_public_outcome_type": "success",
+                "panel_finalized": True,
+                "panel_final_percent": 100,
+                "status_panel_terminalized": True,
+                "refresh_stopped_after_terminal": True,
             })
             vault_entry = get_music_vault_entry(str(current_job.get("vault_id") or "")) if current_job.get("vault_id") else {}
             if current_job.get("internal_job_id"):
@@ -106840,8 +107056,8 @@ async def deliver_music_result_once(
                 status="used",
                 updated_by=updated_by or user_id,
             )
-        file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
-        delivery_message_id = str(getattr(sent_message, "message_id", "") or "")
+        file_id = music_telegram_audio_file_id(sent_message)
+        delivery_message_id = music_telegram_message_id(sent_message)
         delivered_at = now_text()
         current_result.update({
             "music_status": "completed",
@@ -106861,6 +107077,16 @@ async def deliver_music_result_once(
             "delivery_confirmed": True,
             "telegram_delivery_confirmed": True,
             "delivery_succeeded": True,
+            "telegram_send_returned_message": True,
+            "telegram_send_success_detected": True,
+            "delivery_success_detection_source": "telegram_message_id",
+            "delivery_state": "delivered",
+            "delivery_state_final": "delivered",
+            "delivery_succeeded_final": True,
+            "duplicate_guard_state": "closed",
+            "duplicate_prevention_reason": "",
+            "public_x_suppressed": True,
+            "suppress_reason": "delivery_success",
             "telegram_delivered_at": delivered_at,
             "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("send_attempt_count") or 1),
             "music_result_file_id": file_id,
@@ -106901,6 +107127,10 @@ async def deliver_music_result_once(
             "terminal_public_outcome_sent": True,
             "terminal_public_outcome_type": "success",
             "terminal_public_outcome_message_id": delivery_message_id,
+            "panel_finalized": True,
+            "panel_final_percent": 100,
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
         })
         if current_job.get("internal_job_id"):
             current_result["music_job_id"] = str(current_job.get("internal_job_id") or "")
@@ -106922,7 +107152,7 @@ async def deliver_music_result_once(
                         parse_mode="HTML",
                         reply_markup=music_product_success_keyboard(lang, product_context),
                     )
-                success_message_id = str(getattr(success_message, "message_id", "") or "")
+                success_message_id = music_telegram_message_id(success_message)
                 current_result["music_success_message_id"] = success_message_id
                 current_result["success_message_id"] = success_message_id
                 current_result["terminal_public_outcome_message_id"] = success_message_id or current_result.get("terminal_public_outcome_message_id") or delivery_message_id
@@ -106939,6 +107169,8 @@ async def deliver_music_result_once(
                     if current_job.get("internal_job_id"):
                         save_engine_async_job(current_job)
         save_music_guided_result(user_id, current_result)
+        if current_job:
+            music_mark_progress_refresh_terminal(current_job, terminal="delivered")
         return {
             "ok": True,
             "status": "SENT" if charge_result.get("ok") else "SENT_CHARGE_PENDING",
@@ -110301,10 +110533,11 @@ async def handle_music_product_confirm(
                 initial_snapshot=progress_auto_refresh_snapshot(product_type, resolved_existing_job_id, job=existing_job, lang=lang),
                 start_task=not music_job_delivered(existing_job) and not music_job_terminal_failed(existing_job),
             )
-        return await query.message.reply_text(
-            "TOAN AAS đã nhận yêu cầu này. Anh/chị theo dõi bảng trạng thái phía trên, hệ thống không gửi lại yêu cầu tạo nhạc.",
-            reply_markup=product_progress_status_keyboard(product_type, resolved_existing_job_id, lang),
-        )
+        try:
+            await query.answer("TOAN AAS đang xử lý yêu cầu này.", show_alert=False)
+        except Exception:
+            pass
+        return {"ok": True, "status": "ALREADY_SUBMITTED", "job": existing_job, "job_id": resolved_existing_job_id}
     progress_public_note = (
         "Đã xác nhận tạo bản đầy đủ. Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công."
         if current.get("legacy_music_confirm_wrapper")
@@ -170709,10 +170942,36 @@ def generated_media_delivery_limits() -> dict:
     }
 
 def telegram_delivery_message_id(message_obj) -> str:
+    if isinstance(message_obj, dict):
+        for key in ("message_id", "id", "telegram_message_id"):
+            value = str(message_obj.get(key) or "").strip()
+            if value:
+                return value
+        result = message_obj.get("result")
+        if isinstance(result, dict):
+            value = telegram_delivery_message_id(result)
+            if value:
+                return value
     return str(getattr(message_obj, "message_id", "") or "").strip()
 
 def telegram_delivery_file_id(message_obj, method: str = "video") -> str:
-    attr = "document" if str(method or "") == "document" else "video"
+    method_token = str(method or "video").strip().lower()
+    attr = "document" if method_token == "document" else "audio" if method_token == "audio" else "video"
+    if isinstance(message_obj, dict):
+        media = message_obj.get(attr)
+        if isinstance(media, dict):
+            value = str(media.get("file_id") or media.get("id") or "").strip()
+            if value:
+                return value
+        for key in ("file_id", f"{attr}_file_id", "telegram_file_id"):
+            value = str(message_obj.get(key) or "").strip()
+            if value:
+                return value
+        result = message_obj.get("result")
+        if isinstance(result, dict):
+            value = telegram_delivery_file_id(result, method_token)
+            if value:
+                return value
     media = getattr(message_obj, attr, None)
     return str(getattr(media, "file_id", "") or "").strip()
 
