@@ -64,6 +64,7 @@ STATUS_PATHS = (
     "output.status",
 )
 RESULT_URL_PATHS = (
+    "data.result_url",
     "download_url",
     "file_url",
     "result_url",
@@ -73,7 +74,6 @@ RESULT_URL_PATHS = (
     "url",
     "data.download_url",
     "data.file_url",
-    "data.result_url",
     "data.video_url",
     "data.output_url",
     "data.media_url",
@@ -86,6 +86,26 @@ RESULT_URL_PATHS = (
     "videos.0.url",
     "files.0.url",
 )
+VIDEO_RESULT_URL_KEYS = {
+    "result_url",
+    "video_url",
+    "output_url",
+    "download_url",
+    "file_url",
+    "media_url",
+    "url",
+    "uri",
+}
+VIDEO_RESULT_CONTAINER_KEYS = {
+    "data",
+    "result",
+    "output",
+    "outputs",
+    "files",
+    "artifacts",
+    "videos",
+    "task",
+}
 CONFIG_PLACEHOLDER_MARKERS = (
     "th\u1eadt",
     "example",
@@ -142,6 +162,54 @@ def _json_path(payload: Any, path: str) -> Any:
         else:
             return None
     return current
+
+
+def _parse_progress_value(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        raw = float(str(value).strip().rstrip("%"))
+    except Exception:
+        return None
+    if 0 < raw <= 1:
+        raw *= 100
+    return max(0, min(100, int(raw)))
+
+
+def _result_url_rejected(value: str) -> bool:
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    path = (parsed.path or "").lower()
+    if path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".json")):
+        return True
+    if any(marker in path for marker in ("/dashboard", "/console", "/admin")):
+        return True
+    return False
+
+
+def _recursive_video_url(payload: Any, prefix: str = "") -> tuple[str, str]:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            key_text = str(key or "")
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            if key_text in VIDEO_RESULT_URL_KEYS:
+                candidate = str(value or "").strip()
+                if candidate.startswith(("http://", "https://")) and not _result_url_rejected(candidate):
+                    return candidate, path
+        for key, value in payload.items():
+            key_text = str(key or "")
+            if key_text not in VIDEO_RESULT_CONTAINER_KEYS:
+                continue
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            found, found_path = _recursive_video_url(value, path)
+            if found:
+                return found, found_path
+    elif isinstance(payload, list):
+        for index, value in enumerate(payload):
+            path = f"{prefix}.{index}" if prefix else str(index)
+            found, found_path = _recursive_video_url(value, path)
+            if found:
+                return found, found_path
+    return "", ""
 
 
 def _first_value(payload: Any, keys: tuple[str, ...]) -> str:
@@ -391,11 +459,10 @@ def parse_result_url(body: Any, configured_field: str = "") -> tuple[str, str]:
         value = str(_json_path(body, path) or "").strip()
         if not value:
             continue
-        lower = value.split("?", 1)[0].lower()
-        if lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
+        if _result_url_rejected(value):
             continue
         return value, path
-    return "", ""
+    return _recursive_video_url(body)
 
 
 class GenericHttpVideoProvider:
@@ -737,14 +804,15 @@ class GenericHttpVideoProvider:
             url = poll_url.rstrip("/") + "/" + encoded
         result = self._open_json(url, None, method="GET", timeout=int(self.env.get("VIDEO_PROVIDER_POLL_HTTP_TIMEOUT_SECONDS") or 60))
         body = result.get("body") or {}
-        result_field = str(self.env.get(self.result_field_env) or "result_url")
+        result_field = str(
+            self.env.get(self.result_field_env)
+            or ("data.result_url" if self.provider_name == "shopaikey_video" else "result_url")
+        )
         result_url, result_url_path = parse_result_url(body, result_field)
         status, raw_status, status_path = parse_provider_status(body, has_result_url=bool(result_url))
-        progress = _first_value(body, ("progress", "progress_percent", "data.progress", "data.progress_percent"))
-        try:
-            progress_value = int(float(progress)) if progress != "" else None
-        except Exception:
-            progress_value = None
+        progress = _first_value(body, ("data.progress", "data.progress_percent", "progress", "progress_percent"))
+        progress_value = _parse_progress_value(progress)
+        is_shopaikey_status = self.provider_name == "shopaikey_video"
         raw_debug = {
             "smoke_stage": "poll_response_parse",
             "poll_http_status": int(result.get("status_code") or 0),
@@ -753,7 +821,26 @@ class GenericHttpVideoProvider:
             "provider_status_path": status_path,
             "result_url_present": bool(result_url),
             "result_field_path": result_url_path,
+            "result_url_primary_path_checked": True,
+            "result_url_found": bool(result_url),
+            "result_url_source_path": result_url_path or "none",
+            "provider_progress_raw": progress if progress not in (None, "") else "",
+            "provider_progress_raw_number": progress_value if progress_value is not None else "",
+            "provider_progress_source": "data.progress" if progress not in (None, "") else "none",
+            "http_200_not_used_as_progress": True,
         }
+        if is_shopaikey_status:
+            raw_debug.update(
+                {
+                    "shopaikey_status_endpoint_exact": True,
+                    "shopaikey_status_http_code": int(result.get("status_code") or 0),
+                    "shopaikey_raw_status": raw_status,
+                    "shopaikey_normalized_status": status,
+                    "shopaikey_data_progress_raw": progress if progress not in (None, "") else "",
+                    "shopaikey_progress_source": "data.progress" if progress not in (None, "") else "none",
+                    "shopaikey_result_url_from_data": result_url_path == "data.result_url",
+                }
+            )
         if result.get("exception_class"):
             raw_debug["exception_class"] = result.get("exception_class")
             raw_debug["exception_message_safe"] = result.get("exception_message_safe") or ""
