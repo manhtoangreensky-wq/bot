@@ -9531,6 +9531,14 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• selected_vocal_mode: <code>{html.escape(str((job or {}).get('selected_vocal_mode') or (job or {}).get('song_vocal') or '-'))}</code>\n"
         f"• vocal_mode_source: <code>{html.escape(str((job or {}).get('vocal_mode_source') or '-'))}</code>\n"
         f"• vocal_mode_persisted: <code>{html.escape(str((job or {}).get('vocal_mode_persisted') or '-'))}</code>\n"
+        f"• persisted_vocal_mode: <code>{html.escape(str((job or {}).get('song_vocal') or (job or {}).get('vocal_mode') or '-'))}</code>\n"
+        f"• final_provider_vocal_mode: <code>{html.escape(str((job or {}).get('final_provider_vocal_mode') or '-'))}</code>\n"
+        f"• final_provider_voice_field: <code>{html.escape(str((job or {}).get('final_provider_voice_field') or '-'))}</code>\n"
+        f"• final_provider_style_prompt_contains_female: <code>{'yes' if (job or {}).get('final_provider_style_prompt_contains_female') else 'no'}</code>\n"
+        f"• final_provider_lyrics_prompt_contains_female: <code>{'yes' if (job or {}).get('final_provider_lyrics_prompt_contains_female') else 'no'}</code>\n"
+        f"• final_provider_prompt_contains_male: <code>{'yes' if (job or {}).get('final_provider_prompt_contains_male') else 'no'}</code>\n"
+        f"• female_vocal_payload_lock: <code>{html.escape(str((job or {}).get('female_vocal_payload_lock') or '-'))}</code>\n"
+        f"• male_hint_removed_for_female: <code>{html.escape(str((job or {}).get('male_hint_removed_for_female') or '-'))}</code>\n"
         f"• style_preset_id: <code>{html.escape(str((job or {}).get('style_preset_id') or '-'))}</code>\n"
         f"• provider_prompt_contains_voice_hint: <code>{'yes' if (job or {}).get('provider_prompt_contains_voice_hint') else 'no'}</code>\n"
         f"• prompt_contains_female_vocal_hint: <code>{'yes' if (job or {}).get('prompt_contains_female_vocal_hint') else 'no'}</code>\n"
@@ -9667,8 +9675,14 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• artifact_hash: <code>{html.escape(artifact_hash or '-')}</code>\n"
         f"• delivery_state: <code>{html.escape(music_job_delivery_state(job))}</code>\n"
         f"• delivery_lock_state: <code>{html.escape(duplicate_guard)}</code>\n"
+        f"• delivery_lock_acquired: <code>{'yes' if (job or {}).get('delivery_lock_acquired') else 'no'}</code>\n"
+        f"• delivery_in_progress: <code>{'yes' if (job or {}).get('delivery_in_progress') or (job or {}).get('music_delivery_in_progress') else 'no'}</code>\n"
+        f"• duplicate_send_suppressed: <code>{'yes' if (job or {}).get('duplicate_send_suppressed') else 'no'}</code>\n"
+        f"• duplicate_send_suppressed_reason: <code>{html.escape(str((job or {}).get('duplicate_send_suppressed_reason') or '-'))}</code>\n"
         f"• delivery_source_first: <code>{html.escape(str((job or {}).get('delivery_source_first') or (job or {}).get('music_delivery_path') or '-'))}</code>\n"
+        f"• delivery_sender_source: <code>{html.escape(str((job or {}).get('delivery_sender_source') or '-'))}</code>\n"
         f"• ignored_duplicate_sources: <code>{html.escape(ignored_sources)}</code>\n"
+        f"• competing_sender_suppressed: <code>{'yes' if (job or {}).get('competing_sender_suppressed') else 'no'}</code>\n"
         f"• duplicate_delivery_prevented: <code>{'yes' if (job or {}).get('duplicate_delivery_prevented') else 'no'}</code>\n"
         f"• delivery_attempt_count: <code>{int((job or {}).get('delivery_attempt_count') or (job or {}).get('send_attempt_count') or 0)}</code>\n"
         f"• delivery_attempted: <code>{'yes' if failure_fields.get('delivery_attempted') else 'no'}</code>\n"
@@ -55088,12 +55102,14 @@ def shopaikey_suno_submit_payload(
     instrumental: bool = True,
     model: str = "",
     lyrics: str = "",
+    vocal_mode: str = "auto",
 ) -> dict:
-    lyrics_text = str(lyrics or "").strip()
+    locked = music_provider_vocal_submit_fields(prompt, lyrics, vocal_mode, instrumental=instrumental)
+    lyrics_text = str(locked.get("provider_lyrics") or "").strip()
     payload = {
         "mv": model or SHOPAIKEY_MUSIC_MODEL or "chirp-fenix",
         "make_instrumental": bool(instrumental),
-        "gpt_description_prompt": str(prompt or "").strip()[:1200],
+        "gpt_description_prompt": str(locked.get("provider_style_prompt") or prompt or "").strip()[:1200],
         "title": str(title or "TOAN AAS Music").strip()[:160],
         "tags": str(tags or "original").strip()[:240],
     }
@@ -101741,12 +101757,108 @@ def music_product_prompt_contains_vocal_hint(prompt: str = "", vocal_mode: str =
     text = str(prompt or "").lower()
     mode = normalize_song_vocal_mode(vocal_mode)
     if mode == "male":
-        return any(token in text for token in ("male vocal", "male lead", "male singer", "giọng nam", "giong nam"))
+        return bool(
+            re.search(r"\bmale\s+(?:lead\s+)?vocal(?:s)?\b", text)
+            or re.search(r"\bmale\s+singer\b", text)
+            or "giọng nam" in text
+            or "giong nam" in text
+        )
     if mode == "female":
-        return any(token in text for token in ("female vocal", "female lead", "female singer", "giọng nữ", "giong nu"))
+        return bool(
+            re.search(r"\bfemale\s+(?:lead\s+)?vocal(?:s)?\b", text)
+            or re.search(r"\bfemale\s+singer\b", text)
+            or "giọng nữ" in text
+            or "giong nu" in text
+        )
     if mode == "duet":
         return any(token in text for token in ("duet", "male and female", "song ca", "nam nữ", "nam nu"))
     return True
+
+def music_provider_vocal_tag(vocal_mode: str = "auto") -> str:
+    mode = normalize_song_vocal_mode(vocal_mode)
+    if mode == "female":
+        return "Female vocal"
+    if mode == "male":
+        return "Male vocal"
+    if mode == "duet":
+        return "Male and female duet vocal"
+    return ""
+
+def music_provider_strip_lyrics_vocal_conflicts(lyrics: str = "", vocal_mode: str = "auto") -> str:
+    text = str(lyrics or "").strip()
+    mode = normalize_song_vocal_mode(vocal_mode)
+    if not text or mode not in {"female", "male"}:
+        return text
+    conflict_patterns = (
+        [
+            r"^\s*\[(?:male\s+(?:lead\s+)?vocal(?:s)?|male\s+singer)\]\s*$",
+            r"\bmale\s+(?:lead\s+)?vocal(?:s)?\b",
+            r"\bmale\s+singer\b",
+        ]
+        if mode == "female"
+        else [
+            r"^\s*\[(?:female\s+(?:lead\s+)?vocal(?:s)?|female\s+singer)\]\s*$",
+            r"\bfemale\s+(?:lead\s+)?vocal(?:s)?\b",
+            r"\bfemale\s+singer\b",
+        ]
+    )
+    cleaned_lines: list[str] = []
+    for line in text.splitlines():
+        current = line
+        remove_line = False
+        for pattern in conflict_patterns:
+            if re.search(pattern, current, flags=re.I):
+                if pattern.startswith("^"):
+                    remove_line = True
+                    break
+                current = re.sub(pattern, "", current, flags=re.I)
+        if not remove_line:
+            cleaned_lines.append(current.rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned_lines)).strip()
+
+def music_provider_locked_style_prompt(style_prompt: str = "", vocal_mode: str = "auto") -> str:
+    mode = normalize_song_vocal_mode(vocal_mode)
+    text = music_product_strip_vocal_conflicts(str(style_prompt or ""), mode)
+    if mode not in {"female", "male", "duet"}:
+        return text
+    instruction = music_product_vocal_instructions(mode)
+    tag = music_provider_vocal_tag(mode)
+    if instruction and (not music_product_prompt_contains_vocal_hint(text, mode) or (tag and tag.lower() not in text.lower())):
+        text = f"{text}; {instruction}" if text else instruction
+    return sanitize_provider_status_text(text, "", 1200)
+
+def music_provider_locked_lyrics_prompt(lyrics: str = "", vocal_mode: str = "auto") -> str:
+    text = music_provider_strip_lyrics_vocal_conflicts(lyrics, vocal_mode)
+    mode = normalize_song_vocal_mode(vocal_mode)
+    tag = music_provider_vocal_tag(mode)
+    if not text or not tag:
+        return text
+    if tag.lower() not in text.lower():
+        text = f"[{tag}]\n{text}"
+    return text[:4000]
+
+def music_provider_vocal_submit_fields(
+    style_prompt: str = "",
+    lyrics: str = "",
+    vocal_mode: str = "auto",
+    *,
+    instrumental: bool = False,
+) -> dict:
+    mode = "none" if instrumental else normalize_song_vocal_mode(vocal_mode)
+    locked_style = music_provider_locked_style_prompt(style_prompt, mode)
+    locked_lyrics = music_provider_locked_lyrics_prompt(lyrics, mode)
+    combined = f"{locked_style}\n{locked_lyrics}"
+    return {
+        "provider_style_prompt": locked_style,
+        "provider_lyrics": locked_lyrics,
+        "final_provider_vocal_mode": mode,
+        "final_provider_voice_field": "instrumental" if instrumental else ("gpt_description_prompt+prompt" if locked_lyrics else "gpt_description_prompt"),
+        "final_provider_style_prompt_contains_female": music_product_prompt_contains_vocal_hint(locked_style, "female"),
+        "final_provider_lyrics_prompt_contains_female": music_product_prompt_contains_vocal_hint(locked_lyrics, "female"),
+        "final_provider_prompt_contains_male": music_product_prompt_contains_vocal_hint(combined, "male"),
+        "female_vocal_payload_lock": "yes" if mode == "female" and music_product_prompt_contains_vocal_hint(combined, "female") else "no",
+        "male_hint_removed_for_female": "yes" if mode == "female" and not music_product_prompt_contains_vocal_hint(combined, "male") else "no",
+    }
 
 def music_product_duet_lyrics_structure(lyrics: str = "") -> str:
     text = str(lyrics or "")
@@ -103420,6 +103532,16 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
     prompt = music_provider_prompt_for_result(result, preview=preview)
     provider_style_prompt = str(result.get("provider_style_prompt") or prompt).strip()
     provider_lyrics = str(result.get("provider_lyrics") or "").strip()
+    vocal_mode = music_product_canonical_vocal_mode(result)
+    instrumental_submit = product_kind == "background"
+    vocal_submit = music_provider_vocal_submit_fields(
+        provider_style_prompt,
+        provider_lyrics,
+        vocal_mode,
+        instrumental=instrumental_submit,
+    )
+    provider_style_prompt = str(vocal_submit.get("provider_style_prompt") or provider_style_prompt).strip()
+    provider_lyrics = str(vocal_submit.get("provider_lyrics") or provider_lyrics).strip()
     provider_title = str(result.get("provider_title") or result.get("title") or ("TOAN AAS Preview" if preview else "TOAN AAS Music")).strip()
     provider_tags = str(result.get("provider_tags") or result.get("guided_style") or result.get("genre") or result.get("style") or result.get("music_ai_kind") or "original").strip()
     providers = dict(readiness.get("providers") or {})
@@ -103431,7 +103553,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
                 prompt=provider_style_prompt,
                 model=selected_model,
                 duration_seconds=duration,
-                instrumental=product_kind == "background",
+                instrumental=instrumental_submit,
                 title=provider_title,
                 lyrics=provider_lyrics,
                 tags=provider_tags,
@@ -103456,6 +103578,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
             "task_id": task_id,
             "selected_model_key": str(provider_result.get("model") or selected_model or ""),
             "detail": str(provider_result.get("error_message_safe") or provider_result.get("status") or "")[:240],
+            **{key: value for key, value in vocal_submit.items() if key not in {"provider_style_prompt", "provider_lyrics"}},
         }
 
     async def submit_shopaikey() -> dict:
@@ -103467,6 +103590,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
             instrumental=not bool(result.get("song_product") or str(result.get("music_ai_kind") or "") in {"lyrics", "song"}),
             model=selected_model,
             lyrics=provider_lyrics,
+            vocal_mode=vocal_mode,
         )
         try:
             url = shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT)
@@ -103494,6 +103618,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
                 "task_id": task_id,
                 "selected_model_key": selected_model,
                 "detail": sanitize_provider_error((payload or {}).get("message") if isinstance(payload, dict) else "")[:240],
+                **{key: value for key, value in vocal_submit.items() if key not in {"provider_style_prompt", "provider_lyrics"}},
             }
         except Exception as exc:
             safe_error = sanitize_provider_error(exc)[:240]
@@ -103761,6 +103886,12 @@ def create_music_pending_submit_job(
     requested_vocal_mode = normalize_song_vocal_mode(payload.get("requested_vocal_mode") or selected_vocal_mode)
     provider_style_prompt = str(lifecycle_fields.get("provider_style_prompt") or "")
     provider_lyrics = str(lifecycle_fields.get("provider_lyrics") or "")
+    final_vocal_fields = music_provider_vocal_submit_fields(
+        provider_style_prompt,
+        provider_lyrics,
+        selected_vocal_mode,
+        instrumental=product_type != "music_song",
+    )
     provider_payload_valid = bool(provider_style_prompt and (product_type != "music_song" or provider_lyrics))
     pending = {
         "feature": "music_suno",
@@ -103820,6 +103951,13 @@ def create_music_pending_submit_job(
         "lyrics_present": bool(payload.get("lyrics_present") or provider_lyrics),
         "style_prompt_present": bool(payload.get("style_prompt_present") or provider_style_prompt),
         "provider_payload_valid": bool(payload.get("provider_payload_valid") or provider_payload_valid),
+        "final_provider_vocal_mode": str(final_vocal_fields.get("final_provider_vocal_mode") or selected_vocal_mode or ""),
+        "final_provider_voice_field": str(final_vocal_fields.get("final_provider_voice_field") or ""),
+        "final_provider_style_prompt_contains_female": bool(final_vocal_fields.get("final_provider_style_prompt_contains_female")),
+        "final_provider_lyrics_prompt_contains_female": bool(final_vocal_fields.get("final_provider_lyrics_prompt_contains_female")),
+        "final_provider_prompt_contains_male": bool(final_vocal_fields.get("final_provider_prompt_contains_male")),
+        "female_vocal_payload_lock": str(final_vocal_fields.get("female_vocal_payload_lock") or "no"),
+        "male_hint_removed_for_female": str(final_vocal_fields.get("male_hint_removed_for_female") or "no"),
         "female_flow_source": str(payload.get("female_flow_source") or ("restored_pr173/current_shared_path" if selected_vocal_mode == "female" else "")),
         "female_regression_fixed": str(payload.get("female_regression_fixed") or ("yes" if selected_vocal_mode == "female" else "")),
         "duet_enabled": bool(payload.get("duet_enabled") or selected_vocal_mode == "duet"),
@@ -103863,6 +104001,13 @@ def update_music_submit_job_provider_started(job: dict | None, *, updated_by="")
     is_song = music_job_product_type(current, "music_bg") == "music_song"
     lyrics_ready = bool(str(current.get("provider_lyrics") or "").strip()) if is_song else True
     style_ready = bool(str(current.get("provider_style_prompt") or "").strip())
+    selected_vocal_mode = music_product_canonical_vocal_mode(current)
+    final_vocal_fields = music_provider_vocal_submit_fields(
+        str(current.get("provider_style_prompt") or ""),
+        str(current.get("provider_lyrics") or ""),
+        selected_vocal_mode,
+        instrumental=not is_song,
+    )
     current.update({
         "status": "submitting",
         "provider_submit_called": True,
@@ -103884,6 +104029,13 @@ def update_music_submit_job_provider_started(job: dict | None, *, updated_by="")
         "music_style_prepared": bool(style_ready),
         "prompt_prepared": bool(style_ready),
         "music_prompt_prepared": bool(style_ready),
+        "final_provider_vocal_mode": str(final_vocal_fields.get("final_provider_vocal_mode") or selected_vocal_mode or ""),
+        "final_provider_voice_field": str(final_vocal_fields.get("final_provider_voice_field") or current.get("final_provider_voice_field") or ""),
+        "final_provider_style_prompt_contains_female": bool(final_vocal_fields.get("final_provider_style_prompt_contains_female")),
+        "final_provider_lyrics_prompt_contains_female": bool(final_vocal_fields.get("final_provider_lyrics_prompt_contains_female")),
+        "final_provider_prompt_contains_male": bool(final_vocal_fields.get("final_provider_prompt_contains_male")),
+        "female_vocal_payload_lock": str(final_vocal_fields.get("female_vocal_payload_lock") or "no"),
+        "male_hint_removed_for_female": str(final_vocal_fields.get("male_hint_removed_for_female") or "no"),
         "progress_percent": 25 if is_song and lyrics_ready and style_ready else 15,
         "percent": 25 if is_song and lyrics_ready and style_ready else 15,
         "public_percent_reason": "provider_payload_validated_submit_started",
@@ -103927,6 +104079,13 @@ def update_music_submit_job_provider_accepted(
         "submitted_to_provider_at": now_text(),
         "provider_job_id_saved_at": now_text(),
         "selected_model_key": str(payload.get("selected_model_key") or current.get("selected_model_key") or ""),
+        "final_provider_vocal_mode": str(payload.get("final_provider_vocal_mode") or current.get("final_provider_vocal_mode") or ""),
+        "final_provider_voice_field": str(payload.get("final_provider_voice_field") or current.get("final_provider_voice_field") or ""),
+        "final_provider_style_prompt_contains_female": bool(payload.get("final_provider_style_prompt_contains_female") or current.get("final_provider_style_prompt_contains_female")),
+        "final_provider_lyrics_prompt_contains_female": bool(payload.get("final_provider_lyrics_prompt_contains_female") or current.get("final_provider_lyrics_prompt_contains_female")),
+        "final_provider_prompt_contains_male": bool(payload.get("final_provider_prompt_contains_male") or current.get("final_provider_prompt_contains_male")),
+        "female_vocal_payload_lock": str(payload.get("female_vocal_payload_lock") or current.get("female_vocal_payload_lock") or "no"),
+        "male_hint_removed_for_female": str(payload.get("male_hint_removed_for_female") or current.get("male_hint_removed_for_female") or "no"),
         "pending_charge_xu": int(current.get("pending_charge_xu") or 0),
     })
     return save_engine_async_job(current)
@@ -106465,14 +106624,18 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
         or music_delivery_should_suppress_public_fail(result, current)
         or music_job_delivered(current)
     )
+    suppressed_before_send = reason in {"delivery_locked", "delivery_in_progress", "duplicate_in_progress", "memory_lock"}
     current.update({
         "ignored_duplicate_sources": ignored[-12:],
         "last_duplicate_blocked_at": now,
         "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
         "duplicate_delivery_prevented": True,
+        "duplicate_send_suppressed": True,
+        "duplicate_send_suppressed_reason": str(reason or "duplicate_delivery")[:120],
+        "competing_sender_suppressed": bool(not already_delivered),
         "duplicate_guard_state": "closed" if already_delivered else str(current.get("duplicate_guard_state") or "open"),
         "duplicate_prevention_reason": "same_job_same_artifact_already_delivered" if already_delivered else str(reason or "duplicate_delivery")[:120],
-        "delivery_attempt_count": previous_attempts if already_delivered else max(previous_attempts + 1, 1),
+        "delivery_attempt_count": previous_attempts if already_delivered or suppressed_before_send else max(previous_attempts + 1, 1),
     })
     if already_delivered:
         current.update({
@@ -106501,9 +106664,12 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
             "last_duplicate_blocked_at": now,
             "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
             "duplicate_delivery_prevented": True,
+            "duplicate_send_suppressed": True,
+            "duplicate_send_suppressed_reason": str(reason or "duplicate_delivery")[:120],
+            "competing_sender_suppressed": bool(not already_delivered),
             "duplicate_guard_state": "closed" if already_delivered else str(current_result.get("duplicate_guard_state") or "open"),
             "duplicate_prevention_reason": "same_job_same_artifact_already_delivered" if already_delivered else str(reason or "duplicate_delivery")[:120],
-            "delivery_attempt_count": result_attempts if already_delivered else max(result_attempts + 1, 1),
+            "delivery_attempt_count": result_attempts if already_delivered or suppressed_before_send else max(result_attempts + 1, 1),
         })
         if already_delivered:
             current_result.update({
@@ -106587,6 +106753,9 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "terminal_locked_at": delivered_at,
         "music_delivery_lock": "sent",
         "music_result_delivery_lock": "sent",
+        "delivery_lock_acquired": True,
+        "delivery_in_progress": False,
+        "music_delivery_in_progress": False,
         "delivery_confirmed": True,
         "telegram_delivery_confirmed": True,
         "telegram_delivered_at": delivered_at,
@@ -106595,6 +106764,7 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "music_delivery_message_id": message_id,
         "delivery_message_id": message_id,
         "delivery_source_first": str(current.get("delivery_source_first") or current.get("music_delivery_path") or ""),
+        "delivery_sender_source": str(current.get("delivery_sender_source") or current.get("music_delivery_path") or ""),
         "delivered_artifact_hash": output_sha or str(current.get("delivered_artifact_hash") or current.get("music_artifact_hash") or current.get("selected_artifact_hash") or ""),
         "delivered_artifact_path": str(current.get("delivered_artifact_path") or current.get("music_result_path") or current.get("output_path") or current.get("storage_ref") or ""),
         "terminal_public_outcome_sent": True,
@@ -106606,6 +106776,9 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "delivery_state_final": "delivered",
         "delivery_succeeded_final": True,
         "duplicate_guard_state": "closed",
+        "duplicate_send_suppressed": False,
+        "duplicate_send_suppressed_reason": "",
+        "competing_sender_suppressed": False,
         "duplicate_prevention_reason": "",
         "public_x_suppressed": True,
         "suppress_reason": "delivery_success",
@@ -106653,6 +106826,8 @@ def record_music_job_full_send_error(job: dict | None, error: str, updated_by=""
             "delivery_succeeded_final": True,
             "music_delivery_lock": "sent",
             "music_result_delivery_lock": "sent",
+            "delivery_in_progress": False,
+            "music_delivery_in_progress": False,
             "terminal_state": "delivered",
             "music_terminal_state": "delivered",
             "terminal_public_outcome_sent": True,
@@ -106679,6 +106854,8 @@ def record_music_job_full_send_error(job: dict | None, error: str, updated_by=""
             "last_delivery_error_category": "telegram_success_like_unconfirmed",
             "music_delivery_lock": "",
             "music_result_delivery_lock": "",
+            "delivery_in_progress": False,
+            "music_delivery_in_progress": False,
             "fail_reason_safe": "SUCCESS",
             "last_send_error": sanitize_provider_status_text(error, current.get("provider_task_id") or "", 220),
         })
@@ -106698,6 +106875,8 @@ def record_music_job_full_send_error(job: dict | None, error: str, updated_by=""
         "last_delivery_error_category": "telegram_delivery_failed",
         "music_delivery_lock": "",
         "music_result_delivery_lock": "",
+        "delivery_in_progress": False,
+        "music_delivery_in_progress": False,
         "send_attempt_count": previous_send_count + 1,
         "delivery_attempt_count": max(previous_delivery_attempt_count, previous_send_count + 1, 1),
         "last_send_error": sanitize_provider_status_text(error, current.get("provider_task_id") or "", 220),
@@ -106748,6 +106927,7 @@ async def deliver_music_result_once(
     current_result = dict(result or {})
     current_job = dict(job or {})
     source_token = music_delivery_source_token(source)
+    delivery_run_id = f"{source_token}:{time.time_ns()}"
     current_result["user_id"] = current_result.get("user_id") or user_id
     job_id = str(
         current_job.get("internal_job_id")
@@ -106785,8 +106965,9 @@ async def deliver_music_result_once(
         }
     if music_product_audio_has_partial_marker(current_result, current_job):
         return {"ok": False, "status": "FINAL_AUDIO_NOT_READY", "job": current_job, "result": current_result}
-    if str(current_result.get("music_result_delivery_lock") or current_job.get("music_delivery_lock") or "").lower() == "sending":
-        updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_locked", current_result, updated_by=updated_by or user_id)
+    in_progress_lock = bool(current_job.get("delivery_in_progress") or current_job.get("music_delivery_in_progress"))
+    if str(current_result.get("music_result_delivery_lock") or current_job.get("music_delivery_lock") or "").lower() == "sending" or in_progress_lock:
+        updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_in_progress" if in_progress_lock else "delivery_locked", current_result, updated_by=updated_by or user_id)
         return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0), "job": updated_job or current_job, "result": current_result}
     if audio_bytes is not None and not music_artifact_candidate_bytes(audio_bytes) and not music_delivery_artifact_candidates(current_result, current_job, None):
         if current_job and (
@@ -106817,12 +106998,22 @@ async def deliver_music_result_once(
         current_job.update({
             "music_delivery_lock": "sending",
             "music_result_delivery_lock": "sending",
+            "delivery_lock_acquired": True,
+            "delivery_in_progress": True,
+            "music_delivery_in_progress": True,
+            "delivery_lock_run_id": delivery_run_id,
+            "delivery_lock_acquired_at": lock_started_at,
             "music_delivery_started_at": lock_started_at,
             "music_delivery_path": source_token,
+            "delivery_sender_source": source_token,
             "delivery_source_first": str(current_job.get("delivery_source_first") or source_token),
+            "duplicate_guard_state": "sending",
         })
         current_result["music_result_delivery_lock"] = "sending"
         current_result["music_delivery_lock"] = "sending"
+        current_result["delivery_in_progress"] = True
+        current_result["music_delivery_in_progress"] = True
+        current_result["delivery_lock_run_id"] = delivery_run_id
         current_job = save_music_engine_async_job_if_ready(current_job)
         pre_delivery_lock_set = True
     artifact = await select_music_delivery_artifact(current_result, current_job, audio_bytes)
@@ -106834,6 +107025,8 @@ async def deliver_music_result_once(
             if pre_delivery_lock_set:
                 current_job["music_delivery_lock"] = ""
                 current_job["music_result_delivery_lock"] = ""
+                current_job["delivery_in_progress"] = False
+                current_job["music_delivery_in_progress"] = False
             if music_artifact_materialization_pending(artifact) or music_job_artifact_materialization_waiting(current_job):
                 current_job = mark_music_artifact_materialization_waiting(
                     current_job,
@@ -106871,6 +107064,8 @@ async def deliver_music_result_once(
         if current_job and pre_delivery_lock_set:
             current_job["music_delivery_lock"] = ""
             current_job["music_result_delivery_lock"] = ""
+            current_job["delivery_in_progress"] = False
+            current_job["music_delivery_in_progress"] = False
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
         return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
@@ -106879,20 +107074,40 @@ async def deliver_music_result_once(
         if current_job and pre_delivery_lock_set:
             current_job["music_delivery_lock"] = ""
             current_job["music_result_delivery_lock"] = ""
+            current_job["delivery_in_progress"] = False
+            current_job["music_delivery_in_progress"] = False
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
         return {"ok": False, "status": "AUDIO_DURATION_MISSING", "job": current_job, "result": current_result}
+    if job_id:
+        latest_job = get_engine_async_job(job_id)
+        if latest_job and music_job_delivered(latest_job):
+            updated_job = music_delivery_record_duplicate(latest_job, source_token, "already_delivered", current_result, updated_by=updated_by or user_id)
+            return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "charged_xu": int(updated_job.get("charged_xu") or current_result.get("music_charged_xu") or 0), "job": updated_job or latest_job, "result": current_result}
+        if latest_job:
+            latest_run_id = str(latest_job.get("delivery_lock_run_id") or "")
+            latest_lock = str(latest_job.get("music_delivery_lock") or latest_job.get("music_result_delivery_lock") or "").strip().lower()
+            latest_in_progress = bool(latest_job.get("delivery_in_progress") or latest_job.get("music_delivery_in_progress") or latest_lock == "sending")
+            if latest_in_progress and latest_run_id and latest_run_id != delivery_run_id:
+                updated_job = music_delivery_record_duplicate(latest_job, source_token, "delivery_in_progress", current_result, updated_by=updated_by or user_id)
+                return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(updated_job.get("charged_xu") or current_result.get("music_charged_xu") or 0), "job": updated_job or latest_job, "result": current_result}
+            current_job = {**current_job, **latest_job}
     lock_key = music_product_delivery_lock_key(user_id, current_result, current_job, payload)
     if lock_key in MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS:
-        updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_locked", current_result, updated_by=updated_by or user_id)
+        updated_job = music_delivery_record_duplicate(current_job, source_token, "memory_lock", current_result, updated_by=updated_by or user_id)
         return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0), "job": updated_job or current_job, "result": current_result}
     MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS.add(lock_key)
     started_at = now_text()
     current_result.update({
         "music_result_delivery_lock": "sending",
         "music_delivery_lock": "sending",
+        "delivery_lock_acquired": True,
+        "delivery_in_progress": True,
+        "music_delivery_in_progress": True,
+        "delivery_lock_run_id": delivery_run_id,
         "music_delivery_started_at": started_at,
         "music_delivery_path": source_token,
+        "delivery_sender_source": source_token,
         "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("delivery_attempt_count") or current_job.get("send_attempt_count") or 0) + 1,
         "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
         "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
@@ -106918,8 +107133,14 @@ async def deliver_music_result_once(
         current_job.update({
             "music_delivery_lock": "sending",
             "music_result_delivery_lock": "sending",
+            "delivery_lock_acquired": True,
+            "delivery_in_progress": True,
+            "music_delivery_in_progress": True,
+            "delivery_lock_run_id": delivery_run_id,
+            "delivery_lock_acquired_at": str(current_job.get("delivery_lock_acquired_at") or started_at),
             "music_delivery_started_at": started_at,
             "music_delivery_path": source_token,
+            "delivery_sender_source": source_token,
             "music_delivery_lock_key": lock_key,
             "delivery_source_first": str(current_job.get("delivery_source_first") or source_token),
             "delivery_attempt_count": int(current_job.get("delivery_attempt_count") or current_job.get("send_attempt_count") or 0) + 1,
@@ -106973,10 +107194,14 @@ async def deliver_music_result_once(
             logger.warning("music product send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
             current_result["music_result_delivery_lock"] = ""
             current_result["music_delivery_lock"] = ""
+            current_result["delivery_in_progress"] = False
+            current_result["music_delivery_in_progress"] = False
             save_music_guided_result(user_id, current_result)
             if current_job:
                 current_job["music_delivery_lock"] = ""
                 current_job["music_result_delivery_lock"] = ""
+                current_job["delivery_in_progress"] = False
+                current_job["music_delivery_in_progress"] = False
                 current_job = record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
             return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180), "job": current_job, "result": current_result}
 
@@ -106985,6 +107210,8 @@ async def deliver_music_result_once(
             success_like_response = music_telegram_success_like(sent_message)
             current_result["music_result_delivery_lock"] = ""
             current_result["music_delivery_lock"] = ""
+            current_result["delivery_in_progress"] = False
+            current_result["music_delivery_in_progress"] = False
             current_result["music_delivery_blocker"] = "telegram_message_id_missing"
             current_result["telegram_send_returned_message"] = False
             current_result["telegram_send_success_detected"] = bool(success_like_response)
@@ -106995,6 +107222,8 @@ async def deliver_music_result_once(
             if current_job:
                 current_job["music_delivery_lock"] = ""
                 current_job["music_result_delivery_lock"] = ""
+                current_job["delivery_in_progress"] = False
+                current_job["music_delivery_in_progress"] = False
                 current_job["delivery_state"] = "send_unconfirmed_success_like" if success_like_response else "send_unconfirmed"
                 current_job["auto_delivery_blocker"] = "" if success_like_response else "telegram_message_id_missing"
                 current_job["telegram_send_returned_message"] = False
@@ -107022,6 +107251,8 @@ async def deliver_music_result_once(
             current_job["music_result_duration_seconds"] = actual_duration
             current_job["music_result_size_bytes"] = len(payload)
             current_job["music_delivery_lock"] = "sent"
+            current_job["delivery_in_progress"] = False
+            current_job["music_delivery_in_progress"] = False
             current_job["music_delivered_at"] = now_text()
             current_job["music_charge_amount_xu"] = charged
             current_job["music_charged_at"] = now_text() if charge_result.get("ok") else ""
@@ -107034,9 +107265,13 @@ async def deliver_music_result_once(
             current_job["telegram_send_returned_message"] = True
             current_job["telegram_send_success_detected"] = True
             current_job["delivery_success_detection_source"] = "telegram_message_id"
+            current_job["delivery_sender_source"] = source_token
             current_job["delivery_state_final"] = "delivered"
             current_job["delivery_succeeded_final"] = True
             current_job["duplicate_guard_state"] = "closed"
+            current_job["duplicate_send_suppressed"] = False
+            current_job["duplicate_send_suppressed_reason"] = ""
+            current_job["competing_sender_suppressed"] = False
             current_job["public_x_suppressed"] = True
             current_job["suppress_reason"] = "delivery_success"
             current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
@@ -107105,16 +107340,22 @@ async def deliver_music_result_once(
             "music_delivered_at": delivered_at,
             "music_result_delivery_lock": "sent",
             "music_delivery_lock": "sent",
+            "delivery_in_progress": False,
+            "music_delivery_in_progress": False,
             "delivery_confirmed": True,
             "telegram_delivery_confirmed": True,
             "delivery_succeeded": True,
             "telegram_send_returned_message": True,
             "telegram_send_success_detected": True,
             "delivery_success_detection_source": "telegram_message_id",
+            "delivery_sender_source": source_token,
             "delivery_state": "delivered",
             "delivery_state_final": "delivered",
             "delivery_succeeded_final": True,
             "duplicate_guard_state": "closed",
+            "duplicate_send_suppressed": False,
+            "duplicate_send_suppressed_reason": "",
+            "competing_sender_suppressed": False,
             "duplicate_prevention_reason": "",
             "public_x_suppressed": True,
             "suppress_reason": "delivery_success",
