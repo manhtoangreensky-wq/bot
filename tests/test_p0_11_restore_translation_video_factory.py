@@ -192,7 +192,7 @@ def test_auto_dubbing_voice_selection_required():
 
 def test_auto_dubbing_voice_settings():
     labels = _labels(bot.video_dubbing_voice_settings_keyboard("vi"))
-    assert labels == [f"{bot.SUBDUB_DEFAULT_VOICE_SPEED} mặc định", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["1.0 mặc định", "⬅️ Quay lại", "🏠 Menu chính"]
     assert bot.parse_video_dubbing_voice_speed("0.9") == "0.9"
     assert bot.parse_video_dubbing_voice_speed("1") == "1.0"
     assert bot.parse_video_dubbing_voice_speed("1.5") == "1.5"

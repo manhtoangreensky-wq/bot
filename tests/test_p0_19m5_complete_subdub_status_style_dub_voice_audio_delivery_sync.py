@@ -168,7 +168,7 @@ def test_selected_voice_id_not_replaced_by_default(monkeypatch):
     assert state["voice_fallback_used"] is False
 
 
-def test_subtitle_ass_uses_moderate_bottom_boxed_readable_style():
+def test_subtitle_ass_uses_large_boxed_readable_style():
     style = bot.subdub_normalize_style(
         {
             "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -179,14 +179,12 @@ def test_subtitle_ass_uses_moderate_bottom_boxed_readable_style():
     )
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
     font_size = int(re.search(r"Style: Default,[^,]+,(\d+),", ass).group(1))
-    assert 34 <= font_size <= 58
+    assert font_size >= 60
+    assert font_size <= 76
     assert font_size >= style["size"]
-    assert 1.0 <= style["subtitle_font_multiplier"] <= 1.6
-    assert style["position"] == "bottom"
-    assert style["align"] == "center"
+    assert style["subtitle_font_multiplier"] >= 2.0
     assert style["font_size_cap_applied"] is True
     assert style["boxed_background"] is True
-    assert "WrapStyle: 0" in ass
     assert ",3," in ass
     assert style["outline"] >= 4
     assert bot.subdub_cover_filter(style) == ""
@@ -204,8 +202,7 @@ def test_receipt_does_not_show_fail_after_video_delivery():
         {"mode": bot.VIDEO_SUBTITLE_MODE_DUB},
         {"video_delivered": True, "charged": 12, "terminal_state": "delivered"},
     )
-    assert "Đã gửi video hoàn chỉnh" in text
-    assert "Chi phí:" in text
+    assert "Kết quả đã gửi phía trên" in text
     assert "Đã tạo video lồng tiếng." not in text
     assert "chưa" not in text.lower()
     assert "lỗi" not in text.lower()

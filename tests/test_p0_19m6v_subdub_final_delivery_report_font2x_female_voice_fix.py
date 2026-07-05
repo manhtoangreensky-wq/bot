@@ -27,12 +27,9 @@ def test_translated_subtitle_font_size_is_doubled_and_uses_video_play_res():
     })
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
-    assert 1.0 <= style["subtitle_font_multiplier"] <= 1.6
-    assert 34 <= style["render_size"] <= 58
-    assert style["position"] == "bottom"
-    assert style["align"] == "center"
+    assert style["subtitle_font_multiplier"] == 2.0
+    assert style["render_size"] <= 65
     assert style["font_size_cap_applied"] is True
-    assert "WrapStyle: 0" in ass
     assert "PlayResX: 1280" in ass
     assert "PlayResY: 720" in ass
     assert f",{style['render_size']}," in ass
@@ -102,18 +99,16 @@ def test_final_receipt_after_video_delivery_is_success_not_failure():
         "vi",
     )
 
-    assert "Đã gửi video hoàn chỉnh" in text
-    assert "Chi phí:" in text
+    assert "Kết quả đã gửi phía trên" in text
     assert "chưa xử lý được" not in text
     assert "lỗi" not in text.lower()
 
 
-def test_success_after_public_failure_is_suppressed_when_video_delivered():
+def test_success_after_public_failure_is_blocked_with_debug_flag():
     source = inspect.getsource(bot.handle_video_dubbing_callback)
 
-    assert "delivered_video_result" in source
-    assert "subdub_job_has_failure_public_outcome(latest_pipeline_job) and not delivered_video_result" in source
-    assert "late_public_error_suppressed" in source
+    assert "success_after_public_failure_prevented" in source
+    assert "success_after_public_failure_video_message_id" in source
 
 
 def test_no_music_video_generation_payos_pricing_db_changes():

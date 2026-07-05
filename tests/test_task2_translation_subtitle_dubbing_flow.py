@@ -174,7 +174,7 @@ def test_auto_dubbing_language_voice_speed_numeric():
     assert "🇰🇷 한국어" in _labels(bot.video_dubbing_language_keyboard("vi", state))
     assert "Nhập tốc độ mong muốn" in bot.video_dubbing_voice_speed_text(state, "vi")
     labels = _labels(bot.video_dubbing_voice_speed_keyboard("vi"))
-    assert labels == [f"{bot.SUBDUB_DEFAULT_VOICE_SPEED} mặc định", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["1.0 mặc định", "⬅️ Quay lại", "🏠 Menu chính"]
     assert bot.parse_video_dubbing_voice_speed("0.9") == "0.9"
     assert bot.parse_video_dubbing_voice_speed("1") == "1.0"
     assert bot.parse_video_dubbing_voice_speed("1.0") == "1.0"
