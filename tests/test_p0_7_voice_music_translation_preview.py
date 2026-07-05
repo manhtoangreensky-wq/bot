@@ -273,7 +273,8 @@ def test_music_preview_submits_preview_job_and_confirm_submits_full_job(monkeypa
     assert len(submitted) == 2
     assert submitted[1]["preview"] is False
     assert bot.get_music_guided_result(user_id)["music_task_id"] == "music-task-1"
-    assert "Đã xác nhận tạo bản đầy đủ" in confirm.outputs[-1]["text"]
+    assert "TOAN AAS đang tạo nhạc" in confirm.outputs[-1]["text"]
+    assert "Mã xử lý:" in confirm.outputs[-1]["text"]
 
 
 def test_translation_admin_blockers_are_exact_but_public_copy_is_clean(monkeypatch):

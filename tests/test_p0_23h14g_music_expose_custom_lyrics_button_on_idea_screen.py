@@ -87,6 +87,7 @@ def test_custom_lyrics_button_preserves_female_voice_state():
     state = bot.get_music_guided_result(USER_ID)
     assert state["song_vocal"] == "female"
     assert "Giọng hát: <b>Nữ</b>" in update.callback_query.message.outputs[-1]["text"]
+    assert "Style nhạc" in update.callback_query.message.outputs[-1]["text"]
 
 
 def test_custom_lyrics_button_preserves_male_voice_state():
@@ -115,7 +116,7 @@ def test_custom_lyrics_button_does_not_create_music_job(monkeypatch):
     monkeypatch.setattr(bot, "create_music_pending_submit_job", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("job created before confirm")))
     update = _update("music_quick|showroom|music_product_manual")
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
-    assert "Nội dung bài hát" in update.callback_query.message.outputs[-1]["text"]
+    assert "Style nhạc" in update.callback_query.message.outputs[-1]["text"]
 
 
 def test_custom_lyrics_button_does_not_charge(monkeypatch):
@@ -140,6 +141,37 @@ def test_back_from_lyrics_input_returns_to_idea_screen():
     state = bot.get_music_guided_result(USER_ID)
     assert state["song_vocal"] == "duet"
     assert "Ý tưởng bài hát" in back.callback_query.message.outputs[-1]["text"]
+
+
+def test_style_then_lyrics_flow_preserves_female_voice_state():
+    _reset()
+    _select_voice_to_idea(vocal="female")
+    manual = _update("music_quick|showroom|music_product_manual")
+    asyncio.run(bot.handle_music_quick_callback(manual, SimpleNamespace()))
+    assert "Style nhạc" in manual.callback_query.message.outputs[-1]["text"]
+
+    style_message = CaptureMessage(
+        text="Upbeat Tropical Pop, Female vocal, bright acoustic guitar, bouncy bass, healing vibes, 120 BPM",
+        chat_id=USER_ID,
+    )
+    style_update = SimpleNamespace(message=style_message, effective_user=SimpleNamespace(id=USER_ID))
+    asyncio.run(bot.handle_music_guided_pending_text(style_update, SimpleNamespace()))
+    assert "Lời hát" in style_message.outputs[-1]["text"]
+    state = bot.get_music_guided_result(USER_ID)
+    assert state["selected_vocal_mode"] == "female"
+    assert state["music_product_pending_lyrics"] is True
+
+    lyrics_message = CaptureMessage(
+        text="[Intro]\n(Ooh...)\n[Verse]\nTOAN AAS sang ngay\n[Chorus]\nCung nhau vuon xa",
+        chat_id=USER_ID,
+    )
+    lyrics_update = SimpleNamespace(message=lyrics_message, effective_user=SimpleNamespace(id=USER_ID))
+    asyncio.run(bot.handle_music_guided_pending_text(lyrics_update, SimpleNamespace()))
+    result = bot.get_music_guided_result(USER_ID)
+    assert result["selected_vocal_mode"] == "female"
+    assert "Female vocal" in result["provider_style_prompt"]
+    assert result["provider_lyrics"].startswith("[Intro]")
+    assert "Xác nhận tạo bài hát" in lyrics_message.outputs[-1]["text"]
 
 
 def test_back_from_idea_screen_returns_to_voice_selection():

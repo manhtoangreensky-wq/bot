@@ -8056,6 +8056,15 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "candidate_validation_passed": bool(artifact.get("candidate_validation_passed") or current.get("candidate_validation_passed")),
             "provider_auth_bypassed_for_direct_cdn": bool(artifact.get("provider_auth_bypassed_for_direct_cdn") or current.get("provider_auth_bypassed_for_direct_cdn")),
             "provider_auth_bypassed_for_direct_suno_cdn": bool(artifact.get("provider_auth_bypassed_for_direct_suno_cdn") or current.get("provider_auth_bypassed_for_direct_suno_cdn")),
+            "direct_audio_url_get_attempted": bool(artifact.get("direct_audio_url_get_attempted") or current.get("direct_audio_url_get_attempted")),
+            "direct_audio_url_http_status": int(artifact.get("direct_audio_url_http_status") or current.get("direct_audio_url_http_status") or artifact.get("download_http_status") or 0),
+            "direct_audio_url_content_type": str(artifact.get("direct_audio_url_content_type") or current.get("direct_audio_url_content_type") or artifact.get("download_content_type") or ""),
+            "direct_audio_url_bytes": int(artifact.get("direct_audio_url_bytes") or current.get("direct_audio_url_bytes") or artifact.get("downloaded_bytes") or 0),
+            "direct_audio_url_validation_passed": bool(artifact.get("direct_audio_url_validation_passed") or current.get("direct_audio_url_validation_passed")),
+            "direct_audio_url_error_category": str(artifact.get("direct_audio_url_error_category") or artifact.get("download_error_category") or current.get("direct_audio_url_error_category") or ""),
+            "selected_artifact_strategy": str(artifact.get("selected_artifact_strategy") or artifact.get("download_strategy_used") or current.get("selected_artifact_strategy") or ""),
+            "provider_download_json_83_bytes_ignored": bool(artifact.get("provider_download_json_83_bytes_ignored") or current.get("provider_download_json_83_bytes_ignored")),
+            "wav_json_no_data_ignored_when_raw_url_present": bool(artifact.get("wav_json_no_data_ignored_when_raw_url_present") or current.get("wav_json_no_data_ignored_when_raw_url_present")),
             "direct_cdn_download_attempted": bool(artifact.get("direct_cdn_download_attempted") or current.get("direct_cdn_download_attempted")),
             "direct_cdn_download_http_status": int(artifact.get("direct_cdn_download_http_status") or current.get("direct_cdn_download_http_status") or 0),
             "direct_cdn_download_content_type": str(artifact.get("direct_cdn_download_content_type") or current.get("direct_cdn_download_content_type") or ""),
@@ -8213,7 +8222,15 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "pr173_artifact_engine_restored": bool(artifact.get("pr173_artifact_engine_restored") or artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"}),
         "old_working_candidate_path_used": str(artifact.get("old_working_candidate_path_used") or artifact.get("selected_artifact_field_path") or current.get("selected_artifact_field_path") or ""),
         "direct_audio_url_get_attempted": bool(artifact.get("direct_audio_url_get_attempted") or artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"}),
+        "direct_audio_url_http_status": int(artifact.get("direct_audio_url_http_status") or artifact.get("download_http_status") or 0),
+        "direct_audio_url_content_type": str(artifact.get("direct_audio_url_content_type") or artifact.get("download_content_type") or ""),
+        "direct_audio_url_bytes": int(artifact.get("direct_audio_url_bytes") or artifact.get("downloaded_bytes") or len(payload) or 0),
+        "direct_audio_url_validation_passed": bool(artifact.get("direct_audio_url_validation_passed") or artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"}),
+        "direct_audio_url_error_category": "",
         "provider_download_endpoint_bypassed_for_raw_audio": bool(artifact.get("provider_download_endpoint_bypassed_for_raw_audio") or (artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"} and not artifact.get("provider_download_endpoint_attempted"))),
+        "provider_download_json_83_bytes_ignored": bool(artifact.get("provider_download_json_83_bytes_ignored") or (artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"} and not artifact.get("provider_download_endpoint_attempted"))),
+        "wav_json_no_data_ignored_when_raw_url_present": bool(artifact.get("wav_json_no_data_ignored_when_raw_url_present") or (artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"} and not artifact.get("provider_download_endpoint_attempted"))),
+        "selected_artifact_strategy": str(artifact.get("selected_artifact_strategy") or artifact.get("download_strategy_used") or ""),
         "downloaded_content_type": str(artifact.get("download_content_type") or ""),
         "downloaded_bytes": int(artifact.get("downloaded_bytes") or len(payload) or 0),
         "audio_validation_passed": True,
@@ -8224,7 +8241,7 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "provider_download_endpoint_attempted": bool(artifact.get("provider_download_endpoint_attempted")),
         "provider_download_http_status": int(artifact.get("provider_download_http_status") or artifact.get("download_http_status") or 0),
         "provider_download_content_type": str(artifact.get("provider_download_content_type") or artifact.get("download_content_type") or ""),
-        "provider_download_bytes": int(artifact.get("provider_download_bytes") or artifact.get("downloaded_bytes") or len(payload) or 0),
+        "provider_download_bytes": int(artifact.get("provider_download_bytes") or (artifact.get("downloaded_bytes") if artifact.get("provider_download_endpoint_attempted") else 0) or 0),
         "setup_required": "",
         "wav_endpoint_configured": bool(artifact.get("wav_endpoint_configured") or current.get("wav_endpoint_configured")),
         "wav_request_http_status": int(artifact.get("wav_request_http_status") or current.get("wav_request_http_status") or 0),
@@ -8782,6 +8799,7 @@ async def send_product_progress_message(
     canonical = product_progress_status.normalize_product_type(product_type)
     normalized_job_id = canonical_music_job_id(job_id) if progress_product_type_is_music(canonical, job_id) else str(job_id or "")
     panel_job_id = normalized_job_id or str(job_id or "")
+    persisted_job = {}
     if progress_product_type_is_music(canonical, panel_job_id):
         persisted_job = get_engine_async_job(job_id) or get_engine_async_job(panel_job_id)
         if not music_progress_panel_job_is_real(panel_job_id, persisted_job):
@@ -8805,8 +8823,11 @@ async def send_product_progress_message(
             except Exception:
                 pass
             return sent
+    panel_text = product_progress_status_text(canonical, panel_job_id, current_stage, percent, terminal_state, public_note, lang)
+    if progress_product_type_is_music(canonical, panel_job_id) and music_progress_job_lookup_found(panel_job_id, persisted_job):
+        panel_text = product_progress_status_from_job_text(canonical, persisted_job, panel_job_id, lang)
     sent = await message.reply_text(
-        product_progress_status_text(canonical, panel_job_id, current_stage, percent, terminal_state, public_note, lang),
+        panel_text,
         parse_mode="HTML",
         reply_markup=product_progress_status_keyboard(canonical, panel_job_id, lang),
     )
@@ -101538,10 +101559,24 @@ def normalize_song_vocal_mode(value: str = "") -> str:
 
 def music_product_canonical_vocal_mode(data: dict | None = None, default: str = "auto") -> str:
     current = dict(data or {})
-    for key in ("selected_vocal_mode", "requested_vocal_mode", "song_vocal", "vocal_mode"):
+    # PR #173's working path built the provider prompt from the user-facing
+    # song_vocal/vocal_mode choice. Later audit fields can be stale, so they
+    # must never override the voice the user just selected.
+    non_auto: list[str] = []
+    auto_seen = False
+    for key in ("song_vocal", "vocal_mode", "requested_vocal_mode", "selected_vocal_mode"):
         raw = str(current.get(key) or "").strip()
-        if raw:
-            return normalize_song_vocal_mode(raw)
+        if not raw:
+            continue
+        mode = normalize_song_vocal_mode(raw)
+        if mode == "auto":
+            auto_seen = True
+            continue
+        non_auto.append(mode)
+    if non_auto:
+        return non_auto[0]
+    if auto_seen:
+        return "auto"
     return normalize_song_vocal_mode(default)
 
 def music_product_vocal_label(value: str = "", lang: str = "vi") -> str:
@@ -101578,11 +101613,11 @@ def music_product_strip_vocal_conflicts(style_prompt: str = "", vocal_mode: str 
 def music_product_vocal_instructions(vocal_mode: str = "auto") -> str:
     mode = normalize_song_vocal_mode(vocal_mode)
     if mode == "male":
-        return "male lead vocal, clear Vietnamese male vocal, energetic male singer"
+        return "male lead vocal, clear Vietnamese male vocal, energetic male singer, Male vocal"
     if mode == "female":
-        return "female lead vocal, clear Vietnamese female vocal, bright female singer"
+        return "female lead vocal, clear Vietnamese female vocal, bright female singer, Female vocal"
     if mode == "duet":
-        return "male and female duet, alternating male and female vocals, duet chorus, harmony vocals"
+        return "male and female duet, alternating male and female vocals, duet chorus, harmony vocals, Male and female duet vocal"
     return ""
 
 def music_product_prompt_contains_vocal_hint(prompt: str = "", vocal_mode: str = "auto") -> bool:
@@ -101614,18 +101649,23 @@ def music_product_vocal_state_fields(
     prompt_after_preset: str = "",
 ) -> dict:
     data = dict(current or {})
-    requested = music_product_canonical_vocal_mode({
-        "selected_vocal_mode": requested_vocal_mode or data.get("requested_vocal_mode"),
-        "requested_vocal_mode": data.get("requested_vocal_mode"),
-        "song_vocal": data.get("song_vocal"),
-        "vocal_mode": data.get("vocal_mode"),
-    })
-    selected = music_product_canonical_vocal_mode({
-        "selected_vocal_mode": selected_vocal_mode or data.get("selected_vocal_mode"),
-        "requested_vocal_mode": requested,
-        "song_vocal": data.get("song_vocal"),
-        "vocal_mode": data.get("vocal_mode"),
-    }, requested)
+    requested = normalize_song_vocal_mode(
+        requested_vocal_mode
+        or data.get("song_vocal")
+        or data.get("vocal_mode")
+        or data.get("requested_vocal_mode")
+        or data.get("selected_vocal_mode")
+        or "auto"
+    )
+    selected = normalize_song_vocal_mode(
+        selected_vocal_mode
+        or requested
+        or data.get("song_vocal")
+        or data.get("vocal_mode")
+        or data.get("selected_vocal_mode")
+        or data.get("requested_vocal_mode")
+        or "auto"
+    )
     prompt = str(prompt_after_preset or data.get("provider_style_prompt") or data.get("selected_prompt") or data.get("description") or "")
     lyrics = str(data.get("provider_lyrics") or data.get("lyrics") or data.get("song_lyrics") or "").strip()
     style_present = bool(prompt.strip())
@@ -101962,6 +102002,13 @@ def music_product_parse_details(text: str = "", mode: str = "background", tier: 
         "style": "style",
         "phong cách": "style",
         "phong cach": "style",
+        "style nhạc": "style_prompt",
+        "style nhac": "style_prompt",
+        "gợi ý âm nhạc": "style_prompt",
+        "goi y am nhac": "style_prompt",
+        "music prompt": "style_prompt",
+        "music style": "style_prompt",
+        "style prompt": "style_prompt",
         "cảm xúc": "mood",
         "cam xuc": "mood",
         "mood": "mood",
@@ -101978,7 +102025,7 @@ def music_product_parse_details(text: str = "", mode: str = "background", tier: 
         "lyrics": "lyrics",
     }
     for line in raw_text.splitlines():
-        match = re.match(r"^\s*([^:：-]{2,24})\s*[:：-]\s*(.*)$", line)
+        match = re.match(r"^\s*([^:：-]{2,64})\s*[:：-]\s*(.*)$", line)
         if match:
             label = match.group(1).strip().lower()
             normalized = unicodedata.normalize("NFC", label)
@@ -102053,6 +102100,12 @@ def music_product_details_input_text(mode: str = "background", tier: str = "", v
             return "🎤 <b>Song details</b>\n\nSend title, theme, genre, mood, lyrics and language. TOAN AAS will show the invoice before creating audio."
         return "🎼 <b>Background music details</b>\n\nSend genre/style, mood, duration and a short description. TOAN AAS will show the invoice before creating audio."
     if mode_key == "song":
+        vocal_tag = {
+            "male": "Male vocal",
+            "female": "Female vocal",
+            "duet": "Male and female duet vocal",
+            "auto": "Natural vocal",
+        }.get(normalize_song_vocal_mode(vocal_mode), "Natural vocal")
         return (
             f"🎤 <b>Nội dung bài hát</b>\n\n"
             f"Gói: <b>{html.escape(tier_label)}</b>\n"
@@ -102060,10 +102113,10 @@ def music_product_details_input_text(mode: str = "background", tier: str = "", v
             "Gửi theo mẫu ngắn này:\n"
             "Tiêu đề: ...\n"
             "Chủ đề: ...\n"
-            "Thể loại: ...\n"
-            "Cảm xúc: ...\n"
+            f"Style nhạc: Upbeat Tropical Pop, {vocal_tag}, bright acoustic guitar, bouncy bass, healing vibes, refreshing, 120 BPM, clean studio production\n"
             "Ngôn ngữ: Tiếng Việt\n"
             "Lời hát:\n"
+            "[Intro]\n...\n"
             "[Verse]\n...\n[Chorus]\n...\n\n"
             "TOAN AAS chưa xử lý và chưa trừ Xu."
         )
@@ -102075,6 +102128,62 @@ def music_product_details_input_text(mode: str = "background", tier: str = "", v
         "Thể loại: ...\n"
         "Cảm xúc: ...\n"
         "Thời lượng: 60 giây\n\n"
+        "TOAN AAS chưa xử lý và chưa trừ Xu."
+    )
+
+def music_product_style_input_text(tier: str = "", vocal_mode: str = "auto", lang: str = "vi") -> str:
+    tier_label = music_product_tier_label(tier, lang)
+    vocal = normalize_song_vocal_mode(vocal_mode)
+    vocal_tag = {
+        "male": "Male vocal",
+        "female": "Female vocal",
+        "duet": "Male and female duet vocal",
+        "auto": "Natural vocal",
+    }.get(vocal, "Natural vocal")
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎚 <b>Music style</b>\n\n"
+            f"Package: <b>{html.escape(tier_label)}</b>\n"
+            f"Vocal: <b>{html.escape(music_product_vocal_label(vocal, lang))}</b>\n\n"
+            "Send the style/music prompt first. Example:\n"
+            f"Upbeat Tropical Pop, {vocal_tag}, bright acoustic guitar, bouncy bass, healing vibes, 120 BPM, clean studio production\n\n"
+            "TOAN AAS has not processed anything and has not charged Xu."
+        )
+    return (
+        "🎚 <b>Style nhạc</b>\n\n"
+        f"Gói: <b>{html.escape(tier_label)}</b>\n"
+        f"Giọng hát: <b>{html.escape(music_product_vocal_label(vocal, lang))}</b>\n\n"
+        "Anh/chị gửi phần Style / Music Prompt trước.\n"
+        "Ví dụ:\n"
+        f"Upbeat Tropical Pop, {vocal_tag}, bright acoustic guitar, marimba, deep bouncy bass, healing vibes, refreshing, energetic, 120 BPM, clean studio production\n\n"
+        "Sau bước này TOAN AAS mới yêu cầu dán Lời hát.\n"
+        "TOAN AAS chưa xử lý và chưa trừ Xu."
+    )
+
+def music_product_lyrics_input_text(tier: str = "", vocal_mode: str = "auto", style_prompt: str = "", lang: str = "vi") -> str:
+    tier_label = music_product_tier_label(tier, lang)
+    vocal = normalize_song_vocal_mode(vocal_mode)
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎤 <b>Lyrics</b>\n\n"
+            f"Package: <b>{html.escape(tier_label)}</b>\n"
+            f"Vocal: <b>{html.escape(music_product_vocal_label(vocal, lang))}</b>\n\n"
+            "Paste only the lyrics here, with structure tags like [Intro], [Verse], [Chorus]."
+        )
+    style_line = sanitize_provider_status_text(style_prompt, "", 260)
+    return (
+        "🎤 <b>Lời hát</b>\n\n"
+        f"Gói: <b>{html.escape(tier_label)}</b>\n"
+        f"Giọng hát: <b>{html.escape(music_product_vocal_label(vocal, lang))}</b>\n"
+        f"Style nhạc: {html.escape(style_line or 'Đã lưu')}\n\n"
+        "Anh/chị dán phần Lời hát theo cấu trúc:\n"
+        "[Intro]\n"
+        "[Verse 1]\n...\n"
+        "[Pre-Chorus]\n...\n"
+        "[Chorus]\n...\n"
+        "[Bridge]\n...\n"
+        "[Outro]\n\n"
+        "Có thể dùng SFX như [Ocean wave sfx] và bè như (Ooh... aah...).\n"
         "TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
@@ -102138,7 +102247,8 @@ def music_product_suggestion_offset(result: dict | None = None) -> int:
     return max(0, _safe_int((result or {}).get("music_suggestion_offset"), 0))
 
 def music_product_public_style_from_parts(*parts: str) -> str:
-    text = "; ".join(str(item or "").strip() for item in parts if str(item or "").strip())
+    text = ", ".join(str(item or "").strip(" ,.;") for item in parts if str(item or "").strip(" ,.;"))
+    text = re.sub(r"\s*,\s*", ", ", text)
     return re.sub(r"\s{2,}", " ", text).strip(" ;,")[:900]
 
 def build_music_product_suggestions(
@@ -102157,26 +102267,26 @@ def build_music_product_suggestions(
     seed = int(music_product_hash_text(f"{mode_key}:{tier_key}:{vocal_mode}:{clean_idea}")[:6] or "0", 16)
     start = (seed + max(0, int(offset or 0))) % 9
     background_bank = [
-        ("Future Pop", "tươi sáng", "110 BPM", "video quảng cáo TikTok", "sạch, hiện đại, nhịp rõ"),
-        ("Cinematic Tech", "truyền cảm hứng", "92 BPM", "video thương hiệu", "mở rộng, sang trọng, cao trào vừa phải"),
-        ("Tropical House", "vui tươi", "118 BPM", "reels bán hàng", "ấm, dễ nhớ, chuyển cảnh mượt"),
-        ("Lo-fi Corporate", "tin cậy", "86 BPM", "video giới thiệu dịch vụ", "nhẹ, tinh gọn, nền nói chuyện rõ"),
-        ("Electro Pop", "năng lượng", "124 BPM", "short video ra mắt sản phẩm", "bass gọn, synth sáng, hook ngắn"),
-        ("Acoustic Pop", "ấm áp", "96 BPM", "video review", "guitar nhẹ, piano sáng, cảm giác gần gũi"),
-        ("Modern R&B", "sang trọng", "100 BPM", "lookbook sản phẩm", "groove mềm, không lấn lời thoại"),
-        ("Epic Hybrid", "bứt phá", "104 BPM", "video chiến dịch", "trống lớn, synth rộng, kết thúc chắc"),
-        ("Minimal Tech", "tập trung", "108 BPM", "demo phần mềm", "nhịp đều, không rối, nền sạch"),
+        ("Future Pop", "bright, uplifting", "110 BPM", "TikTok advertisement video", "clean studio production, modern synth, clear rhythm"),
+        ("Cinematic Tech", "inspirational, premium", "92 BPM", "brand video", "wide cinematic synth, elegant build, moderate climax"),
+        ("Tropical House", "sunny, feel-good", "118 BPM", "sales reels", "warm pluck synth, catchy hook, smooth transition"),
+        ("Lo-fi Corporate", "trustworthy, calm", "86 BPM", "service introduction video", "soft beat, clean background, speech friendly"),
+        ("Electro Pop", "energetic, bright", "124 BPM", "product launch short video", "bouncy bass, bright synth, short hook"),
+        ("Acoustic Pop", "warm, friendly", "96 BPM", "review video", "acoustic guitar, bright piano, intimate feel"),
+        ("Modern R&B", "luxury, smooth", "100 BPM", "product lookbook", "soft groove, clean bass, vocal-friendly space"),
+        ("Epic Hybrid", "breakthrough, powerful", "104 BPM", "campaign video", "big drums, wide synth, strong ending"),
+        ("Minimal Tech", "focused, precise", "108 BPM", "software demo", "steady pulse, clean texture, uncluttered background"),
     ]
     song_bank = [
-        ("Pop thương hiệu", "vui tươi", "112 BPM", "verse - pre-chorus - chorus - outro", "giai điệu sáng, hook dễ nhớ"),
-        ("Dance Pop", "bứt phá", "124 BPM", "verse - chorus - bridge - final chorus", "nhịp mạnh, điệp khúc mở"),
-        ("Acoustic Pop", "ấm áp", "92 BPM", "verse - chorus - verse - chorus", "mộc, gần gũi, lời rõ"),
-        ("Future Pop", "hiện đại", "116 BPM", "intro - verse - chorus - outro", "synth sáng, cảm giác công nghệ"),
-        ("R&B Pop", "sang trọng", "98 BPM", "verse - pre-chorus - chorus", "groove mềm, vocal nổi"),
-        ("Rock Pop", "quyết tâm", "132 BPM", "verse - chorus - bridge - chorus", "guitar rõ, năng lượng cao"),
-        ("Ballad Pop", "cảm xúc", "78 BPM", "verse - chorus - bridge - outro", "piano mềm, cao trào vừa"),
-        ("Tropical Pop", "lạc quan", "120 BPM", "verse - chorus - dance break - chorus", "nhẹ, nắng, dễ nghe"),
-        ("Indie Pop", "tự nhiên", "104 BPM", "verse - chorus - verse - chorus", "mộc, sáng, có chất riêng"),
+        ("Brand Pop", "upbeat, feel-good", "112 BPM", "verse - pre-chorus - chorus - outro", "bright melody, catchy hook, clean studio production"),
+        ("Dance Pop", "high energy, uplifting", "124 BPM", "verse - chorus - bridge - final chorus", "driving rhythm, open chorus, bouncy bass"),
+        ("Acoustic Pop", "warm, healing", "92 BPM", "verse - chorus - verse - chorus", "acoustic guitar, bright piano, clear lyrics"),
+        ("Future Pop", "modern, inspirational", "116 BPM", "intro - verse - chorus - outro", "bright synth, tech vibe, clean studio production"),
+        ("R&B Pop", "smooth, luxury", "98 BPM", "verse - pre-chorus - chorus", "soft groove, warm bass, vocal-forward mix"),
+        ("Rock Pop", "determined, energetic", "132 BPM", "verse - chorus - bridge - chorus", "clear electric guitar, driving drums, high energy"),
+        ("Ballad Pop", "emotional, hopeful", "78 BPM", "verse - chorus - bridge - outro", "soft piano, gentle strings, emotional climax"),
+        ("Tropical Pop", "optimistic, refreshing", "120 BPM", "verse - chorus - dance break - chorus", "tropical house elements, sunny vibe, catchy melody"),
+        ("Indie Pop", "natural, bright", "104 BPM", "verse - chorus - verse - chorus", "acoustic guitar, indie drums, fresh vocal tone"),
     ]
     title_prefix = ["Bứt Phá", "Nhịp Sáng", "Dấu Ấn", "Vươn Xa", "Tỏa Sáng", "Khởi Động", "Niềm Tin", "Chạm Tới", "Lên Sóng"]
     title_tail = ["TOAN AAS", "Ngày Mới", "AI Việt", "Thương Hiệu", "Tương Lai", "Khách Hàng", "Hành Trình", "Công Nghệ", "Chiến Dịch"]
@@ -102187,11 +102297,11 @@ def build_music_product_suggestions(
             genre, mood, tempo, structure, production = song_bank[idx]
             vocal = normalize_song_vocal_mode(vocal_mode)
             vocal_direction = {
-                "male": "Giọng nam chính rõ lời, giàu năng lượng, không dùng giọng nữ.",
-                "female": "Giọng nữ chính rõ lời, sáng, không dùng giọng nam.",
-                "duet": "Song ca nam nữ, chia câu luân phiên, điệp khúc hòa giọng.",
-                "auto": "Giọng hát tự động phù hợp với phong cách bài hát.",
-            }.get(vocal, "Giọng hát tự động phù hợp với phong cách bài hát.")
+                "male": "Male vocal, male lead vocal, emotional vocal, Vietnamese lyrics in Lyrics field",
+                "female": "Female vocal, female lead vocal, emotional vocal, Vietnamese lyrics in Lyrics field",
+                "duet": "Male and female duet vocal, alternating male and female vocals, duet chorus, Vietnamese lyrics in Lyrics field",
+                "auto": "Natural vocal, emotional vocal, Vietnamese lyrics in Lyrics field",
+            }.get(vocal, "Natural vocal, emotional vocal, Vietnamese lyrics in Lyrics field")
             title = f"{title_prefix[idx]} {title_tail[(idx + i) % 9]}"
             lyric_seed = clean_idea[:110].strip(" .")
             lyrics = (
@@ -102203,6 +102313,7 @@ def build_music_product_suggestions(
             )
             style_prompt = music_product_public_style_from_parts(
                 genre,
+                "acoustic guitar, bright piano, bouncy bass",
                 mood,
                 tempo,
                 production,
@@ -105006,12 +105117,14 @@ async def music_download_artifact_candidate(
     provider_task_id = music_job_provider_task_id(current)
     raw_provider_result = current.get("raw_provider_result_internal") or current.get("raw_provider_result") or {}
     attempts: list[dict] = []
+    raw_audio_prefetch: dict = {}
 
-    async def run_strategy(strategy: str, extra_headers: dict | None = None):
+    async def run_strategy(strategy: str, extra_headers: dict | None = None, target_url: str = ""):
+        request_url = str(target_url or url)
         if extra_headers:
-            payload, detail, status = await _download_music_audio_url_bytes(url, timeout_seconds=timeout_seconds, headers=extra_headers)
+            payload, detail, status = await _download_music_audio_url_bytes(request_url, timeout_seconds=timeout_seconds, headers=extra_headers)
         else:
-            payload, detail, status = await _download_music_audio_url_bytes(url, timeout_seconds=timeout_seconds)
+            payload, detail, status = await _download_music_audio_url_bytes(request_url, timeout_seconds=timeout_seconds)
         content_type = music_download_detail_field(detail, "content_type")
         downloaded = len(payload)
         if not payload:
@@ -105110,6 +105223,83 @@ async def music_download_artifact_candidate(
             **common,
         }
 
+    raw_result_url = str(item.get("raw_result_url") or "").strip()
+    raw_result_field_path = str(item.get("raw_result_field_path") or item.get("field_path") or item.get("source") or "")
+    if (
+        provider_name == "key4u_suno"
+        and item.get("provider_download_endpoint_candidate")
+        and not item.get("skip_raw_audio_prefetch")
+        and bool(item.get("prefer_direct_raw_audio") or item.get("force_direct_raw_audio") or item.get("pr173_direct_raw_audio_first"))
+        and raw_result_url
+        and music_artifact_candidate_is_direct_suno_audio({
+            **item,
+            "url": raw_result_url,
+            "field_path": raw_result_field_path,
+            "source": raw_result_field_path,
+            "provider_download_endpoint_candidate": False,
+        })
+    ):
+        payload, detail, status, content_type, downloaded, category = await run_strategy("direct_raw_url", target_url=raw_result_url)
+        common = {
+            "download_detail": detail,
+            "download_http_status": int(status or 0),
+            "download_content_type": content_type,
+            "downloaded_bytes": int(downloaded or len(payload) or 0),
+            "download_strategy_used": "direct_raw_url",
+            "provider_auth_header_used": False,
+            "provider_proxy_attempted": False,
+            "provider_download_endpoint_configured": provider_download_endpoint_configured,
+            "provider_download_endpoint_attempted": False,
+            "provider_download_http_status": 0,
+            "provider_download_content_type": "",
+            "provider_download_bytes": 0,
+            "provider_auth_bypassed_for_direct_cdn": True,
+            "provider_auth_bypassed_for_direct_suno_cdn": True,
+            "direct_audio_url_get_attempted": True,
+            "direct_audio_url_http_status": int(status or 0),
+            "direct_audio_url_content_type": content_type,
+            "direct_audio_url_bytes": int(downloaded or len(payload) or 0),
+            "direct_audio_url_validation_passed": bool(payload),
+            "direct_cdn_download_attempted": True,
+            "direct_cdn_download_http_status": int(status or 0),
+            "direct_cdn_download_content_type": content_type,
+            "direct_cdn_download_bytes": int(downloaded or len(payload) or 0),
+            "provider_download_endpoint_bypassed_for_raw_audio": True,
+            "provider_download_json_83_bytes_ignored": True,
+            "wav_json_no_data_ignored_when_raw_url_present": True,
+            "selected_artifact_strategy": "direct_raw_url",
+            "candidate_attempted": True,
+            "candidate_field_path": raw_result_field_path,
+            "candidate_host": urlparse(raw_result_url).netloc,
+            "candidate_bare_url_allowed_for_validation": True,
+            "candidate_http_status": int(status or 0),
+            "candidate_content_type": content_type,
+            "candidate_bytes": int(downloaded or len(payload) or 0),
+            "download_attempts": attempts,
+        }
+        if payload:
+            return {
+                "ok": True,
+                "audio_bytes": payload,
+                "download_error_category": "",
+                "pr173_artifact_engine_restored": True,
+                "old_working_candidate_path_used": raw_result_field_path,
+                "candidate_validation_passed": True,
+                "direct_cdn_validation_passed": True,
+                "audio_validation_passed": True,
+                "artifact_ready": True,
+                "final_audio_download_status": "PASS",
+                "final_audio_content_type": content_type,
+                "final_audio_bytes": len(payload),
+                **common,
+            }
+        raw_audio_prefetch = {
+            "direct_audio_url_error_category": category or "download_failed",
+            "direct_audio_url_prefetch_failed": True,
+            "direct_audio_url_prefetch_detail": sanitize_provider_status_text(detail, "", 180),
+            **common,
+        }
+
     if provider_name == "key4u_suno" and item.get("provider_download_endpoint_candidate"):
         proxy_payload, proxy_detail, proxy_status = await music_provider_proxy_download_audio(
             provider_name=provider_name,
@@ -105137,6 +105327,12 @@ async def music_download_artifact_candidate(
                 "provider_download_http_status": int(proxy_status or 0),
                 "provider_download_content_type": proxy_content_type,
                 "provider_download_bytes": len(proxy_payload),
+                "direct_audio_url_get_attempted": bool(raw_audio_prefetch.get("direct_audio_url_get_attempted")),
+                "direct_audio_url_http_status": int(raw_audio_prefetch.get("direct_audio_url_http_status") or 0),
+                "direct_audio_url_content_type": str(raw_audio_prefetch.get("direct_audio_url_content_type") or ""),
+                "direct_audio_url_bytes": int(raw_audio_prefetch.get("direct_audio_url_bytes") or 0),
+                "direct_audio_url_validation_passed": False,
+                "direct_audio_url_error_category": str(raw_audio_prefetch.get("direct_audio_url_error_category") or ""),
                 **wav_fields,
                 "setup_required": "",
                 "download_attempts": [{
@@ -105154,8 +105350,6 @@ async def music_download_artifact_candidate(
         except Exception:
             proxy_downloaded = 0
         direct_attempt = {}
-        raw_result_url = str(item.get("raw_result_url") or "").strip()
-        raw_result_field_path = str(item.get("raw_result_field_path") or item.get("field_path") or item.get("source") or "")
         proxy_selected_clip_present = music_download_detail_field(proxy_detail, "selected_clip_id_present") == "yes"
         proxy_allows_direct_bare_suno_validation = proxy_category in {
             KEY4U_SUNO_WAV_JSON_OBJECT_BLOCKER,
@@ -105250,6 +105444,13 @@ async def music_download_artifact_candidate(
             "provider_download_http_status": int(proxy_status or 0),
             "provider_download_content_type": proxy_content_type,
             "provider_download_bytes": int(proxy_downloaded or 0),
+            "direct_audio_url_get_attempted": bool(raw_audio_prefetch.get("direct_audio_url_get_attempted")),
+            "direct_audio_url_http_status": int(raw_audio_prefetch.get("direct_audio_url_http_status") or 0),
+            "direct_audio_url_content_type": str(raw_audio_prefetch.get("direct_audio_url_content_type") or ""),
+            "direct_audio_url_bytes": int(raw_audio_prefetch.get("direct_audio_url_bytes") or 0),
+            "direct_audio_url_validation_passed": False,
+            "direct_audio_url_error_category": str(raw_audio_prefetch.get("direct_audio_url_error_category") or ""),
+            "direct_audio_url_prefetch_failed": bool(raw_audio_prefetch.get("direct_audio_url_prefetch_failed")),
             **wav_fields,
             "candidate_attempted": bool(direct_attempt),
             "candidate_field_path": raw_result_field_path,
@@ -105629,6 +105830,7 @@ async def select_music_delivery_artifact(
     direct_cdn_last_content_type = ""
     direct_cdn_last_bytes = 0
     provider_auth_any_bypassed_for_direct_cdn = False
+    direct_raw_attempted_urls = set()
     for candidate_order, selected in enumerate(final_candidates, start=1):
         payload = music_artifact_candidate_bytes(selected.get("audio_bytes") or selected.get("bytes"))
         local_path = str(selected.get("local_path") or selected.get("path") or "").strip()
@@ -105697,7 +105899,11 @@ async def select_music_delivery_artifact(
         direct_cdn_download_bytes = 0
         direct_cdn_validation_passed = False
         if not payload and url:
-            downloaded = await music_download_artifact_candidate(selected, {**dict(job or {}), **dict(result or {})}, timeout_seconds=60.0)
+            download_candidate = dict(selected)
+            raw_result_url = str(download_candidate.get("raw_result_url") or "").strip()
+            if raw_result_url and raw_result_url in direct_raw_attempted_urls:
+                download_candidate["skip_raw_audio_prefetch"] = True
+            downloaded = await music_download_artifact_candidate(download_candidate, {**dict(job or {}), **dict(result or {})}, timeout_seconds=60.0)
             payload = bytes(downloaded.get("audio_bytes") or b"")
             download_detail = str(downloaded.get("download_detail") or "")
             download_status = int(downloaded.get("download_http_status") or 0)
@@ -105761,6 +105967,11 @@ async def select_music_delivery_artifact(
                 direct_cdn_last_http_status = direct_cdn_download_http_status
                 direct_cdn_last_content_type = direct_cdn_download_content_type
                 direct_cdn_last_bytes = direct_cdn_download_bytes
+                attempted_url = str(selected.get("url") or selected.get("artifact_url") or selected.get("output_url") or selected.get("download_url") or "").strip()
+                if attempted_url:
+                    direct_raw_attempted_urls.add(attempted_url)
+                if raw_result_url:
+                    direct_raw_attempted_urls.add(raw_result_url)
             if direct_cdn_validation_passed:
                 direct_cdn_any_validation_passed = True
             if provider_auth_bypassed_for_direct_cdn or provider_auth_bypassed_for_direct_suno_cdn:
@@ -110634,16 +110845,35 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML",
             reply_markup=music_product_idea_keyboard(mode, lang, ctx),
         )
+    if action == "music_product_back_style":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        tier = normalize_music_product_tier(result.get("music_product_tier"))
+        vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
+        back_action = "music_product_back_suggestions" if result.get("music_suggestions") else "music_product_back_idea"
+        set_music_guided_pending(user_id, "music_product_song_style", product_context=ctx, previous_screen="music_product_lyrics", return_to=back_action)
+        return await query.message.reply_text(
+            music_product_style_input_text(tier, vocal_mode, lang),
+            parse_mode="HTML",
+            reply_markup=music_flow_back_keyboard(back_action, lang, ctx),
+        )
     if action in {"music_product_edit_description", "music_product_manual"}:
         await query.answer()
         result = get_music_guided_result(user_id) or {}
         mode = music_product_mode_from_result(result)
         tier = normalize_music_product_tier(result.get("music_product_tier"))
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
-        pending_action = "music_product_song_details" if mode == "song" else "music_product_background_details"
         from_idea_screen = bool(mode == "song" and action == "music_product_manual" and not result.get("music_suggestions") and not result.get("music_selected_suggestion_id"))
         back_action = "music_product_back_idea" if from_idea_screen else ("music_product_change_vocal" if mode == "song" else "music_product_change_tier")
         previous_screen = "music_product_idea" if from_idea_screen else "music_product_invoice"
+        if mode == "song":
+            set_music_guided_pending(user_id, "music_product_song_style", product_context=ctx, previous_screen=previous_screen, return_to=back_action)
+            return await query.message.reply_text(
+                music_product_style_input_text(tier, vocal_mode, lang),
+                parse_mode="HTML",
+                reply_markup=music_flow_back_keyboard(back_action, lang, ctx),
+            )
+        pending_action = "music_product_background_details"
         set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen=previous_screen, return_to=back_action)
         return await query.message.reply_text(
             music_product_details_input_text(mode, tier, vocal_mode, lang),
@@ -113926,7 +114156,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     lang = music_ui_lang(uid)
     action = str(state.get("pending_action") or "")
     ctx = normalize_product_context(state.get("product_context"), PRODUCT_CONTEXT_SHOWROOM)
-    text_limit = 3500 if action in {"music_product_background_details", "music_product_song_details"} else 900
+    text_limit = 3500 if action in {"music_product_background_details", "music_product_song_details"} else 1200 if action == "music_product_song_style" else 900
     if action in {"music_product_background_details", "music_product_song_details"}:
         text = str(update.message.text or "").strip()[:text_limit]
     else:
@@ -113967,6 +114197,62 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             reply_markup=music_product_suggestions_keyboard(mode, lang, ctx),
         )
         return True
+    if action == "music_product_song_style":
+        result = get_music_guided_result(uid) or {}
+        tier = normalize_music_product_tier(result.get("music_product_tier") or state.get("music_product_tier"))
+        vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or state.get("vocal_mode") or "auto")
+        blocked = music_copyright_block_reason(text)
+        if blocked:
+            set_music_guided_pending(uid, action, product_context=ctx, previous_screen=str(state.get("previous_screen") or ""), return_to=str(state.get("return_to") or "music_product_back_idea"))
+            await update.message.reply_text(
+                "⛔ Nội dung này có rủi ro bản quyền. Hãy dùng Style nhạc nguyên bản. TOAN AAS chưa xử lý và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=music_flow_back_keyboard(str(state.get("return_to") or "music_product_back_idea"), lang, ctx),
+            )
+            return True
+        parsed = music_product_parse_details(text, "song", tier, vocal_mode)
+        style_prompt = str(parsed.get("style_prompt") or parsed.get("style") or parsed.get("genre") or text).strip()
+        partial = {
+            **dict(result.get("music_product_partial_details") or {}),
+            **{key: value for key, value in parsed.items() if key != "lyrics" and str(value or "").strip()},
+            "style_prompt": style_prompt,
+            "selected_style_prompt": style_prompt,
+            "provider_style_prompt": style_prompt,
+            "music_product_mode": "song",
+            "music_product_tier": tier,
+            "vocal_mode": vocal_mode,
+            "song_vocal": vocal_mode,
+            "requested_vocal_mode": vocal_mode,
+            "selected_vocal_mode": vocal_mode,
+            "vocal_mode_source": "manual_style_pending",
+            "vocal_mode_persisted": "yes",
+        }
+        result.update(partial)
+        if str(parsed.get("lyrics") or "").strip():
+            product_result = music_product_result_from_input({**result, **parsed, **partial, "lyrics": parsed.get("lyrics")})
+            product_result.pop("music_product_partial_details", None)
+            product_result.pop("music_product_partial_text", None)
+            product_result.pop("music_product_pending_lyrics", None)
+            save_music_guided_result(uid, product_result)
+            await update.message.reply_text(
+                music_product_invoice_text(product_result, lang),
+                parse_mode="HTML",
+                reply_markup=music_product_invoice_keyboard(product_result, lang, ctx),
+            )
+            return True
+        result.update({
+            "music_product_partial_details": partial,
+            "music_product_partial_text": text,
+            "music_product_pending_lyrics": True,
+        })
+        save_music_guided_result(uid, result)
+        set_music_guided_pending(uid, "music_product_song_details", product_context=ctx, previous_screen="music_product_style", return_to="music_product_back_style")
+        await update.message.reply_text(
+            music_product_lyrics_input_text(tier, vocal_mode, style_prompt, lang),
+            parse_mode="HTML",
+            reply_markup=music_flow_back_keyboard("music_product_back_style", lang, ctx),
+        )
+        return True
     if action in {"music_product_background_details", "music_product_song_details"}:
         result = get_music_guided_result(uid) or {}
         mode = "song" if action == "music_product_song_details" else "background"
@@ -113989,7 +114275,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         if mode == "song" and str(parsed.get("lyrics") or "").strip() and partial_details:
             lyrics_text = str(parsed.get("lyrics") or "").strip()
             merged = {**partial_details, **parsed}
-            for key in ("title", "theme", "description", "genre", "style", "mood", "language", "duration"):
+            for key in ("title", "theme", "description", "genre", "style", "style_prompt", "selected_style_prompt", "provider_style_prompt", "mood", "language", "duration"):
                 previous_value = str(partial_details.get(key) or "").strip()
                 parsed_value = str(parsed.get(key) or "").strip()
                 if previous_value and (not parsed_value or parsed_value == lyrics_text):
