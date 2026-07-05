@@ -179,9 +179,11 @@ def test_subtitle_ass_uses_large_boxed_readable_style():
     )
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
     font_size = int(re.search(r"Style: Default,[^,]+,(\d+),", ass).group(1))
-    assert font_size >= 76
+    assert font_size >= 60
+    assert font_size <= 76
     assert font_size >= style["size"]
     assert style["subtitle_font_multiplier"] >= 2.0
+    assert style["font_size_cap_applied"] is True
     assert style["boxed_background"] is True
     assert ",3," in ass
     assert style["outline"] >= 4

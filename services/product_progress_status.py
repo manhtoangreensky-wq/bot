@@ -191,7 +191,6 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "back_callback": "videodub|type|subtitle_plus_dub",
         "steps": [
             _stage("received_file", "Nhận video", "Đã nhận video", 5),
-            _stage("input_save_failed", "Nhận video", "Chưa tải được video", 5),
             _stage("extracting_audio", "Tách âm thanh", "Đang tách âm thanh", 20),
             _stage("transcribing", "Nhận diện lời thoại", "Đang nhận diện lời thoại", 35),
             _stage("translating", "Dịch nội dung", "Đang dịch nội dung", 50),
@@ -319,11 +318,11 @@ STAGE_ALIASES = {
         "received": "received_file",
         "received_video": "received_file",
         "saved_input": "received_file",
-        "input_save": "input_save_failed",
-        "input_save_failed": "input_save_failed",
-        "received_file_failed": "input_save_failed",
-        "telegram_download_failed": "input_save_failed",
-        "large_telegram_download_unsupported": "input_save_failed",
+        "input_save": "received_file",
+        "input_save_failed": "received_file",
+        "received_file_failed": "received_file",
+        "telegram_download_failed": "received_file",
+        "large_telegram_download_unsupported": "received_file",
         "extracting": "extracting_audio",
         "translate": "translating",
         "generating_subtitle": "generating_voice",
@@ -962,10 +961,12 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             completed_steps = list(job.get("completed_steps") or [])
             status_text = "TOAN AAS đang xử lý, anh/chị kiểm tra lại sau." if status in {"running", "processing", "queued", "submitted"} else ""
         stage = product_progress_stage(canonical, stage_key)
+        public_stage_key = str(stage.get("key") or stage_key)
+        debug_stage_key = stage_key if stage_key == "input_save_failed" else public_stage_key
         return {
             "product_type": canonical,
-            "current_stage": str(stage.get("key") or stage_key),
-            "percent": product_progress_percent(canonical, str(stage.get("key") or stage_key), progress if progress is not None else None, terminal),
+            "current_stage": str(debug_stage_key),
+            "percent": product_progress_percent(canonical, public_stage_key, progress if progress is not None else None, terminal),
             "terminal_state": terminal,
             "completed_steps": completed_steps,
             "status_text": status_text,
