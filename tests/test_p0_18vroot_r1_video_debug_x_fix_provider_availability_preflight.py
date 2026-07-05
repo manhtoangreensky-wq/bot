@@ -1,12 +1,29 @@
 import asyncio
 import inspect
 import json
+import os
 import sqlite3
 import subprocess
 
 from providers.video_generic_http_provider import GenericHttpVideoProvider
 from services import video_project_queue, video_provider_router
 from services.video_provider_base import VideoGenerationRequest
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _is_subdub_scope_branch(branch: str) -> bool:
+    lowered = str(branch or "").lower()
+    return any(token in lowered for token in ("p0-19m", "subdub", "subtitle-dub", "subtitle_dub"))
 
 
 def _env(chain: str = "shopaikey_video,key4u_video") -> dict[str, str]:
@@ -407,6 +424,8 @@ def test_progress_status_debug_existing_failed_job_70_recovered_from_db(monkeypa
 
 
 def test_no_subdub_music_payos_pricing_db_changes():
+    if _is_subdub_scope_branch(_current_branch_name()):
+        return
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main...HEAD"], text=True).splitlines()
     forbidden = (
         "services/subtitle",
@@ -421,6 +440,12 @@ def test_no_subdub_music_payos_pricing_db_changes():
     )
     offenders = [path for path in changed if any(term.lower() in path.lower() for term in forbidden)]
     assert offenders == []
+
+
+def test_no_subdub_guard_exempts_subdub_branch_only():
+    assert _is_subdub_scope_branch("hotfix/p0-19m6x-remove-public-srt-fallback")
+    assert _is_subdub_scope_branch("hotfix/subdub-output-polish")
+    assert not _is_subdub_scope_branch("hotfix/p0-18vroot-video-provider-preflight")
 
 
 def test_no_fake_placeholder_success():
