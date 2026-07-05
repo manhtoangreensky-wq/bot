@@ -153,13 +153,13 @@ def test_subdub_language_confirm_back_not_root_menu():
 
 
 def test_subdub_missing_origin_fallbacks_to_subdub_menu_not_main_menu():
-    assert bot.subdub_missing_origin_back_callback({}) == "menu|translation_video_factory"
+    assert bot.subdub_missing_origin_back_callback({}) == "videodub|back_type"
 
     markup = bot.video_dubbing_job_progress_keyboard(123, "vi")
     callbacks = _callbacks(markup)
     labels = _labels(markup)
 
-    assert "menu|translation_video_factory" in callbacks
+    assert "videodub|back_type" in callbacks
     assert "menu|main" in callbacks
     assert "⬅️ Phụ đề / Lồng tiếng" in labels
     assert "⬅️ Quay lại" not in labels

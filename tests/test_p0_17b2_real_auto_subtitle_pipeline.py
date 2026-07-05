@@ -24,15 +24,15 @@ class CaptureMessage:
 
     async def reply_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
         self.outputs.append({"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup, **kwargs})
-        return SimpleNamespace(text=text, reply_markup=reply_markup)
+        return SimpleNamespace(message_id=len(self.outputs), text=text, reply_markup=reply_markup)
 
     async def reply_document(self, document=None, filename=None, caption=None, **kwargs):
         self.outputs.append({"document": document, "filename": filename, "caption": str(caption or ""), **kwargs})
-        return SimpleNamespace(document=SimpleNamespace(file_id=f"doc-{filename or 'file'}"))
+        return SimpleNamespace(message_id=len(self.outputs), document=SimpleNamespace(file_id=f"doc-{filename or 'file'}"))
 
     async def reply_audio(self, audio=None, filename=None, caption=None, **kwargs):
         self.outputs.append({"audio": audio, "filename": filename, "caption": str(caption or ""), **kwargs})
-        return SimpleNamespace(audio=SimpleNamespace(file_id=f"audio-{filename or 'file'}"))
+        return SimpleNamespace(message_id=len(self.outputs), audio=SimpleNamespace(file_id=f"audio-{filename or 'file'}"))
 
 
 class CaptureQuery:

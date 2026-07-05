@@ -151,7 +151,7 @@ def test_final_video_delivery_finalizes_panel_and_report():
     assert stored["terminal_public_outcome_type"] == "success"
 
 
-def test_subtitle_font_uses_pre_231_baseline_times_2():
+def test_subtitle_font_uses_pre_231_baseline_plus_four_responsive():
     style = bot.subdub_normalize_style({
         "subtitle_style_preset": "cover_original",
         "video_width": 1280,
@@ -160,9 +160,10 @@ def test_subtitle_font_uses_pre_231_baseline_times_2():
 
     assert style["subtitle_style_baseline_source"] == "pre_231"
     assert style["translated_font_size_baseline"] == style["size"]
-    assert style["translated_font_size_multiplier"] == 2.0
+    assert 1.0 <= style["translated_font_size_multiplier"] <= 1.25
     assert style["translated_font_size_final"] == style["render_size"]
-    assert style["render_size"] <= round(style["size"] * 2)
+    assert style["render_size"] >= style["size"] + 4
+    assert style["render_size"] <= 64
 
 
 def test_subtitle_font_not_huge_absolute_hardcoded():
@@ -181,7 +182,7 @@ def test_subtitle_font_capped_by_video_height():
 
     assert style_720["render_size"] <= 65
     assert style_1080["render_size"] <= 76
-    assert style_720["font_size_cap_applied"] is True
+    assert style_720["render_size"] == style_720["size"] + 4
 
 
 def test_translated_subtitle_wraps_max_two_lines():
@@ -207,14 +208,14 @@ def test_vietnamese_glyphs_supported():
     assert "Xin chào thế giới" in ass
 
 
-def test_broken_volume_button_grid_hidden_by_default():
-    assert bot.SUBDUB_VOLUME_MIX_UI_ENABLED is False
-    assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}) is False
+def test_broken_volume_button_grid_replaced_by_split_numeric_layers():
+    assert bot.SUBDUB_VOLUME_MIX_UI_ENABLED is True
+    assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}) is True
 
     keyboard = bot.subdub_audio_mix_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB})
     labels = _labels(keyboard)
 
-    assert labels == ["⬅️ Quay lại"]
+    assert labels == ["🔊 Âm thanh gốc", "🎙 Giọng lồng tiếng", "⬅️ Quay lại"]
     assert not any(label.startswith("Gốc ") or label.startswith("Lồng ") for label in labels)
 
 
@@ -225,7 +226,7 @@ def test_volume_mix_ui_disabled_does_not_affect_dub_pipeline():
     assert "kwargs.setdefault(\"original_audio_mode\", audio_mode)" in disabled_branch
 
 
-def test_volume_mix_defaults_do_not_break_mux():
+def test_volume_mix_defaults_allow_user_selected_mix():
     mix = bot.subdub_audio_mix_state_fields({
         "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
         "keep_original_audio": "1",
@@ -233,18 +234,19 @@ def test_volume_mix_defaults_do_not_break_mux():
         "dubbed_voice_volume_percent": "200",
     })
 
-    assert mix["keep_original_audio"] is False
-    assert mix["original_audio_volume_percent"] == 0
-    assert mix["dubbed_voice_volume_percent"] == 100
-    assert mix["audio_mix_mode"] == "dub_only"
+    assert mix["keep_original_audio"] is True
+    assert mix["original_audio_volume_percent"] == 80
+    assert mix["dubbed_voice_volume_percent"] == 200
+    assert mix["audio_mix_mode"] == "keep_original"
 
 
-def test_no_public_fixed_percentage_grid_when_disabled():
+def test_no_public_fixed_percentage_grid_with_audio_entry_button():
     dub_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     combo_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
 
-    assert "🎚 Âm thanh" not in dub_labels
-    assert "🎚 Âm thanh" not in combo_labels
+    assert "🎚 Âm thanh" in dub_labels
+    assert "🎚 Âm thanh" in combo_labels
+    assert not any(label.startswith("Gốc ") or label.startswith("Lồng ") for label in dub_labels + combo_labels)
 
 
 def test_final_video_success_report_sent_once():

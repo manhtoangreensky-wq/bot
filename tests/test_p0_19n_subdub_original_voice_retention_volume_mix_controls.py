@@ -4,10 +4,10 @@ import inspect
 import bot
 
 
-def test_audio_mix_controls_hidden_by_default():
-    assert bot.SUBDUB_VOLUME_MIX_UI_ENABLED is False
-    assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}) is False
-    assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}) is False
+def test_audio_mix_controls_enabled_for_dub_modes():
+    assert bot.SUBDUB_VOLUME_MIX_UI_ENABLED is True
+    assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}) is True
+    assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}) is True
     assert bot.subdub_audio_mix_available({"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}) is False
 
 
@@ -19,7 +19,7 @@ def test_audio_mix_default_preserves_existing_dub_only_behavior():
     assert mix["original_audio_volume_percent"] == 0
     assert mix["dubbed_voice_volume_percent"] == 100
     assert mix["audio_mix_mode"] == "dub_only"
-    assert mix["volume_config_source"] == "volume_mix_ui_disabled"
+    assert mix["volume_config_source"] == "default_subdub_audio_mix"
 
 
 def test_audio_mix_keep_original_persists_percentages():
@@ -33,26 +33,28 @@ def test_audio_mix_keep_original_persists_percentages():
     mix = bot.subdub_audio_mix_state_fields(state)
     lines = bot.subdub_audio_mix_confirm_lines(state, "vi")
 
-    assert mix["keep_original_audio"] is False
-    assert mix["original_audio_volume_percent"] == 0
-    assert mix["dubbed_voice_volume_percent"] == 100
-    assert mix["audio_mix_mode"] == "dub_only"
-    assert lines == ""
+    assert mix["keep_original_audio"] is True
+    assert mix["original_audio_volume_percent"] == 30
+    assert mix["dubbed_voice_volume_percent"] == 150
+    assert mix["audio_mix_mode"] == "keep_original"
+    assert "Âm thanh gốc" in lines
+    assert "30%" in lines
+    assert "150%" in lines
 
 
-def test_audio_mix_keyboard_hides_fixed_percentage_grid_by_default():
+def test_audio_mix_keyboard_uses_split_numeric_layers_without_fixed_grid():
     keyboard = bot.subdub_audio_mix_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB})
     labels = [button.text for row in keyboard.inline_keyboard for button in row]
     public = " ".join(labels).lower()
 
-    assert labels == ["⬅️ Quay lại"]
+    assert labels == ["🔊 Âm thanh gốc", "🎙 Giọng lồng tiếng", "⬅️ Quay lại"]
     assert "Gốc 20%" not in labels
     assert "Lồng 80%" not in labels
     assert all(len(label) <= 32 for label in labels)
     assert not any(term in public for term in ("provider", "api", "handler", "callback", "debug", "asr", "tts", "mux", "ffmpeg"))
 
 
-def test_confirm_keyboard_hides_audio_mix_by_default():
+def test_confirm_keyboard_shows_audio_mix_for_dub_modes_only():
     dub_callbacks = [
         button.callback_data
         for row in bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}).inline_keyboard
@@ -64,7 +66,7 @@ def test_confirm_keyboard_hides_audio_mix_by_default():
         for button in row
     ]
 
-    assert "videodub|audio_mix" not in dub_callbacks
+    assert "videodub|audio_mix" in dub_callbacks
     assert "videodub|audio_mix" not in subtitle_callbacks
 
 
@@ -76,7 +78,7 @@ def test_render_video_accepts_volume_mix_parameters():
     assert "dubbed_voice_volume_percent" in signature.parameters
 
 
-def test_render_video_ignores_volume_mix_when_ui_disabled(monkeypatch):
+def test_render_video_applies_volume_mix_when_enabled(monkeypatch):
     commands = []
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
 
@@ -113,10 +115,10 @@ def test_render_video_ignores_volume_mix_when_ui_disabled(monkeypatch):
 
     assert output == b"mp4"
     assert "ffmpeg_video_render_basic" in detail
-    assert "[0:a]volume=0.300[original]" not in rendered
-    assert "[1:a]volume=1.500[dub]" not in rendered
-    assert "[original][dub]amix" not in rendered
-    assert "-map 0:v:0 -map 1:a:0" in rendered
+    assert "[0:a]volume=0.300[original]" in rendered
+    assert "[1:a]volume=1.500[dub]" in rendered
+    assert "[original][dub]amix" in rendered
+    assert "-map 0:v:0 -map 1:a:0" not in rendered
 
 
 def test_subdub_voice_style_debug_includes_volume_mix_fields():
@@ -131,16 +133,18 @@ def test_subdub_voice_style_debug_includes_volume_mix_fields():
         selected_tts_voice_id="female-real-voice",
     )
 
-    assert fields["keep_original_audio"] is False
-    assert fields["original_audio_volume_percent"] == 0
-    assert fields["dubbed_voice_volume_percent"] == 100
-    assert fields["audio_mix_mode"] == "dub_only"
-    assert fields["volume_mix_applied"] is False
+    assert fields["keep_original_audio"] is True
+    assert fields["original_audio_volume_percent"] == 40
+    assert fields["dubbed_voice_volume_percent"] == 120
+    assert fields["audio_mix_mode"] == "keep_original"
+    assert fields["volume_mix_applied"] is True
 
 
-def test_dynamic_volume_ui_future_spec_exists_but_disabled():
+def test_dynamic_volume_ui_spec_is_enabled_and_numeric():
     spec = bot.subdub_dynamic_volume_ui_future_spec()
 
-    assert spec["task"] == "P0.19N.2 SubDub Dynamic Original/Dub Volume Input UI"
-    assert spec["enabled"] is False
+    assert spec["task"] == "P0.19N SubDub Original/Dub Volume Input UI"
+    assert spec["enabled"] is True
     assert spec["public_fixed_percentage_grid"] is False
+    assert spec["original_audio"]["numeric_input_max"] == 100
+    assert spec["dub_voice"]["numeric_input_max"] == 200
