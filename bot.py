@@ -101540,8 +101540,20 @@ def normalize_music_product_tier(value: str = "") -> str:
 def music_product_price_map_for_mode(mode: str = "background") -> dict:
     return MUSIC_PRODUCT_SONG_TIER_PRICES if normalize_music_product_mode(mode) == "song" else MUSIC_PRODUCT_BACKGROUND_TIER_PRICES
 
+def music_product_tier_price_map(mode: str = "background") -> dict:
+    return dict(music_product_price_map_for_mode(mode))
+
+def normalize_music_product_tier_for_mode(value: str = "", mode: str = "background") -> str:
+    raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if re.fullmatch(r"\d+", raw or ""):
+        wanted = int(raw)
+        for tier, price in music_product_price_map_for_mode(mode).items():
+            if int(price or 0) == wanted:
+                return tier
+    return normalize_music_product_tier(value)
+
 def music_product_tier_price_xu(tier: str = "", mode: str = "background") -> int:
-    tier_key = normalize_music_product_tier(tier)
+    tier_key = normalize_music_product_tier_for_mode(tier, mode)
     prices = music_product_price_map_for_mode(mode)
     return int(prices.get(tier_key, prices.get(MUSIC_PRODUCT_TIER_BASIC, MUSIC_PRODUCT_BASIC_PRICE_XU)) or 0)
 
@@ -101597,7 +101609,7 @@ def normalize_music_model_key(value: str = "") -> str:
     return MUSIC_PRODUCT_MODEL_ALIASES.get(raw, raw)
 
 def music_model_preferences_for_tier(tier: str = "", mode: str = "background") -> tuple[str, ...]:
-    tier_key = normalize_music_product_tier(tier)
+    tier_key = normalize_music_product_tier_for_mode(tier, mode)
     mapping = MUSIC_PRODUCT_SONG_TIER_MODEL_PREFERENCES if normalize_music_product_mode(mode) == "song" else MUSIC_PRODUCT_TIER_MODEL_PREFERENCES
     return mapping.get(tier_key, mapping[MUSIC_PRODUCT_TIER_BASIC])
 
@@ -101815,7 +101827,7 @@ def build_music_product_prompt(
 ) -> dict:
     data = dict(data or {})
     mode = normalize_music_product_mode(data.get("music_product_mode") or data.get("mode") or ("song" if data.get("song_product") else "background"))
-    tier = normalize_music_product_tier(data.get("music_product_tier") or data.get("tier"))
+    tier = normalize_music_product_tier_for_mode(data.get("music_product_tier") or data.get("tier"), mode)
     vocal_mode = music_product_canonical_vocal_mode(data)
     duration = normalize_music_duration_seconds(
         data.get("duration_seconds") or data.get("guided_duration_seconds") or (MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS),
@@ -101892,7 +101904,7 @@ def build_music_product_prompt(
 def music_product_result_from_input(data: dict | None = None) -> dict:
     data = dict(data or {})
     mode = normalize_music_product_mode(data.get("music_product_mode") or data.get("mode"))
-    tier = normalize_music_product_tier(data.get("music_product_tier") or data.get("tier"))
+    tier = normalize_music_product_tier_for_mode(data.get("music_product_tier") or data.get("tier"), mode)
     canonical_vocal = music_product_canonical_vocal_mode(data)
     duration = normalize_music_duration_seconds(
         data.get("duration_seconds") or (MUSIC_PRODUCT_DEFAULT_SONG_SECONDS if mode == "song" else MUSIC_PRODUCT_DEFAULT_BACKGROUND_SECONDS),
@@ -101937,7 +101949,7 @@ def music_confirm_tier_from_legacy_price(result: dict | None = None, mode: str =
     current = dict(result or {})
     explicit = str(current.get("music_product_tier") or current.get("tier") or "").strip()
     if explicit:
-        return normalize_music_product_tier(explicit)
+        return normalize_music_product_tier_for_mode(explicit, mode)
     price = _safe_int(
         current.get("music_product_price_xu")
         or current.get("music_price_xu")
@@ -101949,7 +101961,7 @@ def music_confirm_tier_from_legacy_price(result: dict | None = None, mode: str =
         prices = music_product_tier_price_map(mode)
         for tier, tier_price in prices.items():
             if int(tier_price or 0) == price:
-                return normalize_music_product_tier(tier)
+                return normalize_music_product_tier_for_mode(tier, mode)
     return MUSIC_PRODUCT_TIER_BASIC
 
 def music_confirm_result_for_real_job_persist(result: dict | None = None) -> dict:
@@ -102133,7 +102145,7 @@ def music_product_parse_details(text: str = "", mode: str = "background", tier: 
     seconds = normalize_music_duration_seconds(duration_match.group(0), duration_default) if duration_match else duration_default
     parsed.update({
         "music_product_mode": mode_key,
-        "music_product_tier": normalize_music_product_tier(tier),
+        "music_product_tier": normalize_music_product_tier_for_mode(tier, mode_key),
         "duration_seconds": seconds,
         "vocal_mode": normalize_song_vocal_mode(vocal_mode),
     })
@@ -102347,7 +102359,7 @@ def build_music_product_suggestions(
     lang: str = "vi",
 ) -> list[dict]:
     mode_key = normalize_music_product_mode(mode)
-    tier_key = normalize_music_product_tier(tier)
+    tier_key = normalize_music_product_tier_for_mode(tier, mode_key)
     clean_idea = music_product_clean_idea(idea or music_product_sample_idea(mode_key))
     tier_label = music_product_tier_label(tier_key, lang)
     seed = int(music_product_hash_text(f"{mode_key}:{tier_key}:{vocal_mode}:{clean_idea}")[:6] or "0", 16)
@@ -102471,7 +102483,7 @@ def music_product_prompt_preset_audit(
     lang: str = "vi",
 ) -> list[dict]:
     mode_key = normalize_music_product_mode(mode)
-    tier_key = normalize_music_product_tier(tier)
+    tier_key = normalize_music_product_tier_for_mode(tier, mode_key)
     price = music_product_tier_price_xu(tier_key, mode_key)
     rows: list[dict] = []
     for offset in (0, 3, 6):
@@ -102515,7 +102527,7 @@ def music_product_prepare_suggestions_result(
 ) -> dict:
     current = dict(result or {})
     mode = music_product_mode_from_result(current)
-    tier = normalize_music_product_tier(current.get("music_product_tier"))
+    tier = normalize_music_product_tier_for_mode(current.get("music_product_tier"), mode)
     vocal_mode = normalize_song_vocal_mode(current.get("song_vocal") or current.get("vocal_mode") or "auto")
     clean_idea = music_product_clean_idea(idea or current.get("music_user_idea") or music_product_sample_idea(mode))
     next_offset = music_product_suggestion_offset(current) if offset is None else max(0, int(offset or 0))
@@ -102562,7 +102574,7 @@ def music_product_result_from_suggestion(result: dict | None = None, suggestion:
     current = dict(result or {})
     item = dict(suggestion or {})
     mode = music_product_mode_from_result(current)
-    tier = normalize_music_product_tier(current.get("music_product_tier"))
+    tier = normalize_music_product_tier_for_mode(current.get("music_product_tier"), mode)
     raw_current_vocal = str(current.get("song_vocal") or current.get("vocal_mode") or "").strip()
     raw_item_vocal = str(item.get("vocal_mode") or item.get("song_vocal") or "").strip()
     vocal_mode = normalize_song_vocal_mode(raw_current_vocal) if raw_current_vocal else normalize_song_vocal_mode(raw_item_vocal or "auto")
@@ -102671,7 +102683,7 @@ def music_product_suggestions_keyboard(
 def music_product_invoice_text(result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
     mode = music_product_mode_from_result(result)
-    tier = normalize_music_product_tier(result.get("music_product_tier"))
+    tier = normalize_music_product_tier_for_mode(result.get("music_product_tier"), mode)
     price = music_result_price_xu(result)
     genre = str(result.get("genre") or result.get("style") or result.get("guided_style") or "-").strip() or "-"
     mood = str(result.get("mood") or result.get("guided_mood") or "-").strip() or "-"
@@ -106693,7 +106705,7 @@ def music_product_charge_after_delivery(user_id, result: dict | None = None, pri
         user_id,
         price,
         "music_product_create",
-        f"music tier={normalize_music_product_tier(result.get('music_product_tier') or job.get('music_product_tier'))}; duration={music_result_duration_seconds(result or job)}s",
+        f"music tier={normalize_music_product_tier_for_mode(result.get('music_product_tier') or job.get('music_product_tier'), music_product_mode_from_result(result or job))}; duration={music_result_duration_seconds(result or job)}s",
     )
     if not charge.get("ok"):
         return {"ok": False, "charged_xu": 0, "error": str(charge.get("message") or charge.get("status") or "charge_failed")[:160]}
@@ -110967,7 +110979,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         )
     if action.startswith("music_tier_background:"):
         await query.answer()
-        tier = normalize_music_product_tier(action.split(":", 1)[1])
+        tier = normalize_music_product_tier_for_mode(action.split(":", 1)[1], "background")
         existing = get_music_guided_result(user_id) or {}
         result = {
             **existing,
@@ -110996,7 +111008,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         )
     if action.startswith("music_tier_song:"):
         await query.answer()
-        tier = normalize_music_product_tier(action.split(":", 1)[1])
+        tier = normalize_music_product_tier_for_mode(action.split(":", 1)[1], "song")
         existing = get_music_guided_result(user_id) or {}
         raw_existing_vocal = str(existing.get("song_vocal") or existing.get("vocal_mode") or "").strip()
         vocal_mode = normalize_song_vocal_mode(raw_existing_vocal) if raw_existing_vocal else ""
@@ -111036,7 +111048,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         vocal_mode = normalize_song_vocal_mode(action.split(":", 1)[1])
         result = get_music_guided_result(user_id) or {}
-        tier = normalize_music_product_tier(result.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier"), "song")
         result.update({
             "music_product_flow": "p0_20a_3_tier",
             "music_product_mode": "song",
@@ -111108,7 +111120,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         result = get_music_guided_result(user_id) or {}
         mode = music_product_mode_from_result(result)
-        tier = normalize_music_product_tier(result.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier"), mode)
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
         pending_action = "music_product_song_idea" if mode == "song" else "music_product_background_idea"
         set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen="music_product_suggestions", return_to="music_product_back_idea")
@@ -111180,7 +111192,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "music_product_back_style":
         await query.answer()
         result = get_music_guided_result(user_id) or {}
-        tier = normalize_music_product_tier(result.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier"), music_product_mode_from_result(result))
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
         back_action = "music_product_back_suggestions" if result.get("music_suggestions") else "music_product_back_idea"
         set_music_guided_pending(user_id, "music_product_song_style", product_context=ctx, previous_screen="music_product_lyrics", return_to=back_action)
@@ -111193,7 +111205,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         result = get_music_guided_result(user_id) or {}
         mode = music_product_mode_from_result(result)
-        tier = normalize_music_product_tier(result.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier"), mode)
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
         from_idea_screen = bool(mode == "song" and action == "music_product_manual" and not result.get("music_suggestions") and not result.get("music_selected_suggestion_id"))
         back_action = "music_product_back_idea" if from_idea_screen else ("music_product_change_vocal" if mode == "song" else "music_product_change_tier")
@@ -114499,7 +114511,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     if action in {"music_product_background_idea", "music_product_song_idea"}:
         result = get_music_guided_result(uid) or {}
         mode = "song" if action == "music_product_song_idea" else "background"
-        tier = normalize_music_product_tier(result.get("music_product_tier") or state.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier") or state.get("music_product_tier"), mode)
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or state.get("vocal_mode") or "auto")
         blocked = music_copyright_block_reason(text)
         if blocked:
@@ -114531,7 +114543,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         return True
     if action == "music_product_song_style":
         result = get_music_guided_result(uid) or {}
-        tier = normalize_music_product_tier(result.get("music_product_tier") or state.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier") or state.get("music_product_tier"), "song")
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or state.get("vocal_mode") or "auto")
         blocked = music_copyright_block_reason(text)
         if blocked:
@@ -114588,7 +114600,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     if action in {"music_product_background_details", "music_product_song_details"}:
         result = get_music_guided_result(uid) or {}
         mode = "song" if action == "music_product_song_details" else "background"
-        tier = normalize_music_product_tier(result.get("music_product_tier") or state.get("music_product_tier"))
+        tier = normalize_music_product_tier_for_mode(result.get("music_product_tier") or state.get("music_product_tier"), mode)
         vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or state.get("vocal_mode") or "auto")
         blocked = music_copyright_block_reason(text)
         if blocked:
