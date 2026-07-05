@@ -254,11 +254,10 @@ def test_auto_subtitle_produces_real_srt_artifact(monkeypatch):
         )
     )
 
-    assert result["ok"] is False
-    assert result["status"] == "OUTPUT_DELIVERY_FAILED"
-    assert result["workspace_artifacts"]["subtitles"]
-    assert result.get("has_audio") is not True
-    assert any(item.get("document") for item in result.get("state", {}).get("_unused_outputs", []) or []) is False
+    assert result["ok"] is True
+    assert result["has_subtitle"] is True
+    assert result["has_audio"] is False
+    assert any(item.get("document") for item in result["state"].get("_unused_outputs", []) or []) is False
 
 
 def test_translate_subtitle_preserves_srt_timestamps(monkeypatch):

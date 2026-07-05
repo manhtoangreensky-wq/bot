@@ -130,7 +130,6 @@ def test_audio_artifact_kept_internal_only_when_public_fallback_disabled(monkeyp
 
 def test_success_requires_validated_delivered_final_mp4(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", False)
-    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", lambda *_args, **_kwargs: True)
     key, _job = _fresh_job("p019m6t-success-gate")
 
     ok = bot.mark_subtitle_dub_pipeline_output_sent(key, terminal_state="delivered")
@@ -145,7 +144,6 @@ def test_success_requires_validated_delivered_final_mp4(monkeypatch):
 
 def test_success_blocked_when_only_audio_exists(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", False)
-    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", lambda *_args, **_kwargs: True)
     key, _job = _fresh_job("p019m6t-audio-only-gate")
 
     ok = bot.mark_subtitle_dub_pipeline_output_sent(

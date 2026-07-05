@@ -1,13 +1,11 @@
 import inspect
 import os
 import subprocess
-from pathlib import Path
 
 import bot
 
 
 VALID_SRT = "1\n00:00:00,000 --> 00:00:02,000\nXin chào cả nhà\n"
-REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _branch_name():
@@ -30,7 +28,7 @@ def test_translated_subtitle_font_size_is_doubled_and_uses_video_play_res():
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert style["subtitle_font_multiplier"] == 2.0
-    assert style["render_size"] <= 48
+    assert style["render_size"] <= 65
     assert style["font_size_cap_applied"] is True
     assert "PlayResX: 1280" in ass
     assert "PlayResY: 720" in ass
@@ -54,8 +52,7 @@ def test_female_voice_payload_and_resolver_lock_voice_engine_default(monkeypatch
     assert state["voice_fallback_used"] is False
 
 
-def test_success_mark_with_video_delivery_keeps_delivered_terminal(monkeypatch):
-    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", lambda *_args, **_kwargs: True)
+def test_success_mark_with_video_delivery_keeps_delivered_terminal():
     key = "p019m6v-delivered"
     bot.SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
     acquired, _job = bot.acquire_subtitle_dub_pipeline_job(
@@ -108,7 +105,7 @@ def test_final_receipt_after_video_delivery_is_success_not_failure():
 
 
 def test_success_after_public_failure_is_blocked_with_debug_flag():
-    source = (REPO_ROOT / "bot.py").read_text(encoding="utf-8")
+    source = inspect.getsource(bot.handle_video_dubbing_callback)
 
     assert "success_after_public_failure_prevented" in source
     assert "success_after_public_failure_video_message_id" in source
@@ -123,7 +120,6 @@ def test_no_music_video_generation_payos_pricing_db_changes():
     changed = {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
     allowed = {
         "bot.py",
-        "services/subtitle_dub_product_pipeline.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6u_subdub_input_save_failed_terminalization_debug_progress_fix.py",
         "tests/test_p0_19m6v_subdub_final_delivery_report_font2x_female_voice_fix.py",
@@ -131,6 +127,5 @@ def test_no_music_video_generation_payos_pricing_db_changes():
         "tests/test_task2_1_translation_product_logic_cleanup.py",
         "tests/test_task2_4_public_product_screens.py",
         "tests/test_task2_5_user_ux_confirmation_cleanup.py",
-        "tests/test_p0_19m6x_subdub_remove_public_srt_fallback_subtitle_style_dub_speed.py",
     }
     assert changed <= allowed

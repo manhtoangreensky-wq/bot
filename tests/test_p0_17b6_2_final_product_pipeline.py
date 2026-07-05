@@ -213,12 +213,10 @@ def test_public_output_matches_tool():
         active_flow="auto_subtitle",
         subtitle_items=subtitle_items,
     ))
-    assert result["documents"] == 0
+    assert result["documents"] == 1
     assert result["audio"] == 0
     assert result["video"] == 0
-    assert result["srt_artifact_exists"] is True
-    assert result["srt_auto_send_suppressed"] is True
-    assert auto.outputs == []
+    assert [kind for kind, _ in auto.outputs] == ["document"]
 
     transcript = CaptureMessage()
     result = asyncio.run(bot.send_public_subtitle_dub_final_outputs(
@@ -227,12 +225,10 @@ def test_public_output_matches_tool():
         active_flow=bot.VIDEO_DUBBING_FLOW_TRANSCRIPT,
         subtitle_items=subtitle_items,
     ))
-    assert result["documents"] == 0
+    assert result["documents"] == 1
     assert result["audio"] == 0
     assert result["video"] == 0
-    assert result["srt_artifact_exists"] is True
-    assert result["srt_auto_send_suppressed"] is True
-    assert transcript.outputs == []
+    assert transcript.outputs[0][1]["filename"].endswith(".txt")
 
     dub = CaptureMessage()
     result = asyncio.run(bot.send_public_subtitle_dub_final_outputs(

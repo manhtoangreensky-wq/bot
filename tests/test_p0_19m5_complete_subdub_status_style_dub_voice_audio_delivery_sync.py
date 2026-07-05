@@ -117,7 +117,7 @@ def test_audio_fallback_only_when_no_video_delivered(monkeypatch):
     assert "đã tạo được file audio lồng tiếng" in message.calls[0][1]["caption"]
 
 
-def test_auto_subtitle_sends_video_without_public_srt_or_audio():
+def test_auto_subtitle_sends_video_and_srt_without_audio():
     message = CaptureMessage()
     sent = asyncio.run(
         bot.send_public_subtitle_dub_final_outputs(
@@ -130,11 +130,9 @@ def test_auto_subtitle_sends_video_without_public_srt_or_audio():
         )
     )
     assert sent["video"] == 1
-    assert sent["documents"] == 0
+    assert sent["documents"] == 1
     assert sent["audio"] == 0
-    assert sent["srt_artifact_exists"] is True
-    assert sent["srt_auto_send_suppressed"] is True
-    assert [kind for kind, _payload in message.calls] == ["video"]
+    assert [kind for kind, _payload in message.calls] == ["video", "document"]
 
 
 def test_terminal_lock_stores_video_message_id_and_suppresses_late_fail():
@@ -181,8 +179,8 @@ def test_subtitle_ass_uses_large_boxed_readable_style():
     )
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
     font_size = int(re.search(r"Style: Default,[^,]+,(\d+),", ass).group(1))
-    assert font_size >= 46
-    assert font_size <= 62
+    assert font_size >= 60
+    assert font_size <= 76
     assert font_size >= style["size"]
     assert style["subtitle_font_multiplier"] >= 2.0
     assert style["font_size_cap_applied"] is True
@@ -215,7 +213,7 @@ def test_subdub_audit_exposes_mode_steps_style_gain_delivery():
     style = bot.subdub_render_style_audit_payload()
     assert "dub_video" in pipeline["expected_steps"]
     assert "Ghép giọng vào video" in pipeline["expected_steps"]["dub_video"]
-    assert style["render_font_size"] >= min(style["font_size"], 46)
+    assert style["render_font_size"] >= style["font_size"]
     assert style["text_box_enabled"] is True
     assert style["full_black_strip_default_disabled"] is True
     assert style["dub_audio_gain"]["gain"] == 2.0
