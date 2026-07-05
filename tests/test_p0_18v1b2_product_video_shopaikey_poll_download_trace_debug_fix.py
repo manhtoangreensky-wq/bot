@@ -28,7 +28,10 @@ def _env() -> dict[str, str]:
     }
 
 
-def _request() -> VideoGenerationRequest:
+def _request(*, paid_retry_confirmed: bool = False) -> VideoGenerationRequest:
+    metadata = {"product_video": True, "allow_provider_pending": True, "wallet_charge": False}
+    if paid_retry_confirmed:
+        metadata["product_video_paid_retry_confirmed"] = True
     return VideoGenerationRequest(
         job_id="job-67",
         product_type="video_ai_prompt",
@@ -37,7 +40,7 @@ def _request() -> VideoGenerationRequest:
         ratio="9:16",
         duration_seconds=6,
         required_capability="text_to_video_or_scene_video",
-        metadata={"product_video": True, "allow_provider_pending": True, "wallet_charge": False},
+        metadata=metadata,
     )
 
 
@@ -131,7 +134,7 @@ def test_shopaikey_submit_accepted_task_id_keeps_job_pending_not_failed(monkeypa
 
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
 
-    result = video_provider_router.run_provider_generation(_request(), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
+    result = video_provider_router.run_provider_generation(_request(paid_retry_confirmed=True), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
 
     assert calls == [("shopaikey_video", "POST"), ("shopaikey_video", "GET")]
     assert result["selected_provider"] == "shopaikey_video"
@@ -153,7 +156,7 @@ def test_shopaikey_processing_poll_does_not_fallback_to_key4u(monkeypatch, tmp_p
 
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
 
-    result = video_provider_router.run_provider_generation(_request(), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
+    result = video_provider_router.run_provider_generation(_request(paid_retry_confirmed=True), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
     trace = _attempt(result, "shopaikey_video")
 
     assert "key4u_video" not in [item[0] for item in calls]
@@ -199,7 +202,7 @@ def test_shopaikey_download_failure_can_fallback_to_key4u(monkeypatch, tmp_path)
 
     monkeypatch.setattr(GenericHttpVideoProvider, "materialize_result", fake_materialize)
 
-    result = video_provider_router.run_provider_generation(_request(), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
+    result = video_provider_router.run_provider_generation(_request(paid_retry_confirmed=True), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
 
     assert calls == [("shopaikey_video", "POST"), ("shopaikey_video", "GET"), ("key4u_video", "POST")]
     assert result["selected_provider"] == "key4u_video"
@@ -215,7 +218,7 @@ def test_key4u_503_after_shopaikey_terminal_failure_no_poll_no_charge(monkeypatc
     )
     monkeypatch.setattr(GenericHttpVideoProvider, "materialize_result", lambda self, result, job_id: VideoArtifactResult(ok=False, error_code="provider_download_failed"))
 
-    result = video_provider_router.run_provider_generation(_request(), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
+    result = video_provider_router.run_provider_generation(_request(paid_retry_confirmed=True), output_dir=str(tmp_path), environ=_env(), sleep_func=lambda _seconds: None)
     key4u = _attempt(result, "key4u_video")
 
     assert result["selected_provider"] == "key4u_video"

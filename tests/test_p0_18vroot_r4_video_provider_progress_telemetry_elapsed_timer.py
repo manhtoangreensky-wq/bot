@@ -22,6 +22,7 @@ def _provider_alive_payload(**updates):
         "provider_status_raw": "MEDIA_GENERATION_STATUS_IN_PROGRESS",
         "provider_error": "provider_in_progress",
         "blocker": "provider_in_progress",
+        "provider_poll_count_source": "internal_worker",
         "continue_polling": True,
         "primary_provider_continue_polling": True,
         "primary_provider_task_alive": True,
@@ -158,7 +159,7 @@ def test_provider_progress_estimate_caps_below_final():
 
     assert telemetry["render_video_progress_percent"] == 0
     assert telemetry["final_progress_after_reconcile"] == 20
-    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["render_progress_public_mode"] == "zero_waiting"
 
 
 def test_provider_poll_count_displayed():

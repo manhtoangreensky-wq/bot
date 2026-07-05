@@ -28,7 +28,10 @@ def _env() -> dict[str, str]:
     }
 
 
-def _request() -> VideoGenerationRequest:
+def _request(*, paid_retry_confirmed: bool = False) -> VideoGenerationRequest:
+    metadata = {"product_video": True, "allow_provider_pending": True, "wallet_charge": False}
+    if paid_retry_confirmed:
+        metadata["product_video_paid_retry_confirmed"] = True
     return VideoGenerationRequest(
         job_id="job-66",
         product_type="video_ai_prompt",
@@ -37,7 +40,7 @@ def _request() -> VideoGenerationRequest:
         ratio="9:16",
         duration_seconds=6,
         required_capability="text_to_video_or_scene_video",
-        metadata={"product_video": True, "allow_provider_pending": True, "wallet_charge": False},
+        metadata=metadata,
     )
 
 
@@ -89,7 +92,7 @@ def test_configured_shopaikey_is_attempted_before_key4u(monkeypatch, tmp_path):
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
 
     result = video_provider_router.run_provider_generation(
-        _request(),
+        _request(paid_retry_confirmed=True),
         output_dir=str(tmp_path),
         environ=_env(),
         sleep_func=lambda _seconds: None,
@@ -117,7 +120,7 @@ def test_shopaikey_not_skipped_as_provider_status_unknown_when_env_audit_aligned
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
 
     result = video_provider_router.run_provider_generation(
-        _request(),
+        _request(paid_retry_confirmed=True),
         output_dir=str(tmp_path),
         environ=_env(),
         sleep_func=lambda _seconds: None,
@@ -142,7 +145,7 @@ def test_shopaikey_submit_success_saves_task_id_and_allows_poll(monkeypatch, tmp
     )
 
     result = video_provider_router.run_provider_generation(
-        _request(),
+        _request(paid_retry_confirmed=True),
         output_dir=str(tmp_path),
         environ=_env(),
         sleep_func=lambda _seconds: None,
@@ -170,7 +173,7 @@ def test_shopaikey_submit_5xx_falls_back_to_key4u(monkeypatch, tmp_path):
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
 
     result = video_provider_router.run_provider_generation(
-        _request(),
+        _request(paid_retry_confirmed=True),
         output_dir=str(tmp_path),
         environ=_env(),
         sleep_func=lambda _seconds: None,
@@ -192,7 +195,7 @@ def test_key4u_503_no_poll_no_charge(monkeypatch, tmp_path):
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", fake_open)
 
     result = video_provider_router.run_provider_generation(
-        _request(),
+        _request(paid_retry_confirmed=True),
         output_dir=str(tmp_path),
         environ=_env(),
         sleep_func=lambda _seconds: None,
@@ -213,7 +216,7 @@ def test_all_providers_fail_terminal_failed_no_charge(monkeypatch, tmp_path):
     monkeypatch.setattr(GenericHttpVideoProvider, "_open_json", lambda self, *_a, **_k: _http_503(self.provider_name))
 
     result = video_provider_router.run_provider_generation(
-        _request(),
+        _request(paid_retry_confirmed=True),
         output_dir=str(tmp_path),
         environ=_env(),
         sleep_func=lambda _seconds: None,

@@ -305,12 +305,14 @@ def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]
     if raw_count in (None, ""):
         raw_count = payload.get("poll_count")
     count = _as_int(raw_count, 0)
-    source = "payload" if count > 0 else "none"
+    declared_source = str(payload.get("provider_poll_count_source") or "").strip().lower()
+    trusted_sources = {"provider_attempts", "internal_worker", "worker_poll", "worker"}
+    source = declared_source if count > 0 and declared_source in trusted_sources else ("payload" if count > 0 else "none")
     attempts = payload.get("provider_attempts") or payload.get("provider_pending_attempts") or []
     if isinstance(attempts, list):
         poll_attempts = sum(1 for item in attempts if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll"))
-        if poll_attempts > count:
-            count = poll_attempts
+        if poll_attempts > 0 and poll_attempts >= count:
+            count = max(count, poll_attempts)
             source = "provider_attempts"
     return max(0, count), source
 
@@ -419,8 +421,8 @@ def reconcile_provider_progress_telemetry(
         provider_progress_trusted=provider_progress_trusted,
     )
     provider_progress_public_suppressed = bool(alive and not final_output_ready and not result_url_present and not provider_progress_trusted)
-    render_progress_public_mode = "indeterminate" if provider_progress_public_suppressed else "percent"
-    render_progress_public_percent = "-" if provider_progress_public_suppressed else str(render_progress)
+    render_progress_public_mode = "zero_waiting" if provider_progress_public_suppressed else "percent"
+    render_progress_public_percent = "0" if provider_progress_public_suppressed else str(render_progress)
     fake_progress_prevention_reason = "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else ""
     render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
     overall_progress_from_render = 100 if final_output_ready else (95 if result_url_present else 20 + int(render_progress * 0.65))
@@ -463,6 +465,7 @@ def reconcile_provider_progress_telemetry(
         "render_video_progress_percent_public": render_progress_public_percent,
         "provider_progress_public_suppressed": bool(provider_progress_public_suppressed),
         "render_progress_public_mode": render_progress_public_mode,
+        "public_zero_bar_due_to_untrusted_provider": bool(provider_progress_public_suppressed),
         "fake_progress_prevented": bool(provider_progress_public_suppressed),
         "fake_progress_prevention_reason": fake_progress_prevention_reason,
         "percent_conservative_due_to_untrusted_provider": bool(provider_progress_public_suppressed),
