@@ -71,7 +71,7 @@ def test_untrusted_provider_progress_not_shown_publicly():
     assert "90%" not in block
     assert "78%" not in block
     assert "0%" in block
-    assert "Đang dựng" in block
+    assert "Đã gửi yêu cầu dựng video." in block
     assert telemetry["provider_progress_public_suppressed"] is True
 
 
@@ -191,7 +191,7 @@ def test_overall_percent_conservative_when_provider_progress_untrusted():
 def test_public_stage_text_can_show_rendering_without_fake_percent():
     block = bot.video_b14_provider_rendering_block(_telemetry(_provider_alive_payload(provider_progress_raw=100)))
 
-    assert "Đang dựng" in block
+    assert "Đang chờ kết quả dựng video." in block
     assert "0%" in block
     assert "100%" not in block
 
@@ -200,7 +200,7 @@ def test_rendering_block_keeps_zero_bar_when_progress_is_untrusted():
     block = bot.video_b14_provider_rendering_block(_telemetry(_provider_alive_payload(provider_progress_raw=100)))
 
     assert "▱▱▱▱▱▱▱▱▱▱ <b>0%</b>" in block
-    assert "Đang dựng..." in block
+    assert "Đã gửi yêu cầu dựng video." in block
     assert "90%" not in block
 
 
@@ -243,7 +243,7 @@ def test_provider_poll_count_starts_zero_without_real_poll_attempts():
 
     assert telemetry["provider_poll_count"] == 0
     assert telemetry["provider_poll_count_source"] == "none"
-    assert "Đang kiểm tra định kỳ" in block
+    assert "Đang chờ kết quả dựng video." in block
     assert "Đã kiểm tra: <b>0 lần</b>" not in block
 
 

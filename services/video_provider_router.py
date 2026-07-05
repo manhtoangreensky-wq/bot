@@ -57,6 +57,40 @@ def _env_flag(env: dict[str, str], name: str, default: str = "0") -> bool:
     return str(env.get(name, default) or default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_flag_detail(
+    env: dict[str, str] | None,
+    name: str,
+    default: str = "0",
+    *,
+    fallback_to_process_env: bool = False,
+) -> dict[str, Any]:
+    env_data = dict(env or {})
+    if name in env_data:
+        raw = str(env_data.get(name, "") or "").strip()
+        source = "environ"
+    elif fallback_to_process_env and name in os.environ:
+        raw = str(os.environ.get(name, "") or "").strip()
+        source = "process_env"
+    else:
+        raw = str(default)
+        source = "default"
+    normalized = raw.strip().lower()
+    truthy = {"1", "true", "yes", "on"}
+    falsy = {"0", "false", "no", "off", ""}
+    if normalized in truthy:
+        resolved = True
+    elif normalized in falsy:
+        resolved = False
+    else:
+        resolved = False
+        source = f"invalid_{source}"
+    return {
+        "raw": raw,
+        "resolved": bool(resolved),
+        "source": source,
+    }
+
+
 def _env_int(env: dict[str, str], name: str, default: int) -> int:
     try:
         return int(str(env.get(name, str(default)) or str(default)).strip())
@@ -113,8 +147,19 @@ def _metadata_existing_provider_task(metadata: dict[str, Any]) -> tuple[str, str
 
 
 def product_video_submit_enabled(env: dict[str, str] | None = None) -> bool:
-    env = dict(env or os.environ)
-    return _env_flag(env, "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED", "1")
+    return bool(product_video_submit_switch_detail(env).get("resolved"))
+
+
+def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dict[str, Any]:
+    # Remote workers may pass a provider-only config dict to the router. The
+    # global Product Video spend switch must still be read from process env
+    # when the provider config payload does not include it.
+    return _env_flag_detail(
+        env,
+        "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED",
+        "1",
+        fallback_to_process_env=True,
+    )
 
 
 def paid_retry_requires_confirmation(env: dict[str, str] | None = None) -> bool:
@@ -1334,7 +1379,8 @@ def run_provider_generation(
     pending_video_id = str(metadata.get("provider_pending_video_id") or existing_video_id or "").strip()
     pending_request_job_id = str(metadata.get("provider_pending_request_job_id") or "").strip()
     pending_attempts = [dict(item) for item in (metadata.get("provider_pending_attempts") or []) if isinstance(item, dict)]
-    submit_enabled = product_video_submit_enabled(env)
+    submit_switch = product_video_submit_switch_detail(env)
+    submit_enabled = bool(submit_switch.get("resolved"))
     cooldown_state = provider_failure_cooldown_state(metadata, env)
     submit_idempotency_key = hashlib.sha256(
         f"{request.job_id}|{request.product_type}|{request.video_flow_type}|{request.required_capability}".encode("utf-8")
@@ -1344,6 +1390,10 @@ def run_provider_generation(
         "provider_request_job_id": str(request.job_id or ""),
         "provider_submit_idempotency_key": submit_idempotency_key,
         "product_video_provider_submit_enabled": bool(submit_enabled),
+        "product_video_provider_submit_enabled_raw": str(submit_switch.get("raw") or ""),
+        "product_video_provider_submit_enabled_resolved": bool(submit_enabled),
+        "product_video_provider_submit_enabled_source": str(submit_switch.get("source") or "default"),
+        "kill_switch_checked_before_submit": True,
         "provider_submit_blocked_by_kill_switch": False,
         "external_provider_spend_prevented": False,
         "provider_submit_already_exists": bool(pending_task_id or pending_video_id),

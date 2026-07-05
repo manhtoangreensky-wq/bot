@@ -306,7 +306,7 @@ def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]
         raw_count = payload.get("poll_count")
     count = _as_int(raw_count, 0)
     declared_source = str(payload.get("provider_poll_count_source") or "").strip().lower()
-    trusted_sources = {"provider_attempts", "internal_worker", "worker_poll", "worker"}
+    trusted_sources = {"internal_worker", "worker_poll", "worker", "live_worker", "registry_live", "active_worker"}
     source = declared_source if count > 0 and declared_source in trusted_sources else ("payload" if count > 0 else "none")
     attempts = payload.get("provider_attempts") or payload.get("provider_pending_attempts") or []
     if isinstance(attempts, list):
@@ -424,6 +424,24 @@ def reconcile_provider_progress_telemetry(
     render_progress_public_mode = "zero_waiting" if provider_progress_public_suppressed else "percent"
     render_progress_public_percent = "0" if provider_progress_public_suppressed else str(render_progress)
     fake_progress_prevention_reason = "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else ""
+    trusted_render_progress_available = bool(provider_progress_trusted or result_url_present or final_output_ready)
+    why_render_bar_stays_zero = (
+        "provider_progress_untrusted_no_result_url" if provider_progress_public_suppressed else ""
+    )
+    status_registry_missing_after_restart = bool(
+        payload.get("status_registry_missing_after_restart")
+        or payload.get("registry_missing_after_restart")
+        or payload.get("recovered_from_db_for_status_debug")
+    )
+    live_elapsed_sources = {"internal_worker", "worker_poll", "worker", "live_worker", "registry_live", "active_worker"}
+    if status_registry_missing_after_restart:
+        elapsed_public_mode = "hidden"
+    elif poll_count_source in live_elapsed_sources:
+        elapsed_public_mode = "live"
+    elif estimated_started:
+        elapsed_public_mode = "recovered_approx"
+    else:
+        elapsed_public_mode = "hidden" if provider_progress_public_suppressed else "recovered_approx"
     render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
     overall_progress_from_render = 100 if final_output_ready else (95 if result_url_present else 20 + int(render_progress * 0.65))
     if provider_progress_public_suppressed:
@@ -477,6 +495,10 @@ def reconcile_provider_progress_telemetry(
         "render_progress_monotonic_applied": bool(render_monotonic_applied),
         "overall_progress_from_render": overall_progress_from_render,
         "provider_status_for_progress": provider_status,
+        "provider_task_status": provider_status,
+        "trusted_render_progress_available": bool(trusted_render_progress_available),
+        "why_render_bar_stays_zero": why_render_bar_stays_zero,
+        "external_provider_spend_possible": bool(payload.get("provider_submit_called") or payload.get("submit_accepted") or payload.get("provider_task_id_saved") or alive),
         "provider_poll_count": poll_count,
         "provider_poll_count_source": poll_count_source,
         "provider_last_poll_at": payload.get("provider_last_poll_at") or payload.get("last_poll_at") or now_text(current_dt),
@@ -487,6 +509,9 @@ def reconcile_provider_progress_telemetry(
         "provider_wait_elapsed_seconds": elapsed,
         "provider_wait_max_seconds": wait_max,
         "provider_elapsed_estimated": bool(estimated_started),
+        "elapsed_public_mode": elapsed_public_mode,
+        "elapsed_public_source": started_source,
+        "status_registry_missing_after_restart": bool(status_registry_missing_after_restart),
         "elapsed_wall_clock_seconds": wall_clock_elapsed,
         "previous_elapsed_seconds": previous_elapsed,
         "elapsed_monotonic_applied": bool(elapsed_monotonic_applied),
