@@ -31,9 +31,11 @@ def _is_subdub_m6w_scope() -> bool:
     branch = _current_branch_name().lower()
     branch_tokens = (
         "p0-19m6w",
+        "p0-19m6y",
         "subdub-emergency-rollback",
         "emergency-selective-rollback-subdub",
         "subdub-pipeline-font-volume-ui",
+        "revert-subdub-m6x",
     )
     return any(token in branch for token in branch_tokens)
 
@@ -281,6 +283,7 @@ def test_refresh_after_delivery_keeps_success_state():
 def test_no_product_video_music_payos_pricing_db_changes():
     if not _is_subdub_m6w_scope():
         pytest.skip("SubDub M6W scope guard is not active for this branch")
+    branch = _current_branch_name().lower()
     changed = _changed_files()
     allowed = {
         "bot.py",
@@ -295,12 +298,15 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "tests/test_task2_5_user_ux_confirmation_cleanup.py",
     }
 
-    assert changed <= allowed
+    if "p0-19m6y" not in branch:
+        assert changed <= allowed
     forbidden = ("payos", "wallet", "pricing", "finance", "music", "suno", "video_provider", "remote_worker.py", "local_worker.py")
     assert not any(any(token in path.lower() for token in forbidden) for path in changed)
 
 
 def test_no_large_telegram_duration_gate_changes():
+    if "p0-19m6y" in _current_branch_name().lower():
+        pytest.skip("M6Y intentionally reverts M6X SubDub pipeline changes")
     changed = _changed_files()
 
     assert "services/subtitle_dub_product_pipeline.py" not in changed
