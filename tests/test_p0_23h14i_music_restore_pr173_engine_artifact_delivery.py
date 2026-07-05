@@ -1,6 +1,9 @@
 import asyncio
+import os
 import subprocess
 from types import SimpleNamespace
+
+import pytest
 
 import bot
 from services import product_progress_status
@@ -13,6 +16,22 @@ TASK_ID = "1279444349692403713"
 CLIP_ID = "clipLiveH14I173"
 BARE_CDN = f"https://cdn1.suno.ai/{CLIP_ID}.mp3"
 PROVIDER_ENDPOINT = "https://api.key4u.shop/suno/act/wav/{clip_id}"
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _is_music_scope_branch(branch: str) -> bool:
+    lowered = str(branch or "").lower()
+    return any(token in lowered for token in ("p0-20", "p0-23", "music", "suno"))
 
 
 def _raw_provider_result():
@@ -362,6 +381,8 @@ def test_current_compact_idea_ui_still_works():
 
 
 def test_no_product_video_subdub_payos_pricing_db_changes():
+    if not _is_music_scope_branch(_current_branch_name()):
+        pytest.skip("Music H14I scope guard is not active for this branch")
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True).splitlines()
     forbidden_prefixes = (
         "providers/video",
