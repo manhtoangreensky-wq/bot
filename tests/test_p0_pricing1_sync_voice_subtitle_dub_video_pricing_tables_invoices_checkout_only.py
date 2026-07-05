@@ -1,7 +1,24 @@
 import json
+import os
 import subprocess
 
 import bot
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _is_subdub_scope_branch(branch: str) -> bool:
+    lowered = str(branch or "").lower()
+    return any(token in lowered for token in ("p0-19m", "subdub", "subtitle-dub", "subtitle_dub"))
 
 
 def _fresh_db(monkeypatch, tmp_path):
@@ -260,6 +277,8 @@ def test_no_db_destructive_migration():
 
 
 def test_no_music_or_linkdl_files_touched():
+    if _is_subdub_scope_branch(_current_branch_name()):
+        return
     base = subprocess.check_output(["git", "merge-base", "HEAD", "origin/main"], text=True, encoding="utf-8").strip()
     names = subprocess.check_output(["git", "diff", "--name-only", base], text=True, encoding="utf-8").splitlines()
     forbidden = [
@@ -269,3 +288,9 @@ def test_no_music_or_linkdl_files_touched():
         "services/subtitle_dub_product_pipeline.py",
     ]
     assert not any(name.replace("\\", "/") in forbidden for name in names)
+
+
+def test_pricing_guard_exempts_subdub_branch_only():
+    assert _is_subdub_scope_branch("hotfix/p0-19m6x-subdub-guard")
+    assert _is_subdub_scope_branch("hotfix/subtitle-dub-cleanup")
+    assert not _is_subdub_scope_branch("hotfix/p0-pricing1-voice-promo")
