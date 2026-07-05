@@ -219,6 +219,8 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
     task_id = str(pending.get("task_id") or "")
     video_id = str(pending.get("video_id") or "")
     wait_max = max(60, _env_int("PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
+    started_at = str(data.get("provider_started_at") or (job or {}).get("provider_started_at") or "").strip()
+    started_epoch = data.get("provider_started_at_epoch") or (job or {}).get("provider_started_at_epoch") or ""
     data.update(
         {
             "ok": False,
@@ -253,8 +255,18 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
             "primary_provider_task_id_present": bool(task_id or video_id or data.get("provider_task_ids") or data.get("provider_video_ids")),
             "key4u_submit_suppressed": True,
             "next_poll_scheduled": True,
+            "provider_started_at": started_at,
+            "provider_started_at_epoch": started_epoch,
+            "provider_started_at_source": str(data.get("provider_started_at_source") or ("payload" if started_at or started_epoch else "")),
             "provider_wait_elapsed_seconds": int(data.get("provider_wait_elapsed_seconds") or 0),
+            "provider_elapsed_seconds": int(data.get("provider_elapsed_seconds") or data.get("provider_wait_elapsed_seconds") or 0),
             "provider_wait_max_seconds": int(data.get("provider_wait_max_seconds") or wait_max),
+            "provider_progress_raw": data.get("provider_progress_raw", ""),
+            "provider_progress_normalized": int(data.get("provider_progress_normalized") or 0),
+            "provider_progress_estimated": bool(data.get("provider_progress_estimated")),
+            "provider_progress_percent": int(data.get("provider_progress_percent") or 20),
+            "provider_poll_count": int(data.get("provider_poll_count") or 0),
+            "provider_last_poll_at": str(data.get("provider_last_poll_at") or ""),
             "terminal_state": "final_rendering",
             "progress_message": "provider_in_progress",
             "public_message": "TOAN AAS đang dựng video. Anh/chị vui lòng kiểm tra lại sau.",
@@ -958,6 +970,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "provider_pending_video_id": str((job or {}).get("provider_pending_video_id") or "") if pending_matches_request else "",
             "provider_pending_request_job_id": pending_request_job_id if pending_matches_request else "",
             "provider_pending_attempts": ((job or {}).get("provider_pending_attempts") or []) if pending_matches_request else [],
+            "provider_started_at": str((job or {}).get("provider_started_at") or "") if pending_matches_request else "",
+            "provider_started_at_epoch": (job or {}).get("provider_started_at_epoch") if pending_matches_request else "",
+            "provider_wait_started_at": str((job or {}).get("provider_started_at") or (job or {}).get("provider_wait_started_at") or "") if pending_matches_request else "",
+            "provider_wait_started_epoch": (job or {}).get("provider_started_at_epoch") or (job or {}).get("provider_wait_started_epoch") if pending_matches_request else "",
         },
         required_capability=required_capability,
     )

@@ -1239,6 +1239,14 @@ def _claim_video_render_candidate(
                 "project_id": row[1],
                 "user_id": row[2],
                 "job_type": row[3],
+                "status": row[4],
+                "result_json": row[12],
+                "created_at": row[13],
+                "updated_at": row[14],
+                "started_at": row[15],
+                "completed_at": row[16],
+                "progress_percent": row[17],
+                "progress_message": row[18],
             }
             project = {
                 "project_id": row[1],
@@ -1288,11 +1296,27 @@ def _claim_video_render_candidate(
             progress_message = "product video claimed"
         else:
             progress_message = "claimed"
+        result_payload = video_project_queue._json_loads(chosen.get("result_json"), {})  # internal queue JSON helper
+        if not isinstance(result_payload, dict):
+            result_payload = {}
+        telemetry = video_project_queue.reconcile_provider_progress_telemetry(
+            chosen,
+            result_payload,
+            now=current_dt,
+            refresh_source="remote_worker_claim",
+        )
+        claim_progress = 10
+        result_json_value = chosen.get("result_json")
+        if telemetry.get("provider_task_alive"):
+            claim_progress = int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or 20)
+            progress_message = "provider_in_progress"
+            result_payload.update(telemetry)
+            result_json_value = video_project_queue._json_dumps(result_payload)
         cursor = conn.execute(
             """UPDATE video_jobs
                SET status='processing', attempts=COALESCE(attempts,0)+1, locked_by=?, locked_at=?,
                    lease_expires_at=?, started_at=COALESCE(started_at, ?), updated_at=?,
-                   progress_percent=10, progress_message=?
+                   progress_percent=?, progress_message=?, result_json=?
                WHERE id=? AND status='queued' AND job_type=?""",
             (
                 sanitize_worker_id(worker_id),
@@ -1300,7 +1324,9 @@ def _claim_video_render_candidate(
                 lease_expires,
                 current,
                 current,
+                int(claim_progress),
                 progress_message,
+                result_json_value,
                 int(chosen["id"]),
                 video_project_queue.VIDEO_RENDER_JOB_TYPE,
             ),
