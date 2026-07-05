@@ -28,7 +28,8 @@ def test_translated_subtitle_font_size_is_doubled_and_uses_video_play_res():
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert style["subtitle_font_multiplier"] == 2.0
-    assert style["render_size"] >= 88
+    assert style["render_size"] <= 65
+    assert style["font_size_cap_applied"] is True
     assert "PlayResX: 1280" in ass
     assert "PlayResY: 720" in ass
     assert f",{style['render_size']}," in ass
