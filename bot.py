@@ -1861,7 +1861,7 @@ SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.35, env_float("SUBDUB_HARDSUB_COVE
 SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.02, min(0.06, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.05)))
 SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.90, min(0.96, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.91)))
 SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.04, min(0.09, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.065)))
-SUBDUB_SUBTITLE_FONT_MULTIPLIER = max(1.0, min(2.5, env_float("SUBDUB_SUBTITLE_FONT_MULTIPLIER", 2.0)))
+SUBDUB_SUBTITLE_FONT_MULTIPLIER = max(1.0, min(2.0, env_float("SUBDUB_SUBTITLE_FONT_MULTIPLIER", 1.35)))
 SUBDUB_SUBTITLE_TEXT_BOX_ENABLED = env_flag("SUBDUB_SUBTITLE_TEXT_BOX_ENABLED", "true")
 SUBDUB_VIDEO_FIT_MODE = (_env("SUBDUB_VIDEO_FIT_MODE", "cover") or "cover").strip().lower()
 SUBDUB_KEEP_ORIGINAL_RESOLUTION = env_flag("SUBDUB_KEEP_ORIGINAL_RESOLUTION", "true")
@@ -1878,9 +1878,10 @@ SUBDUB_DUB_VOICE_GAIN = max(1.0, min(4.0, env_float("SUBDUB_DUB_VOICE_GAIN", 2.0
 SUBDUB_DUB_LOUDNESS_NORMALIZE = env_flag("SUBDUB_DUB_LOUDNESS_NORMALIZE", "true")
 SUBDUB_DUB_MAX_PEAK_DB = max(-6.0, min(-0.1, env_float("SUBDUB_DUB_MAX_PEAK_DB", -1.0)))
 ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
-SUBDUB_VOLUME_MIX_UI_ENABLED = env_flag("SUBDUB_VOLUME_MIX_UI_ENABLED", "false")
+SUBDUB_VOLUME_MIX_UI_ENABLED = env_flag("SUBDUB_VOLUME_MIX_UI_ENABLED", "true")
 SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT = max(0, min(100, env_int("SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT", 30)))
-SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT = max(80, min(200, env_int("SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT", 100)))
+SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT = max(0, min(200, env_int("SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT", 100)))
+SUBDUB_DEFAULT_VOICE_SPEED = f"{max(0.7, min(1.8, env_float('SUBDUB_DEFAULT_VOICE_SPEED', 0.9))):.2f}".rstrip("0").rstrip(".")
 ASR_PROVIDER = _env("ASR_PROVIDER", "auto").strip().lower()
 TRANSLATE_PROVIDER = _env("TRANSLATE_PROVIDER", "auto").strip().lower()
 TTS_PROVIDER = _env("TTS_PROVIDER", "auto").strip().lower()
@@ -166427,7 +166428,7 @@ def video_dubbing_voice_speed_text(state: dict | None = None, lang: str = "vi") 
             "Enter the desired speed.\n"
             "Examples:\n"
             "• 0.9 = slower\n"
-            "• 1.0 = normal\n"
+            f"• {SUBDUB_DEFAULT_VOICE_SPEED} = default\n"
             "• 1.5 = faster\n\n"
             "You can enter a number from 0.7 to 1.8."
         )
@@ -166436,7 +166437,7 @@ def video_dubbing_voice_speed_text(state: dict | None = None, lang: str = "vi") 
         "Nhập tốc độ mong muốn.\n"
         "Ví dụ:\n"
         "• 0.9 = chậm hơn\n"
-        "• 1.0 = bình thường\n"
+        f"• {SUBDUB_DEFAULT_VOICE_SPEED} = mặc định\n"
         "• 1.5 = nhanh hơn\n\n"
         "Bạn có thể nhập số từ 0.7 đến 1.8."
     )
@@ -166445,7 +166446,7 @@ def video_dubbing_voice_speed_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("1.0 mặc định" if is_vi else "1.0 default", callback_data="videodub|speed_default"),
+            InlineKeyboardButton(f"{SUBDUB_DEFAULT_VOICE_SPEED} mặc định" if is_vi else f"{SUBDUB_DEFAULT_VOICE_SPEED} default", callback_data="videodub|speed_default"),
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_speed"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
@@ -166983,6 +166984,16 @@ def subdub_percent_value(value, default: int, low: int, high: int) -> int:
         number = int(default)
     return max(int(low), min(int(high), number))
 
+def subdub_parse_volume_percent_input(value, *, low: int = 0, high: int = 200) -> int:
+    text = str(value if value is not None else "").strip().replace(",", ".")
+    match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not match:
+        raise ValueError("invalid_volume_percent")
+    number = float(match.group(0))
+    if number < low or number > high:
+        raise ValueError("volume_percent_out_of_range")
+    return int(round(number))
+
 def subdub_keep_original_audio_enabled(state: dict | None = None) -> bool:
     value = str((state or {}).get("keep_original_audio") or "").strip().lower()
     return value in {"1", "true", "yes", "on", "keep", "giữ", "giu"}
@@ -167019,7 +167030,7 @@ def subdub_audio_mix_state_fields(state: dict | None = None) -> dict:
     dub_percent = subdub_percent_value(
         current.get("dubbed_voice_volume_percent") or current.get("voice_volume"),
         SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT,
-        80,
+        0,
         200,
     )
     return {
@@ -167060,9 +167071,12 @@ def subdub_audio_mix_text(state: dict | None = None, lang: str = "vi") -> str:
     original = f"Giữ lại, {mix['original_audio_volume_percent']}%" if mix["keep_original_audio"] else "Tắt"
     return (
         "🎚 <b>Âm thanh video</b>\n\n"
-        f"Âm thanh gốc: <b>{html.escape(original)}</b>\n"
-        f"Giọng lồng tiếng: <b>{mix['dubbed_voice_volume_percent']}%</b>\n\n"
-        "Chọn âm lượng cho video hoàn chỉnh."
+        f"<b>Âm thanh gốc</b>\n"
+        f"Trạng thái: <b>{html.escape(original)}</b>\n"
+        "Có thể bật/tắt và nhập âm lượng từ 0-100%.\n\n"
+        f"<b>Giọng lồng tiếng</b>\n"
+        f"Âm lượng: <b>{mix['dubbed_voice_volume_percent']}%</b>\n"
+        "Có thể nhập âm lượng từ 0-200%."
     )
 
 def subdub_audio_mix_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
@@ -167076,32 +167090,31 @@ def subdub_audio_mix_keyboard(lang: str = "vi", state: dict | None = None) -> In
     if not is_vi:
         keep_label = "Mute original" if mix["keep_original_audio"] else "Keep original"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(("🔇 " if mix["keep_original_audio"] else "🎚 ") + keep_label, callback_data=f"videodub|audio_keep|{'0' if mix['keep_original_audio'] else '1'}")],
         [
-            InlineKeyboardButton("Gốc 20%" if is_vi else "Orig 20%", callback_data="videodub|audio_original_volume|20"),
-            InlineKeyboardButton("Gốc 40%" if is_vi else "Orig 40%", callback_data="videodub|audio_original_volume|40"),
-            InlineKeyboardButton("Gốc 60%" if is_vi else "Orig 60%", callback_data="videodub|audio_original_volume|60"),
+            InlineKeyboardButton(("🔇 " if mix["keep_original_audio"] else "🎚 ") + keep_label, callback_data=f"videodub|audio_keep|{'0' if mix['keep_original_audio'] else '1'}"),
+            InlineKeyboardButton("✏️ Nhập % gốc" if is_vi else "✏️ Original %", callback_data="videodub|audio_original_input"),
         ],
         [
-            InlineKeyboardButton("Gốc 80%" if is_vi else "Orig 80%", callback_data="videodub|audio_original_volume|80"),
-            InlineKeyboardButton("Gốc 100%" if is_vi else "Orig 100%", callback_data="videodub|audio_original_volume|100"),
-        ],
-        [
-            InlineKeyboardButton("Lồng 80%" if is_vi else "Dub 80%", callback_data="videodub|audio_dub_volume|80"),
-            InlineKeyboardButton("Lồng 100%" if is_vi else "Dub 100%", callback_data="videodub|audio_dub_volume|100"),
-            InlineKeyboardButton("Lồng 120%" if is_vi else "Dub 120%", callback_data="videodub|audio_dub_volume|120"),
-        ],
-        [
-            InlineKeyboardButton("Lồng 150%" if is_vi else "Dub 150%", callback_data="videodub|audio_dub_volume|150"),
-            InlineKeyboardButton("Lồng 200%" if is_vi else "Dub 200%", callback_data="videodub|audio_dub_volume|200"),
+            InlineKeyboardButton("🎙 Giọng lồng tiếng" if is_vi else "🎙 Dub voice", callback_data="videodub|audio_dub_menu"),
+            InlineKeyboardButton("✏️ Nhập % lồng" if is_vi else "✏️ Dub %", callback_data="videodub|audio_dub_input"),
         ],
         [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_audio_mix")],
     ])
 
+def subdub_audio_original_input_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "🎚 <b>Original audio</b>\n\nEnter a number from 0 to 100.\nExample: 30"
+    return "🎚 <b>Âm thanh gốc</b>\n\nNhập số từ 0 đến 100.\nVí dụ: 30"
+
+def subdub_audio_dub_input_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "🎙 <b>Dub voice volume</b>\n\nEnter a number from 0 to 200.\nExample: 120"
+    return "🎙 <b>Giọng lồng tiếng</b>\n\nNhập số từ 0 đến 200.\nVí dụ: 120"
+
 def subdub_dynamic_volume_ui_future_spec() -> dict:
     return {
-        "task": "P0.19N.2 SubDub Dynamic Original/Dub Volume Input UI",
-        "enabled": False,
+        "task": "P0.19N SubDub Dynamic Original/Dub Volume Input UI",
+        "enabled": True,
         "screens": [
             "Giữ âm thanh gốc? Bật/Tắt",
             "Nhập âm lượng âm gốc, 0-100%, mặc định 30%",
@@ -167633,6 +167646,59 @@ def video_dubbing_flow_failure_text(mode: str, lang: str = "vi") -> str:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
     return subdub_mode_fail_text(VIDEO_SUBTITLE_MODE_CREATE, lang)
 
+def subdub_result_duration_seconds(state: dict | None = None, result: dict | None = None) -> int:
+    for source in (result or {}, state or {}):
+        for key in ("duration_seconds", "video_duration", "input_duration", "source_duration"):
+            try:
+                value = int(float(source.get(key) or 0))
+            except Exception:
+                value = 0
+            if value > 0:
+                return value
+    return 0
+
+def subdub_result_duration_label(state: dict | None = None, result: dict | None = None) -> str:
+    seconds = subdub_result_duration_seconds(state, result)
+    if seconds <= 0:
+        return "-"
+    minutes, sec = divmod(seconds, 60)
+    return f"{minutes:02d}:{sec:02d}"
+
+def subdub_result_report_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    result = result or {}
+    charged = result.get("charged") if "charged" in result else state.get("charged_xu")
+    cost_line = subdub_success_cost_line(charged or 0, lang)
+    job_code = subdub_public_job_code(
+        str(
+            result.get("job_id")
+            or result.get("public_job_id")
+            or state.get("_pipeline_job_id")
+            or state.get("subdub_public_job_id")
+            or ""
+        )
+    )
+    duration = subdub_result_duration_label(state, result)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "✅ <b>Completed</b>",
+            "",
+            f"Duration: <b>{html.escape(duration)}</b>",
+            cost_line,
+        ]
+        if job_code:
+            lines.insert(2, f"Code: <b>{html.escape(job_code)}</b>")
+        return "\n".join(lines)
+    lines = [
+        "✅ <b>Đã gửi video hoàn chỉnh</b>",
+        "",
+        f"Thời lượng: <b>{html.escape(duration)}</b>",
+        cost_line,
+    ]
+    if job_code:
+        lines.insert(2, f"Mã xử lý: <b>{html.escape(job_code)}</b>")
+    return "\n".join(lines)
+
 def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     result = result or {}
@@ -167652,7 +167718,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
     cost_line = subdub_success_cost_line(result.get("charged") or 0, lang)
     if delivered_video or terminal_delivered:
-        return f"Kết quả đã gửi phía trên.\n\n{cost_line}" if normalize_user_language(lang) == "vi" else f"The result was sent above.\n\n{cost_line}"
+        return subdub_result_report_text(state, result, lang)
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_completed_text(state, result, lang)
     sent_count = sum(int(result.get(key) or 0) for key in ("sent_documents", "sent_audio", "sent_video", "sent_video_document"))
@@ -170774,17 +170840,17 @@ def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, e
     return subdub_clamp_int(target, target, 42, 60)
 
 def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
-    base = subdub_clamp_int((style or {}).get("size"), 52, 34, 72)
-    multiplier = max(1.0, min(2.5, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
+    base = subdub_clamp_int((style or {}).get("size"), 44, 32, 58)
+    multiplier = max(1.0, min(1.6, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     width, height = subdub_style_video_size(state)
     target = int(round(base * multiplier))
-    cap = 72
+    cap = 58
     if height:
         vertical = bool(width and height >= width * 1.15)
-        ratio = 0.072 if vertical else 0.085
-        cap = max(48, int(round(height * ratio)))
-        cap = min(cap, 92 if vertical else 76)
-    return subdub_clamp_int(min(target, cap), min(target, cap), 42, 92)
+        ratio = 0.052 if vertical else 0.064
+        cap = max(40, int(round(height * ratio)))
+        cap = min(cap, 66 if vertical else 58)
+    return subdub_clamp_int(min(target, cap), min(target, cap), 34, 66)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
@@ -170860,7 +170926,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["subtitle_font_path"] = str(font_resolution.get("path") or "")[:260]
     style["subtitle_font_blocker"] = str(font_resolution.get("blocker") or "")[:80]
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
-    style["subtitle_font_multiplier"] = max(1.0, min(2.5, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
+    style["subtitle_font_multiplier"] = max(1.0, min(1.6, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     style["render_size"] = subdub_render_subtitle_size(style, state)
     style["subtitle_style_baseline_source"] = "pre_231"
     style["translated_font_size_baseline"] = int(style.get("size") or 0)
@@ -170870,6 +170936,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         int(style.get("render_size") or 0)
         < int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
     )
+    style["position"] = "bottom"
+    style["align"] = "center"
     style["subtitle_wrap_lines_max"] = 2
     style["outline"] = max(4, subdub_clamp_int(style.get("outline"), 4, 0, 8))
     style["shadow"] = max(1, subdub_clamp_int(style.get("shadow"), 1, 0, 4))
@@ -170978,10 +171046,34 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
         blocks.append({"start": start, "end": end, "text": body})
     return blocks
 
-def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
+def subdub_wrap_text_lines(text: str, max_chars: int, max_lines: int = 2) -> list[str]:
+    max_chars = max(12, int(max_chars or 28))
+    max_lines = max(1, int(max_lines or 2))
+    output: list[str] = []
+    for raw_line in subdub_normalize_subtitle_text(text).replace("\\N", "\n").splitlines():
+        words = re.sub(r"\s+", " ", raw_line).strip().split(" ")
+        current = ""
+        for word in [item for item in words if item]:
+            if not current:
+                current = word
+            elif len(current) + 1 + len(word) <= max_chars:
+                current = f"{current} {word}"
+            else:
+                output.append(current)
+                current = word
+                if len(output) >= max_lines:
+                    break
+        if current and len(output) < max_lines:
+            output.append(current)
+        if len(output) >= max_lines:
+            break
+    return output[:max_lines]
+
+def subdub_ass_escape(text: str, max_lines: int = 2, max_chars: int = 0) -> str:
     normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
-    lines = [re.sub(r"\s+", " ", line).strip().replace("\\", r"\\") for line in normalized.splitlines()]
+    raw_lines = subdub_wrap_text_lines(normalized, max_chars, max_lines) if max_chars else normalized.splitlines()
+    lines = [re.sub(r"\s+", " ", line).strip().replace("\\", r"\\") for line in raw_lines]
     lines = [line for line in lines if line]
     if not lines:
         return ""
@@ -171010,7 +171102,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     header = [
         "[Script Info]",
         "ScriptType: v4.00+",
-        "WrapStyle: 2",
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         f"PlayResX: {play_res_x}",
         f"PlayResY: {play_res_y}",
@@ -171028,8 +171120,10 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     events = []
+    render_size = int(style.get("render_size") or style.get("size") or 48)
+    max_chars = max(14, min(44, int(play_res_x / max(1, render_size) * 1.55)))
     for block in blocks:
-        escaped = subdub_ass_escape(str(block.get("text") or ""), int(style.get("max_lines") or 2))
+        escaped = subdub_ass_escape(str(block.get("text") or ""), int(style.get("max_lines") or 2), max_chars)
         if escaped:
             events.append(
                 "Dialogue: 0,"
@@ -172460,7 +172554,14 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     candidates = []
     openai_tts_candidates = []
     speed_value = float(parse_video_dubbing_voice_speed(voice_speed or "1.0"))
-    openai_voice = "onyx" if "male" in str(voice_id or voice_style or "").lower() or "nam" in str(voice_id or voice_style or "").lower() else "alloy"
+    gender_hint = subdub_voice_id_gender_hint(voice_id) or subdub_voice_gender_from_state(
+        {
+            "voice_id": voice_id,
+            "voice_style": voice_style,
+            "selected_voice_label": voice_style,
+        }
+    )
+    openai_voice = "onyx" if gender_hint == "male" else "alloy"
     key4u_ready = key4u_minimax_tts_configured(require_public=not allow_admin) if allow_admin else key4u_minimax_tts_public_ready()
     shopaikey_ready = shopaikey_minimax_tts_configured() if allow_admin else shopaikey_minimax_tts_public_ready()
     direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
@@ -175722,6 +175823,7 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
     if not state or state.get("step") not in {
         "language_custom", "voice_custom", "voice_saved_select",
         "voice_speed",
+        "audio_original_volume_input", "audio_dub_volume_input",
         "link_input", "subtitle_edit_line_number", "subtitle_edit_line_text",
         "subtitle_find_text", "subtitle_replace_text", "subtitle_time_shift",
         "dialogue_text_input",
@@ -175756,6 +175858,52 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
             social_link_import_confirm_text(state, lang),
             parse_mode="HTML",
             reply_markup=social_link_import_confirm_keyboard(lang),
+        )
+        return True
+    if state.get("step") == "audio_original_volume_input" and subdub_audio_mix_available(state):
+        try:
+            percent = subdub_parse_volume_percent_input(update.message.text, low=0, high=100)
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ Âm thanh gốc chưa hợp lệ. Anh/chị nhập số từ 0 đến 100.",
+                parse_mode="HTML",
+                reply_markup=subdub_audio_mix_keyboard(lang, state),
+            )
+            return True
+        state = set_video_dubbing_pending(
+            uid,
+            "audio_mix",
+            keep_original_audio="1" if percent > 0 else "0",
+            original_audio_volume_percent=percent,
+            audio_mix_mode="keep_original" if percent > 0 else "dub_only",
+            volume_config_source="user_audio_mix_controls",
+        )
+        await update.message.reply_text(
+            subdub_audio_mix_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=subdub_audio_mix_keyboard(lang, state),
+        )
+        return True
+    if state.get("step") == "audio_dub_volume_input" and subdub_audio_mix_available(state):
+        try:
+            percent = subdub_parse_volume_percent_input(update.message.text, low=0, high=200)
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ Âm lượng giọng lồng tiếng chưa hợp lệ. Anh/chị nhập số từ 0 đến 200.",
+                parse_mode="HTML",
+                reply_markup=subdub_audio_mix_keyboard(lang, state),
+            )
+            return True
+        state = set_video_dubbing_pending(
+            uid,
+            "audio_mix",
+            dubbed_voice_volume_percent=percent,
+            volume_config_source="user_audio_mix_controls",
+        )
+        await update.message.reply_text(
+            subdub_audio_mix_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=subdub_audio_mix_keyboard(lang, state),
         )
         return True
     if state.get("step") == "subtitle_edit_line_number":
@@ -176188,7 +176336,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return None
         state = set_video_dubbing_pending(uid, "voice", processing="0", voice_style="", voice_id="", voice_kind="", voice_speed="")
         return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
-    if action in {"audio_mix", "audio_keep", "audio_original_volume", "audio_dub_volume", "back_audio_mix"}:
+    if action in {"audio_mix", "audio_keep", "audio_original_volume", "audio_dub_volume", "audio_original_input", "audio_dub_input", "audio_dub_menu", "back_audio_mix"}:
         if not subdub_audio_mix_available(state):
             return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
         if action == "back_audio_mix":
@@ -176205,6 +176353,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         }
         if action == "audio_mix":
             state = set_video_dubbing_pending(uid, "audio_mix", **fields)
+        elif action == "audio_original_input":
+            state = set_video_dubbing_pending(uid, "audio_original_volume_input", **fields)
+            return await safe_edit_or_send(query, subdub_audio_original_input_text(lang), parse_mode="HTML", reply_markup=subdub_audio_mix_keyboard(lang, state))
+        elif action in {"audio_dub_input", "audio_dub_menu"}:
+            state = set_video_dubbing_pending(uid, "audio_dub_volume_input" if action == "audio_dub_input" else "audio_mix", **fields)
+            if action == "audio_dub_input":
+                return await safe_edit_or_send(query, subdub_audio_dub_input_text(lang), parse_mode="HTML", reply_markup=subdub_audio_mix_keyboard(lang, state))
         elif action == "audio_keep":
             keep = str(value or "") == "1"
             fields.update({
@@ -176222,7 +176377,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             })
             state = set_video_dubbing_pending(uid, "audio_mix", **fields)
         elif action == "audio_dub_volume":
-            percent = subdub_percent_value(value, SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT, 80, 200)
+            percent = subdub_percent_value(value, SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT, 0, 200)
             fields.update({"dubbed_voice_volume_percent": percent})
             state = set_video_dubbing_pending(uid, "audio_mix", **fields)
         return await safe_edit_or_send(query, subdub_audio_mix_text(state, lang), parse_mode="HTML", reply_markup=subdub_audio_mix_keyboard(lang, state))
@@ -176687,7 +176842,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     or (str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref"))
                 ) else "dub_confirmation",
                 **video_dubbing_voice_payload(value, None, lang),
-                voice_speed="1.0",
+                voice_speed=parse_video_dubbing_voice_speed(SUBDUB_DEFAULT_VOICE_SPEED),
                 processing="0",
             )
             if str(state.get("step") or "") == "confirm":
@@ -176972,7 +177127,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
         return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
     if action == "speed_default":
-        state = set_video_dubbing_pending(uid, "confirm", voice_speed="1.0")
+        state = set_video_dubbing_pending(uid, "confirm", voice_speed=parse_video_dubbing_voice_speed(SUBDUB_DEFAULT_VOICE_SPEED))
         return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
     if action == "back_speed":
         state = set_video_dubbing_pending(uid, video_dubbing_back_route(state, action))
@@ -177223,7 +177378,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=video_dubbing_saved_voice_keyboard(uid, lang),
             )
         next_step = "confirm" if video_dubbing_has_media(state) else "await_video"
-        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload("saved", profile, lang), voice_speed="1.0")
+        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload("saved", profile, lang), voice_speed=parse_video_dubbing_voice_speed(SUBDUB_DEFAULT_VOICE_SPEED))
         if next_step == "confirm":
             return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
@@ -177231,7 +177386,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         next_step = "confirm" if video_dubbing_has_media(state) else "await_video"
-        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload(value, None, lang), voice_speed="1.0")
+        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload(value, None, lang), voice_speed=parse_video_dubbing_voice_speed(SUBDUB_DEFAULT_VOICE_SPEED))
         if next_step == "confirm":
             return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
@@ -177315,7 +177470,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             state = set_video_dubbing_pending(uid, "voice")
             return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not state.get("voice_speed"):
-            state = set_video_dubbing_pending(uid, "confirm", voice_speed="1.0")
+            state = set_video_dubbing_pending(uid, "confirm", voice_speed=parse_video_dubbing_voice_speed(SUBDUB_DEFAULT_VOICE_SPEED))
         feature = video_dubbing_product_area_for_mode(mode)
         access = video_dubbing_engine_access_decision(
             uid,
@@ -177502,7 +177657,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
             return None
         latest_pipeline_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
-        if subdub_job_has_failure_public_outcome(latest_pipeline_job):
+        delivered_video_result = bool(
+            result.get("video_delivery_message_id")
+            or result.get("telegram_message_id")
+            or int(result.get("sent_video") or 0)
+            or int(result.get("sent_video_document") or 0)
+            or result.get("final_mp4_delivered")
+        )
+        if subdub_job_has_failure_public_outcome(latest_pipeline_job) and not delivered_video_result:
             update_subtitle_dub_pipeline_job(
                 pipeline_job_key,
                 success_after_public_failure_prevented=True,
@@ -177514,6 +177676,19 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
             set_video_dubbing_pending(uid, "confirm", processing="0")
             return None
+        if subdub_job_has_failure_public_outcome(latest_pipeline_job) and delivered_video_result:
+            update_subtitle_dub_pipeline_job(
+                pipeline_job_key,
+                late_fail_suppressed=True,
+                late_public_error_suppressed=True,
+                public_error_sent=False,
+                public_error_sent_count=0,
+                terminal_public_outcome_type="success",
+                terminal_state="delivered",
+                status="completed",
+                progress_percent=100,
+                completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+            )
         result_state = dict(result.get("state") or {})
         completed_fields = {
             "processing": "0",
@@ -177562,6 +177737,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     cost_line_reason="partial_audio_no_full_video_charge",
                 )
             return None
+        if pipeline_job_key and delivered_video_result:
+            await subdub_send_progress_update(
+                query,
+                pipeline_job_key,
+                str(result.get("job_id") or (SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {}).get("job_id") or ""),
+                "delivered",
+                lang,
+            )
         receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
         sent_receipt = await query.message.reply_text(
             receipt_text,
