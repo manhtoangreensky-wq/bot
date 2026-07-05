@@ -1854,6 +1854,7 @@ SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
 SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED = env_flag("SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED", "false")
+SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED = env_flag("SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED", "false")
 SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
 SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "true")
 SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "false")
@@ -1869,6 +1870,8 @@ SUBDUB_MAX_OUTPUT_WIDTH = max(0, env_int("SUBDUB_MAX_OUTPUT_WIDTH", 0))
 SUBDUB_MAX_OUTPUT_HEIGHT = max(0, env_int("SUBDUB_MAX_OUTPUT_HEIGHT", 0))
 SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING = env_flag("SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", "true")
 SUBDUB_ALLOW_SILENT_VOICE_FALLBACK = env_flag("SUBDUB_ALLOW_SILENT_VOICE_FALLBACK", "false")
+SUBDUB_DUB_SPEECH_RATE = max(0.80, min(0.95, env_float("SUBDUB_DUB_SPEECH_RATE", 0.88)))
+SUBDUB_DUB_MAX_SPEECH_RATE = max(SUBDUB_DUB_SPEECH_RATE, min(1.15, env_float("SUBDUB_DUB_MAX_SPEECH_RATE", 1.08)))
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
 PIPELINE_JOB_LOCK_TTL_SECONDS = max(60, env_int("PIPELINE_JOB_LOCK_TTL_SECONDS", 30 * 60))
 DUB_AUDIO_NORMALIZE_ENABLED = env_flag("DUB_AUDIO_NORMALIZE_ENABLED", "true")
@@ -168668,15 +168671,7 @@ def subdub_audio_fallback_text(mode: str = "", lang: str = "vi") -> str:
     )
 
 def subdub_subtitle_fallback_text(mode: str = "", lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return (
-            "TOAN AAS created the subtitle file, but could not create the final video this time.\n\n"
-            "The subtitle file is sent first so you can download it."
-        )
-    return (
-        "TOAN AAS đã tạo file phụ đề, nhưng chưa tạo được video hoàn chỉnh lúc này.\n\n"
-        "Hệ thống gửi file phụ đề trước để anh/chị tải về."
-    )
+    return subdub_final_video_failed_text(lang)
 
 def subdub_mode_fail_text(mode: str = "", lang: str = "vi") -> str:
     mode = normalize_video_translate_mode(mode)
@@ -168783,6 +168778,10 @@ def subdub_terminal_outcome_debug_defaults() -> dict:
         "audio_fallback_public_enabled": bool(SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED),
         "audio_fallback_suppressed": False,
         "audio_artifact_internal_only": False,
+        "srt_artifact_exists": False,
+        "srt_public_auto_send_enabled": bool(SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED),
+        "srt_auto_send_suppressed": False,
+        "srt_sent_by_explicit_user_request": False,
     }
 
 def subdub_success_cost_line(charged_xu: int | float | str = 0, lang: str = "vi") -> str:
@@ -170735,13 +170734,13 @@ def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
     multiplier = max(1.0, min(2.5, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     width, height = subdub_style_video_size(state)
     target = int(round(base * multiplier))
-    cap = 72
+    cap = 58
     if height:
         vertical = bool(width and height >= width * 1.15)
-        ratio = 0.072 if vertical else 0.085
-        cap = max(48, int(round(height * ratio)))
-        cap = min(cap, 92 if vertical else 76)
-    return subdub_clamp_int(min(target, cap), min(target, cap), 42, 92)
+        ratio = 0.060 if vertical else 0.066
+        cap = max(42, int(round(height * ratio)))
+        cap = min(cap, 70 if vertical else 62)
+    return subdub_clamp_int(min(target, cap), min(target, cap), 38, 70)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
@@ -170819,7 +170818,10 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["subtitle_font_multiplier"] = max(1.0, min(2.5, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     style["render_size"] = subdub_render_subtitle_size(style, state)
-    style["subtitle_style_baseline_source"] = "pre_231"
+    style["subtitle_style_profile"] = "balanced_bottom_large"
+    style["position"] = "bottom"
+    style["align"] = "center"
+    style["subtitle_style_baseline_source"] = "pre_231_reduced_one_level"
     style["translated_font_size_baseline"] = int(style.get("size") or 0)
     style["translated_font_size_multiplier"] = float(style.get("subtitle_font_multiplier") or SUBDUB_SUBTITLE_FONT_MULTIPLIER)
     style["translated_font_size_final"] = int(style.get("render_size") or style.get("size") or 0)
@@ -170828,13 +170830,17 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         < int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
     )
     style["subtitle_wrap_lines_max"] = 2
+    style["subtitle_font_size_reduced_one_level"] = True
+    style["subtitle_alignment"] = "bottom_center"
+    style["font_size_cap_percent_of_height"] = 0.060 if (subdub_style_video_size(state)[0] and subdub_style_video_size(state)[1] >= subdub_style_video_size(state)[0] * 1.15) else 0.066
+    style["black_bar_used"] = False
     style["outline"] = max(4, subdub_clamp_int(style.get("outline"), 4, 0, 8))
     style["shadow"] = max(1, subdub_clamp_int(style.get("shadow"), 1, 0, 4))
     style["max_lines"] = subdub_clamp_int(style.get("max_lines"), 2, 1, 3)
     style["cover_opacity"] = max(0.0, min(0.35, subdub_float_value(style.get("cover_opacity"), 0.0)))
     style["cover_height_ratio"] = max(0.02, min(0.06, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
     style["cover_y_ratio"] = max(0.90, min(0.96, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-    style["text_margin_bottom_ratio"] = max(0.04, min(0.09, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
+    style["text_margin_bottom_ratio"] = max(0.035, min(0.065, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
     style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
     style["hardsub_cover_enabled"] = subdub_bool_value(style.get("hardsub_cover_enabled"), style["cover_original"])
     style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
@@ -170854,6 +170860,9 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
     style["play_res_x"] = max(480, min(3840, int(width or 1280)))
     style["play_res_y"] = max(480, min(3840, int(height or 720)))
+    style["subtitle_margin_v"] = max(28, min(82, int(style["play_res_y"] * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))) if (style.get("cover_original") or style.get("hardsub_cover_enabled")) else 36
+    style["subtitle_chars_per_line"] = 28 if style["play_res_y"] > style["play_res_x"] else 36
+    style["max_lines"] = min(2, int(style.get("max_lines") or 2))
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -170895,7 +170904,7 @@ def subdub_ass_alignment(position: str = "bottom", align: str = "center") -> tup
         return horizontal + 3, 120
     if position in {"bottom_high", "above_original"}:
         return horizontal, 110
-    return horizontal, 48
+    return horizontal, 36
 
 def subdub_parse_srt_timestamp(value: str) -> float:
     text = str(value or "0").strip().replace(",", ".")
@@ -170935,11 +170944,39 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
         blocks.append({"start": start, "end": end, "text": body})
     return blocks
 
-def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
+def subdub_wrap_subtitle_lines(text: str, *, max_lines: int = 2, max_chars: int = 34) -> list[str]:
+    normalized = re.sub(r"\s+", " ", subdub_normalize_subtitle_text(text).replace("\\N", " ")).strip()
+    if not normalized:
+        return []
+    max_lines = max(1, min(2, int(max_lines or 2)))
+    max_chars = max(18, min(48, int(max_chars or 34)))
+    if len(normalized) <= max_chars or max_lines == 1:
+        return [normalized]
+    words = normalized.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars and len(lines) < max_lines - 1:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if len(lines) > max_lines:
+        head = lines[: max_lines - 1]
+        tail = " ".join(lines[max_lines - 1:])
+        return [*head, tail]
+    return lines
+
+def subdub_ass_escape(text: str, max_lines: int = 2, max_chars: int = 34) -> str:
     normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
     lines = [re.sub(r"\s+", " ", line).strip().replace("\\", r"\\") for line in normalized.splitlines()]
     lines = [line for line in lines if line]
+    if len(lines) == 1:
+        lines = [line.replace("\\", r"\\") for line in subdub_wrap_subtitle_lines(lines[0], max_lines=max_lines, max_chars=max_chars)]
     if not lines:
         return ""
     return r"\N".join(lines[:max(1, int(max_lines or 2))])
@@ -170958,7 +170995,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     play_res_x = int(style.get("play_res_x") or 1080)
     play_res_y = int(style.get("play_res_y") or 1920)
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
-        margin_v = max(42, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+        margin_v = max(28, min(82, int(style.get("subtitle_margin_v") or play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+    subtitle_chars_per_line = 28 if play_res_y > play_res_x else 36
     primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
     outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
     boxed = bool(style.get("boxed_background"))
@@ -170986,7 +171024,11 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     ]
     events = []
     for block in blocks:
-        escaped = subdub_ass_escape(str(block.get("text") or ""), int(style.get("max_lines") or 2))
+        escaped = subdub_ass_escape(
+            str(block.get("text") or ""),
+            int(style.get("max_lines") or 2),
+            int(style.get("subtitle_chars_per_line") or subtitle_chars_per_line),
+        )
         if escaped:
             events.append(
                 "Dialogue: 0,"
@@ -171259,6 +171301,10 @@ async def send_public_subtitle_dub_final_outputs(
         "audio_fallback_public_enabled": bool(SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED),
         "audio_fallback_suppressed": False,
         "audio_artifact_internal_only": False,
+        "srt_artifact_exists": bool(srt_text or subtitle_items),
+        "srt_public_auto_send_enabled": bool(SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED),
+        "srt_auto_send_suppressed": False,
+        "srt_sent_by_explicit_user_request": False,
     }
     if video_bytes:
         if metadata_enabled:
@@ -171328,13 +171374,15 @@ async def send_public_subtitle_dub_final_outputs(
 
         if validation.get("ok"):
             if await _deliver_video_payload(video_bytes, "original"):
-                if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
+                if (not SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED) or mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
+                    sent["srt_auto_send_suppressed"] = bool(srt_text or subtitle_items)
                     return sent
             compressed = b""
             if not sent.get("video_delivery_message_id") and (len(video_bytes) > doc_limit or len(video_bytes) >= compress_threshold):
                 compressed, _compress_detail = await subdub_compress_video_bytes(video_bytes, require_audio=require_audio)
                 if compressed and await _deliver_video_payload(compressed, "compressed"):
-                    if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
+                    if (not SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED) or mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
+                        sent["srt_auto_send_suppressed"] = bool(srt_text or subtitle_items)
                         return sent
     if requires_final_mp4 and not sent.get("final_mp4_delivered") and not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
         sent["audio_fallback_suppressed"] = bool(audio_bytes)
@@ -171385,7 +171433,10 @@ async def send_public_subtitle_dub_final_outputs(
     if requires_final_mp4 and not sent.get("final_mp4_delivered"):
         sent["success_blocked_reason"] = sent.get("success_blocked_reason") or "missing_valid_delivered_mp4"
         return sent
-    if not include_subtitle_outputs:
+    if not SUBDUB_PUBLIC_SRT_FALLBACK_ENABLED:
+        wanted_types = ()
+        sent["srt_auto_send_suppressed"] = bool(srt_text or subtitle_items)
+    elif not include_subtitle_outputs:
         wanted_types = ()
     elif active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
         wanted_types = ("txt",)
@@ -172580,38 +172631,7 @@ async def synthesize_dub_segment_chunks(
                 provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
                 duration = retry_duration
                 speed = retry_speed
-        if duration > slot_seconds * 1.15:
-            target_chars = max(12, int(slot_seconds * 18))
-            compact_words = []
-            for word in text.split():
-                candidate = " ".join([*compact_words, word])
-                if compact_words and len(candidate) > target_chars:
-                    break
-                compact_words.append(word)
-            compact_text = " ".join(compact_words).strip()
-            if compact_text and compact_text != text:
-                compact_speed = min(float(max_speed or 1.35), max(speed, 1.1))
-                try:
-                    compact_provider, compact_audio, compact_detail = await video_dubbing_tts_bytes(
-                        compact_text,
-                        voice_style,
-                        voice_id,
-                        f"{compact_speed:.3f}",
-                        allow_admin=allow_admin,
-                    )
-                except TypeError:
-                    compact_provider, compact_audio, compact_detail = await video_dubbing_tts_bytes(
-                        compact_text,
-                        voice_style,
-                        voice_id,
-                        f"{compact_speed:.3f}",
-                    )
-                compact_duration = await video_dubbing_audio_duration_seconds(compact_audio)
-                if compact_audio and compact_duration and compact_duration < duration:
-                    provider, audio_bytes, detail = compact_provider, compact_audio, compact_detail
-                    duration = compact_duration
-                    speed = compact_speed
-                    text = compact_text
+        # Keep translated dialogue intact; prefer natural speech over aggressive speed-up.
         if not audio_bytes:
             raise RuntimeError("tts_segment_empty")
         providers.append(provider)
@@ -172621,8 +172641,11 @@ async def synthesize_dub_segment_chunks(
             "end": end,
             "text": text,
             "audio_bytes": bytes(audio_bytes),
+            "segment_duration": round(slot_seconds, 3),
             "audio_duration": float(duration or 0),
+            "tts_audio_duration_after": float(duration or 0),
             "speed": round(speed, 3),
+            "applied_tts_speed": round(speed, 3),
             "provider": provider,
             "detail": sanitize_log_text(str(detail or ""))[:180],
         })
@@ -173214,8 +173237,14 @@ async def _execute_video_dubbing_pipeline_core(
         render_debug["translated_font_size_final"] = int(render_style.get("translated_font_size_final") or render_style.get("render_size") or render_style.get("size") or 0)
         render_debug["font_size_cap_applied"] = bool(render_style.get("font_size_cap_applied"))
         render_debug["subtitle_wrap_lines_max"] = int(render_style.get("subtitle_wrap_lines_max") or render_style.get("max_lines") or 2)
+        render_debug["subtitle_font_size_reduced_one_level"] = bool(render_style.get("subtitle_font_size_reduced_one_level"))
+        render_debug["font_size_cap_percent_of_height"] = float(render_style.get("font_size_cap_percent_of_height") or 0.0)
+        render_debug["subtitle_alignment"] = str(render_style.get("subtitle_alignment") or "bottom_center")
+        render_debug["subtitle_margin_v"] = int(render_style.get("subtitle_margin_v") or 0)
+        render_debug["max_lines"] = int(render_style.get("max_lines") or 2)
+        render_debug["black_bar_used"] = bool(render_style.get("black_bar_used"))
         render_debug["outline_size"] = int(render_style.get("outline") or 0)
-        render_debug["subtitle_vertical_position"] = int(render_style.get("play_res_y") or 0)
+        render_debug["subtitle_vertical_position"] = "bottom"
         audio_mode = str(
             state.get("original_audio_mode")
             or state.get("source_audio_mode")
@@ -173270,6 +173299,8 @@ async def _execute_video_dubbing_pipeline_core(
         return str(voice_resolution_for_debug.get("provider_voice_id") or "") if voice_resolution_for_debug.get("ok") else ""
 
     # Compatibility: run_subdub_pipeline delegates to subtitle_dub_product_pipeline.process_subtitle_dub_job.
+    state.setdefault("subdub_tts_speed_factor", SUBDUB_DUB_SPEECH_RATE)
+    state.setdefault("subdub_tts_max_speed", SUBDUB_DUB_MAX_SPEECH_RATE)
     product_result = await subtitle_dub_product_pipeline.run_subdub_pipeline(
         job_id=str(state.get("_pipeline_job_id") or ""),
         mode=mode,
@@ -173709,6 +173740,10 @@ async def _execute_video_dubbing_pipeline_core(
             "partial_audio_delivered": bool(delivery.get("partial_audio_delivered")),
             "partial_audio_message_id": str(delivery.get("partial_audio_message_id") or ""),
             "delivery_reason": str(delivery.get("delivery_reason") or ""),
+            "srt_artifact_exists": bool(delivery.get("srt_artifact_exists")),
+            "srt_public_auto_send_enabled": bool(delivery.get("srt_public_auto_send_enabled")),
+            "srt_auto_send_suppressed": bool(delivery.get("srt_auto_send_suppressed")),
+            "srt_sent_by_explicit_user_request": bool(delivery.get("srt_sent_by_explicit_user_request")),
         }
     except Exception:
         refund_charged_credit(
@@ -173844,6 +173879,10 @@ async def _execute_video_dubbing_pipeline_core(
             "audio_fallback_public_enabled": bool(delivery.get("audio_fallback_public_enabled")),
             "audio_fallback_suppressed": bool(delivery.get("audio_fallback_suppressed")),
             "audio_artifact_internal_only": bool(delivery.get("audio_artifact_internal_only")),
+            "srt_artifact_exists": bool(delivery.get("srt_artifact_exists")),
+            "srt_public_auto_send_enabled": bool(delivery.get("srt_public_auto_send_enabled")),
+            "srt_auto_send_suppressed": bool(delivery.get("srt_auto_send_suppressed")),
+            "srt_sent_by_explicit_user_request": bool(delivery.get("srt_sent_by_explicit_user_request")),
             "source_language": str(prepared.get("detected_language") or state.get("source_language") or "auto"),
             "detected_language": str(prepared.get("detected_language") or ""),
             "target_language": str(prepared.get("target_language") or state.get("target_language") or ""),
@@ -174279,6 +174318,7 @@ async def subtitle_plus_dub_send_subtitle_document(message, user_id, state: dict
                         filename=filename,
                         caption=f"✅ File {safe_output_type.upper()}.",
                     )
+                state["srt_sent_by_explicit_user_request"] = True
                 return True
         if callable(getattr(message, "reply_text", None)):
             await message.reply_text("Phụ đề chưa sẵn sàng để tải. Anh/chị quay lại bước trước và thử lại.")
@@ -174292,8 +174332,10 @@ async def subtitle_plus_dub_send_subtitle_document(message, user_id, state: dict
             filename=filename,
             caption=f"✅ File {safe_output_type.upper()}.",
         )
+        state["srt_sent_by_explicit_user_request"] = True
     elif callable(getattr(message, "reply_text", None)):
         await message.reply_text("✅ File SRT đã sẵn sàng.")
+        state["srt_sent_by_explicit_user_request"] = True
     return True
 
 async def subtitle_plus_dub_send_transcript_text(message, user_id, state: dict, *, translated: bool = False) -> bool:
@@ -174894,13 +174936,14 @@ async def execute_subtitle_plus_dub_voice_preview(query, context: ContextTypes.D
         end = max(start + 0.5, float(item.get("end") or 0) - first_start)
         shifted.append({**item, "start": start, "end": min(15.0, end)})
     try:
-        base_speed = float(parse_video_dubbing_voice_speed(state.get("voice_speed") or "1.0"))
+        requested_speed = float(parse_video_dubbing_voice_speed(state.get("voice_speed") or "1.0"))
+        base_speed = max(0.70, min(1.15, requested_speed * SUBDUB_DUB_SPEECH_RATE))
         segment_tts = await synthesize_dub_segment_chunks(
             shifted,
             voice_style=state.get("voice_style") or "",
             voice_id=state.get("voice_id") or state.get("voice_kind") or "default_female",
             base_speed=base_speed,
-            max_speed=max(1.35, base_speed),
+            max_speed=SUBDUB_DUB_MAX_SPEECH_RATE,
             allow_admin=is_admin_user(uid),
         )
         raw_audio, _timeline_detail = await build_dub_timeline_audio(

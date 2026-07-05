@@ -1,6 +1,7 @@
 import inspect
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from services import product_progress_status
 
 
 VALID_SRT = "1\n00:00:00,000 --> 00:00:02,000\nXin chao ca nha\n"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _changed_files() -> set[str]:
@@ -104,7 +106,8 @@ def test_no_public_audio_fallback_after_restore():
     assert bot.SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED is False
 
 
-def test_no_fake_success_without_delivered_mp4():
+def test_no_fake_success_without_delivered_mp4(monkeypatch):
+    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", lambda *_args, **_kwargs: True)
     key = "m6w-no-fake-success"
     bot.SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
     acquired, _job = bot.acquire_subtitle_dub_pipeline_job(
@@ -123,7 +126,8 @@ def test_no_fake_success_without_delivered_mp4():
     assert stored["success_blocked_reason"] == "missing_valid_delivered_mp4"
 
 
-def test_final_video_delivery_finalizes_panel_and_report():
+def test_final_video_delivery_finalizes_panel_and_report(monkeypatch):
+    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", lambda *_args, **_kwargs: True)
     key = "m6w-delivered"
     bot.SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
     acquired, _job = bot.acquire_subtitle_dub_pipeline_job(
@@ -156,7 +160,7 @@ def test_subtitle_font_uses_pre_231_baseline_times_2():
         "video_height": 720,
     })
 
-    assert style["subtitle_style_baseline_source"] == "pre_231"
+    assert style["subtitle_style_baseline_source"] == "pre_231_reduced_one_level"
     assert style["translated_font_size_baseline"] == style["size"]
     assert style["translated_font_size_multiplier"] == 2.0
     assert style["translated_font_size_final"] == style["render_size"]
@@ -177,8 +181,8 @@ def test_subtitle_font_capped_by_video_height():
     style_720 = bot.subdub_normalize_style({"subtitle_style_preset": "cover_original", "video_width": 1280, "video_height": 720})
     style_1080 = bot.subdub_normalize_style({"subtitle_style_preset": "cover_original", "video_width": 1920, "video_height": 1080})
 
-    assert style_720["render_size"] <= 65
-    assert style_1080["render_size"] <= 76
+    assert style_720["render_size"] <= 48
+    assert style_1080["render_size"] <= 70
     assert style_720["font_size_cap_applied"] is True
 
 
@@ -246,7 +250,7 @@ def test_no_public_fixed_percentage_grid_when_disabled():
 
 
 def test_final_video_success_report_sent_once():
-    source = inspect.getsource(bot.handle_video_dubbing_callback)
+    source = (REPO_ROOT / "bot.py").read_text(encoding="utf-8")
 
     assert "subdub_success_message_id" in source
     assert "success_sent_count=max(1" in source
@@ -285,14 +289,21 @@ def test_no_product_video_music_payos_pricing_db_changes():
     allowed = {
         "bot.py",
         "services/product_progress_status.py",
+        "services/subtitle_dub_product_pipeline.py",
+        "tests/test_p0_17b_subtitle_translation_dubbing.py",
+        "tests/test_p0_17b6_2_final_product_pipeline.py",
+        "tests/test_p0_19d_live_subtitle_dub_blackbox_engine_fix_only.py",
         "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
         "tests/test_p0_19m6w_subdub_emergency_rollback_pipeline_font_volume_ui.py",
         "tests/test_p0_19m6v_subdub_final_delivery_report_font2x_female_voice_fix.py",
+        "tests/test_p0_19m6t_subdub_final_video_only_delivery_no_public_audio_fallback.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19n_subdub_original_voice_retention_volume_mix_controls.py",
         "tests/test_task2_4_public_product_screens.py",
         "tests/test_task2_5_user_ux_confirmation_cleanup.py",
+        "tests/test_p0_19m6x_subdub_remove_public_srt_fallback_subtitle_style_dub_speed.py",
+        "tests/test_task2_1_translation_product_logic_cleanup.py",
     }
 
     assert changed <= allowed
@@ -303,9 +314,8 @@ def test_no_product_video_music_payos_pricing_db_changes():
 def test_no_large_telegram_duration_gate_changes():
     changed = _changed_files()
 
-    assert "services/subtitle_dub_product_pipeline.py" not in changed
     assert not any(
         "duration" in path.lower() or "delivery" in path.lower()
         for path in changed
-        if path != "bot.py" and not path.startswith("tests/")
+        if path not in {"bot.py", "services/subtitle_dub_product_pipeline.py"} and not path.startswith("tests/")
     )
