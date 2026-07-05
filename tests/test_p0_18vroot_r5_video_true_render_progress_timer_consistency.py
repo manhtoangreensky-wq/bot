@@ -91,7 +91,7 @@ def test_render_subprogress_does_not_jump_to_85_immediately():
     block = bot.video_b14_provider_rendering_block(telemetry)
 
     assert "85%" not in block
-    assert "Đang dựng" in block
+    assert "Đã gửi yêu cầu dựng video." in block
     assert "0%" in block
 
 
@@ -248,7 +248,7 @@ def test_public_rendering_copy_explains_video_ai_may_take_minutes():
     text = bot.video_b14_provider_rendering_block({"provider_task_alive": True, "render_video_progress_percent": 12})
 
     assert "Video AI có thể mất vài phút" in text
-    assert "Hệ thống đang dựng video" in text
+    assert "Đang chờ kết quả dựng video" in text
 
 
 def test_public_rendering_copy_no_debug_terms():

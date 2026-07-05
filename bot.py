@@ -46623,6 +46623,10 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
         f"• provider submit kill switch enabled: <code>{'yes' if result.get('product_video_provider_submit_enabled') else 'no'}</code>",
+        f"• provider submit kill switch raw: <code>{html.escape(str(result.get('product_video_provider_submit_enabled_raw') or '-'))}</code>",
+        f"• provider submit kill switch resolved: <code>{'yes' if result.get('product_video_provider_submit_enabled_resolved', result.get('product_video_provider_submit_enabled')) else 'no'}</code>",
+        f"• provider submit kill switch source: <code>{html.escape(str(result.get('product_video_provider_submit_enabled_source') or '-'))}</code>",
+        f"• kill switch checked before submit: <code>{'yes' if result.get('kill_switch_checked_before_submit') else 'no'}</code>",
         f"• paid submit allowed: <code>{'yes' if result.get('paid_submit_allowed') else 'no'}</code>",
         f"• paid submit blocked reason: <code>{html.escape(str(result.get('paid_submit_blocked_reason') or '-'))}</code>",
         f"• external spend prevented: <code>{'yes' if result.get('external_provider_spend_prevented') else 'no'}</code>",
@@ -46643,6 +46647,11 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• render video progress public: <code>{html.escape(str(result.get('render_video_progress_percent_public') or '-'))}</code>",
         f"• render progress public mode: <code>{html.escape(str(result.get('render_progress_public_mode') or '-'))}</code>",
         f"• public zero bar due to untrusted provider: <code>{'yes' if result.get('public_zero_bar_due_to_untrusted_provider') else 'no'}</code>",
+        f"• provider task alive: <code>{'yes' if result.get('provider_task_alive') or result.get('active_provider_task') or result.get('primary_provider_task_alive') else 'no'}</code>",
+        f"• provider task status: <code>{html.escape(str(result.get('provider_task_status') or result.get('provider_status_for_progress') or result.get('provider_status') or '-')[:120])}</code>",
+        f"• trusted render progress available: <code>{'yes' if result.get('trusted_render_progress_available') else 'no'}</code>",
+        f"• why render bar stays zero: <code>{html.escape(str(result.get('why_render_bar_stays_zero') or '-')[:160])}</code>",
+        f"• external provider spend possible: <code>{'yes' if result.get('external_provider_spend_possible') else 'no'}</code>",
         f"• provider progress public suppressed: <code>{'yes' if result.get('provider_progress_public_suppressed') else 'no'}</code>",
         f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
         f"• fake progress prevention reason: <code>{html.escape(str(result.get('fake_progress_prevention_reason') or '-'))}</code>",
@@ -66661,21 +66670,31 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     poll_count = safe_int(telemetry.get("provider_poll_count"), 0)
     poll_count_source = str(telemetry.get("provider_poll_count_source") or "").strip().lower()
     elapsed = safe_int(telemetry.get("provider_elapsed_seconds") or telemetry.get("provider_wait_elapsed_seconds"), 0)
+    elapsed_public_mode = str(telemetry.get("elapsed_public_mode") or "").strip().lower()
+    trusted_render_progress = bool(telemetry.get("trusted_render_progress_available"))
+    registry_missing = bool(
+        telemetry.get("status_registry_missing_after_restart")
+        or telemetry.get("registry_missing_after_restart")
+        or (elapsed_public_mode in {"hidden", "recovered", "recovered_approx"} and not trusted_render_progress)
+    )
+    live_poll_sources = {"internal_worker", "worker_poll", "worker", "live_worker", "registry_live", "active_worker"}
     lines = ["<b>Dựng video:</b>"]
     if public_mode in {"indeterminate", "zero_waiting"} or telemetry.get("provider_progress_public_suppressed"):
         progress = 0
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
-        lines.append("<b>Đang dựng...</b>")
+        lines.append("Đã gửi yêu cầu dựng video.")
+        lines.append("Đang chờ kết quả dựng video.")
     else:
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
-    lines.append(f"⏱ Đã xử lý: <b>{html.escape(video_b14_human_elapsed(elapsed))}</b>")
-    if poll_count_source in {"provider_attempts", "internal_worker", "worker_poll", "worker"}:
-        lines.append(f"🔄 Đã kiểm tra: <b>{poll_count} lần</b>")
-    else:
-        lines.append("🔄 <b>Đang kiểm tra định kỳ</b>")
+        if not registry_missing and elapsed > 0:
+            lines.append(f"⏱ Đã xử lý: <b>{html.escape(video_b14_human_elapsed(elapsed))}</b>")
+        if poll_count > 0 and poll_count_source in live_poll_sources:
+            lines.append(f"🔄 Đã kiểm tra: <b>{poll_count} lần</b>")
+        else:
+            lines.append("Đang chờ kết quả dựng video.")
     if telemetry.get("panel_last_updated_at") or telemetry.get("provider_last_poll_at"):
         lines.append("Cập nhật lần cuối: <b>vừa xong</b>")
-    lines.append("Hệ thống đang dựng video. Video AI có thể mất vài phút.")
+    lines.append("Video AI có thể mất vài phút tùy tải hệ thống.")
     lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
     return "\n".join(lines)
 
