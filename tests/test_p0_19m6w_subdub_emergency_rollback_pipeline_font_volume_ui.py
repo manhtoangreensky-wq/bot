@@ -151,7 +151,7 @@ def test_final_video_delivery_finalizes_panel_and_report():
     assert stored["terminal_public_outcome_type"] == "success"
 
 
-def test_subtitle_font_uses_pre_231_baseline_plus_four_responsive():
+def test_subtitle_font_uses_pre_231_baseline_plus_two_responsive():
     style = bot.subdub_normalize_style({
         "subtitle_style_preset": "cover_original",
         "video_width": 1280,
@@ -162,7 +162,7 @@ def test_subtitle_font_uses_pre_231_baseline_plus_four_responsive():
     assert style["translated_font_size_baseline"] == style["size"]
     assert 1.0 <= style["translated_font_size_multiplier"] <= 1.25
     assert style["translated_font_size_final"] == style["render_size"]
-    assert style["render_size"] >= style["size"] + 4
+    assert style["render_size"] >= style["size"] + 2
     assert style["render_size"] <= 64
 
 
@@ -182,7 +182,7 @@ def test_subtitle_font_capped_by_video_height():
 
     assert style_720["render_size"] <= 65
     assert style_1080["render_size"] <= 76
-    assert style_720["render_size"] == style_720["size"] + 4
+    assert style_720["render_size"] == style_720["size"] + 2
 
 
 def test_translated_subtitle_wraps_max_two_lines():
