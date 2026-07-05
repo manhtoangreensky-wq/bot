@@ -8967,6 +8967,36 @@ def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, s
     return recovered, product_type
 
 
+def music_progress_reconcile_debug_text(state: dict | None = None, job: dict | None = None) -> str:
+    current = dict(state or {})
+    source_job = dict(job or {})
+    persisted_progress = safe_int(
+        current.get("persisted_job_progress")
+        or source_job.get("persisted_job_progress")
+        or source_job.get("progress_percent"),
+        0,
+    )
+    lines = [
+        f"• persisted_job_progress: <code>{persisted_progress}%</code>",
+        f"• final_progress_after_reconcile: <code>{safe_int(current.get('final_progress_after_reconcile'), 0)}%</code>",
+        f"• progress_monotonic_applied: <code>{'yes' if current.get('progress_monotonic_applied') else 'no'}</code>",
+        f"• previous_progress: <code>{safe_int(current.get('previous_progress'), 0)}%</code>",
+        f"• requested_progress: <code>{safe_int(current.get('requested_progress'), 0)}%</code>",
+        f"• progress_source: <code>{html.escape(str(current.get('progress_source') or '-'))}</code>",
+        f"• progress_rollback_prevented: <code>{'yes' if current.get('progress_rollback_prevented') else 'no'}</code>",
+        f"• raw_audio_url_present: <code>{'yes' if current.get('raw_audio_url_present') else 'no'}</code>",
+        f"• artifact_materialization_started: <code>{'yes' if current.get('artifact_materialization_started') else 'no'}</code>",
+        f"• artifact_waiting: <code>{'yes' if current.get('artifact_waiting') else 'no'}</code>",
+        f"• artifact_check_stage_allowed: <code>{'yes' if current.get('artifact_check_stage_allowed') else 'no'}</code>",
+        f"• artifact_wait_attempt_count: <code>{safe_int(current.get('artifact_wait_attempt_count'), 0)}</code>",
+        f"• artifact_wait_max_attempts: <code>{safe_int(current.get('artifact_wait_max_attempts'), 0)}</code>",
+        f"• next_artifact_retry_at: <code>{html.escape(str(current.get('next_artifact_retry_at') or '-'))}</code>",
+        f"• artifact_wait_terminal_exhausted: <code>{'yes' if current.get('artifact_wait_terminal_exhausted') else 'no'}</code>",
+        f"• terminal_fail_allowed: <code>{'yes' if current.get('terminal_fail_allowed') else 'no'}</code>",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
     input_job_id = str(job_id or "").strip()
     if progress_product_type_is_music(product_type, job_id):
@@ -9073,6 +9103,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• artifact_ready: <code>{'yes' if music_failure.get('artifact_ready') else 'no'}</code>\n"
             f"• delivery_attempted: <code>{'yes' if music_failure.get('delivery_attempted') else 'no'}</code>\n"
             f"• delivery_succeeded: <code>{'yes' if music_failure.get('delivery_succeeded') else 'no'}</code>\n"
+            + music_progress_reconcile_debug_text(payload)
         )
     subdub_debug_text = ""
     if resolved_type == "subdub":
@@ -9481,6 +9512,7 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• duet_lyrics_structure: <code>{html.escape(str((job or {}).get('duet_lyrics_structure') or '-'))}</code>\n"
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
         f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
+        + music_progress_reconcile_debug_text(state, job) +
         f"• completed_steps: <code>{html.escape(completed_steps)}</code>\n"
         f"• provider_submit_called: <code>{html.escape(str(failure_fields.get('provider_submit_called') or 'unknown'))}</code>\n"
         f"• provider_task_id_present: <code>{'yes' if failure_fields.get('provider_task_id_present') else 'no'}</code>\n"
@@ -9544,6 +9576,10 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• downloaded_bytes: <code>{int((job or {}).get('artifact_downloaded_bytes') or 0)}</code>\n"
         f"• download_error_category: <code>{html.escape(str((job or {}).get('artifact_download_error_category') or '-'))}</code>\n"
         f"• download_strategy_used: <code>{html.escape(str((job or {}).get('download_strategy_used') or '-'))}</code>\n"
+        f"• pr173_artifact_engine_restored: <code>{'yes' if (job or {}).get('pr173_artifact_engine_restored') else 'no'}</code>\n"
+        f"• direct_audio_url_get_attempted: <code>{'yes' if (job or {}).get('direct_audio_url_get_attempted') else 'no'}</code>\n"
+        f"• provider_download_endpoint_bypassed_for_raw_audio: <code>{'yes' if (job or {}).get('provider_download_endpoint_bypassed_for_raw_audio') else 'no'}</code>\n"
+        f"• provider_download_json_83_bytes_ignored: <code>{'yes' if (job or {}).get('provider_download_endpoint_bypassed_for_raw_audio') and int((job or {}).get('provider_download_bytes') or 0) <= 128 else 'no'}</code>\n"
         f"• provider_auth_header_used: <code>{'yes' if (job or {}).get('provider_auth_header_used') else 'no'}</code>\n"
         f"• provider_proxy_attempted: <code>{'yes' if (job or {}).get('provider_proxy_attempted') else 'no'}</code>\n"
         f"• provider_download_endpoint_configured: <code>{'yes' if (job or {}).get('provider_download_endpoint_configured') else 'no'}</code>\n"

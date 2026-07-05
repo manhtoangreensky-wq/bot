@@ -436,10 +436,27 @@ def product_progress_percent(product_type: str = "", stage: str = "", percent: i
     state = str(terminal_state or "").strip().lower()
     if state == "delivered":
         return 100
+    canonical = normalize_product_type(product_type)
     stage_percent = int(product_progress_stage(product_type, stage).get("percent") or 0)
     if percent is not None:
         try:
             requested = max(0, min(100, int(percent)))
+            if canonical in {"music_bg", "music_song"}:
+                stage_key = str(stage or "").strip().lower().replace("-", "_")
+                music_caps = {
+                    "received_request": 5,
+                    "preparing_lyrics": 25,
+                    "preparing_prompt": 25,
+                    "preparing_style": 35,
+                    "generating_song": 75,
+                    "generating_music": 75,
+                    "validating_audio": 95,
+                    "delivering": 99,
+                }
+                cap = int(music_caps.get(stage_key, max(stage_percent, 5)))
+                if state in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+                    cap = max(cap, 95 if stage_key in {"validating_audio", "delivering"} else cap)
+                return min(requested, cap)
             if state in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
                 return min(requested, max(stage_percent, 5))
             return min(requested, stage_percent)
@@ -489,6 +506,209 @@ def _positive_int(job: dict[str, Any], *keys: str) -> int:
         if value > 0:
             return value
     return 0
+
+
+def _music_raw_audio_url_present(job: dict[str, Any]) -> bool:
+    if _first_text(
+        job,
+        "music_output_url",
+        "output_url",
+        "result_url",
+        "download_url",
+        "file_url",
+        "audio_url",
+        "stream_url",
+        "stream_audio_url",
+        "source_audio_url",
+        "selected_artifact_url",
+        "music_result_url",
+        "music_artifact_url",
+        "final_audio_url",
+    ):
+        return True
+    for key in ("provider_result_candidates", "key4u_suno_fetch_candidate_paths", "provider_result_candidate_paths"):
+        value = job.get(key)
+        if isinstance(value, (list, tuple, set)) and len(value) > 0:
+            return True
+    return _positive_int(job, "provider_result_candidate_count", "provider_result_candidate_total_count") > 0
+
+
+def _music_artifact_materialization_started(job: dict[str, Any]) -> bool:
+    if bool(
+        job.get("artifact_materialization_attempted")
+        or job.get("artifact_materialization_started_at")
+        or job.get("materialization_attempted")
+        or job.get("artifact_download_attempted")
+        or job.get("direct_audio_url_get_attempted")
+        or job.get("provider_download_endpoint_attempted")
+        or job.get("provider_proxy_attempted")
+        or job.get("key4u_suno_fetch_attempted")
+    ):
+        return True
+    if _positive_int(job, "download_attempt_count", "artifact_wait_attempt_count", "artifact_materialization_attempt_count") > 0:
+        return True
+    return bool(
+        _first_text(
+            job,
+            "download_strategy_used",
+            "artifact_materialization_status",
+            "materialization_status",
+            "final_audio_download_status",
+        )
+    )
+
+
+def _music_previous_progress(job: dict[str, Any]) -> int:
+    candidates = []
+    for key in (
+        "final_progress_after_reconcile",
+        "final_progress",
+        "progress_percent",
+        "persisted_job_progress",
+        "last_progress_percent",
+        "last_meaningful_progress",
+        "max_progress_percent",
+        "registry_progress",
+        "panel_progress_percent",
+    ):
+        try:
+            value = int(round(float(job.get(key) or 0)))
+        except Exception:
+            value = 0
+        if value > 0:
+            candidates.append(value)
+    return max(candidates or [0])
+
+
+def _music_artifact_wait_attempts(job: dict[str, Any]) -> tuple[int, int]:
+    attempt = _positive_int(job, "artifact_wait_attempt_count", "download_attempt_count", "artifact_materialization_attempt_count")
+    max_attempts = _positive_int(job, "artifact_wait_max_attempts", "music_artifact_wait_max_attempts", "max_artifact_wait_attempts")
+    return attempt, max_attempts
+
+
+def _music_terminal_fail_allowed(job: dict[str, Any], lifecycle: dict[str, Any], terminal: str = "") -> bool:
+    state = str(terminal or "").strip().lower()
+    if state not in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+        return True
+    blocker = str(
+        job.get("primary_blocker")
+        or job.get("artifact_blocker")
+        or job.get("auto_delivery_blocker")
+        or job.get("artifact_download_error_category")
+        or job.get("download_error_category")
+        or job.get("last_download_error_category")
+        or job.get("error_category")
+        or ""
+    ).strip().lower()
+    status = str(job.get("status") or job.get("music_status") or "").strip().lower()
+    provider_status = str(job.get("provider_status") or job.get("last_provider_status") or "").strip().lower()
+    wait_attempts, wait_max = _music_artifact_wait_attempts(job)
+    wait_exhausted = bool(
+        job.get("terminal_after_wait_exhausted")
+        or job.get("artifact_wait_terminal_exhausted")
+        or (wait_max > 0 and wait_attempts >= wait_max)
+    )
+    provider_failed = any(token in f"{status} {provider_status}" for token in ("fail", "error", "cancel", "rejected"))
+    all_candidates_invalid = blocker in {
+        "all_candidates_terminal_invalid",
+        "all_candidates_invalid",
+        "artifact_materialization_failed",
+        "artifact_download_failed",
+        "result_url_forbidden_access_denied",
+        "audio_validation_failed",
+        "scheduler_start_failed",
+        "job_persist_failed",
+        "provider_submit_failed",
+    }
+    provider_missing = bool(
+        not lifecycle.get("provider_task_id")
+        and (
+            blocker == "provider_job_missing"
+            or job.get("provider")
+            or job.get("provider_name_internal")
+            or (status in {"completed", "complete", "success", "succeeded"} and _positive_int(job, "output_bytes", "music_result_size_bytes", "music_output_size_bytes") <= 0)
+        )
+    )
+    return bool(wait_exhausted or provider_failed or all_candidates_invalid or provider_missing)
+
+
+def _music_reconcile_progress(
+    canonical: str,
+    job: dict[str, Any],
+    lifecycle: dict[str, Any],
+    stage_key: str,
+    requested_progress: int,
+    terminal: str,
+    *,
+    music_artifact_waiting: bool = False,
+) -> dict[str, Any]:
+    stage_key = str(stage_key or "received_request").strip().lower().replace("-", "_")
+    previous_progress = _music_previous_progress(job)
+    requested_progress = max(0, min(100, int(requested_progress or 0)))
+    provider_completed = bool(lifecycle.get("provider_completed"))
+    raw_audio_url_present = _music_raw_audio_url_present(job)
+    artifact_materialization_started = _music_artifact_materialization_started(job)
+    artifact_waiting = bool(music_artifact_waiting or job.get("artifact_waiting") or job.get("music_artifact_waiting"))
+    artifact_check_stage_allowed = bool(provider_completed or raw_audio_url_present or artifact_materialization_started or artifact_waiting)
+    terminal_fail_allowed = _music_terminal_fail_allowed(job, lifecycle, terminal)
+    if artifact_waiting and not bool(job.get("terminal_after_wait_exhausted") or job.get("artifact_wait_terminal_exhausted")):
+        terminal_fail_allowed = False
+    progress_source = "stage_default"
+    if previous_progress >= 95 and not lifecycle.get("audio_validated") and str(terminal or "").strip().lower() != "delivered":
+        previous_progress = 0
+    if previous_progress > 0:
+        progress_source = "persisted_job_progress"
+    if artifact_waiting:
+        floor, cap = 80, 90
+        progress_source = "artifact_waiting"
+    elif lifecycle.get("audio_validated"):
+        floor, cap = 95, 95
+        progress_source = "audio_validated"
+    elif stage_key == "delivering":
+        floor, cap = 95, 99
+        progress_source = "delivery_started"
+    elif stage_key == "validating_audio" and artifact_check_stage_allowed:
+        floor, cap = 80, 90
+        progress_source = "artifact_check"
+    elif str(job.get("status") or job.get("music_status") or "").strip().lower() == "submitting" and not lifecycle.get("provider_task_id"):
+        floor, cap = 5, 35
+        progress_source = "provider_submitting"
+    elif stage_key in {"generating_song", "generating_music"} or lifecycle.get("provider_task_id") or lifecycle.get("provider_submit_called"):
+        floor, cap = 50, 75
+        progress_source = "provider_generating"
+    elif stage_key in {"preparing_style"}:
+        floor, cap = 25, 35
+    elif stage_key in {"preparing_lyrics", "preparing_prompt"}:
+        floor, cap = 15, 25
+    else:
+        floor, cap = 5, 5
+    final_progress = max(requested_progress, floor)
+    if previous_progress > 0:
+        final_progress = max(final_progress, previous_progress)
+    final_progress = min(final_progress, cap)
+    if str(terminal or "").strip().lower() == "delivered":
+        final_progress = 100
+        progress_source = "delivered"
+    rollback_prevented = bool(previous_progress > requested_progress and final_progress >= min(previous_progress, cap))
+    return {
+        "progress_monotonic_applied": True,
+        "previous_progress": previous_progress,
+        "requested_progress": requested_progress,
+        "final_progress": final_progress,
+        "final_progress_after_reconcile": final_progress,
+        "progress_source": progress_source,
+        "progress_rollback_prevented": rollback_prevented,
+        "provider_completed": provider_completed,
+        "raw_audio_url_present": raw_audio_url_present,
+        "artifact_materialization_started": artifact_materialization_started,
+        "artifact_waiting": artifact_waiting,
+        "artifact_check_stage_allowed": artifact_check_stage_allowed,
+        "artifact_wait_attempt_count": _music_artifact_wait_attempts(job)[0],
+        "artifact_wait_max_attempts": _music_artifact_wait_attempts(job)[1],
+        "next_artifact_retry_at": str(job.get("next_artifact_retry_at") or ""),
+        "artifact_wait_terminal_exhausted": bool(job.get("terminal_after_wait_exhausted") or job.get("artifact_wait_terminal_exhausted")),
+        "terminal_fail_allowed": terminal_fail_allowed,
+    }
 
 
 def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -842,11 +1062,25 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
     elif status in {"completed", "complete", "success", "succeeded", "delivered"}:
         terminal = "delivered"
     elif any(token in status for token in ("fail", "error", "cancel")):
-        terminal = "failed_no_charge"
+        if canonical in {"music_bg", "music_song"} and music_artifact_waiting:
+            status = "processing"
+        else:
+            terminal = "failed_no_charge"
     if canonical in {"music_bg", "music_song"}:
         lifecycle = music_progress_lifecycle(canonical, job)
         completed_steps = list(lifecycle.get("completed_steps") or [])
         status_text = ""
+        terminal_fail_allowed = _music_terminal_fail_allowed(job, lifecycle, terminal)
+        if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"} and not terminal_fail_allowed:
+            terminal = ""
+            status = "processing"
+            music_artifact_waiting = bool(
+                music_artifact_waiting
+                or lifecycle.get("provider_task_id")
+                or lifecycle.get("provider_completed")
+                or _music_raw_audio_url_present(job)
+                or _music_artifact_materialization_started(job)
+            )
         if terminal == "delivered":
             stage_key = "delivered"
             progress = 100
@@ -872,7 +1106,7 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         elif music_artifact_waiting:
             stage_key = "validating_audio"
             progress = max(80, min(90, int(progress if progress is not None else 85)))
-            status_text = "Đang kiểm tra file nhạc"
+            status_text = "TOAN AAS đang chuẩn bị file nhạc. Anh/chị vui lòng kiểm tra lại sau."
         elif lifecycle.get("audio_validated"):
             stage_key = "delivering"
             progress = max(90, min(95, int(progress if progress is not None else 95)))
@@ -882,15 +1116,22 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         elif lifecycle.get("provider_completed"):
             stage_key = "validating_audio"
             progress = max(80, min(90, int(progress if progress is not None else 85)))
-            status_text = "Đang tải file nhạc"
+            status_text = "Đang tải file nhạc. TOAN AAS đang chuẩn bị file nhạc. Anh/chị vui lòng kiểm tra lại sau."
         elif lifecycle.get("provider_task_id") or lifecycle.get("provider_submit_called"):
             stage_key = "generating_song" if canonical == "music_song" else "generating_music"
             if progress is None:
                 progress = int(product_progress_stage(canonical, stage_key).get("percent") or 60)
+            if status == "submitting" and not lifecycle.get("provider_task_id"):
+                progress = max(5, min(35, int(progress or 12)))
+            else:
+                progress = max(50, min(75, int(progress or 65)))
+            status_text = "TOAN AAS đang tạo bài hát. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả." if canonical == "music_song" else "TOAN AAS đang tạo nhạc. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả."
         elif status in {"submitted", "queued", "processing", "running", "generating"}:
             stage_key = "generating_song" if canonical == "music_song" else "generating_music"
             if progress is None:
                 progress = int(product_progress_stage(canonical, stage_key).get("percent") or 60)
+            progress = max(50, min(75, int(progress or 65)))
+            status_text = "TOAN AAS đang tạo bài hát. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả." if canonical == "music_song" else "TOAN AAS đang tạo nhạc. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả."
         elif canonical == "music_song" and lifecycle.get("style_prepared"):
             stage_key = "preparing_style"
             progress = int(product_progress_stage(canonical, stage_key).get("percent") or 35)
@@ -904,14 +1145,26 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             stage_key = "received_request"
             progress = int(product_progress_stage(canonical, stage_key).get("percent") or 5)
         stage = product_progress_stage(canonical, stage_key)
+        requested_progress = product_progress_percent(canonical, str(stage.get("key") or stage_key), progress if progress is not None else None, terminal)
+        progress_debug = _music_reconcile_progress(
+            canonical,
+            job,
+            lifecycle,
+            str(stage.get("key") or stage_key),
+            requested_progress,
+            terminal,
+            music_artifact_waiting=music_artifact_waiting,
+        )
+        final_progress = int(progress_debug.get("final_progress_after_reconcile") or requested_progress)
         return {
             "product_type": canonical,
             "current_stage": str(stage.get("key") or stage_key),
-            "percent": product_progress_percent(canonical, str(stage.get("key") or stage_key), progress if progress is not None else None, terminal),
+            "percent": final_progress,
             "terminal_state": terminal,
             "completed_steps": completed_steps,
             "music_lifecycle": lifecycle,
             "status_text": status_text,
+            **progress_debug,
         }
     if canonical == "subdub":
         stage_key = str(
@@ -996,7 +1249,7 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
 
 def product_progress_debug_payload(product_type: str = "", job_id: str = "", job: dict[str, Any] | None = None) -> dict[str, Any]:
     state = product_progress_stage_from_job(product_type, job)
-    return {
+    payload = {
         "product_type": normalize_product_type(product_type),
         "job_code": product_progress_public_job_code(job_id),
         "current_stage": state.get("current_stage"),
@@ -1005,6 +1258,28 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
         "completed_steps": list(state.get("completed_steps") or []),
         "update_callback": product_progress_update_callback(product_type, job_id),
     }
+    if normalize_product_type(product_type) in {"music_bg", "music_song"}:
+        for key in (
+            "progress_monotonic_applied",
+            "previous_progress",
+            "requested_progress",
+            "final_progress",
+            "final_progress_after_reconcile",
+            "progress_source",
+            "progress_rollback_prevented",
+            "provider_completed",
+            "raw_audio_url_present",
+            "artifact_materialization_started",
+            "artifact_waiting",
+            "artifact_check_stage_allowed",
+            "artifact_wait_attempt_count",
+            "artifact_wait_max_attempts",
+            "next_artifact_retry_at",
+            "artifact_wait_terminal_exhausted",
+            "terminal_fail_allowed",
+        ):
+            payload[key] = state.get(key)
+    return payload
 
 
 def product_progress_matrix_lines() -> list[str]:
