@@ -63,8 +63,8 @@ def _video_steps() -> list[dict[str, Any]]:
 def _music_song_steps() -> list[dict[str, Any]]:
     return [
         _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu tạo nhạc", 5),
-        _stage("preparing_lyrics", "Chuẩn bị lời bài hát", "Đang chuẩn bị lời bài hát", 20),
-        _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 35),
+        _stage("preparing_lyrics", "Chuẩn bị lời bài hát", "Đang chuẩn bị lời bài hát", 15),
+        _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 25),
         _stage("generating_song", "Tạo bài hát", "Đang tạo bài hát", 65),
         _stage("validating_audio", "Kiểm tra file nhạc", "Đang kiểm tra file nhạc", 85),
         _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
@@ -81,8 +81,8 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "back_callback": "music_quick|showroom|music_hub",
         "steps": [
             _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu tạo nhạc", 5),
-            _stage("preparing_prompt", "Chuẩn bị nội dung nhạc", "Đang chuẩn bị nội dung nhạc", 20),
-            _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 35),
+            _stage("preparing_prompt", "Chuẩn bị nội dung nhạc", "Đang chuẩn bị nội dung nhạc", 15),
+            _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 25),
             _stage("generating_music", "Tạo nhạc nền", "Đang tạo nhạc nền", 65),
             _stage("validating_audio", "Kiểm tra file nhạc", "Đang kiểm tra file nhạc", 85),
             _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
@@ -646,6 +646,8 @@ def _music_reconcile_progress(
     previous_progress = _music_previous_progress(job)
     requested_progress = max(0, min(100, int(requested_progress or 0)))
     provider_completed = bool(lifecycle.get("provider_completed"))
+    create_song_started = bool(lifecycle.get("create_song_started"))
+    provider_status = str(job.get("status") or job.get("music_status") or "").strip().lower()
     raw_audio_url_present = _music_raw_audio_url_present(job)
     artifact_materialization_started = _music_artifact_materialization_started(job)
     artifact_waiting = bool(music_artifact_waiting or job.get("artifact_waiting") or job.get("music_artifact_waiting"))
@@ -672,16 +674,25 @@ def _music_reconcile_progress(
     elif stage_key == "validating_audio" and artifact_check_stage_allowed:
         floor, cap = 80, 90
         progress_source = "artifact_check"
-    elif str(job.get("status") or job.get("music_status") or "").strip().lower() == "submitting" and not lifecycle.get("provider_task_id"):
-        floor, cap = 5, 35
+    elif provider_status == "submitting" and not lifecycle.get("provider_task_id"):
+        floor, cap = 5, 25
         progress_source = "provider_submitting"
-    elif stage_key in {"generating_song", "generating_music"} or lifecycle.get("provider_task_id") or lifecycle.get("provider_submit_called"):
-        floor, cap = 50, 75
-        progress_source = "provider_generating"
+    elif create_song_started:
+        if provider_status in {"generating"}:
+            floor, cap = 65, 75
+            progress_source = "provider_generating"
+        elif provider_status in {"processing", "running", "in_progress"}:
+            floor, cap = 50, 75
+            progress_source = "provider_generating"
+        else:
+            floor, cap = 35, 75
+            progress_source = "provider_accepted"
     elif stage_key in {"preparing_style"}:
-        floor, cap = 25, 35
+        floor, cap = 25, 25
+        progress_source = "style_prepared"
     elif stage_key in {"preparing_lyrics", "preparing_prompt"}:
-        floor, cap = 15, 25
+        floor, cap = 15, 15
+        progress_source = "lyrics_or_prompt_prepared"
     else:
         floor, cap = 5, 5
     final_progress = max(requested_progress, floor)
@@ -692,6 +703,11 @@ def _music_reconcile_progress(
         final_progress = 100
         progress_source = "delivered"
     rollback_prevented = bool(previous_progress > requested_progress and final_progress >= min(previous_progress, cap))
+    public_percent_reason = (
+        "provider_processing"
+        if create_song_started and provider_status in {"processing", "running", "in_progress"}
+        else progress_source
+    )
     return {
         "progress_monotonic_applied": True,
         "previous_progress": previous_progress,
@@ -699,7 +715,9 @@ def _music_reconcile_progress(
         "final_progress": final_progress,
         "final_progress_after_reconcile": final_progress,
         "progress_source": progress_source,
+        "public_percent_reason": public_percent_reason,
         "progress_rollback_prevented": rollback_prevented,
+        "create_song_started": create_song_started,
         "provider_completed": provider_completed,
         "raw_audio_url_present": raw_audio_url_present,
         "artifact_materialization_started": artifact_materialization_started,
@@ -748,12 +766,8 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
         or job.get("telegram_delivery_confirmed")
         or job.get("delivery_confirmed")
     )
-    style_prepared = bool(
-        _as_bool(job.get("style_prepared"))
-        or _as_bool(job.get("music_style_prepared"))
-        or _as_bool(job.get("prompt_prepared"))
-        or _as_bool(job.get("music_prompt_prepared"))
-        or _first_text(
+    style_input_present = bool(
+        _first_text(
             job,
             "provider_style_prompt",
             "style_prompt",
@@ -766,10 +780,8 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
             "mood",
         )
     )
-    lyrics_prepared = bool(
-        _as_bool(job.get("lyrics_prepared"))
-        or _as_bool(job.get("music_lyrics_prepared"))
-        or _first_text(
+    lyrics_input_present = bool(
+        _first_text(
             job,
             "provider_lyrics",
             "lyrics",
@@ -814,6 +826,40 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
         or status in {"completed", "complete", "success", "succeeded", "done", "finished", "downloading", "delivered"}
         or output_bytes > 0
     )
+    stage_hint = str(job.get("current_stage") or job.get("stage") or job.get("progress_stage") or job.get("lifecycle_status") or "").strip().lower().replace("-", "_")
+    provider_missing_failure_candidate = bool(
+        not provider_task_id
+        and output_bytes <= 0
+        and status in {"submitted", "queued", "processing", "running", "generating", "downloading"}
+        and (
+            job.get("provider")
+            or str(job.get("error_category") or "") == "provider_job_missing"
+            or bool(re.match(r"^MUS(?!IC)", str(job.get("internal_job_id") or job.get("job_id") or "").upper()))
+        )
+    )
+    create_song_started = bool(
+        not provider_missing_failure_candidate
+        and (
+            _as_bool(job.get("create_song_started"))
+            or provider_task_id
+            or provider_completed
+            or status in {"submitted", "queued", "processing", "running", "generating", "downloading", "delivered"}
+        )
+    )
+    lyrics_prepared = bool(
+        _as_bool(job.get("lyrics_prepared"))
+        or _as_bool(job.get("music_lyrics_prepared"))
+        or stage_hint in {"preparing_style", "generating_song", "generating_music", "validating_audio", "delivering", "delivered", "provider_submitted", "provider_completed"}
+        or create_song_started
+    )
+    style_prepared = bool(
+        _as_bool(job.get("style_prepared"))
+        or _as_bool(job.get("music_style_prepared"))
+        or _as_bool(job.get("prompt_prepared"))
+        or _as_bool(job.get("music_prompt_prepared"))
+        or stage_hint in {"generating_song", "generating_music", "validating_audio", "delivering", "delivered", "provider_submitted", "provider_completed"}
+        or create_song_started
+    )
     audio_validation_flag = bool(
         _as_bool(job.get("artifact_validated"))
         or _as_bool(job.get("audio_validated"))
@@ -845,8 +891,11 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
     return {
         "lyrics_prepared": lyrics_prepared,
         "style_prepared": style_prepared,
+        "lyrics_input_present": lyrics_input_present,
+        "style_input_present": style_input_present,
         "provider_submit_called": provider_submit_called,
         "provider_task_id": provider_task_id,
+        "create_song_started": create_song_started,
         "provider_completed": provider_completed,
         "artifact_metadata_ready": artifact_metadata_ready,
         "artifact_state": str(job.get("artifact_state") or job.get("music_artifact_state") or ("ready" if artifact_ready else "metadata_ready" if artifact_metadata_ready else "missing")),
@@ -1148,20 +1197,35 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             stage_key = "validating_audio"
             progress = max(80, min(90, int(progress if progress is not None else 85)))
             status_text = "Đang kiểm tra file nhạc. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả."
-        elif lifecycle.get("provider_task_id") or lifecycle.get("provider_submit_called"):
+        elif lifecycle.get("create_song_started"):
             stage_key = "generating_song" if canonical == "music_song" else "generating_music"
-            if progress is None:
-                progress = int(product_progress_stage(canonical, stage_key).get("percent") or 60)
-            if status == "submitting" and not lifecycle.get("provider_task_id"):
-                progress = max(5, min(35, int(progress or 12)))
+            if progress is None or int(progress or 0) <= 0:
+                if status == "generating":
+                    progress = 65
+                elif status in {"processing", "running", "in_progress"}:
+                    progress = 50
+                else:
+                    progress = 35
             else:
-                progress = max(50, min(75, int(progress or 65)))
+                floor_progress = 50 if status in {"processing", "running", "in_progress"} else 35
+                progress = max(floor_progress, min(75, int(progress or floor_progress)))
             status_text = "TOAN AAS đang tạo bài hát. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả." if canonical == "music_song" else "TOAN AAS đang tạo nhạc. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả."
+        elif lifecycle.get("provider_submit_called"):
+            stage_key = "preparing_style" if canonical == "music_song" else "preparing_prompt"
+            progress = max(5, min(25, int(progress if progress is not None else (25 if canonical == "music_song" else 15))))
+            status_text = "TOAN AAS đang gửi yêu cầu tạo bài hát." if canonical == "music_song" else "TOAN AAS đang gửi yêu cầu tạo nhạc."
         elif status in {"submitted", "queued", "processing", "running", "generating"}:
             stage_key = "generating_song" if canonical == "music_song" else "generating_music"
-            if progress is None:
-                progress = int(product_progress_stage(canonical, stage_key).get("percent") or 60)
-            progress = max(50, min(75, int(progress or 65)))
+            if progress is None or int(progress or 0) <= 0:
+                if status == "generating":
+                    progress = 65
+                elif status in {"processing", "running"}:
+                    progress = 50
+                else:
+                    progress = 35
+            else:
+                floor_progress = 50 if status in {"processing", "running"} else 35
+                progress = max(floor_progress, min(75, int(progress or floor_progress)))
             status_text = "TOAN AAS đang tạo bài hát. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả." if canonical == "music_song" else "TOAN AAS đang tạo nhạc. Khi file nhạc sẵn sàng, hệ thống sẽ tự gửi kết quả."
         elif canonical == "music_song" and lifecycle.get("style_prepared"):
             stage_key = "preparing_style"

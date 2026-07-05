@@ -9548,6 +9548,8 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• completed_steps: <code>{html.escape(completed_steps)}</code>\n"
         f"• provider_submit_called: <code>{html.escape(str(failure_fields.get('provider_submit_called') or 'unknown'))}</code>\n"
         f"• provider_task_id_present: <code>{'yes' if failure_fields.get('provider_task_id_present') else 'no'}</code>\n"
+        f"• create_song_started: <code>{'yes' if lifecycle.get('create_song_started') else 'no'}</code>\n"
+        f"• public_percent_reason: <code>{html.escape(str(state.get('public_percent_reason') or (job or {}).get('public_percent_reason') or '-'))}</code>\n"
         f"• lyrics_prepared: <code>{'yes' if lifecycle.get('lyrics_prepared') else 'no'}</code>\n"
         f"• style_prepared: <code>{'yes' if lifecycle.get('style_prepared') else 'no'}</code>\n"
         f"• provider_completed: <code>{'yes' if lifecycle.get('provider_completed') else 'no'}</code>\n"
@@ -103721,6 +103723,8 @@ def create_music_pending_submit_job(
         "panel_callback_data": str(product_progress_status.product_progress_update_callback(product_type, internal_job_id)),
         "real_job_created_before_panel": True,
         "provider_submit_called": False,
+        "create_song_started": False,
+        "public_percent_reason": "request_received",
         "provider_submit_attempt_count": 0,
         "output_bytes": 0,
         "charged_xu": 0,
@@ -103753,12 +103757,14 @@ def create_music_pending_submit_job(
         "provider_metadata": dict(payload.get("provider_metadata") or {}),
         "provider_style_prompt": provider_style_prompt,
         "provider_lyrics": provider_lyrics,
-        "lyrics_prepared": bool(lifecycle_fields.get("lyrics_prepared")),
-        "music_lyrics_prepared": bool(lifecycle_fields.get("music_lyrics_prepared")),
-        "style_prepared": bool(lifecycle_fields.get("style_prepared")),
-        "music_style_prepared": bool(lifecycle_fields.get("music_style_prepared")),
-        "prompt_prepared": bool(lifecycle_fields.get("prompt_prepared")),
-        "music_prompt_prepared": bool(lifecycle_fields.get("music_prompt_prepared")),
+        "lyrics_input_present": bool(provider_lyrics),
+        "style_input_present": bool(provider_style_prompt),
+        "lyrics_prepared": bool(lifecycle_fields.get("lyrics_prepared") or provider_lyrics),
+        "music_lyrics_prepared": bool(lifecycle_fields.get("music_lyrics_prepared") or provider_lyrics),
+        "style_prepared": bool(lifecycle_fields.get("style_prepared") or provider_style_prompt),
+        "music_style_prepared": bool(lifecycle_fields.get("music_style_prepared") or provider_style_prompt),
+        "prompt_prepared": bool(lifecycle_fields.get("prompt_prepared") or provider_style_prompt),
+        "music_prompt_prepared": bool(lifecycle_fields.get("music_prompt_prepared") or provider_style_prompt),
         "duration_seconds": music_result_duration_seconds(payload) if payload else 0,
         "preview_seconds": music_preview_seconds(),
         "preview_start_seconds": music_preview_start_seconds(),
@@ -103783,9 +103789,13 @@ def create_music_pending_submit_job(
 
 def update_music_submit_job_provider_started(job: dict | None, *, updated_by="") -> dict:
     current = dict(job or {})
+    is_song = music_job_product_type(current, "music_bg") == "music_song"
+    lyrics_ready = bool(str(current.get("provider_lyrics") or "").strip()) if is_song else True
+    style_ready = bool(str(current.get("provider_style_prompt") or "").strip())
     current.update({
         "status": "submitting",
         "provider_submit_called": True,
+        "create_song_started": False,
         "provider_submit_called_at": now_text(),
         "provider_submit_attempt_count": int(current.get("provider_submit_attempt_count") or 0) + 1,
         "submitted_to_provider_started_at": now_text(),
@@ -103795,7 +103805,17 @@ def update_music_submit_job_provider_started(job: dict | None, *, updated_by="")
         "lifecycle_status": "submitting",
         "confirm_submit_phase": "provider_submit_called",
         "confirm_submit_blocker": "",
-        "progress_percent": max(8, int(current.get("progress_percent") or 8)),
+        "current_stage": "preparing_style" if is_song else "preparing_prompt",
+        "stage": "preparing_style" if is_song else "preparing_prompt",
+        "lyrics_prepared": bool(lyrics_ready),
+        "music_lyrics_prepared": bool(lyrics_ready),
+        "style_prepared": bool(style_ready),
+        "music_style_prepared": bool(style_ready),
+        "prompt_prepared": bool(style_ready),
+        "music_prompt_prepared": bool(style_ready),
+        "progress_percent": 25 if is_song and lyrics_ready and style_ready else 15,
+        "percent": 25 if is_song and lyrics_ready and style_ready else 15,
+        "public_percent_reason": "provider_payload_validated_submit_started",
     })
     return save_engine_async_job(current)
 
@@ -103811,17 +103831,24 @@ def update_music_submit_job_provider_accepted(
     provider = str(payload.get("provider") or current.get("provider") or "").strip()
     if not task_id:
         return mark_music_confirm_submit_blocker(current, "provider_job_id_missing_after_submit", payload.get("detail") or payload.get("status") or "", updated_by=updated_by)
+    is_song = music_job_product_type(current, "music_bg") == "music_song"
+    generation_stage = "generating_song" if is_song else "generating_music"
     current.update({
         "provider": provider,
         "provider_task_id": task_id,
         "provider_job_id": task_id,
         "status": "submitted",
+        "create_song_started": True,
         "last_provider_status": sanitize_provider_status_text(payload.get("status") or "PASS_SUBMITTED", task_id, 180),
         "provider_status": "submitted",
         "scheduler_status": str(current.get("scheduler_status") or "not_started"),
         "lifecycle_status": "provider_submitted",
         "progress_text": "Đã gửi yêu cầu tạo nhạc tới provider.",
-        "progress_percent": max(12, int(current.get("progress_percent") or 12)),
+        "current_stage": generation_stage,
+        "stage": generation_stage,
+        "progress_percent": 35,
+        "percent": 35,
+        "public_percent_reason": "provider_job_accepted",
         "confirm_submit_phase": "submitted",
         "confirm_submit_blocker": "",
         "auto_delivery_blocker": "",
@@ -110297,7 +110324,7 @@ async def handle_music_product_confirm(
         public_note=progress_public_note,
         lang=lang,
         user_id=user_id,
-        start_task=False,
+        start_task=True,
     )
     progress_chat_id = getattr(sent_progress, "chat_id", None) or getattr(query.message, "chat_id", "")
     progress_message_id = getattr(sent_progress, "message_id", "")
