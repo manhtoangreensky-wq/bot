@@ -9079,17 +9079,27 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• final_progress_after_reconcile: <code>{safe_int((job or {}).get('final_progress_after_reconcile'), 0)}%</code>\n"
             f"• provider_progress_percent: <code>{safe_int((job or {}).get('provider_progress_percent'), 0)}%</code>\n"
             f"• provider_progress_raw: <code>{html.escape(str((job or {}).get('provider_progress_raw') or '-')[:80])}</code>\n"
+            f"• provider_progress_raw_number: <code>{html.escape(str((job or {}).get('provider_progress_raw_number') or '-'))}</code>\n"
             f"• provider_progress_trusted: <code>{'yes' if (job or {}).get('provider_progress_trusted') else 'no'}</code>\n"
             f"• provider_progress_cap_reason: <code>{html.escape(str((job or {}).get('provider_progress_cap_reason') or '-'))}</code>\n"
             f"• render_video_progress_percent: <code>{safe_int((job or {}).get('render_video_progress_percent') or (job or {}).get('provider_render_progress_percent'), 0)}%</code>\n"
+            f"• render_video_progress_percent_public: <code>{html.escape(str((job or {}).get('render_video_progress_percent_public') or '-'))}</code>\n"
+            f"• render_progress_public_mode: <code>{html.escape(str((job or {}).get('render_progress_public_mode') or '-'))}</code>\n"
+            f"• provider_progress_public_suppressed: <code>{'yes' if (job or {}).get('provider_progress_public_suppressed') else 'no'}</code>\n"
+            f"• fake_progress_prevented: <code>{'yes' if (job or {}).get('fake_progress_prevented') else 'no'}</code>\n"
+            f"• fake_progress_prevention_reason: <code>{html.escape(str((job or {}).get('fake_progress_prevention_reason') or '-'))}</code>\n"
+            f"• percent_conservative_due_to_untrusted_provider: <code>{'yes' if (job or {}).get('percent_conservative_due_to_untrusted_provider') else 'no'}</code>\n"
             f"• render_progress_source: <code>{html.escape(str((job or {}).get('render_progress_source') or '-'))}</code>\n"
             f"• render_progress_estimated: <code>{'yes' if (job or {}).get('render_progress_estimated') else 'no'}</code>\n"
             f"• overall_progress_from_render: <code>{safe_int((job or {}).get('overall_progress_from_render'), 0)}%</code>\n"
             f"• provider_poll_count: <code>{safe_int((job or {}).get('provider_poll_count'), 0)}</code>\n"
+            f"• provider_poll_count_source: <code>{html.escape(str((job or {}).get('provider_poll_count_source') or '-'))}</code>\n"
             f"• provider_elapsed_seconds: <code>{safe_int((job or {}).get('provider_elapsed_seconds'), 0)}</code>\n"
             f"• elapsed_wall_clock_seconds: <code>{safe_int((job or {}).get('elapsed_wall_clock_seconds'), 0)}</code>\n"
+            f"• elapsed_live_tick_enabled: <code>no</code>\n"
             f"• elapsed_monotonic_applied: <code>{'yes' if (job or {}).get('elapsed_monotonic_applied') else 'no'}</code>\n"
             f"• provider_wait_max_seconds: <code>{safe_int((job or {}).get('provider_wait_max_seconds'), 0)}</code>\n"
+            f"• next_refresh_expected_at: <code>{html.escape(str((job or {}).get('next_poll_scheduled_at') or '-'))}</code>\n"
         )
     music_failure = music_failure_debug_fields(job, job_id, resolved_type) if progress_product_type_is_music(resolved_type, job_id) else {}
     music_failure_text = ""
@@ -46204,9 +46214,13 @@ def video_render_debug_compact_text(
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
         f"• provider progress percent: <code>{safe_int((result or {}).get('provider_progress_percent'), 0)}%</code>",
         f"• render video progress: <code>{safe_int((result or {}).get('render_video_progress_percent') or (result or {}).get('provider_render_progress_percent'), 0)}%</code>",
+        f"• render video progress public: <code>{_video_debug_safe_value((result or {}).get('render_video_progress_percent_public'), 40)}</code>",
+        f"• render progress public mode: <code>{_video_debug_safe_value((result or {}).get('render_progress_public_mode'), 60)}</code>",
+        f"• fake progress prevented: <code>{'yes' if (result or {}).get('fake_progress_prevented') else 'no'}</code>",
         f"• render progress source: <code>{_video_debug_safe_value((result or {}).get('render_progress_source'), 80)}</code>",
         f"• provider elapsed/max: <code>{safe_int((result or {}).get('provider_elapsed_seconds') or (result or {}).get('provider_wait_elapsed_seconds'), 0)}/{safe_int((result or {}).get('provider_wait_max_seconds'), 0)}</code>",
         f"• provider poll count: <code>{safe_int((result or {}).get('provider_poll_count'), 0)}</code>",
+        f"• provider poll count source: <code>{_video_debug_safe_value((result or {}).get('provider_poll_count_source'), 60)}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if (result or {}).get('progress_monotonic_applied') else 'no'}</code>",
         f"• claimable owner-product: <code>{'yes' if (claim_debug or {}).get('claimable') else 'no'}</code>",
         f"• claim reason: <code>{_video_debug_safe_value((claim_debug or {}).get('reason'), 120)}</code>",
@@ -46329,17 +46343,26 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
         f"• Progress message: <code>{html.escape(str((job or {}).get('progress_message') or '-')[:160])}</code>",
         f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
+        f"• provider progress raw number: <code>{html.escape(str(result.get('provider_progress_raw_number') or '-'))}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• provider progress trusted: <code>{'yes' if result.get('provider_progress_trusted') else 'no'}</code>",
         f"• provider progress cap reason: <code>{html.escape(str(result.get('provider_progress_cap_reason') or '-'))}</code>",
         f"• render video progress: <code>{safe_int(result.get('render_video_progress_percent') or result.get('provider_render_progress_percent'), 0)}%</code>",
+        f"• render video progress public: <code>{html.escape(str(result.get('render_video_progress_percent_public') or '-'))}</code>",
+        f"• render progress public mode: <code>{html.escape(str(result.get('render_progress_public_mode') or '-'))}</code>",
+        f"• provider progress public suppressed: <code>{'yes' if result.get('provider_progress_public_suppressed') else 'no'}</code>",
+        f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
+        f"• fake progress prevention reason: <code>{html.escape(str(result.get('fake_progress_prevention_reason') or '-'))}</code>",
+        f"• percent conservative due to untrusted provider: <code>{'yes' if result.get('percent_conservative_due_to_untrusted_provider') else 'no'}</code>",
         f"• render progress source: <code>{html.escape(str(result.get('render_progress_source') or '-'))}</code>",
         f"• render progress estimated: <code>{'yes' if result.get('render_progress_estimated') else 'no'}</code>",
         f"• overall progress from render: <code>{safe_int(result.get('overall_progress_from_render'), 0)}%</code>",
         f"• provider progress estimated: <code>{'yes' if result.get('provider_progress_estimated') else 'no'}</code>",
         f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
+        f"• provider poll count source: <code>{html.escape(str(result.get('provider_poll_count_source') or '-'))}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
         f"• elapsed wall clock: <code>{safe_int(result.get('elapsed_wall_clock_seconds'), 0)}</code>",
+        f"• elapsed live tick enabled: <code>no</code>",
         f"• elapsed monotonic applied: <code>{'yes' if result.get('elapsed_monotonic_applied') else 'no'}</code>",
         f"• next poll scheduled at: <code>{html.escape(str(result.get('next_poll_scheduled_at') or '-'))}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
@@ -46522,8 +46545,8 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
     masked_tasks = ",".join(mask_provider_task_id(item) for item in task_ids) or "-"
     masked_videos = ",".join(mask_provider_task_id(item) for item in video_ids) or "-"
     poll_count = safe_int(result.get("provider_poll_count"), 0)
-    if not poll_count and result.get("provider_poll_called"):
-        poll_count = max(1, len(events))
+    if not poll_count:
+        poll_count = max(0, sum(1 for item in events if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll")))
     result_url_present = bool(
         result.get("provider_result_url_present")
         or result.get("result_url_present")
@@ -46566,10 +46589,17 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
+        f"• provider progress raw number: <code>{html.escape(str(result.get('provider_progress_raw_number') or '-'))}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• provider progress trusted: <code>{'yes' if result.get('provider_progress_trusted') else 'no'}</code>",
         f"• provider progress cap reason: <code>{html.escape(str(result.get('provider_progress_cap_reason') or '-'))}</code>",
         f"• render video progress: <code>{safe_int(result.get('render_video_progress_percent') or result.get('provider_render_progress_percent'), 0)}%</code>",
+        f"• render video progress public: <code>{html.escape(str(result.get('render_video_progress_percent_public') or '-'))}</code>",
+        f"• render progress public mode: <code>{html.escape(str(result.get('render_progress_public_mode') or '-'))}</code>",
+        f"• provider progress public suppressed: <code>{'yes' if result.get('provider_progress_public_suppressed') else 'no'}</code>",
+        f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
+        f"• fake progress prevention reason: <code>{html.escape(str(result.get('fake_progress_prevention_reason') or '-'))}</code>",
+        f"• percent conservative due to untrusted provider: <code>{'yes' if result.get('percent_conservative_due_to_untrusted_provider') else 'no'}</code>",
         f"• render progress source: <code>{html.escape(str(result.get('render_progress_source') or '-'))}</code>",
         f"• render progress estimated: <code>{'yes' if result.get('render_progress_estimated') else 'no'}</code>",
         f"• overall progress from render: <code>{safe_int(result.get('overall_progress_from_render'), 0)}%</code>",
@@ -46578,6 +46608,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider started source: <code>{html.escape(str(result.get('provider_started_at_source') or '-'))}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
         f"• elapsed wall clock: <code>{safe_int(result.get('elapsed_wall_clock_seconds'), 0)}</code>",
+        f"• elapsed live tick enabled: <code>no</code>",
         f"• elapsed monotonic applied: <code>{'yes' if result.get('elapsed_monotonic_applied') else 'no'}</code>",
         f"• next poll scheduled at: <code>{html.escape(str(result.get('next_poll_scheduled_at') or '-'))}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
@@ -46623,6 +46654,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• poll allowed: <code>{'yes' if result.get('poll_allowed') else 'no'}</code>",
         f"• poll skipped reason: <code>{html.escape(str(result.get('poll_skipped_reason') or '-')[:160])}</code>",
         f"• poll count: <code>{poll_count}</code>",
+        f"• poll count source: <code>{html.escape(str(result.get('provider_poll_count_source') or '-'))}</code>",
         f"• last poll raw status: <code>{html.escape(str(result.get('provider_status_raw') or result.get('provider_status') or '-'))}</code>",
         f"• normalized status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
         f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
@@ -46663,9 +46695,13 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• payload keys: <code>{_video_debug_safe_value(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or [])), 220)}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• render video progress: <code>{safe_int(result.get('render_video_progress_percent') or result.get('provider_render_progress_percent'), 0)}%</code>",
+        f"• render video progress public: <code>{_video_debug_safe_value(result.get('render_video_progress_percent_public'), 40)}</code>",
+        f"• render progress public mode: <code>{_video_debug_safe_value(result.get('render_progress_public_mode'), 60)}</code>",
+        f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
         f"• render progress source: <code>{_video_debug_safe_value(result.get('render_progress_source'), 80)}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
         f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
+        f"• provider poll count source: <code>{_video_debug_safe_value(result.get('provider_poll_count_source'), 60)}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
         f"• summary fields from primary alive task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
@@ -66562,8 +66598,12 @@ def video_b14_render_bar(percent: int) -> str:
 
 def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     telemetry = dict(telemetry or {})
+    public_mode = str(telemetry.get("render_progress_public_mode") or "percent").strip().lower()
+    public_progress = telemetry.get("render_video_progress_percent_public")
     progress = max(0, min(100, safe_int(
-        telemetry.get("render_video_progress_percent")
+        public_progress
+        if public_progress not in (None, "", "-")
+        else telemetry.get("render_video_progress_percent")
         or telemetry.get("provider_render_progress_percent")
         or 0,
         0,
@@ -66572,15 +66612,18 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
         progress = min(90, progress)
     poll_count = safe_int(telemetry.get("provider_poll_count"), 0)
     elapsed = safe_int(telemetry.get("provider_elapsed_seconds") or telemetry.get("provider_wait_elapsed_seconds"), 0)
-    lines = [
-        "<b>Dựng video:</b>",
-        f"{video_b14_render_bar(progress)} <b>{progress}%</b>",
-        f"⏱ Đã xử lý: <b>{html.escape(video_b14_human_elapsed(elapsed))}</b>",
-    ]
-    if poll_count > 0:
-        lines.append(f"🔄 Đã kiểm tra: <b>{poll_count} lần</b>")
+    lines = ["<b>Dựng video:</b>"]
+    if public_mode == "indeterminate" or telemetry.get("provider_progress_public_suppressed"):
+        lines.append("<b>Đang dựng...</b>")
+    else:
+        lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
+    lines.append(f"⏱ Đã xử lý: <b>{html.escape(video_b14_human_elapsed(elapsed))}</b>")
+    lines.append(f"🔄 Đã kiểm tra: <b>{poll_count} lần</b>")
+    if telemetry.get("panel_last_updated_at") or telemetry.get("provider_last_poll_at"):
+        lines.append("Cập nhật lần cuối: <b>vừa xong</b>")
     lines.append("Hệ thống đang dựng video. Anh/chị có thể quay lại kiểm tra sau.")
     lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
+    lines.append("Hệ thống tự cập nhật định kỳ.")
     lines.append("Video AI có thể mất vài phút tùy tải hệ thống.")
     return "\n".join(lines)
 

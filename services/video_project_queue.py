@@ -137,6 +137,18 @@ def _progress_from_value(value: Any) -> int:
     return max(0, min(100, int(raw)))
 
 
+def _progress_raw_number(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        raw = float(str(value).strip().rstrip("%"))
+    except Exception:
+        return None
+    if 0 < raw <= 1:
+        raw *= 100
+    return raw
+
+
 def _extract_progress_raw(payload: dict[str, Any]) -> Any:
     for key in (
         "provider_progress_raw",
@@ -218,20 +230,23 @@ def _provider_status_for_progress(payload: dict[str, Any], alive: bool) -> str:
 def _provider_progress_effective(
     normalized_progress: int,
     *,
+    raw_progress_number: float | None = None,
     provider_status: str,
     result_url_present: bool,
     final_output_ready: bool,
     alive: bool,
 ) -> tuple[int, bool, str, bool]:
+    if raw_progress_number is not None and (raw_progress_number < 0 or raw_progress_number > 100):
+        return 0, False, "invalid_provider_progress_raw", False
     if normalized_progress <= 0:
         return 0, False, "", False
     running = alive or provider_status in {"running", "queued", "pending", "in_progress", "processing", "not_start", "final_rendering"}
     if final_output_ready or (normalized_progress >= 100 and result_url_present and not running):
         return 100, True, "", False
     if running and not result_url_present and normalized_progress >= 100:
-        return 90, False, "in_progress_without_result_url", True
+        return 0, False, "in_progress_without_result_url", False
     if running and not result_url_present:
-        return min(90, normalized_progress), normalized_progress < 100, "in_progress_cap" if normalized_progress > 90 else "", normalized_progress > 90
+        return normalized_progress, True, "", False
     if result_url_present:
         return max(95, min(99, normalized_progress)), True, "", False
     return min(99, normalized_progress), normalized_progress < 100, "missing_final_mp4" if normalized_progress >= 100 else "", normalized_progress >= 100
@@ -248,6 +263,7 @@ def _render_subprogress(
     final_output_ready: bool,
     alive: bool,
     provider_status: str,
+    provider_progress_trusted: bool = False,
 ) -> tuple[int, str, bool, bool]:
     if final_output_ready:
         return 100, "final_mp4_validated", False, False
@@ -261,33 +277,42 @@ def _render_subprogress(
         final_output_ready=final_output_ready,
         alive=alive,
     )
-    if effective > 0:
+    if effective > 0 and trusted and provider_progress_trusted:
         progress = effective
-        source = "provider_raw" if trusted else "provider_raw_capped"
+        source = "provider_raw"
         estimated = False
     else:
-        elapsed_estimate = int((min(max(elapsed, 0), max(1, wait_max)) / max(1, wait_max)) * 90)
-        poll_estimate = min(90, max(0, poll_count - 1) * 3)
-        progress = max(elapsed_estimate, poll_estimate)
-        source = "elapsed_poll_estimate"
-        estimated = True
+        del elapsed, wait_max, poll_count
+        progress = 0
+        source = "indeterminate"
+        estimated = False
     if alive:
         progress = min(90, progress)
-    progress = max(previous_render_progress, progress)
+    if source != "indeterminate":
+        progress = max(previous_render_progress, progress)
     if alive:
         progress = min(90, progress)
     return max(0, min(100, progress)), source, estimated, capped
 
 
 def _provider_poll_count(payload: dict[str, Any]) -> int:
-    count = _as_int(payload.get("provider_poll_count") or payload.get("poll_count"), 0)
+    count, _source = _provider_poll_count_with_source(payload)
+    return count
+
+
+def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]:
+    raw_count = payload.get("provider_poll_count")
+    if raw_count in (None, ""):
+        raw_count = payload.get("poll_count")
+    count = _as_int(raw_count, 0)
+    source = "payload" if count > 0 else "none"
     attempts = payload.get("provider_attempts") or payload.get("provider_pending_attempts") or []
     if isinstance(attempts, list):
         poll_attempts = sum(1 for item in attempts if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll"))
-        count = max(count, poll_attempts)
-    if not count and payload.get("provider_poll_called"):
-        count = 1
-    return max(0, count)
+        if poll_attempts > count:
+            count = poll_attempts
+            source = "provider_attempts"
+    return max(0, count), source
 
 
 def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
@@ -364,12 +389,14 @@ def reconcile_provider_progress_telemetry(
     elapsed_monotonic_applied = bool(previous_elapsed and wall_clock_elapsed < previous_elapsed)
     raw_progress = _extract_progress_raw(payload)
     normalized_progress = _progress_from_value(raw_progress)
-    poll_count = _provider_poll_count(payload)
+    raw_progress_number = _progress_raw_number(raw_progress)
+    poll_count, poll_count_source = _provider_poll_count_with_source(payload)
     result_url_present = _provider_result_url_present(payload)
     final_output_ready = _provider_final_output_ready(payload)
     provider_status = _provider_status_for_progress(payload, alive)
     provider_progress_effective, provider_progress_trusted, provider_progress_cap_reason, provider_progress_cap_applied = _provider_progress_effective(
         normalized_progress,
+        raw_progress_number=raw_progress_number,
         provider_status=provider_status,
         result_url_present=result_url_present,
         final_output_ready=final_output_ready,
@@ -389,9 +416,16 @@ def reconcile_provider_progress_telemetry(
         final_output_ready=final_output_ready,
         alive=alive,
         provider_status=provider_status,
+        provider_progress_trusted=provider_progress_trusted,
     )
+    provider_progress_public_suppressed = bool(alive and not final_output_ready and not result_url_present and not provider_progress_trusted)
+    render_progress_public_mode = "indeterminate" if provider_progress_public_suppressed else "percent"
+    render_progress_public_percent = "-" if provider_progress_public_suppressed else str(render_progress)
+    fake_progress_prevention_reason = "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else ""
     render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
     overall_progress_from_render = 100 if final_output_ready else (95 if result_url_present else 20 + int(render_progress * 0.65))
+    if provider_progress_public_suppressed:
+        overall_progress_from_render = 20
     if alive and not final_output_ready:
         overall_progress_from_render = min(85, overall_progress_from_render)
     estimated = False
@@ -402,7 +436,7 @@ def reconcile_provider_progress_telemetry(
     else:
         requested = max(persisted_progress, _as_int(payload.get("provider_progress_percent"), 0))
         progress_source = "persisted"
-    final_progress = max(persisted_progress, requested)
+    final_progress = requested if provider_progress_public_suppressed else max(persisted_progress, requested)
     if alive:
         final_progress = max(20, min(85, final_progress))
     else:
@@ -421,10 +455,17 @@ def reconcile_provider_progress_telemetry(
         "provider_progress_cap_reason": provider_progress_cap_reason,
         "provider_progress_cap_applied": bool(provider_progress_cap_applied or render_cap_applied),
         "provider_progress_effective": provider_progress_effective,
+        "provider_progress_raw_number": raw_progress_number if raw_progress_number is not None else "",
         "provider_progress_estimated": bool(estimated),
         "provider_progress_percent": provider_progress_effective if provider_progress_effective else render_progress,
         "render_video_progress_percent": render_progress,
         "provider_render_progress_percent": render_progress,
+        "render_video_progress_percent_public": render_progress_public_percent,
+        "provider_progress_public_suppressed": bool(provider_progress_public_suppressed),
+        "render_progress_public_mode": render_progress_public_mode,
+        "fake_progress_prevented": bool(provider_progress_public_suppressed),
+        "fake_progress_prevention_reason": fake_progress_prevention_reason,
+        "percent_conservative_due_to_untrusted_provider": bool(provider_progress_public_suppressed),
         "render_progress_source": render_source,
         "render_progress_raw_provider": raw_progress if raw_progress not in (None, "") else "",
         "render_progress_estimated": bool(render_estimated),
@@ -434,6 +475,7 @@ def reconcile_provider_progress_telemetry(
         "overall_progress_from_render": overall_progress_from_render,
         "provider_status_for_progress": provider_status,
         "provider_poll_count": poll_count,
+        "provider_poll_count_source": poll_count_source,
         "provider_last_poll_at": payload.get("provider_last_poll_at") or payload.get("last_poll_at") or now_text(current_dt),
         "provider_started_at": payload.get("provider_started_at") or _format_epoch(started_epoch),
         "provider_started_at_epoch": started_epoch,

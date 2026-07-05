@@ -146,8 +146,9 @@ def test_provider_progress_estimated_when_raw_missing():
     payload = _provider_alive_payload(provider_started_at_epoch=started, provider_wait_max_seconds=1200)
     telemetry = bot.video_b14_provider_telemetry(_panel_job(progress=20, payload=payload), payload)
 
-    assert telemetry["provider_progress_estimated"] is True
-    assert 20 < telemetry["final_progress_after_reconcile"] < 85
+    assert telemetry["provider_progress_estimated"] is False
+    assert telemetry["render_progress_source"] == "indeterminate"
+    assert telemetry["final_progress_after_reconcile"] == 20
 
 
 def test_provider_progress_estimate_caps_below_final():
@@ -155,8 +156,9 @@ def test_provider_progress_estimate_caps_below_final():
     payload = _provider_alive_payload(provider_started_at_epoch=started, provider_wait_max_seconds=1200)
     telemetry = bot.video_b14_provider_telemetry(_panel_job(progress=20, payload=payload), payload)
 
-    assert telemetry["render_video_progress_percent"] == 90
-    assert telemetry["final_progress_after_reconcile"] == 78
+    assert telemetry["render_video_progress_percent"] == 0
+    assert telemetry["final_progress_after_reconcile"] == 20
+    assert telemetry["render_progress_public_mode"] == "indeterminate"
 
 
 def test_provider_poll_count_displayed():
