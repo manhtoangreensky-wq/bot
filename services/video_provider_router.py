@@ -85,6 +85,18 @@ def _progress_value(value: Any) -> int:
     return max(0, min(100, int(raw)))
 
 
+def _progress_raw_number(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        raw = float(str(value).strip().rstrip("%"))
+    except Exception:
+        return None
+    if 0 < raw <= 1:
+        raw *= 100
+    return raw
+
+
 def _progress_from_raw(raw: Any) -> Any:
     if raw in (None, ""):
         return None
@@ -130,16 +142,24 @@ def _provider_status_for_progress(poll_result: VideoPollResult) -> str:
     return status or "running"
 
 
-def _effective_provider_progress(normalized_progress: int, *, status: str, result_url_present: bool) -> tuple[int, bool, str, bool]:
+def _effective_provider_progress(
+    normalized_progress: int,
+    *,
+    raw_progress_number: float | None = None,
+    status: str,
+    result_url_present: bool,
+) -> tuple[int, bool, str, bool]:
+    if raw_progress_number is not None and (raw_progress_number < 0 or raw_progress_number > 100):
+        return 0, False, "invalid_provider_progress_raw", False
     if normalized_progress <= 0:
         return 0, False, "", False
     running = status in {"running", "queued", "pending", "in_progress", "processing", "not_start", "final_rendering"}
     if normalized_progress >= 100 and result_url_present and not running:
         return 100, True, "", False
     if running and not result_url_present and normalized_progress >= 100:
-        return 90, False, "in_progress_without_result_url", True
+        return 0, False, "in_progress_without_result_url", False
     if running and not result_url_present:
-        return min(90, normalized_progress), normalized_progress < 100, "in_progress_cap" if normalized_progress > 90 else "", normalized_progress > 90
+        return normalized_progress, True, "", False
     if result_url_present:
         return max(95, min(99, normalized_progress)), True, "", False
     return min(99, normalized_progress), normalized_progress < 100, "missing_final_mp4" if normalized_progress >= 100 else "", normalized_progress >= 100
@@ -193,11 +213,13 @@ def _provider_pending_telemetry(
     if raw_progress in (None, ""):
         raw_progress = _progress_from_raw(getattr(poll_result, "raw", {}) or {})
     normalized_progress = _progress_value(raw_progress)
+    raw_progress_number = _progress_raw_number(raw_progress)
     elapsed = max(0, int(now_epoch - started_epoch))
     result_url_present = _poll_result_url_present(poll_result)
     provider_status = _provider_status_for_progress(poll_result)
     effective_progress, trusted, cap_reason, cap_applied = _effective_provider_progress(
         normalized_progress,
+        raw_progress_number=raw_progress_number,
         status=provider_status,
         result_url_present=result_url_present,
     )
@@ -206,22 +228,21 @@ def _provider_pending_telemetry(
         _as_int(metadata.get("provider_render_progress_percent"), 0),
     )
     poll_count = sum(1 for item in attempt_traces if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll"))
-    poll_count = max(1, poll_count)
+    poll_count = max(0, poll_count)
+    poll_count_source = "provider_attempts" if poll_count > 0 else "none"
+    provider_progress_public_suppressed = bool(not result_url_present and not trusted)
     if result_url_present:
         render_progress = max(previous_render_progress, 95)
         render_source = "provider_result_url"
         estimated = False
-    elif effective_progress > 0:
-        render_progress = max(previous_render_progress, min(90, effective_progress))
-        render_source = "provider_raw" if trusted else "provider_raw_capped"
+    elif effective_progress > 0 and trusted:
+        render_progress = max(previous_render_progress, effective_progress)
+        render_source = "provider_raw"
         estimated = False
     else:
-        elapsed_estimate = int((min(elapsed, wait_max) / max(1, wait_max)) * 90)
-        poll_estimate = min(90, max(0, poll_count - 1) * 3)
-        render_progress = max(previous_render_progress, elapsed_estimate, poll_estimate)
-        render_progress = min(90, render_progress)
-        render_source = "elapsed_poll_estimate"
-        estimated = True
+        render_progress = 0
+        render_source = "indeterminate"
+        estimated = False
     provider_progress = effective_progress or render_progress
     poll_interval = _env_int(dict(os.environ), "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", 25)
     return {
@@ -231,6 +252,7 @@ def _provider_pending_telemetry(
         "provider_elapsed_estimated": elapsed_estimated,
         "provider_progress_raw": raw_progress if raw_progress not in (None, "") else "",
         "provider_progress_normalized": normalized_progress,
+        "provider_progress_raw_number": raw_progress_number if raw_progress_number is not None else "",
         "provider_progress_trusted": trusted,
         "provider_progress_cap_reason": cap_reason,
         "provider_progress_cap_applied": cap_applied,
@@ -239,15 +261,22 @@ def _provider_pending_telemetry(
         "provider_progress_percent": provider_progress,
         "render_video_progress_percent": max(0, min(100, render_progress)),
         "provider_render_progress_percent": max(0, min(100, render_progress)),
+        "render_video_progress_percent_public": "-" if provider_progress_public_suppressed else str(max(0, min(100, render_progress))),
+        "provider_progress_public_suppressed": provider_progress_public_suppressed,
+        "render_progress_public_mode": "indeterminate" if provider_progress_public_suppressed else "percent",
+        "fake_progress_prevented": provider_progress_public_suppressed,
+        "fake_progress_prevention_reason": "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else "",
+        "percent_conservative_due_to_untrusted_provider": provider_progress_public_suppressed,
         "render_progress_source": render_source,
         "render_progress_raw_provider": raw_progress if raw_progress not in (None, "") else "",
         "render_progress_estimated": estimated,
         "render_progress_cap_applied": cap_applied,
         "render_progress_result_url_present": result_url_present,
         "render_progress_monotonic_applied": bool(previous_render_progress and render_progress >= previous_render_progress),
-        "overall_progress_from_render": 95 if result_url_present else min(85, 20 + int(max(0, min(100, render_progress)) * 0.65)),
+        "overall_progress_from_render": 95 if result_url_present else (20 if provider_progress_public_suppressed else min(85, 20 + int(max(0, min(100, render_progress)) * 0.65))),
         "provider_status_for_progress": provider_status,
         "provider_poll_count": poll_count,
+        "provider_poll_count_source": poll_count_source,
         "provider_last_poll_at": _epoch_text(now_epoch),
         "provider_elapsed_seconds": elapsed,
         "provider_wait_elapsed_seconds": elapsed,

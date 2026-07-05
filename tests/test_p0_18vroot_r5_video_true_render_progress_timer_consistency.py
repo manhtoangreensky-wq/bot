@@ -79,8 +79,9 @@ def test_render_subprogress_increases_with_elapsed_time():
     early = _telemetry(payload, now=datetime(2026, 7, 5, 10, 1, 0))
     later = _telemetry(payload, now=datetime(2026, 7, 5, 10, 10, 0))
 
-    assert later["render_video_progress_percent"] > early["render_video_progress_percent"]
-    assert later["render_progress_source"] == "elapsed_poll_estimate"
+    assert later["provider_elapsed_seconds"] > early["provider_elapsed_seconds"]
+    assert later["render_video_progress_percent"] == 0
+    assert later["render_progress_source"] == "indeterminate"
 
 
 def test_render_subprogress_does_not_jump_to_85_immediately():
@@ -90,7 +91,8 @@ def test_render_subprogress_does_not_jump_to_85_immediately():
     block = bot.video_b14_provider_rendering_block(telemetry)
 
     assert "85%" not in block
-    assert "0%" in block
+    assert "Đang dựng" in block
+    assert "0%" not in block
 
 
 def test_render_subprogress_caps_below_100_while_provider_in_progress():
@@ -98,8 +100,10 @@ def test_render_subprogress_caps_below_100_while_provider_in_progress():
 
     telemetry = _telemetry(payload)
 
-    assert telemetry["render_video_progress_percent"] < 100
-    assert telemetry["provider_progress_percent"] == 90
+    assert telemetry["render_video_progress_percent"] == 0
+    assert telemetry["provider_progress_percent"] == 0
+    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["fake_progress_prevented"] is True
 
 
 def test_overall_progress_maps_from_render_subprogress():
@@ -121,7 +125,7 @@ def test_provider_raw_100_not_trusted_without_result_url():
     assert telemetry["provider_progress_raw"] == "100"
     assert telemetry["provider_progress_trusted"] is False
     assert telemetry["provider_progress_cap_reason"] == "in_progress_without_result_url"
-    assert telemetry["provider_progress_effective"] == 90
+    assert telemetry["provider_progress_effective"] == 0
 
 
 def test_provider_progress_100_allowed_only_after_completed_result_url():
@@ -146,8 +150,9 @@ def test_provider_progress_effective_cap_reason_recorded():
 
     telemetry = _telemetry(payload)
 
-    assert telemetry["provider_progress_cap_applied"] is True
+    assert telemetry["provider_progress_cap_applied"] is False
     assert telemetry["provider_progress_cap_reason"] == "in_progress_without_result_url"
+    assert telemetry["fake_progress_prevented"] is True
 
 
 def test_elapsed_uses_provider_started_at_wall_clock():
@@ -211,7 +216,7 @@ def test_progress_status_top_percent_equals_final_reconciled_progress():
 
 
 def test_public_panel_uses_final_reconciled_progress(monkeypatch):
-    payload = _provider_alive_payload(render_video_progress_percent=42, provider_render_progress_percent=42)
+    payload = _provider_alive_payload(provider_progress_raw=42, provider_progress_percent=42, provider_progress_normalized=42)
     job = _job(progress=20, payload=payload)
     monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: job)
     monkeypatch.setattr(bot, "video_b14_fail_stale_product_job_for_status", lambda _job_id: 0)
@@ -324,6 +329,8 @@ def test_router_pending_telemetry_caps_raw_100_without_result_url():
 
     telemetry = video_provider_router._provider_pending_telemetry(request, poll, attempt_traces=[{"phase": "poll"}], wait_max=1200)
 
-    assert telemetry["provider_progress_percent"] == 90
-    assert telemetry["render_video_progress_percent"] == 90
+    assert telemetry["provider_progress_percent"] == 0
+    assert telemetry["render_video_progress_percent"] == 0
+    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["fake_progress_prevented"] is True
     assert telemetry["provider_progress_cap_reason"] == "in_progress_without_result_url"

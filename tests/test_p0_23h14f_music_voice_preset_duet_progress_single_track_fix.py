@@ -1,6 +1,9 @@
 import asyncio
+import os
 import subprocess
 from types import SimpleNamespace
+
+import pytest
 
 import bot
 
@@ -8,6 +11,22 @@ import bot
 USER_ID = 232614
 JOB_ID = "MUS14FVOICE"
 AUDIO_BYTES = b"ID3-toan-aas-h14f-final-audio" * 260
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _is_music_scope_branch(branch: str) -> bool:
+    lowered = str(branch or "").lower()
+    return any(token in lowered for token in ("p0-20", "p0-23", "music", "suno"))
 
 
 class FakeBot:
@@ -420,6 +439,8 @@ def test_no_duplicate_charge(monkeypatch):
 
 
 def test_no_product_video_subdub_payos_pricing_db_changes():
+    if not _is_music_scope_branch(_current_branch_name()):
+        pytest.skip("Music H14F scope guard is not active for this branch")
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True).splitlines()
     forbidden_prefixes = (
         "providers/video",

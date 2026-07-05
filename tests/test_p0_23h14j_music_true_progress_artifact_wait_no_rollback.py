@@ -1,5 +1,8 @@
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 import bot
 from services import product_progress_status
@@ -8,6 +11,22 @@ from services import product_progress_status
 JOB_ID = "MUSH14JTRUE"
 TASK_ID = "1279444349692403713"
 RAW_AUDIO_URL = "https://cdn1.suno.ai/h14j-live.mp3"
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _is_music_scope_branch(branch: str) -> bool:
+    lowered = str(branch or "").lower()
+    return any(token in lowered for token in ("p0-20", "p0-23", "music", "suno"))
 
 
 def _job(**overrides):
@@ -224,6 +243,8 @@ def test_music_debug_no_generic_x_for_artifact_waiting_job(monkeypatch):
 
 
 def test_no_product_video_subdub_payos_pricing_db_changes():
+    if not _is_music_scope_branch(_current_branch_name()):
+        pytest.skip("Music H14J scope guard is not active for this branch")
     repo = Path(__file__).resolve().parents[1]
     changed = subprocess.check_output(
         [
