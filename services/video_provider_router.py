@@ -132,6 +132,21 @@ def product_video_retry_confirmed(metadata: dict[str, Any] | None = None) -> boo
     )
 
 
+def _product_video_paid_fallback_blocked(
+    blocker: str,
+    env: dict[str, str] | None,
+    metadata: dict[str, Any] | None,
+) -> bool:
+    if not paid_retry_requires_confirmation(env) or product_video_retry_confirmed(metadata):
+        return False
+    # Missing submit config is a local setup check, not a provider credit spend.
+    # Let the chain inspect the next provider so admin diagnostics can report
+    # the exact all-config-missing state without triggering a paid retry path.
+    if str(blocker or "").strip() == "provider_config_missing_at_submit":
+        return False
+    return True
+
+
 def provider_failure_cooldown_state(
     metadata: dict[str, Any] | None = None,
     env: dict[str, str] | None = None,
@@ -1878,7 +1893,7 @@ def run_provider_generation(
                 blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, exc_payload, submit_failure=True)
-                    if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                         return _paid_fallback_requires_confirmation_payload(blocker, exc_payload)
                     continue
                 _record_failure(blocker, exc_payload, submit_failure=True)
@@ -1906,7 +1921,7 @@ def run_provider_generation(
             blocker = submit.error_code or "provider_submit_failed"
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker, submit.raw, submit_failure=True)
-                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                     return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                 continue
             _record_failure(blocker, submit.raw, submit_failure=True)
@@ -1955,7 +1970,7 @@ def run_provider_generation(
                 blocker = "provider_task_id_missing"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, submit.raw, submit_failure=True)
-                    if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                         return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                     continue
                 _record_failure(blocker, submit.raw, submit_failure=True)
@@ -2031,7 +2046,7 @@ def run_provider_generation(
                         return _provider_pending_payload(submit, pending_poll, poll_blocker=blocker)
                     if attempt_index + 1 < len(candidate_adapters):
                         _record_failure(blocker, exc_payload, submit_failure=False)
-                        if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                        if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                             return _paid_fallback_requires_confirmation_payload(blocker, exc_payload)
                         break
                     _record_failure(blocker, exc_payload, submit_failure=False)
@@ -2104,7 +2119,7 @@ def run_provider_generation(
                     blocker = poll_result.error_code or f"provider_poll_{poll_result.status}"
                     if attempt_index + 1 < len(candidate_adapters):
                         _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
-                        if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                        if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                             return _paid_fallback_requires_confirmation_payload(blocker, getattr(poll_result, "raw", {}))
                         break
                     _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
@@ -2183,7 +2198,7 @@ def run_provider_generation(
                 blocker = "provider_timeout"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker)
-                    if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                         return _paid_fallback_requires_confirmation_payload(blocker)
                     continue
                 _record_failure(blocker)
@@ -2220,7 +2235,7 @@ def run_provider_generation(
             blocker = "provider_result_url_missing"
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker)
-                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                     return _paid_fallback_requires_confirmation_payload(blocker)
                 continue
             _record_failure(blocker)
@@ -2268,7 +2283,7 @@ def run_provider_generation(
             blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker)
-                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                     return _paid_fallback_requires_confirmation_payload(blocker)
                 continue
             _record_failure(blocker)
@@ -2298,7 +2313,7 @@ def run_provider_generation(
                         "provider_error_message_safe": artifact.error_message or blocker,
                     },
                 )
-                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
                     return _paid_fallback_requires_confirmation_payload(
                         blocker,
                         {

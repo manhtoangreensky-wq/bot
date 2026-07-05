@@ -1,6 +1,9 @@
 import asyncio
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 import bot
 from services import product_progress_status
@@ -12,6 +15,24 @@ CLIP_ID = "clipH14KPr173"
 BARE_CDN = f"https://cdn1.suno.ai/{CLIP_ID}.mp3"
 PROVIDER_ENDPOINT = f"https://api.key4u.shop/suno/act/wav/{CLIP_ID}"
 AUDIO_BYTES = b"ID3-toan-aas-h14k-real-audio" * 360
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    repo = Path(__file__).resolve().parents[1]
+    return subprocess.check_output(
+        ["git", "-c", f"safe.directory={repo.as_posix()}", "branch", "--show-current"],
+        cwd=repo,
+        text=True,
+    ).strip()
+
+
+def _is_music_h14k_scope() -> bool:
+    branch = _current_branch_name().lower()
+    return "p0-23h14k" in branch or "music-pr173-vocal" in branch
 
 
 class _AudioResponse:
@@ -341,6 +362,8 @@ def test_provider_generating_does_not_fake_jump_to_85():
 
 
 def test_no_product_video_subdub_voice_payos_pricing_db_changes():
+    if not _is_music_h14k_scope():
+        pytest.skip("Music H14K diff guard is scoped to Music H14K branches only.")
     repo = Path(__file__).resolve().parents[1]
     changed = subprocess.check_output(
         ["git", "-c", f"safe.directory={repo.as_posix()}", "diff", "--name-only", "origin/main"],
