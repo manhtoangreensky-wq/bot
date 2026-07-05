@@ -32,6 +32,9 @@ VIDEO_STUB_PROVIDER_NAME = "stub_video"
 PUBLIC_NO_VIDEO_PROVIDER_COPY = (
     "Hiện hệ thống dựng video AI chưa sẵn sàng. Bot chưa trừ Xu."
 )
+PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY = (
+    "TOAN AAS đang tạm khóa tạo video AI để kiểm tra chất lượng. Hệ thống chưa trừ Xu."
+)
 VIDEO_CREDIT_BLOCKED_STATUSES = {
     "low",
     "low_credit",
@@ -71,6 +74,86 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(float(text))
     except Exception:
         return int(default)
+
+
+def _first_nonempty_value(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                text = str(item or "").strip()
+                if text:
+                    return text
+            continue
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _metadata_existing_provider_task(metadata: dict[str, Any]) -> tuple[str, str, str]:
+    metadata = dict(metadata or {})
+    provider = _first_nonempty_value(
+        metadata.get("provider_pending_provider"),
+        metadata.get("selected_provider"),
+        metadata.get("selected_provider_before_submit"),
+        metadata.get("provider"),
+    )
+    task_id = _first_nonempty_value(
+        metadata.get("provider_pending_task_id"),
+        metadata.get("provider_task_id"),
+        metadata.get("provider_job_id"),
+        metadata.get("provider_task_ids"),
+    )
+    video_id = _first_nonempty_value(
+        metadata.get("provider_pending_video_id"),
+        metadata.get("provider_video_id"),
+        metadata.get("provider_video_ids"),
+    )
+    return provider, task_id, video_id
+
+
+def product_video_submit_enabled(env: dict[str, str] | None = None) -> bool:
+    env = dict(env or os.environ)
+    return _env_flag(env, "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED", "1")
+
+
+def paid_retry_requires_confirmation(env: dict[str, str] | None = None) -> bool:
+    env = dict(env or os.environ)
+    return _env_flag(env, "PRODUCT_VIDEO_PAID_RETRY_REQUIRES_CONFIRMATION", "1")
+
+
+def product_video_retry_confirmed(metadata: dict[str, Any] | None = None) -> bool:
+    metadata = dict(metadata or {})
+    return bool(
+        metadata.get("explicit_paid_retry_confirmed")
+        or metadata.get("product_video_paid_retry_confirmed")
+        or metadata.get("paid_provider_retry_confirmed")
+        or metadata.get("paid_fallback_confirmed")
+    )
+
+
+def provider_failure_cooldown_state(
+    metadata: dict[str, Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    metadata = dict(metadata or {})
+    env = dict(env or os.environ)
+    enabled = _env_flag(env, "PRODUCT_VIDEO_PROVIDER_FAILURE_COOLDOWN_ENABLED", "1")
+    threshold = max(1, _env_int(env, "PRODUCT_VIDEO_PROVIDER_FAILURE_COOLDOWN_THRESHOLD", 3))
+    window_minutes = max(1, _env_int(env, "PRODUCT_VIDEO_PROVIDER_FAILURE_COOLDOWN_WINDOW_MINUTES", 60))
+    recent_failures = max(
+        _as_int(metadata.get("recent_provider_failures"), 0),
+        _as_int(metadata.get("recent_product_video_provider_failures"), 0),
+        _as_int(env.get("PRODUCT_VIDEO_PROVIDER_RECENT_FAILURES"), 0),
+    )
+    active = bool(enabled and recent_failures >= threshold)
+    return {
+        "provider_health_cooldown_enabled": bool(enabled),
+        "provider_health_cooldown_active": active,
+        "recent_provider_failures": recent_failures,
+        "provider_failure_cooldown_threshold": threshold,
+        "provider_failure_cooldown_window_minutes": window_minutes,
+    }
 
 
 def _progress_value(value: Any) -> int:
@@ -261,9 +344,10 @@ def _provider_pending_telemetry(
         "provider_progress_percent": provider_progress,
         "render_video_progress_percent": max(0, min(100, render_progress)),
         "provider_render_progress_percent": max(0, min(100, render_progress)),
-        "render_video_progress_percent_public": "-" if provider_progress_public_suppressed else str(max(0, min(100, render_progress))),
+        "render_video_progress_percent_public": "0" if provider_progress_public_suppressed else str(max(0, min(100, render_progress))),
         "provider_progress_public_suppressed": provider_progress_public_suppressed,
-        "render_progress_public_mode": "indeterminate" if provider_progress_public_suppressed else "percent",
+        "render_progress_public_mode": "zero_waiting" if provider_progress_public_suppressed else "percent",
+        "public_zero_bar_due_to_untrusted_provider": provider_progress_public_suppressed,
         "fake_progress_prevented": provider_progress_public_suppressed,
         "fake_progress_prevention_reason": "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else "",
         "percent_conservative_due_to_untrusted_provider": provider_progress_public_suppressed,
@@ -1228,14 +1312,40 @@ def run_provider_generation(
         or (request.metadata or {}).get("interactive_product")
     )
     metadata = dict(request.metadata or {})
-    pending_provider = str(metadata.get("provider_pending_provider") or "").strip()
-    pending_task_id = str(metadata.get("provider_pending_task_id") or "").strip()
-    pending_video_id = str(metadata.get("provider_pending_video_id") or "").strip()
+    is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or allow_pending_result)
+    existing_provider, existing_task_id, existing_video_id = _metadata_existing_provider_task(metadata)
+    pending_provider = str(metadata.get("provider_pending_provider") or existing_provider or "").strip()
+    pending_task_id = str(metadata.get("provider_pending_task_id") or existing_task_id or "").strip()
+    pending_video_id = str(metadata.get("provider_pending_video_id") or existing_video_id or "").strip()
     pending_request_job_id = str(metadata.get("provider_pending_request_job_id") or "").strip()
     pending_attempts = [dict(item) for item in (metadata.get("provider_pending_attempts") or []) if isinstance(item, dict)]
+    submit_enabled = product_video_submit_enabled(env)
+    cooldown_state = provider_failure_cooldown_state(metadata, env)
+    submit_idempotency_key = hashlib.sha256(
+        f"{request.job_id}|{request.product_type}|{request.video_flow_type}|{request.required_capability}".encode("utf-8")
+    ).hexdigest()[:24]
     base_debug = {
         "provider_router_called": True,
         "provider_request_job_id": str(request.job_id or ""),
+        "provider_submit_idempotency_key": submit_idempotency_key,
+        "product_video_provider_submit_enabled": bool(submit_enabled),
+        "provider_submit_blocked_by_kill_switch": False,
+        "external_provider_spend_prevented": False,
+        "provider_submit_already_exists": bool(pending_task_id or pending_video_id),
+        "duplicate_paid_submit_prevented": False,
+        "duplicate_paid_submit_prevented_count": 0,
+        "submit_attempt_count": 0,
+        "provider_task_id_saved_before_retry": bool(pending_task_id or pending_video_id),
+        "active_provider_task": bool(pending_task_id or pending_video_id),
+        "last_provider_submit_timestamp": metadata.get("last_provider_submit_timestamp") or "",
+        "paid_submit_allowed": bool(submit_enabled),
+        "paid_submit_blocked_reason": "",
+        "paid_retry_requires_confirmation": paid_retry_requires_confirmation(env),
+        "paid_retry_confirmed": product_video_retry_confirmed(metadata),
+        "admin_external_spend_warning": (
+            "Creating a Product Video job may spend external provider credits even if no MP4 is produced."
+        ),
+        **cooldown_state,
         "required_capability_original": required_capability_original,
         "normalized_capability_candidates": list(normalized_capability_candidates),
         "provider_candidates_count": len([item for item in provider_candidates if item]),
@@ -1264,6 +1374,47 @@ def run_provider_generation(
         "provider_poll_called": False,
         "provider_result_url_present": False,
     }
+    if is_product_video and not submit_enabled and not (pending_task_id or pending_video_id):
+        return {
+            "ok": False,
+            **base_debug,
+            "provider_attempted": False,
+            "provider_submit_called": False,
+            "provider_submit_blocked_by_kill_switch": True,
+            "external_provider_spend_prevented": True,
+            "paid_submit_allowed": False,
+            "paid_submit_blocked_reason": "provider_submit_kill_switch",
+            "provider_error": "provider_submit_kill_switch",
+            "blocker": "provider_submit_kill_switch",
+            "provider_status": "blocked_no_charge",
+            "terminal_state": "blocked_no_charge",
+            "status": "failed_no_charge",
+            "charge": 0,
+            "charged_xu": 0,
+            "no_charge": True,
+            "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+            "provider_readiness": status,
+        }
+    if is_product_video and cooldown_state.get("provider_health_cooldown_active") and not (pending_task_id or pending_video_id):
+        return {
+            "ok": False,
+            **base_debug,
+            "provider_attempted": False,
+            "provider_submit_called": False,
+            "external_provider_spend_prevented": True,
+            "paid_submit_allowed": False,
+            "paid_submit_blocked_reason": "provider_health_cooldown_active",
+            "provider_error": "provider_health_cooldown_active",
+            "blocker": "provider_health_cooldown_active",
+            "provider_status": "blocked_no_charge",
+            "terminal_state": "blocked_no_charge",
+            "status": "failed_no_charge",
+            "charge": 0,
+            "charged_xu": 0,
+            "no_charge": True,
+            "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+            "provider_readiness": status,
+        }
     if adapter is None:
         config_blocker = _config_validation_blocker_from_status(status, request.required_capability)
         if config_blocker:
@@ -1413,8 +1564,9 @@ def run_provider_generation(
         attempt_traces.append(current_trace)
         poll_existing_task = bool(
             (pending_task_id or pending_video_id)
-            and pending_provider == current_adapter.provider_name
+            and (not pending_provider or pending_provider == current_adapter.provider_name)
             and (not pending_request_job_id or pending_request_job_id == str(request.job_id or ""))
+            and attempt_index == 0
         )
         submit_called_flag = not poll_existing_task
 
@@ -1475,6 +1627,18 @@ def run_provider_generation(
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
                 "provider_attempted": True,
+                "provider_submit_already_exists": bool(poll_existing_task),
+                "duplicate_paid_submit_prevented": bool(poll_existing_task),
+                "duplicate_paid_submit_prevented_count": 1 if poll_existing_task else 0,
+                "provider_task_id_saved_before_retry": bool(pending_task_id or pending_video_id),
+                "active_provider_task": bool(poll_existing_task),
+                "submit_attempt_count": 0 if poll_existing_task else 1,
+                "last_provider_submit_timestamp": (
+                    metadata.get("last_provider_submit_timestamp")
+                    or ("" if poll_existing_task else str(int(time.time())))
+                ),
+                "paid_submit_allowed": bool(submit_enabled and not poll_existing_task),
+                "external_provider_spend_prevented": bool(poll_existing_task),
                 "provider_attempts": _copy_attempt_traces(),
             }
 
@@ -1546,6 +1710,46 @@ def run_provider_generation(
                         current_trace["downloaded_file_size"] = 0
             for key, value in updates.items():
                 current_trace[key] = value
+
+        def _paid_fallback_requires_confirmation_payload(reason: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
+            raw = dict(raw or {})
+            blocker = str(reason or "paid_fallback_requires_confirmation").strip() or "paid_fallback_requires_confirmation"
+            submit_status = _submit_http_status(raw)
+            return {
+                "ok": False,
+                **_attempt_base(),
+                "provider_submit_called": submit_called_flag,
+                "provider_submit_http_status": submit_status,
+                "provider_submit_http_5xx": _is_submit_5xx(raw, blocker, submit_status),
+                "provider_submit_retriable": bool(raw.get("provider_submit_retriable") or _is_submit_5xx(raw, blocker, submit_status)),
+                "provider_task_id_saved": False,
+                "submit_accepted": False,
+                "provider_poll_called": False,
+                "provider_fallback_attempted": False,
+                "provider_fallback_attempts": list(attempt_failures),
+                "fallback_provider_attempts": list(attempt_failures),
+                "provider_fallback_reason": "paid_fallback_requires_confirmation",
+                "fallback_used": False,
+                "fallback_reason": "",
+                "fallback_allowed": False,
+                "fallback_blocked_reason": "paid_fallback_requires_confirmation",
+                "provider_error": blocker,
+                "blocker": "paid_fallback_requires_confirmation",
+                "provider_status": "failed_no_charge",
+                "terminal_state": "failed_no_charge",
+                "status": "failed_no_charge",
+                "paid_submit_allowed": False,
+                "paid_submit_blocked_reason": "paid_fallback_requires_confirmation",
+                "paid_retry_requires_confirmation": True,
+                "paid_retry_confirmed": False,
+                "external_provider_spend_prevented": True,
+                "charge": 0,
+                "charged_xu": 0,
+                "no_charge": True,
+                "public_message": PUBLIC_PRODUCT_VIDEO_SUBMIT_BLOCKED_COPY,
+                "provider_attempts": _copy_attempt_traces(),
+                "provider_readiness": status,
+            }
 
         def _provider_pending_payload(
             submit: VideoSubmitResult,
@@ -1674,6 +1878,8 @@ def run_provider_generation(
                 blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, exc_payload, submit_failure=True)
+                    if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                        return _paid_fallback_requires_confirmation_payload(blocker, exc_payload)
                     continue
                 _record_failure(blocker, exc_payload, submit_failure=True)
                 if allow_pending_result:
@@ -1700,6 +1906,8 @@ def run_provider_generation(
             blocker = submit.error_code or "provider_submit_failed"
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker, submit.raw, submit_failure=True)
+                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                 continue
             _record_failure(blocker, submit.raw, submit_failure=True)
             final_blocker = _final_submit_blocker()
@@ -1747,6 +1955,8 @@ def run_provider_generation(
                 blocker = "provider_task_id_missing"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker, submit.raw, submit_failure=True)
+                    if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                        return _paid_fallback_requires_confirmation_payload(blocker, submit.raw)
                     continue
                 _record_failure(blocker, submit.raw, submit_failure=True)
                 payload = {
@@ -1821,6 +2031,8 @@ def run_provider_generation(
                         return _provider_pending_payload(submit, pending_poll, poll_blocker=blocker)
                     if attempt_index + 1 < len(candidate_adapters):
                         _record_failure(blocker, exc_payload, submit_failure=False)
+                        if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                            return _paid_fallback_requires_confirmation_payload(blocker, exc_payload)
                         break
                     _record_failure(blocker, exc_payload, submit_failure=False)
                     exc_payload["provider_attempts"] = _copy_attempt_traces()
@@ -1892,6 +2104,8 @@ def run_provider_generation(
                     blocker = poll_result.error_code or f"provider_poll_{poll_result.status}"
                     if attempt_index + 1 < len(candidate_adapters):
                         _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
+                        if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                            return _paid_fallback_requires_confirmation_payload(blocker, getattr(poll_result, "raw", {}))
                         break
                     _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
                     payload = {
@@ -1969,6 +2183,8 @@ def run_provider_generation(
                 blocker = "provider_timeout"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker)
+                    if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                        return _paid_fallback_requires_confirmation_payload(blocker)
                     continue
                 _record_failure(blocker)
                 payload = {
@@ -2004,6 +2220,8 @@ def run_provider_generation(
             blocker = "provider_result_url_missing"
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker)
+                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    return _paid_fallback_requires_confirmation_payload(blocker)
                 continue
             _record_failure(blocker)
             payload = {
@@ -2050,6 +2268,8 @@ def run_provider_generation(
             blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker)
+                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    return _paid_fallback_requires_confirmation_payload(blocker)
                 continue
             _record_failure(blocker)
             _mark_trace("download", blocker=blocker, validation_passed=False, safe_error=str(exc_payload.get("exception_message_safe") or "")[:220])
@@ -2078,6 +2298,18 @@ def run_provider_generation(
                         "provider_error_message_safe": artifact.error_message or blocker,
                     },
                 )
+                if is_product_video and paid_retry_requires_confirmation(env) and not product_video_retry_confirmed(metadata):
+                    return _paid_fallback_requires_confirmation_payload(
+                        blocker,
+                        {
+                            **(getattr(poll_result, "raw", {}) or {}),
+                            "provider_result_blocker": blocker,
+                            "result_url_present": True,
+                            "download_content_type": artifact.content_type,
+                            "downloaded_file_size": artifact.bytes,
+                            "provider_error_message_safe": artifact.error_message or blocker,
+                        },
+                    )
                 continue
             _record_failure(
                 blocker,

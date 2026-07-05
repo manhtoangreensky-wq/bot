@@ -199,7 +199,7 @@ def test_video_trend_provider_in_progress_remains_processing(monkeypatch, tmp_pa
     assert result["next_poll_scheduled"] is True
 
 
-def test_fallback_only_after_terminal_primary_failure(monkeypatch, tmp_path):
+def test_terminal_primary_failure_requires_retry_confirmation_before_fallback(monkeypatch, tmp_path):
     shop = _TerminalDownloadFailShopAIKeyProvider()
     key4u = _FailingKey4UProvider()
     monkeypatch.setattr(video_provider_router, "load_video_provider_adapters", lambda _env=None: [shop, key4u])
@@ -212,10 +212,11 @@ def test_fallback_only_after_terminal_primary_failure(monkeypatch, tmp_path):
     )
 
     assert shop.download_calls == 1
-    assert key4u.submit_calls == 1
-    assert result["selected_provider"] == "key4u_video"
-    assert result["provider_fallback_attempted"] is True
-    assert result["provider_fallback_reason"] == "provider_download_failed"
+    assert key4u.submit_calls == 0
+    assert result["blocker"] == "paid_fallback_requires_confirmation"
+    assert result["paid_submit_blocked_reason"] == "paid_fallback_requires_confirmation"
+    assert result["provider_fallback_attempted"] is False
+    assert result["no_charge"] is True
 
 
 def test_key4u_not_submitted_when_shopaikey_pending(monkeypatch, tmp_path):

@@ -70,6 +70,7 @@ def test_untrusted_provider_progress_not_shown_publicly():
 
     assert "90%" not in block
     assert "78%" not in block
+    assert "0%" in block
     assert "Đang dựng" in block
     assert telemetry["provider_progress_public_suppressed"] is True
 
@@ -80,13 +81,13 @@ def test_provider_raw_200_does_not_render_90_percent():
     assert telemetry["provider_progress_raw_number"] == 200.0
     assert telemetry["provider_progress_trusted"] is False
     assert telemetry["render_video_progress_percent"] == 0
-    assert telemetry["render_video_progress_percent_public"] == "-"
+    assert telemetry["render_video_progress_percent_public"] == "0"
 
 
-def test_in_progress_without_result_url_uses_indeterminate_render_status():
+def test_in_progress_without_result_url_uses_zero_waiting_render_status():
     telemetry = _telemetry(_provider_alive_payload(provider_progress_raw=100, provider_progress_percent=100))
 
-    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["render_progress_public_mode"] == "zero_waiting"
     assert telemetry["render_progress_source"] == "indeterminate"
     assert telemetry["fake_progress_prevented"] is True
 
@@ -132,11 +133,11 @@ def test_render_progress_100_only_after_result_url_or_final_mp4():
     assert with_url["provider_progress_effective"] == 100
 
 
-def test_untrusted_progress_uses_indeterminate_even_if_raw_high():
+def test_untrusted_progress_uses_zero_waiting_even_if_raw_high():
     telemetry = _telemetry(_provider_alive_payload(provider_progress_raw=999, provider_progress_percent=100))
 
     assert telemetry["provider_progress_cap_reason"] == "invalid_provider_progress_raw"
-    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["render_progress_public_mode"] == "zero_waiting"
 
 
 def test_elapsed_recomputes_on_each_refresh():
@@ -163,7 +164,7 @@ def test_public_copy_does_not_imply_per_second_live_timer():
     text = bot.video_b14_provider_rendering_block(_telemetry(_provider_alive_payload()))
 
     assert "mỗi giây" not in text.lower()
-    assert "tự cập nhật định kỳ" in text
+    assert "tự cập nhật khi có video hoàn chỉnh" in text
 
 
 def test_debug_shows_refresh_interval():
@@ -191,7 +192,16 @@ def test_public_stage_text_can_show_rendering_without_fake_percent():
     block = bot.video_b14_provider_rendering_block(_telemetry(_provider_alive_payload(provider_progress_raw=100)))
 
     assert "Đang dựng" in block
+    assert "0%" in block
     assert "100%" not in block
+
+
+def test_rendering_block_keeps_zero_bar_when_progress_is_untrusted():
+    block = bot.video_b14_provider_rendering_block(_telemetry(_provider_alive_payload(provider_progress_raw=100)))
+
+    assert "▱▱▱▱▱▱▱▱▱▱ <b>0%</b>" in block
+    assert "Đang dựng..." in block
+    assert "90%" not in block
 
 
 def test_video_debug_no_generic_x_for_untrusted_progress_job_77():
@@ -233,7 +243,8 @@ def test_provider_poll_count_starts_zero_without_real_poll_attempts():
 
     assert telemetry["provider_poll_count"] == 0
     assert telemetry["provider_poll_count_source"] == "none"
-    assert "Đã kiểm tra: <b>0 lần</b>" in block
+    assert "Đang kiểm tra định kỳ" in block
+    assert "Đã kiểm tra: <b>0 lần</b>" not in block
 
 
 def test_provider_poll_count_uses_real_attempts_only():
@@ -270,7 +281,7 @@ def test_no_fake_placeholder_success():
     assert telemetry["provider_task_alive"] is True
 
 
-def test_router_untrusted_high_progress_stays_indeterminate():
+def test_router_untrusted_high_progress_stays_zero_waiting():
     request = VideoGenerationRequest(
         job_id="77",
         product_type="video_trend",
@@ -286,4 +297,5 @@ def test_router_untrusted_high_progress_stays_indeterminate():
     assert telemetry["render_video_progress_percent"] == 0
     assert telemetry["provider_poll_count"] == 0
     assert telemetry["provider_poll_count_source"] == "none"
-    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["render_progress_public_mode"] == "zero_waiting"
+    assert telemetry["render_video_progress_percent_public"] == "0"

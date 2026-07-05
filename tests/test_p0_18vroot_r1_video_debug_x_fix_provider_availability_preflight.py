@@ -339,7 +339,7 @@ def test_key4u_503_classified_temporarily_unavailable(monkeypatch, tmp_path):
     assert result["no_charge"] is True
 
 
-def test_all_providers_unavailable_blocks_or_cleanly_fails_before_render_job(monkeypatch, tmp_path):
+def test_primary_unavailable_requires_confirmation_before_paid_fallback(monkeypatch, tmp_path):
     def fake_open(self, *_args, **_kwargs):
         return _shopaikey_no_channel(self.provider_name) if self.provider_name == "shopaikey_video" else _key4u_503(self.provider_name)
 
@@ -351,7 +351,9 @@ def test_all_providers_unavailable_blocks_or_cleanly_fails_before_render_job(mon
         sleep_func=lambda _seconds: None,
     )
 
-    assert result["blocker"] == "all_video_providers_submit_unavailable"
+    assert result["blocker"] == "paid_fallback_requires_confirmation"
+    assert result["paid_retry_requires_confirmation"] is True
+    assert result["external_provider_spend_prevented"] is True
     assert result["no_charge"] is True
     assert not result.get("output_path")
 

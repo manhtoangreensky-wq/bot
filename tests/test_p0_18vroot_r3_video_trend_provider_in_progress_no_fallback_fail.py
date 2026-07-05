@@ -281,7 +281,7 @@ def test_text_to_video_or_scene_engine_uses_pending_policy(monkeypatch, tmp_path
     assert result["continue_polling"] is True
 
 
-def test_fallback_allowed_only_after_terminal_primary_failure(monkeypatch, tmp_path):
+def test_terminal_primary_failure_requires_retry_confirmation_before_fallback(monkeypatch, tmp_path):
     shop = _TerminalDownloadFailShopAIKeyProvider()
     key4u = _FailingKey4UProvider()
     monkeypatch.setattr(video_provider_router, "load_video_provider_adapters", lambda _env=None: [shop, key4u])
@@ -294,10 +294,11 @@ def test_fallback_allowed_only_after_terminal_primary_failure(monkeypatch, tmp_p
     )
 
     assert shop.download_calls == 1
-    assert key4u.submit_calls == 1
-    assert result["selected_provider"] == "key4u_video"
-    assert result["provider_fallback_attempted"] is True
-    assert result["provider_fallback_reason"] == "provider_download_failed"
+    assert key4u.submit_calls == 0
+    assert result["blocker"] == "paid_fallback_requires_confirmation"
+    assert result["paid_submit_blocked_reason"] == "paid_fallback_requires_confirmation"
+    assert result["provider_fallback_attempted"] is False
+    assert result["no_charge"] is True
 
 
 def test_provider_wait_timeout_configured_before_terminal_fail(monkeypatch, tmp_path):

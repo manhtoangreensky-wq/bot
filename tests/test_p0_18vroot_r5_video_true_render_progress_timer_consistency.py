@@ -92,7 +92,7 @@ def test_render_subprogress_does_not_jump_to_85_immediately():
 
     assert "85%" not in block
     assert "Đang dựng" in block
-    assert "0%" not in block
+    assert "0%" in block
 
 
 def test_render_subprogress_caps_below_100_while_provider_in_progress():
@@ -102,7 +102,7 @@ def test_render_subprogress_caps_below_100_while_provider_in_progress():
 
     assert telemetry["render_video_progress_percent"] == 0
     assert telemetry["provider_progress_percent"] == 0
-    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["render_progress_public_mode"] == "zero_waiting"
     assert telemetry["fake_progress_prevented"] is True
 
 
@@ -331,6 +331,6 @@ def test_router_pending_telemetry_caps_raw_100_without_result_url():
 
     assert telemetry["provider_progress_percent"] == 0
     assert telemetry["render_video_progress_percent"] == 0
-    assert telemetry["render_progress_public_mode"] == "indeterminate"
+    assert telemetry["render_progress_public_mode"] == "zero_waiting"
     assert telemetry["fake_progress_prevented"] is True
     assert telemetry["provider_progress_cap_reason"] == "in_progress_without_result_url"
