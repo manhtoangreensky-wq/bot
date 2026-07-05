@@ -172800,6 +172800,9 @@ async def transcribe_media_to_segments(
         }
     is_video = bool(media_kind == "video" or content_type.startswith("video/") or file_name.endswith((".mp4", ".mov", ".mkv", ".webm")))
     is_audio = bool(media_kind in {"audio", "voice"} or content_type.startswith("audio/") or file_name.endswith((".mp3", ".wav", ".m4a", ".ogg", ".oga", ".aac")))
+    if not (is_video or is_audio) and source_bytes and content_type in {"", "application/octet-stream"} and media_kind in {"", "media"}:
+        is_video = True
+        content_type = "video/mp4"
     if not (is_video or is_audio):
         return {
             "output_valid": False,
