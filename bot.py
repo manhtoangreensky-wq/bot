@@ -173448,7 +173448,8 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
     output_segments = list(source_segments)
     translation_provider = ""
     if needs_translation:
-        output_subtitle = get_video_dubbing_artifact(user_id, state.get("translated_subtitle_ref") or "translated_subtitle")
+        translated_ref = str(state.get("translated_subtitle_ref") or "").strip()
+        output_subtitle = get_video_dubbing_artifact(user_id, translated_ref) if translated_ref else ""
         if not output_subtitle:
             # translate_subtitle_segments calls translate_subtitle_text per segment so timestamps stay intact.
             translated = await translate_subtitle_segments(
@@ -175196,7 +175197,8 @@ async def subtitle_plus_dub_translate_current_subtitle(
     prepared_state = dict(prepared.get("state") or {})
     translated_subtitle = str(prepared.get("output_subtitle") or "").strip()
     if not translated_subtitle:
-        translated_subtitle = get_video_dubbing_artifact(user_id, prepared_state.get("translated_subtitle_ref") or "translated_subtitle").strip()
+        translated_ref = str(prepared_state.get("translated_subtitle_ref") or "").strip()
+        translated_subtitle = get_video_dubbing_artifact(user_id, translated_ref).strip() if translated_ref else ""
     if not translated_subtitle:
         state = set_video_dubbing_pending(user_id, "original_subtitle_ready", processing="0", processing_error="translation_empty")
         await message.reply_text(
