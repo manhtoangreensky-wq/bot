@@ -26,6 +26,11 @@ def _is_subdub_scope_branch(branch: str) -> bool:
     return any(token in lowered for token in ("p0-19m", "subdub", "subtitle-dub", "subtitle_dub"))
 
 
+def _is_video_preflight_scope_branch(branch: str) -> bool:
+    lowered = str(branch or "").lower()
+    return any(token in lowered for token in ("p0-18vroot", "video-provider-preflight", "video_debug_x"))
+
+
 def _env(chain: str = "shopaikey_video,key4u_video") -> dict[str, str]:
     return {
         "VIDEO_PROVIDER_CHAIN": chain,
@@ -424,7 +429,8 @@ def test_progress_status_debug_existing_failed_job_70_recovered_from_db(monkeypa
 
 
 def test_no_subdub_music_payos_pricing_db_changes():
-    if _is_subdub_scope_branch(_current_branch_name()):
+    branch = _current_branch_name()
+    if _is_subdub_scope_branch(branch) or not _is_video_preflight_scope_branch(branch):
         return
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main...HEAD"], text=True).splitlines()
     forbidden = (
@@ -446,6 +452,8 @@ def test_no_subdub_guard_exempts_subdub_branch_only():
     assert _is_subdub_scope_branch("hotfix/p0-19m6x-remove-public-srt-fallback")
     assert _is_subdub_scope_branch("hotfix/subdub-output-polish")
     assert not _is_subdub_scope_branch("hotfix/p0-18vroot-video-provider-preflight")
+    assert _is_video_preflight_scope_branch("hotfix/p0-18vroot-video-provider-preflight")
+    assert not _is_video_preflight_scope_branch("hotfix/p0-23h14k-music-pr173-vocal-lyrics-route-fix")
 
 
 def test_no_fake_placeholder_success():

@@ -129,8 +129,9 @@ def test_song_manual_template_only_after_custom_button():
     update = _update_with_query("music_quick|showroom|music_product_manual", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     text = update.callback_query.message.outputs[-1]["text"]
-    assert "Tiêu đề:" in text
-    assert "Lời hát:" in text
+    assert "Style nhạc" in text
+    assert "Male vocal" in text
+    assert "Lời hát:" not in text
 
 
 def test_toan_aas_sample_idea_generates_three_suggestions():
