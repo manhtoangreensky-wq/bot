@@ -114,6 +114,17 @@ def _format_epoch(epoch: float) -> str:
     return ""
 
 
+def _human_elapsed(seconds: int | float | str = 0) -> str:
+    total = max(0, _as_int(seconds, 0))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours} giờ {minutes} phút {secs} giây"
+    if minutes:
+        return f"{minutes} phút {secs} giây"
+    return f"{secs} giây"
+
+
 def _progress_from_value(value: Any) -> int:
     if value in (None, ""):
         return 0
@@ -146,6 +157,126 @@ def _extract_progress_raw(payload: dict[str, Any]) -> Any:
             if nested not in (None, ""):
                 return nested
     return None
+
+
+def _provider_result_url_present(payload: dict[str, Any]) -> bool:
+    for key in (
+        "provider_result_url_present",
+        "result_url_present",
+        "provider_final_url_present",
+        "final_url_present",
+    ):
+        if payload.get(key):
+            return True
+    for key in (
+        "provider_result_url",
+        "result_url",
+        "download_url",
+        "provider_download_url",
+        "file_url",
+        "video_url",
+        "output_url",
+        "final_video_url",
+    ):
+        if str(payload.get(key) or "").strip():
+            return True
+    return False
+
+
+def _provider_final_output_ready(payload: dict[str, Any]) -> bool:
+    if any(
+        payload.get(key)
+        for key in (
+            "final_mp4_validated",
+            "final_video_validated",
+            "delivery_succeeded",
+            "video_delivered",
+            "final_delivered",
+        )
+    ):
+        return True
+    if _as_int(payload.get("output_bytes") or payload.get("bytes") or payload.get("final_video_bytes"), 0) > 0:
+        return True
+    if str(payload.get("final_video_file_id") or "").strip():
+        return True
+    return False
+
+
+def _provider_status_for_progress(payload: dict[str, Any], alive: bool) -> str:
+    status = str(
+        payload.get("normalized_provider_status")
+        or payload.get("provider_status")
+        or payload.get("provider_status_raw")
+        or payload.get("nonterminal_provider_status")
+        or ""
+    ).strip().lower()
+    if alive and not status:
+        return "running"
+    return status
+
+
+def _provider_progress_effective(
+    normalized_progress: int,
+    *,
+    provider_status: str,
+    result_url_present: bool,
+    final_output_ready: bool,
+    alive: bool,
+) -> tuple[int, bool, str, bool]:
+    if normalized_progress <= 0:
+        return 0, False, "", False
+    running = alive or provider_status in {"running", "queued", "pending", "in_progress", "processing", "not_start", "final_rendering"}
+    if final_output_ready or (normalized_progress >= 100 and result_url_present and not running):
+        return 100, True, "", False
+    if running and not result_url_present and normalized_progress >= 100:
+        return 90, False, "in_progress_without_result_url", True
+    if running and not result_url_present:
+        return min(90, normalized_progress), normalized_progress < 100, "in_progress_cap" if normalized_progress > 90 else "", normalized_progress > 90
+    if result_url_present:
+        return max(95, min(99, normalized_progress)), True, "", False
+    return min(99, normalized_progress), normalized_progress < 100, "missing_final_mp4" if normalized_progress >= 100 else "", normalized_progress >= 100
+
+
+def _render_subprogress(
+    *,
+    normalized_progress: int,
+    elapsed: int,
+    wait_max: int,
+    poll_count: int,
+    previous_render_progress: int,
+    result_url_present: bool,
+    final_output_ready: bool,
+    alive: bool,
+    provider_status: str,
+) -> tuple[int, str, bool, bool]:
+    if final_output_ready:
+        return 100, "final_mp4_validated", False, False
+    if result_url_present:
+        progress = 95
+        return max(previous_render_progress, progress), "provider_result_url", False, False
+    effective, trusted, _reason, capped = _provider_progress_effective(
+        normalized_progress,
+        provider_status=provider_status,
+        result_url_present=result_url_present,
+        final_output_ready=final_output_ready,
+        alive=alive,
+    )
+    if effective > 0:
+        progress = effective
+        source = "provider_raw" if trusted else "provider_raw_capped"
+        estimated = False
+    else:
+        elapsed_estimate = int((min(max(elapsed, 0), max(1, wait_max)) / max(1, wait_max)) * 90)
+        poll_estimate = min(90, max(0, poll_count - 1) * 3)
+        progress = max(elapsed_estimate, poll_estimate)
+        source = "elapsed_poll_estimate"
+        estimated = True
+    if alive:
+        progress = min(90, progress)
+    progress = max(previous_render_progress, progress)
+    if alive:
+        progress = min(90, progress)
+    return max(0, min(100, progress)), source, estimated, capped
 
 
 def _provider_poll_count(payload: dict[str, Any]) -> int:
@@ -227,19 +358,47 @@ def reconcile_provider_progress_telemetry(
         started_source = "now"
         started_epoch = current_epoch
         estimated_started = True
-    elapsed = max(_as_int(payload.get("provider_wait_elapsed_seconds") or payload.get("provider_elapsed_seconds"), 0), int(max(0, current_epoch - started_epoch)))
+    previous_elapsed = _as_int(payload.get("provider_wait_elapsed_seconds") or payload.get("provider_elapsed_seconds"), 0)
+    wall_clock_elapsed = int(max(0, current_epoch - started_epoch))
+    elapsed = max(previous_elapsed, wall_clock_elapsed)
+    elapsed_monotonic_applied = bool(previous_elapsed and wall_clock_elapsed < previous_elapsed)
     raw_progress = _extract_progress_raw(payload)
     normalized_progress = _progress_from_value(raw_progress)
+    poll_count = _provider_poll_count(payload)
+    result_url_present = _provider_result_url_present(payload)
+    final_output_ready = _provider_final_output_ready(payload)
+    provider_status = _provider_status_for_progress(payload, alive)
+    provider_progress_effective, provider_progress_trusted, provider_progress_cap_reason, provider_progress_cap_applied = _provider_progress_effective(
+        normalized_progress,
+        provider_status=provider_status,
+        result_url_present=result_url_present,
+        final_output_ready=final_output_ready,
+        alive=alive,
+    )
+    previous_render_progress = max(
+        _as_int(payload.get("render_video_progress_percent"), 0),
+        _as_int(payload.get("provider_render_progress_percent"), 0),
+    )
+    render_progress, render_source, render_estimated, render_cap_applied = _render_subprogress(
+        normalized_progress=normalized_progress,
+        elapsed=elapsed,
+        wait_max=wait_max,
+        poll_count=poll_count,
+        previous_render_progress=previous_render_progress,
+        result_url_present=result_url_present,
+        final_output_ready=final_output_ready,
+        alive=alive,
+        provider_status=provider_status,
+    )
+    render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
+    overall_progress_from_render = 100 if final_output_ready else (95 if result_url_present else 20 + int(render_progress * 0.65))
+    if alive and not final_output_ready:
+        overall_progress_from_render = min(85, overall_progress_from_render)
     estimated = False
     if alive:
-        if normalized_progress > 0:
-            requested = max(20, min(85, normalized_progress))
-            progress_source = "provider_raw"
-        else:
-            requested = 20 + min(65, int((min(elapsed, wait_max) / max(1, wait_max)) * 65))
-            requested = max(20, min(85, requested))
-            estimated = True
-            progress_source = "elapsed_estimate"
+        requested = max(20, min(85, overall_progress_from_render))
+        estimated = bool(render_estimated)
+        progress_source = "render_subprogress"
     else:
         requested = max(persisted_progress, _as_int(payload.get("provider_progress_percent"), 0))
         progress_source = "persisted"
@@ -258,9 +417,23 @@ def reconcile_provider_progress_telemetry(
         "progress_source": progress_source,
         "provider_progress_raw": raw_progress if raw_progress not in (None, "") else "",
         "provider_progress_normalized": normalized_progress,
+        "provider_progress_trusted": bool(provider_progress_trusted),
+        "provider_progress_cap_reason": provider_progress_cap_reason,
+        "provider_progress_cap_applied": bool(provider_progress_cap_applied or render_cap_applied),
+        "provider_progress_effective": provider_progress_effective,
         "provider_progress_estimated": bool(estimated),
-        "provider_progress_percent": final_progress if alive and not normalized_progress else normalized_progress,
-        "provider_poll_count": _provider_poll_count(payload),
+        "provider_progress_percent": provider_progress_effective if provider_progress_effective else render_progress,
+        "render_video_progress_percent": render_progress,
+        "provider_render_progress_percent": render_progress,
+        "render_progress_source": render_source,
+        "render_progress_raw_provider": raw_progress if raw_progress not in (None, "") else "",
+        "render_progress_estimated": bool(render_estimated),
+        "render_progress_cap_applied": bool(render_cap_applied or provider_progress_cap_applied),
+        "render_progress_result_url_present": bool(result_url_present),
+        "render_progress_monotonic_applied": bool(render_monotonic_applied),
+        "overall_progress_from_render": overall_progress_from_render,
+        "provider_status_for_progress": provider_status,
+        "provider_poll_count": poll_count,
         "provider_last_poll_at": payload.get("provider_last_poll_at") or payload.get("last_poll_at") or now_text(current_dt),
         "provider_started_at": payload.get("provider_started_at") or _format_epoch(started_epoch),
         "provider_started_at_epoch": started_epoch,
@@ -269,8 +442,15 @@ def reconcile_provider_progress_telemetry(
         "provider_wait_elapsed_seconds": elapsed,
         "provider_wait_max_seconds": wait_max,
         "provider_elapsed_estimated": bool(estimated_started),
+        "elapsed_wall_clock_seconds": wall_clock_elapsed,
+        "previous_elapsed_seconds": previous_elapsed,
+        "elapsed_monotonic_applied": bool(elapsed_monotonic_applied),
+        "elapsed_display_text": _human_elapsed(elapsed),
+        "panel_refresh_interval_seconds": _as_int(payload.get("panel_refresh_interval_seconds"), 25),
         "provider_status_raw": payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or "",
         "provider_status_normalized": payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
+        "result_url_present": bool(result_url_present),
+        "provider_result_url_present": bool(result_url_present),
         "next_poll_scheduled": bool(payload.get("next_poll_scheduled") or alive),
         "next_poll_scheduled_at": payload.get("next_poll_scheduled_at") or "",
         "panel_last_updated_at": now_text(current_dt),
