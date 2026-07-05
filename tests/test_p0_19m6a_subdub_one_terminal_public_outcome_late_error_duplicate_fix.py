@@ -312,6 +312,7 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "tests/test_p0_19m6z_subdub_voice_subtitle_status_audio_report_fix.py",
         "tests/test_p0_19n_subdub_original_voice_retention_volume_mix_controls.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
+        "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
         "tests/test_p0_11_restore_translation_video_factory.py",
         "tests/test_task2_1_translation_product_logic_cleanup.py",
         "tests/test_task2_4_public_product_screens.py",
