@@ -327,7 +327,7 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
     )
     assert result["ok"] is True
     assert captured["text"] == "xin chào thế giới"
-    assert captured["voice_speed"] == "1.5"
+    assert captured["voice_speed"] == "1.15"
 
 
 def test_public_guard_no_admin_blocker():

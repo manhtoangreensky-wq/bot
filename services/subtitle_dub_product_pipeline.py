@@ -23,6 +23,13 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value if value not in (None, "") else default)
+    except Exception:
+        return float(default)
+
+
 async def _maybe_await(value: Any) -> Any:
     if asyncio.iscoroutine(value) or hasattr(value, "__await__"):
         return await value
@@ -195,7 +202,15 @@ async def process_subtitle_dub_job(
                 "voice_resolution": dict(pipeline_state.get("_subdub_voice_resolution") or {}),
                 "route_attempts": route_attempts,
             }
-        speed = float(parse_voice_speed(str(pipeline_state.get("voice_speed") or "1.0")))
+        requested_speed = float(parse_voice_speed(str(pipeline_state.get("voice_speed") or "1.0")))
+        speed_factor = max(0.75, min(1.0, _safe_float(pipeline_state.get("subdub_tts_speed_factor"), 0.88)))
+        speed = max(0.7, min(1.15, requested_speed * speed_factor))
+        max_speed = max(speed, min(1.15, _safe_float(pipeline_state.get("subdub_tts_max_speed"), 1.08)))
+        pipeline_state["requested_tts_speed"] = requested_speed
+        pipeline_state["applied_tts_speed"] = round(speed, 3)
+        pipeline_state["speed_adjustment_method"] = "subdub_natural_speech_rate"
+        pipeline_state["dub_timing_alignment_applied"] = True
+        pipeline_state["dub_speed_blocker"] = ""
         route_attempts["tts"] = True
         segment_tts = await _maybe_await(
             synthesize_segments(
@@ -203,7 +218,7 @@ async def process_subtitle_dub_job(
                 voice_style=pipeline_state.get("voice_style") or "",
                 voice_id=selected_tts_voice_id,
                 base_speed=speed,
-                max_speed=max(1.35, speed),
+                max_speed=max_speed,
             )
         )
         segment_tts = dict(segment_tts or {})
@@ -311,6 +326,11 @@ async def process_subtitle_dub_job(
         "video_output": video_output,
         "normalization_detail": normalization_detail,
         "selected_tts_voice_id": selected_tts_voice_id,
+        "requested_tts_speed": pipeline_state.get("requested_tts_speed"),
+        "applied_tts_speed": pipeline_state.get("applied_tts_speed"),
+        "speed_adjustment_method": pipeline_state.get("speed_adjustment_method") or "",
+        "dub_timing_alignment_applied": bool(pipeline_state.get("dub_timing_alignment_applied")),
+        "dub_speed_blocker": pipeline_state.get("dub_speed_blocker") or "",
         "output_type": output_type,
         "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider") or tts_provider),
         "charged": False,

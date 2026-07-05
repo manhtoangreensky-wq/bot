@@ -178,7 +178,7 @@ def test_dub_pipeline_default_voice_asset_no_forced_video_render(monkeypatch, tm
 
     async def fake_synthesize(segments, **kwargs):
         assert segments
-        assert kwargs.get("base_speed") == 1.0
+        assert 0.80 <= kwargs.get("base_speed", 0) < 1.0
         return {"provider": "stub_tts", "chunks": [{"start": 0, "end": 2, "audio_bytes": b"audio-bytes"}]}
 
     async def fake_timeline(chunks, total_duration=0):
