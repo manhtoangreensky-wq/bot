@@ -1,5 +1,8 @@
 import inspect
+import os
 import subprocess
+
+import pytest
 
 import bot
 from services import product_progress_status
@@ -11,6 +14,28 @@ VALID_SRT = "1\n00:00:00,000 --> 00:00:02,000\nXin chao ca nha\n"
 def _changed_files() -> set[str]:
     output = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _is_subdub_m6w_scope() -> bool:
+    branch = _current_branch_name().lower()
+    branch_tokens = (
+        "p0-19m6w",
+        "subdub-emergency-rollback",
+        "emergency-selective-rollback-subdub",
+        "subdub-pipeline-font-volume-ui",
+    )
+    return any(token in branch for token in branch_tokens)
 
 
 def _labels(markup):
@@ -254,6 +279,8 @@ def test_refresh_after_delivery_keeps_success_state():
 
 
 def test_no_product_video_music_payos_pricing_db_changes():
+    if not _is_subdub_m6w_scope():
+        pytest.skip("SubDub M6W scope guard is not active for this branch")
     changed = _changed_files()
     allowed = {
         "bot.py",
