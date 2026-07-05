@@ -8209,6 +8209,14 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "last_downloaded_bytes": int(artifact.get("downloaded_bytes") or len(payload) or 0),
         "artifact_download_error_category": "",
         "download_strategy_used": str(artifact.get("download_strategy_used") or ""),
+        "pr173_artifact_engine_restored": bool(artifact.get("pr173_artifact_engine_restored") or artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"}),
+        "old_working_candidate_path_used": str(artifact.get("old_working_candidate_path_used") or artifact.get("selected_artifact_field_path") or current.get("selected_artifact_field_path") or ""),
+        "direct_audio_url_get_attempted": bool(artifact.get("direct_audio_url_get_attempted") or artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"}),
+        "provider_download_endpoint_bypassed_for_raw_audio": bool(artifact.get("provider_download_endpoint_bypassed_for_raw_audio") or (artifact.get("download_strategy_used") in {"direct_cdn", "direct_raw_url"} and not artifact.get("provider_download_endpoint_attempted"))),
+        "downloaded_content_type": str(artifact.get("download_content_type") or ""),
+        "downloaded_bytes": int(artifact.get("downloaded_bytes") or len(payload) or 0),
+        "audio_validation_passed": True,
+        "delivery_succeeded": bool(current.get("delivery_succeeded")),
         "provider_auth_header_used": bool(artifact.get("provider_auth_header_used")),
         "provider_proxy_attempted": bool(artifact.get("provider_proxy_attempted")),
         "provider_download_endpoint_configured": bool(artifact.get("provider_download_endpoint_configured")),
@@ -103708,6 +103716,32 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         )
         if materialized.get("ok") and audio_bytes:
             return {"ok": True, "status": "COMPLETED", "job": materialized_job, "output_url": output_url, "audio_bytes": audio_bytes}
+        if str(materialized.get("status") or "").upper() == "ARTIFACT_WAITING" or music_job_artifact_materialization_waiting(materialized_job):
+            materialized_job.update({
+                "status": "processing",
+                "terminal_state": "",
+                "music_terminal_state": "",
+                "provider_status": "completed",
+                "provider_completed": True,
+                "music_provider_completed": True,
+                "lifecycle_status": "artifact_waiting",
+                "artifact_ready": False,
+                "music_artifact_ready": False,
+                "artifact_validated": False,
+                "audio_validated": False,
+                "music_audio_validated": False,
+                "primary_blocker": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
+                "artifact_blocker": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
+                "auto_delivery_blocker": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
+                "error_category": MUSIC_ARTIFACT_NOT_READY_BLOCKER,
+                "progress_percent": max(85, min(90, int(materialized_job.get("progress_percent") or job.get("progress_percent") or 85))),
+                "progress_text": "Bài hát đã tạo xong, TOAN AAS đang chuẩn bị file nhạc để gửi tự động. Hệ thống chưa trừ Xu.",
+                "pr173_artifact_engine_restored": True,
+                "terminal_after_wait_exhausted": False,
+                "recovery_action": materialized.get("recovery_action") or "artifact_waiting_retry_later",
+            })
+            save_engine_async_job(materialized_job)
+            return {"ok": False, "status": "ARTIFACT_WAITING", "job": materialized_job, "output_url": output_url, "audio_bytes": b""}
         if music_result_url_expired_download(materialized_job) and not bool(materialized_job.get("refresh_url_attempted")):
             refreshed = await refresh_music_expired_result_url_for_job(
                 materialized_job,
@@ -104939,8 +104973,14 @@ async def music_download_artifact_candidate(
                 "ok": True,
                 "audio_bytes": payload,
                 "download_error_category": "",
+                "pr173_artifact_engine_restored": True,
+                "old_working_candidate_path_used": str(item.get("field_path") or item.get("source") or ""),
+                "direct_audio_url_get_attempted": True,
+                "provider_download_endpoint_bypassed_for_raw_audio": True,
                 "candidate_validation_passed": True,
                 "direct_cdn_validation_passed": True,
+                "audio_validation_passed": True,
+                "artifact_ready": True,
                 "final_audio_download_status": "PASS",
                 "final_audio_content_type": content_type,
                 "final_audio_bytes": len(payload),
@@ -104951,8 +104991,14 @@ async def music_download_artifact_candidate(
             "status": "ARTIFACT_DOWNLOAD_FAILED",
             "audio_bytes": b"",
             "download_error_category": category or "download_failed",
+            "pr173_artifact_engine_restored": True,
+            "old_working_candidate_path_used": str(item.get("field_path") or item.get("source") or ""),
+            "direct_audio_url_get_attempted": True,
+            "provider_download_endpoint_bypassed_for_raw_audio": True,
             "candidate_validation_passed": False,
             "direct_cdn_validation_passed": False,
+            "audio_validation_passed": False,
+            "artifact_ready": False,
             "final_audio_download_status": "FAIL",
             "final_audio_content_type": content_type,
             "final_audio_bytes": 0,
@@ -105124,6 +105170,12 @@ async def music_download_artifact_candidate(
             "downloaded_bytes": int(downloaded or len(payload) or 0),
             "download_error_category": "",
             "download_strategy_used": "direct_raw_url",
+            "pr173_artifact_engine_restored": True,
+            "old_working_candidate_path_used": str(item.get("field_path") or item.get("source") or ""),
+            "direct_audio_url_get_attempted": True,
+            "provider_download_endpoint_bypassed_for_raw_audio": bool(provider_name == "key4u_suno"),
+            "audio_validation_passed": True,
+            "artifact_ready": True,
             "provider_auth_header_used": False,
             "provider_proxy_attempted": False,
             "provider_download_endpoint_configured": provider_download_endpoint_configured,
@@ -105791,6 +105843,15 @@ async def select_music_delivery_artifact(
             "downloaded_bytes": int(downloaded_bytes or len(payload) or 0),
             "download_error_category": "",
             "download_strategy_used": download_strategy_used,
+            "pr173_artifact_engine_restored": bool(download_strategy_used in {"direct_cdn", "direct_raw_url"} or direct_cdn_validation_passed),
+            "old_working_candidate_path_used": str((candidate_field_path if candidate_validation_passed else "") or selected.get("field_path") or selected.get("source") or ""),
+            "direct_audio_url_get_attempted": bool(download_strategy_used in {"direct_cdn", "direct_raw_url"} or direct_cdn_download_attempted),
+            "provider_download_endpoint_bypassed_for_raw_audio": bool(
+                not provider_download_endpoint_attempted
+                and str(selected.get("provider_name") or job.get("provider") if isinstance(job, dict) else "").strip() == "key4u_suno"
+            ),
+            "audio_validation_passed": True,
+            "artifact_ready": True,
             "provider_auth_header_used": provider_auth_header_used,
             "provider_proxy_attempted": provider_proxy_attempted,
             "provider_download_endpoint_configured": provider_download_endpoint_configured,
@@ -106135,6 +106196,17 @@ async def deliver_music_result_once(
             if pre_delivery_lock_set:
                 current_job["music_delivery_lock"] = ""
                 current_job["music_result_delivery_lock"] = ""
+            if music_artifact_materialization_pending(artifact) or music_job_artifact_materialization_waiting(current_job):
+                current_job = mark_music_artifact_materialization_waiting(
+                    current_job,
+                    artifact,
+                    updated_by=updated_by or user_id,
+                    source=f"delivery:{source_token}",
+                )
+                current_job["pr173_artifact_engine_restored"] = True
+                if current_job.get("internal_job_id"):
+                    save_engine_async_job(current_job)
+                return {"ok": False, "status": "ARTIFACT_WAITING", "job": current_job, "result": current_result}
             if (
                 bool(current_job.get("provider_completed") or current_job.get("music_provider_completed"))
                 or str(current_job.get("status") or "").strip().lower() in {"completed", "complete", "success", "succeeded", "downloading"}
