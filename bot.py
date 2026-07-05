@@ -5636,6 +5636,7 @@ MUSIC_VAULT_INDEX_KEY = "music_vault:index"
 MUSIC_VAULT_MEMORY: dict[str, dict] = {}
 MUSIC_VAULT_MEMORY_INDEX: list[str] = []
 MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS: set[str] = set()
+MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS: dict[str, dict] = {}
 MUSIC_VAULT_STATUSES = {"generated_unused", "preview_sent", "reserved", "used", "archived", "expired", "blocked"}
 PREVIEW_QUOTA_WINDOW_DAYS = 15
 PREVIEW_QUOTA_PRODUCT_TYPES = ("music_ai", "voice_ai", "video_ai", "subtitle_dub_ai")
@@ -9676,11 +9677,15 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• delivery_state: <code>{html.escape(music_job_delivery_state(job))}</code>\n"
         f"• delivery_lock_state: <code>{html.escape(duplicate_guard)}</code>\n"
         f"• delivery_lock_acquired: <code>{'yes' if (job or {}).get('delivery_lock_acquired') else 'no'}</code>\n"
+        f"• h14o_female_suggestion_guard_active: <code>{'yes' if (job or {}).get('h14o_female_suggestion_guard_active') else 'no'}</code>\n"
+        f"• delivery_guard_key: <code>{html.escape(str((job or {}).get('delivery_guard_key') or '-'))}</code>\n"
         f"• delivery_in_progress: <code>{'yes' if (job or {}).get('delivery_in_progress') or (job or {}).get('music_delivery_in_progress') else 'no'}</code>\n"
         f"• duplicate_send_suppressed: <code>{'yes' if (job or {}).get('duplicate_send_suppressed') else 'no'}</code>\n"
         f"• duplicate_send_suppressed_reason: <code>{html.escape(str((job or {}).get('duplicate_send_suppressed_reason') or '-'))}</code>\n"
+        f"• duplicate_send_suppressed_count: <code>{int((job or {}).get('duplicate_send_suppressed_count') or 0)}</code>\n"
         f"• delivery_source_first: <code>{html.escape(str((job or {}).get('delivery_source_first') or (job or {}).get('music_delivery_path') or '-'))}</code>\n"
         f"• delivery_sender_source: <code>{html.escape(str((job or {}).get('delivery_sender_source') or '-'))}</code>\n"
+        f"• sender_sources_seen: <code>{html.escape(','.join(str(item) for item in ((job or {}).get('sender_sources_seen') or [])) or '-')}</code>\n"
         f"• ignored_duplicate_sources: <code>{html.escape(ignored_sources)}</code>\n"
         f"• competing_sender_suppressed: <code>{'yes' if (job or {}).get('competing_sender_suppressed') else 'no'}</code>\n"
         f"• duplicate_delivery_prevented: <code>{'yes' if (job or {}).get('duplicate_delivery_prevented') else 'no'}</code>\n"
@@ -9704,7 +9709,9 @@ def _music_job_debug_text(job_id: str = "") -> str:
         f"• success_charge_line: <code>{html.escape(str((job or {}).get('success_charge_line') or '-'))}</code>\n"
         f"• last_duplicate_blocked_at: <code>{html.escape(str((job or {}).get('last_duplicate_blocked_at') or '-'))}</code>\n"
         f"• delivery_message_id: <code>{html.escape(str((job or {}).get('music_delivery_message_id') or (job or {}).get('delivery_message_id') or '-'))}</code>\n"
+        f"• first_delivery_message_id: <code>{html.escape(str((job or {}).get('first_delivery_message_id') or '-'))}</code>\n"
         f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
+        f"• receipt_sent_once: <code>{'yes' if (job or {}).get('receipt_sent_once') else 'no'}</code>\n"
         f"• delivered_artifact_hash: <code>{html.escape(str((job or {}).get('delivered_artifact_hash') or '-'))}</code>\n"
         f"• delivered_artifact_path: <code>{html.escape('present' if str((job or {}).get('delivered_artifact_path') or '').strip() else '-')}</code>\n"
         f"• retry_job_id: <code>{html.escape(str((job or {}).get('retry_job_id') or '-'))}</code>\n"
@@ -106688,6 +106695,110 @@ def music_delivery_record_duplicate(job: dict | None = None, source: str = "", r
             save_music_guided_result(current_result.get("user_id"), current_result)
     return current or current_result
 
+def music_h14o_sender_sources_seen(job: dict | None = None, source: str = "") -> list[str]:
+    current = dict(job or {})
+    source_token = music_delivery_source_token(source)
+    seen = list(current.get("sender_sources_seen") or [])
+    if source_token and source_token not in seen:
+        seen.append(source_token)
+    return seen[-12:]
+
+def music_h14o_female_suggestion_guard_active(result: dict | None = None, job: dict | None = None) -> bool:
+    data = {**dict(job or {}), **dict(result or {})}
+    if music_job_product_type(data, "music_song") != "music_song":
+        return False
+    selected = normalize_song_vocal_mode(data.get("selected_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or "")
+    requested = normalize_song_vocal_mode(data.get("requested_vocal_mode") or data.get("song_vocal") or data.get("vocal_mode") or selected)
+    if selected != "female" or requested != "female":
+        return False
+    vocal_source = str(data.get("vocal_mode_source") or "").strip().lower()
+    if vocal_source in {"manual_input", "manual_style_pending", "manual_details_pending"}:
+        return False
+    if str(data.get("music_selected_suggestion_id") or "").strip():
+        return True
+    if vocal_source == "selected_suggestion":
+        return True
+    flow = str(data.get("music_product_flow") or "").strip().lower()
+    route_text = " ".join(
+        str(data.get(key) or "")
+        for key in ("confirm_route", "confirm_callback_data", "panel_route", "panel_callback_data", "expected_route")
+    ).lower()
+    return bool(flow == "p0_20b1_suggestions" and "music_ai_confirm" in route_text and "music_quick" in route_text)
+
+def music_h14o_female_suggestion_delivery_guard_key(
+    user_id,
+    chat_id,
+    result: dict | None = None,
+    job: dict | None = None,
+    artifact_hash: str = "",
+) -> str:
+    if not music_h14o_female_suggestion_guard_active(result, job):
+        return ""
+    data = {**dict(job or {}), **dict(result or {})}
+    job_id = str(data.get("internal_job_id") or data.get("music_internal_job_id") or data.get("music_job_id") or data.get("job_id") or "").strip()
+    chat_token = str(chat_id or data.get("chat_id") or user_id or "").strip()
+    artifact_token = str(artifact_hash or data.get("selected_artifact_hash") or data.get("music_artifact_hash") or data.get("output_sha256") or "").strip()
+    if not (job_id and chat_token and artifact_token):
+        return ""
+    return f"h14o-female-suggestion:{job_id}:{chat_token}:{artifact_token}"
+
+def music_h14o_mark_duplicate_suppressed(
+    job: dict | None = None,
+    result: dict | None = None,
+    *,
+    guard_key: str,
+    source: str,
+    reason: str,
+    updated_by="",
+) -> tuple[dict, dict]:
+    source_token = music_delivery_source_token(source)
+    previous_delivery_attempts = int((job or {}).get("delivery_attempt_count") or (job or {}).get("send_attempt_count") or 0)
+    previous_send_attempts = int((job or {}).get("send_attempt_count") or 0)
+    updated_job = music_delivery_record_duplicate(job, source_token, reason, result, updated_by=updated_by)
+    current_job = dict(updated_job or job or {})
+    current_result = dict(result or {})
+    count = int(current_job.get("duplicate_send_suppressed_count") or current_result.get("duplicate_send_suppressed_count") or 0) + 1
+    seen = music_h14o_sender_sources_seen(current_job, source_token)
+    is_in_progress = "in_progress" in str(reason or "")
+    fields = {
+        "h14o_female_suggestion_guard_active": True,
+        "delivery_guard_key": guard_key,
+        "delivery_in_progress": bool(is_in_progress and not music_job_delivered(current_job)),
+        "music_delivery_in_progress": bool(is_in_progress and not music_job_delivered(current_job)),
+        "duplicate_send_suppressed": True,
+        "duplicate_send_suppressed_reason": reason,
+        "duplicate_send_suppressed_count": count,
+        "sender_sources_seen": seen,
+        "duplicate_guard_state": "closed" if music_job_delivered(current_job) else "h14o_suppressed",
+        "delivery_attempt_count": previous_delivery_attempts,
+        "send_attempt_count": previous_send_attempts,
+        "receipt_sent_once": bool(
+            current_job.get("receipt_sent_once")
+            or current_job.get("music_success_message_id")
+            or current_job.get("success_message_id")
+            or current_result.get("music_success_message_id")
+            or current_result.get("success_message_id")
+        ),
+    }
+    if current_job.get("music_delivery_message_id") or current_job.get("delivery_message_id"):
+        fields["delivery_succeeded"] = True
+        fields["delivery_state"] = "delivered"
+        fields["terminal_state"] = "delivered"
+        fields["music_terminal_state"] = "delivered"
+        fields["music_delivery_lock"] = "sent"
+        fields["music_result_delivery_lock"] = "sent"
+        fields["public_x_suppressed"] = True
+    current_job.update(fields)
+    current_result.update(fields)
+    if current_job.get("music_delivery_message_id") and not current_job.get("first_delivery_message_id"):
+        current_job["first_delivery_message_id"] = current_job.get("music_delivery_message_id")
+        current_result["first_delivery_message_id"] = current_job.get("music_delivery_message_id")
+    if current_job.get("internal_job_id"):
+        save_engine_async_job(current_job)
+    if current_result.get("user_id"):
+        save_music_guided_result(current_result.get("user_id"), current_result)
+    return current_job, current_result
+
 def music_delivery_should_suppress_public_fail(result: dict | None = None, job: dict | None = None) -> bool:
     data = {**dict(job or {}), **dict(result or {})}
     if music_job_delivered(data):
@@ -106927,7 +107038,9 @@ async def deliver_music_result_once(
     current_result = dict(result or {})
     current_job = dict(job or {})
     source_token = music_delivery_source_token(source)
-    delivery_run_id = f"{source_token}:{time.time_ns()}"
+    delivery_run_id = source_token
+    h14o_guard_key = ""
+    h14o_artifact_hash = ""
     current_result["user_id"] = current_result.get("user_id") or user_id
     job_id = str(
         current_job.get("internal_job_id")
@@ -106967,6 +107080,39 @@ async def deliver_music_result_once(
         return {"ok": False, "status": "FINAL_AUDIO_NOT_READY", "job": current_job, "result": current_result}
     in_progress_lock = bool(current_job.get("delivery_in_progress") or current_job.get("music_delivery_in_progress"))
     if str(current_result.get("music_result_delivery_lock") or current_job.get("music_delivery_lock") or "").lower() == "sending" or in_progress_lock:
+        early_artifact_hash = str(
+            current_job.get("selected_artifact_hash")
+            or current_job.get("music_artifact_hash")
+            or current_result.get("selected_artifact_hash")
+            or current_result.get("music_artifact_hash")
+            or music_audio_sha256(audio_bytes)
+            or ""
+        ).strip()
+        early_chat_id = str(getattr(message, "chat_id", "") or current_job.get("chat_id") or current_result.get("chat_id") or user_id or "").strip()
+        early_h14o_guard_key = music_h14o_female_suggestion_delivery_guard_key(
+            user_id,
+            early_chat_id,
+            current_result,
+            current_job,
+            early_artifact_hash,
+        )
+        if early_h14o_guard_key:
+            updated_job, updated_result = music_h14o_mark_duplicate_suppressed(
+                current_job,
+                current_result,
+                guard_key=early_h14o_guard_key,
+                source=source_token,
+                reason="h14o_female_suggestion_in_progress" if in_progress_lock else "h14o_female_suggestion_delivery_locked",
+                updated_by=updated_by or user_id,
+            )
+            return {
+                "ok": True,
+                "status": "DELIVERY_LOCKED",
+                "duplicate": True,
+                "charged_xu": int(updated_result.get("music_charged_xu") or updated_job.get("charged_xu") or 0),
+                "job": updated_job,
+                "result": updated_result,
+            }
         updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_in_progress" if in_progress_lock else "delivery_locked", current_result, updated_by=updated_by or user_id)
         return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0), "job": updated_job or current_job, "result": current_result}
     if audio_bytes is not None and not music_artifact_candidate_bytes(audio_bytes) and not music_delivery_artifact_candidates(current_result, current_job, None):
@@ -107092,6 +107238,107 @@ async def deliver_music_result_once(
                 updated_job = music_delivery_record_duplicate(latest_job, source_token, "delivery_in_progress", current_result, updated_by=updated_by or user_id)
                 return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(updated_job.get("charged_xu") or current_result.get("music_charged_xu") or 0), "job": updated_job or latest_job, "result": current_result}
             current_job = {**current_job, **latest_job}
+    h14o_artifact_hash = str(
+        artifact.get("selected_artifact_hash")
+        or current_job.get("selected_artifact_hash")
+        or current_job.get("music_artifact_hash")
+        or current_result.get("selected_artifact_hash")
+        or current_result.get("music_artifact_hash")
+        or music_audio_sha256(payload)
+        or ""
+    ).strip()
+    delivery_chat_id = str(getattr(message, "chat_id", "") or current_job.get("chat_id") or current_result.get("chat_id") or user_id or "").strip()
+    h14o_guard_key = music_h14o_female_suggestion_delivery_guard_key(
+        user_id,
+        delivery_chat_id,
+        current_result,
+        current_job,
+        h14o_artifact_hash,
+    )
+    if h14o_guard_key:
+        memory_state = dict(MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS.get(h14o_guard_key) or {})
+        memory_status = str(memory_state.get("state") or "").strip().lower()
+        if memory_status in {"in_progress", "delivered", "uncertain"}:
+            reason = "h14o_female_suggestion_in_progress" if memory_status == "in_progress" else f"h14o_female_suggestion_{memory_status}"
+            updated_job, updated_result = music_h14o_mark_duplicate_suppressed(
+                current_job,
+                current_result,
+                guard_key=h14o_guard_key,
+                source=source_token,
+                reason=reason,
+                updated_by=updated_by or user_id,
+            )
+            return {
+                "ok": True,
+                "status": "ALREADY_DELIVERED" if memory_status == "delivered" else "DELIVERY_LOCKED",
+                "duplicate": True,
+                "charged_xu": int(updated_job.get("charged_xu") or updated_result.get("music_charged_xu") or 0),
+                "job": updated_job,
+                "result": updated_result,
+            }
+        latest_h14o_job = get_engine_async_job(job_id) if job_id else {}
+        if latest_h14o_job:
+            latest_same_guard = str(latest_h14o_job.get("delivery_guard_key") or "") == h14o_guard_key
+            latest_h14o_in_progress = bool(
+                latest_same_guard
+                and (
+                    latest_h14o_job.get("delivery_in_progress")
+                    or latest_h14o_job.get("music_delivery_in_progress")
+                    or str(latest_h14o_job.get("duplicate_guard_state") or "").strip().lower() in {"h14o_sending", "sending"}
+                )
+            )
+            latest_h14o_delivered = bool(
+                latest_same_guard
+                and (
+                    music_job_delivered(latest_h14o_job)
+                    or latest_h14o_job.get("music_delivery_message_id")
+                    or latest_h14o_job.get("delivery_message_id")
+                )
+            )
+            if latest_h14o_delivered or latest_h14o_in_progress:
+                reason = "h14o_female_suggestion_already_delivered" if latest_h14o_delivered else "h14o_female_suggestion_in_progress"
+                updated_job, updated_result = music_h14o_mark_duplicate_suppressed(
+                    latest_h14o_job,
+                    current_result,
+                    guard_key=h14o_guard_key,
+                    source=source_token,
+                    reason=reason,
+                    updated_by=updated_by or user_id,
+                )
+                return {
+                    "ok": True,
+                    "status": "ALREADY_DELIVERED" if latest_h14o_delivered else "DELIVERY_LOCKED",
+                    "duplicate": True,
+                    "charged_xu": int(updated_job.get("charged_xu") or updated_result.get("music_charged_xu") or 0),
+                    "job": updated_job,
+                    "result": updated_result,
+                }
+        seen_sources = music_h14o_sender_sources_seen(current_job, source_token)
+        MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS[h14o_guard_key] = {
+            "state": "in_progress",
+            "source": source_token,
+            "job_id": job_id,
+            "chat_id": delivery_chat_id,
+            "artifact_hash": h14o_artifact_hash,
+            "started_at": now_text(),
+        }
+        h14o_fields = {
+            "h14o_female_suggestion_guard_active": True,
+            "delivery_guard_key": h14o_guard_key,
+            "delivery_in_progress": True,
+            "music_delivery_in_progress": True,
+            "duplicate_guard_state": "h14o_sending",
+            "sender_sources_seen": seen_sources,
+            "selected_artifact_hash": h14o_artifact_hash,
+            "music_artifact_hash": h14o_artifact_hash,
+            "delivery_sender_source": source_token,
+        }
+        current_result.update(h14o_fields)
+        current_job.update(h14o_fields)
+        if current_job.get("internal_job_id"):
+            save_engine_async_job(current_job)
+        if current_result.get("user_id"):
+            save_music_guided_result(current_result.get("user_id"), current_result)
     lock_key = music_product_delivery_lock_key(user_id, current_result, current_job, payload)
     if lock_key in MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS:
         updated_job = music_delivery_record_duplicate(current_job, source_token, "memory_lock", current_result, updated_by=updated_by or user_id)
@@ -107192,6 +107439,31 @@ async def deliver_music_result_once(
                 )
         except Exception as exc:
             logger.warning("music product send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
+            if h14o_guard_key:
+                MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS[h14o_guard_key] = {
+                    **dict(MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS.get(h14o_guard_key) or {}),
+                    "state": "uncertain",
+                    "source": source_token,
+                    "job_id": job_id,
+                    "artifact_hash": h14o_artifact_hash,
+                    "updated_at": now_text(),
+                }
+                h14o_uncertain_fields = {
+                    "h14o_female_suggestion_guard_active": True,
+                    "delivery_guard_key": h14o_guard_key,
+                    "delivery_in_progress": False,
+                    "music_delivery_in_progress": False,
+                    "duplicate_guard_state": "uncertain",
+                    "uncertain_delivery_state": True,
+                    "delivery_state": "uncertain_after_send_error",
+                    "delivery_sender_source": source_token,
+                    "sender_sources_seen": music_h14o_sender_sources_seen(current_job, source_token),
+                    "public_x_suppressed": True,
+                    "suppress_reason": "h14o_uncertain_after_send_error",
+                }
+                current_result.update(h14o_uncertain_fields)
+                if current_job:
+                    current_job.update(h14o_uncertain_fields)
             current_result["music_result_delivery_lock"] = ""
             current_result["music_delivery_lock"] = ""
             current_result["delivery_in_progress"] = False
@@ -107202,7 +107474,13 @@ async def deliver_music_result_once(
                 current_job["music_result_delivery_lock"] = ""
                 current_job["delivery_in_progress"] = False
                 current_job["music_delivery_in_progress"] = False
-                current_job = record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
+                if h14o_guard_key:
+                    current_job["last_send_error"] = sanitize_provider_status_text(str(exc), "", 180)
+                    current_job["last_delivery_error_category"] = "h14o_uncertain_after_send_error"
+                    if current_job.get("internal_job_id"):
+                        save_engine_async_job(current_job)
+                else:
+                    current_job = record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
             return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180), "job": current_job, "result": current_result}
 
         delivery_message_id_raw = music_telegram_message_id(sent_message)
@@ -107239,10 +107517,36 @@ async def deliver_music_result_once(
         price_xu = music_result_price_xu(current_result)
         charge_fields = music_product_charge_debug_fields(charge_result, price_xu=price_xu, charged_xu=charged)
         success_charge_line = music_product_success_charge_line({**current_result, **charge_fields}, charged, lang)
+        h14o_success_fields = {}
+        if h14o_guard_key:
+            MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS[h14o_guard_key] = {
+                **dict(MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS.get(h14o_guard_key) or {}),
+                "state": "delivered",
+                "source": source_token,
+                "job_id": job_id,
+                "artifact_hash": h14o_artifact_hash,
+                "message_id": delivery_message_id_raw,
+                "delivered_at": now_text(),
+            }
+            h14o_success_fields = {
+                "h14o_female_suggestion_guard_active": True,
+                "delivery_guard_key": h14o_guard_key,
+                "delivery_in_progress": False,
+                "music_delivery_in_progress": False,
+                "delivery_succeeded": True,
+                "duplicate_guard_state": "closed",
+                "duplicate_send_suppressed": False,
+                "duplicate_send_suppressed_reason": "",
+                "sender_sources_seen": music_h14o_sender_sources_seen(current_job, source_token),
+                "first_delivery_message_id": delivery_message_id_raw,
+                "receipt_sent_once": bool(current_result.get("music_success_message_id") or current_job.get("music_success_message_id") or not send_success_message),
+                "delivered_artifact_hash": h14o_artifact_hash or str(current_job.get("delivered_artifact_hash") or current_result.get("delivered_artifact_hash") or ""),
+            }
         vault_entry = {}
         if current_job:
             current_job["charged_xu"] = charged
             current_job.update(charge_fields)
+            current_job.update(h14o_success_fields)
             current_job["success_charge_line"] = success_charge_line
             current_job["pending_charge_xu"] = 0
             current_job["output_bytes"] = max(int(current_job.get("output_bytes") or 0), len(payload))
@@ -107326,6 +107630,7 @@ async def deliver_music_result_once(
         delivery_message_id = music_telegram_message_id(sent_message)
         delivered_at = now_text()
         current_result.update({
+            **h14o_success_fields,
             "music_status": "completed",
             "music_charged_xu": charged,
             **charge_fields,
@@ -107440,6 +107745,29 @@ async def deliver_music_result_once(
                     current_job["music_success_send_error"] = current_result["music_success_send_error"]
                     if current_job.get("internal_job_id"):
                         save_engine_async_job(current_job)
+        if h14o_guard_key:
+            receipt_once = bool(success_message_id or not send_success_message)
+            h14o_receipt_fields = {
+                "h14o_female_suggestion_guard_active": True,
+                "delivery_guard_key": h14o_guard_key,
+                "receipt_sent_once": receipt_once,
+                "first_delivery_message_id": str(current_result.get("first_delivery_message_id") or delivery_message_id or ""),
+                "duplicate_guard_state": "closed",
+                "delivery_in_progress": False,
+                "music_delivery_in_progress": False,
+            }
+            current_result.update(h14o_receipt_fields)
+            if current_job:
+                current_job.update(h14o_receipt_fields)
+                if current_job.get("internal_job_id"):
+                    save_engine_async_job(current_job)
+            MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS[h14o_guard_key] = {
+                **dict(MUSIC_H14O_FEMALE_SUGGESTION_SEND_GUARDS.get(h14o_guard_key) or {}),
+                "state": "delivered",
+                "message_id": str(delivery_message_id or ""),
+                "success_message_id": str(success_message_id or ""),
+                "receipt_sent_once": receipt_once,
+            }
         save_music_guided_result(user_id, current_result)
         if current_job:
             music_mark_progress_refresh_terminal(current_job, terminal="delivered")
