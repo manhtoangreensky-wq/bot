@@ -172621,23 +172621,23 @@ def subdub_style_video_size(state: dict | None = None) -> tuple[int, int]:
     return max(0, width), max(0, height)
 
 def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, explicit: bool = False) -> int:
-    base = subdub_clamp_int((style or {}).get("size"), 48, 34, 64)
+    base = subdub_clamp_int((style or {}).get("size"), 40, 28, 58)
     if explicit:
         return base
     width, height = subdub_style_video_size(state)
     boxed = bool((style or {}).get("cover_original") or (style or {}).get("hardsub_cover_enabled"))
     if height <= 0:
-        return max(base, 50 if boxed else 48)
+        return max(base, 38 if boxed else 36)
     vertical = bool(width and height >= width * 1.15)
     if height <= 720:
-        target = 46 if boxed else 44
+        target = 34 if boxed else 32
     elif height <= 1080:
-        target = 54 if boxed else 52
+        target = 40 if boxed else 38
     else:
-        target = 56 if vertical else 58
+        target = 46 if vertical else 44
     if vertical:
-        target = min(58, max(target, 52))
-    return subdub_clamp_int(target, target, 42, 60)
+        target = min(48, max(target, 40))
+    return subdub_clamp_int(target, target, 30, 52)
 
 def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
     base = subdub_clamp_int((style or {}).get("size"), 52, 34, 72)
@@ -172764,6 +172764,24 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
     style["play_res_x"] = max(480, min(3840, int(width or 1280)))
     style["play_res_y"] = max(480, min(3840, int(height or 720)))
+    legacy_font_before = 46 if int(style["play_res_y"]) <= 720 else 54 if int(style["play_res_y"]) <= 1080 else 58
+    style["subtitle_margin_v_after"] = max(4, min(24, int(round(style["play_res_y"] * (6.0 / 720.0)))))
+    style["subtitle_margin_v_before"] = max(
+        42,
+        min(
+            118,
+            int(style["play_res_y"] * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)),
+        ),
+    )
+    style["subtitle_style_source"] = "m6ag_style_only"
+    style["subtitle_font_size_before"] = int(legacy_font_before)
+    style["subtitle_font_size_after"] = int(style.get("render_size") or style.get("size") or 0)
+    style["subtitle_bottom_margin_v"] = int(style["subtitle_margin_v_after"])
+    style["subtitle_alignment"] = "bottom_center"
+    style["subtitle_max_lines"] = 2
+    style["subtitle_long_cue_split"] = "yes"
+    style["subtitle_wrap_no_overflow"] = "yes"
+    style["subtitle_style_only_change"] = "yes"
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -172806,6 +172824,10 @@ def subdub_ass_alignment(position: str = "bottom", align: str = "center") -> tup
     if position in {"bottom_high", "above_original"}:
         return horizontal, 110
     return horizontal, 48
+
+def subdub_bottom_margin_v(play_res_y: int | float | str = 720) -> int:
+    height = max(480, min(3840, _safe_int(play_res_y, 720)))
+    return max(4, min(18, int(round(height * 0.009))))
 
 def subdub_parse_srt_timestamp(value: str) -> float:
     text = str(value or "0").strip().replace(",", ".")
@@ -172892,8 +172914,11 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
     play_res_x = int(style.get("play_res_x") or 1080)
     play_res_y = int(style.get("play_res_y") or 1920)
+    bottom_margin_v = subdub_bottom_margin_v(play_res_y)
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
-        margin_v = max(58, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+        margin_v = int(style.get("subtitle_margin_v_after") or max(4, min(24, int(round(play_res_y * (6.0 / 720.0))))))
+    elif int(alignment or 0) in {1, 2, 3}:
+        margin_v = bottom_margin_v
     primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
     outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
     boxed = bool(style.get("boxed_background"))
@@ -174097,6 +174122,7 @@ async def video_dubbing_render_video(
         style = subdub_normalize_style(style_state)
         subtitle_filter = ""
         fallback_subtitle_filter = ""
+        style_fallback_reason = ""
         advanced_filters = []
         if subtitle_bytes:
             subtitle_text = subdub_normalize_subtitle_text(subtitle_bytes)
@@ -174109,13 +174135,15 @@ async def video_dubbing_render_video(
             if style.get("show_subtitles"):
                 fallback_subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
                 if not style.get("subtitle_font_resolution_ok"):
-                    return b"", str(style.get("subtitle_font_blocker") or "subtitle_font_missing")
-                ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
-                if not ass_text:
-                    return b"", "subtitle_ass_generation_failed"
-                with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(ass_text)
-                subtitle_filter = subdub_subtitle_filter_for_file(ass_path)
+                    style_fallback_reason = str(style.get("subtitle_font_blocker") or "subtitle_font_missing")
+                else:
+                    ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
+                    if ass_text:
+                        with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
+                            handle.write(ass_text)
+                        subtitle_filter = subdub_subtitle_filter_for_file(ass_path)
+                    else:
+                        style_fallback_reason = "subtitle_ass_generation_failed"
         if subtitle_filter and subdub_advanced_style_enabled(subtitle_style):
             cover_filter = subdub_cover_filter(style)
             if cover_filter:
@@ -174178,7 +174206,7 @@ async def video_dubbing_render_video(
             return output_bytes, f"ffmpeg_video_render_{label}:{validation.get('detail') or 'validated'}"
 
         fit_filters = subdub_video_fit_filters(subtitle_style)
-        basic_filter = fallback_subtitle_filter if advanced_filters and fallback_subtitle_filter else subtitle_filter
+        basic_filter = fallback_subtitle_filter or subtitle_filter
         basic_filters = [*fit_filters, *([basic_filter] if basic_filter else [])]
         if advanced_filters:
             output_bytes, detail = await _run_render_attempt([*fit_filters, *advanced_filters], "advanced_style")
@@ -174188,7 +174216,10 @@ async def video_dubbing_render_video(
             if fallback_bytes:
                 return fallback_bytes, f"{fallback_detail};advanced_style_fallback"
             return b"", f"{detail};{fallback_detail}"
-        return await _run_render_attempt(basic_filters, "basic")
+        output_bytes, detail = await _run_render_attempt(basic_filters, "basic")
+        if output_bytes and style_fallback_reason:
+            return output_bytes, f"{detail};subtitle_style_fallback_basic:{sanitize_log_text(style_fallback_reason)[:80]}"
+        return output_bytes, detail
 
 async def build_subtitle_dubbed_video_pipeline(
     source_video_bytes: bytes,
