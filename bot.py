@@ -172639,7 +172639,7 @@ def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, e
         target = min(58, max(target, 52))
     return subdub_clamp_int(target, target, 42, 60)
 
-def subdub_live_effective_subtitle_size_before_m6af(style: dict, state: dict | None = None) -> int:
+def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
     base = subdub_clamp_int((style or {}).get("size"), 52, 34, 72)
     multiplier = max(1.0, min(1.25, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     width, height = subdub_style_video_size(state)
@@ -172652,17 +172652,6 @@ def subdub_live_effective_subtitle_size_before_m6af(style: dict, state: dict | N
         cap = min(cap, 68 if vertical else 64)
     current_effective = subdub_clamp_int(min(target, cap), min(target, cap), 40, 68)
     return subdub_clamp_int(current_effective - 2, current_effective - 2, 38, 66)
-
-def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
-    width, height = subdub_style_video_size(state)
-    live_effective_before = subdub_live_effective_subtitle_size_before_m6af(style, state)
-    if height:
-        vertical = bool(width and height >= width * 1.15)
-        frame_cap = int(round(height * (0.039 if vertical else 0.061)))
-        frame_cap = subdub_clamp_int(frame_cap, 44, 38, 54 if vertical else 48)
-    else:
-        frame_cap = 48
-    return subdub_clamp_int(min(live_effective_before - 2, frame_cap), live_effective_before - 2, 36, 54)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
@@ -172739,15 +172728,11 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["subtitle_font_blocker"] = str(font_resolution.get("blocker") or "")[:80]
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["subtitle_font_multiplier"] = max(1.0, min(1.25, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
-    live_effective_before = subdub_live_effective_subtitle_size_before_m6af(style, state)
     style["render_size"] = subdub_render_subtitle_size(style, state)
     style["subtitle_style_baseline_source"] = "pre_231"
     style["translated_font_size_baseline"] = int(style.get("size") or 0)
     style["translated_font_size_multiplier"] = float(style.get("subtitle_font_multiplier") or SUBDUB_SUBTITLE_FONT_MULTIPLIER)
     style["translated_font_size_final"] = int(style.get("render_size") or style.get("size") or 0)
-    style["subtitle_font_size_before_live_effective"] = int(live_effective_before)
-    style["subtitle_font_size_after"] = int(style.get("render_size") or style.get("size") or 0)
-    style["subtitle_font_size_delta"] = int(style["subtitle_font_size_after"] - style["subtitle_font_size_before_live_effective"])
     style["font_size_cap_applied"] = bool(
         int(style.get("render_size") or 0)
         < int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
@@ -172779,11 +172764,6 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
     style["play_res_x"] = max(480, min(3840, int(width or 1280)))
     style["play_res_y"] = max(480, min(3840, int(height or 720)))
-    style["subtitle_margin_v_after"] = max(4, min(24, int(round(style["play_res_y"] * (6.0 / 720.0)))))
-    style["subtitle_alignment"] = "bottom_center"
-    style["subtitle_max_lines"] = 2
-    style["subtitle_long_cue_split"] = "yes"
-    style["subtitle_wrap_no_overflow"] = "yes"
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -172899,67 +172879,6 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
         lines[-1] = " ".join(words[consumed:])
     return r"\N".join(line.replace("\\", r"\\") for line in lines if line)
 
-def subdub_caption_chunks(text: str, style: dict | None = None) -> list[str]:
-    style = dict(style or {})
-    normalized = re.sub(r"\s+", " ", subdub_normalize_subtitle_text(text).replace("\\N", " ")).strip()
-    if not normalized:
-        return []
-    play_res_x = max(480, int(style.get("play_res_x") or 1280))
-    font_size = max(24, int(style.get("render_size") or style.get("size") or 44))
-    line_chars = max(14, min(38, int((play_res_x * 0.72) / (font_size * 0.58))))
-    max_chars = max(20, line_chars * 2)
-    max_words = max(6, min(14, int(max_chars / 5.5)))
-    sentence_parts = [
-        part.strip()
-        for part in re.split(r"(?<=[.!?…;])\s+", normalized)
-        if part.strip()
-    ]
-    chunks: list[str] = []
-    for sentence in sentence_parts or [normalized]:
-        words = sentence.split()
-        current: list[str] = []
-        for word in words:
-            candidate = " ".join([*current, word])
-            if current and (len(candidate) > max_chars or len(current) >= max_words):
-                chunks.append(" ".join(current))
-                current = [word]
-            else:
-                current.append(word)
-        if current:
-            chunks.append(" ".join(current))
-    return [chunk for chunk in chunks if chunk]
-
-def subdub_split_srt_blocks_for_ass(blocks: list[dict], style: dict | None = None) -> list[dict]:
-    split_blocks: list[dict] = []
-    previous_end = 0.0
-    for block in blocks or []:
-        raw_start = max(0.0, float((block or {}).get("start") or 0))
-        raw_end = max(raw_start + 0.05, float((block or {}).get("end") or 0))
-        start = max(raw_start, previous_end)
-        end = max(start + 0.05, raw_end)
-        chunks = subdub_caption_chunks(str((block or {}).get("text") or ""), style)
-        if not chunks:
-            continue
-        duration = max(0.05, end - start)
-        weights = [max(1, len(re.sub(r"\s+", "", chunk))) for chunk in chunks]
-        minimum = 0.7
-        if duration >= minimum * len(chunks):
-            remaining = duration - minimum * len(chunks)
-            total_weight = max(1, sum(weights))
-            durations = [minimum + remaining * weight / total_weight for weight in weights]
-        else:
-            total_weight = max(1, sum(weights))
-            durations = [duration * weight / total_weight for weight in weights]
-        cursor = start
-        for index, (chunk, chunk_duration) in enumerate(zip(chunks, durations)):
-            chunk_end = end if index == len(chunks) - 1 else min(end, cursor + max(0.05, chunk_duration))
-            if chunk_end <= cursor:
-                chunk_end = cursor + 0.05
-            split_blocks.append({"start": cursor, "end": chunk_end, "text": chunk})
-            cursor = chunk_end
-        previous_end = max(previous_end, split_blocks[-1]["end"])
-    return split_blocks
-
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
     style = subdub_normalize_style(style_or_state)
     readability = subdub_validate_subtitle_text_for_delivery(srt_text)
@@ -172970,12 +172889,11 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     blocks = subdub_srt_blocks(str(readability.get("normalized_text") or ""))
     if not blocks or not style.get("show_subtitles"):
         return ""
-    blocks = subdub_split_srt_blocks_for_ass(blocks, style)
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
     play_res_x = int(style.get("play_res_x") or 1080)
     play_res_y = int(style.get("play_res_y") or 1920)
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
-        margin_v = int(style.get("subtitle_margin_v_after") or max(4, min(24, int(round(play_res_y * (6.0 / 720.0))))))
+        margin_v = max(58, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
     primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
     outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
     boxed = bool(style.get("boxed_background"))
@@ -174272,57 +174190,6 @@ async def video_dubbing_render_video(
             return b"", f"{detail};{fallback_detail}"
         return await _run_render_attempt(basic_filters, "basic")
 
-async def subdub_render_with_known_good_dub_fallback(
-    render_func,
-    args: tuple,
-    kwargs: dict,
-    *,
-    mode: str,
-    subtitle_style: dict | None = None,
-) -> tuple[tuple[bytes, str], dict]:
-    result = await render_func(*args, **dict(kwargs or {}))
-    debug = {
-        "dub_known_good_path_active": False,
-        "dub_restored_from_commit": "",
-        "dub_known_good_baseline_commit": "1dc772c",
-        "dub_known_good_rollback_commit": "a958de4",
-        "dub_known_good_function_path": (
-            "_execute_video_dubbing_pipeline_core>"
-            "process_subtitle_dub_job>video_dubbing_render_video"
-        ),
-    }
-    if (
-        normalize_video_translate_mode(mode)
-        not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-        or bytes((result or (b"", ""))[0] or b"")
-        or not SUBDUB_VOLUME_MIX_UI_ENABLED
-    ):
-        return result, debug
-    known_good_kwargs = {
-        "dubbed_audio": bytes((kwargs or {}).get("dubbed_audio") or b""),
-        "subtitle_bytes": bytes((kwargs or {}).get("subtitle_bytes") or b""),
-        "subtitle_style": dict(subtitle_style or {}),
-        "keep_original_audio": False,
-        "original_audio_mode": "mute",
-        "require_audio": True,
-    }
-    try:
-        signature = inspect.signature(render_func)
-        if not any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
-            supported = set(signature.parameters)
-            known_good_kwargs = {
-                key: value for key, value in known_good_kwargs.items()
-                if key in supported
-            }
-    except Exception:
-        pass
-    known_good_result = await render_func(*args, **known_good_kwargs)
-    if bytes((known_good_result or (b"", ""))[0] or b""):
-        debug["dub_known_good_path_active"] = True
-        debug["dub_restored_from_commit"] = "a958de4"
-        return known_good_result, debug
-    return result, debug
-
 async def build_subtitle_dubbed_video_pipeline(
     source_video_bytes: bytes,
     source_content_type: str,
@@ -175258,6 +175125,12 @@ async def _execute_video_dubbing_pipeline_core(
         "transcript_length": 0,
     }
     render_debug = {
+        "m4restore_shared_pipeline_active": True,
+        "m4restore_source_commit": "7dd2210",
+        "subdub_mode": mode,
+        "entry_route": str(state.get("entry_route") or state.get("origin") or state.get("source_step") or ""),
+        "wrapper_name": "_execute_video_dubbing_pipeline_core",
+        "run_subdub_pipeline_called": False,
         "advanced_style_enabled": False,
         "style_render_attempted": False,
         "style_render_pass": False,
@@ -175322,14 +175195,6 @@ async def _execute_video_dubbing_pipeline_core(
         render_debug["subtitle_style_baseline_source"] = str(render_style.get("subtitle_style_baseline_source") or "pre_231")
         render_debug["translated_font_size_baseline"] = int(render_style.get("translated_font_size_baseline") or render_style.get("size") or 0)
         render_debug["translated_font_size_final"] = int(render_style.get("translated_font_size_final") or render_style.get("render_size") or render_style.get("size") or 0)
-        render_debug["subtitle_font_size_before_live_effective"] = int(render_style.get("subtitle_font_size_before_live_effective") or 0)
-        render_debug["subtitle_font_size_after"] = int(render_style.get("subtitle_font_size_after") or 0)
-        render_debug["subtitle_font_size_delta"] = int(render_style.get("subtitle_font_size_delta") or 0)
-        render_debug["subtitle_margin_v_after"] = int(render_style.get("subtitle_margin_v_after") or 0)
-        render_debug["subtitle_alignment"] = str(render_style.get("subtitle_alignment") or "bottom_center")
-        render_debug["subtitle_max_lines"] = int(render_style.get("subtitle_max_lines") or 2)
-        render_debug["subtitle_long_cue_split"] = str(render_style.get("subtitle_long_cue_split") or "yes")
-        render_debug["subtitle_wrap_no_overflow"] = str(render_style.get("subtitle_wrap_no_overflow") or "yes")
         render_debug["font_size_cap_applied"] = bool(render_style.get("font_size_cap_applied"))
         render_debug["subtitle_wrap_lines_max"] = int(render_style.get("subtitle_wrap_lines_max") or render_style.get("max_lines") or 2)
         render_debug["outline_size"] = int(render_style.get("outline") or 0)
@@ -175368,19 +175233,7 @@ async def _execute_video_dubbing_pipeline_core(
             kwargs = {key: value for key, value in kwargs.items() if key in supported}
         except Exception:
             pass
-        result, known_good_debug = await subdub_render_with_known_good_dub_fallback(
-            video_dubbing_render_video,
-            args,
-            kwargs,
-            mode=mode,
-            subtitle_style=render_style,
-        )
-        render_debug.update(known_good_debug)
-        render_debug["dub_audio_path_exists"] = bool(kwargs.get("dubbed_audio"))
-        render_debug["dub_audio_size"] = len(bytes(kwargs.get("dubbed_audio") or b""))
-        render_debug["dub_mux_output_path"] = "memory://final_mp4" if bytes((result or (b"", ""))[0] or b"") else ""
-        render_debug["dub_mux_output_exists"] = bool(bytes((result or (b"", ""))[0] or b""))
-        render_debug["dub_mux_output_size"] = len(bytes((result or (b"", ""))[0] or b""))
+        result = await video_dubbing_render_video(*args, **kwargs)
         detail = str((result or (b"", ""))[1] or "")
         render_debug["render_detail"] = detail
         render_debug["style_render_attempted"] = "advanced_style" in detail
@@ -175399,6 +175252,7 @@ async def _execute_video_dubbing_pipeline_core(
         subdub_apply_voice_resolution_to_state(state, voice_resolution_for_debug)
         return str(voice_resolution_for_debug.get("provider_voice_id") or "") if voice_resolution_for_debug.get("ok") else ""
 
+    render_debug["run_subdub_pipeline_called"] = True
     # Compatibility: run_subdub_pipeline delegates to subtitle_dub_product_pipeline.process_subtitle_dub_job.
     product_result = await subtitle_dub_product_pipeline.run_subdub_pipeline(
         job_id=str(state.get("_pipeline_job_id") or ""),
