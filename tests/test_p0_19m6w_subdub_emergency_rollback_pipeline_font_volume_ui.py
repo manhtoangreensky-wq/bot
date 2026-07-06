@@ -162,8 +162,9 @@ def test_subtitle_font_uses_pre_231_baseline_plus_two_responsive():
     assert style["translated_font_size_baseline"] == style["size"]
     assert 1.0 <= style["translated_font_size_multiplier"] <= 1.25
     assert style["translated_font_size_final"] == style["render_size"]
-    assert style["render_size"] >= style["size"] + 2
-    assert style["render_size"] <= 64
+    assert style["render_size"] <= style["subtitle_font_size_before_live_effective"] - 2
+    assert style["subtitle_font_size_delta"] <= -2
+    assert style["render_size"] <= 48
 
 
 def test_subtitle_font_not_huge_absolute_hardcoded():
@@ -182,7 +183,7 @@ def test_subtitle_font_capped_by_video_height():
 
     assert style_720["render_size"] <= 65
     assert style_1080["render_size"] <= 76
-    assert style_720["render_size"] == style_720["size"] + 2
+    assert style_720["subtitle_font_size_delta"] <= -2
 
 
 def test_translated_subtitle_wraps_max_two_lines():
