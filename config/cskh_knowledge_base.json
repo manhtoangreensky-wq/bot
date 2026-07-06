@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "intents": [
+    {
+      "id": "payment_issue",
+      "keywords": ["chua nhan xu", "chưa nhận xu", "nap chua vao", "nạp chưa vào", "loi thanh toan", "lỗi thanh toán", "chuyen khoan roi", "chuyển khoản rồi", "bill", "ma giao dich", "mã giao dịch"],
+      "reply": "TOAN AAS đã nhận vấn đề nạp Xu/thanh toán. Bạn gửi giúp mã xử lý, ảnh chụp lỗi nếu có và thời gian giao dịch. Không gửi token, mật khẩu hoặc thông tin nhạy cảm. Mình sẽ chuyển admin kiểm tra, chưa tự động cộng/trừ/hoàn Xu.",
+      "handoff": true,
+      "ticket": true
+    },
+    {
+      "id": "refund",
+      "keywords": ["hoan xu", "hoàn xu", "refund", "tra xu", "trả xu", "hoan tien", "hoàn tiền", "khieu nai", "khiếu nại"],
+      "reply": "TOAN AAS đã nhận yêu cầu kiểm tra hoàn Xu. Bạn gửi mã xử lý, thời gian phát sinh và ảnh chụp lỗi nếu có. Admin sẽ đối soát trước, bot không tự hứa hoàn Xu hay hoàn tiền.",
+      "handoff": true,
+      "ticket": true
+    },
+    {
+      "id": "technical_error",
+      "keywords": ["loi video", "lỗi video", "loi anh", "lỗi ảnh", "loi phu de", "lỗi phụ đề", "long tieng", "lồng tiếng", "loi nhac", "lỗi nhạc", "khong chay", "không chạy", "that bai", "thất bại", "bi loi", "bị lỗi", "ma xu ly", "mã xử lý"],
+      "reply": "TOAN AAS đã nhận lỗi cần kiểm tra. Bạn gửi giúp mã xử lý, ảnh/chụp màn hình lỗi nếu có và thời điểm thao tác. Không gửi token hoặc mật khẩu. Mình sẽ chuyển admin xem chi tiết.",
+      "handoff": true,
+      "ticket": true
+    },
+    {
+      "id": "admin_handoff",
+      "keywords": ["gap admin", "gặp admin", "nhan admin", "nhắn admin", "tu van vien", "tư vấn viên", "nguoi that", "người thật", "can ho tro", "cần hỗ trợ"],
+      "reply": "Mình đã ghi nhận bạn muốn gặp admin. TOAN AAS sẽ chuyển người phụ trách hỗ trợ trực tiếp. Bạn có thể gửi thêm nội dung cần xử lý tại đây.",
+      "handoff": true,
+      "ticket": true
+    },
+    {
+      "id": "pricing",
+      "keywords": ["gia", "giá", "bang gia", "bảng giá", "xu", "nap xu", "nạp xu", "goi", "gói", "bao nhieu", "bao nhiêu"],
+      "reply": "Bạn có thể xem mục Nạp Xu / Bảng giá trong bot TOAN AAS để chọn gói phù hợp. Nếu cần tư vấn theo nhu cầu riêng, hãy nhắn mục Hỗ trợ hoặc gửi ngắn nhu cầu tại đây.",
+      "handoff": false,
+      "ticket": false
+    },
+    {
+      "id": "premium_private_bot",
+      "keywords": ["premium", "bot rieng", "bot riêng", "dang ky", "đăng ký", "goi rieng", "gói riêng", "cskh", "shop", "doanh nghiep", "doanh nghiệp"],
+      "reply": "TOAN AAS có hỗ trợ Premium, gói dịch vụ và tư vấn bot riêng cho shop/doanh nghiệp. Bạn cho mình biết mục tiêu, kênh đang dùng và phần muốn tự động hóa, admin sẽ tư vấn gói phù hợp.",
+      "handoff": true,
+      "ticket": true
+    },
+    {
+      "id": "greeting",
+      "keywords": ["chao", "chào", "hello", "hi", "xin chao", "xin chào", "bat dau", "bắt đầu", "dich vu", "dịch vụ", "tu van", "tư vấn"],
+      "reply": "Chào bạn, TOAN AAS có thể hỗ trợ tạo ảnh, video, nội dung, phụ đề/lồng tiếng, gói dịch vụ và bot riêng. Bạn cần hỏi bảng giá, cách dùng hay cần admin hỗ trợ?",
+      "handoff": false,
+      "ticket": false
+    },
+    {
+      "id": "media_unknown",
+      "keywords": ["media", "file", "tep", "tệp", "anh", "ảnh", "video", "audio"],
+      "reply": "TOAN AAS đã nhận file/tệp của bạn. Bạn mô tả thêm vấn đề hoặc nhu cầu cần xử lý nhé. Nếu đây là lỗi thanh toán/kết quả, hãy gửi thêm mã xử lý và thời điểm phát sinh.",
+      "handoff": true,
+      "ticket": true
+    },
+    {
+      "id": "out_of_scope",
+      "keywords": [],
+      "reply": "TOAN AAS đã nhận tin nhắn. Nội dung này cần admin xem thêm để tránh trả lời sai. Bạn gửi ngắn mục tiêu hoặc mã xử lý nếu có nhé.",
+      "handoff": true,
+      "ticket": true
+    }
+  ]
+}

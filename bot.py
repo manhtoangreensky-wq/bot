@@ -53,7 +53,8 @@ from telegram import (
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters, ContextTypes, ApplicationHandlerStop
+    CallbackQueryHandler, filters, ContextTypes, ApplicationHandlerStop,
+    BusinessConnectionHandler, BusinessMessagesDeletedHandler,
 )
 from creative_suggestions import creative_suggestion_bank, rotating_suggestions
 from image_prompt_quality import (
@@ -93,6 +94,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_router, worker_auth
 from services.video_provider_base import mask_provider_task_id
@@ -51170,6 +51172,8 @@ def human_support_text() -> str:
     return (
         "👨‍💼 <b>Hỗ trợ TOAN AAS</b>\n\n"
         "Bạn muốn gặp admin, xem ticket, tư vấn gói hay đăng ký dịch vụ riêng?\n\n"
+        "Bạn có thể nhắn trực tiếp @toanaas. CSKH tự động sẽ hỗ trợ thông tin cơ bản "
+        "và chuyển admin khi cần.\n\n"
         "Nếu bạn cần báo lỗi thanh toán, lỗi video/ảnh hoặc hoàn Xu, hãy dùng "
         "<b>Góp ý / Báo lỗi</b> để TOAN AAS tạo ticket kiểm tra rõ hơn."
     )
@@ -51188,7 +51192,24 @@ def human_support_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🤖 Kết nối bot riêng", callback_data="support|bot"),
             InlineKeyboardButton("📦 Tư vấn gói dịch vụ", callback_data="support|consult"),
         ],
+        [InlineKeyboardButton("🤖 CSKH tự động", callback_data="support|cskh_auto")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_cskh_auto_text() -> str:
+    return (
+        "🤖 <b>CSKH tự động TOAN AAS</b>\n\n"
+        "Bạn có thể nhắn trực tiếp @toanaas. CSKH tự động sẽ hỗ trợ thông tin cơ bản "
+        "như bảng giá, cách dùng, gói dịch vụ và sẽ chuyển admin khi gặp thanh toán, "
+        "hoàn Xu hoặc lỗi cần kiểm tra.\n\n"
+        "Không gửi token, mật khẩu hoặc thông tin nhạy cảm."
+    )
+
+def support_cskh_auto_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Mở Telegram @toanaas", url=SUPPORT_TELEGRAM_URL)],
+        [InlineKeyboardButton("🎫 Tạo ticket hỗ trợ", callback_data="support|ticket"), InlineKeyboardButton("📂 Ticket của tôi", callback_data="ticket|mine")],
+        [InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def support_admin_contact_text() -> str:
@@ -82346,6 +82367,258 @@ async def handle_support_ticket_attachment(update: Update, context: ContextTypes
     )
     return True
 
+def cskh_business_state() -> dict:
+    return telegram_business_support.load_state()
+
+def save_cskh_business_state(state: dict) -> dict:
+    return telegram_business_support.save_state(state)
+
+def cskh_bot_user_id(context: ContextTypes.DEFAULT_TYPE | None = None) -> str:
+    if context and getattr(context, "bot", None):
+        bot_id = getattr(context.bot, "id", None)
+        if bot_id:
+            return str(bot_id)
+    return str(ACTIVE_TELEGRAM_BOT_ID or "")
+
+def cskh_format_ts(timestamp_value) -> str:
+    try:
+        return datetime.fromtimestamp(float(timestamp_value), tz=VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "-"
+
+def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str]:
+    bot_status = bot_status or {}
+    can_connect = payload.get("bot_can_connect_to_business")
+    if can_connect is True:
+        can_connect_text = "yes"
+    elif can_connect is False:
+        can_connect_text = "no"
+    else:
+        can_connect_text = "unknown"
+    last_message = payload.get("last_business_message_at")
+    last_update = payload.get("last_business_update_at")
+    last_debug = payload.get("last_debug") or {}
+    return [
+        "🤖 <b>CSKH Telegram Business Status</b>",
+        "",
+        f"• Connected bot: <code>{html.escape(bot_status.get('username') or ACTIVE_TELEGRAM_BOT_USERNAME or '-')}</code>",
+        f"• Business support enabled: <code>{'yes' if payload.get('enabled') else 'no'}</code>",
+        f"• Bot can connect to business: <code>{can_connect_text}</code>",
+        f"• Receiving business updates: <code>{'yes' if payload.get('receiving_business_updates') else 'no'}</code>",
+        f"• Receiving business messages: <code>{'yes' if payload.get('receiving_business_messages') else 'no'}</code>",
+        f"• Active connections: <code>{payload.get('active_connection_count') or 0}</code>",
+        f"• Latest connection id: <code>{html.escape(str(payload.get('latest_connection_id_masked') or '-'))}</code>",
+        f"• Allowed updates include business: <code>{'yes' if payload.get('allowed_updates_include_business') else 'no'}</code>",
+        f"• Auto-reply mode: <code>{html.escape(str(payload.get('auto_reply_mode') or 'off'))}</code>",
+        f"• Handoff chats: <code>{payload.get('handoff_count') or 0}</code>",
+        f"• Last business update: <code>{html.escape(cskh_format_ts(last_update) if last_update else '-')}</code>",
+        f"• Last business message: <code>{html.escape(cskh_format_ts(last_message) if last_message else '-')}</code>",
+        f"• Last intent: <code>{html.escape(str(last_debug.get('classified_intent') or '-'))}</code>",
+        f"• Last reply sent: <code>{'yes' if last_debug.get('reply_sent') else 'no'}</code>",
+    ]
+
+def cskh_classification_preview(text: str, classification: dict) -> str:
+    return (
+        "🧪 <b>CSKH classifier test</b>\n\n"
+        f"Intent: <code>{html.escape(str(classification.get('intent_id') or '-'))}</code>\n"
+        f"Handoff: <code>{'yes' if classification.get('handoff') else 'no'}</code>\n"
+        f"Ticket path: <code>{'yes' if classification.get('ticket') else 'no'}</code>\n"
+        f"Would send: <code>no</code>\n\n"
+        f"Input:\n<code>{html.escape(text[:800])}</code>\n\n"
+        f"Reply preview:\n{html.escape(str(classification.get('reply') or '')[:1200])}"
+    )
+
+async def notify_cskh_business_admin(
+    context: ContextTypes.DEFAULT_TYPE,
+    title: str,
+    lines: list[str],
+) -> None:
+    if not ADMIN_ID:
+        return
+    text = title + "\n\n" + "\n".join(lines)
+    for admin_id in owner_and_admin_ids():
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text[:3500], parse_mode="HTML")
+        except Exception as exc:
+            logger.warning("cskh business admin notify failed | admin=%s error=%s", admin_id, type(exc).__name__)
+
+async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    state = cskh_business_state()
+    bot_status = await telegram_business_support.get_business_status(context.bot)
+    allowed_updates = Update.ALL_TYPES
+    try:
+        info = await context.bot.get_webhook_info()
+        allowed_updates = getattr(info, "allowed_updates", None) or Update.ALL_TYPES
+    except Exception:
+        allowed_updates = Update.ALL_TYPES
+    payload = telegram_business_support.status_payload(
+        state,
+        bot_status=bot_status,
+        allowed_updates=allowed_updates,
+    )
+    await update.message.reply_text("\n".join(cskh_status_lines(payload, bot_status)), parse_mode="HTML")
+
+async def cmd_cskh_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    state = telegram_business_support.set_enabled(cskh_business_state(), True)
+    save_cskh_business_state(state)
+    await update.message.reply_text(
+        "✅ CSKH tự động đã bật ở chế độ rules_only.\n\n"
+        "Khuyến nghị live test với một selected chat trước. Duplicate/cooldown/handoff guard đang bật."
+    )
+
+async def cmd_cskh_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    state = telegram_business_support.set_enabled(cskh_business_state(), False)
+    save_cskh_business_state(state)
+    await update.message.reply_text("⏸ CSKH tự động đã tắt. Bot vẫn ghi nhận business updates để kiểm tra trạng thái.")
+
+async def cmd_cskh_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    state = cskh_business_state()
+    requested = str((context.args or [""])[0] if context.args else "").strip()
+    if requested:
+        state = telegram_business_support.set_mode(state, requested)
+        save_cskh_business_state(state)
+    mode = state.get("mode") if state.get("enabled") else "off"
+    await update.message.reply_text(
+        "🤖 <b>CSKH mode</b>\n\n"
+        f"Mode: <code>{html.escape(str(mode))}</code>\n"
+        "Available: <code>off</code>, <code>rules_only</code>, <code>rules_plus_ai_draft</code>\n"
+        "AI mặc định không bật trong P0.CSKH.1.",
+        parse_mode="HTML",
+    )
+
+async def cmd_cskh_handoff_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    chat_ref = str((context.args or [""])[0] if context.args else "").strip()
+    if not chat_ref:
+        await update.message.reply_text("Dùng: /cskh_handoff_on <chat_id>")
+        return
+    state = telegram_business_support.set_handoff(cskh_business_state(), chat_ref, True, "admin_manual")
+    save_cskh_business_state(state)
+    await update.message.reply_text(f"✅ Đã bật handoff cho chat <code>{html.escape(chat_ref)}</code>.", parse_mode="HTML")
+
+async def cmd_cskh_handoff_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    chat_ref = str((context.args or [""])[0] if context.args else "").strip()
+    if not chat_ref:
+        await update.message.reply_text("Dùng: /cskh_handoff_off <chat_id>")
+        return
+    state = telegram_business_support.set_handoff(cskh_business_state(), chat_ref, False)
+    save_cskh_business_state(state)
+    await update.message.reply_text(f"✅ Đã tắt handoff cho chat <code>{html.escape(chat_ref)}</code>.", parse_mode="HTML")
+
+async def cmd_cskh_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    text = " ".join(context.args or []).strip()
+    if not text:
+        await update.message.reply_text("Dùng: /cskh_test <tin nhắn khách>")
+        return
+    classification = telegram_business_support.classify_cskh_message(text)
+    await update.message.reply_text(cskh_classification_preview(text, classification), parse_mode="HTML")
+
+async def handle_cskh_business_connection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    connection = getattr(update, "business_connection", None)
+    if not connection:
+        return
+    state = telegram_business_support.upsert_business_connection(cskh_business_state(), connection)
+    save_cskh_business_state(state)
+    payload = telegram_business_support.normalize_business_connection(connection)
+    status = "enabled" if payload.get("is_enabled", True) else "disabled"
+    await notify_cskh_business_admin(
+        context,
+        "🤖 <b>CSKH Business connection update</b>",
+        [
+            f"• Status: <code>{html.escape(status)}</code>",
+            f"• Connection: <code>{html.escape(payload.get('masked_id') or '-')}</code>",
+            f"• User chat: <code>{html.escape(payload.get('user_chat_id') or '-')}</code>",
+        ],
+    )
+
+async def handle_cskh_deleted_business_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    payload = telegram_business_support.extract_deleted_business_messages(update)
+    state = telegram_business_support.mark_deleted_business_messages(cskh_business_state(), payload)
+    save_cskh_business_state(state)
+
+async def handle_cskh_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await process_cskh_business_message(update, context, edited=False)
+
+async def handle_cskh_edited_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await process_cskh_business_message(update, context, edited=True)
+
+async def process_cskh_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE, *, edited: bool = False):
+    event = telegram_business_support.extract_business_message(update, edited=edited)
+    if not event:
+        return
+    state = telegram_business_support.record_business_message_received(cskh_business_state(), event)
+    classification = telegram_business_support.classify_business_event(event)
+    guard = telegram_business_support.evaluate_auto_reply_guard(
+        state,
+        event,
+        bot_user_id=cskh_bot_user_id(context),
+    )
+    if not guard.get("allowed"):
+        state = telegram_business_support.record_suppressed(state, event, classification, guard)
+        save_cskh_business_state(state)
+        return
+    reply = str(classification.get("reply") or "").strip()
+    if not reply or not classification.get("public_safe", True):
+        classification["intent_id"] = "out_of_scope"
+        classification["handoff"] = True
+        classification["ticket"] = True
+        reply = "TOAN AAS đã nhận tin nhắn. Nội dung này cần admin xem thêm để tránh trả lời sai."
+    send_result = await telegram_business_support.send_business_message(
+        context.bot,
+        event.business_connection_id,
+        event.chat_id,
+        reply,
+        reply_to_message_id=event.message_id,
+    )
+    state = telegram_business_support.record_auto_reply(state, event, classification, send_result)
+    if classification.get("handoff"):
+        state = telegram_business_support.set_handoff(
+            state,
+            event.chat_id,
+            True,
+            str(classification.get("intent_id") or "handoff"),
+        )
+    save_cskh_business_state(state)
+    if classification.get("handoff"):
+        await notify_cskh_business_admin(
+            context,
+            "🎧 <b>CSKH business handoff required</b>",
+            [
+                f"• Chat: <code>{html.escape(str(event.chat_id))}</code>",
+                f"• Connection: <code>{html.escape(telegram_business_support.mask_business_connection_id(event.business_connection_id))}</code>",
+                f"• Intent: <code>{html.escape(str(classification.get('intent_id') or '-'))}</code>",
+                f"• Message id: <code>{html.escape(str(event.message_id or '-'))}</code>",
+                "• Auto-reply sent once, handoff guard is now active.",
+            ],
+        )
+
 def support_admin_search_payload(search: str) -> tuple[str, InlineKeyboardMarkup]:
     exact = get_support_ticket_by_code(search)
     tickets = [exact] if exact else list_support_tickets(search=search, limit=10)
@@ -82581,6 +82854,9 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
     if action == "admin_contact":
         clear_support_ticket_pending(uid)
         return await safe_edit_or_send(query, support_admin_contact_text(), reply_markup=support_admin_contact_keyboard())
+    if action == "cskh_auto":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_cskh_auto_text(), reply_markup=support_cskh_auto_keyboard())
     if action == "ticket":
         set_support_ticket_pending(
             uid,
@@ -181128,6 +181404,10 @@ async def lifespan(app: FastAPI):
 
     tg_app.add_handler(MessageHandler(filters.ALL, safe_mode_message_guard), group=-10)
     tg_app.add_handler(CallbackQueryHandler(safe_mode_callback_guard), group=-10)
+    tg_app.add_handler(BusinessConnectionHandler(handle_cskh_business_connection))
+    tg_app.add_handler(BusinessMessagesDeletedHandler(handle_cskh_deleted_business_messages))
+    tg_app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, handle_cskh_business_message))
+    tg_app.add_handler(MessageHandler(filters.UpdateType.EDITED_BUSINESS_MESSAGE, handle_cskh_edited_business_message))
     tg_app.add_handler(CommandHandler("ping",        cmd_ping))
     tg_app.add_handler(CommandHandler("status",      cmd_status))
     tg_app.add_handler(CommandHandler("support",     cmd_support))
@@ -181137,6 +181417,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("support_tickets", cmd_support_tickets))
     tg_app.add_handler(CommandHandler("support_ticket", cmd_support_ticket))
     tg_app.add_handler(CommandHandler("support_close", cmd_support_close))
+    tg_app.add_handler(CommandHandler("cskh_business_status", cmd_cskh_business_status))
+    tg_app.add_handler(CommandHandler("cskh_on", cmd_cskh_on))
+    tg_app.add_handler(CommandHandler("cskh_off", cmd_cskh_off))
+    tg_app.add_handler(CommandHandler("cskh_mode", cmd_cskh_mode))
+    tg_app.add_handler(CommandHandler("cskh_handoff_on", cmd_cskh_handoff_on))
+    tg_app.add_handler(CommandHandler("cskh_handoff_off", cmd_cskh_handoff_off))
+    tg_app.add_handler(CommandHandler("cskh_test", cmd_cskh_test))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
