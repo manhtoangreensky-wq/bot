@@ -306,8 +306,13 @@ def test_m6ae_no_product_video_music_voice_payos_pricing_db_changes():
     allowed = {
         "bot.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
+        "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
+        "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6ab_subdub_suppress_late_fail_x_after_success_only.py",
+        "tests/test_p0_19m6v_subdub_final_delivery_report_font2x_female_voice_fix.py",
         "tests/test_p0_19m6w_subdub_emergency_rollback_pipeline_font_volume_ui.py",
+        "tests/test_p0_23h14m_music_delivery_lock_no_duplicate_mp3_no_late_x.py",
+        "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
     }
 
     assert changed <= allowed

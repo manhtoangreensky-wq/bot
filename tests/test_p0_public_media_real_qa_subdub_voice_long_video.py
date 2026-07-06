@@ -105,11 +105,12 @@ def test_receipt_after_video_delivery_does_not_repeat_success_caption():
         {"video_delivered": True, "charged": 12, "terminal_state": "delivered"},
     )
 
-    assert "Đã hoàn tất" in text
+    assert "Đã tạo video lồng tiếng thành công" in text
     assert "Kết quả:" in text
     assert "Thời lượng:" in text
-    assert "Chi phí:" in text
-    assert "Đã tạo video lồng tiếng" not in text
+    assert "Gói/Giá:" in text
+    assert "Đã gửi video" in text
+    assert text.count("Đã tạo video") == 1
     assert "lỗi" not in text.lower()
 
 

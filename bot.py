@@ -173321,11 +173321,11 @@ async def send_public_subtitle_dub_final_outputs(
         sent["srt_suppress_reason"] = "video_delivered"
         sent["partial_copy_suppressed"] = True
         wanted_types = ()
-    elif video_product_subtitle_mode:
+    elif video_product_subtitle_mode and sent.get("final_mp4_delivered"):
         sent["srt_fallback_suppressed"] = True
         sent["auto_srt_after_video_prevented"] = bool(sent.get("final_mp4_delivered") or video_bytes)
         sent["srt_auto_send_suppressed"] = True
-        sent["srt_suppress_reason"] = "explicit_download_only"
+        sent["srt_suppress_reason"] = "video_delivered"
         sent["partial_copy_suppressed"] = True
         sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
         wanted_types = ()

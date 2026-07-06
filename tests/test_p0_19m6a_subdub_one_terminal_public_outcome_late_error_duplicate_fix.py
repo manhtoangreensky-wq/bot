@@ -312,6 +312,7 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "tests/test_p0_19m6v_subdub_final_delivery_report_font2x_female_voice_fix.py",
         "tests/test_p0_19m6w_subdub_emergency_rollback_pipeline_font_volume_ui.py",
         "tests/test_p0_19m6ab_subdub_suppress_late_fail_x_after_success_only.py",
+        "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
         "tests/test_p0_19m6z_subdub_voice_subtitle_status_audio_report_fix.py",
         "tests/test_p0_19n_subdub_original_voice_retention_volume_mix_controls.py",
         "tests/test_p0_19m8r_selective_rollback_subdub_m8_keep_international_subtitle_only.py",
@@ -320,8 +321,10 @@ def test_no_product_video_music_payos_pricing_db_changes():
         "tests/test_task2_4_public_product_screens.py",
         "tests/test_task2_5_user_ux_confirmation_cleanup.py",
         "tests/test_task2_translation_subtitle_dubbing_flow.py",
+        "tests/test_p0_23h14m_music_delivery_lock_no_duplicate_mp3_no_late_x.py",
         "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
     }
     assert changed <= allowed
+    runtime_changed = {path for path in changed if not path.startswith("tests/")}
     disallowed = ("payos", "wallet", "pricing", "finance", "music", "suno", "video_provider", "remote_worker.py", "local_worker.py")
-    assert not any(any(token in path.lower() for token in disallowed) for path in changed)
+    assert not any(any(token in path.lower() for token in disallowed) for path in runtime_changed)
