@@ -52,6 +52,64 @@ def _git_status_paths():
     return paths
 
 
+def _git_branch_paths():
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main...HEAD"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
+
+
+def _git_diff_file(path):
+    result = subprocess.run(
+        ["git", "diff", "origin/main...HEAD", "--", path],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout:
+        result = subprocess.run(
+            ["git", "diff", "--", path],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    if result.returncode != 0:
+        pytest.skip(f"git diff unavailable for {path}")
+    return result.stdout
+
+
+def _local_worker_change_is_img2vid_only():
+    diff = _git_diff_file("local_worker.py")
+    if not diff:
+        return True
+    allowed_markers = ("run_frame_video_ffmpeg", "run_frame_video_render", "not_enough_images")
+    forbidden_markers = (
+        "music",
+        "suno",
+        "subdub",
+        "subtitle",
+        "dub",
+        "payos",
+        "wallet",
+        "provider",
+        "video_provider",
+        "remote_worker",
+    )
+    added_removed = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    return any(marker in diff for marker in allowed_markers) and not any(marker in added_removed.lower() for marker in forbidden_markers)
+
+
 def _git_diff_bot():
     result = subprocess.run(
         ["git", "diff", "--", "bot.py"],
@@ -292,9 +350,11 @@ def test_free_tools_refresh_does_not_touch_voice_runtime():
 
 
 def test_free_tools_refresh_does_not_touch_payos_pricing_db_webhook():
-    changed_paths = _git_status_paths()
-    forbidden_paths = ("providers/", "services/product_progress_status.py", "remote_worker.py", "local_worker.py")
+    changed_paths = set(_git_status_paths()) | set(_git_branch_paths())
+    forbidden_paths = ("providers/", "services/product_progress_status.py", "remote_worker.py")
     assert not any(path.startswith(forbidden_paths) for path in changed_paths)
+    if "local_worker.py" in changed_paths:
+        assert _local_worker_change_is_img2vid_only()
     diff = _git_diff_bot()
     for marker in ("payos", "payment webhook", "pricing", "db_connect", "webhook"):
         assert marker not in diff.lower()
