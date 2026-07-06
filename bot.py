@@ -60359,6 +60359,7 @@ FREE_HUB_LIBRARY_CATEGORIES = {
     "image": ("image_prompt", "🖼 Prompt ảnh"),
     "meta": ("meta_ai_video", "🤖 Prompt Meta AI"),
     "caption": ("caption_cta", "✍️ Caption / CTA"),
+    "music": ("music_sfx", "🎵 Nhạc/SFX"),
     "shop": ("video_prompt", "🏪 Shop / Affiliate"),
     "beauty": ("image_prompt", "💄 Spa / Mỹ phẩm"),
     "random": ("__all__", "🔁 Gợi ý ngẫu nhiên"),
@@ -60436,13 +60437,13 @@ def free_hub_main_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🆓 <b>TOAN AAS FREE TOOLS</b>\n\n"
-            "This area helps you prepare content before creating real images, videos, voice or documents.\n\n"
-            "Real image generation, AI video, rendering, dubbing and AI music will show price and ask for confirmation before any Xu is charged."
+            "This area gathers 0-Xu/free helpers for preparing content, prompts, notes, temporary media, quick drafts and previews before paid tools.\n\n"
+            "Real image, video, dubbing and music creation will still show price and ask for confirmation before any Xu is charged."
         )
     return (
         "🆓 <b>Công cụ miễn phí TOAN AAS</b>\n\n"
-        "Khu này giúp bạn chuẩn bị nội dung miễn phí/tiết kiệm trước khi tạo ảnh, video, voice hoặc tài liệu thật.\n\n"
-        "Các bước như tạo ảnh thật, video AI, render, lồng tiếng, tạo nhạc AI sẽ báo giá và xác nhận riêng trước khi trừ Xu."
+        "Khu này gom các công cụ 0 Xu/miễn phí để chuẩn bị nội dung, viết prompt, ghi chú, lưu media, thử nhanh hoặc tạo bản nháp trước khi dùng các tính năng trả phí.\n\n"
+        "Các tính năng tạo ảnh/video/lồng tiếng/tạo nhạc thật vẫn sẽ báo giá và hỏi xác nhận riêng trước khi trừ Xu."
     )
 
 def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -60453,10 +60454,14 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
             ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
             ("🖼 Prompt ảnh/video" if is_vi else "🖼 Image/video prompts", "freehub|prompts"),
-            ("📦 Gói đăng bài" if is_vi else "📦 Publish package", "freehub|publish_package"),
             ("📚 Kho prompt mẫu" if is_vi else "📚 Prompt library", "freehub|library"),
+            ("📦 Gói đăng bài" if is_vi else "📦 Publish package", "freehub|publish_package"),
             ("📝 Ghi chú / Tài liệu" if is_vi else "📝 Notes / Documents", "menu|main_memory"),
-            ("📥 Lưu media tạm để dùng tiếp" if is_vi else "📥 Save media temporarily", "freehub|upload"),
+            ("📥 Lưu media tạm" if is_vi else "📥 Save temp media", "freehub|upload"),
+            ("🎙 Script voice/SubDub" if is_vi else "🎙 Voice/SubDub script", "freehub|hook"),
+            ("🎵 Ý tưởng nhạc/SFX" if is_vi else "🎵 Music/SFX ideas", "freehub|lib_music"),
+            ("🧑‍💼 Hỗ trợ" if is_vi else "🧑‍💼 Support", "support|start"),
+            ("💬 Góp ý / Báo lỗi" if is_vi else "💬 Feedback / bug", "feedback|start"),
         ],
         nav_back=None,
         nav_main=True,
@@ -61025,7 +61030,7 @@ def free_hub_library_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMar
             ("3️⃣ Chọn mẫu 3" if is_vi else "3️⃣ Choose 3", "freehub|lib_pick3"),
             ("🔁 Gợi ý khác" if is_vi else "🔁 More", "freehub|lib_more"),
         ],
-        nav_back=("⬅️ Thư viện prompt" if is_vi else "⬅️ Prompt library", "freehub|library"),
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
         lang=lang,
     )
 
@@ -61038,7 +61043,7 @@ def free_hub_library_item_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📤 Dùng cho Meta AI" if is_vi else "📤 Use with Meta AI", "freehub|copy"),
             ("✍️ Tạo caption từ mẫu" if is_vi else "✍️ Caption from prompt", "freehub|caption_more"),
         ],
-        nav_back=("⬅️ Danh sách mẫu" if is_vi else "⬅️ Suggestions", "freehub|lib_back"),
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
         lang=lang,
     )
 
