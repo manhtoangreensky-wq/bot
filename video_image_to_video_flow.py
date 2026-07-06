@@ -34,10 +34,9 @@ def frame_video_unified_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     main_label = "🏠 Menu chính" if is_vi else "🏠 Main menu"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📷 Tôi có ảnh sẵn" if is_vi else "📷 I have images", callback_data="framevideo|start"),
-            InlineKeyboardButton("🖼 Tạo ảnh AI trước" if is_vi else "🖼 Create AI images first", callback_data="framevideo|ai_first"),
+            InlineKeyboardButton("📤 Dùng ảnh có sẵn" if is_vi else "📤 Use existing images", callback_data="framevideo|start"),
+            InlineKeyboardButton("✨ Tạo ảnh AI nhanh rồi ghép" if is_vi else "✨ Quick AI images then stitch", callback_data="framevideo|ai_first"),
         ],
-        [InlineKeyboardButton("📚 Gợi ý bố cục ảnh" if is_vi else "📚 Image layout ideas", callback_data="framevideo|layout")],
         [
             InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
             InlineKeyboardButton(main_label, callback_data="framevideo|main"),
@@ -48,30 +47,26 @@ def frame_video_unified_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def frame_video_ai_first_guard_text(lang: str = "vi") -> str:
     if not _is_vi(lang):
         return (
-            "🖼 <b>Create AI images first</b>\n\n"
-            "Choose the existing AI image tool, prepare image prompts from the storyboard, or continue with images you already have. "
-            "TOAN AAS only moves to paid generation after a clear confirmation step and has not charged Xu here."
+            "✨ <b>Quick AI images then stitch</b>\n\n"
+            "Enter a prompt and image count. TOAN AAS will create related still images first, then you can stitch those images into a simple MP4 slideshow.\n\n"
+            "Image generation is priced separately. Video stitching is priced by total seconds."
         )
     return (
-        "🖼 <b>Tạo ảnh AI trước</b>\n\n"
-        "Anh/chị có thể mở công cụ tạo ảnh AI hiện có, dùng prompt ảnh từ storyboard, hoặc quay lại gửi ảnh sẵn. "
-        "TOAN AAS chỉ tạo ảnh/video thật sau bước xác nhận rõ ràng và chưa trừ Xu ở màn này."
+        "✨ <b>Tạo ảnh AI nhanh rồi ghép</b>\n\n"
+        "Nhập prompt và số ảnh. TOAN AAS tạo nhiều ảnh cùng chủ đề, sau đó anh/chị có thể ghép các ảnh đó thành video.\n\n"
+        "Bước tạo ảnh tính phí riêng. Bước ghép video tính theo tổng số giây."
     )
 
 
 def frame_video_ai_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = _is_vi(lang)
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Nhập prompt ảnh" if is_vi else "✍️ Enter image prompt", callback_data="framevideo|ai_prompt")],
         [
-            InlineKeyboardButton("🖼 Mở Tạo ảnh AI" if is_vi else "🖼 Open AI image tool", callback_data="menu|main_image"),
-            InlineKeyboardButton("🎬 Storyboard + Prompt" if is_vi else "🎬 Storyboard + Prompt", callback_data="vproduct|open|storyboard_prompt"),
-        ],
-        [
-            InlineKeyboardButton("📷 Tôi có ảnh sẵn" if is_vi else "📷 I have images", callback_data="framevideo|start"),
-            InlineKeyboardButton("📚 Gợi ý bố cục ảnh" if is_vi else "📚 Image layout ideas", callback_data="framevideo|layout"),
-        ],
-        [
+            InlineKeyboardButton("📤 Dùng ảnh có sẵn" if is_vi else "📤 Use existing images", callback_data="framevideo|start"),
             InlineKeyboardButton("⬅️ Ghép ảnh thành video" if is_vi else "⬅️ Image slideshow video", callback_data="framevideo|hub"),
+        ],
+        [
             InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
         ],
     ])

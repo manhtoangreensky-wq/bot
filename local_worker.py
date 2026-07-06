@@ -312,7 +312,7 @@ def concat_path(path: str) -> str:
 def run_frame_video_ffmpeg(image_paths: list[str], output_path: str, width: int, height: int, seconds: float, effect: str, timeout: int) -> None:
     if not LOCAL_FFMPEG_PATH or not os.path.exists(LOCAL_FFMPEG_PATH):
         raise RuntimeError("LOCAL_FFMPEG_PATH missing")
-    if len(image_paths) < 2:
+    if len(image_paths) < 1:
         raise RuntimeError("not_enough_images")
     clips: list[str] = []
     random_cycle = ["fade", "zoom", "pan", "slide"]
@@ -733,7 +733,7 @@ def run_frame_video_render(job: dict) -> None:
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         photos = list(payload.get("photos") or [])
-        if len(photos) < 2:
+        if len(photos) < 1:
             update_job(job_id, "failed", "not_enough_images")
             return
         with tempfile.TemporaryDirectory() as tmpdir:

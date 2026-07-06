@@ -64983,6 +64983,8 @@ def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     if not product:
         return "⚠️ Sản phẩm video không tồn tại. Bot chưa trừ Xu."
+    if str(product_id or "") == "frame_video_local":
+        return ivf.frame_video_unified_menu_text(lang)
     if normalize_user_language(lang) != "vi":
         return (
             f"{product.get('public_label')}\n\n"
@@ -64995,6 +64997,8 @@ def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
 
 def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
+    if str(product_id or "") == "frame_video_local":
+        return ivf.frame_video_unified_menu_keyboard(lang)
     is_vi = normalize_user_language(lang) == "vi"
     parent_callback = str(product.get("parent_menu_callback") or "menu|main_video")
     menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
@@ -117987,6 +117991,202 @@ def build_video_project(
 def frame_video_effect_is_motion(effect: str = "") -> bool:
     return frame_video_effect_payload(effect).get("token") in {"zoom", "pan", "slide", "random"}
 
+IMG2VID_AI_IMAGE_MAX_COUNT = max(1, int(os.getenv("IMG2VID_AI_IMAGE_MAX_COUNT", "8") or 8))
+IMG2VID_SECONDS_CHOICES = (2, 3, 5)
+
+def img2vid_seconds_per_image_for_state(state: dict | None) -> float:
+    state = state if isinstance(state, dict) else {}
+    value = state.get("seconds_per_image")
+    try:
+        seconds = float(value)
+        if seconds > 0:
+            return round(seconds, 2)
+    except Exception:
+        pass
+    duration = frame_video_duration_payload(state.get("duration") or "standard")
+    return round(float(duration.get("seconds") or 3.0), 2)
+
+def img2vid_slideshow_price_breakdown(image_count: int = 0, seconds_per_image=0) -> dict:
+    count = max(0, int(image_count or 0))
+    seconds_each = max(0.1, float(seconds_per_image or 0))
+    total_seconds = round(count * seconds_each, 2)
+    if count <= 3 and total_seconds <= 6:
+        price = 0
+    else:
+        first = max(0.0, min(total_seconds, 10.0) - 6.0) * 10
+        second = max(0.0, min(total_seconds, 20.0) - 10.0) * 8
+        third = max(0.0, total_seconds - 20.0) * 6
+        price = int(math.ceil(first + second + third))
+    return {
+        "image_count": count,
+        "seconds_per_image": seconds_each,
+        "duration_seconds": int(math.ceil(total_seconds)),
+        "total_seconds": total_seconds,
+        "free_limit_images": 3,
+        "free_limit_seconds": 6,
+        "price_xu": int(price),
+        "total": int(price),
+        "base": int(price),
+        "duration_extra": int(price),
+        "effect_extra": 0,
+        "audio_extra": 0,
+        "addon_xu": 0,
+        "subtitle_xu": 0,
+        "dubbing_xu": 0,
+        "estimated_vnd": int(price) * int(XU_TO_VND or 100),
+    }
+
+def img2vid_slideshow_price_for_state(state: dict | None) -> dict:
+    state = state if isinstance(state, dict) else {}
+    return img2vid_slideshow_price_breakdown(
+        len(state.get("photos") or []),
+        img2vid_seconds_per_image_for_state(state),
+    )
+
+def img2vid_image_unit_cost() -> int:
+    try:
+        return int(image_tier_cost_xu("low") or 0)
+    except Exception:
+        return int(os.getenv("IMG2VID_AI_IMAGE_UNIT_XU", "20") or 20)
+
+def img2vid_image_prompt_variants(base_prompt: str, count: int = 1) -> list[str]:
+    base = " ".join(str(base_prompt or "").strip().split())
+    if not base:
+        base = "nội dung sản phẩm"
+    total = max(1, min(int(count or 1), IMG2VID_AI_IMAGE_MAX_COUNT))
+    angles = [
+        "khung mở đầu rõ chủ đề",
+        "cận cảnh chi tiết chính",
+        "bối cảnh sử dụng tự nhiên",
+        "quy trình hoặc hành động liên quan",
+        "kết quả/thành phẩm hấp dẫn",
+        "góc nhìn lifestyle đồng bộ",
+        "ảnh nhấn mạnh lợi ích chính",
+        "khung kết thúc sạch, dễ ghép video",
+    ]
+    return [
+        (
+            f"Ảnh {idx}/{total}: {base}. {angles[(idx - 1) % len(angles)]}. "
+            "Giữ cùng chủ đề, màu sắc và phong cách để ghép thành video slideshow liền mạch. "
+            "Không thêm chữ, không logo lạ, bố cục rõ."
+        )
+        for idx in range(1, total + 1)
+    ]
+
+def img2vid_state_debug_dict(job_id: str = "", state: dict | None = None, job: dict | None = None) -> dict:
+    state = state if isinstance(state, dict) else {}
+    job = job if isinstance(job, dict) else {}
+    price = img2vid_slideshow_price_for_state(state or job)
+    photos = list((state or job).get("photos") or [])
+    return {
+        "job_id": str(job_id or job.get("job_id") or ""),
+        "mode": str(state.get("mode") or job.get("mode") or "existing_images"),
+        "image_count": len(photos) or int(job.get("image_count") or 0),
+        "image_sources": str(state.get("image_sources") or job.get("image_sources") or state.get("source") or job.get("source") or "uploaded"),
+        "image_generation_requested": bool(state.get("image_generation_requested") or job.get("image_generation_requested")),
+        "image_generation_price": int(state.get("image_generation_price") or job.get("image_generation_price") or 0),
+        "image_generation_paid": bool(state.get("image_generation_paid") or job.get("image_generation_paid")),
+        "generated_image_count": int(state.get("generated_image_count") or job.get("generated_image_count") or 0),
+        "seconds_per_image": float(state.get("seconds_per_image") or job.get("seconds_per_image") or price.get("seconds_per_image") or 0),
+        "total_seconds": float(price.get("total_seconds") or job.get("duration_seconds") or 0),
+        "slideshow_price": int(price.get("price_xu") or job.get("charged_amount") or 0),
+        "local_renderer_used": True,
+        "ai_video_provider_called": False,
+        "storyboard_route_called": False,
+        "output_mp4_path": str(job.get("output_mp4_path") or ""),
+        "output_mp4_exists": bool(job.get("output_mp4_exists")),
+        "output_mp4_size": int(job.get("output_mp4_size") or 0),
+        "delivery_status": str(job.get("delivery_status") or job.get("status") or ""),
+        "refund_required": bool(job.get("refund_required")),
+        "refund_applied": bool(job.get("refund_applied")),
+    }
+
+def img2vid_seconds_keyboard(back_callback: str = "framevideo|back|collect") -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(f"{value}s / ảnh", callback_data=f"framevideo|img2vid_seconds|{value}") for value in IMG2VID_SECONDS_CHOICES]]
+    rows.append([InlineKeyboardButton("✍️ Nhập số giây khác", callback_data="framevideo|img2vid_seconds_custom")])
+    rows.append([
+        InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def img2vid_slideshow_confirm_text(state: dict | None, user_id=0) -> str:
+    state = state if isinstance(state, dict) else {}
+    price = img2vid_slideshow_price_for_state(state)
+    count = int(price.get("image_count") or 0)
+    seconds_each = float(price.get("seconds_per_image") or 0)
+    total_seconds = float(price.get("total_seconds") or 0)
+    total = int(price.get("price_xu") or 0)
+    return (
+        "🎞 <b>Xác nhận ghép ảnh thành video</b>\n\n"
+        "Ghép ảnh tĩnh thành video MP4 đơn giản.\n"
+        "Không dùng AI dựng cảnh. Không phải Storyboard. Không phải Video AI.\n\n"
+        f"• Số ảnh: <b>{count}</b>\n"
+        f"• Giây mỗi ảnh: <b>{seconds_each:g}s</b>\n"
+        f"• Tổng thời lượng: <b>{total_seconds:g}s</b>\n"
+        f"• Giá video: <b>{xu_number(total)} Xu</b>\n\n"
+        "TOAN AAS chỉ ghép MP4 sau khi anh/chị xác nhận."
+    )
+
+def img2vid_slideshow_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận tạo MP4", callback_data="framevideo|img2vid_confirm")],
+        [InlineKeyboardButton("⏱ Đổi số giây", callback_data="framevideo|img2vid_seconds_menu")],
+        [
+            InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+        ],
+    ])
+
+def img2vid_ai_count_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("2 ảnh", callback_data="framevideo|ai_count|2"),
+            InlineKeyboardButton("4 ảnh", callback_data="framevideo|ai_count|4"),
+            InlineKeyboardButton("6 ảnh", callback_data="framevideo|ai_count|6"),
+            InlineKeyboardButton("8 ảnh", callback_data="framevideo|ai_count|8"),
+        ],
+        [InlineKeyboardButton("✍️ Nhập số khác", callback_data="framevideo|ai_count_custom")],
+        [
+            InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+        ],
+    ])
+
+def img2vid_ai_confirm_text(state: dict | None) -> str:
+    state = state if isinstance(state, dict) else {}
+    count = max(1, min(int(state.get("ai_image_count") or 1), IMG2VID_AI_IMAGE_MAX_COUNT))
+    unit = img2vid_image_unit_cost()
+    total = unit * count
+    prompt = html.escape(str(state.get("ai_prompt") or "").strip()[:500])
+    return (
+        "✨ <b>Xác nhận tạo ảnh AI</b>\n\n"
+        f"• Số ảnh: <b>{count}</b>\n"
+        f"• Giá ảnh: <b>{xu_number(unit)} Xu/ảnh</b>\n"
+        f"• Tổng Xu: <b>{xu_number(total)} Xu</b>\n"
+        f"• Prompt: <i>{prompt}</i>\n\n"
+        "TOAN AAS sẽ tạo nhiều ảnh cùng chủ đề trước. Nếu tạo thiếu ảnh, hệ thống hoàn Xu phần ảnh chưa tạo."
+    )
+
+def img2vid_ai_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận tạo ảnh", callback_data="framevideo|ai_generate_confirm")],
+        [InlineKeyboardButton("🔢 Đổi số ảnh", callback_data="framevideo|ai_count_menu")],
+        [
+            InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+        ],
+    ])
+
+def img2vid_generated_images_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎞 Ghép các ảnh này thành video", callback_data="framevideo|ai_stitch_generated")],
+        [
+            InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+        ],
+    ])
+
 def frame_video_base_price_for_count(count: int = 0) -> int:
     count = max(2, int(count or 0))
     if count <= 5:
@@ -118026,6 +118226,8 @@ def frame_video_audio_extra_for_state(state: dict) -> int:
     return 0
 
 def frame_video_price_breakdown(state: dict) -> dict:
+    if bool((state or {}).get("img2vid_lock1")):
+        return img2vid_slideshow_price_for_state(state)
     count = len((state or {}).get("photos") or [])
     duration_seconds = frame_video_estimated_output_seconds(state)
     pricing = calculate_video_total_price(
@@ -118143,8 +118345,10 @@ def frame_video_total_input_mb(state: dict) -> float:
     return round(total_bytes / (1024 * 1024), 2)
 
 def frame_video_estimated_output_seconds(state: dict) -> float:
-    duration = frame_video_duration_payload((state or {}).get("duration") or "standard")
     count = len((state or {}).get("photos") or [])
+    if bool((state or {}).get("img2vid_lock1")):
+        return round(img2vid_seconds_per_image_for_state(state) * max(0, int(count or 0)), 2)
+    duration = frame_video_duration_payload((state or {}).get("duration") or "standard")
     return round(float(duration.get("seconds") or 0) * max(0, int(count or 0)), 2)
 
 def frame_video_worker_connected() -> bool:
@@ -118169,8 +118373,9 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
         return {"ok": False, "action": "blocked", "reason": "disabled", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
     if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(user_id):
         return {"ok": False, "action": "blocked", "reason": "public_off", "message": frame_video_maintenance_text(), "worker_connected": worker_connected}
-    if image_count < 2:
-        return {"ok": False, "action": "blocked", "reason": "not_enough_images", "message": "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", "worker_connected": worker_connected}
+    min_images = 1 if bool((state or {}).get("img2vid_lock1")) and str((state or {}).get("mode") or "") == "ai_images_then_slideshow" else 2
+    if image_count < min_images:
+        return {"ok": False, "action": "blocked", "reason": "not_enough_images", "message": f"⚠️ Cần ít nhất {min_images} ảnh để ghép thành video. Bot chưa trừ Xu.", "worker_connected": worker_connected}
     if image_count > int(FRAME_VIDEO_MAX_IMAGES or 20):
         return {
             "ok": False,
@@ -118217,6 +118422,7 @@ def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict,
     ratio = frame_video_ratio_payload((state or {}).get("ratio") or "9x16")
     duration = frame_video_duration_payload((state or {}).get("duration") or "standard")
     effect = frame_video_effect_payload((state or {}).get("effect") or "fade")
+    seconds_per_image = img2vid_seconds_per_image_for_state(state) if bool((state or {}).get("img2vid_lock1")) else float(duration.get("seconds") or 1.5)
     photos = []
     for item in list((state or {}).get("photos") or [])[:FRAME_VIDEO_MAX_IMAGES]:
         photos.append({
@@ -118233,15 +118439,19 @@ def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict,
         "width": int(ratio.get("width") or 720),
         "height": int(ratio.get("height") or 1280),
         "duration": str((state or {}).get("duration") or "standard"),
-        "seconds_per_image": float(duration.get("seconds") or 1.5),
+        "seconds_per_image": float(seconds_per_image),
         "effect": str(effect.get("token") or "fade"),
         "max_render_seconds": int(FRAME_VIDEO_MAX_RENDER_SECONDS or 180),
         "caption": (
             "✅ Đã ghép ảnh thành video.\n"
             f"Job: {str(frame_job_id or '')}\n"
             f"Đã trừ: {int(charged_amount or 0)} Xu.\n"
-            "Video được render bằng Local Worker."
+            "Video MP4 đã được ghép từ ảnh tĩnh."
         ),
+        "img2vid_lock1": bool((state or {}).get("img2vid_lock1")),
+        "mode": str((state or {}).get("mode") or "existing_images"),
+        "ai_video_provider_called": False,
+        "storyboard_route_called": False,
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -118285,6 +118495,16 @@ def create_frame_video_job(user_id, chat_id, state: dict, charged_amount: int = 
         "charged_amount": int(charged_amount or 0),
         "price_breakdown": breakdown,
         "detail": "",
+        "mode": str((state or {}).get("mode") or "existing_images"),
+        "image_sources": str((state or {}).get("image_sources") or (state or {}).get("source") or "uploaded"),
+        "image_generation_requested": bool((state or {}).get("image_generation_requested")),
+        "image_generation_price": int((state or {}).get("image_generation_price") or 0),
+        "image_generation_paid": bool((state or {}).get("image_generation_paid")),
+        "generated_image_count": int((state or {}).get("generated_image_count") or 0),
+        "seconds_per_image": float(img2vid_seconds_per_image_for_state(state)) if bool((state or {}).get("img2vid_lock1")) else float(frame_video_duration_payload((state or {}).get("duration") or "standard").get("seconds") or 0),
+        "ai_video_provider_called": False,
+        "storyboard_route_called": False,
+        "local_renderer_used": True,
     }
     return job_id
 
@@ -119171,7 +119391,7 @@ async def render_frame_video_paths(
     ffmpeg = ffmpeg_path or frame_video_ffmpeg_path()
     if not ffmpeg:
         return False, "ffmpeg_missing"
-    if len(image_paths or []) < 2:
+    if len(image_paths or []) < 1:
         return False, "not_enough_images"
     clips: list[str] = []
     directory = os.path.dirname(output_path) or tempfile.gettempdir()
@@ -119221,6 +119441,7 @@ async def render_frame_video_from_state(context: ContextTypes.DEFAULT_TYPE, stat
     ratio = frame_video_ratio_payload(state.get("ratio") or "9x16")
     duration = frame_video_duration_payload(state.get("duration") or "standard")
     effect = frame_video_effect_payload(state.get("effect") or "fade")
+    seconds_per_image = img2vid_seconds_per_image_for_state(state) if bool((state or {}).get("img2vid_lock1")) else float(duration["seconds"])
     image_paths: list[str] = []
     for idx, photo in enumerate((state.get("photos") or [])[:FRAME_VIDEO_MAX_IMAGES], start=1):
         file_id = str(photo.get("file_id") or "")
@@ -119238,7 +119459,7 @@ async def render_frame_video_from_state(context: ContextTypes.DEFAULT_TYPE, stat
         output_path,
         int(ratio["width"]),
         int(ratio["height"]),
-        float(duration["seconds"]),
+        float(seconds_per_image),
         str(effect["token"]),
     )
 
@@ -119291,6 +119512,63 @@ async def handle_frame_video_photo(update: Update, context: ContextTypes.DEFAULT
     set_frame_video_state(uid, state)
     await update.message.reply_text(frame_video_collect_text(len(state["photos"])), reply_markup=frame_video_collect_keyboard())
     return True
+
+async def handle_frame_video_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message or not update.message.text:
+        return False
+    uid = update.effective_user.id
+    state = get_frame_video_state(uid)
+    if not state or not bool(state.get("img2vid_lock1")):
+        return False
+    step = str(state.get("step") or "")
+    text = update.message.text.strip()
+    if step == "ai_prompt":
+        prompt = " ".join(text.split())
+        if len(prompt) < 3:
+            await update.message.reply_text("⚠️ Prompt hơi ngắn. Anh/chị nhập rõ chủ đề ảnh muốn tạo nhé.")
+            return True
+        state["ai_prompt"] = prompt[:1200]
+        state["step"] = "ai_count"
+        set_frame_video_state(uid, state)
+        await update.message.reply_text(
+            "🔢 Chọn số ảnh AI muốn tạo trước khi ghép video.",
+            reply_markup=img2vid_ai_count_keyboard(),
+        )
+        return True
+    if step == "ai_count_custom":
+        count = _safe_int(text, 0)
+        if count < 1 or count > IMG2VID_AI_IMAGE_MAX_COUNT:
+            await update.message.reply_text(f"⚠️ Số ảnh hợp lệ là 1-{IMG2VID_AI_IMAGE_MAX_COUNT}.")
+            return True
+        state["ai_image_count"] = count
+        state["image_generation_price"] = int(img2vid_image_unit_cost() * count)
+        state["step"] = "ai_confirm"
+        set_frame_video_state(uid, state)
+        await update.message.reply_text(img2vid_ai_confirm_text(state), parse_mode="HTML", reply_markup=img2vid_ai_confirm_keyboard())
+        return True
+    if step == "seconds_custom":
+        raw = text.replace(",", ".")
+        try:
+            seconds = float(raw)
+        except Exception:
+            seconds = 0.0
+        if seconds <= 0 or seconds > 30:
+            await update.message.reply_text("⚠️ Nhập số giây mỗi ảnh từ 1 đến 30.")
+            return True
+        state = invalidate_frame_video_paid_preview(state)
+        state["seconds_per_image"] = round(seconds, 2)
+        state["duration"] = "custom"
+        state["ratio"] = state.get("ratio") or "9x16"
+        state["effect"] = state.get("effect") or "fade"
+        state["music_choice"] = "skip"
+        state["music_merge_enabled"] = False
+        state["voice_choice"] = "skip"
+        state["voice_merge_enabled"] = False
+        state["step"] = "confirm"
+        set_frame_video_state(uid, state)
+        await update.message.reply_text(img2vid_slideshow_confirm_text(state, uid), parse_mode="HTML", reply_markup=img2vid_slideshow_confirm_keyboard())
+        return True
+    return False
 
 async def render_video_with_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, video_info: dict, audio_info: dict, mode: str):
     ffmpeg = shutil.which("ffmpeg")
@@ -140295,6 +140573,21 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
     ]
     await reply_html_lines(update, lines)
 
+async def cmd_img2vid_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    job = FRAME_VIDEO_JOBS.get(job_id) if job_id else {}
+    state = get_frame_video_state(uid) if not job else {}
+    debug = img2vid_state_debug_dict(job_id, state, job)
+    lines = ["🧾 <b>IMG2VID DEBUG</b>", ""]
+    for key, value in debug.items():
+        safe_value = html.escape(str(value))
+        lines.append(f"• {key}: <code>{safe_value}</code>")
+    return await reply_html_lines(update, lines)
+
 async def cmd_clear_frame_video_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
@@ -140369,6 +140662,113 @@ async def cmd_tool_test_frame_video(update: Update, context: ContextTypes.DEFAUL
             save_tool_test_result("frame_video", "FAIL_SEND", detail, uid)
             await update.message.reply_text("⚠️ Render PASS nhưng Telegram gửi video lỗi. Bot chưa trừ Xu.")
 
+async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYPE, uid, lang: str, action: str, parts: list[str], state: dict):
+    if action == "ai_prompt":
+        state["step"] = "ai_prompt"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, "✍️ Nhập prompt/nội dung ảnh muốn tạo.\n\nTOAN AAS sẽ tạo nhiều ảnh cùng chủ đề trước, sau đó anh/chị có thể ghép thành video.", parse_mode=None, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]))
+    if action == "ai_count_menu":
+        state["step"] = "ai_count"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, "🔢 Chọn số ảnh AI muốn tạo trước khi ghép video.", parse_mode=None, reply_markup=img2vid_ai_count_keyboard())
+    if action == "ai_count" and len(parts) > 2:
+        count = max(1, min(_safe_int(parts[2], 1), IMG2VID_AI_IMAGE_MAX_COUNT))
+        state["ai_image_count"] = count
+        state["image_generation_price"] = int(img2vid_image_unit_cost() * count)
+        state["step"] = "ai_confirm"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, img2vid_ai_confirm_text(state), parse_mode="HTML", reply_markup=img2vid_ai_confirm_keyboard())
+    if action == "ai_count_custom":
+        state["step"] = "ai_count_custom"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, f"Nhập số ảnh muốn tạo (1-{IMG2VID_AI_IMAGE_MAX_COUNT}).", parse_mode=None)
+    if action == "ai_generate_confirm":
+        prompt = str(state.get("ai_prompt") or "").strip()
+        count = max(1, min(int(state.get("ai_image_count") or 0), IMG2VID_AI_IMAGE_MAX_COUNT))
+        if not prompt:
+            state["step"] = "ai_prompt"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(query, "⚠️ Anh/chị cần nhập prompt ảnh trước. Bot chưa trừ Xu.", parse_mode=None)
+        enabled, guard_message = shopaikey_public_generation_guard("image")
+        if not enabled and not is_admin_user(uid):
+            return await safe_edit_or_send(query, guard_message or ui_text(lang, "media.public_off"), parse_mode=None)
+        unit_cost = img2vid_image_unit_cost()
+        image_cost = int(unit_cost * count)
+        charged_amount = 0
+        if image_cost > 0 and not is_admin_user(uid):
+            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Img2Vid user")
+            if int(credits or 0) < image_cost:
+                return await edit_insufficient_credits(query, int(credits or 0), image_cost, uid)
+            charge = spend_fixed_credit_info(uid, image_cost, "spend_img2vid_ai_images", "Tạo ảnh AI nhanh để ghép video", apply_member_discount_flag=False)
+            if not charge.get("ok"):
+                credits_now, _, _ = get_user(uid)
+                return await edit_insufficient_credits(query, int(credits_now or 0), image_cost, uid)
+            charged_amount = int(charge.get("final_cost") or image_cost)
+        state["image_generation_paid"] = image_cost > 0
+        state["image_generation_price"] = image_cost
+        state["image_generation_charged_amount"] = charged_amount if charged_amount else image_cost
+        state["step"] = "generating_images"
+        set_frame_video_state(uid, state)
+        await safe_edit_or_send(query, f"✨ TOAN AAS đang tạo {count} ảnh cùng chủ đề. Vui lòng chờ, không cần gửi lại lệnh.", parse_mode=None)
+        generated = []
+        for idx, image_prompt in enumerate(img2vid_image_prompt_variants(prompt, count), start=1):
+            try:
+                result = await shopaikey_image_generate(image_prompt, aspect_ratio="9:16", tier="low")
+            except Exception as exc:
+                logger.warning("img2vid ai image generation failed | %s", sanitize_log_text(str(exc))[:220])
+                continue
+            status = str((result or {}).get("status") or "").lower()
+            image_url = str((result or {}).get("image_url") or (result or {}).get("url") or "").strip()
+            b64_json = str((result or {}).get("b64_json") or "")
+            if status not in {"success", "succeeded", "ok"} and not (image_url or b64_json):
+                continue
+            sent_ok, file_id = await send_generated_image_result(context, query.message.chat_id, image_url, f"🖼 Ảnh {idx}/{count} cho video ghép ảnh.", None, lang, b64_json=b64_json)
+            if sent_ok:
+                generated.append({"file_id": str(file_id or ""), "image_url": image_url, "file_size": 0, "source": "generated", "prompt": image_prompt})
+        missing = max(0, count - len(generated))
+        refund_applied = False
+        if missing > 0 and image_cost > 0 and not is_admin_user(uid):
+            refund_applied = refund_charged_credit(uid, missing * unit_cost, "img2vid_ai_image_refund", "", "Hoàn Xu ảnh AI chưa tạo đủ trong Ghép ảnh thành video", True)
+        if not generated:
+            state["generated_image_count"] = 0
+            state["refund_applied"] = refund_applied
+            state["step"] = "ai_prompt"
+            set_frame_video_state(uid, state)
+            return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ TOAN AAS chưa tạo được ảnh AI lần này. Bot đã hoàn Xu phần ảnh chưa tạo nếu có trừ.", reply_markup=ivf.frame_video_unified_menu_keyboard(lang))
+        state["photos"] = generated[:FRAME_VIDEO_MAX_IMAGES]
+        state["generated_image_count"] = len(generated)
+        state["refund_applied"] = refund_applied
+        state["step"] = "ai_images_ready"
+        set_frame_video_state(uid, state)
+        return await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ Đã tạo {len(generated)}/{count} ảnh cùng chủ đề.\n\nAnh/chị có thể ghép các ảnh này thành video MP4 đơn giản.", reply_markup=img2vid_generated_images_keyboard())
+    if action == "ai_stitch_generated":
+        if len(state.get("photos") or []) < 1:
+            return await safe_edit_or_send(query, "⚠️ Chưa có ảnh AI để ghép. Bot chưa trừ Xu video.", parse_mode=None, reply_markup=ivf.frame_video_unified_menu_keyboard(lang))
+        state["step"] = "seconds"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, "⏱ Chọn số giây mỗi ảnh cho video MP4.", parse_mode=None, reply_markup=img2vid_seconds_keyboard("framevideo|ai_first"))
+    if action in {"img2vid_seconds_menu", "img2vid_seconds_custom"}:
+        if action == "img2vid_seconds_custom":
+            state["step"] = "seconds_custom"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(query, "Nhập số giây mỗi ảnh (ví dụ: 2, 3, 5).", parse_mode=None)
+        state["step"] = "seconds"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, "⏱ Chọn số giây mỗi ảnh cho video MP4.", parse_mode=None, reply_markup=img2vid_seconds_keyboard())
+    if action == "img2vid_seconds" and len(parts) > 2:
+        seconds = max(1.0, min(float(_safe_int(parts[2], 3) or 3), 30.0))
+        state = invalidate_frame_video_paid_preview(state)
+        state.update({"seconds_per_image": seconds, "duration": "custom", "ratio": state.get("ratio") or "9x16", "effect": state.get("effect") or "fade", "music_choice": "skip", "music_merge_enabled": False, "voice_choice": "skip", "voice_merge_enabled": False, "step": "confirm"})
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(query, img2vid_slideshow_confirm_text(state, uid), parse_mode="HTML", reply_markup=img2vid_slideshow_confirm_keyboard())
+    if action == "img2vid_confirm":
+        state["paid_preview_seen"] = True
+        state["paid_preview_video_file_id"] = "img2vid_lock1_no_preview"
+        state["img2vid_lock1"] = True
+        set_frame_video_state(uid, state)
+        return {"continue_confirm": True, "state": state}
+    return None
+
 async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -140390,6 +140790,23 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
 
     if action in {"hub", "menu", "ai_first", "layout"}:
         if action == "ai_first":
+            clear_media_creator_pending_states(uid)
+            set_frame_video_state(uid, {
+                "step": "ai_prompt",
+                "photos": [],
+                "img2vid_lock1": True,
+                "mode": "ai_images_then_slideshow",
+                "image_sources": "generated",
+                "image_generation_requested": True,
+                "source": "img2vid_ai_images",
+                "ratio": "9x16",
+                "duration": "standard",
+                "effect": "fade",
+                "music_choice": "skip",
+                "music_merge_enabled": False,
+                "voice_choice": "skip",
+                "voice_merge_enabled": False,
+            })
             return await safe_edit_or_send(
                 query,
                 ivf.frame_video_ai_first_guard_text(lang),
@@ -140426,7 +140843,21 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(uid):
             return await safe_edit_or_send(query, "Công cụ ghép video đang bảo trì, vui lòng thử lại sau. Bot chưa trừ Xu.", parse_mode=None)
         clear_media_creator_pending_states(uid)
-        set_frame_video_state(uid, {"step": "collect", "photos": [], "source": "existing_images"})
+        set_frame_video_state(uid, {
+            "step": "collect",
+            "photos": [],
+            "source": "existing_images",
+            "image_sources": "uploaded",
+            "img2vid_lock1": True,
+            "mode": "existing_images",
+            "ratio": "9x16",
+            "duration": "standard",
+            "effect": "fade",
+            "music_choice": "skip",
+            "music_merge_enabled": False,
+            "voice_choice": "skip",
+            "voice_merge_enabled": False,
+        })
         return await safe_edit_or_send(
             query,
             "📷 <b>Tôi có ảnh sẵn</b>\n\n" + frame_video_collect_text(0),
@@ -140437,6 +140868,13 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, "⏰ Yêu cầu đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.", parse_mode=None)
     if state.get("step") == "rendering" and action != "confirm":
         return await safe_edit_or_send(query, "Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.", parse_mode=None)
+
+    img2vid_result = await handle_img2vid_lock1_callback(query, context, uid, lang, action, parts, state)
+    if isinstance(img2vid_result, dict) and img2vid_result.get("continue_confirm"):
+        action = "confirm"
+        state = img2vid_result.get("state") or get_frame_video_state(uid) or state
+    elif img2vid_result is not None:
+        return img2vid_result
 
     if action == "preview_check":
         local_job_id = _safe_int(parts[2] if len(parts) > 2 else state.get("paid_preview_local_job_id"), 0)
@@ -140616,6 +141054,17 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             state["step"] = "mode_select"
             set_frame_video_state(uid, state)
             return await safe_edit_or_send(query, frame_video_mode_select_text(), parse_mode=None, reply_markup=frame_video_mode_select_keyboard())
+        if bool(state.get("img2vid_lock1")):
+            state["step"] = "seconds"
+            state["ratio"] = state.get("ratio") or "9x16"
+            state["effect"] = state.get("effect") or "fade"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                "⏱ Chọn số giây mỗi ảnh cho video MP4.",
+                parse_mode=None,
+                reply_markup=img2vid_seconds_keyboard(),
+            )
         state["ratio"] = state.get("ratio") or "9x16"
         state["duration"] = state.get("duration") or "standard"
         state["step"] = "effect"
@@ -140727,16 +141176,17 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         return await start_video_addon_step(query, uid, state, "low", lang, source="frame")
 
     if action == "confirm":
-        if len(state.get("photos") or []) < 2:
-            return await safe_edit_or_send(query, "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
-        if not state.get("paid_preview_seen") or not str(state.get("paid_preview_video_file_id") or ""):
+        min_images = 1 if bool(state.get("img2vid_lock1")) and str(state.get("mode") or "") == "ai_images_then_slideshow" else 2
+        if len(state.get("photos") or []) < min_images:
+            return await safe_edit_or_send(query, f"⚠️ Cần ít nhất {min_images} ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
+        if not bool(state.get("img2vid_lock1")) and (not state.get("paid_preview_seen") or not str(state.get("paid_preview_video_file_id") or "")):
             return await safe_edit_or_send(
                 query,
                 frame_video_preview_text(state, ready=False),
                 parse_mode="HTML",
                 reply_markup=frame_video_preview_entry_keyboard(),
             )
-        addon_guard = video_addon_runtime_guard(state)
+        addon_guard = {"ok": True} if bool(state.get("img2vid_lock1")) else video_addon_runtime_guard(state)
         if not addon_guard.get("ok"):
             return await safe_edit_or_send(
                 query,
@@ -140753,10 +141203,10 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
             render_type = frame_video_render_type(state)
             base_cost = frame_video_price_for_state(state)
-            preview_cost = shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
+            preview_cost = int(base_cost or 0) if bool(state.get("img2vid_lock1")) else shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
             if int(credits or 0) < preview_cost and not is_admin_user(uid):
                 return await edit_insufficient_credits(query, int(credits or 0), preview_cost, uid)
-            charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video")
+            charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video", apply_member_discount_flag=not bool(state.get("img2vid_lock1")))
             if not charge.get("ok"):
                 credits_now, _, _ = get_user(uid)
                 return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or preview_cost), uid)
@@ -140837,10 +141287,10 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
         render_type = frame_video_render_type(state)
         base_cost = frame_video_price_for_state(state)
-        preview_cost = shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
+        preview_cost = int(base_cost or 0) if bool(state.get("img2vid_lock1")) else shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
         if int(credits or 0) < preview_cost and not is_admin_user(uid):
             return await edit_insufficient_credits(query, int(credits or 0), preview_cost, uid)
-        charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video")
+        charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video", apply_member_discount_flag=not bool(state.get("img2vid_lock1")))
         if not charge.get("ok"):
             credits_now, _, _ = get_user(uid)
             return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or preview_cost), uid)
@@ -140869,10 +141319,11 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         with tempfile.TemporaryDirectory() as tmpdir:
             out_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
             ok, detail = await render_frame_video_from_state(context, state, out_path, tmpdir)
-            if not ok or not os.path.exists(out_path):
+            out_size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+            if not ok or not os.path.exists(out_path) or out_size <= 0:
                 refunded = refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do render lỗi", charged_amount > 0)
                 set_frame_video_last_error(f"render_fail:{sanitize_log_text(str(detail))[:220]}")
-                update_frame_video_job(job_id, status="failed", detail=sanitize_log_text(str(detail))[:240])
+                update_frame_video_job(job_id, status="failed", detail=sanitize_log_text(str(detail))[:240], refund_required=charged_amount > 0, refund_applied=refunded)
                 clear_frame_video_state(uid)
                 save_tool_test_result("frame_video", "FAIL", f"render:{sanitize_log_text(str(detail))[:300]}", uid)
                 record_usage_event(
@@ -140916,7 +141367,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                         reply_markup=frame_video_success_keyboard(),
                     )
                 clear_frame_video_state(uid)
-                update_frame_video_job(job_id, status="success", detail="mp4 sent")
+                update_frame_video_job(job_id, status="success", detail="mp4 sent", output_mp4_path=out_path, output_mp4_exists=True, output_mp4_size=out_size, delivery_status="sent")
                 save_tool_test_result("frame_video", "PASS", f"rendered {len(state.get('photos') or [])} images; cost={charged_amount}", uid)
                 record_usage_event(
                     uid,
@@ -166693,6 +167144,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_upload(update, context):
         return
 
+    frame_state = get_frame_video_state(uid)
+    if frame_state and bool(frame_state.get("img2vid_lock1")) and await handle_frame_video_photo(update, context):
+        return
+
     if await handle_video_product_pending_media(update, context):
         return
 
@@ -181776,6 +182231,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_text(update, context):
         return
 
+    if await handle_frame_video_pending_text(update, context):
+        return
+
     if await handle_video_product_pending_text(update, context):
         return
 
@@ -182303,6 +182761,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_test_all_tiers", cmd_video_test_all_tiers))
     tg_app.add_handler(CommandHandler("video_recent_jobs", cmd_video_recent_jobs))
     tg_app.add_handler(CommandHandler("video_failed_jobs", cmd_video_failed_jobs))
+    tg_app.add_handler(CommandHandler("img2vid_debug", cmd_img2vid_debug))
     tg_app.add_handler(CommandHandler("video_error_report", cmd_video_error_report))
     tg_app.add_handler(CommandHandler("video_last_export_error", cmd_video_last_export_error))
     tg_app.add_handler(CommandHandler("video_job_dedupe_status", cmd_video_job_dedupe_status))
