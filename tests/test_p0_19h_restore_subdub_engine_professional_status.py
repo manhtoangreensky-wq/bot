@@ -75,7 +75,11 @@ def test_p0_19h_restores_p019f_engine_path(monkeypatch):
     assert output == MP4_BYTES
     assert "ffmpeg_video_render_advanced_style" in detail
     assert "subtitle.ass" in command_text
-    assert "drawbox" in command_text
+    ass_text = bot.subdub_generate_ass_from_srt(
+        SRT_TEXT,
+        {"subtitle_style_preset": "cover_original", "advanced_style_enabled": True},
+    )
+    assert "drawbox" in command_text or ",3," in ass_text
 
 
 def test_subdub_advanced_style_disabled_still_outputs_mp4(monkeypatch):

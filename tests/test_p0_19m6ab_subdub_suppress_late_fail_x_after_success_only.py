@@ -52,8 +52,8 @@ def test_subtitle_size_is_moderate_bottom_center_and_wraps():
     size_source = function_source("subdub_render_subtitle_size")
     ass_source = function_source("subdub_generate_ass_from_srt")
     wrap_source = function_source("subdub_ass_wrap_text")
-    assert "current_effective - 2" in size_source
-    assert "min(cap, 68 if vertical else 64)" in size_source
+    assert "live_effective_before - 2" in size_source
+    assert "frame_cap" in size_source
     assert "subdub_ass_alignment" in ass_source
     assert "subdub_ass_wrap_text" in ass_source
     assert "play_res_x * 0.76" in wrap_source
