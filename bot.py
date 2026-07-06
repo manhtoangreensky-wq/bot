@@ -46673,6 +46673,14 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
         f"• provider progress raw number: <code>{html.escape(str(result.get('provider_progress_raw_number') or '-'))}</code>",
+        f"• progress source: <code>{html.escape(str(result.get('provider_progress_source') or result.get('shopaikey_progress_source') or '-'))}</code>",
+        f"• HTTP 200 ignored as progress: <code>{'yes' if result.get('http_200_not_used_as_progress') else 'no'}</code>",
+        f"• ShopAIKey exact status endpoint: <code>{'yes' if result.get('shopaikey_status_endpoint_exact') else 'no'}</code>",
+        f"• ShopAIKey status HTTP: <code>{safe_int(result.get('shopaikey_status_http_code'), 0)}</code>",
+        f"• ShopAIKey data.status: <code>{html.escape(str(result.get('shopaikey_raw_status') or '-')[:120])}</code>",
+        f"• ShopAIKey data.progress: <code>{html.escape(str(result.get('shopaikey_data_progress_raw') or '-')[:80])}</code>",
+        f"• ShopAIKey data.result_url: <code>{'yes' if result.get('shopaikey_result_url_from_data') else 'no'}</code>",
+        f"• result URL source path: <code>{html.escape(str(result.get('result_url_source_path') or result.get('result_field_path') or '-')[:120])}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• provider progress trusted: <code>{'yes' if result.get('provider_progress_trusted') else 'no'}</code>",
         f"• provider progress cap reason: <code>{html.escape(str(result.get('provider_progress_cap_reason') or '-'))}</code>",
@@ -46777,6 +46785,13 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• ShopAIKey exact status endpoint: <code>{'yes' if result.get('shopaikey_status_endpoint_exact') else 'no'}</code>",
+        f"• ShopAIKey status HTTP: <code>{safe_int(result.get('shopaikey_status_http_code'), 0)}</code>",
+        f"• ShopAIKey data.status: <code>{_video_debug_safe_value(result.get('shopaikey_raw_status'), 80)}</code>",
+        f"• ShopAIKey data.progress: <code>{_video_debug_safe_value(result.get('shopaikey_data_progress_raw'), 60)}</code>",
+        f"• ShopAIKey data.result_url: <code>{'yes' if result.get('shopaikey_result_url_from_data') else 'no'}</code>",
+        f"• HTTP 200 ignored as progress: <code>{'yes' if result.get('http_200_not_used_as_progress') else 'no'}</code>",
+        f"• result URL source path: <code>{_video_debug_safe_value(result.get('result_url_source_path') or result.get('result_field_path'), 80)}</code>",
         f"• submit url host: <code>{_video_debug_safe_value(result.get('provider_submit_url_host'), 120)}</code>",
         f"• auth header: <code>{_video_debug_safe_value(result.get('provider_auth_header_name'), 80)}</code> present=<code>{'yes' if result.get('auth_header_value_present') or result.get('provider_auth_value_present') or result.get('auth_present') or result.get('auth_configured') else 'no'}</code> scheme=<code>{_video_debug_safe_value(result.get('provider_auth_scheme_prefix') or result.get('auth_scheme'), 40)}</code>",
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
@@ -46839,6 +46854,388 @@ async def cmd_video_provider_job_debug(update: Update, context: ContextTypes.DEF
     args = _diagnostic_message_args(update, context)
     job_id = safe_int(args[0] if args else 0, 0)
     return await video_debug_safe_reply_text(update.message, video_provider_job_debug_text(job_id))
+
+
+def _video_provider_recover_values(result: dict, keys: tuple[str, ...]) -> list[str]:
+    values: list[str] = []
+
+    def add(value) -> None:
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                add(item)
+            return
+        text = str(value or "").strip()
+        if text and text not in values:
+            values.append(text)
+
+    for key in keys:
+        add(result.get(key))
+    for event in result.get("provider_events") or []:
+        if not isinstance(event, dict):
+            continue
+        for key in keys:
+            add(event.get(key))
+    for attempt in result.get("provider_attempts") or []:
+        if not isinstance(attempt, dict):
+            continue
+        for key in keys:
+            add(attempt.get(key))
+    return values
+
+
+def _video_provider_recover_identity(result: dict) -> dict:
+    provider_values = _video_provider_recover_values(
+        result,
+        (
+            "provider_pending_provider",
+            "selected_provider_before_submit",
+            "initial_selected_provider",
+            "selected_provider",
+            "provider",
+        ),
+    )
+    task_ids = _video_provider_recover_values(
+        result,
+        (
+            "provider_pending_task_id",
+            "provider_task_id",
+            "task_id",
+            "id_base",
+            "provider_task_ids",
+        ),
+    )
+    video_ids = _video_provider_recover_values(
+        result,
+        (
+            "provider_pending_video_id",
+            "provider_video_id",
+            "video_id",
+            "videoId",
+            "provider_video_ids",
+        ),
+    )
+    provider = next((item for item in provider_values if item and item != "-"), "")
+    if provider in {"shopai", "shopaikey"}:
+        provider = "shopaikey_video"
+    elif provider in {"key4u", "k4u"}:
+        provider = "key4u_video"
+    task_id = next((item for item in task_ids if item and item != "-"), "")
+    if not task_id:
+        task_id = next((item for item in video_ids if item and item != "-"), "")
+    if not provider and task_id:
+        provider = "shopaikey_video"
+    return {
+        "provider": provider,
+        "task_id": task_id,
+        "task_id_source": "provider_task_ids/provider_pending_task_id" if task_ids else ("provider_video_ids" if video_ids else ""),
+        "task_id_masked": mask_provider_task_id(task_id),
+    }
+
+
+def _video_provider_recover_adapter(provider: str):
+    target = str(provider or "").strip().lower()
+    adapters = video_provider_router.load_video_provider_adapters(os.environ)
+    for adapter in adapters:
+        if str(getattr(adapter, "provider_name", "") or "").strip().lower() == target:
+            return adapter
+    if target in {"shopaikey_video", "key4u_video", "toanaas_video", "generic_http"}:
+        factory = getattr(video_provider_router, "_generic_adapter_for", None)
+        if callable(factory):
+            return factory(target, dict(os.environ))
+    return None
+
+
+def _video_provider_recover_debug_from_poll(poll_result) -> dict:
+    raw = dict(getattr(poll_result, "raw", {}) or {})
+    return {
+        "recovery_poll_called": True,
+        "recovery_poll_endpoint_exact": bool(raw.get("shopaikey_status_endpoint_exact")),
+        "recovery_poll_http_status": safe_int(raw.get("shopaikey_status_http_code") or raw.get("poll_http_status"), 0),
+        "recovery_raw_status": str(raw.get("shopaikey_raw_status") or getattr(poll_result, "raw_status", "") or getattr(poll_result, "status", "") or ""),
+        "recovery_normalized_status": str(raw.get("shopaikey_normalized_status") or getattr(poll_result, "status", "") or ""),
+        "recovery_data_progress_raw": str(raw.get("shopaikey_data_progress_raw") or raw.get("provider_progress_raw") or ""),
+        "recovery_progress_source": str(raw.get("shopaikey_progress_source") or raw.get("provider_progress_source") or "none"),
+        "recovery_http_200_not_used_as_progress": bool(raw.get("http_200_not_used_as_progress")),
+        "recovery_result_url_found": bool(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "")),
+        "recovery_result_url_source_path": str(raw.get("result_url_source_path") or raw.get("result_field_path") or "none"),
+        "recovery_result_url_from_data": bool(raw.get("shopaikey_result_url_from_data")),
+        "recovery_result_url_present": bool(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "")),
+    }
+
+
+def _video_provider_update_job_result(conn, job_id: int, updates: dict) -> dict:
+    job = video_project_queue.get_video_render_job(conn, int(job_id))
+    if not job:
+        return {}
+    current = _video_debug_json((job or {}).get("result_json"), {})
+    if not isinstance(current, dict):
+        current = {}
+    current.update(updates)
+    conn.execute(
+        "UPDATE video_jobs SET result_json=?, updated_at=? WHERE id=?",
+        (json.dumps(current, ensure_ascii=False), now_text_safe(), int(job_id)),
+    )
+    conn.commit()
+    return current
+
+
+def video_provider_recover_existing_task(job_id: int, *, download: bool = False, conn=None) -> dict:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {"ok": False, "blocker": "job_id_required", "charge": 0}
+    owns_conn = conn is None
+    if conn is None:
+        conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        if not job:
+            return {"ok": False, "blocker": "job_not_found", "job_id": jid, "charge": 0}
+        result = _video_debug_json((job or {}).get("result_json"), {})
+        identity = _video_provider_recover_identity(result if isinstance(result, dict) else {})
+        provider = str(identity.get("provider") or "").strip()
+        task_id = str(identity.get("task_id") or "").strip()
+        if not task_id:
+            _video_provider_update_job_result(
+                conn,
+                jid,
+                {
+                    "video_provider_recover_called": True,
+                    "video_provider_recover_download_requested": bool(download),
+                    "no_new_paid_submit": True,
+                    "recovery_charge_xu": 0,
+                    "recovery_blocker": "provider_task_id_missing",
+                },
+            )
+            return {"ok": False, "blocker": "provider_task_id_missing", "job_id": jid, "provider": provider or "-", "charge": 0}
+        adapter = _video_provider_recover_adapter(provider)
+        if adapter is None:
+            _video_provider_update_job_result(
+                conn,
+                jid,
+                {
+                    "video_provider_recover_called": True,
+                    "video_provider_recover_download_requested": bool(download),
+                    "existing_provider_task_id_found": True,
+                    "provider_task_id_masked": identity.get("task_id_masked"),
+                    "no_new_paid_submit": True,
+                    "recovery_charge_xu": 0,
+                    "recovery_blocker": "provider_adapter_missing",
+                },
+            )
+            return {"ok": False, "blocker": "provider_adapter_missing", "job_id": jid, "provider": provider or "-", "task_id_masked": identity.get("task_id_masked"), "charge": 0}
+
+        poll_result = adapter.poll_video_job(task_id)
+        poll_debug = _video_provider_recover_debug_from_poll(poll_result)
+        normalized = str(getattr(poll_result, "status", "") or poll_debug.get("recovery_normalized_status") or "")
+        updates = {
+            "video_provider_recover_called": True,
+            "video_provider_recover_download_requested": bool(download),
+            "existing_provider_task_id_found": True,
+            "provider_pending_provider": provider,
+            "provider_pending_task_id": task_id,
+            "provider_task_ids": [task_id],
+            "provider_task_id_masked": identity.get("task_id_masked"),
+            "no_new_paid_submit": True,
+            "paid_fallback_not_used": True,
+            "recovery_charge_xu": 0,
+            "postprocess_not_required_for_recovery": True,
+            "delivery_type": "raw_provider_video",
+            **poll_debug,
+        }
+        if normalized in {"queued", "running", "processing", "pending", "in_progress", "not_start"}:
+            updates.update(
+                {
+                    "recovery_status": "waiting_provider_result",
+                    "recovery_blocker": "provider_in_progress",
+                    "continue_polling": True,
+                }
+            )
+            _video_provider_update_job_result(conn, jid, updates)
+            return {
+                "ok": False,
+                "waiting": True,
+                "blocker": "provider_in_progress",
+                "job_id": jid,
+                "provider": provider,
+                "task_id_masked": identity.get("task_id_masked"),
+                "poll": poll_result,
+                "debug": updates,
+                "charge": 0,
+            }
+        if normalized in {"failed", "cancelled"}:
+            updates.update(
+                {
+                    "recovery_status": "provider_failed",
+                    "recovery_blocker": str(getattr(poll_result, "error_code", "") or normalized),
+                    "continue_polling": False,
+                }
+            )
+            _video_provider_update_job_result(conn, jid, updates)
+            return {
+                "ok": False,
+                "blocker": updates["recovery_blocker"],
+                "job_id": jid,
+                "provider": provider,
+                "task_id_masked": identity.get("task_id_masked"),
+                "poll": poll_result,
+                "debug": updates,
+                "charge": 0,
+            }
+        if normalized == "succeeded" and not poll_debug.get("recovery_result_url_present"):
+            updates.update(
+                {
+                    "recovery_status": "completed_missing_result_url",
+                    "recovery_blocker": "provider_result_url_missing",
+                    "continue_polling": False,
+                }
+            )
+            _video_provider_update_job_result(conn, jid, updates)
+            return {
+                "ok": False,
+                "blocker": "provider_result_url_missing",
+                "job_id": jid,
+                "provider": provider,
+                "task_id_masked": identity.get("task_id_masked"),
+                "poll": poll_result,
+                "debug": updates,
+                "charge": 0,
+            }
+        if normalized == "succeeded" and not download:
+            updates.update({"recovery_status": "result_url_available", "recovery_blocker": "", "continue_polling": False})
+            _video_provider_update_job_result(conn, jid, updates)
+            return {
+                "ok": True,
+                "result_url_available": True,
+                "job_id": jid,
+                "provider": provider,
+                "task_id_masked": identity.get("task_id_masked"),
+                "poll": poll_result,
+                "debug": updates,
+                "charge": 0,
+            }
+
+        artifact = adapter.materialize_result(poll_result, f"recovery_job_{jid}")
+        updates.update(
+            {
+                "recovery_status": "raw_provider_video_downloaded" if artifact.ok else "raw_provider_video_download_failed",
+                "recovery_download_attempted": True,
+                "recovery_download_success": bool(artifact.ok),
+                "raw_provider_video_artifact_path": str(artifact.local_path or ""),
+                "raw_provider_video_valid": bool(artifact.ok and artifact.has_video_stream and artifact.bytes > 0),
+                "raw_provider_video_bytes": int(artifact.bytes or 0),
+                "raw_provider_video_duration": float(artifact.duration or 0.0),
+                "recovery_blocker": "" if artifact.ok else (artifact.error_code or "provider_download_failed"),
+                "continue_polling": False,
+            }
+        )
+        _video_provider_update_job_result(conn, jid, updates)
+        return {
+            "ok": bool(artifact.ok),
+            "blocker": "" if artifact.ok else updates["recovery_blocker"],
+            "job_id": jid,
+            "provider": provider,
+            "task_id_masked": identity.get("task_id_masked"),
+            "poll": poll_result,
+            "artifact": artifact,
+            "debug": updates,
+            "charge": 0,
+        }
+    finally:
+        if owns_conn:
+            conn.close()
+
+
+def video_provider_recover_text(payload: dict) -> str:
+    jid = safe_int(payload.get("job_id"), 0)
+    provider = html.escape(str(payload.get("provider") or "-"))
+    task_masked = html.escape(str(payload.get("task_id_masked") or "-"))
+    blocker = html.escape(str(payload.get("blocker") or (payload.get("debug") or {}).get("recovery_blocker") or "-")[:180])
+    debug = dict(payload.get("debug") or {})
+    status = html.escape(str(debug.get("recovery_raw_status") or debug.get("recovery_normalized_status") or "-")[:120])
+    progress = html.escape(str(debug.get("recovery_data_progress_raw") or "-")[:80])
+    result_url_present = "yes" if debug.get("recovery_result_url_present") or payload.get("result_url_available") else "no"
+    lines = [
+        "🧾 <b>Video Provider Recovery</b>",
+        "",
+        f"• job id: <code>{jid or '-'}</code>",
+        f"• provider: <code>{provider}</code>",
+        f"• task id: <code>{task_masked}</code>",
+        f"• poll endpoint exact: <code>{'yes' if debug.get('recovery_poll_endpoint_exact') else 'no'}</code>",
+        f"• poll http: <code>{safe_int(debug.get('recovery_poll_http_status'), 0)}</code>",
+        f"• data.status: <code>{status}</code>",
+        f"• data.progress: <code>{progress}</code>",
+        f"• result_url present: <code>{result_url_present}</code>",
+        f"• download success: <code>{'yes' if debug.get('recovery_download_success') else 'no'}</code>",
+        f"• raw MP4 bytes: <code>{safe_int(debug.get('raw_provider_video_bytes'), 0)}</code>",
+        f"• no new submit: <code>yes</code>",
+        f"• paid fallback: <code>no</code>",
+        f"• charge: <code>0</code>",
+        f"• blocker: <code>{blocker}</code>",
+    ]
+    return "\n".join(lines)
+
+
+def video_provider_raw_status_text(job_id: int) -> str:
+    payload = video_provider_recover_existing_task(job_id, download=False)
+    return video_provider_recover_text(payload)
+
+
+async def cmd_video_provider_raw_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = _diagnostic_message_args(update, context)
+    job_id = safe_int(args[0] if args else 0, 0)
+    if job_id <= 0:
+        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_raw_status JOB_ID</code>", parse_mode="HTML")
+    return await video_debug_safe_reply_text(update.message, video_provider_raw_status_text(job_id))
+
+
+async def cmd_video_provider_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = _diagnostic_message_args(update, context)
+    job_id = safe_int(args[0] if args else 0, 0)
+    if job_id <= 0:
+        return await update.message.reply_text("⚠️ Dùng: <code>/video_provider_recover JOB_ID</code>", parse_mode="HTML")
+    payload = video_provider_recover_existing_task(job_id, download=True)
+    artifact = payload.get("artifact")
+    artifact_path = str(getattr(artifact, "local_path", "") or "")
+    if payload.get("ok") and artifact_path:
+        delivery = await send_generated_video_artifact_for_delivery(
+            context.bot,
+            update.effective_chat.id,
+            artifact_path,
+            filename=f"toan_aas_raw_provider_video_{job_id}.mp4",
+            caption="TOAN AAS đã lấy được video thô từ hệ thống dựng. Đây là bản gốc để kiểm tra trước khi xử lý hậu kỳ.",
+            lang="vi",
+        )
+        conn = db_connect()
+        try:
+            _video_provider_update_job_result(
+                conn,
+                job_id,
+                {
+                    "recovery_raw_video_sent": bool(delivery.get("sent")),
+                    "raw_provider_video_delivered": bool(delivery.get("sent")),
+                    "recovery_delivery_method": str(delivery.get("method") or ""),
+                    "recovery_delivery_message_id": str(delivery.get("telegram_message_id") or ""),
+                    "recovery_charge_xu": 0,
+                    "no_new_paid_submit": True,
+                    "paid_fallback_not_used": True,
+                },
+            )
+        finally:
+            conn.close()
+        if delivery.get("sent"):
+            return await video_debug_safe_reply_text(update.message, video_provider_recover_text(payload))
+        payload = {
+            **payload,
+            "blocker": "telegram_raw_video_delivery_failed",
+            "debug": {**dict(payload.get("debug") or {}), "recovery_blocker": "telegram_raw_video_delivery_failed"},
+        }
+    return await video_debug_safe_reply_text(update.message, video_provider_recover_text(payload))
 
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
@@ -180709,6 +181106,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_delivery_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_artifact_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_provider_job_debug", cmd_video_provider_job_debug))
+    tg_app.add_handler(CommandHandler("video_provider_raw_status", cmd_video_provider_raw_status))
+    tg_app.add_handler(CommandHandler("video_provider_recover", cmd_video_provider_recover))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))

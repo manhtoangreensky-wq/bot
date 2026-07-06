@@ -32,11 +32,14 @@ def pytest_collection_modifyitems(config, items):
         "test_p0_17c2_static_guard_no_unrelated_files_touched": "docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md",
         "test_p0_17c4_static_guard_no_unrelated_files_touched": "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
         "test_no_engine_files_touched_for_pricing_combo_task": "tests/test_p0_21b_clean_pricing_packages_combos_back_routing.py",
+        "test_music_h14m_scope_does_not_touch_forbidden_runtime_areas": "tests/test_p0_23h14m_music_delivery_lock_no_duplicate_mp3_no_late_x.py",
+        "test_h14n_no_product_video_subdub_voice_payos_db_changes": "tests/test_p0_23h14n_music_female_real_output_and_one_mp3_only.py",
+        "test_h14o_does_not_touch_product_video_subdub_voice_payos_db": "tests/test_p0_23h14o_music_female_suggestion_one_mp3_only.py",
     }
     for item in items:
         report_path = branch_scoped_static_guards.get(item.name)
         if report_path and report_path not in changed:
-            item.add_marker(pytest.mark.skip(reason=f"{item.name} applies only to its PayOS branch diff."))
+            item.add_marker(pytest.mark.skip(reason=f"{item.name} applies only to its scoped branch diff."))
 
 
 @pytest.fixture

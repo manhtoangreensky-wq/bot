@@ -244,12 +244,21 @@ def _progress_from_raw(raw: Any) -> Any:
     if raw in (None, ""):
         return None
     if isinstance(raw, dict):
-        for key in ("provider_progress_percent", "progress_percent", "progress", "percent", "percentage"):
+        for key in (
+            "provider_progress_raw",
+            "shopaikey_data_progress_raw",
+            "data_progress_raw",
+            "provider_progress_percent",
+            "progress_percent",
+            "progress",
+            "percent",
+            "percentage",
+        ):
             value = raw.get(key)
             if value not in (None, ""):
                 return value
-        for value in raw.values():
-            nested = _progress_from_raw(value)
+        for key in ("data", "result", "output", "response", "raw", "provider_raw", "poll_raw"):
+            nested = _progress_from_raw(raw.get(key))
             if nested not in (None, ""):
                 return nested
     if isinstance(raw, (list, tuple)):
@@ -784,6 +793,8 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             "SHOPAIKEY_VIDEO_STATUS_ENDPOINT",
         )
         poll_url = poll_url or str(namespace_cfg.get("poll_url") or "")
+        if not poll_url and submit_url:
+            poll_url = submit_url.rstrip("/")
         generic_ready = bool(
             submit_url
             and poll_url
