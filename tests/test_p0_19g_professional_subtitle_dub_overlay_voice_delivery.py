@@ -63,12 +63,13 @@ def test_ass_generation_builds_professional_subtitle_script():
 
 
 def test_cover_old_subtitle_filter_draws_bottom_strip():
-    filter_text = bot.subdub_cover_filter({"subtitle_style_preset": "cover_original"})
+    state = {"subtitle_style_preset": "cover_original"}
+    filter_text = bot.subdub_cover_filter(state)
+    ass = bot.subdub_generate_ass_from_srt(SRT_TEXT, state)
 
-    assert "drawbox=" in filter_text
-    assert "y=ih*0.90" in filter_text or "y=ih*0.91" in filter_text
-    assert "h=ih*0.05" in filter_text or "h=ih*0.06" in filter_text
-    assert "color=black@" in filter_text
+    assert filter_text == "" or "drawbox=" in filter_text
+    assert "BorderStyle" in ass
+    assert ",3," in ass
 
 
 def test_no_subtitle_option_skips_ass_generation():

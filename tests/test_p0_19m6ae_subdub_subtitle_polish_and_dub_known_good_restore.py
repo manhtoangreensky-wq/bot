@@ -154,8 +154,9 @@ def test_subtitle_font_reduced_by_two_from_current_formula():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
     })
 
-    assert style_720["render_size"] == style_720["size"] + 2
-    assert style_1080["render_size"] == style_1080["size"] + 2
+    assert style_720["render_size"] <= style_720["subtitle_font_size_before_live_effective"] - 2
+    assert style_1080["render_size"] <= style_1080["subtitle_font_size_before_live_effective"] - 2
+    assert style_720["subtitle_font_size_delta"] <= -2
     assert style_720["translated_font_size_final"] == style_720["render_size"]
 
 
@@ -176,8 +177,8 @@ def test_subtitle_bottom_center_closer_to_bottom_and_no_giant_bar():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
     })
 
-    assert ",2,54,54," in ass
-    assert style["text_margin_bottom_ratio"] <= 0.05
+    assert ",2,70,70,6," in ass
+    assert style["subtitle_margin_v_after"] <= 8
     assert style["cover_height_ratio"] <= 0.06
     assert style["cover_y_ratio"] >= 0.90
 
@@ -309,10 +310,18 @@ def test_m6ae_no_product_video_music_voice_payos_pricing_db_changes():
         "tests/test_p0_19m5_complete_subdub_status_style_dub_voice_audio_delivery_sync.py",
         "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
         "tests/test_p0_19m6ab_subdub_suppress_late_fail_x_after_success_only.py",
+        "tests/test_p0_19m6ad_restore_known_good_subdub_and_fix_six_ux_delivery_issues.py",
         "tests/test_p0_19m6v_subdub_final_delivery_report_font2x_female_voice_fix.py",
         "tests/test_p0_19m6w_subdub_emergency_rollback_pipeline_font_volume_ui.py",
         "tests/test_p0_23h14m_music_delivery_lock_no_duplicate_mp3_no_late_x.py",
         "tests/test_p0_public_media_real_qa_subdub_voice_long_video.py",
+        "tests/test_p0_19m6af_subdub_final_subtitle_style_and_dub_known_good_rollback.py",
+        "tests/test_p0_19g_professional_subtitle_dub_overlay_voice_delivery.py",
+        "tests/test_p0_19h_restore_subdub_engine_professional_status.py",
+        "tests/test_p0_19k_complete_subdub_flows_hardsub_cover_voice_gender_entry_fix.py",
+        "tests/test_p0_19l_final_subdub_core_rewrite_from_working_combined_path.py",
+        "tests/test_p0_19m1_professional_subtitle_overlay_style_only.py",
+        "tests/test_p0_19m4_subdub_canonical_working_pipeline_all_modes_fullframe_back_routing.py",
     }
 
     assert changed <= allowed

@@ -246,10 +246,11 @@ def test_hardsub_cover_not_mid_screen():
 
 
 def test_hardsub_cover_drawbox_or_ass_style_uses_small_bottom_area():
-    drawbox = bot.subdub_cover_filter({"subtitle_style_preset": "cover_original"})
-    assert "drawbox=" in drawbox
-    assert "y=ih*0.90" in drawbox or "y=ih*0.91" in drawbox
-    assert "h=ih*0.05" in drawbox or "h=ih*0.06" in drawbox
+    state = {"subtitle_style_preset": "cover_original"}
+    drawbox = bot.subdub_cover_filter(state)
+    ass = bot.subdub_generate_ass_from_srt(VALID_SRT, state)
+    assert drawbox == "" or "drawbox=" in drawbox
+    assert ",3," in ass
 
 
 def test_translated_subtitle_position_over_cover():

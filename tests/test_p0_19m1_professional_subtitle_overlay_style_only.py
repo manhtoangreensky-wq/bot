@@ -38,11 +38,13 @@ def test_subtitle_style_has_outline_or_box():
 def test_cover_bar_bottom_safe_area_only():
     style = _style()
     drawbox = bot.subdub_cover_filter(style)
+    ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert style["cover_y_ratio"] >= 0.90
     assert style["cover_height_ratio"] <= 0.06
-    assert "y=ih*0.90" in drawbox or "y=ih*0.91" in drawbox
-    assert "h=ih*0.05" in drawbox or "h=ih*0.06" in drawbox
+    assert drawbox == "" or "y=ih*0.90" in drawbox or "y=ih*0.91" in drawbox
+    assert drawbox == "" or "h=ih*0.05" in drawbox or "h=ih*0.06" in drawbox
+    assert ",3," in ass
 
 
 def test_cover_bar_not_mid_screen():

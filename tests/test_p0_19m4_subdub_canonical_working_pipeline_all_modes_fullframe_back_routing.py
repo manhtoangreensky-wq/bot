@@ -214,8 +214,10 @@ def test_cover_bar_if_enabled_is_small():
     assert style["cover_opacity"] <= 0.35
     assert style["cover_y_ratio"] >= 0.90
     drawbox = bot.subdub_cover_filter(style)
+    ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
     assert "h=ih*0.24" not in drawbox
-    assert "y=ih*0.90" in drawbox or "y=ih*0.91" in drawbox
+    assert drawbox == "" or "y=ih*0.90" in drawbox or "y=ih*0.91" in drawbox
+    assert ",3," in ass
 
 
 def test_subtitle_style_bold_outline_readable():

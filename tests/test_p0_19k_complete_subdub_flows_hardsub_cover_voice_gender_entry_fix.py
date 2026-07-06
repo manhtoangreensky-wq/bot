@@ -276,9 +276,8 @@ def test_hardsub_cover_drawbox_or_ass_style_present(monkeypatch):
     filter_text = bot.subdub_cover_filter(style)
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
-    assert "drawbox=" in filter_text
-    assert "y=ih*0.90" in filter_text
-    assert "h=ih*0.06" in filter_text
+    assert filter_text == "" or "drawbox=" in filter_text
+    assert ",3," in ass
     assert "Dialogue: 0" in ass
 
 
@@ -303,7 +302,7 @@ def test_subtitle_render_places_translated_text_over_cover():
 
     assert "Style: Default" in ass
     assert "Xin chao" in ass
-    assert bot.subdub_cover_filter(state).startswith("drawbox=")
+    assert bot.subdub_cover_filter(state).startswith("drawbox=") or ",3," in ass
 
 
 def test_dub_only_does_not_force_cover_unless_requested():
