@@ -1860,7 +1860,7 @@ SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "false")
 SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.35, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.30)))
 SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.02, min(0.06, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.05)))
 SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.90, min(0.96, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.91)))
-SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.04, min(0.09, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.065)))
+SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.04, min(0.09, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.05)))
 SUBDUB_SUBTITLE_FONT_MULTIPLIER = max(1.0, min(1.25, env_float("SUBDUB_SUBTITLE_FONT_MULTIPLIER", 1.08)))
 SUBDUB_SUBTITLE_TEXT_BOX_ENABLED = env_flag("SUBDUB_SUBTITLE_TEXT_BOX_ENABLED", "true")
 SUBDUB_VIDEO_FIT_MODE = (_env("SUBDUB_VIDEO_FIT_MODE", "cover") or "cover").strip().lower()
@@ -169260,19 +169260,54 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             VIDEO_SUBTITLE_MODE_DUB: "Video lồng tiếng",
             VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Video phụ đề + lồng tiếng",
         }
+        type_labels = {
+            VIDEO_SUBTITLE_MODE_CREATE: "Tạo phụ đề",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "Dịch phụ đề",
+            VIDEO_SUBTITLE_MODE_DUB: "Lồng tiếng",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Phụ đề + lồng tiếng",
+        }
         product_label = product_labels.get(mode, "Video đã xử lý")
+        type_label = type_labels.get(mode, product_label)
+        job_code = (
+            result.get("public_job_id")
+            or result.get("subdub_public_job_id")
+            or result.get("job_id")
+            or result.get("internal_job_id")
+            or state.get("public_job_id")
+            or state.get("subdub_public_job_id")
+            or state.get("_pipeline_job_id")
+            or state.get("job_id")
+            or ""
+        )
+        job_line = f"• Mã xử lý: <code>{html.escape(subdub_public_job_code(str(job_code)))}</code>\n" if job_code else ""
+        target_language = str(result.get("target_language") or state.get("target_language") or "").strip()
+        language_line = f"• Ngôn ngữ đích: <b>{html.escape(target_language)}</b>\n" if target_language else ""
         if normalize_user_language(lang) != "vi":
             return (
                 "✅ <b>Completed</b>\n\n"
+                f"{job_line}"
                 f"• Result: <b>{html.escape(product_label)}</b>\n"
+                f"• Type: <b>{html.escape(type_label)}</b>\n"
                 f"• Duration: <b>{html.escape(duration)}</b>\n"
-                f"• {cost_line}"
+                f"• Plan/price: {cost_line}\n"
+                "• Status: <b>Video sent</b>"
             )
+        success_titles = {
+            VIDEO_SUBTITLE_MODE_CREATE: "✅ <b>Đã tạo video phụ đề thành công.</b>",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "✅ <b>Đã tạo video phụ đề thành công.</b>",
+            VIDEO_SUBTITLE_MODE_DUB: "✅ <b>Đã tạo video lồng tiếng thành công.</b>",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "✅ <b>Đã tạo video phụ đề + lồng tiếng thành công.</b>",
+        }
         return (
-            "✅ <b>Đã hoàn tất</b>\n\n"
+            f"{success_titles.get(mode, '✅ <b>Đã hoàn tất.</b>')}\n\n"
+            f"{job_line}"
             f"• Kết quả: <b>{html.escape(product_label)}</b>\n"
+            f"• Loại: <b>{html.escape(type_label)}</b>\n"
             f"• Thời lượng: <b>{html.escape(duration)}</b>\n"
-            f"• {cost_line}"
+            f"• Gói/Giá: {cost_line}\n"
+            f"• Đã trừ: <b>{int(charged_xu or 0)} Xu</b>\n"
+            f"{language_line}"
+            "• Trạng thái: <b>Đã gửi video</b>"
         )
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_completed_text(state, result, lang)
@@ -172570,7 +172605,8 @@ def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
         ratio = 0.052 if vertical else 0.062
         cap = max(50, int(round(height * ratio)))
         cap = min(cap, 68 if vertical else 64)
-    return subdub_clamp_int(min(target, cap), min(target, cap), 40, 68)
+    current_effective = subdub_clamp_int(min(target, cap), min(target, cap), 40, 68)
+    return subdub_clamp_int(current_effective - 2, current_effective - 2, 38, 66)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
@@ -172778,7 +172814,7 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     normalized = re.sub(r"[{}]", "", normalized)
     play_res_x = max(480, int(style.get("play_res_x") or 1280))
     font_size = max(24, int(style.get("render_size") or style.get("size") or 48))
-    max_chars = max(14, min(46, int((play_res_x * 0.82) / (font_size * 0.58))))
+    max_chars = max(14, min(42, int((play_res_x * 0.76) / (font_size * 0.58))))
     words = re.sub(r"\s+", " ", normalized).strip().split(" ")
     limit = max(1, int(max_lines or 2))
     total_chars = len(" ".join(words))
@@ -172795,9 +172831,25 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     if current:
         lines.append(current)
     if len(lines) > limit:
-        consumed = sum(len(line.split()) for line in lines[:limit - 1])
-        lines = lines[:limit]
-        lines[-1] = " ".join(words[consumed:])
+        balanced: list[str] = []
+        target_chars = max(max_chars, int(math.ceil(total_chars / limit)))
+        current = ""
+        for word in (item for item in words if item):
+            candidate = f"{current} {word}".strip()
+            remaining_slots = max(1, limit - len(balanced))
+            remaining_words = len([item for item in words if item]) - sum(len(line.split()) for line in balanced)
+            if current and len(candidate) > target_chars and remaining_slots > 1 and remaining_words > remaining_slots:
+                balanced.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            balanced.append(current)
+        if len(balanced) > limit:
+            consumed = sum(len(line.split()) for line in balanced[:limit - 1])
+            balanced = balanced[:limit]
+            balanced[-1] = " ".join(words[consumed:])
+        lines = balanced
     return r"\N".join(line.replace("\\", r"\\") for line in lines if line)
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
@@ -173091,6 +173143,10 @@ async def send_public_subtitle_dub_final_outputs(
     is_combined = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     requires_final_mp4 = subdub_video_requires_final_mp4(mode)
     metadata_enabled = bool(strict_validation)
+    video_product_subtitle_mode = bool(
+        active_flow not in {VIDEO_DUBBING_FLOW_TRANSCRIPT, VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}
+        and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+    )
     sent = {
         "documents": 0,
         "audio": 0,
@@ -173119,6 +173175,10 @@ async def send_public_subtitle_dub_final_outputs(
         "audio_fallback_public_enabled": bool(SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED),
         "audio_fallback_suppressed": False,
         "audio_artifact_internal_only": False,
+        "srt_auto_send_suppressed": False,
+        "srt_suppress_reason": "",
+        "partial_copy_suppressed": False,
+        "explicit_srt_download_available": False,
     }
     if video_bytes:
         if metadata_enabled:
@@ -173180,6 +173240,13 @@ async def send_public_subtitle_dub_final_outputs(
                     sent["final_mp4_delivered"] = True
                     if source == "compressed":
                         sent["delivery_method"] = "compressed_document"
+                if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
+                    sent["srt_fallback_suppressed"] = True
+                    sent["auto_srt_after_video_prevented"] = True
+                    sent["srt_auto_send_suppressed"] = True
+                    sent["srt_suppress_reason"] = "video_delivered"
+                    sent["partial_copy_suppressed"] = True
+                    sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
                 return True
             except Exception as exc:
                 sent["delivery_reason"] = type(exc).__name__
@@ -173250,6 +173317,17 @@ async def send_public_subtitle_dub_final_outputs(
     if subdub_should_skip_public_subtitle_fallback(existing_job, sent):
         sent["srt_fallback_suppressed"] = True
         sent["auto_srt_after_video_prevented"] = True
+        sent["srt_auto_send_suppressed"] = True
+        sent["srt_suppress_reason"] = "video_delivered"
+        sent["partial_copy_suppressed"] = True
+        wanted_types = ()
+    elif video_product_subtitle_mode and sent.get("final_mp4_delivered"):
+        sent["srt_fallback_suppressed"] = True
+        sent["auto_srt_after_video_prevented"] = bool(sent.get("final_mp4_delivered") or video_bytes)
+        sent["srt_auto_send_suppressed"] = True
+        sent["srt_suppress_reason"] = "video_delivered"
+        sent["partial_copy_suppressed"] = True
+        sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
         wanted_types = ()
     elif not include_subtitle_outputs:
         wanted_types = ()
@@ -175584,6 +175662,10 @@ async def _execute_video_dubbing_pipeline_core(
             "final_video_message_id": str(delivery.get("video_delivery_message_id") or delivery.get("telegram_message_id") or ""),
             "srt_fallback_suppressed": bool(delivery.get("srt_fallback_suppressed")),
             "auto_srt_after_video_prevented": bool(delivery.get("auto_srt_after_video_prevented")),
+            "srt_auto_send_suppressed": bool(delivery.get("srt_auto_send_suppressed")),
+            "srt_suppress_reason": str(delivery.get("srt_suppress_reason") or ""),
+            "partial_copy_suppressed": bool(delivery.get("partial_copy_suppressed")),
+            "explicit_srt_download_available": bool(delivery.get("explicit_srt_download_available")),
         }
     except Exception:
         refund_charged_credit(
@@ -175797,6 +175879,10 @@ async def _execute_video_dubbing_pipeline_core(
             "partial_audio_after_failure_prevented": bool(delivery.get("partial_audio_after_failure_prevented")),
             "srt_fallback_suppressed": bool(delivery.get("srt_fallback_suppressed")),
             "auto_srt_after_video_prevented": bool(delivery.get("auto_srt_after_video_prevented")),
+            "srt_auto_send_suppressed": bool(delivery.get("srt_auto_send_suppressed")),
+            "srt_suppress_reason": str(delivery.get("srt_suppress_reason") or ""),
+            "partial_copy_suppressed": bool(delivery.get("partial_copy_suppressed")),
+            "explicit_srt_download_available": bool(delivery.get("explicit_srt_download_available")),
             "delivered_at": time.time() if result_terminal_state == "delivered" else "",
             "terminal_locked_at": time.time(),
             "late_fail_suppressed": bool(result_terminal_state == "delivered" or partial_audio_delivered),
@@ -175863,6 +175949,10 @@ async def _execute_video_dubbing_pipeline_core(
         "audio_fallback_public_enabled": bool(delivery.get("audio_fallback_public_enabled")),
         "audio_fallback_suppressed": bool(delivery.get("audio_fallback_suppressed")),
         "audio_artifact_internal_only": bool(delivery.get("audio_artifact_internal_only")),
+        "srt_auto_send_suppressed": bool(delivery.get("srt_auto_send_suppressed")),
+        "srt_suppress_reason": str(delivery.get("srt_suppress_reason") or ""),
+        "partial_copy_suppressed": bool(delivery.get("partial_copy_suppressed")),
+        "explicit_srt_download_available": bool(delivery.get("explicit_srt_download_available")),
         "terminal_state": result_terminal_state,
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,

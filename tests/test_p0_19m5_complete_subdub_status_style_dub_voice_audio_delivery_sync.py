@@ -130,9 +130,12 @@ def test_auto_subtitle_sends_video_and_srt_without_audio():
         )
     )
     assert sent["video"] == 1
-    assert sent["documents"] == 1
+    assert sent["documents"] == 0
     assert sent["audio"] == 0
-    assert [kind for kind, _payload in message.calls] == ["video", "document"]
+    assert sent["srt_auto_send_suppressed"] is True
+    assert sent["srt_suppress_reason"] == "video_delivered"
+    assert sent["explicit_srt_download_available"] is True
+    assert [kind for kind, _payload in message.calls] == ["video"]
 
 
 def test_terminal_lock_stores_video_message_id_and_suppresses_late_fail():
@@ -179,8 +182,9 @@ def test_subtitle_ass_uses_moderate_boxed_readable_style():
     )
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
     font_size = int(re.search(r"Style: Default,[^,]+,(\d+),", ass).group(1))
-    assert font_size >= style["size"] + 4
-    assert font_size <= 64
+    assert font_size == style["render_size"]
+    assert font_size <= style["size"] + 2
+    assert font_size <= 66
     assert font_size >= style["size"]
     assert 1.0 <= style["subtitle_font_multiplier"] <= 1.25
     assert style["font_size_cap_applied"] in {True, False}
@@ -202,10 +206,11 @@ def test_receipt_does_not_show_fail_after_video_delivery():
         {"mode": bot.VIDEO_SUBTITLE_MODE_DUB},
         {"video_delivered": True, "charged": 12, "terminal_state": "delivered"},
     )
-    assert "Đã hoàn tất" in text
+    assert "Đã tạo video lồng tiếng thành công" in text
     assert "Thời lượng:" in text
-    assert "Chi phí:" in text
-    assert "Đã tạo video lồng tiếng." not in text
+    assert "Gói/Giá:" in text
+    assert "Đã gửi video" in text
+    assert text.count("Đã tạo video") == 1
     assert "chưa" not in text.lower()
     assert "lỗi" not in text.lower()
 
