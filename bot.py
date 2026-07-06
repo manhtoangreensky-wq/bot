@@ -97,7 +97,7 @@ from services import audio_postprocess, minimax_voice_adapter, product_progress_
 from services import telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_router, worker_auth
-from services.video_provider_base import mask_provider_task_id
+from services.video_provider_base import VideoPollResult, mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
@@ -8963,7 +8963,7 @@ def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, s
         return {}, ""
     result = _video_debug_json((video_job or {}).get("result_json"), {})
     product_type = video_final_output.product_type_from_project(project or {}, result or {}) or "multiscene_video"
-    provider_telemetry = video_b14_provider_telemetry(video_job, result, refresh_source="progress_status_debug")
+    provider_telemetry = video_b14_reconciled_provider_debug(video_job, project, result, refresh_source="progress_status_debug")
     provider_alive = bool(provider_telemetry.get("provider_task_alive"))
     reconciled_progress = safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 0)
     reconciled_status = str(provider_telemetry.get("final_status_after_reconcile") or (video_job or {}).get("status") or "")
@@ -9106,6 +9106,10 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• provider_progress_raw_number: <code>{html.escape(str((job or {}).get('provider_progress_raw_number') or '-'))}</code>\n"
             f"• provider_progress_source: <code>{html.escape(str((job or {}).get('provider_progress_source') or '-')[:80])}</code>\n"
             f"• HTTP 200 ignored as progress: <code>{'yes' if (job or {}).get('http_200_not_used_as_progress') else 'no'}</code>\n"
+            f"• canonical task: <code>{html.escape(str((job or {}).get('canonical_task_id_masked') or '-'))}</code>\n"
+            f"• canonical source: <code>{html.escape(str((job or {}).get('canonical_task_source') or '-'))}</code>\n"
+            f"• canonical selected reason: <code>{html.escape(str((job or {}).get('canonical_task_selected_reason') or '-'))}</code>\n"
+            f"• canonical all task ids: <code>{html.escape(','.join(str(item) for item in ((job or {}).get('canonical_all_task_ids_masked') or [])) or '-')}</code>\n"
             f"• ShopAIKey exact status endpoint: <code>{'yes' if (job or {}).get('shopaikey_status_endpoint_exact') else 'no'}</code>\n"
             f"• ShopAIKey status HTTP: <code>{safe_int((job or {}).get('shopaikey_status_http_code'), 0)}</code>\n"
             f"• ShopAIKey data.status: <code>{html.escape(str((job or {}).get('shopaikey_raw_status') or '-')[:120])}</code>\n"
@@ -46409,7 +46413,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         "🧪 <b>Video Render Debug</b>",
         "",
         f"• Mode: <code>{html.escape(mode)}</code>",
-        f"• Runtime commit: <code>{html.escape(str(PUBLIC_VERSION or APP_VERSION or '-'))}</code>",
+        f"• Runtime commit: <code>{html.escape(str(APP_BUILD_SHA or APP_BUILD or PUBLIC_VERSION or '-'))}</code>",
         f"• Job: <code>{jid}</code>",
         f"• Project: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• Product type: <code>{html.escape(product_type)}</code>",
@@ -46420,6 +46424,10 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• Progress message: <code>{html.escape(str((job or {}).get('progress_message') or '-')[:160])}</code>",
         f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
         f"• provider progress raw number: <code>{html.escape(str(result.get('provider_progress_raw_number') or '-'))}</code>",
+        f"• canonical task: <code>{html.escape(str(result.get('canonical_task_id_masked') or '-'))}</code>",
+        f"• canonical source: <code>{html.escape(str(result.get('canonical_task_source') or '-'))}</code>",
+        f"• canonical selected reason: <code>{html.escape(str(result.get('canonical_task_selected_reason') or '-'))}</code>",
+        f"• canonical all task ids: <code>{html.escape(','.join(str(item) for item in (result.get('canonical_all_task_ids_masked') or [])) or '-')}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• provider progress trusted: <code>{'yes' if result.get('provider_progress_trusted') else 'no'}</code>",
         f"• provider progress cap reason: <code>{html.escape(str(result.get('provider_progress_cap_reason') or '-'))}</code>",
@@ -46457,6 +46465,10 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• worker claim status: <code>{html.escape(str(result.get('worker_claim_status') or '-'))}</code>",
         f"• worker claim reason: <code>{html.escape(str(result.get('worker_claim_reason') or '-')[:220])}</code>",
         f"• process: <code>{html.escape(str(result.get('process_hostname') or '-'))}</code> pid=<code>{safe_int(result.get('process_pid'), 0) or '-'}</code>",
+        f"• worker git SHA: <code>{html.escape(str(result.get('worker_git_sha') or '-'))}</code>",
+        f"• worker parser version: <code>{html.escape(str(result.get('worker_parser_version') or '-'))}</code>",
+        f"• worker started at: <code>{html.escape(str(result.get('worker_started_at') or '-'))}</code>",
+        f"• worker code matches runtime: <code>{html.escape(str(result.get('worker_code_matches_runtime') or 'unknown'))}</code>",
         f"• Updated: <code>{html.escape(vietnam_time_display((job or {}).get('updated_at')))}</code>",
         "",
         "Payload:",
@@ -46681,6 +46693,10 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
         f"• provider progress raw number: <code>{html.escape(str(result.get('provider_progress_raw_number') or '-'))}</code>",
+        f"• canonical task: <code>{html.escape(str(result.get('canonical_task_id_masked') or '-'))}</code>",
+        f"• canonical source: <code>{html.escape(str(result.get('canonical_task_source') or '-'))}</code>",
+        f"• canonical selected reason: <code>{html.escape(str(result.get('canonical_task_selected_reason') or '-'))}</code>",
+        f"• canonical all task ids: <code>{html.escape(','.join(str(item) for item in (result.get('canonical_all_task_ids_masked') or [])) or '-')}</code>",
         f"• progress source: <code>{html.escape(str(result.get('provider_progress_source') or result.get('shopaikey_progress_source') or '-'))}</code>",
         f"• HTTP 200 ignored as progress: <code>{'yes' if result.get('http_200_not_used_as_progress') else 'no'}</code>",
         f"• ShopAIKey exact status endpoint: <code>{'yes' if result.get('shopaikey_status_endpoint_exact') else 'no'}</code>",
@@ -46728,6 +46744,10 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• worker claim route: <code>{html.escape(str(result.get('worker_claim_route') or '-'))}</code>",
         f"• worker claim status: <code>{html.escape(str(result.get('worker_claim_status') or '-'))}</code>",
         f"• process: <code>{html.escape(str(result.get('process_hostname') or '-'))}</code> pid=<code>{safe_int(result.get('process_pid'), 0) or '-'}</code>",
+        f"• worker git SHA: <code>{html.escape(str(result.get('worker_git_sha') or '-'))}</code>",
+        f"• worker parser version: <code>{html.escape(str(result.get('worker_parser_version') or '-'))}</code>",
+        f"• worker started at: <code>{html.escape(str(result.get('worker_started_at') or '-'))}</code>",
+        f"• worker code matches runtime: <code>{html.escape(str(result.get('worker_code_matches_runtime') or 'unknown'))}</code>",
         f"• submit exception: <code>{html.escape(str(result.get('provider_submit_exception_class') or result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('provider_submit_exception_message_safe') or result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• submit url configured: <code>{'yes' if result.get('provider_submit_url_configured') or result.get('submit_url_configured') else 'no'}</code>",
         f"• submit url host: <code>{html.escape(str(result.get('provider_submit_url_host') or '-'))}</code>",
@@ -46794,6 +46814,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider config source: <code>{_video_debug_safe_value(result.get('provider_config_source'), 120)}</code>",
         f"• actual processor: <code>{_video_debug_safe_value(result.get('actual_processor'), 80)}</code>",
         f"• worker service mode: <code>{_video_debug_safe_value(result.get('worker_service_mode'), 80)}</code>",
+        f"• worker git SHA: <code>{_video_debug_safe_value(result.get('worker_git_sha'), 80)}</code>",
+        f"• worker parser version: <code>{_video_debug_safe_value(result.get('worker_parser_version'), 80)}</code>",
+        f"• worker code matches runtime: <code>{_video_debug_safe_value(result.get('worker_code_matches_runtime') or 'unknown', 40)}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
@@ -46811,6 +46834,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider model present: <code>{'yes' if result.get('provider_model_present') or result.get('provider_payload_model') else 'no'}</code>",
         f"• payload model: <code>{_video_debug_safe_value(result.get('provider_payload_model'), 120)}</code>",
         f"• payload keys: <code>{_video_debug_safe_value(','.join(str(item) for item in (result.get('provider_payload_keys') or result.get('payload_keys') or [])), 220)}</code>",
+        f"• canonical task: <code>{_video_debug_safe_value(result.get('canonical_task_id_masked'), 80)}</code>",
+        f"• canonical source: <code>{_video_debug_safe_value(result.get('canonical_task_source'), 100)}</code>",
+        f"• canonical reason: <code>{_video_debug_safe_value(result.get('canonical_task_selected_reason'), 100)}</code>",
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• render video progress: <code>{safe_int(result.get('render_video_progress_percent') or result.get('provider_render_progress_percent'), 0)}%</code>",
         f"• render video progress public: <code>{_video_debug_safe_value(result.get('render_video_progress_percent_public'), 40)}</code>",
@@ -46959,6 +46985,394 @@ def _video_provider_recover_adapter(provider: str):
     return None
 
 
+def _video_provider_normalize_name(value: str) -> str:
+    target = str(value or "").strip().lower()
+    return {
+        "shopai": "shopaikey_video",
+        "shopaikey": "shopaikey_video",
+        "key4u": "key4u_video",
+        "k4u": "key4u_video",
+        "toanaas": "toanaas_video",
+    }.get(target, target)
+
+
+def _video_provider_task_candidates(result: dict, project: dict | None = None) -> list[dict]:
+    payload = dict(result or {})
+    candidates: list[dict] = []
+    order = 0
+
+    def add(mapping: dict, source: str, *, provider_hint: str = "", task_value="") -> None:
+        nonlocal order
+        if not isinstance(mapping, dict):
+            return
+        provider = _video_provider_normalize_name(
+            mapping.get("provider")
+            or mapping.get("provider_name")
+            or mapping.get("selected_provider")
+            or provider_hint
+            or payload.get("selected_provider")
+            or payload.get("provider_pending_provider")
+        )
+        task_id = str(
+            task_value
+            or mapping.get("provider_task_id")
+            or mapping.get("task_id")
+            or mapping.get("id_base")
+            or mapping.get("provider_video_id")
+            or mapping.get("video_id")
+            or mapping.get("videoId")
+            or ""
+        ).strip()
+        if not task_id or task_id == "-":
+            return
+        order += 1
+        status = str(
+            mapping.get("shopaikey_raw_status")
+            or mapping.get("provider_status_raw")
+            or mapping.get("poll_raw_status")
+            or mapping.get("raw_status")
+            or mapping.get("normalized_provider_status")
+            or mapping.get("provider_status")
+            or mapping.get("normalized_status")
+            or mapping.get("status")
+            or ""
+        ).strip()
+        result_url = str(
+            mapping.get("result_url")
+            or mapping.get("provider_result_url")
+            or mapping.get("file_url")
+            or mapping.get("download_url")
+            or mapping.get("output_url")
+            or ""
+        ).strip()
+        candidates.append(
+            {
+                "provider": provider or "shopaikey_video",
+                "task_id": task_id,
+                "source": source,
+                "status": status,
+                "result_url": result_url,
+                "timestamp": str(
+                    mapping.get("polled_at")
+                    or mapping.get("updated_at")
+                    or mapping.get("submitted_at")
+                    or mapping.get("created_at")
+                    or ""
+                ),
+                "order": order,
+                "primary": source in {
+                    "persisted_job.provider_pending_task_id",
+                    "persisted_job.provider_task_id",
+                    "persisted_job.provider_task_ids",
+                },
+            }
+        )
+
+    provider_hint = _video_provider_normalize_name(
+        payload.get("provider_pending_provider")
+        or payload.get("selected_provider")
+        or payload.get("provider")
+    )
+    for key in ("provider_pending_task_id", "provider_task_id", "task_id", "id_base"):
+        add(payload, f"persisted_job.{key}", provider_hint=provider_hint, task_value=payload.get(key))
+    for key in ("provider_task_ids", "provider_video_ids"):
+        values = payload.get(key) or []
+        if not isinstance(values, (list, tuple, set)):
+            values = [values]
+        for value in values:
+            add(payload, f"persisted_job.{key}", provider_hint=provider_hint, task_value=value)
+    for group_name in (
+        "provider_attempts",
+        "provider_pending_attempts",
+        "provider_fallback_attempts",
+        "fallback_provider_attempts",
+        "provider_events",
+    ):
+        for item in payload.get(group_name) or []:
+            if isinstance(item, dict):
+                add(item, group_name, provider_hint=provider_hint)
+
+    project = dict(project or {})
+    for field_name in ("asset_pack_json", "story_bible_json", "addon_plan_json", "invoice_json"):
+        metadata = _video_debug_json(project.get(field_name), {})
+        if not isinstance(metadata, dict):
+            continue
+        for key in ("provider_pending_task_id", "provider_task_id", "task_id", "id_base"):
+            add(metadata, f"project.{field_name}.{key}", provider_hint=provider_hint, task_value=metadata.get(key))
+        for item in metadata.get("provider_attempts") or []:
+            if isinstance(item, dict):
+                add(item, f"project.{field_name}.provider_attempts", provider_hint=provider_hint)
+
+    merged: dict[tuple[str, str], dict] = {}
+    for candidate in candidates:
+        key = (candidate["provider"], candidate["task_id"])
+        existing = merged.get(key)
+        if not existing:
+            merged[key] = candidate
+            continue
+        existing["primary"] = bool(existing.get("primary") or candidate.get("primary"))
+        existing["order"] = max(safe_int(existing.get("order"), 0), safe_int(candidate.get("order"), 0))
+        if candidate.get("status"):
+            existing["status"] = candidate["status"]
+        if candidate.get("result_url"):
+            existing["result_url"] = candidate["result_url"]
+        if candidate.get("timestamp"):
+            existing["timestamp"] = candidate["timestamp"]
+        sources = [item for item in str(existing.get("source") or "").split(",") if item]
+        if candidate["source"] not in sources:
+            sources.append(candidate["source"])
+        existing["source"] = ",".join(sources)
+    return list(merged.values())
+
+
+def _video_provider_status_class(value: str, *, result_url: str = "") -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"success", "succeeded", "completed", "complete", "done", "finished"} or (
+        result_url and normalized not in {"failed", "failure", "cancelled", "canceled", "error"}
+    ):
+        return "succeeded"
+    if normalized in {"running", "processing", "in_progress", "pending", "queued", "submitted", "created", "not_start"}:
+        return "running"
+    if normalized in {"failed", "failure", "cancelled", "canceled", "error"}:
+        return "failed"
+    return normalized or "unknown"
+
+
+def _video_provider_canonical_parser_fields(poll_result) -> dict:
+    if poll_result is None:
+        return {}
+    raw = dict(getattr(poll_result, "raw", {}) or {})
+    progress_raw = raw.get("shopaikey_data_progress_raw")
+    if progress_raw in (None, ""):
+        progress_raw = raw.get("provider_progress_raw")
+    progress_number = getattr(poll_result, "progress_percent", None)
+    if progress_number in (None, ""):
+        progress_number = raw.get("provider_progress_raw_number")
+    result_url = str(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "") or "")
+    return {
+        "shopaikey_status_endpoint_exact": bool(raw.get("shopaikey_status_endpoint_exact")),
+        "shopaikey_status_http_code": safe_int(raw.get("shopaikey_status_http_code") or raw.get("poll_http_status"), 0),
+        "shopaikey_raw_status": str(raw.get("shopaikey_raw_status") or getattr(poll_result, "raw_status", "") or ""),
+        "shopaikey_normalized_status": str(raw.get("shopaikey_normalized_status") or getattr(poll_result, "status", "") or ""),
+        "shopaikey_data_progress_raw": progress_raw if progress_raw not in (None, "") else "",
+        "shopaikey_progress_source": "data.progress" if progress_raw not in (None, "") else "none",
+        "shopaikey_result_url_from_data": bool(raw.get("shopaikey_result_url_from_data")),
+        "shopaikey_data_result_url_present": bool(result_url),
+        "provider_progress_raw": progress_raw if progress_raw not in (None, "") else "",
+        "provider_progress_raw_number": progress_number if progress_number not in (None, "") else "",
+        "provider_progress_source": "data.progress" if progress_raw not in (None, "") else "none",
+        "http_200_not_used_as_progress": True,
+        "result_url_source_path": str(raw.get("result_url_source_path") or raw.get("result_field_path") or "none"),
+        "result_url_primary_path_checked": bool(raw.get("result_url_primary_path_checked")),
+        "result_url_found": bool(result_url),
+        "result_url_present": bool(result_url),
+        "provider_result_url_present": bool(result_url),
+        "normalized_provider_status": str(getattr(poll_result, "status", "") or ""),
+        "provider_status": str(getattr(poll_result, "status", "") or ""),
+    }
+
+
+def resolve_canonical_video_provider_task(
+    job_id: int,
+    *,
+    conn=None,
+    job: dict | None = None,
+    project: dict | None = None,
+    result: dict | None = None,
+    poll_candidates: bool = True,
+) -> dict:
+    """Resolve one stable Product Video task without submitting or falling back."""
+    jid = safe_int(job_id, 0)
+    owns_conn = conn is None and (job is None or project is None or result is None)
+    if owns_conn:
+        conn = db_connect()
+    try:
+        if job is None and conn is not None:
+            job = video_project_queue.get_video_render_job(conn, jid)
+        if project is None and conn is not None and job:
+            project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0))
+        if result is None:
+            result = _video_debug_json((job or {}).get("result_json"), {})
+        candidates = _video_provider_task_candidates(dict(result or {}), project)
+        adapter_cache: dict[str, object] = {}
+        for candidate in candidates:
+            candidate["status_class"] = _video_provider_status_class(
+                candidate.get("status"),
+                result_url=str(candidate.get("result_url") or ""),
+            )
+            if not poll_candidates:
+                continue
+            provider = str(candidate.get("provider") or "")
+            adapter = adapter_cache.get(provider)
+            if provider not in adapter_cache:
+                adapter = _video_provider_recover_adapter(provider)
+                adapter_cache[provider] = adapter
+            if adapter is None:
+                candidate["poll_error"] = "provider_adapter_missing"
+                continue
+            try:
+                polled = adapter.poll_video_job(str(candidate.get("task_id") or ""))
+                candidate["poll_result"] = polled
+                candidate["status"] = str(getattr(polled, "raw_status", "") or getattr(polled, "status", "") or "")
+                candidate["result_url"] = str(getattr(polled, "result_url", "") or getattr(polled, "file_url", "") or "")
+                candidate["status_class"] = _video_provider_status_class(
+                    str(getattr(polled, "status", "") or candidate.get("status") or ""),
+                    result_url=candidate["result_url"],
+                )
+                candidate["parser_fields"] = _video_provider_canonical_parser_fields(polled)
+            except Exception as exc:
+                candidate["poll_error"] = type(exc).__name__
+
+        successful = [
+            item for item in candidates
+            if item.get("status_class") == "succeeded" and str(item.get("result_url") or "").strip()
+        ]
+        active = [item for item in candidates if item.get("status_class") == "running"]
+        failed = [item for item in candidates if item.get("status_class") == "failed"]
+        selected = None
+        selected_reason = "provider_task_id_missing"
+        if successful:
+            selected = max(successful, key=lambda item: (str(item.get("timestamp") or ""), safe_int(item.get("order"), 0)))
+            selected_reason = "success_result_url_wins"
+        elif active:
+            selected = max(
+                active,
+                key=lambda item: (1 if item.get("primary") else 0, str(item.get("timestamp") or ""), safe_int(item.get("order"), 0)),
+            )
+            selected_reason = "active_primary_task"
+        elif failed:
+            selected = max(failed, key=lambda item: (str(item.get("timestamp") or ""), safe_int(item.get("order"), 0)))
+            selected_reason = "terminal_failed_task"
+        elif candidates:
+            selected = max(candidates, key=lambda item: (1 if item.get("primary") else 0, safe_int(item.get("order"), 0)))
+            selected_reason = "best_persisted_candidate"
+
+        selected = dict(selected or {})
+        all_masked = [mask_provider_task_id(item.get("task_id")) for item in candidates if item.get("task_id")]
+        parser_fields = dict(selected.get("parser_fields") or {})
+        return {
+            "job_id": jid,
+            "canonical_task_id": str(selected.get("task_id") or ""),
+            "canonical_task_id_masked": mask_provider_task_id(selected.get("task_id")),
+            "canonical_provider": str(selected.get("provider") or ""),
+            "canonical_source": str(selected.get("source") or ""),
+            "canonical_status": str(selected.get("status_class") or "unknown"),
+            "canonical_result_url": str(selected.get("result_url") or ""),
+            "canonical_poll_result": selected.get("poll_result"),
+            "all_task_ids_masked": all_masked,
+            "task_count": len(candidates),
+            "selected_reason": selected_reason,
+            "canonical_task_ambiguity": len(candidates) > 1,
+            "candidate_summaries": [
+                {
+                    "provider": str(item.get("provider") or ""),
+                    "task_id_masked": mask_provider_task_id(item.get("task_id")),
+                    "source": str(item.get("source") or ""),
+                    "status": str(item.get("status_class") or "unknown"),
+                    "result_url_present": bool(item.get("result_url")),
+                    "poll_error": str(item.get("poll_error") or ""),
+                }
+                for item in candidates
+            ],
+            **parser_fields,
+        }
+    finally:
+        if owns_conn and conn is not None:
+            conn.close()
+
+
+def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | None = None) -> dict:
+    current = dict(data or {})
+    canonical = dict(canonical or {})
+    task_id = str(canonical.get("canonical_task_id") or "").strip()
+    provider = str(canonical.get("canonical_provider") or "").strip()
+    result_url = str(canonical.get("canonical_result_url") or "").strip()
+    parser_keys = {
+        "shopaikey_status_endpoint_exact",
+        "shopaikey_status_http_code",
+        "shopaikey_raw_status",
+        "shopaikey_normalized_status",
+        "shopaikey_data_progress_raw",
+        "shopaikey_progress_source",
+        "shopaikey_result_url_from_data",
+        "shopaikey_data_result_url_present",
+        "provider_progress_raw",
+        "provider_progress_raw_number",
+        "provider_progress_source",
+        "http_200_not_used_as_progress",
+        "result_url_source_path",
+        "result_url_primary_path_checked",
+        "result_url_found",
+        "result_url_present",
+        "provider_result_url_present",
+        "normalized_provider_status",
+        "provider_status",
+    }
+    if canonical:
+        current.update(
+            {
+                "r8d_canonical_parser_active": True,
+                "canonical_task_id_masked": canonical.get("canonical_task_id_masked") or "-",
+                "canonical_provider": provider or "-",
+                "canonical_task_source": canonical.get("canonical_source") or "-",
+                "canonical_task_selected_reason": canonical.get("selected_reason") or "-",
+                "canonical_task_count": safe_int(canonical.get("task_count"), 0),
+                "canonical_all_task_ids_masked": list(canonical.get("all_task_ids_masked") or []),
+                "canonical_task_ambiguity": bool(canonical.get("canonical_task_ambiguity")),
+                "canonical_candidate_summaries": list(canonical.get("candidate_summaries") or []),
+                "canonical_status": canonical.get("canonical_status") or "-",
+                "canonical_result_url_present": bool(result_url),
+            }
+        )
+    if task_id:
+        current["provider_pending_task_id"] = task_id
+        current["provider_task_id_saved"] = True
+        task_ids = [str(item) for item in (current.get("provider_task_ids") or []) if str(item or "").strip()]
+        if task_id not in task_ids:
+            task_ids.insert(0, task_id)
+        current["provider_task_ids"] = task_ids
+    if provider:
+        current["provider_pending_provider"] = provider
+        current.setdefault("selected_provider", provider)
+    if result_url:
+        current["provider_result_url_present"] = True
+        current["result_url_present"] = True
+        current["result_url_found"] = True
+        current["result_url"] = result_url
+    for key in parser_keys:
+        value = canonical.get(key)
+        if value not in (None, "") and (
+            key.startswith("shopaikey_")
+            or key in {
+                "provider_progress_source",
+                "http_200_not_used_as_progress",
+                "result_url_source_path",
+                "result_url_primary_path_checked",
+                "result_url_found",
+                "result_url_present",
+                "provider_result_url_present",
+            }
+            or current.get(key) in (None, "", 0, 200, "200")
+        ):
+            current[key] = value
+    if canonical.get("http_200_not_used_as_progress"):
+        if current.get("provider_progress_raw") in (200, "200"):
+            current["provider_progress_raw"] = ""
+        if current.get("provider_progress_raw_number") in (200, "200"):
+            current["provider_progress_raw_number"] = ""
+    if canonical.get("canonical_status") == "succeeded":
+        current["provider_poll_called"] = True
+        current["continue_polling"] = False
+        current["normalized_provider_status"] = "succeeded"
+        current["provider_status"] = "succeeded"
+    elif canonical.get("canonical_status") == "running":
+        current["provider_poll_called"] = True
+        current["continue_polling"] = True
+        current["normalized_provider_status"] = "running"
+        current["provider_status"] = "running"
+    return current
+
+
 def _video_provider_recover_debug_from_poll(poll_result) -> dict:
     raw = dict(getattr(poll_result, "raw", {}) or {})
     return {
@@ -47005,9 +47419,21 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
         if not job:
             return {"ok": False, "blocker": "job_not_found", "job_id": jid, "charge": 0}
         result = _video_debug_json((job or {}).get("result_json"), {})
-        identity = _video_provider_recover_identity(result if isinstance(result, dict) else {})
-        provider = str(identity.get("provider") or "").strip()
-        task_id = str(identity.get("task_id") or "").strip()
+        project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0))
+        canonical = resolve_canonical_video_provider_task(
+            jid,
+            conn=conn,
+            job=job,
+            project=project,
+            result=result if isinstance(result, dict) else {},
+            poll_candidates=True,
+        )
+        provider = str(canonical.get("canonical_provider") or "").strip()
+        task_id = str(canonical.get("canonical_task_id") or "").strip()
+        identity = {
+            "task_id_masked": canonical.get("canonical_task_id_masked"),
+            "task_id_source": canonical.get("canonical_source"),
+        }
         if not task_id:
             _video_provider_update_job_result(
                 conn,
@@ -47021,6 +47447,27 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
                 },
             )
             return {"ok": False, "blocker": "provider_task_id_missing", "job_id": jid, "provider": provider or "-", "charge": 0}
+        if download and bool((result or {}).get("raw_provider_video_delivered")):
+            return {
+                "ok": True,
+                "already_delivered": True,
+                "blocker": "",
+                "job_id": jid,
+                "provider": provider,
+                "task_id_masked": identity.get("task_id_masked"),
+                "debug": {
+                    "recovery_raw_video_sent": True,
+                    "raw_provider_video_delivered": True,
+                    "duplicate_delivery_prevented": True,
+                    "no_new_paid_submit": True,
+                    "paid_fallback_not_used": True,
+                    "recovery_charge_xu": 0,
+                    "canonical_task_id_masked": canonical.get("canonical_task_id_masked"),
+                    "canonical_task_source": canonical.get("canonical_source"),
+                    "canonical_task_selected_reason": canonical.get("selected_reason"),
+                },
+                "charge": 0,
+            }
         adapter = _video_provider_recover_adapter(provider)
         if adapter is None:
             _video_provider_update_job_result(
@@ -47038,17 +47485,34 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             )
             return {"ok": False, "blocker": "provider_adapter_missing", "job_id": jid, "provider": provider or "-", "task_id_masked": identity.get("task_id_masked"), "charge": 0}
 
-        poll_result = adapter.poll_video_job(task_id)
+        poll_result = canonical.get("canonical_poll_result")
+        if poll_result is None:
+            poll_result = adapter.poll_video_job(task_id)
         poll_debug = _video_provider_recover_debug_from_poll(poll_result)
-        normalized = str(getattr(poll_result, "status", "") or poll_debug.get("recovery_normalized_status") or "")
+        normalized = _video_provider_status_class(
+            str(getattr(poll_result, "status", "") or poll_debug.get("recovery_normalized_status") or ""),
+            result_url=str(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "") or ""),
+        )
+        all_task_ids = [
+            str(item.get("task_id") or "")
+            for item in _video_provider_task_candidates(result if isinstance(result, dict) else {}, project)
+            if str(item.get("task_id") or "").strip()
+        ]
         updates = {
             "video_provider_recover_called": True,
             "video_provider_recover_download_requested": bool(download),
             "existing_provider_task_id_found": True,
             "provider_pending_provider": provider,
             "provider_pending_task_id": task_id,
-            "provider_task_ids": [task_id],
+            "provider_task_ids": list(dict.fromkeys(all_task_ids or [task_id])),
             "provider_task_id_masked": identity.get("task_id_masked"),
+            "canonical_task_id_masked": canonical.get("canonical_task_id_masked"),
+            "canonical_task_source": canonical.get("canonical_source"),
+            "canonical_task_selected_reason": canonical.get("selected_reason"),
+            "canonical_task_count": safe_int(canonical.get("task_count"), 0),
+            "canonical_all_task_ids_masked": list(canonical.get("all_task_ids_masked") or []),
+            "canonical_task_ambiguity": bool(canonical.get("canonical_task_ambiguity")),
+            "canonical_candidate_summaries": list(canonical.get("candidate_summaries") or []),
             "no_new_paid_submit": True,
             "paid_fallback_not_used": True,
             "recovery_charge_xu": 0,
@@ -47056,7 +47520,7 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             "delivery_type": "raw_provider_video",
             **poll_debug,
         }
-        if normalized in {"queued", "running", "processing", "pending", "in_progress", "not_start"}:
+        if normalized == "running":
             updates.update(
                 {
                     "recovery_status": "waiting_provider_result",
@@ -47076,7 +47540,7 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
                 "debug": updates,
                 "charge": 0,
             }
-        if normalized in {"failed", "cancelled"}:
+        if normalized == "failed":
             updates.update(
                 {
                     "recovery_status": "provider_failed",
@@ -47129,6 +47593,7 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             }
 
         artifact = adapter.materialize_result(poll_result, f"recovery_job_{jid}")
+        download_debug = dict(getattr(artifact, "diagnostics", {}) or {})
         updates.update(
             {
                 "recovery_status": "raw_provider_video_downloaded" if artifact.ok else "raw_provider_video_download_failed",
@@ -47140,6 +47605,9 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
                 "raw_provider_video_duration": float(artifact.duration or 0.0),
                 "recovery_blocker": "" if artifact.ok else (artifact.error_code or "provider_download_failed"),
                 "continue_polling": False,
+                "terminal_state": "recover_ready_for_delivery" if artifact.ok else "recover_failed",
+                "no_charge": True,
+                **download_debug,
             }
         )
         _video_provider_update_job_result(conn, jid, updates)
@@ -47174,12 +47642,24 @@ def video_provider_recover_text(payload: dict) -> str:
         f"• job id: <code>{jid or '-'}</code>",
         f"• provider: <code>{provider}</code>",
         f"• task id: <code>{task_masked}</code>",
+        f"• canonical source: <code>{html.escape(str(debug.get('canonical_task_source') or '-'))}</code>",
+        f"• canonical selected reason: <code>{html.escape(str(debug.get('canonical_task_selected_reason') or '-'))}</code>",
+        f"• task count: <code>{safe_int(debug.get('canonical_task_count'), 0)}</code>",
+        f"• all task ids: <code>{html.escape(','.join(str(item) for item in (debug.get('canonical_all_task_ids_masked') or [])) or '-')}</code>",
         f"• poll endpoint exact: <code>{'yes' if debug.get('recovery_poll_endpoint_exact') else 'no'}</code>",
         f"• poll http: <code>{safe_int(debug.get('recovery_poll_http_status'), 0)}</code>",
         f"• data.status: <code>{status}</code>",
         f"• data.progress: <code>{progress}</code>",
         f"• result_url present: <code>{result_url_present}</code>",
         f"• download success: <code>{'yes' if debug.get('recovery_download_success') else 'no'}</code>",
+        f"• download HTTP: <code>{safe_int(debug.get('download_http_status'), 0)}</code>",
+        f"• result URL host/scheme/ext: <code>{html.escape(str(debug.get('result_url_host') or '-'))}</code>/<code>{html.escape(str(debug.get('result_url_scheme') or '-'))}</code>/<code>{html.escape(str(debug.get('result_url_ext') or '-'))}</code>",
+        f"• result URL query present: <code>{'yes' if debug.get('result_url_query_present') else 'no'}</code>",
+        f"• redirect count: <code>{safe_int(debug.get('download_redirect_count'), 0)}</code>",
+        f"• content type/length: <code>{html.escape(str(debug.get('download_content_type') or '-'))}</code>/<code>{safe_int(debug.get('download_content_length'), 0)}</code>",
+        f"• download error: <code>{html.escape(str(debug.get('download_error_class') or '-'))}</code>",
+        f"• MP4 validator: <code>{html.escape(str(debug.get('mp4_validator_result') or '-'))}</code>",
+        f"• first bytes: <code>{html.escape(str(debug.get('first_bytes_hex_safe') or '-'))}</code>",
         f"• raw MP4 bytes: <code>{safe_int(debug.get('raw_provider_video_bytes'), 0)}</code>",
         f"• no new submit: <code>yes</code>",
         f"• paid fallback: <code>no</code>",
@@ -67194,10 +67674,26 @@ def video_b14_primary_alive_attempt(result: dict | None = None) -> dict:
 
 
 def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict | None = None, result: dict | None = None, *, refresh_source: str = "debug") -> dict:
-    del project
     data = dict(result or {})
+    canonical_fields: dict = {}
+    try:
+        jid = safe_int((job or {}).get("id") or (job or {}).get("job_id"), 0)
+        if jid > 0:
+            canonical = resolve_canonical_video_provider_task(
+                jid,
+                job=dict(job or {}),
+                project=dict(project or {}),
+                result=data,
+                poll_candidates=True,
+            )
+            canonical_fields = _video_provider_merge_canonical_task_debug({}, canonical)
+            data = _video_provider_merge_canonical_task_debug(data, canonical)
+    except Exception as exc:
+        data["canonical_task_resolver_error"] = type(exc).__name__
     telemetry = video_b14_provider_telemetry(job, data, refresh_source=refresh_source)
     data.update(telemetry)
+    if canonical_fields:
+        data.update(canonical_fields)
     if telemetry.get("provider_task_alive"):
         primary = video_b14_primary_alive_attempt(data)
         for key in (
@@ -67249,6 +67745,11 @@ def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict |
         data.setdefault("summary_provider_attempt_source", "result_json")
         data.setdefault("summary_fields_from_primary_alive_task", False)
         data.setdefault("stale_failed_attempt_ignored", False)
+    worker_sha = str(data.get("worker_git_sha") or "").strip()
+    if worker_sha and APP_BUILD_SHA:
+        data["worker_code_matches_runtime"] = "yes" if worker_sha.startswith(APP_BUILD_SHA[:12]) or APP_BUILD_SHA.startswith(worker_sha[:12]) else "no"
+    else:
+        data.setdefault("worker_code_matches_runtime", "unknown")
     return data
 
 
@@ -67368,7 +67869,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             project = {}
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
     job_result = video_b14_job_result_payload(job)
-    provider_telemetry = video_b14_provider_telemetry(job, job_result, refresh_source="public_panel")
+    reconciled_job_result = video_b14_reconciled_provider_debug(job, project, job_result, refresh_source="public_panel")
+    if reconciled_job_result.get("shopaikey_status_endpoint_exact") or reconciled_job_result.get("canonical_result_url_present"):
+        job_result = reconciled_job_result
+        provider_telemetry = reconciled_job_result
+    else:
+        provider_telemetry = video_b14_provider_telemetry(job, job_result, refresh_source="public_panel")
     provider_task_alive = bool(provider_telemetry.get("provider_task_alive"))
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
