@@ -149,8 +149,87 @@ def _progress_raw_number(value: Any) -> float | None:
     return raw
 
 
+R8B_SHOPAIKEY_STATUS_KEYS = (
+    "shopaikey_status_endpoint_exact",
+    "shopaikey_status_http_code",
+    "shopaikey_raw_status",
+    "shopaikey_normalized_status",
+    "shopaikey_data_progress_raw",
+    "shopaikey_progress_source",
+    "shopaikey_result_url_from_data",
+    "shopaikey_data_result_url_present",
+    "shopaikey_fail_reason",
+    "provider_progress_raw",
+    "provider_progress_raw_number",
+    "provider_progress_source",
+    "http_200_not_used_as_progress",
+    "result_url_primary_path_checked",
+    "result_url_found",
+    "result_url_source_path",
+)
+
+
+def _non_empty(value: Any) -> bool:
+    return value not in (None, "")
+
+
+def _provider_attempts(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    attempts: list[dict[str, Any]] = []
+    for key in ("provider_attempts", "provider_pending_attempts", "provider_fallback_attempts", "fallback_provider_attempts"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            attempts.extend(dict(item) for item in value if isinstance(item, dict))
+    return attempts
+
+
+def _r8b_shopaikey_parser_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the newest ShopAIKey R8B parser fields from payload or attempts."""
+    payload = dict(payload or {})
+    selected = str(payload.get("selected_provider") or payload.get("selected_provider_before_submit") or payload.get("provider_pending_provider") or "").strip()
+    candidates: list[dict[str, Any]] = []
+    if any(key in payload for key in R8B_SHOPAIKEY_STATUS_KEYS):
+        candidates.append(payload)
+    for item in _provider_attempts(payload):
+        provider = str(item.get("provider") or "").strip()
+        if selected and provider and provider != selected:
+            continue
+        if any(key in item for key in R8B_SHOPAIKEY_STATUS_KEYS):
+            candidates.append(item)
+    if not candidates and selected:
+        for item in _provider_attempts(payload):
+            if any(key in item for key in R8B_SHOPAIKEY_STATUS_KEYS):
+                candidates.append(item)
+    result: dict[str, Any] = {}
+    for item in candidates:
+        for key in R8B_SHOPAIKEY_STATUS_KEYS:
+            value = item.get(key)
+            if _non_empty(value):
+                result[key] = value
+            elif key not in result and isinstance(value, bool):
+                result[key] = value
+    return result
+
+
+def _progress_source(payload: dict[str, Any], parser_fields: dict[str, Any]) -> str:
+    for key in ("provider_progress_source", "shopaikey_progress_source"):
+        value = parser_fields.get(key)
+        if _non_empty(value):
+            return str(value)
+    for key in ("provider_progress_source", "shopaikey_progress_source"):
+        value = payload.get(key)
+        if _non_empty(value):
+            return str(value)
+    return "none"
+
+
 def _extract_progress_raw(payload: dict[str, Any]) -> Any:
+    parser_fields = _r8b_shopaikey_parser_fields(payload)
+    for key in ("shopaikey_data_progress_raw", "provider_progress_raw"):
+        value = parser_fields.get(key)
+        if _non_empty(value):
+            return value
     for key in (
+        "shopaikey_data_progress_raw",
         "provider_progress_raw",
         "provider_progress_percent",
         "provider_progress_normalized",
@@ -392,6 +471,8 @@ def reconcile_provider_progress_telemetry(
     raw_progress = _extract_progress_raw(payload)
     normalized_progress = _progress_from_value(raw_progress)
     raw_progress_number = _progress_raw_number(raw_progress)
+    parser_fields = _r8b_shopaikey_parser_fields(payload)
+    provider_progress_source = _progress_source(payload, parser_fields)
     poll_count, poll_count_source = _provider_poll_count_with_source(payload)
     result_url_present = _provider_result_url_present(payload)
     final_output_ready = _provider_final_output_ready(payload)
@@ -420,7 +501,18 @@ def reconcile_provider_progress_telemetry(
         provider_status=provider_status,
         provider_progress_trusted=provider_progress_trusted,
     )
-    provider_progress_public_suppressed = bool(alive and not final_output_ready and not result_url_present and not provider_progress_trusted)
+    provider_progress_public_suppressed = bool(
+        alive
+        and not final_output_ready
+        and not result_url_present
+        and (
+            not provider_progress_trusted
+            or bool(parser_fields.get("http_200_not_used_as_progress") or payload.get("http_200_not_used_as_progress"))
+        )
+    )
+    if provider_progress_public_suppressed:
+        render_progress = 0
+        render_source = "indeterminate"
     render_progress_public_mode = "zero_waiting" if provider_progress_public_suppressed else "percent"
     render_progress_public_percent = "0" if provider_progress_public_suppressed else str(render_progress)
     fake_progress_prevention_reason = "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else ""
@@ -470,6 +562,7 @@ def reconcile_provider_progress_telemetry(
         "final_progress": final_progress,
         "progress_source": progress_source,
         "provider_progress_raw": raw_progress if raw_progress not in (None, "") else "",
+        "provider_progress_source": provider_progress_source,
         "provider_progress_normalized": normalized_progress,
         "provider_progress_trusted": bool(provider_progress_trusted),
         "provider_progress_cap_reason": provider_progress_cap_reason,
@@ -521,6 +614,19 @@ def reconcile_provider_progress_telemetry(
         "provider_status_normalized": payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
         "result_url_present": bool(result_url_present),
         "provider_result_url_present": bool(result_url_present),
+        "http_200_not_used_as_progress": bool(parser_fields.get("http_200_not_used_as_progress") or payload.get("http_200_not_used_as_progress")),
+        "shopaikey_status_endpoint_exact": bool(parser_fields.get("shopaikey_status_endpoint_exact") or payload.get("shopaikey_status_endpoint_exact")),
+        "shopaikey_status_http_code": _as_int(parser_fields.get("shopaikey_status_http_code") or payload.get("shopaikey_status_http_code"), 0),
+        "shopaikey_raw_status": parser_fields.get("shopaikey_raw_status") or payload.get("shopaikey_raw_status") or "",
+        "shopaikey_normalized_status": parser_fields.get("shopaikey_normalized_status") or payload.get("shopaikey_normalized_status") or "",
+        "shopaikey_data_progress_raw": parser_fields.get("shopaikey_data_progress_raw") or payload.get("shopaikey_data_progress_raw") or "",
+        "shopaikey_progress_source": parser_fields.get("shopaikey_progress_source") or payload.get("shopaikey_progress_source") or "",
+        "shopaikey_result_url_from_data": bool(parser_fields.get("shopaikey_result_url_from_data") or payload.get("shopaikey_result_url_from_data")),
+        "shopaikey_data_result_url_present": bool(parser_fields.get("shopaikey_data_result_url_present") or payload.get("shopaikey_data_result_url_present")),
+        "shopaikey_fail_reason": parser_fields.get("shopaikey_fail_reason") or payload.get("shopaikey_fail_reason") or "",
+        "result_url_primary_path_checked": bool(parser_fields.get("result_url_primary_path_checked") or payload.get("result_url_primary_path_checked")),
+        "result_url_found": bool(parser_fields.get("result_url_found") or payload.get("result_url_found")),
+        "result_url_source_path": parser_fields.get("result_url_source_path") or payload.get("result_url_source_path") or "",
         "next_poll_scheduled": bool(payload.get("next_poll_scheduled") or alive),
         "next_poll_scheduled_at": payload.get("next_poll_scheduled_at") or "",
         "panel_last_updated_at": now_text(current_dt),

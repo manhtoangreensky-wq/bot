@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from providers.video_generic_http_provider import GenericHttpVideoProvider
 from providers.video_kling_provider import KlingVideoProvider
@@ -51,6 +52,37 @@ VIDEO_CREDIT_BLOCKED_STATUSES = {
 PROVIDER_NONTERMINAL_STATUSES = {"not_start", "queued", "running", "processing", "in_progress", "pending"}
 PROVIDER_PENDING_BLOCKERS = {"provider_in_progress", "provider_pending", "provider_status_unknown"}
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
+PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY = (
+    "TOAN AAS chưa nhận được video hoàn chỉnh từ hệ thống dựng video. "
+    "Bot chưa trừ Xu. Anh/chị có thể gửi video khác hoặc thử lại sau."
+)
+
+
+def _failed_result_url_diagnostic(result_url: str) -> dict[str, Any]:
+    raw_url = str(result_url or "").strip()
+    if not raw_url:
+        return {
+            "result_url_present": False,
+            "result_url_host": "",
+            "result_url_scheme": "",
+            "result_url_ext": "",
+            "result_url_trusted": False,
+        }
+    parsed = urlparse(raw_url)
+    extension = os.path.splitext(parsed.path or "")[1].lower()
+    return {
+        "result_url_present": True,
+        "result_url_host": str(parsed.hostname or ""),
+        "result_url_scheme": str(parsed.scheme or ""),
+        "result_url_ext": extension,
+        "download_http_status": 0,
+        "download_content_type": "",
+        "download_bytes": 0,
+        "download_error_class": "provider_terminal_failure",
+        "download_error_message_masked": "Provider reported terminal failure; result URL was not trusted or downloaded.",
+        "mp4_validator_result": "not_run_provider_terminal_failure",
+        "result_url_trusted": False,
+    }
 
 
 def _env_flag(env: dict[str, str], name: str, default: str = "0") -> bool:
@@ -361,9 +393,10 @@ def _provider_pending_telemetry(
     else:
         started_source = "metadata"
         elapsed_estimated = False
-    raw_progress = poll_result.progress_percent
+    poll_raw = dict(getattr(poll_result, "raw", {}) or {})
+    raw_progress = _progress_from_raw(poll_raw)
     if raw_progress in (None, ""):
-        raw_progress = _progress_from_raw(getattr(poll_result, "raw", {}) or {})
+        raw_progress = poll_result.progress_percent
     normalized_progress = _progress_value(raw_progress)
     raw_progress_number = _progress_raw_number(raw_progress)
     elapsed = max(0, int(now_epoch - started_epoch))
@@ -382,7 +415,13 @@ def _provider_pending_telemetry(
     poll_count = sum(1 for item in attempt_traces if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll"))
     poll_count = max(0, poll_count)
     poll_count_source = "provider_attempts" if poll_count > 0 else "none"
-    provider_progress_public_suppressed = bool(not result_url_present and not trusted)
+    provider_progress_public_suppressed = bool(
+        not result_url_present
+        and (
+            not trusted
+            or bool(poll_raw.get("http_200_not_used_as_progress"))
+        )
+    )
     if result_url_present:
         render_progress = max(previous_render_progress, 95)
         render_source = "provider_result_url"
@@ -403,6 +442,7 @@ def _provider_pending_telemetry(
         "provider_started_at_source": started_source,
         "provider_elapsed_estimated": elapsed_estimated,
         "provider_progress_raw": raw_progress if raw_progress not in (None, "") else "",
+        "provider_progress_source": str(poll_raw.get("provider_progress_source") or poll_raw.get("shopaikey_progress_source") or ("poll_result" if raw_progress not in (None, "") else "none")),
         "provider_progress_normalized": normalized_progress,
         "provider_progress_raw_number": raw_progress_number if raw_progress_number is not None else "",
         "provider_progress_trusted": trusted,
@@ -441,6 +481,16 @@ def _provider_pending_telemetry(
         "result_url_present": result_url_present,
         "provider_result_url_present": result_url_present,
         "next_poll_scheduled_at": _epoch_text(now_epoch + max(1, poll_interval)),
+        "http_200_not_used_as_progress": bool(poll_raw.get("http_200_not_used_as_progress")),
+        "shopaikey_status_endpoint_exact": bool(poll_raw.get("shopaikey_status_endpoint_exact")),
+        "shopaikey_status_http_code": _debug_http_status(poll_raw, "shopaikey_status_http_code"),
+        "shopaikey_raw_status": poll_raw.get("shopaikey_raw_status") or poll_raw.get("provider_status_raw") or "",
+        "shopaikey_normalized_status": poll_raw.get("shopaikey_normalized_status") or _provider_status_for_progress(poll_result),
+        "shopaikey_data_progress_raw": poll_raw.get("shopaikey_data_progress_raw") if poll_raw.get("shopaikey_data_progress_raw") not in (None, "") else "",
+        "shopaikey_progress_source": poll_raw.get("shopaikey_progress_source") or poll_raw.get("provider_progress_source") or "none",
+        "shopaikey_result_url_from_data": bool(poll_raw.get("shopaikey_result_url_from_data")),
+        "shopaikey_data_result_url_present": bool(poll_raw.get("shopaikey_result_url_from_data") and result_url_present),
+        "result_url_source_path": poll_raw.get("result_url_source_path") or poll_raw.get("result_field_path") or "",
     }
 
 
@@ -1262,6 +1312,22 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "provider_submit_http_5xx",
         "provider_submit_retriable",
         "provider_error_message_safe",
+        "provider_progress_raw",
+        "provider_progress_raw_number",
+        "provider_progress_source",
+        "http_200_not_used_as_progress",
+        "result_url_primary_path_checked",
+        "result_url_found",
+        "result_url_source_path",
+        "shopaikey_status_endpoint_exact",
+        "shopaikey_status_http_code",
+        "shopaikey_raw_status",
+        "shopaikey_normalized_status",
+        "shopaikey_data_progress_raw",
+        "shopaikey_progress_source",
+        "shopaikey_result_url_from_data",
+        "shopaikey_data_result_url_present",
+        "shopaikey_fail_reason",
     ):
         if key in raw and key not in target:
             target[key] = raw.get(key)
@@ -1765,10 +1831,34 @@ def run_provider_generation(
                     current_trace["poll_http_status"] = poll_status
                 if raw.get("provider_status_raw") is not None:
                     current_trace["poll_raw_status"] = str(raw.get("provider_status_raw") or "")
+                if raw.get("shopaikey_raw_status") is not None:
+                    current_trace["poll_raw_status"] = str(raw.get("shopaikey_raw_status") or "")
                 if raw.get("provider_status") or raw.get("normalized_provider_status"):
                     current_trace["normalized_status"] = str(raw.get("normalized_provider_status") or raw.get("provider_status") or "")
+                if raw.get("shopaikey_normalized_status"):
+                    current_trace["normalized_status"] = str(raw.get("shopaikey_normalized_status") or "")
                 if raw.get("result_url_present") is not None:
                     current_trace["result_url_present"] = bool(raw.get("result_url_present"))
+                for key in (
+                    "shopaikey_status_endpoint_exact",
+                    "shopaikey_status_http_code",
+                    "shopaikey_raw_status",
+                    "shopaikey_normalized_status",
+                    "shopaikey_data_progress_raw",
+                    "shopaikey_progress_source",
+                    "shopaikey_result_url_from_data",
+                    "shopaikey_data_result_url_present",
+                    "provider_progress_raw",
+                    "provider_progress_raw_number",
+                    "provider_progress_source",
+                    "http_200_not_used_as_progress",
+                    "result_url_source_path",
+                    "result_url_primary_path_checked",
+                    "result_url_found",
+                    "shopaikey_fail_reason",
+                ):
+                    if key in raw:
+                        current_trace[key] = raw.get(key)
                 if raw.get("task_id_field_path") or raw.get("video_id_field_path"):
                     current_trace["task_id_source"] = str(raw.get("task_id_field_path") or raw.get("video_id_field_path") or "")
                 if raw.get("provider_task_id_present") is not None:
@@ -2154,6 +2244,8 @@ def run_provider_generation(
                         **telemetry,
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_fallback_attempted": bool(attempt_index > 0),
+                        "provider_fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                         "provider_submit_called": submit_called_flag,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(provider_task_ids),
@@ -2177,18 +2269,25 @@ def run_provider_generation(
                     payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 if poll_result.status in {"failed", "cancelled"}:
-                    blocker = poll_result.error_code or f"provider_poll_{poll_result.status}"
-                    if attempt_index + 1 < len(candidate_adapters):
+                    terminal_result_url = str(poll_result.result_url or poll_result.file_url or "").strip()
+                    result_diagnostic = _failed_result_url_diagnostic(terminal_result_url)
+                    blocker = (
+                        "provider_failed_result_url_invalid"
+                        if terminal_result_url
+                        else poll_result.error_code or f"provider_poll_{poll_result.status}"
+                    )
+                    if attempt_index + 1 < len(candidate_adapters) and not is_product_video:
                         _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
-                        if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
-                            return _paid_fallback_requires_confirmation_payload(blocker, getattr(poll_result, "raw", {}))
                         break
                     _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
                     payload = {
                         "ok": False,
                         **_attempt_base(),
+                        **result_diagnostic,
                         "fallback_used": attempt_index > 0,
                         "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_fallback_attempted": bool(attempt_index > 0),
+                        "provider_fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                         "provider_submit_called": submit_called_flag,
                         "provider_submit_http_status": submit_http_status,
                         "provider_task_id_saved": bool(submit.provider_task_id),
@@ -2198,11 +2297,24 @@ def run_provider_generation(
                         "poll_skipped_reason": "",
                         "provider_error": blocker,
                         "blocker": blocker,
+                        "provider_result_blocker": blocker,
                         "provider_status": poll_result.status,
+                        "continue_polling": False,
+                        "fallback_allowed": False,
+                        "fallback_blocked_reason": "provider_terminal_failure_no_paid_fallback" if is_product_video else "",
                         "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                         "provider_readiness": status,
+                        "no_charge": bool(allow_pending_result or (request.metadata or {}).get("product_video")),
+                        "charge": 0,
+                        "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY if is_product_video else "",
                     }
-                    _mark_trace("poll", blocker=blocker, normalized_status=poll_result.status)
+                    _mark_trace(
+                        "poll",
+                        blocker=blocker,
+                        normalized_status=poll_result.status,
+                        continue_polling=False,
+                        result_url_present=bool(terminal_result_url),
+                    )
                     payload["provider_attempts"] = _copy_attempt_traces()
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             else:

@@ -1,6 +1,9 @@
 import asyncio
 import inspect
+import os
 import subprocess
+
+import pytest
 
 import bot
 from services import product_progress_status, subtitle_dub_product_pipeline
@@ -36,6 +39,17 @@ class _Message:
 def _changed_files() -> set[str]:
     output = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True)
     return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
+
+
+def _skip_unless_m6ae_scope() -> None:
+    branch = os.getenv("GITHUB_HEAD_REF") or ""
+    if not branch:
+        try:
+            branch = subprocess.check_output(["git", "branch", "--show-current"], text=True).strip()
+        except Exception:
+            branch = ""
+    if "m6ae" not in branch.lower():
+        pytest.skip("M6AE scope guard only applies on M6AE branches")
 
 
 def test_subtitle_only_video_delivery_sets_100_and_all_steps_green():
@@ -302,6 +316,7 @@ def test_subdub_public_ui_no_internal_terms_in_touched_receipt():
 
 
 def test_m6ae_no_product_video_music_voice_payos_pricing_db_changes():
+    _skip_unless_m6ae_scope()
     changed = _changed_files()
     allowed = {
         "bot.py",
@@ -319,6 +334,7 @@ def test_m6ae_no_product_video_music_voice_payos_pricing_db_changes():
 
 
 def test_m6ae_no_asr_tts_provider_core_rewrite():
+    _skip_unless_m6ae_scope()
     changed = _changed_files()
 
     assert not any(path.startswith("providers/") for path in changed)

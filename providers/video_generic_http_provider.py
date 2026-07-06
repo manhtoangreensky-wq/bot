@@ -812,6 +812,7 @@ class GenericHttpVideoProvider:
         status, raw_status, status_path = parse_provider_status(body, has_result_url=bool(result_url))
         progress = _first_value(body, ("data.progress", "data.progress_percent", "progress", "progress_percent"))
         progress_value = _parse_progress_value(progress)
+        fail_reason = _first_value(body, ("data.fail_reason", "data.error", "data.message", "fail_reason", "error", "message"))
         is_shopaikey_status = self.provider_name == "shopaikey_video"
         raw_debug = {
             "smoke_stage": "poll_response_parse",
@@ -828,6 +829,7 @@ class GenericHttpVideoProvider:
             "provider_progress_raw_number": progress_value if progress_value is not None else "",
             "provider_progress_source": "data.progress" if progress not in (None, "") else "none",
             "http_200_not_used_as_progress": True,
+            "shopaikey_fail_reason": fail_reason if fail_reason not in (None, "") else "",
         }
         if is_shopaikey_status:
             raw_debug.update(
