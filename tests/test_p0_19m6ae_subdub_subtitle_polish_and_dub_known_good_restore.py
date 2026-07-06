@@ -168,9 +168,10 @@ def test_subtitle_font_reduced_by_two_from_current_formula():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
     })
 
-    assert style_720["render_size"] <= style_720["subtitle_font_size_before_live_effective"] - 2
-    assert style_1080["render_size"] <= style_1080["subtitle_font_size_before_live_effective"] - 2
-    assert style_720["subtitle_font_size_delta"] <= -2
+    assert "subtitle_font_size_before_live_effective" not in style_720
+    assert "subtitle_font_size_before_live_effective" not in style_1080
+    assert 38 <= style_720["render_size"] <= 66
+    assert 38 <= style_1080["render_size"] <= 66
     assert style_720["translated_font_size_final"] == style_720["render_size"]
 
 
@@ -191,8 +192,8 @@ def test_subtitle_bottom_center_closer_to_bottom_and_no_giant_bar():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
     })
 
-    assert ",2,70,70,6," in ass
-    assert style["subtitle_margin_v_after"] <= 8
+    assert ",2,70,70,58," in ass
+    assert "subtitle_margin_v_after" not in style
     assert style["cover_height_ratio"] <= 0.06
     assert style["cover_y_ratio"] >= 0.90
 

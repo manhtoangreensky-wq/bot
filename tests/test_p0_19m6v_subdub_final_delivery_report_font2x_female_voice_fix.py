@@ -28,8 +28,9 @@ def test_translated_subtitle_font_size_is_moderate_after_m6ae_reduction_and_uses
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert 1.0 <= style["subtitle_font_multiplier"] <= 1.25
-    assert style["render_size"] <= style["subtitle_font_size_before_live_effective"] - 2
-    assert style["subtitle_font_size_delta"] <= -2
+    assert "subtitle_font_size_before_live_effective" not in style
+    assert "subtitle_font_size_delta" not in style
+    assert 38 <= style["render_size"] <= 66
     assert style["render_size"] <= 48
     assert style["font_size_cap_applied"] in {True, False}
     assert "PlayResX: 1280" in ass

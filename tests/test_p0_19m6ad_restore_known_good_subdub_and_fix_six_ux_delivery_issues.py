@@ -59,7 +59,7 @@ def test_audio_mix_controls_remain_split_and_numeric():
 
 
 def test_subtitle_style_stays_moderate_bottom_center():
-    assert "live_effective_before - 2" in _source("subdub_render_subtitle_size")
+    assert "current_effective - 2" in _source("subdub_render_subtitle_size")
     assert "subdub_ass_alignment" in _source("subdub_generate_ass_from_srt")
     assert "subdub_ass_wrap_text" in _source("subdub_generate_ass_from_srt")
 

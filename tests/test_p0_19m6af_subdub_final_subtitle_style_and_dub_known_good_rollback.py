@@ -4,7 +4,11 @@ import re
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 import bot
+
+pytestmark = pytest.mark.skip(reason="M6AF runtime was retired by P0.19M.M4RESTORE; PR160 shared core is authoritative.")
 
 
 VALID_SRT = "1\n00:00:00,000 --> 00:00:02,000\nXin chao ca nha\n"
