@@ -4,7 +4,7 @@
     {
       "id": "payment_issue",
       "keywords": ["chua nhan xu", "chưa nhận xu", "nap chua vao", "nạp chưa vào", "loi thanh toan", "lỗi thanh toán", "chuyen khoan roi", "chuyển khoản rồi", "bill", "ma giao dich", "mã giao dịch"],
-      "reply": "TOAN AAS đã nhận vấn đề nạp Xu/thanh toán. Bạn gửi giúp mã xử lý, ảnh chụp lỗi nếu có và thời gian giao dịch. Không gửi token, mật khẩu hoặc thông tin nhạy cảm. Mình sẽ chuyển admin kiểm tra, chưa tự động cộng/trừ/hoàn Xu.",
+      "reply": "TOAN AAS đã nhận vấn đề nạp Xu/thanh toán. Bạn gửi giúp mã xử lý, ảnh chụp lỗi nếu có và thời gian giao dịch. Mình sẽ chuyển admin kiểm tra, chưa tự động cộng/trừ/hoàn Xu.",
       "handoff": true,
       "ticket": true
     },
@@ -18,7 +18,7 @@
     {
       "id": "technical_error",
       "keywords": ["loi video", "lỗi video", "loi anh", "lỗi ảnh", "loi phu de", "lỗi phụ đề", "long tieng", "lồng tiếng", "loi nhac", "lỗi nhạc", "khong chay", "không chạy", "that bai", "thất bại", "bi loi", "bị lỗi", "ma xu ly", "mã xử lý"],
-      "reply": "TOAN AAS đã nhận lỗi cần kiểm tra. Bạn gửi giúp mã xử lý, ảnh/chụp màn hình lỗi nếu có và thời điểm thao tác. Không gửi token hoặc mật khẩu. Mình sẽ chuyển admin xem chi tiết.",
+      "reply": "TOAN AAS đã nhận lỗi cần kiểm tra. Bạn gửi giúp mã xử lý, ảnh/chụp màn hình lỗi nếu có và thời điểm thao tác. Mình sẽ chuyển admin xem chi tiết.",
       "handoff": true,
       "ticket": true
     },

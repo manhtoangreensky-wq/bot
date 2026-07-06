@@ -79,6 +79,10 @@ def test_admin_cskh_on_enables(monkeypatch):
     import bot
 
     state = cskh.default_state()
+    state = cskh.upsert_business_connection(
+        state,
+        _obj(id="business-connection-abcdef123456", user=_obj(id=111), is_enabled=True),
+    )
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
     monkeypatch.setattr(bot, "cskh_business_state", lambda: state)
 
@@ -225,8 +229,11 @@ def test_no_music_product_video_subdub_runtime_touched():
         "bot.py",
         "services/telegram_business_support.py",
         "config/cskh_knowledge_base.json",
+        "config/cskh_training_data.json",
         "docs/cskh_telegram_business_setup.md",
+        "docs/cskh_toan_aas_playbook.md",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
     }
 

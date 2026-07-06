@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import re
 import time
 import unicodedata
 from dataclasses import asdict, dataclass
@@ -21,6 +23,63 @@ DEFAULT_MODE = "rules_only"
 VALID_MODES = {"off", "rules_only", "rules_plus_ai_draft"}
 DEFAULT_COOLDOWN_SECONDS = 60
 STATE_VERSION = 1
+TRAINING_DATA_VERSION_FALLBACK = "0"
+PUBLIC_FORBIDDEN_TERMS = (
+    "provider",
+    "api",
+    "webhook",
+    "worker",
+    "traceback",
+    "database",
+    "internal error",
+    "route",
+    "parser",
+    "debug",
+    "stack",
+    "exception",
+    "raw payload",
+    "task id provider",
+    "token",
+    "secret",
+    "key",
+    "endpoint",
+)
+UNSAFE_PROMISE_TERMS = (
+    "da hoan tien",
+    "da hoan xu",
+    "da cong xu",
+    "em da hoan",
+    "em da cong",
+    "chac chan hoan",
+    "tu dong cong xu",
+)
+URGENT_INTENTS = {
+    "payment_xu_not_received",
+    "payment_wrong_amount",
+    "payment_duplicate",
+    "payment_issue",
+    "refund_request",
+    "refund",
+    "angry_scam_accusation",
+    "product_video_stuck",
+    "product_video_failed_no_file",
+    "subdub_subtitle_error",
+    "subdub_dubbing_error",
+    "complaint_after_resolution",
+    "public_negative_comment",
+}
+LEGACY_INTENT_ALIASES = {
+    "payment_issue": "payment_issue",
+    "refund": "refund",
+    "technical_error": "technical_error",
+    "admin_handoff": "admin_handoff",
+    "pricing": "pricing",
+    "premium_private_bot": "premium_private_bot",
+    "greeting": "greeting",
+    "media_unknown": "media_unknown",
+    "out_of_scope": "out_of_scope",
+}
+_REPLY_VARIATION_COUNTER: dict[str, int] = {}
 
 
 @dataclass
@@ -51,6 +110,13 @@ def default_knowledge_base_path() -> Path:
     if configured:
         return Path(configured)
     return Path(__file__).resolve().parents[1] / "config" / "cskh_knowledge_base.json"
+
+
+def default_training_data_path() -> Path:
+    configured = os.getenv("CSKH_TRAINING_DATA_FILE", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[1] / "config" / "cskh_training_data.json"
 
 
 def default_state() -> dict:
@@ -136,6 +202,53 @@ def _fold(value: str) -> str:
     text = unicodedata.normalize("NFD", str(value or "").lower())
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     return " ".join(text.replace("đ", "d").split())
+
+
+def _fold_contains(text: str, needle: str) -> bool:
+    return bool(needle and needle in text)
+
+
+def _clean_reply_text(reply: str, *, severity: str = "normal") -> str:
+    clean = "\n".join(line.strip() for line in str(reply or "").splitlines()).strip()
+    limit = 1200 if severity == "urgent" else 900
+    if len(clean) > limit:
+        clean = clean[: limit - 1].rstrip() + "…"
+    return clean
+
+
+def _intent_id(intent: dict) -> str:
+    return str(intent.get("id") or intent.get("intent_id") or "").strip()
+
+
+def _intent_templates(intent: dict) -> list[str]:
+    templates = intent.get("reply_templates") or intent.get("safe_reply_templates") or []
+    if isinstance(templates, str):
+        templates = [templates]
+    templates = [str(item).strip() for item in templates if str(item or "").strip()]
+    single = str(intent.get("reply") or "").strip()
+    if single and single not in templates:
+        templates.append(single)
+    return templates
+
+
+def _next_step_hint(intent: dict) -> str:
+    steps = intent.get("safe_next_steps") or []
+    if isinstance(steps, str):
+        return steps
+    return str(steps[0]) if steps else "Hỏi thêm thông tin còn thiếu"
+
+
+def _training_fallback() -> dict:
+    return {
+        "version": TRAINING_DATA_VERSION_FALLBACK,
+        "brand": "TOAN AAS",
+        "language": "vi",
+        "forbidden_phrases": [],
+        "preferred_phrases": [],
+        "ticket_fields": {},
+        "intents": [],
+        "conversation_scenarios": [],
+    }
 
 
 def _media_type(message: Any) -> str:
@@ -309,6 +422,11 @@ def handoff_required(state: dict, chat_id: str) -> bool:
     return bool(entry and entry.get("enabled", True))
 
 
+def has_active_business_connection(state: dict) -> bool:
+    clean = normalize_state(state)
+    return any(bool(item.get("is_enabled", True)) for item in clean["connections"].values())
+
+
 def load_knowledge_base(path: str | Path | None = None) -> dict:
     target = Path(path) if path else default_knowledge_base_path()
     try:
@@ -327,63 +445,320 @@ def load_knowledge_base(path: str | Path | None = None) -> dict:
         }
 
 
+def load_training_data(path: str | Path | None = None) -> dict:
+    target = Path(path) if path else default_training_data_path()
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        data = _training_fallback()
+    clean = _training_fallback()
+    if isinstance(data, dict):
+        clean.update(data)
+    clean["version"] = str(clean.get("version") or TRAINING_DATA_VERSION_FALLBACK)
+    clean["intents"] = [item for item in clean.get("intents") or [] if isinstance(item, dict) and _intent_id(item)]
+    clean["conversation_scenarios"] = [item for item in clean.get("conversation_scenarios") or [] if isinstance(item, dict)]
+    return clean
+
+
 INTENT_PRIORITY = (
+    "angry_scam_accusation",
+    "public_negative_comment",
+    "payment_xu_not_received",
+    "payment_duplicate",
+    "payment_wrong_amount",
     "payment_issue",
+    "refund_request",
     "refund",
+    "product_video_failed_no_file",
+    "product_video_stuck",
+    "subdub_subtitle_error",
+    "subdub_dubbing_error",
+    "music_wrong_voice_or_duplicate_file",
+    "voice_tts_error",
     "technical_error",
     "admin_handoff",
-    "pricing",
     "premium_private_bot",
+    "job_status_check",
+    "account_or_usage_limit",
+    "product_video_quality_issue",
+    "product_video_how_to",
+    "subdub_file_too_large",
+    "subdub_how_to",
+    "music_how_to",
+    "voice_tts_how_to",
+    "image_prompt_help",
+    "free_tools_help",
+    "pricing_topup",
+    "pricing_general",
+    "pricing",
+    "new_user_what_is_toan_aas",
     "greeting",
     "media_unknown",
     "out_of_scope",
 )
 
 
-def classify_cskh_message(text: str = "", *, media_type: str = "", kb: dict | None = None) -> dict:
-    base = kb or load_knowledge_base()
-    intents = list(base.get("intents") or [])
+def _legacy_intents_from_kb(kb: dict) -> list[dict]:
+    intents = []
+    for item in kb.get("intents") or []:
+        if not isinstance(item, dict):
+            continue
+        intent_id = str(item.get("id") or "").strip()
+        if not intent_id:
+            continue
+        intents.append(
+            {
+                "id": intent_id,
+                "description": f"Legacy CSKH.1 intent {intent_id}",
+                "priority": 10,
+                "confidence_keywords": list(item.get("keywords") or []),
+                "example_user_messages": list(item.get("keywords") or [])[:8],
+                "required_context_fields": [],
+                "reply_templates": [str(item.get("reply") or "")],
+                "handoff_required": bool(item.get("handoff")),
+                "ticket_required": bool(item.get("ticket") or item.get("handoff")),
+                "safe_next_steps": ["Hỏi thêm thông tin còn thiếu"],
+                "forbidden_claims": [],
+                "severity": "urgent" if intent_id in URGENT_INTENTS else "normal",
+            }
+        )
+    return intents
+
+
+def _intent_lookup(training_data: dict, kb: dict) -> dict[str, dict]:
+    merged: dict[str, dict] = {}
+    for item in _legacy_intents_from_kb(kb):
+        merged[_intent_id(item)] = item
+    for item in training_data.get("intents") or []:
+        merged[_intent_id(item)] = item
+    return merged
+
+
+def _intent_signal_terms(intent: dict) -> list[str]:
+    terms: list[str] = []
+    for key in ("confidence_keywords", "keywords", "signals", "example_user_messages", "user_samples"):
+        values = intent.get(key) or []
+        if isinstance(values, str):
+            values = [values]
+        for value in values:
+            folded = _fold(str(value or ""))
+            if folded and folded not in terms:
+                terms.append(folded)
+    return terms
+
+
+def _score_intent(intent: dict, query: str) -> tuple[int, list[str]]:
+    score = 0
+    matches: list[str] = []
+    for term in _intent_signal_terms(intent):
+        if _fold_contains(query, term):
+            score += 4 + min(4, len(term.split()))
+            matches.append(term)
+        elif len(term.split()) >= 3 and all(part in query for part in term.split()[:3]):
+            score += 2
+            matches.append(term)
+    if score:
+        score += int(intent.get("priority") or 0) // 20
+    return score, matches
+
+
+def _select_intent(text: str, media_type: str, training_data: dict, kb: dict) -> tuple[dict, int, list[str]]:
     query = _fold(text)
     if not query and media_type:
         query = "media file tep anh video audio"
-    matches = []
-    by_id = {str(item.get("id") or ""): item for item in intents}
-    for item in intents:
-        keywords = [_fold(keyword) for keyword in item.get("keywords") or []]
-        if keywords and any(keyword and keyword in query for keyword in keywords):
-            matches.append(item)
-    if not matches and media_type and by_id.get("media_unknown"):
-        matches = [by_id["media_unknown"]]
-    if not matches:
-        fallback = by_id.get("out_of_scope") or (intents[-1] if intents else {})
-        matches = [fallback]
-    selected = matches[0]
-    matched_ids = {str(item.get("id") or "") for item in matches}
-    for intent_id in INTENT_PRIORITY:
-        if intent_id in matched_ids:
-            selected = by_id[intent_id]
-            break
-    intent_id = str(selected.get("id") or "out_of_scope")
-    reply = str(selected.get("reply") or "").strip()
-    handoff = bool(selected.get("handoff"))
+    intents = _intent_lookup(training_data, kb)
+    candidates: list[tuple[int, int, dict, list[str]]] = []
+    for intent_id, intent in intents.items():
+        score, matches = _score_intent(intent, query)
+        if score:
+            priority_rank = len(INTENT_PRIORITY) - INTENT_PRIORITY.index(intent_id) if intent_id in INTENT_PRIORITY else 0
+            candidates.append((score, priority_rank, intent, matches))
+    if candidates:
+        candidates.sort(key=lambda item: (item[0], item[1], int(item[2].get("priority") or 0)), reverse=True)
+        score, _priority_rank, selected, matches = candidates[0]
+        return selected, score, matches
+    if media_type and "media_unknown" in intents:
+        return intents["media_unknown"], 1, [media_type]
+    return intents.get("out_of_scope") or {"id": "out_of_scope", "reply_templates": ["Dạ em cần thêm thông tin để hỗ trợ đúng ạ."]}, 0, []
+
+
+def _classification_confidence(intent_id: str, score: int) -> str:
+    if intent_id == "out_of_scope" or score <= 1:
+        return "low"
+    if score >= 8:
+        return "high"
+    return "medium"
+
+
+def _classification_severity(intent: dict, intent_id: str) -> str:
+    configured = str(intent.get("severity") or "").strip().lower()
+    if configured in {"normal", "warning", "urgent"}:
+        return configured
+    return "urgent" if intent_id in URGENT_INTENTS else ("warning" if bool(intent.get("handoff_required") or intent.get("handoff")) else "normal")
+
+
+def _extract_context_fields(text: str) -> dict:
+    raw = str(text or "")
+    folded = _fold(raw)
+    fields: dict[str, str] = {}
+    job_match = re.search(r"(?:#|job|ma xu ly|mã xử lý|ma job|mã job)\s*[:#-]?\s*([A-Za-z0-9_-]{2,})", raw, re.IGNORECASE)
+    if job_match:
+        fields["job_code"] = job_match.group(1)
+        fields["music_job_id"] = job_match.group(1)
+    amount_match = re.search(r"(\d+(?:[.,]\d+)?\s*(?:k|nghin|nghìn|tr|triệu|vnd|đ|dong|đồng))", raw, re.IGNORECASE)
+    if amount_match:
+        fields["payment_amount"] = amount_match.group(1)
+        fields["amount"] = amount_match.group(1)
+    if any(term in folded for term in ("bill", "anh chuyen khoan", "anh giao dich", "bien lai", "chup giao dich", "screenshot")):
+        fields["screenshot_or_bill"] = "yes"
+    if any(term in folded for term in ("luc", "hom nay", "sang nay", "chieu nay", "toi qua", "buoi toi", "ngay", "vua", "xong")) or re.search(r"\d{1,2}:\d{2}", raw):
+        fields["payment_time"] = "mentioned"
+        fields["time_created"] = "mentioned"
+    duration_match = re.search(r"(\d+\s*(?:giay|giây|phut|phút|s|p|min|minute))", folded)
+    if duration_match:
+        fields["video_duration"] = duration_match.group(1)
+    if any(term in folded for term in ("giong nam", "giong nu", "giọng nam", "giọng nữ", "voice")):
+        fields["voice_selected"] = "mentioned"
+    if any(term in folded for term in ("tru xu", "trừ xu", "mat xu", "mất xu", "charged")):
+        fields["charged_xu"] = "mentioned"
+    if len(raw.strip()) > 0:
+        fields["issue_detail"] = raw.strip()[:240]
+        fields["user_message_summary"] = raw.strip()[:240]
+    return fields
+
+
+def _missing_fields(intent: dict, text: str) -> list[str]:
+    extracted = _extract_context_fields(text)
+    missing = []
+    for field in intent.get("required_context_fields") or []:
+        if field in {"customer_chat_id", "business_connection_id"}:
+            continue
+        if field not in extracted:
+            missing.append(str(field))
+    return missing
+
+
+def _infer_product(intent_id: str) -> str:
+    if intent_id.startswith("payment") or intent_id in {"refund", "refund_request"}:
+        return "payment_xu"
+    if intent_id.startswith("product_video"):
+        return "product_video"
+    if intent_id.startswith("subdub"):
+        return "subdub"
+    if intent_id.startswith("music"):
+        return "music"
+    if intent_id.startswith("voice"):
+        return "voice"
+    if intent_id.startswith("image"):
+        return "image_ai"
+    if intent_id in {"premium_private_bot"}:
+        return "premium_private_bot"
+    return "general"
+
+
+def _select_reply_template(intent: dict, text: str, *, severity: str, variation_seed: str | int | None = None) -> tuple[str, str]:
+    intent_id = _intent_id(intent) or "out_of_scope"
+    templates = _intent_templates(intent)
+    if not templates:
+        templates = ["Dạ em cần thêm thông tin để hỗ trợ đúng cho mình ạ. Anh/chị gửi mã xử lý hoặc mô tả vấn đề giúp em nhé."]
+    if variation_seed is None:
+        current = _REPLY_VARIATION_COUNTER.get(intent_id, 0)
+        _REPLY_VARIATION_COUNTER[intent_id] = current + 1
+        index = current % len(templates)
+    else:
+        digest = hashlib.sha256(f"{intent_id}:{variation_seed}".encode("utf-8")).hexdigest()
+        index = int(digest[:8], 16) % len(templates)
+    reply = _clean_reply_text(templates[index], severity=severity)
+    return reply, f"{intent_id}:{index + 1}"
+
+
+def build_ticket_draft(
+    classification: dict,
+    event: BusinessMessageEvent | None = None,
+    *,
+    text: str = "",
+) -> dict:
+    source_text = text or (event.text if event else "") or (event.caption if event else "")
+    extracted = _extract_context_fields(source_text)
+    intent_id = str(classification.get("intent_id") or "out_of_scope")
     return {
-        "intent_id": intent_id,
-        "reply": reply,
-        "handoff": handoff,
-        "ticket": bool(selected.get("ticket") or handoff),
-        "confidence": "rules",
-        "public_safe": public_reply_is_safe(reply),
+        "customer_chat_id": str(event.chat_id if event else ""),
+        "business_connection_id": mask_business_connection_id(event.business_connection_id if event else ""),
+        "intent": intent_id,
+        "severity": str(classification.get("severity") or "normal"),
+        "product": _infer_product(intent_id),
+        "job_code": extracted.get("job_code", ""),
+        "payment_amount": extracted.get("payment_amount", ""),
+        "payment_time": extracted.get("payment_time", ""),
+        "user_message_summary": extracted.get("user_message_summary", source_text[:240]),
+        "missing_fields": list(classification.get("missing_fields") or []),
+        "suggested_admin_action": "Kiểm tra ca theo thông tin khách gửi và phản hồi theo chính sách TOAN AAS.",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "handoff_required": bool(classification.get("handoff_required") or classification.get("handoff")),
     }
 
 
+def classify_cskh_message(
+    text: str = "",
+    *,
+    media_type: str = "",
+    kb: dict | None = None,
+    training_data: dict | None = None,
+    variation_seed: str | int | None = None,
+) -> dict:
+    base = kb or load_knowledge_base()
+    training = training_data or load_training_data()
+    selected, score, matched_terms = _select_intent(text, media_type, training, base)
+    intent_id = _intent_id(selected) or "out_of_scope"
+    confidence = _classification_confidence(intent_id, score)
+    severity = _classification_severity(selected, intent_id)
+    reply, template_id = _select_reply_template(selected, text, severity=severity, variation_seed=variation_seed)
+    handoff = bool(selected.get("handoff_required", selected.get("handoff", False)))
+    ticket = bool(selected.get("ticket_required", selected.get("ticket", handoff)))
+    if confidence == "low" and intent_id != "out_of_scope":
+        intent_id = "out_of_scope"
+        fallback = _intent_lookup(training, base).get("out_of_scope") or selected
+        severity = "normal"
+        reply, template_id = _select_reply_template(fallback, text, severity=severity, variation_seed=variation_seed)
+        handoff = bool(fallback.get("handoff_required", fallback.get("handoff", False)))
+        ticket = bool(fallback.get("ticket_required", fallback.get("ticket", handoff)))
+        selected = fallback
+    missing = _missing_fields(selected, text)
+    result = {
+        "intent": intent_id,
+        "intent_id": intent_id,
+        "reply": reply,
+        "reply_preview": reply,
+        "reply_template_id": template_id,
+        "handoff": handoff,
+        "handoff_required": handoff,
+        "ticket": ticket,
+        "ticket_required": ticket,
+        "confidence": confidence,
+        "severity": severity,
+        "missing_fields": missing,
+        "matched_keyword_groups": matched_terms,
+        "training_data_version": str(training.get("version") or TRAINING_DATA_VERSION_FALLBACK),
+        "public_safe": public_reply_is_safe(reply),
+        "safe_next_step": _next_step_hint(selected),
+        "forbidden_claims": list(selected.get("forbidden_claims") or []),
+    }
+    if ticket or handoff:
+        result["ticket_preview"] = build_ticket_draft(result, text=text)
+    return result
+
+
 def classify_business_event(event: BusinessMessageEvent, kb: dict | None = None) -> dict:
-    return classify_cskh_message(event.text or event.caption, media_type=event.media_type, kb=kb)
+    result = classify_cskh_message(event.text or event.caption, media_type=event.media_type, kb=kb)
+    if result.get("ticket") or result.get("handoff"):
+        result["ticket_preview"] = build_ticket_draft(result, event, text=event.text or event.caption)
+    return result
 
 
 def public_reply_is_safe(reply: str) -> bool:
     folded = _fold(reply)
-    forbidden = ("provider", "api", "env", "debug", "traceback", "endpoint", "secret", "internal")
-    return not any(term in folded for term in forbidden)
+    hard_forbidden = tuple(_fold(term) for term in PUBLIC_FORBIDDEN_TERMS + UNSAFE_PROMISE_TERMS)
+    return not any(term and term in folded for term in hard_forbidden)
 
 
 def evaluate_auto_reply_guard(
@@ -443,6 +818,9 @@ def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: 
     clean["last_intent"][str(event.chat_id)] = str(classification.get("intent_id") or "")
     clean["last_debug"] = {
         "classified_intent": classification.get("intent_id"),
+        "confidence": classification.get("confidence"),
+        "severity": classification.get("severity"),
+        "ticket_required": bool(classification.get("ticket") or classification.get("ticket_required")),
         "reply_sent": True,
         "reply_method_business_connection_id_present": bool(
             (send_result or {}).get("payload", {}).get("business_connection_id")

@@ -339,9 +339,12 @@ def test_m6ae_no_product_video_music_voice_payos_pricing_db_changes():
         "tests/test_p0_19m1_professional_subtitle_overlay_style_only.py",
         "tests/test_p0_19m4_subdub_canonical_working_pipeline_all_modes_fullframe_back_routing.py",
         "config/cskh_knowledge_base.json",
+        "config/cskh_training_data.json",
         "docs/cskh_telegram_business_setup.md",
+        "docs/cskh_toan_aas_playbook.md",
         "services/telegram_business_support.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
     }
 
     assert changed <= allowed
