@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -92,6 +93,7 @@ class VideoArtifactResult:
     error_code: str = ""
     error_message: str = ""
     content_type: str = ""
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -213,38 +215,133 @@ def materialize_video_url(
 ) -> VideoArtifactResult:
     source = str(url or "").strip()
     if not source:
-        return VideoArtifactResult(ok=False, error_code="provider_result_url_missing")
+        return VideoArtifactResult(
+            ok=False,
+            error_code="provider_result_url_missing",
+            diagnostics={"result_url_present": False, "mp4_validator_result": "not_run_missing_url"},
+        )
+    parsed_source = urllib.parse.urlsplit(source)
+    source_path = str(parsed_source.path or "")
+    source_ext = Path(source_path).suffix.lower()
+    diagnostics: dict[str, Any] = {
+        "result_url_present": True,
+        "result_url_host": str(parsed_source.hostname or "")[:160],
+        "result_url_scheme": str(parsed_source.scheme or "")[:20],
+        "result_url_ext": source_ext[:20],
+        "result_url_query_present": bool(parsed_source.query),
+        "trusted_video_url": bool(
+            parsed_source.scheme in {"http", "https"} and parsed_source.hostname
+        ) or os.path.isfile(source),
+        "download_http_status": 0,
+        "download_final_url_host": "",
+        "download_redirect_count": 0,
+        "download_content_type": "",
+        "download_content_length": 0,
+        "download_bytes": 0,
+        "download_error_class": "",
+        "download_error_message_masked": "",
+        "mp4_validator_result": "not_run",
+        "first_bytes_hex_safe": "",
+    }
     out_dir = Path(output_dir or os.environ.get("VIDEO_PROVIDER_OUTPUT_DIR") or os.environ.get("VIDEO_PROVIDER_WORK_DIR") or "video_outputs")
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_job = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(job_id or "job"))[:80]
     target = out_dir / f"{filename_prefix}_{safe_job}.mp4"
     content_type = ""
+
+    class _CountingRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def __init__(self):
+            super().__init__()
+            self.redirect_count = 0
+
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            self.redirect_count += 1
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
     try:
         if os.path.isfile(source):
             shutil.copyfile(source, target)
             content_type = "video/mp4"
+            diagnostics["download_http_status"] = 200
+            diagnostics["download_final_url_host"] = "local_file"
         else:
             request = urllib.request.Request(source, headers={"User-Agent": "TOAN-AAS-video-provider/1.0"})
-            with urllib.request.urlopen(request, timeout=max(1, int(timeout_seconds or 180))) as response:
+            redirect_handler = _CountingRedirectHandler()
+            opener = urllib.request.build_opener(redirect_handler)
+            with opener.open(request, timeout=max(1, int(timeout_seconds or 180))) as response:
                 content_type = str(response.headers.get("Content-Type") or "")
+                final_url = str(response.geturl() or "")
+                final_parts = urllib.parse.urlsplit(final_url)
+                try:
+                    content_length = int(response.headers.get("Content-Length") or 0)
+                except Exception:
+                    content_length = 0
+                diagnostics.update(
+                    {
+                        "download_http_status": int(getattr(response, "status", 0) or response.getcode() or 0),
+                        "download_final_url_host": str(final_parts.hostname or "")[:160],
+                        "download_redirect_count": int(redirect_handler.redirect_count),
+                        "download_content_length": content_length,
+                    }
+                )
                 with target.open("wb") as handle:
                     shutil.copyfileobj(response, handle)
     except Exception as exc:
-        return VideoArtifactResult(ok=False, local_path=str(target), error_code="provider_download_failed", error_message=type(exc).__name__)
-    if not target.exists() or target.stat().st_size <= 0:
-        return VideoArtifactResult(ok=False, local_path=str(target), error_code="output_zero_bytes", content_type=content_type)
-    rejected = _reject_non_video_payload(target, content_type)
-    if rejected:
-        return VideoArtifactResult(ok=False, local_path=str(target), bytes=int(target.stat().st_size), error_code=rejected, content_type=content_type)
-    probe = video_final_output.probe_video(str(target))
-    if not probe.get("ok"):
+        diagnostics.update(
+            {
+                "download_error_class": type(exc).__name__,
+                "download_error_message_masked": type(exc).__name__,
+                "mp4_validator_result": "not_run_download_failed",
+            }
+        )
         return VideoArtifactResult(
             ok=False,
             local_path=str(target),
-            bytes=int(target.stat().st_size),
+            error_code="provider_download_failed",
+            error_message=type(exc).__name__,
+            diagnostics=diagnostics,
+        )
+    diagnostics["download_content_type"] = content_type[:160]
+    size = int(target.stat().st_size) if target.exists() else 0
+    diagnostics["download_bytes"] = size
+    try:
+        diagnostics["first_bytes_hex_safe"] = target.read_bytes()[:16].hex()
+    except Exception:
+        diagnostics["first_bytes_hex_safe"] = ""
+    minimum_bytes = max(1, int(os.environ.get("VIDEO_PROVIDER_MIN_VIDEO_BYTES") or 1024))
+    rejected = _reject_non_video_payload(target, content_type)
+    if rejected:
+        diagnostics["mp4_validator_result"] = rejected
+        return VideoArtifactResult(
+            ok=False,
+            local_path=str(target),
+            bytes=size,
+            error_code=rejected,
+            content_type=content_type,
+            diagnostics=diagnostics,
+        )
+    if size < minimum_bytes:
+        diagnostics["mp4_validator_result"] = "output_below_minimum_bytes"
+        return VideoArtifactResult(
+            ok=False,
+            local_path=str(target),
+            bytes=size,
+            error_code="output_zero_bytes" if size <= 0 else "output_below_minimum_bytes",
+            content_type=content_type,
+            diagnostics=diagnostics,
+        )
+    probe = video_final_output.probe_video(str(target))
+    if not probe.get("ok"):
+        diagnostics["mp4_validator_result"] = str(probe.get("reason") or "output_unreadable")
+        return VideoArtifactResult(
+            ok=False,
+            local_path=str(target),
+            bytes=size,
             error_code=str(probe.get("reason") or "output_unreadable"),
             content_type=content_type,
+            diagnostics=diagnostics,
         )
+    diagnostics["mp4_validator_result"] = "valid_mp4"
     digest = hashlib.sha256()
     with target.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -258,6 +355,7 @@ def materialize_video_url(
         has_audio_stream=bool(probe.get("has_audio")),
         artifact_hash=digest.hexdigest(),
         content_type=content_type,
+        diagnostics=diagnostics,
     )
 
 

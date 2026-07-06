@@ -21,6 +21,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+WORKER_PARSER_VERSION = "r8d_product_video_canonical_parser"
+WORKER_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
 
 def load_dotenv(path: str) -> None:
     if not os.path.exists(path):
@@ -78,6 +81,27 @@ WORKER_POLL_INTERVAL_SECONDS = max(1, env_int("WORKER_POLL_INTERVAL_SECONDS", 5)
 WORKER_CONCURRENCY = max(1, env_int("WORKER_CONCURRENCY", 1))
 WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).strip()
 FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
+
+
+def worker_git_sha() -> str:
+    for name in ("RAILWAY_GIT_COMMIT_SHA", "GIT_COMMIT_SHA", "SOURCE_VERSION", "APP_BUILD_SHA"):
+        value = str(os.environ.get(name) or "").strip()
+        if value:
+            return value[:40]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=SCRIPT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode == 0:
+            return str(result.stdout or "").strip()[:40]
+    except Exception:
+        return ""
+    return ""
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
 LAST_CLAIM_RESPONSE: dict = {}
 LAST_IDLE_REASON = ""
@@ -386,6 +410,10 @@ def worker_process_trace(job: dict | None = None, *, service_mode: str = "", cla
         "worker_claim_reason": str(data.get("worker_claim_reason") or "")[:300],
         "process_hostname": str(hostname or "")[:160],
         "process_pid": int(os.getpid() or 0),
+        "worker_git_sha": worker_git_sha(),
+        "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_started_at": WORKER_STARTED_AT,
+        "worker_code_matches_runtime": str(data.get("worker_code_matches_runtime") or "unknown")[:40],
     }
 
 
