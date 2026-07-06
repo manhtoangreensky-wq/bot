@@ -171440,6 +171440,7 @@ def subdub_terminal_outcome_debug_defaults() -> dict:
         "success_blocked_reason": "",
         "audio_fallback_public_enabled": bool(SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED),
         "audio_fallback_suppressed": False,
+        "audio_auto_send_suppressed": False,
         "audio_artifact_internal_only": False,
     }
 
@@ -173460,21 +173461,46 @@ def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, e
     return subdub_clamp_int(target, target, 42, 60)
 
 def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
-    base = subdub_clamp_int((style or {}).get("size"), 52, 34, 72)
-    multiplier = max(1.0, min(1.25, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
+    style_state = dict(state or {})
+    m4live1_style_active = bool(
+        style_state.get("m4live1_style_renderer_only")
+        or str(style_state.get("output_type") or "").strip().lower() in {"burn", "both", "video_subtitle"}
+    )
+    if not m4live1_style_active:
+        base = subdub_clamp_int((style or {}).get("size"), 52, 34, 72)
+        multiplier = max(1.0, min(1.25, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
+        width, height = subdub_style_video_size(style_state)
+        target = max(base + 4, int(round(base * multiplier)))
+        cap = 68
+        if height:
+            vertical = bool(width and height >= width * 1.15)
+            ratio = 0.052 if vertical else 0.062
+            cap = max(50, int(round(height * ratio)))
+            cap = min(cap, 68 if vertical else 64)
+        current_effective = subdub_clamp_int(min(target, cap), min(target, cap), 40, 68)
+        return subdub_clamp_int(current_effective - 2, current_effective - 2, 38, 66)
+    base = subdub_clamp_int((style or {}).get("size"), 44, 34, 60)
+    multiplier = max(1.0, min(1.12, subdub_float_value((style or {}).get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     width, height = subdub_style_video_size(state)
-    target = max(base + 4, int(round(base * multiplier)))
-    cap = 68
+    target = int(round(base * multiplier))
+    cap = 42
     if height:
         vertical = bool(width and height >= width * 1.15)
-        ratio = 0.052 if vertical else 0.062
-        cap = max(50, int(round(height * ratio)))
-        cap = min(cap, 68 if vertical else 64)
-    current_effective = subdub_clamp_int(min(target, cap), min(target, cap), 40, 68)
-    return subdub_clamp_int(current_effective - 2, current_effective - 2, 38, 66)
+        if height <= 720:
+            cap = 40 if vertical else 38
+        elif height <= 1080:
+            cap = 42 if vertical else 40
+        else:
+            cap = 44 if vertical else 42
+    current_effective = subdub_clamp_int(min(target, cap) + 2, min(target, cap) + 2, 40, 48)
+    return subdub_clamp_int(current_effective - 2, current_effective - 2, 38, 46)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
+    m4live1_style_active = bool(
+        state.get("m4live1_style_renderer_only")
+        or str(state.get("output_type") or "").strip().lower() in {"burn", "both", "video_subtitle"}
+    )
     cover_default_enabled = subdub_should_enable_hardsub_cover(
         state,
         state.get("mode") or state.get("video_processing_mode") or state.get("process_type"),
@@ -173515,6 +173541,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
             "cover_y_ratio", "subtitle_cover_y_ratio",
             "text_margin_bottom_ratio", "subtitle_text_margin_bottom_ratio",
             "max_lines", "subtitle_max_lines",
+            "max_width_ratio", "subtitle_max_width_ratio",
+            "output_type", "m4live1_style_renderer_only",
             "show_subtitles", "burn_subtitle", "display_subtitles",
             "hardsub_cover_enabled", "subtitle_style_profile",
             "subtitle_font_multiplier", "subtitle_text_box_enabled",
@@ -173548,9 +173576,14 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["subtitle_font_blocker"] = str(font_resolution.get("blocker") or "")[:80]
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["subtitle_font_multiplier"] = max(1.0, min(1.25, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
+    style["subtitle_font_size_before"] = int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
     style["render_size"] = subdub_render_subtitle_size(style, state)
+    style["subtitle_font_size_after"] = int(style.get("render_size") or 0)
+    if m4live1_style_active:
+        style["subtitle_style_design_base_size"] = int(style.get("size") or 0)
+        style["size"] = int(style.get("render_size") or style.get("size") or 0)
     style["subtitle_style_baseline_source"] = "pre_231"
-    style["translated_font_size_baseline"] = int(style.get("size") or 0)
+    style["translated_font_size_baseline"] = int(style.get("subtitle_style_design_base_size") or style.get("size") or 0)
     style["translated_font_size_multiplier"] = float(style.get("subtitle_font_multiplier") or SUBDUB_SUBTITLE_FONT_MULTIPLIER)
     style["translated_font_size_final"] = int(style.get("render_size") or style.get("size") or 0)
     style["font_size_cap_applied"] = bool(
@@ -173564,7 +173597,10 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["cover_opacity"] = max(0.0, min(0.35, subdub_float_value(style.get("cover_opacity"), 0.0)))
     style["cover_height_ratio"] = max(0.02, min(0.06, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
     style["cover_y_ratio"] = max(0.90, min(0.96, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-    style["text_margin_bottom_ratio"] = max(0.04, min(0.09, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
+    if m4live1_style_active:
+        style["text_margin_bottom_ratio"] = max(0.006, min(0.011, subdub_float_value(style.get("text_margin_bottom_ratio"), 0.008)))
+    else:
+        style["text_margin_bottom_ratio"] = max(0.04, min(0.09, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
     style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
     style["hardsub_cover_enabled"] = subdub_bool_value(style.get("hardsub_cover_enabled"), style["cover_original"])
     style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
@@ -173584,6 +173620,18 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
     style["play_res_x"] = max(480, min(3840, int(width or 1280)))
     style["play_res_y"] = max(480, min(3840, int(height or 720)))
+    if m4live1_style_active:
+        style["subtitle_alignment"] = "bottom_center"
+        style["subtitle_max_width_ratio"] = max(0.84, min(0.88, subdub_float_value(style.get("max_width_ratio"), 0.86)))
+        style["subtitle_max_lines"] = 2
+        style["subtitle_pipeline_untouched"] = True
+        style["m4live1_style_renderer_only"] = True
+        style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
+        style["subtitle_margin_v_after"] = max(4, min(14, int(round(style["play_res_y"] * subdub_float_value(style.get("text_margin_bottom_ratio"), 0.008)))))
+        side_margin = int(round(style["play_res_x"] * ((1.0 - float(style["subtitle_max_width_ratio"])) / 2.0)))
+        side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
+        style["subtitle_margin_l_after"] = side_margin
+        style["subtitle_margin_r_after"] = side_margin
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -173679,7 +173727,9 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     normalized = re.sub(r"[{}]", "", normalized)
     play_res_x = max(480, int(style.get("play_res_x") or 1280))
     font_size = max(24, int(style.get("render_size") or style.get("size") or 48))
-    max_chars = max(14, min(42, int((play_res_x * 0.76) / (font_size * 0.58))))
+    max_width_ratio = max(0.84, min(0.88, subdub_float_value(style.get("subtitle_max_width_ratio"), 0.86)))
+    available_width = play_res_x * max_width_ratio if style.get("m4live1_style_renderer_only") else play_res_x * 0.76
+    max_chars = max(16, min(48, int(available_width / (font_size * 0.62))))
     words = re.sub(r"\s+", " ", normalized).strip().split(" ")
     limit = max(1, int(max_lines or 2))
     lines: list[str] = []
@@ -173694,10 +173744,50 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     if current:
         lines.append(current)
     if len(lines) > limit:
-        consumed = sum(len(line.split()) for line in lines[:limit - 1])
-        lines = lines[:limit]
-        lines[-1] = " ".join(words[consumed:])
+        if limit == 2:
+            all_words = [word for word in words if word]
+            midpoint = max(1, len(all_words) // 2)
+            best_split = midpoint
+            best_score = 10**9
+            for split_at in range(1, len(all_words)):
+                first = " ".join(all_words[:split_at])
+                second = " ".join(all_words[split_at:])
+                overflow = max(0, len(first) - max_chars) + max(0, len(second) - max_chars)
+                balance = abs(len(first) - len(second))
+                score = overflow * 10 + balance
+                if score < best_score:
+                    best_score = score
+                    best_split = split_at
+            lines = [" ".join(all_words[:best_split]), " ".join(all_words[best_split:])]
+        else:
+            consumed = sum(len(line.split()) for line in lines[:limit - 1])
+            lines = lines[:limit]
+            lines[-1] = " ".join(words[consumed:])
     return r"\N".join(line.replace("\\", r"\\") for line in lines if line)
+
+def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[str]:
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    normalized = re.sub(r"[{}]", "", normalized)
+    words = [word for word in re.sub(r"\s+", " ", normalized).strip().split(" ") if word]
+    if not words:
+        return []
+    play_res_x = max(480, int(style.get("play_res_x") or 1280))
+    font_size = max(24, int(style.get("render_size") or style.get("size") or 48))
+    max_width_ratio = max(0.84, min(0.88, subdub_float_value(style.get("subtitle_max_width_ratio"), 0.86)))
+    max_chars = max(16, min(48, int((play_res_x * max_width_ratio) / (font_size * 0.62))))
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    line_limit = max(1, min(2, int(max_lines or 2)))
+    return ["\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
     style = subdub_normalize_style(style_or_state)
@@ -173713,7 +173803,16 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     play_res_x = int(style.get("play_res_x") or 1080)
     play_res_y = int(style.get("play_res_y") or 1920)
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
-        margin_v = max(58, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+        if style.get("m4live1_style_renderer_only"):
+            margin_v = int(style.get("subtitle_margin_v_after") or max(4, min(14, int(play_res_y * 0.008))))
+        else:
+            margin_v = max(58, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+    if style.get("m4live1_style_renderer_only"):
+        margin_l = int(style.get("subtitle_margin_l_after") or max(32, int(play_res_x * 0.07)))
+        margin_r = int(style.get("subtitle_margin_r_after") or max(32, int(play_res_x * 0.07)))
+    else:
+        margin_l = max(32, int(play_res_x * 0.055))
+        margin_r = max(32, int(play_res_x * 0.055))
     primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
     outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
     boxed = bool(style.get("boxed_background"))
@@ -173733,7 +173832,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
             "Style: Default,"
             f"{style.get('font')},{int(style.get('render_size') or style.get('size') or 48)},{primary},&H00FFFFFF,{outline},{back_color},"
             f"-1,0,0,0,100,100,0,0,{border_style},{int(style.get('outline') or 0)},{int(style.get('shadow') or 0)},"
-            f"{alignment},{max(32, int(play_res_x * 0.055))},{max(32, int(play_res_x * 0.055))},{margin_v},1"
+            f"{alignment},{margin_l},{margin_r},{margin_v},1"
         ),
         "",
         "[Events]",
@@ -173741,16 +173840,29 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     ]
     events = []
     for block in blocks:
-        escaped = subdub_ass_wrap_text(
+        chunks = subdub_ass_text_chunks(
             str(block.get("text") or ""),
             style,
             int(style.get("max_lines") or 2),
         )
-        if escaped:
+        if not chunks:
+            continue
+        block_start = float(block.get("start") or 0)
+        block_end = max(block_start + 0.2, float(block.get("end") or 0))
+        weights = [max(1, len(re.sub(r"\s+", "", chunk))) for chunk in chunks]
+        total_weight = max(1, sum(weights))
+        elapsed_weight = 0
+        for chunk, weight in zip(chunks, weights):
+            chunk_start = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+            elapsed_weight += weight
+            chunk_end = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+            escaped = subdub_ass_wrap_text(chunk, style, int(style.get("max_lines") or 2))
+            if not escaped:
+                continue
             events.append(
                 "Dialogue: 0,"
-                f"{subdub_ass_timestamp(float(block.get('start') or 0))},"
-                f"{subdub_ass_timestamp(float(block.get('end') or 0))},"
+                f"{subdub_ass_timestamp(chunk_start)},"
+                f"{subdub_ass_timestamp(chunk_end)},"
                 f"Default,,0,0,0,,{escaped}"
             )
     return "\n".join(header + events) + "\n"
@@ -174093,6 +174205,7 @@ async def send_public_subtitle_dub_final_outputs(
                     sent["srt_fallback_suppressed"] = True
                     sent["auto_srt_after_video_prevented"] = True
                     sent["srt_auto_send_suppressed"] = True
+                    sent["audio_auto_send_suppressed"] = bool(audio_bytes)
                     sent["srt_suppress_reason"] = "video_delivered"
                     sent["partial_copy_suppressed"] = True
                     sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
@@ -176001,6 +176114,10 @@ async def _execute_video_dubbing_pipeline_core(
         else:
             await _progress("rendering_subtitle")
         render_state = subdub_output_style_state(state, mode)
+        if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
+            render_state.setdefault("output_type", "burn")
+        elif mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            render_state.setdefault("output_type", "video_subtitle")
         render_style = subdub_normalize_style(render_state)
         render_style["advanced_style_enabled"] = subdub_advanced_style_enabled(render_state)
         render_debug["advanced_style_enabled"] = bool(render_style.get("advanced_style_enabled"))
@@ -176017,6 +176134,17 @@ async def _execute_video_dubbing_pipeline_core(
         render_debug["translated_font_size_final"] = int(render_style.get("translated_font_size_final") or render_style.get("render_size") or render_style.get("size") or 0)
         render_debug["font_size_cap_applied"] = bool(render_style.get("font_size_cap_applied"))
         render_debug["subtitle_wrap_lines_max"] = int(render_style.get("subtitle_wrap_lines_max") or render_style.get("max_lines") or 2)
+        render_debug["m4live1_style_renderer_only"] = bool(render_style.get("m4live1_style_renderer_only"))
+        render_debug["subtitle_font_size_before"] = int(render_style.get("subtitle_font_size_before") or 0)
+        render_debug["subtitle_font_size_after"] = int(render_style.get("subtitle_font_size_after") or 0)
+        render_debug["subtitle_margin_v_before"] = int(render_style.get("subtitle_margin_v_before") or 0)
+        render_debug["subtitle_margin_v_after"] = int(render_style.get("subtitle_margin_v_after") or 0)
+        render_debug["subtitle_margin_l_after"] = int(render_style.get("subtitle_margin_l_after") or 0)
+        render_debug["subtitle_margin_r_after"] = int(render_style.get("subtitle_margin_r_after") or 0)
+        render_debug["subtitle_alignment"] = str(render_style.get("subtitle_alignment") or "")
+        render_debug["subtitle_max_width_ratio"] = float(render_style.get("subtitle_max_width_ratio") or 0.0)
+        render_debug["subtitle_max_lines"] = int(render_style.get("subtitle_max_lines") or render_style.get("max_lines") or 2)
+        render_debug["subtitle_pipeline_untouched"] = bool(render_style.get("subtitle_pipeline_untouched"))
         render_debug["outline_size"] = int(render_style.get("outline") or 0)
         render_debug["subtitle_vertical_position"] = int(render_style.get("play_res_y") or 0)
         audio_mode = str(
@@ -176026,28 +176154,45 @@ async def _execute_video_dubbing_pipeline_core(
             or ("mute" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "keep")
         )
         audio_mix = subdub_audio_mix_state_fields(state)
+        mix_source = str(audio_mix.get("volume_config_source") or "")
+        volume_mix_requested = bool(
+            SUBDUB_VOLUME_MIX_UI_ENABLED
+            and (
+                bool(audio_mix.get("keep_original_audio"))
+                or int(audio_mix.get("dubbed_voice_volume_percent") or SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT) != int(SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT)
+                or (mix_source and mix_source != "default_subdub_audio_mix")
+            )
+        )
         render_debug.update({
             **audio_mix,
             "original_audio_path_present": bool(state.get("input_file_path") or state.get("source_file_id") or state.get("video_file_id")),
             "dubbed_audio_path_present": bool(state.get("dubbed_audio_path") or state.get("generated_audio_path") or kwargs.get("dubbed_audio")),
-            "volume_mix_applied": bool(audio_mix.get("keep_original_audio") or int(audio_mix.get("dubbed_voice_volume_percent") or 100) != 100),
+            "volume_mix_applied": bool(volume_mix_requested),
+            "m4live1_volume_mix_passthrough": bool(volume_mix_requested),
+            "m4live1_dub_wrapper_restored": bool(mode == VIDEO_SUBTITLE_MODE_DUB),
+            "m4live1_subtitle_dub_wrapper_restored": bool(mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
+            "dub_mode_uses_run_subdub_pipeline": bool(mode == VIDEO_SUBTITLE_MODE_DUB),
+            "subtitle_dub_mode_uses_run_subdub_pipeline": bool(mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
             "volume_mix_blocker": "",
         })
         kwargs.setdefault("subtitle_style", render_style)
-        if SUBDUB_VOLUME_MIX_UI_ENABLED:
+        if SUBDUB_VOLUME_MIX_UI_ENABLED and volume_mix_requested:
             kwargs.setdefault("keep_original_audio", bool(audio_mix.get("keep_original_audio")))
             kwargs.setdefault("original_audio_mode", str(audio_mix.get("audio_mix_mode") or audio_mode))
             kwargs.setdefault("original_audio_volume_percent", int(audio_mix.get("original_audio_volume_percent") or 0))
             kwargs.setdefault("dubbed_voice_volume_percent", int(audio_mix.get("dubbed_voice_volume_percent") or SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT))
         else:
-            kwargs.setdefault("keep_original_audio", False)
-            kwargs.setdefault("original_audio_mode", audio_mode)
+            kwargs.setdefault("keep_original_audio", False if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else bool(audio_mix.get("keep_original_audio")))
+            if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+                kwargs.setdefault("original_audio_mode", "mute")
+            else:
+                kwargs.setdefault("original_audio_mode", audio_mode)
         kwargs.setdefault("require_audio", mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
         try:
             signature = inspect.signature(video_dubbing_render_video)
             supported = set(signature.parameters)
             required_render_params = {"subtitle_style", "original_audio_mode", "require_audio"}
-            if SUBDUB_VOLUME_MIX_UI_ENABLED:
+            if volume_mix_requested:
                 required_render_params.update({"original_audio_volume_percent", "dubbed_voice_volume_percent"})
             render_supports_validation = required_render_params.issubset(supported)
             kwargs = {key: value for key, value in kwargs.items() if key in supported}
