@@ -9102,6 +9102,12 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• provider_progress_percent: <code>{safe_int((job or {}).get('provider_progress_percent'), 0)}%</code>\n"
             f"• provider_progress_raw: <code>{html.escape(str((job or {}).get('provider_progress_raw') or '-')[:80])}</code>\n"
             f"• provider_progress_raw_number: <code>{html.escape(str((job or {}).get('provider_progress_raw_number') or '-'))}</code>\n"
+            f"• provider_progress_source: <code>{html.escape(str((job or {}).get('provider_progress_source') or '-')[:80])}</code>\n"
+            f"• HTTP 200 ignored as progress: <code>{'yes' if (job or {}).get('http_200_not_used_as_progress') else 'no'}</code>\n"
+            f"• ShopAIKey exact status endpoint: <code>{'yes' if (job or {}).get('shopaikey_status_endpoint_exact') else 'no'}</code>\n"
+            f"• ShopAIKey status HTTP: <code>{safe_int((job or {}).get('shopaikey_status_http_code'), 0)}</code>\n"
+            f"• ShopAIKey data.status: <code>{html.escape(str((job or {}).get('shopaikey_raw_status') or '-')[:120])}</code>\n"
+            f"• ShopAIKey data.progress: <code>{html.escape(str((job or {}).get('shopaikey_data_progress_raw') or '-')[:80])}</code>\n"
             f"• provider_progress_trusted: <code>{'yes' if (job or {}).get('provider_progress_trusted') else 'no'}</code>\n"
             f"• provider_progress_cap_reason: <code>{html.escape(str((job or {}).get('provider_progress_cap_reason') or '-'))}</code>\n"
             f"• render_video_progress_percent: <code>{safe_int((job or {}).get('render_video_progress_percent') or (job or {}).get('provider_render_progress_percent'), 0)}%</code>\n"
@@ -46755,6 +46761,12 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• last poll raw status: <code>{html.escape(str(result.get('provider_status_raw') or result.get('provider_status') or '-'))}</code>",
         f"• normalized status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
         f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• result URL host: <code>{html.escape(str(result.get('result_url_host') or '-'))}</code>",
+        f"• result URL scheme/ext: <code>{html.escape(str(result.get('result_url_scheme') or '-'))}</code>/<code>{html.escape(str(result.get('result_url_ext') or '-'))}</code>",
+        f"• result URL trusted: <code>{'yes' if result.get('result_url_trusted') else 'no'}</code>",
+        f"• download HTTP/content/bytes: <code>{safe_int(result.get('download_http_status'), 0)}</code>/<code>{html.escape(str(result.get('download_content_type') or '-'))}</code>/<code>{safe_int(result.get('download_bytes'), 0)}</code>",
+        f"• download error: <code>{html.escape(str(result.get('download_error_class') or '-'))}</code> message=<code>{html.escape(str(result.get('download_error_message_masked') or '-')[:220])}</code>",
+        f"• MP4 validator: <code>{html.escape(str(result.get('mp4_validator_result') or '-'))}</code>",
         f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
         f"• terminal state: <code>{html.escape(terminal_state)}</code>",
         f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
@@ -67162,6 +67174,31 @@ def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict |
     data.update(telemetry)
     if telemetry.get("provider_task_alive"):
         primary = video_b14_primary_alive_attempt(data)
+        for key in (
+            "shopaikey_status_endpoint_exact",
+            "shopaikey_status_http_code",
+            "shopaikey_raw_status",
+            "shopaikey_normalized_status",
+            "shopaikey_data_progress_raw",
+            "shopaikey_progress_source",
+            "shopaikey_result_url_from_data",
+            "shopaikey_data_result_url_present",
+            "shopaikey_fail_reason",
+            "provider_progress_raw",
+            "provider_progress_raw_number",
+            "provider_progress_source",
+            "http_200_not_used_as_progress",
+            "result_url_source_path",
+            "result_url_primary_path_checked",
+            "result_url_found",
+        ):
+            value = primary.get(key)
+            if value not in (None, "") and (
+                key.startswith("shopaikey_")
+                or key in {"provider_progress_source", "http_200_not_used_as_progress", "result_url_source_path", "result_url_primary_path_checked", "result_url_found"}
+                or data.get(key) in (None, "", 0, 200, "200")
+            ):
+                data[key] = value
         primary_http = safe_int(primary.get("submit_http_status"), 0)
         current_http = safe_int(data.get("provider_submit_http_status"), 0)
         accepted = bool(data.get("submit_accepted") or data.get("provider_task_id_saved") or primary.get("submit_accepted") or primary.get("task_id_present"))
