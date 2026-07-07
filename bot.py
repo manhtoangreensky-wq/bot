@@ -1879,6 +1879,9 @@ DUB_AUDIO_FALLBACK_GAIN_DB = env_float("DUB_AUDIO_FALLBACK_GAIN_DB", 8.0)
 SUBDUB_DUB_VOICE_GAIN = max(1.0, min(4.0, env_float("SUBDUB_DUB_VOICE_GAIN", 2.0)))
 SUBDUB_DUB_LOUDNESS_NORMALIZE = env_flag("SUBDUB_DUB_LOUDNESS_NORMALIZE", "true")
 SUBDUB_DUB_MAX_PEAK_DB = max(-6.0, min(-0.1, env_float("SUBDUB_DUB_MAX_PEAK_DB", -1.0)))
+SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.85, min(0.92, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 0.90)))
+SUBDUB_DUB_MAX_SPEECH_RATE = max(SUBDUB_DUB_DEFAULT_SPEECH_RATE, min(1.05, env_float("SUBDUB_DUB_MAX_SPEECH_RATE", 1.02)))
+SUBDUB_DUB_MAX_START_EARLY_MS = max(0, env_int("SUBDUB_DUB_MAX_START_EARLY_MS", 0))
 ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
 SUBDUB_VOLUME_MIX_UI_ENABLED = env_flag("SUBDUB_VOLUME_MIX_UI_ENABLED", "true")
 SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT = max(0, min(100, env_int("SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT", 30)))
@@ -89108,6 +89111,12 @@ def subdub_voice_style_state_fields(
         "voice_config_source": "subdub_runtime_default_voice_config",
         "voice_fallback_used": bool(voice.get("fallback_used")),
         "voice_fallback_reason": str(voice.get("fallback_reason") or voice.get("reason") or "")[:180],
+        "male_fallback_used": bool(voice.get("fallback_used") and str(voice.get("fallback_reason") or "").lower().find("male") >= 0),
+        "dub_speech_rate": float(current.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE),
+        "dub_max_speech_rate": float(current.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE),
+        "dub_timing_reference": str(current.get("dub_timing_reference") or "subtitle_cues")[:80],
+        "dub_max_start_early_ms": int(current.get("dub_max_start_early_ms") or SUBDUB_DUB_MAX_START_EARLY_MS),
+        "dub_audio_pacing_applied": bool(current.get("dub_audio_pacing_applied") if "dub_audio_pacing_applied" in current else True),
         "tts_audio_volume_gain": float(SUBDUB_DUB_VOICE_GAIN),
         "tts_audio_loudness_normalize": bool(SUBDUB_DUB_LOUDNESS_NORMALIZE),
         "tts_audio_max_peak_db": float(SUBDUB_DUB_MAX_PEAK_DB),
@@ -169453,6 +169462,37 @@ def parse_video_dubbing_voice_speed(value: str) -> str:
     normalized = f"{number:.2f}".rstrip("0").rstrip(".")
     return "1.0" if normalized == "1" else normalized
 
+def subdub_dub_speech_config(state: dict | None = None, requested_speed: str | float = "") -> dict:
+    state = dict(state or {})
+    raw_speed = requested_speed if str(requested_speed or "").strip() else state.get("voice_speed")
+    raw_speed_text = str(raw_speed or "").strip()
+    try:
+        parsed = float(parse_video_dubbing_voice_speed(str(raw_speed_text or "1.0")))
+    except Exception:
+        parsed = 1.0
+    explicit_custom_speed = bool(raw_speed_text and raw_speed_text not in {"1", "1.0", "1.00"})
+    if explicit_custom_speed:
+        base = max(0.7, min(1.8, float(parsed)))
+        max_rate = max(base, min(1.8, base))
+    else:
+        base = parsed if parsed < 0.95 else float(SUBDUB_DUB_DEFAULT_SPEECH_RATE)
+        base = max(0.7, min(float(SUBDUB_DUB_DEFAULT_SPEECH_RATE), float(base)))
+        max_rate = max(base, min(float(SUBDUB_DUB_MAX_SPEECH_RATE), max(base, base + 0.12)))
+    return {
+        "requested_dub_voice_gender": str(
+            state.get("requested_voice_gender")
+            or state.get("selected_voice_gender")
+            or subdub_voice_gender_from_state(state)
+            or ""
+        )[:40],
+        "dub_speech_rate": round(base, 3),
+        "dub_max_speech_rate": round(max_rate, 3),
+        "dub_timing_reference": "subtitle_cues",
+        "dub_max_start_early_ms": int(SUBDUB_DUB_MAX_START_EARLY_MS),
+        "dub_audio_pacing_applied": True,
+        "no_male_fallback_when_female_requested": not bool(SUBDUB_ALLOW_SILENT_VOICE_FALLBACK),
+    }
+
 def apply_video_factory_to_finalization(user_id, state: dict | None = None) -> dict:
     state = dict(state or {})
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
@@ -170650,17 +170690,24 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
     outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
     public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
+    delivered_video = bool(
+        (result.get("video_delivered") and not public_error_already_sent)
+        or result.get("final_mp4_delivered")
+        or result.get("delivery_succeeded")
+        or result.get("video_delivery_message_id")
+        or int(result.get("sent_video") or 0)
+        or int(result.get("sent_video_document") or 0)
+    )
+    terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
     if outcome_type == "partial_audio_delivered" or result.get("partial_audio_delivered") or state.get("partial_audio_delivered"):
         if SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
             return subdub_audio_fallback_text(mode, lang)
         return subdub_final_video_failed_text(lang) if subdub_video_requires_final_mp4(mode) else subdub_mode_fail_text(mode, lang)
-    if outcome_type == "failure" or (
+    if not (delivered_video or terminal_delivered) and (outcome_type == "failure" or (
         public_error_already_sent
         and not bool(result.get("late_fail_suppressed") or state.get("late_fail_suppressed"))
-    ):
+    )):
         return subdub_mode_fail_text(mode, lang)
-    delivered_video = bool(result.get("video_delivered") or result.get("video_delivery_message_id") or int(result.get("sent_video") or 0) or int(result.get("sent_video_document") or 0))
-    terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
     charged_xu = int(result.get("charged") or result.get("charged_xu") or state.get("charged_xu") or 0)
     cost_line = subdub_success_cost_line(charged_xu, lang)
     if delivered_video or terminal_delivered:
@@ -170669,7 +170716,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             duration = "Đang cập nhật" if normalize_user_language(lang) == "vi" else "Updating"
         product_labels = {
             VIDEO_SUBTITLE_MODE_CREATE: "Video phụ đề",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "Video phụ đề dịch",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "Đã tạo video phụ đề dịch",
             VIDEO_SUBTITLE_MODE_DUB: "Video lồng tiếng",
             VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Video phụ đề + lồng tiếng",
         }
@@ -171695,7 +171742,7 @@ def subdub_progress_stage_payload(stage: str = "") -> dict:
 
 def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str = "vi") -> str:
     payload = subdub_progress_stage_payload(stage)
-    return product_progress_status_text(
+    text = product_progress_status_text(
         "subdub",
         job_id,
         str(payload.get("stage") or stage or "received_file"),
@@ -171703,6 +171750,12 @@ def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str
         "delivered" if str(payload.get("stage") or "") == "delivered" else "",
         lang=lang,
     )
+    if str(payload.get("stage") or "").strip().lower() == "delivered":
+        if normalize_user_language(lang) == "vi":
+            text = text.replace("🎬 TOAN AAS đang xử lý video", "✅ TOAN AAS đã hoàn tất video", 1)
+        else:
+            text = text.replace("🎬 TOAN AAS is processing video", "✅ TOAN AAS completed the video", 1)
+    return text
 
 def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -172295,6 +172348,7 @@ def subdub_duration_gate_payload(
     is_long = bool(input_duration and input_duration > preview)
     long_allowed = bool(is_long and not over_limit)
     gate_result = "fail_over_limit" if over_limit else ("pass_long" if long_allowed else ("pass_unknown_duration" if not input_duration else "pass"))
+    over_30_supported = bool(is_long and long_allowed)
     return {
         "input_duration": int(input_duration or 0),
         "duration_seconds": int(input_duration or 0),
@@ -172307,6 +172361,9 @@ def subdub_duration_gate_payload(
         "duration_guard_stage": "after_input_save",
         "is_long_media": is_long,
         "long_media_allowed": long_allowed,
+        "over_30_supported": over_30_supported,
+        "over_30_route": "async" if over_30_supported else ("blocked_clean" if over_limit else "normal"),
+        "duration_preflight_done": True,
         "preview_duration_seconds": int(preview),
     }
 
@@ -172487,6 +172544,59 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
             fields.setdefault("status", "completed")
         elif desired_terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
             fields["status"] = desired_terminal
+    incoming_outcome = str(fields.get("terminal_public_outcome_type") or "").strip().lower()
+    incoming_status = str(fields.get("status") or "").strip().lower()
+    incoming_failure = bool(
+        current_terminal == "delivered"
+        and (
+            incoming_outcome == "failure"
+            or incoming_status.startswith("failed")
+            or truthy_value(fields.get("public_error_sent"), False)
+            or truthy_value(fields.get("public_failure_sent"), False)
+            or _safe_int(fields.get("public_error_sent_count"), 0) > 0
+        )
+    )
+    if incoming_failure:
+        ignored_reason = str(
+            fields.get("pipeline_blocker")
+            or fields.get("no_charge_reason")
+            or fields.get("last_error_stage")
+            or fields.get("status")
+            or "late_failure_after_video_success"
+        )[:180]
+        for blocked_key in {
+            "terminal_state", "status", "lifecycle_state", "current_stage", "progress_stage",
+            "progress_percent", "completed_steps", "terminal_public_outcome_type",
+            "public_error_sent", "public_failure_sent", "public_error_sent_count",
+            "last_error_safe", "last_error_stage", "pipeline_blocker", "input_save_blocker",
+            "no_charge_reason", "success_blocked_reason", "full_video_failed",
+        }:
+            fields.pop(blocked_key, None)
+        fields.update({
+            "terminal_state": "delivered",
+            "status": "completed",
+            "lifecycle_state": "delivered",
+            "current_stage": "delivered",
+            "progress_stage": "delivered",
+            "progress_percent": 100,
+            "completed_steps": subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+            "late_fail_suppressed": True,
+            "late_public_error_suppressed": True,
+            "duplicate_error_prevented": True,
+            "error_sent_after_delivery": False,
+            "public_error_sent": False,
+            "public_failure_sent": False,
+            "public_error_sent_count": 0,
+            "terminal_public_outcome_sent": True,
+            "terminal_public_outcome_type": "success",
+            "ignored_late_error_count": int(job.get("ignored_late_error_count") or 0) + 1,
+            "last_ignored_error_reason": ignored_reason,
+            "suppress_reason": "video_already_delivered",
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
+            "panel_finalized": True,
+            "panel_final_percent": 100,
+        })
     job.update(fields)
     job = subdub_normalize_input_save_failed_terminal(job)
     job = subdub_enrich_job_identity(job, job_key=str(job_key or ""), mode=str(job.get("mode") or fields.get("mode") or ""), state=job)
@@ -174176,9 +174286,11 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["subtitle_max_width_ratio"] = max(0.84, min(0.88, subdub_float_value(style.get("max_width_ratio"), 0.86)))
         style["subtitle_max_lines"] = 2
         style["subtitle_pipeline_untouched"] = True
+        style["m4live2_subtitle_bottom_lock"] = True
+        style["subtitle_pos_override_removed"] = True
         style["m4live1_style_renderer_only"] = True
         style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
-        style["subtitle_margin_v_after"] = max(4, min(14, int(round(style["play_res_y"] * subdub_float_value(style.get("text_margin_bottom_ratio"), 0.008)))))
+        style["subtitle_margin_v_after"] = max(4, min(8, int(round(style["play_res_y"] * 0.004))))
         side_margin = int(round(style["play_res_x"] * ((1.0 - float(style["subtitle_max_width_ratio"])) / 2.0)))
         side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
         style["subtitle_margin_l_after"] = side_margin
@@ -174372,6 +174484,11 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     header = [
         "[Script Info]",
         "ScriptType: v4.00+",
+        f"; m4live2_subtitle_bottom_lock: {'yes' if style.get('m4live2_subtitle_bottom_lock') else 'no'}",
+        f"; subtitle_alignment: {'bottom_center' if alignment == 2 else alignment}",
+        f"; subtitle_margin_v_effective: {margin_v}",
+        "; subtitle_pos_override_removed: yes",
+        f"; subtitle_max_lines: {int(style.get('max_lines') or 2)}",
         "WrapStyle: 2",
         "ScaledBorderAndShadow: yes",
         f"PlayResX: {play_res_x}",
@@ -174390,6 +174507,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     events = []
+    last_dialogue_end = 0.0
+    overlap_suppressed = 0
     for block in blocks:
         chunks = subdub_ass_text_chunks(
             str(block.get("text") or ""),
@@ -174407,6 +174526,11 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
             chunk_start = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
             elapsed_weight += weight
             chunk_end = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+            if chunk_start < last_dialogue_end:
+                overlap_suppressed += 1
+                original_duration = max(0.2, chunk_end - chunk_start)
+                chunk_start = last_dialogue_end + 0.01
+                chunk_end = max(chunk_start + 0.2, chunk_start + original_duration)
             escaped = subdub_ass_wrap_text(chunk, style, int(style.get("max_lines") or 2))
             if not escaped:
                 continue
@@ -174416,6 +174540,9 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
                 f"{subdub_ass_timestamp(chunk_end)},"
                 f"Default,,0,0,0,,{escaped}"
             )
+            last_dialogue_end = max(last_dialogue_end, chunk_end)
+    if len(header) >= 5:
+        header.insert(5, f"; subtitle_overlap_events_suppressed: {overlap_suppressed}")
     return "\n".join(header + events) + "\n"
 
 def subdub_ffmpeg_filter_path(path: str) -> str:
@@ -176651,7 +176778,16 @@ async def _execute_video_dubbing_pipeline_core(
         await _progress("generating_voice")
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not str(kwargs.get("voice_id") or "").strip():
             return {"provider": "", "chunks": []}
-        return await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
+        speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
+        kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
+        kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
+        if isinstance(result, dict):
+            result.update({
+                **speech_config,
+                "male_fallback_used": False,
+            })
+        return result
 
     render_supports_validation = True
 
@@ -176768,6 +176904,10 @@ async def _execute_video_dubbing_pipeline_core(
         subdub_apply_voice_resolution_to_state(state, voice_resolution_for_debug)
         return str(voice_resolution_for_debug.get("provider_voice_id") or "") if voice_resolution_for_debug.get("ok") else ""
 
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        speech_config = subdub_dub_speech_config(state, state.get("voice_speed") or "1.0")
+        state = {**state, **speech_config}
+        render_debug.update(speech_config)
     render_debug["run_subdub_pipeline_called"] = True
     # Compatibility: run_subdub_pipeline delegates to subtitle_dub_product_pipeline.process_subtitle_dub_job.
     product_result = await subtitle_dub_product_pipeline.run_subdub_pipeline(
