@@ -94,7 +94,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services import telegram_business_support
+from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_router, worker_auth
 from services.video_provider_base import VideoPollResult, mask_provider_task_id
@@ -61810,6 +61810,9 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return build_2col_keyboard(
         [
+            ("🤖 Bật AI Chatbot" if is_vi else "🤖 Enable AI Chatbot", "aichat|on"),
+            ("⏸ Tắt AI Chatbot" if is_vi else "⏸ Disable AI Chatbot", "aichat|off"),
+            ("🧭 Cấp quyền AI hỗ trợ thao tác" if is_vi else "🧭 Allow AI action assist", "aichat|assist_on"),
             ("🤖 Prompt Meta AI" if is_vi else "🤖 Meta AI prompt", "freehub|meta"),
             ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
             ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
@@ -84209,6 +84212,179 @@ async def notify_cskh_business_admin(
             await context.bot.send_message(chat_id=admin_id, text=text[:3500], parse_mode="HTML")
         except Exception as exc:
             logger.warning("cskh business admin notify failed | admin=%s error=%s", admin_id, type(exc).__name__)
+
+def aichat_state() -> dict:
+    return ai_chatbot_copilot.load_state()
+
+def save_aichat_state(state: dict) -> dict:
+    return ai_chatbot_copilot.save_state(state)
+
+def aichat_consent_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅ Tôi đồng ý bật AI Chatbot", callback_data="aichat|consent_on")],
+            [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+        ]
+    )
+
+def aichat_control_keyboard(payload: dict | None = None) -> InlineKeyboardMarkup:
+    data = payload or {}
+    rows = []
+    if data.get("enabled"):
+        rows.append([InlineKeyboardButton("Tắt AI Chatbot", callback_data="aichat|off")])
+        if data.get("assist_actions"):
+            rows.append([InlineKeyboardButton("Tắt quyền AI hỗ trợ thao tác", callback_data="aichat|assist_off")])
+        else:
+            rows.append([InlineKeyboardButton("Cấp quyền AI hỗ trợ thao tác trong bot", callback_data="aichat|assist_on")])
+    else:
+        rows.append([InlineKeyboardButton("Bật AI Chatbot", callback_data="aichat|on")])
+    rows.append([InlineKeyboardButton("AI Chatbot status", callback_data="aichat|status"), InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")])
+    return InlineKeyboardMarkup(rows)
+
+def aichat_result_keyboard(result: dict, payload: dict | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    flow = dict((result or {}).get("target_flow") or {})
+    if flow.get("callback") and result.get("action_guard") == "prepare_flow_stop_at_confirm":
+        rows.append([InlineKeyboardButton(str(flow.get("label") or "Mở flow"), callback_data=str(flow.get("callback")))])
+    if result.get("action_guard") == "needs_action_permission":
+        rows.append([InlineKeyboardButton("Cấp quyền AI hỗ trợ thao tác trong bot", callback_data="aichat|assist_on")])
+    rows.append([InlineKeyboardButton("Tắt AI Chatbot", callback_data="aichat|off"), InlineKeyboardButton("Trace", callback_data="aichat|trace")])
+    return InlineKeyboardMarkup(rows)
+
+def aichat_status_text(payload: dict) -> str:
+    last = payload.get("last_trace") or {}
+    return (
+        "🤖 <b>AAS ONE AI Chatbot</b>\n\n"
+        f"• Enabled: <code>{'yes' if payload.get('enabled') else 'no'}</code>\n"
+        f"• Consent: <code>{'yes' if payload.get('consented') else 'no'}</code>\n"
+        f"• Assist actions: <code>{'yes' if payload.get('assist_actions') else 'no'}</code>\n"
+        f"• Last intent: <code>{html.escape(str(last.get('intent_id') or '-'))}</code>\n"
+        f"• Last source: <code>{html.escape(', '.join(map(str, last.get('source') or [])) or '-')}</code>\n"
+        f"• Last permission: <code>{html.escape(str(last.get('permission') or '-'))}</code>\n"
+        f"• Last action guard: <code>{html.escape(str(last.get('action_guard') or '-'))}</code>\n"
+        f"• State source: <code>{html.escape(str(payload.get('state_source') or '-'))}</code>\n\n"
+        "AI Chatbot tách riêng CSKH. Tác vụ tốn Xu luôn dừng ở màn xác nhận chuẩn."
+    )
+
+def aichat_trace_text(payload: dict) -> str:
+    trace = list(payload.get("trace") or [])[-10:]
+    lines = ["🧭 <b>AI Chatbot Trace</b>", ""]
+    if not trace:
+        lines.append("Chưa có trace AI Chatbot.")
+        return "\n".join(lines)
+    for index, item in enumerate(trace, 1):
+        flow = item.get("target_flow") or {}
+        lines.extend(
+            [
+                f"<b>{index}.</b> <code>{html.escape(str(item.get('text_preview') or '-')[:160])}</code>",
+                f"   intent=<code>{html.escape(str(item.get('intent_id') or '-'))}</code> replied=<code>{'yes' if item.get('replied') else 'no'}</code>",
+                f"   source=<code>{html.escape(', '.join(map(str, item.get('source') or [])) or '-')}</code>",
+                f"   permission=<code>{html.escape(str(item.get('permission') or '-'))}</code> guard=<code>{html.escape(str(item.get('action_guard') or '-'))}</code>",
+                f"   flow=<code>{html.escape(str(flow.get('callback') or '-'))}</code> learning=<code>{html.escape(str(item.get('learning_candidate_id') or '-'))}</code>",
+                f"   reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
+            ]
+        )
+    return "\n".join(lines)
+
+async def cmd_aichat_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+    state, result = ai_chatbot_copilot.request_enable(aichat_state(), update.effective_user.id)
+    save_aichat_state(state)
+    await update.message.reply_text(result["reply"], reply_markup=aichat_consent_keyboard())
+
+async def cmd_aichat_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+    state, result = ai_chatbot_copilot.disable_user(aichat_state(), update.effective_user.id)
+    save_aichat_state(state)
+    await update.message.reply_text(result["reply"], reply_markup=aichat_control_keyboard({"enabled": False}))
+
+async def cmd_aichat_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+    payload = ai_chatbot_copilot.status_payload(aichat_state(), update.effective_user.id)
+    await update.message.reply_text(aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+
+async def cmd_aichat_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+    text = " ".join(context.args or []).strip()
+    if not text:
+        await update.message.reply_text("Dùng: /aichat_test <tin nhắn>")
+        return
+    result = ai_chatbot_copilot.preview_message(text, user_id=update.effective_user.id)
+    lines = [
+        "🧪 <b>AI Chatbot test</b>",
+        "",
+        f"Intent: <code>{html.escape(str(result.get('intent_id') or '-'))}</code>",
+        f"Source: <code>{html.escape(', '.join(map(str, result.get('source') or [])) or '-')}</code>",
+        f"Permission: <code>{html.escape(str(result.get('permission') or '-'))}</code>",
+        f"Action guard: <code>{html.escape(str(result.get('action_guard') or '-'))}</code>",
+        f"Provider call allowed: <code>{'yes' if result.get('provider_call_allowed') else 'no'}</code>",
+        f"Xu charge allowed: <code>{'yes' if result.get('xu_charge_allowed') else 'no'}</code>",
+        "",
+        f"Reply:\n{result.get('reply') or '-'}",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_aichat_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+    payload = ai_chatbot_copilot.status_payload(aichat_state(), update.effective_user.id)
+    await update.message.reply_text(aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+
+async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "status"
+    uid = query.from_user.id
+    state = aichat_state()
+    if action == "on":
+        state, result = ai_chatbot_copilot.request_enable(state, uid)
+        save_aichat_state(state)
+        return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_consent_keyboard())
+    if action == "consent_on":
+        state, result = ai_chatbot_copilot.enable_with_consent(state, uid)
+        save_aichat_state(state)
+        payload = ai_chatbot_copilot.status_payload(state, uid)
+        return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_control_keyboard(payload))
+    if action == "off":
+        state, result = ai_chatbot_copilot.disable_user(state, uid)
+        save_aichat_state(state)
+        return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_control_keyboard({"enabled": False}))
+    if action in {"assist_on", "assist_off"}:
+        state, result = ai_chatbot_copilot.set_action_permission(state, uid, action == "assist_on")
+        save_aichat_state(state)
+        payload = ai_chatbot_copilot.status_payload(state, uid)
+        if result.get("consent_required"):
+            return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_consent_keyboard())
+        return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_control_keyboard(payload))
+    payload = ai_chatbot_copilot.status_payload(state, uid)
+    if action == "trace":
+        return await safe_edit_or_send(query, aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+    return await safe_edit_or_send(query, aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+
+async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    text = update.message.text.strip()
+    if not text or text.startswith("/"):
+        return False
+    state = aichat_state()
+    state, result = ai_chatbot_copilot.process_message(state, update.effective_user.id, text)
+    save_aichat_state(state)
+    if result.get("action_guard") == "disabled_no_reply":
+        return ai_chatbot_copilot.was_explicitly_disabled(state, update.effective_user.id)
+    if not result.get("replied"):
+        return False
+    await update.message.reply_text(
+        str(result.get("reply") or ""),
+        parse_mode="HTML",
+        reply_markup=aichat_result_keyboard(result, ai_chatbot_copilot.status_payload(state, update.effective_user.id)),
+        disable_web_page_preview=True,
+    )
+    return True
 
 async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):
@@ -183908,6 +184084,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_support_persona_message(update, context):
         return
 
+    if await handle_aichat_message(update, context):
+        return
+
     normalized_music_command = normalize_music_inline_command_text(text)
     if normalized_music_command:
         handled = await dispatch_music_inline_command(update, context, normalized_music_command)
@@ -184213,6 +184392,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("cskh_learning_show", cmd_cskh_learning_show))
     tg_app.add_handler(CommandHandler("cskh_learning_mark", cmd_cskh_learning_mark))
     tg_app.add_handler(CommandHandler("cskh_intents", cmd_cskh_intents))
+    tg_app.add_handler(CommandHandler("aichat_on", cmd_aichat_on))
+    tg_app.add_handler(CommandHandler("aichat_off", cmd_aichat_off))
+    tg_app.add_handler(CommandHandler("aichat_status", cmd_aichat_status))
+    tg_app.add_handler(CommandHandler("aichat_test", cmd_aichat_test))
+    tg_app.add_handler(CommandHandler("aichat_trace", cmd_aichat_trace))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
@@ -185285,6 +185469,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_buy_plan_callback, pattern=r"^buy_plan\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_doc_tool_callback, pattern=r"^docflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_aichat_callback, pattern=r"^aichat\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_payos_risk_callback, pattern=r"^payrisk\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_canary_callback, pattern=r"^remote_worker_canary_(create|status)(\||$)"))
