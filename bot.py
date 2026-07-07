@@ -65501,16 +65501,24 @@ def video_microflow_title(kind: str) -> str:
     return titles.get(str(kind or ""), "💡 <b>Gợi ý nội dung</b>")
 
 
+def video_microflow_option_display_limit(kind: str = "", product_id: str = "", option_count: int = 0) -> int:
+    count = option_count if option_count > 0 else 3
+    if str(kind or "") == "storyboard" or str(product_id or "") in {"storyboard_prompt", "frame_video_local"}:
+        return min(3, count)
+    return min(5, count)
+
+
 def video_microflow_options_text(kind: str, topic: str, product_id: str = "", scene_count: int = 5, lang: str = "vi", options: list[dict] | None = None, selected_index: int | None = None) -> str:
     kind = str(kind or "")
     topic_raw = video_microflow_normalize_topic(topic)
     option_list = list(options) if isinstance(options, list) else video_microflow_build_options(kind, topic_raw, product_id, scene_count)
+    display_limit = video_microflow_option_display_limit(kind, product_id, len(option_list))
     selected = safe_int(selected_index, -1) if selected_index is not None else -1
     lines = [video_microflow_title(kind), "", f"Chủ đề: <code>{html.escape(topic_raw)}</code>", ""]
     if kind == "storyboard":
         lines.append("Các lựa chọn dưới đây là khung hình/cảnh ảnh để tạo ảnh trước. Cảnh video cuối sẽ được tạo sau, có motion và số giây riêng.")
         lines.append("")
-    for idx, option in enumerate(option_list[:5], start=1):
+    for idx, option in enumerate(option_list[:display_limit], start=1):
         marker = "✅ " if selected == idx - 1 else ""
         lines.append(f"{marker}{idx}. <b>{html.escape(str(option.get('title') or f'Lựa chọn {idx}'))}</b>")
         for detail in video_microflow_option_summary(kind, dict(option))[:6]:
@@ -65522,24 +65530,46 @@ def video_microflow_options_text(kind: str, topic: str, product_id: str = "", sc
 
 
 def video_microflow_select_label(kind: str, index: int) -> str:
+    if 0 <= index < len(VIDEO_NUMBER_BUTTON_LABELS):
+        return VIDEO_NUMBER_BUTTON_LABELS[index]
     return str(index + 1)
 
 
 def video_microflow_options_keyboard(product_id: str, lang: str = "vi", options: list[dict] | None = None, kind: str = "") -> InlineKeyboardMarkup:
     option_count = len(options or [])
     option_count = option_count if option_count else 3
-    buttons = [
-        InlineKeyboardButton(video_microflow_select_label(kind, idx), callback_data=f"vproduct|microflow_choose|{idx}")
-        for idx in range(min(5, option_count))
-    ]
-    rows: list[list[InlineKeyboardButton]] = [buttons] if buttons else []
-    refresh_label = "🔄 Gợi ý lại"
-    edit_label = "✍️ Nhập chủ đề riêng"
-    rows.extend([
-        [InlineKeyboardButton(refresh_label, callback_data="vproduct|microflow_regenerate"), InlineKeyboardButton(edit_label, callback_data="vproduct|microflow_custom_topic")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
-    return InlineKeyboardMarkup(rows)
+    display_limit = video_microflow_option_display_limit(kind, product_id, option_count)
+    if str(kind or "") == "video_idea":
+        refresh_label = "🔄 Đổi ý tưởng"
+        edit_label = "✍️ Nhập chủ đề riêng"
+    elif str(kind or "") == "script":
+        refresh_label = "🔄 Đổi kịch bản"
+        edit_label = "✍️ Nhập chủ đề riêng"
+    elif str(kind or "") == "storyboard":
+        refresh_label = "🔄 Đổi storyboard"
+        edit_label = "✍️ Nhập chủ đề riêng"
+    elif str(kind or "") == "image_prompts":
+        refresh_label = "🔄 Đổi bộ ảnh"
+        edit_label = "✍️ Nhập chủ đề riêng"
+    elif str(kind or "") == "selfshot":
+        refresh_label = "🔄 Đổi hướng"
+        edit_label = "✍️ Nhập mô tả riêng"
+    else:
+        refresh_label = "🔄 Gợi ý lại"
+        edit_label = "✍️ Nhập chủ đề riêng"
+    return video_numbered_choice_keyboard(
+        [
+            (video_microflow_select_label(kind, idx), f"vproduct|microflow_choose|{idx}")
+            for idx in range(display_limit)
+        ],
+        lang=lang,
+        action_items=[
+            (refresh_label, "vproduct|microflow_regenerate"),
+            (edit_label, "vproduct|microflow_custom_topic"),
+        ],
+        back=(ui_text(lang, "common.back"), "vproduct|back"),
+        main=True,
+    )
 
 
 def video_idea_development_text(session: dict | None = None, lang: str = "vi") -> str:
