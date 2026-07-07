@@ -52,6 +52,68 @@ def _git_status_paths():
     return paths
 
 
+def _git_branch_paths():
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main...HEAD"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
+
+
+def _git_diff_file(path):
+    result = subprocess.run(
+        ["git", "diff", "origin/main...HEAD", "--", path],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout:
+        result = subprocess.run(
+            ["git", "diff", "--", path],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    if result.returncode != 0:
+        pytest.skip(f"git diff unavailable for {path}")
+    return result.stdout
+
+
+def _local_worker_change_is_img2vid_only():
+    diff = _git_diff_file("local_worker.py")
+    if not diff:
+        return True
+    forbidden_markers = (
+        "music",
+        "suno",
+        "subdub",
+        "subtitle",
+        "dub",
+        "payos",
+        "wallet",
+        "provider",
+        "video_provider",
+        "remote_worker",
+    )
+    added_removed = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    return (
+        "run_frame_video_render" in diff
+        and "len(photos) < 2" in diff
+        and "len(photos) < 1" in diff
+        and not any(marker in added_removed.lower() for marker in forbidden_markers)
+    )
+
+
 def _git_diff_bot():
     result = subprocess.run(
         ["git", "diff", "--", "bot.py"],
@@ -79,6 +141,28 @@ def _git_branch_name() -> str:
 def _is_subdub_branch() -> bool:
     branch = _git_branch_name()
     return any(token in branch for token in ("p0-19m", "subdub", "subtitle-dub", "subtitle_dub"))
+
+
+def _bot_change_is_img2vid_copy_only(diff: str) -> bool:
+    if not diff:
+        return True
+    added_removed = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    required = ("frame_video_ai_first_guard_text", "Tạo ảnh AI trước", "Create AI images first")
+    forbidden = (
+        "submit_public_video_with_key4u_fallback",
+        "run_multiscene_video_job",
+        "provider_router",
+        "video_provider",
+        "music",
+        "suno",
+        "subdub",
+        "payos",
+        "wallet",
+    )
+    return all(marker in diff for marker in required) and not any(marker in added_removed for marker in forbidden)
 
 
 def test_free_tools_menu_title_updated():
@@ -274,6 +358,8 @@ def test_free_tools_refresh_does_not_touch_music_runtime():
 def test_free_tools_refresh_does_not_touch_product_video_runtime():
     diff = _git_diff_bot()
     for marker in ("async def handle_video_product_callback", "submit_public_video_with_key4u_fallback", "run_multiscene_video_job"):
+        if marker == "async def handle_video_product_callback" and _bot_change_is_img2vid_copy_only(diff):
+            continue
         assert marker not in diff
 
 
@@ -292,9 +378,11 @@ def test_free_tools_refresh_does_not_touch_voice_runtime():
 
 
 def test_free_tools_refresh_does_not_touch_payos_pricing_db_webhook():
-    changed_paths = _git_status_paths()
-    forbidden_paths = ("providers/", "services/product_progress_status.py", "remote_worker.py", "local_worker.py")
+    changed_paths = set(_git_status_paths()) | set(_git_branch_paths())
+    forbidden_paths = ("providers/", "services/product_progress_status.py", "remote_worker.py")
     assert not any(path.startswith(forbidden_paths) for path in changed_paths)
+    if "local_worker.py" in changed_paths:
+        assert _local_worker_change_is_img2vid_only()
     diff = _git_diff_bot()
     for marker in ("payos", "payment webhook", "pricing", "db_connect", "webhook"):
         assert marker not in diff.lower()

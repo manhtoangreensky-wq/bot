@@ -235,7 +235,11 @@ def test_script_to_video_back_matrix():
 def test_frame_video_button_not_jump_main_menu():
     text, markup, session = _open(181812, "frame_video_local")
     assert "Ghép ảnh thành video" in text
-    assert "vproduct|frame_send_images|frame_video_local" in _callbacks(markup)
+    callbacks = _callbacks(markup)
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
     assert session["video_tool"] == "frame_video_local"
 
 

@@ -87,8 +87,8 @@ def test_legacy_image_to_video_callback_redirects_to_merge_flow():
 def test_merge_images_menu_has_two_paths():
     labels = _labels(ivf.frame_video_unified_menu_keyboard("vi"))
     text = ivf.frame_video_unified_menu_text("vi")
-    assert "📷 Tôi có ảnh sẵn" in labels
-    assert "🖼 Tạo ảnh AI trước" in labels
+    assert "📤 Dùng ảnh có sẵn" in labels
+    assert "✨ Tạo ảnh AI nhanh rồi ghép" in labels
     assert "công cụ ghép video của TOAN AAS" in text
     assert "Local Worker" not in text
     assert "FFmpeg" not in text
@@ -165,12 +165,13 @@ def test_merge_images_no_charge_before_confirm(monkeypatch):
 def test_merge_images_ai_first_path_uses_existing_image_core_guarded():
     user_id = 1702008
     query = _run_frame(user_id, "framevideo|ai_first")
-    assert "Tạo ảnh AI trước" in query.edits[-1][0]
+    assert "Tạo ảnh AI nhanh rồi ghép" in query.edits[-1][0]
     callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
-    assert "menu|main_image" in callbacks
+    assert "framevideo|ai_prompt" in callbacks
     assert "framevideo|start" in callbacks
-    assert "framevideo|layout" in callbacks
-    assert "chưa trừ Xu" in query.edits[-1][0]
+    assert "menu|main_image" not in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert bot.get_frame_video_state(user_id)["step"] == "ai_prompt"
 
 
 def test_merge_images_ai_first_handoff_to_effect_selection():

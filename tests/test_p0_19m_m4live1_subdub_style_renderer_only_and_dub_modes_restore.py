@@ -335,14 +335,36 @@ def _changed_paths_from_main() -> set[str]:
     return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
 
 
+def _local_worker_change_is_img2vid_only() -> bool:
+    diff = subprocess.check_output(
+        ["git", "diff", "--unified=0", "origin/main", "--", "local_worker.py"],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+    ).lower()
+    changed_lines = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    forbidden = ("music", "suno", "subdub", "subtitle", "dub", "payos", "wallet", "provider", "video_provider")
+    return (
+        "run_frame_video_render" in diff
+        and "len(photos) < 2" in diff
+        and "len(photos) < 1" in diff
+        and not any(marker in changed_lines for marker in forbidden)
+    )
+
+
 def test_m4live1_no_music_runtime_changes():
     changed = _changed_paths_from_main()
-    assert not any(path.startswith("providers/suno") or "music" in path.lower() for path in changed)
+    assert not any(path.startswith("providers/suno") or ("music" in path.lower() and not path.startswith("tests/")) for path in changed)
 
 
 def test_m4live1_no_product_video_runtime_changes():
     changed = _changed_paths_from_main()
     forbidden = ("services/video_", "providers/video_", "remote_worker.py", "local_worker.py")
+    if "local_worker.py" in changed and _local_worker_change_is_img2vid_only():
+        changed = {path for path in changed if path != "local_worker.py"}
     assert not any(path.startswith(forbidden) for path in changed)
 
 

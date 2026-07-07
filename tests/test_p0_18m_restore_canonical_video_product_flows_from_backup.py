@@ -200,8 +200,10 @@ def test_frame_video_button_routes_real_flow():
     text, markup, session = _press(180010, "vproduct|open|frame_video_local")
     callbacks = _callbacks(markup)
     assert "Ghép ảnh thành video" in text
-    assert "vproduct|frame_send_images|frame_video_local" in callbacks
-    assert "vproduct|frame_recent|frame_video_local" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
     assert session.get("video_tool") == "frame_video_local"
 
 
@@ -230,7 +232,11 @@ def test_frame_video_package_confirm_before_render(monkeypatch):
 def test_frame_video_no_placeholder_if_handler_exists():
     text, markup, _session = _press(180013, "framevideo|ai_first")
     assert "đang được chuẩn bị" not in text
-    assert "menu|main_image" in _callbacks(markup)
+    callbacks = _callbacks(markup)
+    assert "framevideo|ai_prompt" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
 
 
 def test_script_to_video_splits_scenes():

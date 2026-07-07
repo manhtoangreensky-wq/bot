@@ -92,7 +92,7 @@ def test_video_menu_each_button_routes_to_matching_flow():
         ("vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|image")),
         ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|ai_prompt_menu|video_ai_real", "vproduct|ai_image_menu|video_ai_real", "vproduct|ai_video_menu|video_ai_real")),
         ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_existing|script_image_video", "vproduct|script_ideas|script_image_video", "vproduct|script_manual|script_image_video")),
-        ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|frame_send_images|frame_video_local", "vproduct|frame_recent|frame_video_local")),
+        ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("framevideo|start", "framevideo|ai_first")),
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
         ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film")),
         ("vdownload|start", "Tải video từ link", ()),
@@ -158,10 +158,13 @@ def test_script_to_video_route():
 
 
 def test_image_to_video_route():
-    text, callbacks = _assert_route(918807, "vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|frame_send_images|frame_video_local", "vproduct|frame_recent|frame_video_local"))
+    text, callbacks = _assert_route(918807, "vproduct|open|frame_video_local", "Ghép ảnh thành video", ("framevideo|start", "framevideo|ai_first"))
     assert "Local Worker" not in text
     assert "FFmpeg" not in text
-    assert "vproduct|frame_send_images|frame_video_local" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
 
 
 def test_self_shot_scene_change_route():

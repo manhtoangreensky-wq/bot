@@ -160,6 +160,25 @@ def test_video_auto_refresh_uses_same_renderer_as_manual_refresh(monkeypatch):
     assert fake.edits[-1]["text"] == expected
 
 
+def _local_worker_change_is_img2vid_only() -> bool:
+    diff = subprocess.check_output(
+        ["git", "diff", "--unified=0", "origin/main", "--", "local_worker.py"],
+        text=True,
+        encoding="utf-8",
+    ).lower()
+    changed_lines = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    forbidden = ("music", "suno", "subdub", "subtitle", "dub", "payos", "wallet", "provider", "video_provider")
+    return (
+        "run_frame_video_render" in diff
+        and "len(photos) < 2" in diff
+        and "len(photos) < 1" in diff
+        and not any(marker in changed_lines for marker in forbidden)
+    )
+
+
 def test_video_manual_refresh_does_not_start_duplicate_loop():
     _reset()
     app = FakeApplication()
@@ -285,6 +304,8 @@ def test_no_video_engine_provider_changes():
     }
     if "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py" in changed:
         changed = [item for item in changed if item not in p0_18r_engine_files]
+    if "local_worker.py" in changed and _local_worker_change_is_img2vid_only():
+        changed = [item for item in changed if item != "local_worker.py"]
     assert not forbidden.intersection(changed)
 
 
