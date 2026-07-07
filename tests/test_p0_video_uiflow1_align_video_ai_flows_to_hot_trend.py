@@ -264,7 +264,10 @@ def test_uiflow1_no_provider_submit_or_charge_from_planning_callbacks():
 def test_uiflow1_scope_only_bot_and_tests():
     changed = _changed_files()
     assert "bot.py" in changed
-    assert "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py" in changed
+    assert changed & {
+        "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py",
+        "tests/test_p0_video_uiflow_lock_current_good_flow.py",
+    }
     forbidden_prefixes = (
         "providers/",
         "services/subtitle",

@@ -88703,6 +88703,8 @@ VIDEO_COMMAND_REGISTRY_HOTFIX = {
     "video_tier_matrix": "cmd_video_tier_matrix",
     "video_debug_tier_payload": "cmd_video_debug_tier_payload",
     "video_test_tier_duration": "cmd_video_test_tier_duration",
+    "video_duration_capability": "cmd_video_duration_capability",
+    "video_duration_smoke": "cmd_video_duration_smoke",
     "video_test_all_tiers": "cmd_video_test_all_tiers",
     "video_recent_jobs": "cmd_video_recent_jobs",
     "video_failed_jobs": "cmd_video_failed_jobs",
@@ -88889,6 +88891,52 @@ def video_duration_debug_lines(tier: str = "", seconds: int | str | None = None,
         f"Khuyến nghị: {html.escape(str(payload['recommendation']))}",
     ]
 
+def video_duration2_capability_lines() -> list[str]:
+    from services.product_video_duration_decision import duration_capability_report, load_duration_decision, public_contract_lines, scene_price
+
+    config = load_duration_decision()
+    report = duration_capability_report(config)
+    price = scene_price(1, config)
+    lines = [
+        "🎬 <b>VIDEO DURATION CAPABILITY</b>",
+        "",
+        f"Provider/model: <code>{html.escape(report['provider'])}</code> / <code>{html.escape(report['model'])}</code>",
+        f"Public mode: <code>{html.escape(report['public_mode'])}</code>",
+        f"Short clip: <code>{int(report['short_clip_seconds'])}s</code>",
+        f"Supported exact durations: <code>{html.escape(', '.join(map(str, report['supported_exact_durations'])) or '-')}</code>",
+        f"Max single video seconds: <code>{int(report['max_single_video_seconds'])}</code>",
+        f"Seconds pricing: <code>{'ON' if report['seconds_pricing_enabled'] else 'OFF'}</code>",
+        f"Multi-scene public: <code>{'ON' if report['multi_scene_enabled'] and report['concat_enabled'] else 'OFF'}</code>",
+        f"Last smoke: <code>{html.escape(report['last_smoke_status'])}</code>",
+        "",
+        "<b>Public contract hiện tại</b>",
+        *[html.escape(line) for line in public_contract_lines(config)],
+        "",
+        f"1 cảnh: giá gốc <code>{int(price['list_price'])} Xu</code>, ưu đãi <code>{int(price['promo_price'])} Xu</code> đến <code>{html.escape(price['promo_until'])}</code>.",
+        "",
+        "Provider smoke thật: <code>KHÓA CHI PHÍ</code> — chỉ chạy khi Toan duyệt riêng.",
+        "Provider call: <code>NO</code> | Xu deducted: <code>NO</code>",
+    ]
+    return lines
+
+def video_duration2_smoke_lines(seconds: int | str | None = None) -> list[str]:
+    from services.product_video_duration_decision import SUPPORTED_SMOKE_SECONDS, duration_smoke_dry_run
+
+    requested = safe_int(seconds, 0)
+    result = duration_smoke_dry_run(requested_seconds=requested, approved_by_toan=False)
+    return [
+        "🧪 <b>VIDEO DURATION SMOKE</b>",
+        "",
+        f"Requested: <code>{int(requested or 0)}s</code>",
+        f"Allowed smoke durations: <code>{html.escape(', '.join(map(str, SUPPORTED_SMOKE_SECONDS)))}</code>",
+        f"Status: <code>{html.escape(str(result.get('status') or '-'))}</code>",
+        f"Blocker: <code>{html.escape(str(result.get('blocker') or result.get('classification') or '-'))}</code>",
+        "Provider call: <code>NO</code>",
+        "Xu deducted: <code>NO</code>",
+        "",
+        "Không chạy provider thật trong test/internal validation vì khóa chi phí ShopAIKey/Key4U.",
+    ]
+
 def video_job_admin_rows(limit: int = 8, failed_only: bool = False) -> list[dict]:
     limit = max(1, min(int(limit or 8), 20))
     conn = db_connect()
@@ -89029,6 +89077,18 @@ async def cmd_video_test_tier_duration(update: Update, context: ContextTypes.DEF
             "• Nếu muốn rà kỹ: <code>/video_test_tier_duration 1000 8 CONFIRM</code> vẫn chỉ xác nhận payload/debug, chưa submit job thật.",
         ])
     await reply_html_lines(update, lines)
+
+async def cmd_video_duration_capability(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, video_duration2_capability_lines())
+
+async def cmd_video_duration_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    seconds = args[0] if args else 0
+    await reply_html_lines(update, video_duration2_smoke_lines(seconds))
 
 async def _cmd_video_test_tier(update: Update, context: ContextTypes.DEFAULT_TYPE, tier: str):
     if not is_admin_user(update.effective_user.id):
@@ -183675,6 +183735,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_tier_matrix", cmd_video_tier_matrix))
     tg_app.add_handler(CommandHandler("video_debug_tier_payload", cmd_video_debug_tier_payload))
     tg_app.add_handler(CommandHandler("video_test_tier_duration", cmd_video_test_tier_duration))
+    tg_app.add_handler(CommandHandler("video_duration_capability", cmd_video_duration_capability))
+    tg_app.add_handler(CommandHandler("video_duration_smoke", cmd_video_duration_smoke))
     tg_app.add_handler(CommandHandler("video_test_tier_200", cmd_video_test_tier_200))
     tg_app.add_handler(CommandHandler("video_test_tier_300", cmd_video_test_tier_300))
     tg_app.add_handler(CommandHandler("video_test_tier_400", cmd_video_test_tier_400))
