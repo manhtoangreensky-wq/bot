@@ -62933,6 +62933,42 @@ VIDEO_INTRO_THEN_PROFILE_PRODUCTS = frozenset({
     "frame_video_local",
 })
 
+VIDEO_UIFLOW1_CANONICAL_SEQUENCE = (
+    "entry_product_screen",
+    "choose_input_method",
+    "type_specific_suggestion",
+    "profile_context_suggestion",
+    "add_materials",
+    "style_customization",
+    "storyboard_prompt_review",
+    "final_confirmation",
+)
+
+VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS = frozenset({
+    "video_ai_real",
+    "script_image_video",
+    "self_shot_scene_change",
+    "storyboard_prompt",
+    "multi_scene_film",
+})
+
+
+def video_uiflow1_canonical_flow_map() -> dict:
+    return {
+        "canonical_reference": "video_trend",
+        "sequence": VIDEO_UIFLOW1_CANONICAL_SEQUENCE,
+        "must_include": {
+            "type_specific_suggestion": True,
+            "profile_context_suggestion": True,
+            "add_materials": True,
+            "review_before_confirm": True,
+        },
+        "aligned_products": sorted(VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS),
+        "excluded_products": ["frame_video_local"],
+        "provider_calls_allowed": False,
+        "charge_allowed": False,
+    }
+
 VIDEO_BACK_MENU_TARGET = "__video_menu__"
 
 VIDEO_STEP_BACK_MATRIX = {
@@ -62984,6 +63020,13 @@ VIDEO_STEP_BACK_MATRIX = {
         "storyboard_idea": "intro",
         "storyboard_to_video": "intro",
         "profile_select": "intro",
+        "idea_suggestions": "profile_select",
+        "asset_intake": "idea_suggestions",
+        "asset_ai_image": "asset_intake",
+        "asset_layout_ideas": "asset_intake",
+        "asset_storyboard_prompt": "asset_intake",
+        "b14_creative_controls": "asset_intake",
+        "storyboard_preview": "b14_creative_controls",
         "platform": "collect_input",
         "panels": "profile_select",
         "style": "panels",
@@ -62992,7 +63035,6 @@ VIDEO_STEP_BACK_MATRIX = {
         "extra_scene": "image_plan",
         "output_target": "extra_scene",
         "result": "output_target",
-        "storyboard_preview": "result",
     },
     "script_image_video": {
         "intro": VIDEO_BACK_MENU_TARGET,
@@ -63006,6 +63048,12 @@ VIDEO_STEP_BACK_MATRIX = {
         "script_voice": "intro",
         "profile_select": "collect_input",
         "idea_suggestions": "profile_select",
+        "asset_intake": "idea_suggestions",
+        "asset_ai_image": "asset_intake",
+        "asset_layout_ideas": "asset_intake",
+        "asset_storyboard_prompt": "asset_intake",
+        "b14_creative_controls": "asset_intake",
+        "storyboard_preview": "b14_creative_controls",
         "platform": "profile_select",
         "panels": "profile_select",
         "style": "panels",
@@ -63013,8 +63061,6 @@ VIDEO_STEP_BACK_MATRIX = {
         "image_plan": "color",
         "extra_scene": "image_plan",
         "result": "extra_scene",
-        "asset_intake": "result",
-        "storyboard_preview": "asset_intake",
     },
     "multi_scene_film": {
         "intro": VIDEO_BACK_MENU_TARGET,
@@ -63026,6 +63072,12 @@ VIDEO_STEP_BACK_MATRIX = {
         "collect_input": "intro",
         "profile_select": "intro",
         "idea_suggestions": "profile_select",
+        "asset_intake": "idea_suggestions",
+        "asset_ai_image": "asset_intake",
+        "asset_layout_ideas": "asset_intake",
+        "asset_storyboard_prompt": "asset_intake",
+        "b14_creative_controls": "asset_intake",
+        "storyboard_preview": "b14_creative_controls",
         "platform": "profile_select",
         "panels": "profile_select",
         "style": "panels",
@@ -63034,7 +63086,6 @@ VIDEO_STEP_BACK_MATRIX = {
         "image_plan": "pace",
         "extra_scene": "image_plan",
         "result": "extra_scene",
-        "storyboard_preview": "result",
     },
     "video_ai_real": {
         "intro": VIDEO_BACK_MENU_TARGET,
@@ -63056,7 +63107,13 @@ VIDEO_STEP_BACK_MATRIX = {
         "suggest_video": "ai_video_menu",
         "image_to_video_prompt_set_options": "image_suggestion_topic",
         "profile_select": "collect_input",
-        "b14_creative_controls": "profile_select",
+        "idea_suggestions": "profile_select",
+        "asset_intake": "idea_suggestions",
+        "asset_ai_image": "asset_intake",
+        "asset_layout_ideas": "asset_intake",
+        "asset_storyboard_prompt": "asset_intake",
+        "b14_creative_controls": "asset_intake",
+        "storyboard_preview": "b14_creative_controls",
         "style": "profile_select",
         "color": "style",
         "movement": "color",
@@ -63070,6 +63127,13 @@ VIDEO_STEP_BACK_MATRIX = {
         "collect_input": "intro",
         "selfshot_ideas": "intro",
         "profile_select": "collect_input",
+        "idea_suggestions": "profile_select",
+        "asset_intake": "idea_suggestions",
+        "asset_ai_image": "asset_intake",
+        "asset_layout_ideas": "asset_intake",
+        "asset_storyboard_prompt": "asset_intake",
+        "b14_creative_controls": "asset_intake",
+        "storyboard_preview": "b14_creative_controls",
         "subject": "profile_select",
         "scene_idea": "subject",
         "platform": "scene_idea",
@@ -63343,12 +63407,8 @@ def video_post_profile_step(product_id: str, session: dict | None = None) -> str
     product_id = str(product_id or "")
     if product_id == "video_idea":
         return "idea_suggestions"
-    if product_id in {"storyboard_prompt", "script_image_video", "multi_scene_film"}:
-        return "panels"
-    if product_id == "self_shot_scene_change":
-        return "subject"
-    if product_id == "video_ai_real":
-        return "b14_creative_controls"
+    if product_id in VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS:
+        return "idea_suggestions"
     if product_id == "frame_video_local":
         return "b14_creative_controls"
     return "intro"
@@ -70344,6 +70404,8 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
     if step == "asset_intake":
         return await safe_edit_or_send(target, video_asset_intake_intro_text(lang), parse_mode=None, reply_markup=video_asset_intake_keyboard(lang))
     draft = dict((session or {}).get("draft") or {})
+    if step == "idea_suggestions" and draft.get("b14_profile_id"):
+        return await safe_edit_or_send(target, video_b14_idea_suggestions_text(session, lang), parse_mode="HTML", reply_markup=video_b14_idea_suggestions_keyboard(lang))
     if step in VIDEO_MICROFLOW_OPTION_STEPS and (draft.get("microflow_kind") or product_id == "video_idea" or step != "idea_suggestions"):
         kind = str(draft.get("microflow_kind") or ("video_idea" if step == "idea_suggestions" else "prompt"))
         topic = str(draft.get("microflow_topic") or session.get("topic") or "ý tưởng video")
@@ -70374,8 +70436,6 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, video_storyboard_final_video_scenes_text(session, lang), parse_mode="HTML", reply_markup=video_storyboard_final_video_scenes_keyboard(lang))
     if step == "image_to_video_prompt_set_options":
         return await safe_edit_or_send(target, video_image_prompt_set_text(session, lang), parse_mode="HTML", reply_markup=video_image_prompt_set_keyboard(lang))
-    if step == "idea_suggestions" and (session.get("draft") or {}).get("b14_profile_id"):
-        return await safe_edit_or_send(target, video_b14_idea_suggestions_text(session, lang), parse_mode="HTML", reply_markup=video_b14_idea_suggestions_keyboard(lang))
     if step == "b14_creative_controls":
         return await safe_edit_or_send(target, video_b14_creative_controls_text(session, user_id, lang), parse_mode="HTML", reply_markup=video_b14_creative_controls_keyboard(lang))
     if step == "storyboard_preview":
@@ -71220,6 +71280,19 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             reply_markup=video_b14_profile_selection_keyboard(lang),
         )
     if action == "b14_profile_back":
+        if (
+            str(session.get("current_step") or "") == "asset_intake"
+            and product_id in VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS
+        ):
+            target_step, session = task3d_back_step(uid)
+            if target_step == VIDEO_BACK_MENU_TARGET:
+                return await safe_edit_or_send(
+                    query,
+                    menu_text_main_video_i18n(lang),
+                    parse_mode="HTML",
+                    reply_markup=main_video_keyboard(lang),
+                )
+            return await task3d_render_step(query, uid, session, lang)
         if (session.get("draft") or {}).get("b14_profile_id"):
             session = task3d_session_step(uid, "intro", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(

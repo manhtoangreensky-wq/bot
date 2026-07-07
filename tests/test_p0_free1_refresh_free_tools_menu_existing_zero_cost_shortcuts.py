@@ -165,6 +165,33 @@ def _bot_change_is_img2vid_copy_only(diff: str) -> bool:
     return all(marker in diff for marker in required) and not any(marker in added_removed for marker in forbidden)
 
 
+def _bot_change_is_video_uiflow1_only(diff: str) -> bool:
+    if not diff:
+        return True
+    added_removed = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    ).lower()
+    required = (
+        "VIDEO_UIFLOW1_CANONICAL_SEQUENCE",
+        "VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS",
+        "video_uiflow1_canonical_flow_map",
+        '"storyboard_preview": "b14_creative_controls"',
+    )
+    forbidden = (
+        "submit_public_video_with_key4u_fallback",
+        "run_multiscene_video_job",
+        "provider_router",
+        "video_provider",
+        "music",
+        "suno",
+        "subdub",
+        "payos",
+        "wallet",
+    )
+    return all(marker in diff for marker in required) and not any(marker in added_removed for marker in forbidden)
+
+
 def test_free_tools_menu_title_updated():
     assert "🆓 <b>Công cụ miễn phí TOAN AAS</b>" in bot.free_hub_main_text("vi")
 
@@ -358,7 +385,9 @@ def test_free_tools_refresh_does_not_touch_music_runtime():
 def test_free_tools_refresh_does_not_touch_product_video_runtime():
     diff = _git_diff_bot()
     for marker in ("async def handle_video_product_callback", "submit_public_video_with_key4u_fallback", "run_multiscene_video_job"):
-        if marker == "async def handle_video_product_callback" and _bot_change_is_img2vid_copy_only(diff):
+        if marker == "async def handle_video_product_callback" and (
+            _bot_change_is_img2vid_copy_only(diff) or _bot_change_is_video_uiflow1_only(diff)
+        ):
             continue
         assert marker not in diff
 
