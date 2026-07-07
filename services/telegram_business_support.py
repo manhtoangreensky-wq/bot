@@ -32,6 +32,7 @@ TRAINING_DATA_VERSION_FALLBACK = "0"
 PLAYBOOK_VERSION_FALLBACK = "0"
 CONVERSATION_MEMORY_LIMIT = 500
 LEARNING_QUEUE_LIMIT = 200
+BUSINESS_TRACE_LIMIT = 5
 PUBLIC_FORBIDDEN_TERMS = (
     "provider",
     "api",
@@ -158,6 +159,13 @@ def default_state() -> dict:
         "last_business_update_at": None,
         "last_business_message_at": None,
         "last_debug": {},
+        "business_trace": [],
+        "last_business_message": {},
+        "last_eligible_message": {},
+        "last_ignored_message": {},
+        "last_reply": {},
+        "last_debounce_buffer_summary": {},
+        "recent_message_keys": {},
     }
 
 
@@ -180,9 +188,17 @@ def normalize_state(state: dict | None) -> dict:
         "message_buffers",
         "learning_queue",
         "last_debug",
+        "last_business_message",
+        "last_eligible_message",
+        "last_ignored_message",
+        "last_reply",
+        "last_debounce_buffer_summary",
+        "recent_message_keys",
     ):
         if not isinstance(clean.get(key), dict):
             clean[key] = {}
+    if not isinstance(clean.get("business_trace"), list):
+        clean["business_trace"] = []
     return clean
 
 
@@ -260,12 +276,14 @@ def _intent_templates(intent: dict) -> list[str]:
 
 
 PRICING_SIGNAL_TERMS = (
+    "bang gia",
     "gia",
     "bao nhieu",
     "nhieu tien",
     "nhieu xu",
     "phi",
     "goi",
+    "tien",
     "re nhat",
     "mien phi",
     "xu",
@@ -274,6 +292,54 @@ PRICING_SIGNAL_TERMS = (
 
 def _is_pricing_question(folded: str) -> bool:
     return any(term in folded for term in PRICING_SIGNAL_TERMS)
+
+
+def _event_public_text(event: BusinessMessageEvent | None) -> str:
+    if not event:
+        return ""
+    return str(event.text or event.caption or "").strip()
+
+
+def _normalized_message_text(text: str) -> str:
+    return _fold(_redact_sensitive_text(text))[:300]
+
+
+def _message_text_hash(text: str) -> str:
+    normalized = _normalized_message_text(text)
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12] if normalized else "empty"
+
+
+def _classification_intent_id(classification: dict | None) -> str:
+    return str((classification or {}).get("intent_id") or (classification or {}).get("intent") or "unknown").strip() or "unknown"
+
+
+def business_message_cooldown_key(event: BusinessMessageEvent, classification: dict | None = None) -> str:
+    text = _event_public_text(event)
+    return ":".join(
+        [
+            "cooldown",
+            str(event.chat_id or "-"),
+            _classification_intent_id(classification),
+            _message_text_hash(text),
+        ]
+    )
+
+
+def business_message_duplicate_key(event: BusinessMessageEvent, classification: dict | None = None) -> str:
+    text = _event_public_text(event)
+    return ":".join(
+        [
+            "duplicate",
+            str(event.chat_id or "-"),
+            str(event.from_user_id or "-"),
+            _classification_intent_id(classification),
+            _message_text_hash(text),
+        ]
+    )
+
+
+def has_pricing_keyword(text: str) -> bool:
+    return _is_pricing_question(_fold(text))
 
 
 def _next_step_hint(intent: dict) -> str:
@@ -315,6 +381,87 @@ def mask_chat_id(chat_id: str | int | None) -> str:
     if len(raw) <= 4:
         return raw[:1] + "..." + raw[-1:]
     return raw[:2] + "..." + raw[-2:]
+
+
+def _short_message_snapshot(event: BusinessMessageEvent | None, classification: dict | None = None) -> dict:
+    text = _event_public_text(event)
+    return {
+        "chat_id_masked": mask_chat_id(event.chat_id if event else ""),
+        "business_connection_id_masked": mask_business_connection_id(event.business_connection_id if event else ""),
+        "message_id": str(event.message_id if event else ""),
+        "text": _redact_sensitive_text(text)[:180],
+        "text_hash": _message_text_hash(text),
+        "intent_id": _classification_intent_id(classification),
+        "at": float(event.timestamp or time.time()) if event else time.time(),
+    }
+
+
+def _brain_path_for_classification(classification: dict | None) -> str:
+    payload = classification or {}
+    if payload.get("playbook_scenario_id") or payload.get("knowledge_entry_id") or payload.get("training_data_version"):
+        return "cskh4_cskh6"
+    if str(payload.get("intent_id") or "") == "out_of_scope":
+        return "fallback"
+    return "old_template"
+
+
+def debounce_buffer_summary(state: dict, chat_id: str | int | None = None) -> dict:
+    clean = normalize_state(state)
+    buffers = clean.get("message_buffers") or {}
+    selected = {}
+    if chat_id is not None:
+        selected = dict(buffers.get(str(chat_id)) or {})
+    elif buffers:
+        selected = dict(max(buffers.values(), key=lambda item: float((item or {}).get("last_at") or 0)))
+    messages = list(selected.get("messages") or [])
+    return {
+        "chat_id_masked": mask_chat_id(selected.get("chat_id") or chat_id or ""),
+        "count": len(messages),
+        "texts": [_redact_sensitive_text(str(item.get("text") or ""))[:80] for item in messages[-5:]],
+        "ready_at": selected.get("ready_at"),
+    }
+
+
+def _record_business_trace(
+    state: dict,
+    *,
+    event: BusinessMessageEvent | None,
+    classification: dict | None,
+    replied: bool,
+    block_reason: str = "",
+    block_reason_detail: str = "",
+    reply_preview: str = "",
+    handler_path: str = "business_message",
+    brain_path: str | None = None,
+    cooldown_key: str = "",
+    duplicate_key: str = "",
+    eligible: bool = True,
+) -> dict:
+    clean = normalize_state(state)
+    snapshot = _short_message_snapshot(event, classification)
+    entry = {
+        **snapshot,
+        "eligible": bool(eligible),
+        "replied": bool(replied),
+        "block_reason": str(block_reason or ""),
+        "block_reason_detail": str(block_reason_detail or ""),
+        "reply_preview": _redact_sensitive_text(reply_preview)[:240],
+        "handler_path": handler_path,
+        "brain_path": brain_path or _brain_path_for_classification(classification),
+        "cooldown_key": cooldown_key,
+        "duplicate_key": duplicate_key,
+    }
+    trace = list(clean.get("business_trace") or [])
+    trace.append(entry)
+    clean["business_trace"] = trace[-BUSINESS_TRACE_LIMIT:]
+    clean["last_business_message"] = snapshot
+    if eligible:
+        clean["last_eligible_message"] = snapshot
+    if replied:
+        clean["last_reply"] = entry
+    elif block_reason:
+        clean["last_ignored_message"] = entry
+    return clean
 
 
 def prune_conversation_memory(state: dict, *, now: float | None = None, ttl_seconds: int | None = None) -> dict:
@@ -370,6 +517,7 @@ def conversation_stage_for_intent(intent_id: str) -> str:
         "bot_private_pricing",
         "mixed_product_pricing",
         "unknown_pricing_product",
+        "pricing_table_general",
     }:
         return "pricing"
     if intent in {"vague_or_unclear", "out_of_scope", "product_video_consulting", "product_video_how_to"}:
@@ -605,11 +753,18 @@ def is_distinct_followup_question(event: BusinessMessageEvent) -> bool:
     folded = _fold(event.text or event.caption)
     if not folded:
         return False
-    if len(folded.split()) < 3:
-        return False
+    if has_pricing_keyword(event.text or event.caption):
+        return True
     signals = (
+        "bang gia",
         "gia",
         "bao nhieu",
+        "nhieu xu",
+        "phi",
+        "goi",
+        "tien",
+        "re nhat",
+        "mien phi",
         "xu",
         "video",
         "nap",
@@ -1420,6 +1575,7 @@ def _pricing_source_for_intent(kb: dict, intent_id: str, product_id: str) -> str
         "mixed_product_pricing",
         "unknown_pricing_product",
         "pricing_general",
+        "pricing_table_general",
         "pricing",
     }:
         return "unknown"
@@ -1473,6 +1629,7 @@ INTENT_PRIORITY = (
     "image_prompt_help",
     "free_tools_help",
     "pricing_topup",
+    "pricing_table_general",
     "pricing_general",
     "pricing",
     "new_user_what_is_toan_aas",
@@ -1512,12 +1669,55 @@ def _legacy_intents_from_kb(kb: dict) -> list[dict]:
     return intents
 
 
+def _builtin_live_intents() -> list[dict]:
+    return [
+        {
+            "id": "pricing_table_general",
+            "description": "Khách hỏi bảng giá tổng quát TOAN AAS.",
+            "priority": 86,
+            "confidence_keywords": [
+                "bảng giá",
+                "bang gia",
+                "cho em bảng giá",
+                "gửi bảng giá",
+                "bảng giá dịch vụ",
+                "giá tổng",
+                "có bảng giá không",
+                "giá các dịch vụ",
+            ],
+            "example_user_messages": [
+                "bảng giá",
+                "cho em bảng giá",
+                "gửi bảng giá",
+                "bảng giá dịch vụ",
+                "giá tổng",
+                "có bảng giá không",
+                "giá các dịch vụ sao",
+            ],
+            "required_context_fields": [],
+            "reply_templates": [
+                "Dạ em gửi mình hướng bảng giá tổng quát ạ: TOAN AAS có Video AI, tạo ảnh/ghép ảnh thành video, SubDub phụ đề-lồng tiếng, voice/nhạc và bot riêng. Mỗi phần bot sẽ báo gói/Xu trước khi mình xác nhận, nên không bị trừ nhầm. Anh/chị muốn xem giá phần video, ảnh hay SubDub trước ạ?"
+            ],
+            "handoff_required": False,
+            "ticket_required": False,
+            "safe_next_steps": ["Hỏi khách muốn xem giá phần video, ảnh hay SubDub trước"],
+            "forbidden_claims": ["báo giá bịa", "cam kết giảm giá", "tự hứa miễn phí"],
+            "severity": "normal",
+        }
+    ]
+
+
 def _intent_lookup(training_data: dict, kb: dict) -> dict[str, dict]:
     merged: dict[str, dict] = {}
+    for item in _builtin_live_intents():
+        merged[_intent_id(item)] = item
     for item in _legacy_intents_from_kb(kb):
         merged[_intent_id(item)] = item
     for item in training_data.get("intents") or []:
-        merged[_intent_id(item)] = item
+        intent_id = _intent_id(item)
+        if intent_id:
+            existing = merged.get(intent_id)
+            merged[intent_id] = {**existing, **item} if isinstance(existing, dict) else item
     return merged
 
 
@@ -1563,9 +1763,16 @@ def _heuristic_intent_id(query: str) -> str:
     voice_terms = ("voice", "tts", "giong doc", "giong nam", "giong nu")
     music_terms = ("nhac", "music", "bai hat", "suno", "nhac nen")
     private_bot_terms = ("bot rieng", "premium", "he thong rieng", "cskh tu dong", "shop", "doanh nghiep")
+    has_specific_product_word = any(term in folded for term in video_terms + image_terms + img2vid_terms + subtitle_terms + dub_terms + voice_terms + music_terms + private_bot_terms)
 
     if any(term in folded for term in ("nay su dung sao", "bot nay dung sao", "dung kieu gi", "huong dan", "moi vao", "bat dau tu dau", "su dung sao anh")):
         return "new_user_what_is_toan_aas"
+    if not has_specific_product_word and "xu" not in folded and (
+        folded in {"bang gia", "cho em bang gia", "gui bang gia", "bang gia dich vu", "gia tong"}
+        or "bang gia" in folded
+        or any(term in folded for term in ("co bang gia khong", "gia cac dich vu", "bang gia tong", "xem bang gia"))
+    ):
+        return "pricing_table_general"
     if any(term in folded for term in ("xu bang", "bang gia xu", "quy doi xu", "xu tinh sao", "1 xu", "1000 xu")):
         return "pricing_general"
     if any(term in folded for term in ("bam nham", "co mat xu", "co tru tien truoc", "tru tien truoc", "bao gia truoc", "tru xu truoc")):
@@ -1793,6 +2000,70 @@ def build_ticket_draft(
     }
 
 
+def _is_simple_greeting_text(text: str) -> bool:
+    folded = _fold(text)
+    return folded in {
+        "alo",
+        "hi",
+        "hello",
+        "em oi",
+        "shop oi",
+        "co ai khong",
+        "co ho tro khong",
+        "cho minh hoi voi",
+    }
+
+
+def _context_aware_greeting_reply(text: str, classification: dict, conversation_memory: dict | None = None) -> dict:
+    intent_id = str(classification.get("intent_id") or "")
+    if intent_id not in {"greeting", "greeting_ping", "repeated_ping"} or not _is_simple_greeting_text(text):
+        return classification
+    memory = conversation_memory or {}
+    last_stage = str(memory.get("conversation_stage") or "")
+    last_intent = str(memory.get("last_intent") or "")
+    last_product = str(memory.get("last_product") or "")
+    pricing_context = last_stage == "pricing" or last_intent.endswith("_pricing") or last_intent in {
+        "pricing",
+        "pricing_general",
+        "pricing_table_general",
+        "pricing_topup",
+    }
+    if pricing_context:
+        reply = "Dạ em đây ạ. Mình muốn xem giá phần video, ảnh hay bảng giá tổng ạ?"
+        template_id = "context_greeting:pricing"
+    elif last_product and last_product not in {"general", ""}:
+        reply = "Dạ em đây ạ. Mình cần em hỗ trợ tiếp phần đó hay muốn hỏi thêm bảng giá ạ?"
+        template_id = "context_greeting:product"
+    else:
+        reply = "Dạ em đây ạ. Anh/chị muốn hỏi về video, ảnh, SubDub hay nạp Xu ạ?"
+        template_id = "context_greeting:new"
+    classification = dict(classification)
+    classification["reply"] = reply
+    classification["reply_preview"] = reply
+    classification["reply_template_id"] = template_id
+    classification["playbook_scenario_id"] = classification.get("playbook_scenario_id") or ""
+    classification["public_safe"] = public_reply_is_safe(reply)
+    return classification
+
+
+def _apply_pricing_table_thread_hint(text: str, classification: dict) -> dict:
+    folded = _fold(text)
+    intent_id = str(classification.get("intent_id") or "")
+    if "bang gia" not in folded or intent_id != "product_video_pricing":
+        return classification
+    reply = (
+        "Dạ em ưu tiên phần giá video trước ạ. Video AI sẽ tùy loại video, độ dài và tư liệu đầu vào; bot sẽ báo gói/Xu trước khi mình xác nhận. "
+        "Nếu mình muốn xem bảng giá tổng quát thì TOAN AAS có Video AI, ảnh/ghép ảnh thành video, SubDub phụ đề-lồng tiếng, voice/nhạc và bot riêng. "
+        "Anh/chị muốn xem kỹ phần video sản phẩm, video quảng cáo hay video từ ảnh trước ạ?"
+    )
+    classification = dict(classification)
+    classification["reply"] = reply
+    classification["reply_preview"] = reply
+    classification["reply_template_id"] = "pricing_thread:video_plus_table"
+    classification["public_safe"] = public_reply_is_safe(reply)
+    return classification
+
+
 def classify_cskh_message(
     text: str = "",
     *,
@@ -1800,6 +2071,7 @@ def classify_cskh_message(
     kb: dict | None = None,
     training_data: dict | None = None,
     variation_seed: str | int | None = None,
+    conversation_memory: dict | None = None,
 ) -> dict:
     base = kb or load_knowledge_base()
     training = training_data or load_training_data()
@@ -1893,11 +2165,12 @@ def classify_cskh_message(
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     elif result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, text=text)
-    return result
+    result = _apply_pricing_table_thread_hint(text, result)
+    return _context_aware_greeting_reply(text, result, conversation_memory)
 
 
-def classify_business_event(event: BusinessMessageEvent, kb: dict | None = None) -> dict:
-    result = classify_cskh_message(event.text or event.caption, media_type=event.media_type, kb=kb)
+def classify_business_event(event: BusinessMessageEvent, kb: dict | None = None, conversation_memory: dict | None = None) -> dict:
+    result = classify_cskh_message(event.text or event.caption, media_type=event.media_type, kb=kb, conversation_memory=conversation_memory)
     if result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, event, text=event.text or event.caption)
     return result
@@ -1937,11 +2210,12 @@ async def process_business_event_runtime(
     clean = record_business_message_received(state, event)
     if clean.get("enabled"):
         clean = upsert_business_connection_from_message(clean, event)
-    classification = classify_business_event(event)
     chat_id = str(event.chat_id or "")
+    memory = get_conversation_memory(clean, chat_id)
+    classification = classify_business_event(event, conversation_memory=memory)
     if str(classification.get("severity") or "") == "urgent" and clean.get("message_buffers", {}).get(chat_id):
         clean, _dropped = pop_message_buffer(clean, chat_id, force=True)
-    guard = evaluate_auto_reply_guard(clean, event, bot_user_id=bot_user_id)
+    guard = evaluate_auto_reply_guard(clean, event, bot_user_id=bot_user_id, classification=classification)
     if not guard.get("allowed"):
         clean = record_suppressed(clean, event, classification, guard)
         clean = update_conversation_memory(clean, event, classification)
@@ -1949,11 +2223,20 @@ async def process_business_event_runtime(
         return {"sent": False, "classification": classification, "guard": guard}
     if allow_debounce and should_debounce_message(clean, event, classification):
         clean = append_message_buffer(clean, event)
+        debounce_guard = {
+            **guard,
+            "allowed": False,
+            "debounce_pending": True,
+            "block_reason": "debounce_pending",
+            "block_reason_detail": "waiting for quick follow-up messages before replying",
+        }
+        clean["last_debounce_buffer_summary"] = debounce_buffer_summary(clean, chat_id)
+        clean = record_suppressed(clean, event, classification, debounce_guard)
         clean = update_conversation_memory(clean, event, classification)
         save_state_fn(clean)
         if schedule_buffer_fn:
             schedule_buffer_fn(event.chat_id, context)
-        return {"sent": False, "buffered": True, "classification": classification, "guard": guard}
+        return {"sent": False, "buffered": True, "classification": classification, "guard": debounce_guard}
     reply = str(classification.get("reply") or "").strip()
     if not reply or not classification.get("public_safe", True):
         classification["intent_id"] = "out_of_scope"
@@ -1962,14 +2245,27 @@ async def process_business_event_runtime(
         classification["ticket"] = True
         classification["ticket_required"] = True
         reply = "TOAN AAS đã nhận tin nhắn. Nội dung này cần admin xem thêm để tránh trả lời sai."
-    send_result = await send_business_message(
-        context.bot,
-        event.business_connection_id,
-        event.chat_id,
-        reply,
-        reply_to_message_id=event.message_id,
-    )
-    clean = record_auto_reply(clean, event, classification, send_result)
+    try:
+        send_result = await send_business_message(
+            context.bot,
+            event.business_connection_id,
+            event.chat_id,
+            reply,
+            reply_to_message_id=event.message_id,
+        )
+    except Exception as exc:
+        failure_guard = {
+            **guard,
+            "allowed": False,
+            "send_failed": True,
+            "block_reason": "send_failed",
+            "block_reason_detail": type(exc).__name__,
+        }
+        clean = record_suppressed(clean, event, classification, failure_guard)
+        clean = update_conversation_memory(clean, event, classification)
+        save_state_fn(clean)
+        return {"sent": False, "classification": classification, "guard": failure_guard, "error": type(exc).__name__}
+    clean = record_auto_reply(clean, event, classification, send_result, guard=guard)
     clean = update_conversation_memory(clean, event, classification, reply=reply)
     if should_queue_learning(classification, event.text or event.caption):
         clean, _candidate = add_learning_candidate(
@@ -2004,12 +2300,18 @@ def evaluate_auto_reply_guard(
     bot_user_id: str | int | None = None,
     now: float | None = None,
     cooldown_seconds: int | None = None,
+    classification: dict | None = None,
 ) -> dict:
     clean = normalize_state(state)
     current = time.time() if now is None else float(now)
     cooldown = int(cooldown_seconds or os.getenv("CSKH_AUTO_REPLY_COOLDOWN_SECONDS") or DEFAULT_COOLDOWN_SECONDS)
     key = business_message_key(event)
     chat_id = str(event.chat_id or "")
+    cooldown_key = business_message_cooldown_key(event, classification)
+    duplicate_key = business_message_duplicate_key(event, classification)
+    recent_duplicate = clean.get("recent_message_keys", {}).get(duplicate_key) or {}
+    recent_duplicate_at = float((recent_duplicate or {}).get("at") or 0)
+    pricing_bypass = has_pricing_keyword(event.text or event.caption)
     debug = {
         "allowed": True,
         "disabled_suppressed": False,
@@ -2021,6 +2323,7 @@ def evaluate_auto_reply_guard(
         "command_suppressed": False,
         "deleted_suppressed": False,
         "missing_business_connection_id_suppressed": False,
+        "pricing_cooldown_bypass": pricing_bypass,
     }
     if not clean.get("enabled"):
         debug["disabled_suppressed"] = True
@@ -2028,6 +2331,10 @@ def evaluate_auto_reply_guard(
         debug["missing_business_connection_id_suppressed"] = True
     if key in clean["processed_messages"]:
         debug["duplicate_suppressed"] = True
+        debug["block_reason_detail"] = "same Telegram business message key was already processed"
+    elif recent_duplicate_at and current - recent_duplicate_at < cooldown:
+        debug["duplicate_suppressed"] = True
+        debug["block_reason_detail"] = "same normalized message and intent was already answered recently"
     if key in clean["deleted_messages"]:
         debug["deleted_suppressed"] = True
     if handoff_required(clean, chat_id):
@@ -2039,24 +2346,32 @@ def evaluate_auto_reply_guard(
         debug["admin_manual_suppressed"] = True
     if str(event.text or event.caption or "").strip().startswith("/"):
         debug["command_suppressed"] = True
-    last_reply = float(clean["last_auto_reply_at"].get(chat_id) or 0)
-    if last_reply and current - last_reply < cooldown and not is_distinct_followup_question(event):
+    last_reply = float(clean["last_auto_reply_at"].get(cooldown_key) or 0)
+    if last_reply and current - last_reply < cooldown and not pricing_bypass:
         debug["cooldown_suppressed"] = True
+        debug["block_reason_detail"] = "same normalized message and intent is still inside cooldown window"
     debug["allowed"] = not any(value for key_name, value in debug.items() if key_name.endswith("_suppressed"))
     debug["message_key"] = key
+    debug["cooldown_key"] = cooldown_key
+    debug["duplicate_key"] = duplicate_key
     debug["cooldown_seconds"] = cooldown
     debug["block_reason"] = guard_block_reason(debug)
+    debug.setdefault("block_reason_detail", "")
     return debug
 
 
-def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: dict, send_result: dict | None = None) -> dict:
+def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: dict, send_result: dict | None = None, guard: dict | None = None) -> dict:
     clean = normalize_state(state)
     now = time.time()
     key = business_message_key(event)
+    cooldown_key = business_message_cooldown_key(event, classification)
+    duplicate_key = business_message_duplicate_key(event, classification)
     clean["processed_messages"][key] = {"at": now, "intent_id": classification.get("intent_id")}
-    clean["last_auto_reply_at"][str(event.chat_id)] = now
+    clean["last_auto_reply_at"][cooldown_key] = now
+    clean["recent_message_keys"][duplicate_key] = {"at": now, "intent_id": classification.get("intent_id")}
     clean["last_intent"][str(event.chat_id)] = str(classification.get("intent_id") or "")
     clean["last_debug"] = {
+        **dict(guard or {}),
         "classified_intent": classification.get("intent_id"),
         "confidence": classification.get("confidence"),
         "severity": classification.get("severity"),
@@ -2065,21 +2380,63 @@ def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: 
         "reply_method_business_connection_id_present": bool(
             (send_result or {}).get("payload", {}).get("business_connection_id")
         ),
+        "block_reason": "",
+        "block_reason_detail": "",
+        "cooldown_key": cooldown_key,
+        "duplicate_key": duplicate_key,
+        "handler_path": "business_message_runtime",
+        "brain_path": _brain_path_for_classification(classification),
     }
+    clean = _record_business_trace(
+        clean,
+        event=event,
+        classification=classification,
+        replied=True,
+        reply_preview=str(classification.get("reply") or ""),
+        handler_path="business_message_runtime",
+        brain_path=_brain_path_for_classification(classification),
+        cooldown_key=cooldown_key,
+        duplicate_key=duplicate_key,
+        eligible=True,
+    )
     _prune_dict(clean["processed_messages"], 500)
+    _prune_timestamp_dict(clean["last_auto_reply_at"], 500)
+    _prune_dict(clean["recent_message_keys"], 500)
     return clean
 
 
 def record_suppressed(state: dict, event: BusinessMessageEvent | None, classification: dict | None, guard: dict) -> dict:
     clean = normalize_state(state)
+    block_reason = str((guard or {}).get("block_reason") or guard_block_reason(guard) or "no_reply_generated")
+    eligible = block_reason not in {"disabled", "handoff", "self_message", "admin_manual", "command", "deleted", "missing_business_connection_id"}
     clean["last_debug"] = {
         **dict(guard or {}),
         "classified_intent": (classification or {}).get("intent_id"),
         "reply_sent": False,
         "reply_method_business_connection_id_present": bool(event and event.business_connection_id),
+        "block_reason": block_reason,
+        "block_reason_detail": str((guard or {}).get("block_reason_detail") or ""),
+        "cooldown_key": str((guard or {}).get("cooldown_key") or (business_message_cooldown_key(event, classification) if event else "")),
+        "duplicate_key": str((guard or {}).get("duplicate_key") or (business_message_duplicate_key(event, classification) if event else "")),
+        "handler_path": "business_message_runtime",
+        "brain_path": _brain_path_for_classification(classification),
     }
     if event and classification:
         clean["last_intent"][str(event.chat_id)] = str(classification.get("intent_id") or "")
+    clean = _record_business_trace(
+        clean,
+        event=event,
+        classification=classification,
+        replied=False,
+        block_reason=block_reason,
+        block_reason_detail=str((guard or {}).get("block_reason_detail") or ""),
+        reply_preview=str((classification or {}).get("reply") or ""),
+        handler_path="business_message_runtime",
+        brain_path=_brain_path_for_classification(classification),
+        cooldown_key=clean["last_debug"].get("cooldown_key") or "",
+        duplicate_key=clean["last_debug"].get("duplicate_key") or "",
+        eligible=eligible,
+    )
     return clean
 
 
@@ -2087,6 +2444,14 @@ def _prune_dict(payload: dict, max_items: int) -> None:
     if len(payload) <= max_items:
         return
     sortable = sorted(payload.items(), key=lambda item: float((item[1] or {}).get("at") or 0))
+    for key, _value in sortable[: max(0, len(payload) - max_items)]:
+        payload.pop(key, None)
+
+
+def _prune_timestamp_dict(payload: dict, max_items: int) -> None:
+    if len(payload) <= max_items:
+        return
+    sortable = sorted(payload.items(), key=lambda item: float(item[1] or 0))
     for key, _value in sortable[: max(0, len(payload) - max_items)]:
         payload.pop(key, None)
 
@@ -2101,8 +2466,11 @@ def guard_block_reason(debug: dict | None) -> str:
     reasons = (
         ("disabled_suppressed", "disabled"),
         ("missing_business_connection_id_suppressed", "missing_business_connection_id"),
-        ("duplicate_suppressed", "duplicate"),
-        ("cooldown_suppressed", "cooldown"),
+        ("duplicate_suppressed", "exact_duplicate"),
+        ("cooldown_suppressed", "cooldown_same_intent"),
+        ("debounce_pending", "debounce_pending"),
+        ("send_failed", "send_failed"),
+        ("exception", "exception"),
         ("handoff_suppressed", "handoff"),
         ("self_message_suppressed", "self_message"),
         ("admin_manual_suppressed", "admin_manual"),
@@ -2140,6 +2508,20 @@ def status_payload(state: dict, *, bot_status: dict | None = None, allowed_updat
         "receiving_business_messages": bool(clean.get("last_business_message_at")),
         "last_debug": last_debug,
         "last_block_reason": last_debug.get("block_reason") or guard_block_reason(last_debug),
+        "last_block_reason_detail": last_debug.get("block_reason_detail") or "",
+        "last_business_message": dict(clean.get("last_business_message") or {}),
+        "last_eligible_message": dict(clean.get("last_eligible_message") or {}),
+        "last_ignored_message": dict(clean.get("last_ignored_message") or {}),
+        "last_reply": dict(clean.get("last_reply") or {}),
+        "last_reply_sent": bool(last_debug.get("reply_sent")),
+        "last_intent": last_debug.get("classified_intent") or "",
+        "last_cooldown_key": last_debug.get("cooldown_key") or "",
+        "last_duplicate_key": last_debug.get("duplicate_key") or "",
+        "last_handler_path": last_debug.get("handler_path") or "",
+        "last_brain_path": last_debug.get("brain_path") or "",
+        "last_debounce_buffer_summary": dict(clean.get("last_debounce_buffer_summary") or debounce_buffer_summary(clean)),
+        "business_trace": list(clean.get("business_trace") or [])[-BUSINESS_TRACE_LIMIT:],
+        "state_source": str(default_state_path()),
     }
 
 
