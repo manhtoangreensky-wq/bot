@@ -99,7 +99,7 @@
       "policy_claim_types": ["safe_public_fact"],
       "safe_reply_templates": [
         "Dạ làm video bán hàng được ạ. Để chọn đúng luồng, em cần biết sản phẩm gì, mục tiêu là quảng cáo hay giới thiệu, và mình muốn dùng ảnh có sẵn hay viết prompt từ đầu. {quote_before_confirm_text}",
-        "Dạ với video nhiều cảnh, mình nên chốt sản phẩm, độ dài mong muốn và có cần voice/phụ đề/logo không. Anh/chị gửi em sản phẩm và mục tiêu video, em gợi ý hướng làm vừa đủ trước ạ."
+        "Dạ với video nhiều cảnh, mình nên chốt sản phẩm, độ dài mong muốn và có cần voice/phụ đề/logo không. Anh/chị gửi em sản phẩm và mục tiêu video, em gợi ý gói/Xu phù hợp trước khi mình xác nhận ạ."
       ],
       "next_question": "Sản phẩm gì và mình muốn video để quảng cáo hay giới thiệu ạ?",
       "handoff_required": false,
@@ -128,7 +128,7 @@
       "examples": ["ảnh rồi ghép video được không", "ghép ảnh thành video bao nhiêu"],
       "policy_claim_types": ["config_priced_fact", "safe_public_fact"],
       "safe_reply_templates": [
-        "Dạ được ạ. Nếu anh/chị đã có ảnh sẵn thì mình có thể ghép thành video; nếu chưa có ảnh thì tạo ảnh AI trước rồi mới ghép. {price_text_if_configured} Anh/chị muốn dùng bao nhiêu ảnh và mỗi ảnh khoảng mấy giây ạ?"
+        "Dạ được ạ. Nếu anh/chị đã có ảnh sẵn thì mình có thể làm video AI từ ảnh; nếu chưa có ảnh thì tạo ảnh trước bằng AI rồi mới ghép. {price_text_if_configured} Anh/chị muốn dùng bao nhiêu ảnh và mỗi ảnh khoảng mấy giây ạ?"
       ],
       "next_question": "Anh/chị muốn dùng bao nhiêu ảnh và mỗi ảnh khoảng mấy giây ạ?",
       "handoff_required": false,
@@ -185,7 +185,7 @@
       "examples": ["video xong chưa thấy file", "file lỗi", "lồng tiếng sai"],
       "policy_claim_types": ["admin_action_required"],
       "safe_reply_templates": [
-        "Dạ em xin lỗi vì phần này làm mình mất thời gian ạ. {job_code_request} Em sẽ chuyển admin kiểm tra đầu ra thực tế; nếu hệ thống chưa tạo được file hợp lệ thì bên em sẽ báo rõ trước khi xử lý tiếp."
+        "Dạ em xin lỗi vì phần video này làm mình mất thời gian ạ. {job_code_request} Em sẽ chuyển admin kiểm tra đầu ra thực tế; nếu hệ thống chưa tạo được video/file hợp lệ thì bên em sẽ báo rõ trước khi xử lý tiếp."
       ],
       "next_question": "Anh/chị gửi giúp mã xử lý hoặc ảnh trạng thái lỗi ạ.",
       "handoff_required": true,

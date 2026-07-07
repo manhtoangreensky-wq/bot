@@ -1201,7 +1201,8 @@ def _playbook_slots(playbook: dict, classification: dict | None = None, scenario
     slots.setdefault("admin_check_line", "Admin sẽ kiểm tra theo dữ liệu thực tế trước khi phản hồi hướng xử lý.")
     slots["product_name"] = str(scenario.get("product_name") or classification.get("primary_product") or classification.get("product") or "TOAN AAS")
     price_text = str(classification.get("price_text") or "").strip()
-    slots["price_text_if_configured"] = price_text if str(classification.get("pricing_source") or "") == "config" else ""
+    rendered_price = price_text[:1].lower() + price_text[1:] if price_text else ""
+    slots["price_text_if_configured"] = rendered_price if str(classification.get("pricing_source") or "") == "config" else ""
     slots["next_question"] = str(scenario.get("next_question") or classification.get("next_question") or "Anh/chị muốn làm phần nào trước ạ?")
     slots["handoff_line"] = str(slots.get("handoff_line") or "Em sẽ chuyển admin kiểm tra giúp mình.")
     return slots
@@ -1261,6 +1262,7 @@ def build_human_touch_reply(
     *,
     playbook: dict | None = None,
     kb: dict | None = None,
+    variation_seed: str | int | None = None,
 ) -> dict:
     data = playbook or load_playbook()
     base = kb or load_knowledge_base()
@@ -1271,8 +1273,16 @@ def build_human_touch_reply(
     templates = [str(item).strip() for item in scenario.get("safe_reply_templates") or [] if str(item or "").strip()]
     if not templates:
         return {"matched": False, "scenario_id": str(scenario.get("id") or "")}
-    digest = hashlib.sha256(f"{scenario.get('id')}:{text}".encode("utf-8")).hexdigest()
-    template = templates[int(digest[:8], 16) % len(templates)]
+    scenario_id = str(scenario.get("id") or "unknown")
+    template_key = f"playbook:{scenario_id}"
+    if variation_seed is None:
+        current_index = _REPLY_VARIATION_COUNTER.get(template_key, 0)
+        _REPLY_VARIATION_COUNTER[template_key] = current_index + 1
+        template_index = current_index % len(templates)
+    else:
+        digest = hashlib.sha256(f"{template_key}:{variation_seed}".encode("utf-8")).hexdigest()
+        template_index = int(digest[:8], 16) % len(templates)
+    template = templates[template_index]
     slots = _playbook_slots(data, current, scenario)
     reply = _clean_reply_text(_format_playbook_template(template, slots), severity=str(current.get("severity") or scenario.get("severity") or "normal"))
     pricing_source = str(current.get("pricing_source") or "unknown")
@@ -1284,8 +1294,9 @@ def build_human_touch_reply(
     return {
         "matched": True,
         "playbook_version": str(data.get("version") or PLAYBOOK_VERSION_FALLBACK),
-        "scenario_id": str(scenario.get("id") or ""),
+        "scenario_id": scenario_id,
         "scenario_group": str(scenario.get("group") or ""),
+        "reply_template_id": f"{template_key}:{template_index + 1}",
         "reply": reply,
         "policy_claims": policy,
         "handoff_required": handoff,
@@ -1850,7 +1861,7 @@ def classify_cskh_message(
         "safe_next_step": _next_step_hint(selected),
         "forbidden_claims": list(selected.get("forbidden_claims") or []),
     }
-    playbook_reply = build_human_touch_reply(text, result, kb=base)
+    playbook_reply = build_human_touch_reply(text, result, kb=base, variation_seed=variation_seed)
     if playbook_reply.get("matched"):
         policy = playbook_reply.get("policy_claims") or {}
         result["playbook_version"] = str(playbook_reply.get("playbook_version") or "")
@@ -1862,7 +1873,7 @@ def classify_cskh_message(
         if not policy.get("unsafe") and str(playbook_reply.get("reply") or "").strip():
             result["reply"] = str(playbook_reply.get("reply") or "").strip()
             result["reply_preview"] = result["reply"]
-            result["reply_template_id"] = f"playbook:{result['playbook_scenario_id']}"
+            result["reply_template_id"] = str(playbook_reply.get("reply_template_id") or f"playbook:{result['playbook_scenario_id']}")
         else:
             result["reply"] = "Dạ phần này cần admin xác nhận chính sách trước để tránh em trả lời sai. Anh/chị gửi giúp thông tin liên quan, em chuyển admin kiểm tra ngay ạ."
             result["reply_preview"] = result["reply"]

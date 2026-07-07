@@ -253,6 +253,7 @@ def test_no_music_product_video_subdub_runtime_touched():
         "bot.py",
         "services/telegram_business_support.py",
         "config/cskh_knowledge_base.json",
+        "config/cskh_playbook.json",
         "config/cskh_training_data.json",
         "docs/cskh_telegram_business_setup.md",
         "docs/cskh_toan_aas_playbook.md",
@@ -261,6 +262,7 @@ def test_no_music_product_video_subdub_runtime_touched():
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
         "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
+        "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
     }
     img2vid_scope = {

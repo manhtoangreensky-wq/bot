@@ -131,6 +131,7 @@ def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
         "config/cskh_playbook.json",
         "config/cskh_training_data.json",
         "config/cskh_knowledge_base.json",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
     }
     forbidden_fragments = (
