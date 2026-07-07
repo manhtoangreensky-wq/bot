@@ -166,7 +166,9 @@ def test_provider_poll_count_displayed():
     payload = _provider_alive_payload(provider_poll_count=8, provider_elapsed_seconds=754, provider_progress_percent=38)
     block = bot.video_b14_provider_rendering_block(bot.video_b14_provider_telemetry(_panel_job(payload=payload), payload))
 
-    assert "Đã kiểm tra: <b>8 lần</b>" in block
+    assert "Đã kiểm tra" not in block
+    assert "8 lần" not in block
+    assert "Hệ thống đang dựng video" in block
     assert "provider" not in block.lower()
 
 
@@ -174,7 +176,8 @@ def test_elapsed_seconds_displayed():
     payload = _provider_alive_payload(provider_started_at_epoch=time.time() - 754, provider_elapsed_seconds=754, provider_progress_percent=38)
     block = bot.video_b14_provider_rendering_block(bot.video_b14_provider_telemetry(_panel_job(payload=payload), payload))
 
-    assert "12 phút 34 giây" in block
+    assert "12 phút 34 giây" not in block
+    assert "Hệ thống đang dựng video" in block
 
 
 def test_elapsed_timer_uses_provider_started_at():

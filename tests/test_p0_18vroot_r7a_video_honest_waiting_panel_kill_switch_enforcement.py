@@ -164,7 +164,7 @@ def test_public_hides_poll_count_from_provider_attempts():
 
     assert "Đã kiểm tra" not in block
     assert "13 lần" not in block
-    assert "Đang chờ kết quả dựng video" in block
+    assert "đang chờ kết quả" in block
 
 
 def test_public_hides_poll_count_when_registry_missing_after_restart():
@@ -181,7 +181,7 @@ def test_public_hides_poll_count_when_registry_missing_after_restart():
 
     assert "Đã kiểm tra" not in block
     assert "Đã xử lý" not in block
-    assert "Đã gửi yêu cầu dựng video." in block
+    assert "Đã gửi yêu cầu dựng video, đang chờ kết quả." in block
 
 
 def test_public_shows_poll_count_only_for_live_worker_source():
@@ -196,7 +196,9 @@ def test_public_shows_poll_count_only_for_live_worker_source():
         )
     )
 
-    assert "Đã kiểm tra: <b>2 lần</b>" in block
+    assert "Đã kiểm tra" not in block
+    assert "2 lần" not in block
+    assert "Hệ thống đang dựng video" in block
 
 
 def test_public_elapsed_hidden_when_registry_missing():
@@ -210,7 +212,7 @@ def test_public_elapsed_hidden_when_registry_missing():
     )
 
     assert "Đã xử lý" not in block
-    assert "Đang chờ kết quả dựng video." in block
+    assert "Hệ thống đang dựng video" in block
 
 
 def test_elapsed_debug_source_present():
@@ -226,8 +228,8 @@ def test_zero_waiting_public_copy_honest_short():
 
     assert "<b>Dựng video:</b>" in block
     assert "▱▱▱▱▱▱▱▱▱▱ <b>0%</b>" in block
-    assert "Đã gửi yêu cầu dựng video." in block
-    assert "Đang chờ kết quả dựng video." in block
+    assert "Đã gửi yêu cầu dựng video, đang chờ kết quả." in block
+    assert "Hệ thống đang dựng video" in block
     assert "Đã xử lý" not in block
     assert "Đã kiểm tra" not in block
 
