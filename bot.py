@@ -84066,6 +84066,13 @@ def cskh_bot_user_id(context: ContextTypes.DEFAULT_TYPE | None = None) -> str:
             return str(bot_id)
     return str(ACTIVE_TELEGRAM_BOT_ID or "")
 
+def cskh_bot_username(context: ContextTypes.DEFAULT_TYPE | None = None) -> str:
+    if context and getattr(context, "bot", None):
+        username = getattr(context.bot, "username", None)
+        if username:
+            return str(username)
+    return str(ACTIVE_TELEGRAM_BOT_USERNAME or BOT_USERNAME or "")
+
 def cskh_format_ts(timestamp_value) -> str:
     try:
         return datetime.fromtimestamp(float(timestamp_value), tz=VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
@@ -84107,6 +84114,9 @@ def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str
         f"• Last block detail: <code>{html.escape(str(payload.get('last_block_reason_detail') or '-'))}</code>",
         f"• Last cooldown key: <code>{html.escape(str(payload.get('last_cooldown_key') or '-'))}</code>",
         f"• Last duplicate key: <code>{html.escape(str(payload.get('last_duplicate_key') or '-'))}</code>",
+        f"• Last ignored reason: <code>{html.escape(str(payload.get('last_ignored_reason') or '-'))}</code>",
+        f"• Last idempotency key: <code>{html.escape(str(payload.get('last_idempotency_key') or '-'))}</code>",
+        f"• Last self/outbound: <code>{html.escape(str(payload.get('last_self_outbound_detection') or '-'))}</code>",
         f"• Last handler path: <code>{html.escape(str(payload.get('last_handler_path') or '-'))}</code>",
         f"• Last brain path: <code>{html.escape(str(payload.get('last_brain_path') or '-'))}</code>",
         f"• Last buffer: <code>{html.escape(str(buffer_summary.get('count', 0)))} msg</code>",
@@ -84122,7 +84132,7 @@ def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str
     return lines
 
 def cskh_business_trace_lines(payload: dict) -> list[str]:
-    trace = list(payload.get("business_trace") or [])[-5:]
+    trace = list(payload.get("business_trace") or [])[-10:]
     lines = ["🧭 <b>CSKH Business Trace</b>", ""]
     if not trace:
         lines.append("Chưa có business message trace.")
@@ -84132,9 +84142,12 @@ def cskh_business_trace_lines(payload: dict) -> list[str]:
         lines.extend(
             [
                 f"<b>{index}.</b> <code>{html.escape(text or '-')}</code>",
+                f"   type=<code>{html.escape(str(item.get('update_type') or '-'))}</code> direction=<code>{html.escape(str(item.get('direction_guess') or '-'))}</code> msg=<code>{html.escape(str(item.get('message_id') or '-'))}</code>",
+                f"   from=<code>{html.escape(str(item.get('from_user_id_masked') or '-'))}</code> from_bot=<code>{'yes' if item.get('from_is_bot') else 'no'}</code> bc=<code>{html.escape(str(item.get('business_connection_id_masked') or '-'))}</code>",
                 f"   intent=<code>{html.escape(str(item.get('intent_id') or '-'))}</code> eligible=<code>{'yes' if item.get('eligible') else 'no'}</code> replied=<code>{'yes' if item.get('replied') else 'no'}</code>",
                 f"   block=<code>{html.escape(str(item.get('block_reason') or '-'))}</code> detail=<code>{html.escape(str(item.get('block_reason_detail') or '-'))}</code>",
-                f"   brain=<code>{html.escape(str(item.get('brain_path') or '-'))}</code> reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
+                f"   idem=<code>{html.escape(str(item.get('idempotency_key') or '-'))}</code> self=<code>{html.escape(str(item.get('self_outbound_detection') or '-'))}</code>",
+                f"   handler=<code>{html.escape(str(item.get('handler_path') or '-'))}</code> brain=<code>{html.escape(str(item.get('brain_path') or '-'))}</code> reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
             ]
         )
     return lines
@@ -84468,6 +84481,7 @@ async def process_cskh_business_event(
         state=state or cskh_business_state(),
         save_state_fn=save_cskh_business_state,
         bot_user_id=cskh_bot_user_id(context),
+        bot_username=cskh_bot_username(context),
         allow_debounce=allow_debounce,
         schedule_buffer_fn=cskh_schedule_buffer_flush,
         notify_admin_fn=notify_cskh_business_admin,

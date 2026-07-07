@@ -32,7 +32,7 @@ TRAINING_DATA_VERSION_FALLBACK = "0"
 PLAYBOOK_VERSION_FALLBACK = "0"
 CONVERSATION_MEMORY_LIMIT = 500
 LEARNING_QUEUE_LIMIT = 200
-BUSINESS_TRACE_LIMIT = 5
+BUSINESS_TRACE_LIMIT = 10
 PUBLIC_FORBIDDEN_TERMS = (
     "provider",
     "api",
@@ -111,6 +111,20 @@ class BusinessMessageEvent:
     timestamp: float
     media_type: str
     is_edited: bool = False
+    update_id: str = ""
+    from_username: str = ""
+    sender_business_bot_id: str = ""
+    sender_business_bot_username: str = ""
+    via_bot_id: str = ""
+    via_bot_username: str = ""
+    reply_to_message_id: str = ""
+    reply_to_from_user_id: str = ""
+    reply_to_from_is_bot: bool = False
+    reply_to_from_username: str = ""
+    author_signature: str = ""
+    is_from_offline: bool = False
+    has_service_payload: bool = False
+    direction_guess: str = "unknown"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -166,6 +180,7 @@ def default_state() -> dict:
         "last_reply": {},
         "last_debounce_buffer_summary": {},
         "recent_message_keys": {},
+        "replied_event_keys": {},
     }
 
 
@@ -194,6 +209,7 @@ def normalize_state(state: dict | None) -> dict:
         "last_reply",
         "last_debounce_buffer_summary",
         "recent_message_keys",
+        "replied_event_keys",
     ):
         if not isinstance(clean.get(key), dict):
             clean[key] = {}
@@ -226,6 +242,14 @@ def _get(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, dict):
         return value.get(key, default)
     return getattr(value, key, default)
+
+
+def _user_id(value: Any) -> str:
+    return str(_get(value, "id") or "").strip()
+
+
+def _username(value: Any) -> str:
+    return str(_get(value, "username") or "").strip().lstrip("@").lower()
 
 
 def _timestamp(value: Any = None) -> float:
@@ -298,6 +322,111 @@ def _event_public_text(event: BusinessMessageEvent | None) -> str:
     if not event:
         return ""
     return str(event.text or event.caption or "").strip()
+
+
+def _has_customer_text_signal(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    if re.fullmatch(r"[\?\s]{1,3}", raw):
+        return True
+    folded = _fold(raw)
+    service_text = re.sub(r"[^a-z0-9]+", " ", folded).strip()
+    service_compact = service_text.replace(" ", "")
+    if service_text in {"dan nhan", "dan da nhan", "tin nhan moi", "new message"}:
+        return False
+    if service_text.endswith(" dan nhan") and len(service_text.split()) <= 4:
+        return False
+    if service_compact in {"dannhan", "dannhantin", "dnnhn"}:
+        return False
+    return bool(re.search(r"[0-9A-Za-zÀ-ỹ]", raw))
+
+
+def business_event_has_meaningful_text(event: BusinessMessageEvent | None) -> bool:
+    return bool(event and _has_customer_text_signal(_event_public_text(event)))
+
+
+def business_message_idempotency_key(event: BusinessMessageEvent | dict | None) -> str:
+    payload = event.to_dict() if isinstance(event, BusinessMessageEvent) else dict(event or {})
+    text = str(payload.get("text") or payload.get("caption") or "").strip()
+    identity = str(payload.get("message_id") or "").strip()
+    if not identity:
+        identity = f"update:{payload.get('update_id') or '-'}"
+    return ":".join(
+        [
+            "replied",
+            str(payload.get("business_connection_id") or "-"),
+            str(payload.get("chat_id") or "-"),
+            identity or "-",
+            _message_text_hash(text),
+        ]
+    )
+
+
+def _same_username(left: str | None, right: str | None) -> bool:
+    return bool(str(left or "").strip() and str(left or "").strip().lstrip("@").lower() == str(right or "").strip().lstrip("@").lower())
+
+
+def business_event_self_or_outbound_reasons(
+    event: BusinessMessageEvent | None,
+    *,
+    bot_user_id: str | int | None = None,
+    bot_username: str | None = None,
+    connection: dict | None = None,
+) -> list[str]:
+    if not event:
+        return []
+    bot_id = str(bot_user_id or "").strip()
+    bot_name = str(bot_username or "").strip().lstrip("@").lower()
+    connection_user_id = str((connection or {}).get("user_id") or "").strip()
+    connection_username = str((connection or {}).get("username") or "").strip().lstrip("@").lower()
+    reasons: list[str] = []
+    if event.from_is_bot:
+        reasons.append("from_is_bot")
+    if bot_id and str(event.from_user_id or "") == bot_id:
+        reasons.append("from_user_id_is_bot")
+    if bot_name and _same_username(event.from_username, bot_name):
+        reasons.append("from_username_is_bot")
+    if event.sender_business_bot_id:
+        reasons.append("sender_business_bot_present")
+        if bot_id and str(event.sender_business_bot_id) == bot_id:
+            reasons.append("sender_business_bot_id_is_bot")
+    if bot_name and _same_username(event.sender_business_bot_username, bot_name):
+        reasons.append("sender_business_bot_username_is_bot")
+    if bot_id and str(event.via_bot_id or "") == bot_id:
+        reasons.append("via_bot_id_is_bot")
+    if bot_name and _same_username(event.via_bot_username, bot_name):
+        reasons.append("via_bot_username_is_bot")
+    if connection_user_id and str(event.from_user_id or "") == connection_user_id:
+        reasons.append("from_user_id_is_business_owner")
+    if connection_username and _same_username(event.from_username, connection_username):
+        reasons.append("from_username_is_business_owner")
+    if event.is_from_offline and (connection_user_id and str(event.from_user_id or "") == connection_user_id):
+        reasons.append("offline_business_owner_message")
+    return list(dict.fromkeys(reasons))
+
+
+def business_event_direction_guess(
+    event: BusinessMessageEvent | None,
+    *,
+    bot_user_id: str | int | None = None,
+    bot_username: str | None = None,
+    connection: dict | None = None,
+) -> str:
+    if not event:
+        return "unknown"
+    if business_event_self_or_outbound_reasons(
+        event,
+        bot_user_id=bot_user_id,
+        bot_username=bot_username,
+        connection=connection,
+    ):
+        return "outbound_or_self"
+    if event.has_service_payload or not business_event_has_meaningful_text(event):
+        return "non_text_or_service"
+    if event.from_user_id:
+        return "inbound_customer"
+    return "unknown"
 
 
 def _normalized_message_text(text: str) -> str:
@@ -383,14 +512,28 @@ def mask_chat_id(chat_id: str | int | None) -> str:
     return raw[:2] + "..." + raw[-2:]
 
 
+def mask_user_id(user_id: str | int | None) -> str:
+    raw = str(user_id or "").strip()
+    if not raw:
+        return "-"
+    if len(raw) <= 4:
+        return raw[:1] + "..." + raw[-1:]
+    return raw[:2] + "..." + raw[-2:]
+
+
 def _short_message_snapshot(event: BusinessMessageEvent | None, classification: dict | None = None) -> dict:
     text = _event_public_text(event)
     return {
+        "update_type": str(event.update_type if event else ""),
         "chat_id_masked": mask_chat_id(event.chat_id if event else ""),
         "business_connection_id_masked": mask_business_connection_id(event.business_connection_id if event else ""),
+        "from_user_id_masked": mask_user_id(event.from_user_id if event else ""),
+        "from_is_bot": bool(event.from_is_bot if event else False),
         "message_id": str(event.message_id if event else ""),
+        "direction_guess": str(event.direction_guess if event else "unknown"),
         "text": _redact_sensitive_text(text)[:180],
         "text_hash": _message_text_hash(text),
+        "idempotency_key": business_message_idempotency_key(event) if event else "",
         "intent_id": _classification_intent_id(classification),
         "at": float(event.timestamp or time.time()) if event else time.time(),
     }
@@ -435,6 +578,8 @@ def _record_business_trace(
     brain_path: str | None = None,
     cooldown_key: str = "",
     duplicate_key: str = "",
+    idempotency_key: str = "",
+    self_outbound_detection: str = "",
     eligible: bool = True,
 ) -> dict:
     clean = normalize_state(state)
@@ -450,6 +595,8 @@ def _record_business_trace(
         "brain_path": brain_path or _brain_path_for_classification(classification),
         "cooldown_key": cooldown_key,
         "duplicate_key": duplicate_key,
+        "idempotency_key": idempotency_key or snapshot.get("idempotency_key") or "",
+        "self_outbound_detection": self_outbound_detection,
     }
     trace = list(clean.get("business_trace") or [])
     trace.append(entry)
@@ -520,7 +667,7 @@ def conversation_stage_for_intent(intent_id: str) -> str:
         "pricing_table_general",
     }:
         return "pricing"
-    if intent in {"vague_or_unclear", "out_of_scope", "product_video_consulting", "product_video_how_to"}:
+    if intent in {"customer_confused_or_what", "vague_or_unclear", "out_of_scope", "product_video_consulting", "product_video_how_to"}:
         return "discovering_need"
     if intent in URGENT_INTENTS or intent.endswith("_error") or "stuck" in intent or "failed" in intent:
         return "troubleshooting"
@@ -629,7 +776,9 @@ def append_message_buffer(
             "business_connection_id": str(event.business_connection_id or ""),
             "chat_id": chat_id,
             "from_user_id": str(event.from_user_id or ""),
+            "from_username": str(event.from_username or ""),
             "message_id": str(event.message_id or ""),
+            "update_id": str(event.update_id or ""),
             "text": _redact_sensitive_text(event.text or event.caption),
             "media_type": str(event.media_type or ""),
             "at": event.timestamp or current,
@@ -640,6 +789,7 @@ def append_message_buffer(
         "chat_id": chat_id,
         "business_connection_id": str(event.business_connection_id or existing.get("business_connection_id") or ""),
         "from_user_id": str(event.from_user_id or existing.get("from_user_id") or ""),
+        "from_username": str(event.from_username or existing.get("from_username") or ""),
         "first_at": float(existing.get("first_at") or current),
         "last_at": current,
         "ready_at": current + debounce,
@@ -700,6 +850,8 @@ def event_from_buffer(buffer: dict) -> BusinessMessageEvent | None:
         message_id=str(last.get("message_id") or ""),
         timestamp=float(last.get("at") or time.time()),
         media_type=str(last.get("media_type") or ""),
+        update_id=str(last.get("update_id") or ""),
+        from_username=str(buffer.get("from_username") or last.get("from_username") or ""),
     )
 
 
@@ -967,6 +1119,44 @@ def _media_type(message: Any) -> str:
     return ""
 
 
+def _has_service_payload(message: Any) -> bool:
+    for attr in (
+        "new_chat_members",
+        "left_chat_member",
+        "new_chat_title",
+        "new_chat_photo",
+        "delete_chat_photo",
+        "group_chat_created",
+        "supergroup_chat_created",
+        "channel_chat_created",
+        "message_auto_delete_timer_changed",
+        "forum_topic_created",
+        "forum_topic_edited",
+        "forum_topic_closed",
+        "forum_topic_reopened",
+        "general_forum_topic_hidden",
+        "general_forum_topic_unhidden",
+        "pinned_message",
+        "proximity_alert_triggered",
+        "video_chat_scheduled",
+        "video_chat_started",
+        "video_chat_ended",
+        "video_chat_participants_invited",
+        "web_app_data",
+        "contact",
+        "location",
+        "venue",
+        "poll",
+        "dice",
+        "game",
+        "invoice",
+        "successful_payment",
+    ):
+        if _get(message, attr):
+            return True
+    return False
+
+
 def mask_business_connection_id(connection_id: str | None) -> str:
     raw = str(connection_id or "").strip()
     if not raw:
@@ -998,13 +1188,17 @@ def extract_business_message(update: Any, *, edited: bool = False) -> BusinessMe
         return None
     chat = _get(message, "chat") or {}
     user = _get(message, "from_user") or _get(message, "from") or {}
+    sender_business_bot = _get(message, "sender_business_bot") or {}
+    via_bot = _get(message, "via_bot") or {}
+    reply_to_message = _get(message, "reply_to_message") or {}
+    reply_to_user = _get(reply_to_message, "from_user") or _get(reply_to_message, "from") or {}
     text = str(_get(message, "text") or "")
     caption = str(_get(message, "caption") or "")
     return BusinessMessageEvent(
         update_type=update_type,
         business_connection_id=str(_get(message, "business_connection_id") or ""),
         chat_id=str(_get(chat, "id") or _get(message, "chat_id") or ""),
-        from_user_id=str(_get(user, "id") or ""),
+        from_user_id=_user_id(user),
         from_is_bot=bool(_get(user, "is_bot") or False),
         text=text,
         caption=caption,
@@ -1012,6 +1206,19 @@ def extract_business_message(update: Any, *, edited: bool = False) -> BusinessMe
         timestamp=_timestamp(_get(message, "date")),
         media_type=_media_type(message),
         is_edited=bool(edited),
+        update_id=str(_get(update, "update_id") or ""),
+        from_username=_username(user),
+        sender_business_bot_id=_user_id(sender_business_bot),
+        sender_business_bot_username=_username(sender_business_bot),
+        via_bot_id=_user_id(via_bot),
+        via_bot_username=_username(via_bot),
+        reply_to_message_id=str(_get(reply_to_message, "message_id") or ""),
+        reply_to_from_user_id=_user_id(reply_to_user),
+        reply_to_from_is_bot=bool(_get(reply_to_user, "is_bot") or False),
+        reply_to_from_username=_username(reply_to_user),
+        author_signature=str(_get(message, "author_signature") or ""),
+        is_from_offline=bool(_get(message, "is_from_offline") or _get(message, "from_offline") or False),
+        has_service_payload=_has_service_payload(message),
     )
 
 
@@ -1672,6 +1879,35 @@ def _legacy_intents_from_kb(kb: dict) -> list[dict]:
 def _builtin_live_intents() -> list[dict]:
     return [
         {
+            "id": "customer_confused_or_what",
+            "description": "Khách hỏi lại vì bot vừa trả lời sai hoặc lệch ngữ cảnh.",
+            "priority": 98,
+            "confidence_keywords": [
+                "?",
+                "??",
+                "gì vậy",
+                "gi vay",
+                "là sao",
+                "la sao",
+                "sao vậy",
+                "sao vay",
+                "không hiểu",
+                "khong hieu",
+                "nói gì vậy",
+                "noi gi vay",
+            ],
+            "example_user_messages": ["?", "??", "gì vậy?", "là sao", "không hiểu"],
+            "required_context_fields": [],
+            "reply_templates": [
+                "Dạ xin lỗi anh/chị, em vừa trả lời chưa đúng ngữ cảnh. Mình muốn hỏi về video, ảnh, SubDub hay bảng giá ạ?"
+            ],
+            "handoff_required": False,
+            "ticket_required": False,
+            "safe_next_steps": ["Hỏi lại nhu cầu theo nhóm sản phẩm chính"],
+            "forbidden_claims": ["tự nhận lỗi hệ thống", "hứa hoàn tiền", "hứa cộng Xu"],
+            "severity": "normal",
+        },
+        {
             "id": "pricing_table_general",
             "description": "Khách hỏi bảng giá tổng quát TOAN AAS.",
             "priority": 86,
@@ -1765,6 +2001,11 @@ def _heuristic_intent_id(query: str) -> str:
     private_bot_terms = ("bot rieng", "premium", "he thong rieng", "cskh tu dong", "shop", "doanh nghiep")
     has_specific_product_word = any(term in folded for term in video_terms + image_terms + img2vid_terms + subtitle_terms + dub_terms + voice_terms + music_terms + private_bot_terms)
 
+    if re.fullmatch(r"[\?\s]{1,3}", str(query or "")) or any(
+        term in folded
+        for term in ("gi vay", "la sao", "sao vay", "noi gi vay", "khong hieu", "ua la sao", "bot noi gi vay")
+    ):
+        return "customer_confused_or_what"
     if any(term in folded for term in ("nay su dung sao", "bot nay dung sao", "dung kieu gi", "huong dan", "moi vao", "bat dau tu dau", "su dung sao anh")):
         return "new_user_what_is_toan_aas"
     if not has_specific_product_word and "xu" not in folded and (
@@ -2176,6 +2417,24 @@ def classify_business_event(event: BusinessMessageEvent, kb: dict | None = None,
     return result
 
 
+def ignored_business_event_classification(event: BusinessMessageEvent | None, reason: str) -> dict:
+    return {
+        "matched": False,
+        "intent_id": "ignored_business_event",
+        "reply": "",
+        "reply_preview": "",
+        "handoff": False,
+        "handoff_required": False,
+        "ticket": False,
+        "ticket_required": False,
+        "confidence": 0.0,
+        "severity": "normal",
+        "public_safe": True,
+        "block_reason": str(reason or ""),
+        "media_type": str(event.media_type if event else ""),
+    }
+
+
 def playbook_test_message(text: str) -> dict:
     classification = classify_cskh_message(text, variation_seed=text)
     return {
@@ -2203,6 +2462,7 @@ async def process_business_event_runtime(
     state: dict,
     save_state_fn: Any,
     bot_user_id: str = "",
+    bot_username: str = "",
     allow_debounce: bool = True,
     schedule_buffer_fn: Any = None,
     notify_admin_fn: Any = None,
@@ -2211,11 +2471,31 @@ async def process_business_event_runtime(
     if clean.get("enabled"):
         clean = upsert_business_connection_from_message(clean, event)
     chat_id = str(event.chat_id or "")
+    preliminary_guard = evaluate_auto_reply_guard(
+        clean,
+        event,
+        bot_user_id=bot_user_id,
+        bot_username=bot_username,
+        classification=None,
+    )
+    preliminary_block = preliminary_guard.get("block_reason") or ""
+    if preliminary_block in {
+        "self_or_outbound_message",
+        "non_text_or_service_event",
+        "already_replied_event",
+        "command",
+        "deleted",
+        "missing_business_connection_id",
+    }:
+        classification = ignored_business_event_classification(event, preliminary_block)
+        clean = record_suppressed(clean, event, classification, preliminary_guard)
+        save_state_fn(clean)
+        return {"sent": False, "classification": classification, "guard": preliminary_guard}
     memory = get_conversation_memory(clean, chat_id)
     classification = classify_business_event(event, conversation_memory=memory)
     if str(classification.get("severity") or "") == "urgent" and clean.get("message_buffers", {}).get(chat_id):
         clean, _dropped = pop_message_buffer(clean, chat_id, force=True)
-    guard = evaluate_auto_reply_guard(clean, event, bot_user_id=bot_user_id, classification=classification)
+    guard = evaluate_auto_reply_guard(clean, event, bot_user_id=bot_user_id, bot_username=bot_username, classification=classification)
     if not guard.get("allowed"):
         clean = record_suppressed(clean, event, classification, guard)
         clean = update_conversation_memory(clean, event, classification)
@@ -2298,6 +2578,7 @@ def evaluate_auto_reply_guard(
     event: BusinessMessageEvent,
     *,
     bot_user_id: str | int | None = None,
+    bot_username: str | None = None,
     now: float | None = None,
     cooldown_seconds: int | None = None,
     classification: dict | None = None,
@@ -2306,42 +2587,69 @@ def evaluate_auto_reply_guard(
     current = time.time() if now is None else float(now)
     cooldown = int(cooldown_seconds or os.getenv("CSKH_AUTO_REPLY_COOLDOWN_SECONDS") or DEFAULT_COOLDOWN_SECONDS)
     key = business_message_key(event)
+    idempotency_key = business_message_idempotency_key(event)
     chat_id = str(event.chat_id or "")
     cooldown_key = business_message_cooldown_key(event, classification)
     duplicate_key = business_message_duplicate_key(event, classification)
     recent_duplicate = clean.get("recent_message_keys", {}).get(duplicate_key) or {}
     recent_duplicate_at = float((recent_duplicate or {}).get("at") or 0)
     pricing_bypass = has_pricing_keyword(event.text or event.caption)
+    connection = clean["connections"].get(str(event.business_connection_id or "")) or {}
+    self_outbound_reasons = business_event_self_or_outbound_reasons(
+        event,
+        bot_user_id=bot_user_id,
+        bot_username=bot_username,
+        connection=connection,
+    )
+    event.direction_guess = business_event_direction_guess(
+        event,
+        bot_user_id=bot_user_id,
+        bot_username=bot_username,
+        connection=connection,
+    )
+    meaningful_text = business_event_has_meaningful_text(event)
     debug = {
         "allowed": True,
         "disabled_suppressed": False,
+        "already_replied_event_suppressed": False,
         "duplicate_suppressed": False,
         "cooldown_suppressed": False,
         "handoff_suppressed": False,
+        "self_or_outbound_suppressed": False,
         "self_message_suppressed": False,
         "admin_manual_suppressed": False,
+        "non_text_or_service_suppressed": False,
         "command_suppressed": False,
         "deleted_suppressed": False,
         "missing_business_connection_id_suppressed": False,
         "pricing_cooldown_bypass": pricing_bypass,
+        "direction_guess": event.direction_guess,
+        "idempotency_key": idempotency_key,
+        "self_outbound_detection": ",".join(self_outbound_reasons),
     }
     if not clean.get("enabled"):
         debug["disabled_suppressed"] = True
     if not str(event.business_connection_id or "").strip():
         debug["missing_business_connection_id_suppressed"] = True
-    if key in clean["processed_messages"]:
+    if self_outbound_reasons:
+        debug["self_or_outbound_suppressed"] = True
+        debug["block_reason_detail"] = ",".join(self_outbound_reasons)
+    if event.from_is_bot or (bot_user_id and str(event.from_user_id or "") == str(bot_user_id)):
+        debug["self_message_suppressed"] = True
+    if (event.has_service_payload or event.media_type or not meaningful_text) and not meaningful_text:
+        debug["non_text_or_service_suppressed"] = True
+        debug.setdefault("block_reason_detail", "no useful customer text in business event")
+    if key in clean["processed_messages"] or idempotency_key in clean.get("replied_event_keys", {}):
+        debug["already_replied_event_suppressed"] = True
         debug["duplicate_suppressed"] = True
-        debug["block_reason_detail"] = "same Telegram business message key was already processed"
+        debug.setdefault("block_reason_detail", "same Telegram business message key was already processed")
     elif recent_duplicate_at and current - recent_duplicate_at < cooldown:
         debug["duplicate_suppressed"] = True
-        debug["block_reason_detail"] = "same normalized message and intent was already answered recently"
+        debug.setdefault("block_reason_detail", "same normalized message and intent was already answered recently")
     if key in clean["deleted_messages"]:
         debug["deleted_suppressed"] = True
     if handoff_required(clean, chat_id):
         debug["handoff_suppressed"] = True
-    if event.from_is_bot or (bot_user_id and str(event.from_user_id or "") == str(bot_user_id)):
-        debug["self_message_suppressed"] = True
-    connection = clean["connections"].get(str(event.business_connection_id or "")) or {}
     if event.from_user_id and str(event.from_user_id) == str(connection.get("user_id") or ""):
         debug["admin_manual_suppressed"] = True
     if str(event.text or event.caption or "").strip().startswith("/"):
@@ -2349,7 +2657,7 @@ def evaluate_auto_reply_guard(
     last_reply = float(clean["last_auto_reply_at"].get(cooldown_key) or 0)
     if last_reply and current - last_reply < cooldown and not pricing_bypass:
         debug["cooldown_suppressed"] = True
-        debug["block_reason_detail"] = "same normalized message and intent is still inside cooldown window"
+        debug.setdefault("block_reason_detail", "same normalized message and intent is still inside cooldown window")
     debug["allowed"] = not any(value for key_name, value in debug.items() if key_name.endswith("_suppressed"))
     debug["message_key"] = key
     debug["cooldown_key"] = cooldown_key
@@ -2364,9 +2672,11 @@ def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: 
     clean = normalize_state(state)
     now = time.time()
     key = business_message_key(event)
+    idempotency_key = business_message_idempotency_key(event)
     cooldown_key = business_message_cooldown_key(event, classification)
     duplicate_key = business_message_duplicate_key(event, classification)
     clean["processed_messages"][key] = {"at": now, "intent_id": classification.get("intent_id")}
+    clean["replied_event_keys"][idempotency_key] = {"at": now, "intent_id": classification.get("intent_id")}
     clean["last_auto_reply_at"][cooldown_key] = now
     clean["recent_message_keys"][duplicate_key] = {"at": now, "intent_id": classification.get("intent_id")}
     clean["last_intent"][str(event.chat_id)] = str(classification.get("intent_id") or "")
@@ -2384,8 +2694,10 @@ def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: 
         "block_reason_detail": "",
         "cooldown_key": cooldown_key,
         "duplicate_key": duplicate_key,
+        "idempotency_key": idempotency_key,
         "handler_path": "business_message_runtime",
         "brain_path": _brain_path_for_classification(classification),
+        "self_outbound_detection": str((guard or {}).get("self_outbound_detection") or ""),
     }
     clean = _record_business_trace(
         clean,
@@ -2397,18 +2709,32 @@ def record_auto_reply(state: dict, event: BusinessMessageEvent, classification: 
         brain_path=_brain_path_for_classification(classification),
         cooldown_key=cooldown_key,
         duplicate_key=duplicate_key,
+        idempotency_key=idempotency_key,
+        self_outbound_detection=str((guard or {}).get("self_outbound_detection") or ""),
         eligible=True,
     )
     _prune_dict(clean["processed_messages"], 500)
     _prune_timestamp_dict(clean["last_auto_reply_at"], 500)
     _prune_dict(clean["recent_message_keys"], 500)
+    _prune_dict(clean["replied_event_keys"], 500)
     return clean
 
 
 def record_suppressed(state: dict, event: BusinessMessageEvent | None, classification: dict | None, guard: dict) -> dict:
     clean = normalize_state(state)
     block_reason = str((guard or {}).get("block_reason") or guard_block_reason(guard) or "no_reply_generated")
-    eligible = block_reason not in {"disabled", "handoff", "self_message", "admin_manual", "command", "deleted", "missing_business_connection_id"}
+    eligible = block_reason not in {
+        "disabled",
+        "handoff",
+        "self_message",
+        "admin_manual",
+        "self_or_outbound_message",
+        "non_text_or_service_event",
+        "already_replied_event",
+        "command",
+        "deleted",
+        "missing_business_connection_id",
+    }
     clean["last_debug"] = {
         **dict(guard or {}),
         "classified_intent": (classification or {}).get("intent_id"),
@@ -2418,8 +2744,10 @@ def record_suppressed(state: dict, event: BusinessMessageEvent | None, classific
         "block_reason_detail": str((guard or {}).get("block_reason_detail") or ""),
         "cooldown_key": str((guard or {}).get("cooldown_key") or (business_message_cooldown_key(event, classification) if event else "")),
         "duplicate_key": str((guard or {}).get("duplicate_key") or (business_message_duplicate_key(event, classification) if event else "")),
+        "idempotency_key": str((guard or {}).get("idempotency_key") or (business_message_idempotency_key(event) if event else "")),
         "handler_path": "business_message_runtime",
         "brain_path": _brain_path_for_classification(classification),
+        "self_outbound_detection": str((guard or {}).get("self_outbound_detection") or ""),
     }
     if event and classification:
         clean["last_intent"][str(event.chat_id)] = str(classification.get("intent_id") or "")
@@ -2435,6 +2763,8 @@ def record_suppressed(state: dict, event: BusinessMessageEvent | None, classific
         brain_path=_brain_path_for_classification(classification),
         cooldown_key=clean["last_debug"].get("cooldown_key") or "",
         duplicate_key=clean["last_debug"].get("duplicate_key") or "",
+        idempotency_key=clean["last_debug"].get("idempotency_key") or "",
+        self_outbound_detection=clean["last_debug"].get("self_outbound_detection") or "",
         eligible=eligible,
     )
     return clean
@@ -2465,7 +2795,10 @@ def guard_block_reason(debug: dict | None) -> str:
     payload = dict(debug or {})
     reasons = (
         ("disabled_suppressed", "disabled"),
+        ("self_or_outbound_suppressed", "self_or_outbound_message"),
+        ("non_text_or_service_suppressed", "non_text_or_service_event"),
         ("missing_business_connection_id_suppressed", "missing_business_connection_id"),
+        ("already_replied_event_suppressed", "already_replied_event"),
         ("duplicate_suppressed", "exact_duplicate"),
         ("cooldown_suppressed", "cooldown_same_intent"),
         ("debounce_pending", "debounce_pending"),
@@ -2517,6 +2850,9 @@ def status_payload(state: dict, *, bot_status: dict | None = None, allowed_updat
         "last_intent": last_debug.get("classified_intent") or "",
         "last_cooldown_key": last_debug.get("cooldown_key") or "",
         "last_duplicate_key": last_debug.get("duplicate_key") or "",
+        "last_ignored_reason": (clean.get("last_ignored_message") or {}).get("block_reason") or "",
+        "last_idempotency_key": last_debug.get("idempotency_key") or "",
+        "last_self_outbound_detection": last_debug.get("self_outbound_detection") or "",
         "last_handler_path": last_debug.get("handler_path") or "",
         "last_brain_path": last_debug.get("brain_path") or "",
         "last_debounce_buffer_summary": dict(clean.get("last_debounce_buffer_summary") or debounce_buffer_summary(clean)),
