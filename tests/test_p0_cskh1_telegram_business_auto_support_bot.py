@@ -261,8 +261,18 @@ def test_no_music_product_video_subdub_runtime_touched():
         "tests/test_p0_23h14h_music_compact_idea_menu_restore_female_voice_pr173.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
     }
+    video_uiflow1_scope = {
+        "bot.py",
+        "tests/test_p0_18n1_unify_video_product_entry_ui_flow_matrix.py",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py",
+        "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py",
+    }
     if "tests/test_p0_video_img2vid_lock1_two_path_flow.py" in changed:
         assert set(changed) <= img2vid_scope
+        return
+    if "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py" in changed:
+        assert set(changed) <= video_uiflow1_scope
         return
 
     assert set(changed) <= allowed

@@ -518,6 +518,22 @@ def test_guided_idea_motion_and_scene_skip_are_free_prompt_steps():
     query = _FakeQuery(user_id, "vproduct|b14_profile|product_review")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
+    assert session["current_step"] == "idea_suggestions"
+    assert session["draft"]["provider_called"] is not True
+    assert session["draft"].get("xu_charged", 0) == 0
+
+    query = _FakeQuery(user_id, "vproduct|b14_idea_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "asset_intake"
+    assert session["draft"]["provider_called"] is not True
+    assert session["draft"].get("xu_charged", 0) == 0
+
+    query = _FakeQuery(user_id, "vproduct|asset_skip")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
     assert session["current_step"] == "b14_creative_controls"
     assert session["draft"]["provider_called"] is not True
     assert session["draft"].get("xu_charged", 0) == 0

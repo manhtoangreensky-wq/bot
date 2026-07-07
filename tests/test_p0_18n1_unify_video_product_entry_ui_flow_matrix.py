@@ -220,9 +220,9 @@ def test_script_to_video_profile_then_scene_planning():
     _press(user_id, "vproduct|input_text|script_image_video")
     _send_text(user_id, "kịch bản review sản phẩm")
     text, markup, session = _press(user_id, "vproduct|b14_profile|product_review")
-    assert session["current_step"] == "panels"
-    assert "Chọn số" in text
-    assert "vproduct|panels|6" in _callbacks(markup)
+    assert session["current_step"] == "idea_suggestions"
+    assert "Gợi ý" in text
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
 
 
 def test_script_to_video_not_jump_video_ai_real():
@@ -256,9 +256,9 @@ def test_self_shot_profile_then_object_selection():
     _press(user_id, "vproduct|selfshot_source|upload")
     _send_media(user_id, kind="video")
     text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
-    assert session["current_step"] == "subject"
-    assert "Chọn chủ thể" in text
-    assert "vproduct|subject|person" in _callbacks(markup)
+    assert session["current_step"] == "idea_suggestions"
+    assert "Gợi ý" in text
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
 
 
 def test_self_shot_session_preserved():
@@ -295,9 +295,9 @@ def test_multiscene_profile_then_scene_count_or_outline():
     _press(user_id, "vproduct|film_manual|multi_scene_film")
     _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
     text, markup, session = _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    assert session["current_step"] == "panels"
-    assert "Chọn số" in text
-    assert "vproduct|panels|9" in _callbacks(markup)
+    assert session["current_step"] == "idea_suggestions"
+    assert "Gợi ý" in text
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
 
 
 def test_multiscene_engine_not_touched():
@@ -334,8 +334,8 @@ def test_idea_profile_then_idea_list():
     text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
     assert session["current_step"] == "idea_suggestions"
     assert "Gợi ý ý tưởng" in text
-    assert "vproduct|microflow_choose|0" in _callbacks(markup)
-    assert "vproduct|microflow_choose|4" in _callbacks(markup)
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+    assert "vproduct|b14_idea_select|4" in _callbacks(markup)
 
 
 def test_idea_does_not_jump_assets():
@@ -370,9 +370,9 @@ def test_storyboard_profile_then_prompt_generation():
     _press(user_id, "vproduct|input_text|storyboard_prompt")
     _send_text(user_id, "mèo cam đi công viên")
     text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
-    assert session["current_step"] == "panels"
-    assert "panel" in text.lower()
-    assert "vproduct|panels|12" in _callbacks(markup)
+    assert session["current_step"] == "idea_suggestions"
+    assert "Gợi ý" in text
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
 
 
 def test_storyboard_does_not_auto_render():
