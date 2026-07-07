@@ -217,7 +217,7 @@ def test_backup_cleanup_deletes_old_db_backups_inside_backups_keep_latest_5(tmp_
     base = tmp_path / "data"
     backups = []
     for index in range(7):
-        path = base / "backups" / f"toandaas_system_{index}.db"
+        path = base / "backups" / f"toandaas_system_2026070{index + 1}_033000_startup.db"
         _write(path, f"backup-{index}".encode("utf-8"), age_seconds=(index + 1) * 3600)
         backups.append(path)
 
@@ -237,7 +237,7 @@ def test_current_db_wallet_payment_finance_files_are_never_deleted_by_backup_cle
     finance = base / "finance.sqlite"
     for path in (current_db, wallet, payment, finance):
         _write(path, b"protected")
-    old_backup = base / "backups" / "old.db"
+    old_backup = base / "backups" / "toandaas_system_20260701_033000_startup.db"
     _write(old_backup, b"old", age_seconds=10 * 3600)
 
     report = storage_migration.backup_cleanup_report(base, keep=0, delete=True, confirm=True)

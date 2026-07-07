@@ -9,6 +9,7 @@ verified mapping exists.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -34,6 +35,10 @@ MIGRATION_TARGET_DIRS = (
 )
 BACKUP_DIR_NAME = "backups"
 BACKUP_CLEANUP_EXTENSIONS = {".bak", ".backup", ".zip", ".tar", ".gz", ".tgz", ".7z", ".db", ".sqlite", ".sqlite3"}
+TOAN_AAS_DB_BACKUP_PATTERNS = (
+    re.compile(r"^toanaas_system_\d{8}_\d{6}(?:_\d+)?\.sqlite3$", re.IGNORECASE),
+    re.compile(r"^toandaas_system_\d{8}_\d{6}_[A-Za-z0-9_-]+\.db$", re.IGNORECASE),
+)
 MIGRATION_TABLE = "storage_artifact_migrations"
 
 
@@ -383,6 +388,29 @@ def _row_to_record(row: tuple) -> dict:
     return dict(zip(keys, row))
 
 
+def is_known_toan_aas_db_backup(path: str | os.PathLike[str], backup_dir: str | os.PathLike[str]) -> bool:
+    resolved = _resolve(path)
+    root = _resolve(backup_dir)
+    if not resolved or not root or not _is_under(resolved, root):
+        return False
+    if resolved.suffix.lower() not in {".db", ".sqlite", ".sqlite3"}:
+        return False
+    return any(pattern.match(resolved.name) for pattern in TOAN_AAS_DB_BACKUP_PATTERNS)
+
+
+def classify_backup_cleanup_file(path: str | os.PathLike[str], backup_dir: str | os.PathLike[str]) -> tuple[bool, str]:
+    resolved = _resolve(path)
+    root = _resolve(backup_dir)
+    if not resolved or not root or not _is_under(resolved, root):
+        return False, "outside_backup_dir"
+    suffix = resolved.suffix.lower()
+    if suffix in {".db", ".sqlite", ".sqlite3"}:
+        return (True, "known_toan_aas_db_backup") if is_known_toan_aas_db_backup(resolved, root) else (False, "unsupported_backup_name")
+    if suffix in BACKUP_CLEANUP_EXTENSIONS:
+        return True, "supported_backup_extension"
+    return False, "unsupported_backup_extension"
+
+
 def migrate_existing_assets(
     base_dir: str | os.PathLike[str],
     *,
@@ -496,7 +524,8 @@ def backup_cleanup_report(
                 files.append(resolved)
     files.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
     keep_count = max(0, int(keep))
-    kept = set(files[:keep_count])
+    valid_files = [path for path in files if classify_backup_cleanup_file(path, backup_dir)[0]]
+    kept = set(valid_files[:keep_count])
     deleted_count = 0
     for path in files:
         try:
@@ -504,11 +533,11 @@ def backup_cleanup_report(
         except OSError as exc:
             report.errors.append(f"stat_failed:{type(exc).__name__}:{path.name}")
             continue
-        suffix = path.suffix.lower()
+        valid_backup, backup_reason = classify_backup_cleanup_file(path, backup_dir)
         if path in kept:
             status, reason = "kept", "latest_backup_kept"
-        elif suffix not in BACKUP_CLEANUP_EXTENSIONS:
-            status, reason = "blocked", "unsupported_backup_extension"
+        elif not valid_backup:
+            status, reason = "blocked", backup_reason
         elif deleted_count >= int(max_delete_files):
             status, reason = "blocked", "max_delete_files_reached"
         else:
