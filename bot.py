@@ -82904,24 +82904,44 @@ def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str
     last_message = payload.get("last_business_message_at")
     last_update = payload.get("last_business_update_at")
     last_debug = payload.get("last_debug") or {}
-    return [
+    lines = [
         "🤖 <b>CSKH Telegram Business Status</b>",
         "",
         f"• Connected bot: <code>{html.escape(bot_status.get('username') or ACTIVE_TELEGRAM_BOT_USERNAME or '-')}</code>",
         f"• Business support enabled: <code>{'yes' if payload.get('enabled') else 'no'}</code>",
+        f"• Auto-reply mode: <code>{html.escape(str(payload.get('auto_reply_mode') or 'off'))}</code>",
+        f"• Waiting for first selected Business message: <code>{'yes' if payload.get('waiting_for_first_business_message') else 'no'}</code>",
         f"• Bot can connect to business: <code>{can_connect_text}</code>",
+        f"• Allowed updates include business: <code>{'yes' if payload.get('allowed_updates_include_business') else 'no'}</code>",
         f"• Receiving business updates: <code>{'yes' if payload.get('receiving_business_updates') else 'no'}</code>",
         f"• Receiving business messages: <code>{'yes' if payload.get('receiving_business_messages') else 'no'}</code>",
         f"• Active connections: <code>{payload.get('active_connection_count') or 0}</code>",
         f"• Latest connection id: <code>{html.escape(str(payload.get('latest_connection_id_masked') or '-'))}</code>",
-        f"• Allowed updates include business: <code>{'yes' if payload.get('allowed_updates_include_business') else 'no'}</code>",
-        f"• Auto-reply mode: <code>{html.escape(str(payload.get('auto_reply_mode') or 'off'))}</code>",
         f"• Handoff chats: <code>{payload.get('handoff_count') or 0}</code>",
         f"• Last business update: <code>{html.escape(cskh_format_ts(last_update) if last_update else '-')}</code>",
         f"• Last business message: <code>{html.escape(cskh_format_ts(last_message) if last_message else '-')}</code>",
         f"• Last intent: <code>{html.escape(str(last_debug.get('classified_intent') or '-'))}</code>",
         f"• Last reply sent: <code>{'yes' if last_debug.get('reply_sent') else 'no'}</code>",
+        f"• Last block reason: <code>{html.escape(str(payload.get('last_block_reason') or '-'))}</code>",
     ]
+    if payload.get("waiting_for_first_business_message"):
+        lines.extend(
+            [
+                "",
+                "Đã bật chế độ chờ. Hãy nhắn từ selected Business chat để bot ghi nhận connection.",
+            ]
+        )
+    return lines
+
+async def cskh_business_runtime_probe(context: ContextTypes.DEFAULT_TYPE) -> tuple[dict, list[str]]:
+    bot_status = await telegram_business_support.get_business_status(context.bot)
+    allowed_updates = Update.ALL_TYPES
+    try:
+        info = await context.bot.get_webhook_info()
+        allowed_updates = getattr(info, "allowed_updates", None) or Update.ALL_TYPES
+    except Exception:
+        allowed_updates = Update.ALL_TYPES
+    return bot_status, allowed_updates
 
 def cskh_classification_preview(text: str, classification: dict) -> str:
     missing_fields = classification.get("missing_fields") or []
@@ -82967,13 +82987,7 @@ async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
         return
     state = cskh_business_state()
-    bot_status = await telegram_business_support.get_business_status(context.bot)
-    allowed_updates = Update.ALL_TYPES
-    try:
-        info = await context.bot.get_webhook_info()
-        allowed_updates = getattr(info, "allowed_updates", None) or Update.ALL_TYPES
-    except Exception:
-        allowed_updates = Update.ALL_TYPES
+    bot_status, allowed_updates = await cskh_business_runtime_probe(context)
     payload = telegram_business_support.status_payload(
         state,
         bot_status=bot_status,
@@ -82987,16 +83001,30 @@ async def cmd_cskh_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
         return
     current_state = cskh_business_state()
-    if not telegram_business_support.has_active_business_connection(current_state):
+    bot_status, allowed_updates = await cskh_business_runtime_probe(context)
+    if bot_status.get("can_connect_to_business") is not True:
         await update.message.reply_text(
-            "⚠️ Chưa bật CSKH tự động vì bot chưa ghi nhận Business connection hợp lệ.\n\n"
-            "Hãy nhắn thử từ một selected chat rồi kiểm tra /cskh_business_status trước khi bật."
+            "⚠️ Chưa bật CSKH tự động vì bot chưa có quyền kết nối Telegram Business.\n\n"
+            "Hãy kiểm tra BotFather/Telegram Business rồi chạy lại /cskh_business_status."
+        )
+        return
+    if not telegram_business_support.allowed_updates_include_business(allowed_updates):
+        await update.message.reply_text(
+            "⚠️ Chưa bật CSKH tự động vì allowed_updates chưa nhận đủ Business updates.\n\n"
+            "Cần có business_connection, business_message, edited_business_message, deleted_business_messages."
         )
         return
     state = telegram_business_support.set_enabled(current_state, True)
     save_cskh_business_state(state)
+    active = telegram_business_support.has_active_business_connection(state)
+    if not active:
+        await update.message.reply_text(
+            "✅ Đã bật CSKH tự động ở chế độ chờ Business chat.\n\n"
+            "Khi có tin nhắn từ selected chat, bot sẽ ghi nhận connection và tự trả lời."
+        )
+        return
     await update.message.reply_text(
-        "✅ CSKH tự động đã bật ở chế độ rules_only.\n\n"
+        "✅ CSKH tự động đã bật.\n\n"
         "Khuyến nghị live test với một selected chat trước. Duplicate/cooldown/handoff guard đang bật."
     )
 
@@ -83118,6 +83146,8 @@ async def process_cskh_business_message(update: Update, context: ContextTypes.DE
     if not event:
         return
     state = telegram_business_support.record_business_message_received(cskh_business_state(), event)
+    if state.get("enabled"):
+        state = telegram_business_support.upsert_business_connection_from_message(state, event)
     classification = telegram_business_support.classify_business_event(event)
     guard = telegram_business_support.evaluate_auto_reply_guard(
         state,
