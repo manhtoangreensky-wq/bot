@@ -10603,6 +10603,413 @@ def provider_usage_summary(provider: str = "key4u", since_hours: int = 24) -> di
             conn.close()
     return summary
 
+PROVIDER_SPEND_AUDIT_BUCKETS = [
+    "Product Video AI",
+    "IMG2VID Path A",
+    "IMG2VID Path B AI image generation",
+    "SubDub subtitle/dub",
+    "Voice/TTS",
+    "Music",
+    "Admin smoke",
+    "Recover/status/debug",
+    "Background worker",
+    "Unknown",
+]
+
+def provider_spend_mask(value, head: int = 3, tail: int = 3) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "-"
+    if len(raw) <= head + tail + 2:
+        return raw[0] + "***" + raw[-1] if len(raw) > 2 else "***"
+    return f"{raw[:head]}...{raw[-tail:]}"
+
+def provider_spend_table_exists(conn, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (str(table or ""),),
+    ).fetchone()
+    return bool(row)
+
+def provider_spend_table_columns(conn, table: str) -> set[str]:
+    if not provider_spend_table_exists(conn, table):
+        return set()
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+def provider_spend_audit_product_type(text: str, job_type: str = "", capability: str = "") -> str:
+    haystack = " ".join([str(text or ""), str(job_type or ""), str(capability or "")]).lower()
+    if any(term in haystack for term in ("frame_video", "framevideo", "local_ffmpeg", "local_worker_ffmpeg")):
+        return "IMG2VID Path A"
+    if any(term in haystack for term in ("storyboard", "image_pack", "workflow_image", "ai image", "shopaikey_image")) and ("image" in haystack):
+        return "IMG2VID Path B AI image generation"
+    if any(term in haystack for term in ("subtitle", "videodub", "video_dub", "subdub", "asr", "stt", "translate")):
+        return "SubDub subtitle/dub"
+    if any(term in haystack for term in ("tts", "voice", "minimax", "audio_speech", "clone_voice")):
+        return "Voice/TTS"
+    if any(term in haystack for term in ("music", "suno", "song", "sfx")):
+        return "Music"
+    if "video" in haystack or "kling" in haystack or "veo" in haystack:
+        return "Product Video AI"
+    return "Unknown"
+
+def provider_spend_audit_source(text: str, admin_only=False, is_admin_smoke=False) -> str:
+    haystack = str(text or "").lower()
+    if any(term in haystack for term in ("pytest", "codex", "test fixture", "unit test")):
+        return "Codex/test/smoke"
+    if is_admin_smoke or any(term in haystack for term in ("tool_test", "smoke", "quick_video_test", "quick_image_test", "admin smoke")):
+        return "admin command"
+    if any(term in haystack for term in ("recover", "refund", "clear_job_lock", "job_status", "debug", "manual poll", "status")):
+        return "recover command"
+    if any(term in haystack for term in ("worker", "auto_poll", "background", "local_worker", "local_ffmpeg", "frame_video_render")):
+        return "background worker"
+    if bool(admin_only):
+        return "admin command"
+    if any(term in haystack for term in ("public", "callback", "shopaikey_video", "shopaikey_image", "package", "confirmed")):
+        return "public user flow"
+    return "unknown"
+
+def provider_spend_audit_command(text: str, product_type: str, source: str) -> str:
+    haystack = str(text or "").lower()
+    command_patterns = [
+        ("/tool_test_wf_i2v", ("workflow_image_to_video", "wf_i2v")),
+        ("/tool_test_shopaikey_video", ("tool_test_shopaikey_video", "shopaikey video smoke")),
+        ("/tool_test_shopaikey_image", ("tool_test_shopaikey_image", "image smoke")),
+        ("/quick_video_test", ("quick_video_test", "quick video")),
+        ("/quick_image_test", ("quick_image_test", "quick image")),
+        ("/shopaikey_video_job", ("shopaikey_video_job", "manual poll")),
+        ("framevideo|confirm", ("framevideo", "frame_video")),
+        ("storyboard|confirm_images", ("storyboard",)),
+        ("videodub|confirm", ("videodub", "subtitle", "dub")),
+    ]
+    for command, terms in command_patterns:
+        if any(term in haystack for term in terms):
+            return command
+    if product_type == "Product Video AI":
+        return "shopaikey/video callback"
+    if product_type == "IMG2VID Path A":
+        return "framevideo/local_worker"
+    if product_type == "IMG2VID Path B AI image generation":
+        return "storyboard/image callback"
+    if source == "background worker":
+        return "background worker"
+    return "unknown"
+
+def provider_spend_add_record(records: list[dict], *, provider: str, product_type: str, command: str, source: str, job_id="", user_id="", task_id="", timestamp="", estimated_cost_usd=0, estimated_cost_xu=0, status="", evidence="", table="") -> None:
+    provider_key = str(provider or "").strip().lower()
+    external_provider = provider_key not in {"ffmpeg", "local_ffmpeg", "local_worker", "local_worker_ffmpeg"} and not provider_key.startswith("local_")
+    records.append({
+        "provider": str(provider or "unknown")[:60],
+        "product_type": product_type if product_type in PROVIDER_SPEND_AUDIT_BUCKETS else "Unknown",
+        "command": str(command or "unknown")[:80],
+        "source": str(source or "unknown")[:40],
+        "job_id": str(job_id or "-")[:40],
+        "user_masked": provider_spend_mask(user_id, 2, 2),
+        "task_id_masked": provider_spend_mask(task_id, 4, 4),
+        "timestamp": str(timestamp or "-")[:40],
+        "estimated_cost_usd": float(estimated_cost_usd or 0),
+        "estimated_cost_xu": int(estimated_cost_xu or 0),
+        "status": str(status or "-")[:40],
+        "evidence": sanitize_log_text(str(evidence or ""))[:180],
+        "table": str(table or "")[:40],
+        "external_provider": external_provider,
+    })
+
+def provider_spend_audit_records(limit: int = 80) -> dict:
+    limit = max(1, min(int(limit or 80), 200))
+    since = vn_now().strftime("%Y-%m-%d 00:00:00")
+    records: list[dict] = []
+    tables: dict[str, dict] = {}
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        for table in ("provider_usage_events", "shopaikey_jobs", "shopaikey_billing_events", "api_debug_events", "usage_events", "local_worker_jobs", "music_generation_jobs"):
+            exists = provider_spend_table_exists(conn, table)
+            count = 0
+            if exists:
+                try:
+                    count = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] or 0)
+                except Exception:
+                    count = 0
+            tables[table] = {"exists": exists, "count": count}
+
+        if tables["provider_usage_events"]["exists"]:
+            for row in conn.execute(
+                """SELECT id, provider, capability, model, user_id, is_admin_smoke, request_id,
+                          provider_task_id, status, estimated_cost_usd, estimated_cost_xu,
+                          media_units, note, created_at
+                   FROM provider_usage_events
+                   WHERE COALESCE(created_at,'') >= ?
+                   ORDER BY id DESC LIMIT ?""",
+                (since, limit),
+            ).fetchall():
+                text = f"{row['provider']} {row['capability']} {row['model']} {row['request_id']} {row['note']} {row['status']}"
+                product = provider_spend_audit_product_type(text, capability=row["capability"])
+                source = provider_spend_audit_source(text, is_admin_smoke=bool(row["is_admin_smoke"]))
+                command = provider_spend_audit_command(text, product, source)
+                provider_spend_add_record(
+                    records,
+                    provider=row["provider"],
+                    product_type=product,
+                    command=command,
+                    source=source,
+                    job_id=row["request_id"] or row["id"],
+                    user_id=row["user_id"],
+                    task_id=row["provider_task_id"],
+                    timestamp=row["created_at"],
+                    estimated_cost_usd=row["estimated_cost_usd"],
+                    estimated_cost_xu=row["estimated_cost_xu"],
+                    status=row["status"],
+                    evidence=row["note"] or row["capability"],
+                    table="provider_usage_events",
+                )
+
+        if tables["shopaikey_jobs"]["exists"]:
+            for row in conn.execute(
+                """SELECT id, provider, job_type, model, task_id, user_id, admin_only, status,
+                          xu_cost_planned, xu_deducted, billing_status, source_job_id,
+                          package_item_type, prompt_preview, created_at, updated_at
+                   FROM shopaikey_jobs
+                   WHERE COALESCE(created_at,'') >= ?
+                   ORDER BY id DESC LIMIT ?""",
+                (since, limit),
+            ).fetchall():
+                text = " ".join(str(row[key] or "") for key in ("provider", "job_type", "model", "status", "billing_status", "source_job_id", "package_item_type", "prompt_preview"))
+                product = provider_spend_audit_product_type(text, job_type=row["job_type"])
+                source = provider_spend_audit_source(text, admin_only=bool(row["admin_only"]))
+                command = provider_spend_audit_command(text, product, source)
+                provider_spend_add_record(
+                    records,
+                    provider=row["provider"] or "shopaikey",
+                    product_type=product,
+                    command=command,
+                    source=source,
+                    job_id=row["id"],
+                    user_id=row["user_id"],
+                    task_id=row["task_id"],
+                    timestamp=row["created_at"] or row["updated_at"],
+                    estimated_cost_xu=row["xu_cost_planned"] or row["xu_deducted"] or 0,
+                    status=row["status"],
+                    evidence=f"job_type={row['job_type']}; billing={row['billing_status'] or '-'}; source_job={provider_spend_mask(row['source_job_id'], 4, 4)}",
+                    table="shopaikey_jobs",
+                )
+
+        if tables["shopaikey_billing_events"]["exists"] and tables["shopaikey_jobs"]["exists"]:
+            for row in conn.execute(
+                """SELECT e.id, e.user_id, e.job_id, e.event_type, e.amount_xu, e.reason, e.created_at,
+                          j.provider, j.job_type, j.task_id, j.admin_only, j.model, j.status, j.source_job_id
+                   FROM shopaikey_billing_events e
+                   LEFT JOIN shopaikey_jobs j ON j.id=e.job_id
+                   WHERE COALESCE(e.created_at,'') >= ?
+                     AND (e.event_type LIKE '%provider%' OR e.event_type LIKE '%deduct%' OR e.event_type LIKE '%package_use%')
+                   ORDER BY e.id DESC LIMIT ?""",
+                (since, limit),
+            ).fetchall():
+                text = f"{row['event_type']} {row['reason']} {row['job_type']} {row['model']} {row['status']} {row['source_job_id']}"
+                product = provider_spend_audit_product_type(text, job_type=row["job_type"])
+                source = provider_spend_audit_source(text, admin_only=bool(row["admin_only"]))
+                command = provider_spend_audit_command(text, product, source)
+                provider_spend_add_record(
+                    records,
+                    provider=row["provider"] or "shopaikey",
+                    product_type=product,
+                    command=command,
+                    source=source,
+                    job_id=row["job_id"],
+                    user_id=row["user_id"],
+                    task_id=row["task_id"],
+                    timestamp=row["created_at"],
+                    estimated_cost_xu=row["amount_xu"],
+                    status=row["event_type"],
+                    evidence=row["reason"],
+                    table="shopaikey_billing_events",
+                )
+
+        if tables["api_debug_events"]["exists"]:
+            for row in conn.execute(
+                """SELECT id, provider, action, status, http_status, detail, created_at
+                   FROM api_debug_events
+                   WHERE COALESCE(created_at,'') >= ?
+                     AND LOWER(COALESCE(provider,'')) IN ('shopaikey','key4u')
+                   ORDER BY id DESC LIMIT ?""",
+                (since, limit),
+            ).fetchall():
+                text = f"{row['provider']} {row['action']} {row['status']} {row['detail']}"
+                product = provider_spend_audit_product_type(text, capability=row["action"])
+                source = provider_spend_audit_source(text)
+                command = provider_spend_audit_command(text, product, source)
+                task_match = re.search(r"task_id=([^;\s]+)", str(row["detail"] or ""))
+                provider_spend_add_record(
+                    records,
+                    provider=row["provider"],
+                    product_type=product,
+                    command=command,
+                    source=source,
+                    job_id=row["id"],
+                    task_id=task_match.group(1) if task_match else "",
+                    timestamp=row["created_at"],
+                    status=row["status"],
+                    evidence=f"action={row['action']}; http={row['http_status']}",
+                    table="api_debug_events",
+                )
+
+        if tables["usage_events"]["exists"]:
+            cols = provider_spend_table_columns(conn, "usage_events")
+            if {"id", "user_id", "tool_name", "command", "status", "provider", "detail", "created_at"}.issubset(cols):
+                for row in conn.execute(
+                    """SELECT id, user_id, tool_name, command, status, provider, detail, xu_delta, created_at
+                       FROM usage_events
+                       WHERE COALESCE(created_at,'') >= ?
+                         AND COALESCE(provider,'') != ''
+                       ORDER BY id DESC LIMIT ?""",
+                    (since, limit),
+                ).fetchall():
+                    text = f"{row['provider']} {row['tool_name']} {row['command']} {row['status']} {row['detail']}"
+                    product = provider_spend_audit_product_type(text, capability=row["tool_name"])
+                    source = provider_spend_audit_source(text)
+                    command = provider_spend_audit_command(text, product, source)
+                    provider_spend_add_record(
+                        records,
+                        provider=row["provider"],
+                        product_type=product,
+                        command=command or row["command"],
+                        source=source,
+                        job_id=row["id"],
+                        user_id=row["user_id"],
+                        timestamp=row["created_at"],
+                        estimated_cost_xu=abs(int(row["xu_delta"] or 0)),
+                        status=row["status"],
+                        evidence=row["detail"],
+                        table="usage_events",
+                    )
+
+        if tables["local_worker_jobs"]["exists"]:
+            cols = provider_spend_table_columns(conn, "local_worker_jobs")
+            if {"id", "user_id", "command", "job_type", "provider", "status", "xu_cost", "created_at"}.issubset(cols):
+                for row in conn.execute(
+                    """SELECT id, user_id, command, job_type, provider, status, xu_cost, created_at, updated_at
+                       FROM local_worker_jobs
+                       WHERE COALESCE(created_at,'') >= ?
+                       ORDER BY id DESC LIMIT ?""",
+                    (since, limit),
+                ).fetchall():
+                    text = f"{row['provider']} {row['command']} {row['job_type']} {row['status']}"
+                    product = provider_spend_audit_product_type(text, capability=row["job_type"])
+                    source = provider_spend_audit_source(text)
+                    command = provider_spend_audit_command(text, product, source)
+                    provider_spend_add_record(
+                        records,
+                        provider=row["provider"] or "local_worker",
+                        product_type=product,
+                        command=command,
+                        source=source,
+                        job_id=row["id"],
+                        user_id=row["user_id"],
+                        timestamp=row["created_at"] or row["updated_at"],
+                        estimated_cost_xu=row["xu_cost"],
+                        status=row["status"],
+                        evidence=f"job_type={row['job_type']}",
+                        table="local_worker_jobs",
+                    )
+
+        product_counts = {key: 0 for key in PROVIDER_SPEND_AUDIT_BUCKETS}
+        source_counts = {
+            "public user flow": 0,
+            "admin command": 0,
+            "recover command": 0,
+            "background worker": 0,
+            "Codex/test/smoke": 0,
+            "unknown": 0,
+        }
+        provider_counts: dict[str, int] = {}
+        grouped: dict[tuple[str, str, str], dict] = {}
+        for record in records:
+            if record.get("external_provider"):
+                product_counts[record["product_type"]] = product_counts.get(record["product_type"], 0) + 1
+            source_counts[record["source"]] = source_counts.get(record["source"], 0) + 1
+            if record.get("external_provider"):
+                provider_counts[record["provider"]] = provider_counts.get(record["provider"], 0) + 1
+            key = (record["provider"], record["product_type"], record["source"])
+            bucket = grouped.setdefault(key, {"count": 0, "estimated_cost_usd": 0.0, "estimated_cost_xu": 0})
+            bucket["count"] += 1
+            bucket["estimated_cost_usd"] += float(record["estimated_cost_usd"] or 0)
+            bucket["estimated_cost_xu"] += int(record["estimated_cost_xu"] or 0)
+
+        return {
+            "since": since,
+            "tables": tables,
+            "records": records[:limit],
+            "product_counts": product_counts,
+            "source_counts": source_counts,
+            "provider_counts": provider_counts,
+            "grouped": grouped,
+            "largest_usage_source": max(provider_counts.items(), key=lambda item: item[1])[0] if provider_counts else "none",
+        }
+    finally:
+        conn.close()
+
+def provider_spend_audit_text(limit: int = 80) -> str:
+    audit = provider_spend_audit_records(limit=limit)
+    product_counts = audit["product_counts"]
+    source_counts = audit["source_counts"]
+    tables = audit["tables"]
+    lines = [
+        "🧾 <b>Provider Spend Audit</b>",
+        "",
+        "Mode: <code>read-only DB/event audit</code>",
+        "Real provider calls made: <code>NO</code>",
+        f"Since: <code>{html.escape(str(audit.get('since') or '-'))}</code>",
+        "",
+        "<b>Submit/usage source counts</b>",
+        f"• Product Video submit count: <code>{int(product_counts.get('Product Video AI') or 0)}</code>",
+        f"• IMG2VID Path A submit count: <code>{int(product_counts.get('IMG2VID Path A') or 0)}</code>",
+        f"• IMG2VID Path B image submit count: <code>{int(product_counts.get('IMG2VID Path B AI image generation') or 0)}</code>",
+        f"• SubDub submit count: <code>{int(product_counts.get('SubDub subtitle/dub') or 0)}</code>",
+        f"• Voice/TTS submit count: <code>{int(product_counts.get('Voice/TTS') or 0)}</code>",
+        f"• Music submit count: <code>{int(product_counts.get('Music') or 0)}</code>",
+        f"• Admin smoke submit count: <code>{int(source_counts.get('admin command') or 0) + int(source_counts.get('Codex/test/smoke') or 0)}</code>",
+        f"• Recover/debug submit count: <code>{int(source_counts.get('recover command') or 0)}</code>",
+        f"• Background worker submit count: <code>{int(source_counts.get('background worker') or 0)}</code>",
+        f"• Unknown submit count: <code>{int(product_counts.get('Unknown') or 0) + int(source_counts.get('unknown') or 0)}</code>",
+        f"• Largest usage source: <code>{html.escape(str(audit.get('largest_usage_source') or 'none'))}</code>",
+        "",
+        "<b>Evidence tables</b>",
+    ]
+    for table, info in tables.items():
+        lines.append(f"• {html.escape(table)}: <code>{'present' if info.get('exists') else 'missing'}</code> rows <code>{int(info.get('count') or 0)}</code>")
+
+    lines.extend(["", "<b>Grouped</b>"])
+    grouped = audit.get("grouped") or {}
+    if not grouped:
+        lines.append("• No local provider submit/usage records found for today.")
+    else:
+        for (provider, product, source), item in sorted(grouped.items(), key=lambda pair: (-pair[1]["count"], pair[0])):
+            lines.append(
+                f"• {html.escape(provider)} | {html.escape(product)} | {html.escape(source)}: "
+                f"<code>{int(item.get('count') or 0)}</code> | cost_xu <code>{int(item.get('estimated_cost_xu') or 0)}</code>"
+            )
+
+    lines.extend(["", "<b>Recent masked evidence</b>"])
+    recent = list(audit.get("records") or [])[:12]
+    if not recent:
+        lines.append("• none")
+    for rec in recent:
+        lines.append(
+            f"• {html.escape(rec['timestamp'])} | {html.escape(rec['provider'])} | {html.escape(rec['product_type'])} | "
+            f"{html.escape(rec['source'])} | cmd <code>{html.escape(rec['command'])}</code> | "
+            f"job <code>{html.escape(rec['job_id'])}</code> | user <code>{html.escape(rec['user_masked'])}</code> | "
+            f"task <code>{html.escape(rec['task_id_masked'])}</code> | table <code>{html.escape(rec['table'])}</code>"
+        )
+
+    lines.extend([
+        "",
+        "<b>Static proofs</b>",
+        "• IMG2VID Path A frame video uses <code>ffmpeg/local_worker</code>; expected ShopAIKey/Key4U usage: <code>0</code>.",
+        "• IMG2VID Path B AI images are provider-backed in product code, but Codex tests must mock provider calls.",
+        "• This command does not call <code>/shopaikey_usage</code>, smoke tests, video generation, AI image generation, or TTS.",
+        "• Music is read-only in this audit; no Music behavior is changed.",
+    ])
+    return "\n".join(lines)
+
 def latest_api_debug_event(provider: str, actions: list[str]) -> dict:
     action_list = [str(item or "")[:80] for item in actions if str(item or "").strip()]
     if not action_list:
@@ -95100,6 +95507,29 @@ async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE
         "Không hiển thị API key hoặc usage URL đầy đủ.",
         parse_mode="HTML",
     )
+
+async def cmd_provider_spend_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    limit = 80
+    if args:
+        try:
+            limit = max(1, min(int(args[0]), 200))
+        except Exception:
+            limit = 80
+    try:
+        text = provider_spend_audit_text(limit=limit)
+    except Exception as exc:
+        logger.warning("provider spend audit failed | error_class=%s", type(exc).__name__)
+        text = (
+            "🧾 <b>Provider Spend Audit</b>\n\n"
+            "Mode: <code>read-only DB/event audit</code>\n"
+            "Real provider calls made: <code>NO</code>\n"
+            f"Status: <code>FAILED_{html.escape(type(exc).__name__)}</code>\n"
+            "Không gọi provider, không chạy smoke, không tạo video/ảnh/TTS."
+        )
+    await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -183239,6 +183669,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("test_all_system", cmd_test_all_system))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
+    tg_app.add_handler(CommandHandler("provider_spend_audit", cmd_provider_spend_audit))
     tg_app.add_handler(CommandHandler("key4u_usage", cmd_key4u_usage))
     tg_app.add_handler(CommandHandler("key4u_set_manual_balance", cmd_key4u_set_manual_balance))
     tg_app.add_handler(CommandHandler("key4u_usage_set_manual", cmd_key4u_usage_set_manual))

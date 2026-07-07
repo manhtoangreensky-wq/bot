@@ -4575,6 +4575,152 @@ def test_workflow_image_to_video_admin_guard_and_assets(monkeypatch):
             os.unlink(db_path)
 
 
+def test_provider_spend_audit_is_registered_and_read_only():
+    source = bot_source_text()
+    helper_source = source_between(source, "def provider_spend_audit_records", "def latest_api_debug_event")
+    command_source = source_between(source, "async def cmd_provider_spend_audit", "async def cmd_tool_test_shopaikey")
+
+    assert 'CommandHandler("provider_spend_audit", cmd_provider_spend_audit)' in source
+    assert "Real provider calls made: <code>NO</code>" in command_source
+    assert "read-only DB/event audit" in helper_source + command_source
+    for forbidden in [
+        "get_shopaikey_usage(",
+        "shopaikey_video_create_smoke_test(",
+        "shopaikey_workflow_image_to_video_create(",
+        "shopaikey_image_generate(",
+        "shopaikey_tts_smoke_test(",
+        ".video_generation(",
+        ".suno_create(",
+    ]:
+        assert forbidden not in helper_source + command_source
+
+    frame_source = source_between(source, "async def cmd_frame_video_status", "async def cmd_clear_frame_video_error")
+    assert "ffmpeg" in frame_source
+    assert "shopaikey_video_create_smoke_test" not in frame_source
+    assert "SHOPAIKEY_VIDEO_URL" not in frame_source
+
+
+def test_provider_spend_audit_masks_and_groups_temp_db(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    now = bot.now_text()
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE provider_usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT,
+                capability TEXT,
+                model TEXT,
+                user_id TEXT,
+                is_admin_smoke INTEGER DEFAULT 0,
+                request_id TEXT,
+                provider_task_id TEXT,
+                status TEXT,
+                estimated_cost_usd REAL DEFAULT 0,
+                estimated_cost_xu INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                media_units INTEGER DEFAULT 0,
+                note TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE shopaikey_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT DEFAULT 'shopaikey',
+                job_type TEXT,
+                model TEXT,
+                task_id TEXT,
+                user_id TEXT,
+                admin_only INTEGER DEFAULT 0,
+                status TEXT,
+                xu_cost_planned INTEGER DEFAULT 0,
+                xu_deducted INTEGER DEFAULT 0,
+                billing_status TEXT DEFAULT '',
+                source_job_id TEXT DEFAULT '',
+                package_item_type TEXT DEFAULT '',
+                prompt_preview TEXT DEFAULT '',
+                created_at TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE shopaikey_billing_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                job_id INTEGER,
+                event_type TEXT,
+                amount_xu INTEGER,
+                balance_before INTEGER,
+                balance_after INTEGER,
+                reason TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE local_worker_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                command TEXT,
+                job_type TEXT,
+                provider TEXT,
+                status TEXT,
+                xu_cost INTEGER,
+                created_at TEXT,
+                updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            """INSERT INTO provider_usage_events
+            (provider, capability, model, user_id, is_admin_smoke, request_id, provider_task_id, status, estimated_cost_usd, estimated_cost_xu, media_units, note, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("key4u", "video_generate", "kling-video", "123456789", 0, "req-public-video", "task-key4u-12345", "PASS_SUBMITTED", 0.42, 640, 1, "public_video_key4u_route", now),
+        )
+        conn.execute(
+            """INSERT INTO shopaikey_jobs
+            (provider, job_type, model, task_id, user_id, admin_only, status, xu_cost_planned, billing_status, source_job_id, prompt_preview, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("shopaikey", "image", "nano-banana", "", "987654321", 0, "SUCCESS", 320, "deducted", "", "storyboard scene image", now, now),
+        )
+        conn.execute(
+            """INSERT INTO shopaikey_jobs
+            (provider, job_type, model, task_id, user_id, admin_only, status, xu_cost_planned, billing_status, source_job_id, prompt_preview, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("shopaikey", "video", "veo3.1-fast", "task-shop-video-999", "987654321", 0, "IN_PROGRESS", 640, "deducted_after_provider_accept", "1", "public video", now, now),
+        )
+        video_job_id = conn.execute("SELECT id FROM shopaikey_jobs WHERE task_id='task-shop-video-999'").fetchone()[0]
+        conn.execute(
+            """INSERT INTO shopaikey_billing_events
+            (user_id, job_id, event_type, amount_xu, balance_before, balance_after, reason, created_at)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            ("987654321", video_job_id, "video_provider_submitted", 640, 1000, 360, "task_id=task-shop-video-999; tier=basic", now),
+        )
+        conn.execute(
+            """INSERT INTO local_worker_jobs
+            (user_id, command, job_type, provider, status, xu_cost, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            ("555555555", "frame_video", "frame_video_render", "local_ffmpeg", "succeeded", 80, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        audit = bot.provider_spend_audit_records(limit=20)
+        text = bot.provider_spend_audit_text(limit=20)
+        assert audit["product_counts"]["Product Video AI"] >= 2
+        assert audit["product_counts"]["IMG2VID Path B AI image generation"] >= 1
+        assert audit["product_counts"]["IMG2VID Path A"] == 0
+        assert audit["source_counts"]["background worker"] >= 1
+        assert "task...2345" in text
+        assert "123456789" not in text
+        assert "987654321" not in text
+        assert "Real provider calls made: <code>NO</code>" in text
+        assert "Music is read-only" in text
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
 def test_shopaikey_status_falls_back_to_api_debug_events(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -4952,6 +5098,7 @@ def test_critical_sales_ready_commands_remain_registered():
         "shopaikey_status": "cmd_shopaikey_status",
         "image_provider_status": "cmd_image_provider_status",
         "shopaikey_usage": "cmd_shopaikey_usage",
+        "provider_spend_audit": "cmd_provider_spend_audit",
         "package_catalog": "cmd_package_catalog",
         "grant_combo": "cmd_grant_combo",
         "grant_monthly": "cmd_grant_monthly",
