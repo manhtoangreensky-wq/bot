@@ -8,6 +8,7 @@ import os
 import re
 import time
 import unicodedata
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ DEFAULT_CONVERSATION_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_MESSAGE_DEBOUNCE_SECONDS = 3
 STATE_VERSION = 1
 TRAINING_DATA_VERSION_FALLBACK = "0"
+PLAYBOOK_VERSION_FALLBACK = "0"
 CONVERSATION_MEMORY_LIMIT = 500
 LEARNING_QUEUE_LIMIT = 200
 PUBLIC_FORBIDDEN_TERMS = (
@@ -59,6 +61,13 @@ UNSAFE_PROMISE_TERMS = (
     "chac chan hoan",
     "tu dong cong xu",
 )
+POLICY_CLAIM_TYPES = {
+    "safe_public_fact",
+    "config_priced_fact",
+    "admin_action_required",
+    "policy_confirm_required",
+    "never_auto_promise",
+}
 URGENT_INTENTS = {
     "payment_xu_not_received",
     "payment_wrong_amount",
@@ -123,6 +132,13 @@ def default_training_data_path() -> Path:
     if configured:
         return Path(configured)
     return Path(__file__).resolve().parents[1] / "config" / "cskh_training_data.json"
+
+
+def default_playbook_path() -> Path:
+    configured = os.getenv("CSKH_PLAYBOOK_FILE", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[1] / "config" / "cskh_playbook.json"
 
 
 def default_state() -> dict:
@@ -1020,6 +1036,265 @@ def load_training_data(path: str | Path | None = None) -> dict:
     return clean
 
 
+def _playbook_fallback() -> dict:
+    return {
+        "version": PLAYBOOK_VERSION_FALLBACK,
+        "raw_script_auto_ingest": False,
+        "response_framework": {
+            "steps": ["acknowledge", "mirror", "verified_answer", "next_action", "handoff_if_needed"],
+            "default_max_sentences": 5,
+        },
+        "policy_claim_categories": {claim: {"auto_reply": claim in {"safe_public_fact", "config_priced_fact"}} for claim in POLICY_CLAIM_TYPES},
+        "reply_slots": {
+            "quote_before_confirm_text": "Em sẽ báo đúng gói/Xu trước khi mình xác nhận.",
+            "handoff_line": "Em sẽ chuyển admin kiểm tra giúp mình.",
+            "admin_check_line": "Admin sẽ kiểm tra theo dữ liệu thực tế trước khi phản hồi hướng xử lý.",
+        },
+        "scenarios": [],
+        "unsafe_reference_claim_patterns": [],
+    }
+
+
+def load_playbook(path: str | Path | None = None) -> dict:
+    target = Path(path) if path else default_playbook_path()
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        data = _playbook_fallback()
+    clean = _playbook_fallback()
+    if isinstance(data, dict):
+        clean.update(data)
+    clean["version"] = str(clean.get("version") or PLAYBOOK_VERSION_FALLBACK)
+    clean["raw_script_auto_ingest"] = bool(clean.get("raw_script_auto_ingest", False))
+    categories = clean.get("policy_claim_categories") if isinstance(clean.get("policy_claim_categories"), dict) else {}
+    for claim_type in POLICY_CLAIM_TYPES:
+        categories.setdefault(claim_type, {"auto_reply": claim_type in {"safe_public_fact", "config_priced_fact"}})
+    clean["policy_claim_categories"] = categories
+    clean["reply_slots"] = clean.get("reply_slots") if isinstance(clean.get("reply_slots"), dict) else {}
+    clean["scenarios"] = [item for item in clean.get("scenarios") or [] if isinstance(item, dict) and str(item.get("id") or "").strip()]
+    clean["unsafe_reference_claim_patterns"] = [
+        item for item in clean.get("unsafe_reference_claim_patterns") or [] if isinstance(item, dict)
+    ]
+    return clean
+
+
+def playbook_policy_claim_categories(playbook: dict | None = None) -> set[str]:
+    data = playbook or load_playbook()
+    return set((data.get("policy_claim_categories") or {}).keys())
+
+
+def _contains_any(folded: str, terms: tuple[str, ...] | list[str]) -> bool:
+    return any(term and term in folded for term in terms)
+
+
+def detect_policy_claims(
+    text: str,
+    *,
+    pricing_source: str = "unknown",
+    playbook: dict | None = None,
+) -> dict:
+    data = playbook or load_playbook()
+    folded = _fold(text)
+    claim_types: set[str] = {"safe_public_fact"}
+    blocked: list[str] = []
+    requires_admin_review = False
+
+    completed_refund_terms = (
+        "da hoan",
+        "da refund",
+        "da tra tien",
+        "da tra xu",
+        "da cong xu",
+        "cong xu roi",
+        "hoan xong",
+        "hoan thanh cong",
+    )
+    voucher_terms = ("voucher", "ma giam gia", "coupon", "tang ma", "tang voucher")
+    bonus_terms = ("bonus", "tang xu", "cong them xu", "khuyen mai nap", "thuong nap")
+    vip_terms = ("vip", "khach than thiet", "giam gia rieng", "chiet khau", "uu dai rieng")
+    negated_policy_terms = (
+        "khong tu hua",
+        "chua tu hua",
+        "khong hua",
+        "chua hua",
+        "chua co chinh sach",
+        "can admin xac nhan",
+    )
+    is_negated_policy_statement = _contains_any(folded, negated_policy_terms)
+    hard_price = bool(re.search(r"\b\d+[\d.,]*(?:\s*(?:xu|vnd|dong|đ|k|tr|trieu|triệu))\b", folded, re.IGNORECASE))
+
+    if _contains_any(folded, completed_refund_terms):
+        claim_types.add("never_auto_promise")
+        blocked.append("refund_or_xu_completed_without_record")
+    if _contains_any(folded, voucher_terms) and not is_negated_policy_statement:
+        claim_types.add("policy_confirm_required")
+        blocked.append("voucher_policy_unverified")
+        requires_admin_review = True
+    if _contains_any(folded, bonus_terms) and not is_negated_policy_statement:
+        claim_types.add("policy_confirm_required")
+        blocked.append("bonus_policy_unverified")
+        requires_admin_review = True
+    if _contains_any(folded, vip_terms) and not is_negated_policy_statement:
+        claim_types.add("policy_confirm_required")
+        blocked.append("vip_or_discount_policy_unverified")
+        requires_admin_review = True
+    if hard_price and str(pricing_source or "unknown") != "config":
+        claim_types.add("config_priced_fact")
+        blocked.append("hardcoded_price_without_config_source")
+        requires_admin_review = True
+
+    for item in data.get("unsafe_reference_claim_patterns") or []:
+        pattern = _fold(str(item.get("pattern") or ""))
+        if pattern and pattern in folded:
+            claim_type = str(item.get("claim_type") or "policy_confirm_required")
+            if claim_type in POLICY_CLAIM_TYPES:
+                claim_types.add(claim_type)
+            blocked.append(str(item.get("id") or pattern))
+            requires_admin_review = True
+
+    unsafe = bool(blocked) or "never_auto_promise" in claim_types
+    safe_replacement = str((data.get("reply_slots") or {}).get("handoff_line") or "Em sẽ chuyển admin kiểm tra giúp mình.")
+    return {
+        "claim_types": sorted(claim_types),
+        "unsafe": unsafe,
+        "requires_admin_review": requires_admin_review or unsafe,
+        "blocked_claims": blocked,
+        "safe_replacement": safe_replacement,
+    }
+
+
+def playbook_status(playbook: dict | None = None, kb: dict | None = None) -> dict:
+    data = playbook or load_playbook()
+    base = kb or load_knowledge_base()
+    claim_counter: Counter[str] = Counter()
+    policy_confirm_scenarios = 0
+    unsafe_template_count = 0
+    pricing_sources = Counter(str(item.get("source") or "unknown") for item in (_pricing_matrix(base) or {}).values() if isinstance(item, dict))
+    for scenario in data.get("scenarios") or []:
+        for claim in scenario.get("policy_claim_types") or []:
+            claim_counter[str(claim)] += 1
+        if any(claim in {"policy_confirm_required", "never_auto_promise"} for claim in scenario.get("policy_claim_types") or []):
+            policy_confirm_scenarios += 1
+        for template in scenario.get("safe_reply_templates") or []:
+            if detect_policy_claims(str(template), playbook=data).get("unsafe"):
+                unsafe_template_count += 1
+                break
+    return {
+        "version": str(data.get("version") or PLAYBOOK_VERSION_FALLBACK),
+        "scenario_count": len(data.get("scenarios") or []),
+        "policy_claim_counts": dict(claim_counter),
+        "policy_confirm_scenario_count": policy_confirm_scenarios,
+        "unsafe_unverified_claims_count": unsafe_template_count,
+        "pricing_source_count": dict(pricing_sources),
+        "raw_script_auto_ingest": bool(data.get("raw_script_auto_ingest")),
+        "last_updated": str(data.get("last_updated") or ""),
+    }
+
+
+def _playbook_slots(playbook: dict, classification: dict | None = None, scenario: dict | None = None) -> dict[str, str]:
+    classification = classification or {}
+    scenario = scenario or {}
+    slots = {str(key): str(value) for key, value in (playbook.get("reply_slots") or {}).items()}
+    slots.update({str(key): str(value) for key, value in (scenario.get("reply_slots") or {}).items()})
+    slots.setdefault("quote_before_confirm_text", "Em sẽ báo đúng gói/Xu trước khi mình xác nhận.")
+    slots.setdefault("handoff_line", "Em sẽ chuyển admin kiểm tra giúp mình.")
+    slots.setdefault("admin_check_line", "Admin sẽ kiểm tra theo dữ liệu thực tế trước khi phản hồi hướng xử lý.")
+    slots["product_name"] = str(scenario.get("product_name") or classification.get("primary_product") or classification.get("product") or "TOAN AAS")
+    price_text = str(classification.get("price_text") or "").strip()
+    slots["price_text_if_configured"] = price_text if str(classification.get("pricing_source") or "") == "config" else ""
+    slots["next_question"] = str(scenario.get("next_question") or classification.get("next_question") or "Anh/chị muốn làm phần nào trước ạ?")
+    slots["handoff_line"] = str(slots.get("handoff_line") or "Em sẽ chuyển admin kiểm tra giúp mình.")
+    return slots
+
+
+def _format_playbook_template(template: str, slots: dict[str, str]) -> str:
+    def repl(match: re.Match) -> str:
+        return str(slots.get(match.group(1), ""))
+
+    rendered = re.sub(r"\{([A-Za-z0-9_]+)\}", repl, str(template or ""))
+    rendered = re.sub(r"[ \t]+", " ", rendered)
+    rendered = re.sub(r"\n{3,}", "\n\n", rendered).strip()
+    return rendered
+
+
+def _scenario_score(scenario: dict, text: str, classification: dict) -> tuple[int, list[str]]:
+    folded = _fold(text)
+    intent_id = str(classification.get("intent_id") or "")
+    score = 0
+    matches: list[str] = []
+    if intent_id and intent_id in [str(item) for item in (scenario.get("intent_ids") or [])]:
+        score += 5
+        matches.append(intent_id)
+    for key in ("signals", "examples"):
+        for signal in scenario.get(key) or []:
+            term = _fold(str(signal or ""))
+            if term and term in folded:
+                score += 4 if key == "signals" else 3
+                matches.append(term)
+            elif term and len(term.split()) >= 3 and all(part in folded for part in term.split()[:3]):
+                score += 2
+                matches.append(term)
+    return score, matches[:8]
+
+
+def select_playbook_scenario(text: str, classification: dict | None = None, playbook: dict | None = None) -> dict:
+    data = playbook or load_playbook()
+    current = classification or {}
+    candidates: list[tuple[int, int, dict, list[str]]] = []
+    for idx, scenario in enumerate(data.get("scenarios") or []):
+        score, matches = _scenario_score(scenario, text, current)
+        if score:
+            candidates.append((score, int(scenario.get("priority") or 0), scenario, matches))
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    score, _priority, scenario, matches = candidates[0]
+    selected = dict(scenario)
+    selected["_match_score"] = score
+    selected["_matched_terms"] = matches
+    return selected
+
+
+def build_human_touch_reply(
+    text: str,
+    classification: dict | None = None,
+    *,
+    playbook: dict | None = None,
+    kb: dict | None = None,
+) -> dict:
+    data = playbook or load_playbook()
+    base = kb or load_knowledge_base()
+    current = dict(classification or {})
+    scenario = select_playbook_scenario(text, current, data)
+    if not scenario:
+        return {"matched": False}
+    templates = [str(item).strip() for item in scenario.get("safe_reply_templates") or [] if str(item or "").strip()]
+    if not templates:
+        return {"matched": False, "scenario_id": str(scenario.get("id") or "")}
+    digest = hashlib.sha256(f"{scenario.get('id')}:{text}".encode("utf-8")).hexdigest()
+    template = templates[int(digest[:8], 16) % len(templates)]
+    slots = _playbook_slots(data, current, scenario)
+    reply = _clean_reply_text(_format_playbook_template(template, slots), severity=str(current.get("severity") or scenario.get("severity") or "normal"))
+    pricing_source = str(current.get("pricing_source") or "unknown")
+    if slots.get("price_text_if_configured"):
+        pricing_source = "config"
+    policy = detect_policy_claims(reply, pricing_source=pricing_source, playbook=data)
+    handoff = bool(scenario.get("handoff_required") or policy.get("requires_admin_review"))
+    ticket = bool(scenario.get("ticket_required") or handoff)
+    return {
+        "matched": True,
+        "playbook_version": str(data.get("version") or PLAYBOOK_VERSION_FALLBACK),
+        "scenario_id": str(scenario.get("id") or ""),
+        "scenario_group": str(scenario.get("group") or ""),
+        "reply": reply,
+        "policy_claims": policy,
+        "handoff_required": handoff,
+        "ticket_required": ticket,
+        "matched_terms": list(scenario.get("_matched_terms") or []),
+        "status": playbook_status(data, base),
+    }
+
+
 def _knowledge_products(kb: dict) -> dict[str, dict]:
     products = kb.get("products") or kb.get("product_knowledge") or {}
     if isinstance(products, list):
@@ -1278,6 +1553,20 @@ def _heuristic_intent_id(query: str) -> str:
     music_terms = ("nhac", "music", "bai hat", "suno", "nhac nen")
     private_bot_terms = ("bot rieng", "premium", "he thong rieng", "cskh tu dong", "shop", "doanh nghiep")
 
+    if any(term in folded for term in ("nay su dung sao", "bot nay dung sao", "dung kieu gi", "huong dan", "moi vao", "bat dau tu dau", "su dung sao anh")):
+        return "new_user_what_is_toan_aas"
+    if any(term in folded for term in ("xu bang", "bang gia xu", "quy doi xu", "xu tinh sao", "1 xu", "1000 xu")):
+        return "pricing_general"
+    if any(term in folded for term in ("bam nham", "co mat xu", "co tru tien truoc", "tru tien truoc", "bao gia truoc", "tru xu truoc")):
+        return "pricing_general"
+    if any(term in folded for term in ("dat qua", "mac qua", "ben khac free", "de suy nghi", "co giam gia", "giam gia khong")):
+        return "pricing_general"
+    if any(term in folded for term in ("clone giong", "giong cua toi", "giong cua minh", "voice rieng", "file ghi am")):
+        return "voice_tts_how_to"
+    if any(term in folded for term in ("khong nhan bonus", "bonus chua vao", "khuyen mai chua co", "voucher", "ma giam gia")):
+        return "payment_issue"
+    if any(term in folded for term in ("goi quan ly", "gap quan ly", "quan ly dau", "khong noi chuyen voi bot")):
+        return "admin_handoff"
     if any(term in folded for term in video_terms) and any(
         term in folded
         for term in ("chua thay file", "chua co file", "khong thay file", "khong ra file", "chua ra file", "video fail", "bi tru xu")
@@ -1561,8 +1850,37 @@ def classify_cskh_message(
         "safe_next_step": _next_step_hint(selected),
         "forbidden_claims": list(selected.get("forbidden_claims") or []),
     }
+    playbook_reply = build_human_touch_reply(text, result, kb=base)
+    if playbook_reply.get("matched"):
+        policy = playbook_reply.get("policy_claims") or {}
+        result["playbook_version"] = str(playbook_reply.get("playbook_version") or "")
+        result["playbook_scenario_id"] = str(playbook_reply.get("scenario_id") or "")
+        result["playbook_scenario_group"] = str(playbook_reply.get("scenario_group") or "")
+        result["playbook_policy_claims"] = policy
+        result["playbook_status"] = playbook_reply.get("status") or {}
+        result["playbook_matched_terms"] = list(playbook_reply.get("matched_terms") or [])
+        if not policy.get("unsafe") and str(playbook_reply.get("reply") or "").strip():
+            result["reply"] = str(playbook_reply.get("reply") or "").strip()
+            result["reply_preview"] = result["reply"]
+            result["reply_template_id"] = f"playbook:{result['playbook_scenario_id']}"
+        else:
+            result["reply"] = "Dạ phần này cần admin xác nhận chính sách trước để tránh em trả lời sai. Anh/chị gửi giúp thông tin liên quan, em chuyển admin kiểm tra ngay ạ."
+            result["reply_preview"] = result["reply"]
+            result["reply_template_id"] = f"playbook_policy_guard:{result['playbook_scenario_id']}"
+        if playbook_reply.get("handoff_required"):
+            result["handoff"] = True
+            result["handoff_required"] = True
+        if playbook_reply.get("ticket_required"):
+            result["ticket"] = True
+            result["ticket_required"] = True
+        result["public_safe"] = public_reply_is_safe(result["reply"]) and not bool(policy.get("unsafe"))
+    else:
+        result["playbook_policy_claims"] = detect_policy_claims(result.get("reply") or "", pricing_source=pricing_source)
+        result["public_safe"] = public_reply_is_safe(result["reply"]) and not bool(result["playbook_policy_claims"].get("unsafe"))
     result["would_queue_learning"] = should_queue_learning(result, text)
     if ticket or handoff:
+        result["ticket_preview"] = build_ticket_draft(result, text=text)
+    elif result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     return result
 
@@ -1572,6 +1890,20 @@ def classify_business_event(event: BusinessMessageEvent, kb: dict | None = None)
     if result.get("ticket") or result.get("handoff"):
         result["ticket_preview"] = build_ticket_draft(result, event, text=event.text or event.caption)
     return result
+
+
+def playbook_test_message(text: str) -> dict:
+    classification = classify_cskh_message(text, variation_seed=text)
+    return {
+        "input": str(text or ""),
+        "intent_id": str(classification.get("intent_id") or ""),
+        "reply": str(classification.get("reply") or ""),
+        "playbook_scenario_id": str(classification.get("playbook_scenario_id") or ""),
+        "policy_claims": classification.get("playbook_policy_claims") or {},
+        "would_handoff": bool(classification.get("handoff_required") or classification.get("handoff")),
+        "would_queue_learning": bool(classification.get("would_queue_learning")),
+        "status": playbook_status(),
+    }
 
 
 def public_reply_is_safe(reply: str) -> bool:

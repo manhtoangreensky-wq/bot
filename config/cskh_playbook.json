@@ -1,0 +1,253 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-07-07",
+  "raw_script_auto_ingest": false,
+  "response_framework": {
+    "steps": ["acknowledge", "mirror", "verified_answer", "next_action", "handoff_if_needed"],
+    "default_max_sentences": 5,
+    "angry_first": true,
+    "language": "vi",
+    "tone": ["ấm", "gọn", "giống người thật", "không hứa quá quyền"]
+  },
+  "policy_claim_categories": {
+    "safe_public_fact": {
+      "auto_reply": true,
+      "description": "Thông tin chung an toàn về cách dùng, cần dữ liệu gì, hoặc luồng hỗ trợ."
+    },
+    "config_priced_fact": {
+      "auto_reply": true,
+      "description": "Chỉ nhắc giá khi lấy từ cấu hình pricing_matrix/source=config."
+    },
+    "admin_action_required": {
+      "auto_reply": false,
+      "description": "Các việc cần admin đối soát tài khoản, giao dịch, ticket hoặc lịch sử job."
+    },
+    "policy_confirm_required": {
+      "auto_reply": false,
+      "description": "Voucher, bonus, VIP, giảm giá, hoàn tiền hoặc chính sách chưa có cấu hình bật."
+    },
+    "never_auto_promise": {
+      "auto_reply": false,
+      "description": "Không bao giờ tự nói đã hoàn tiền/cộng Xu/tặng voucher nếu chưa có bản ghi xác nhận."
+    }
+  },
+  "unsafe_reference_claim_patterns": [
+    {"id": "refund_completed", "pattern": "đã hoàn", "claim_type": "never_auto_promise"},
+    {"id": "xu_added", "pattern": "đã cộng Xu", "claim_type": "never_auto_promise"},
+    {"id": "voucher_promise", "pattern": "tặng voucher", "claim_type": "policy_confirm_required"},
+    {"id": "bonus_promise", "pattern": "tặng Xu", "claim_type": "policy_confirm_required"},
+    {"id": "vip_discount", "pattern": "giảm giá VIP", "claim_type": "policy_confirm_required"}
+  ],
+  "reply_slots": {
+    "quote_before_confirm_text": "Em sẽ báo đúng gói/Xu trước khi mình xác nhận.",
+    "handoff_line": "Em sẽ chuyển admin kiểm tra giúp mình.",
+    "admin_check_line": "Admin sẽ kiểm tra theo dữ liệu thực tế trước khi phản hồi hướng xử lý.",
+    "payment_evidence_request": "Anh/chị gửi giúp em số tiền, thời gian chuyển và ảnh bill/mã giao dịch.",
+    "job_code_request": "Anh/chị gửi giúp em mã xử lý hoặc ảnh trạng thái lỗi.",
+    "config_price_note": "{price_text_if_configured}"
+  },
+  "scenarios": [
+    {
+      "id": "new_user_how_to_use",
+      "group": "new_user_pricing_xu",
+      "intent_ids": ["new_user_what_is_toan_aas", "greeting", "greeting_ping"],
+      "signals": ["này sử dụng sao", "bot này dùng sao", "dùng kiểu gì", "mới vào", "bắt đầu từ đâu", "em hướng dẫn"],
+      "examples": ["này sử dụng sao anh", "bot này dùng sao", "mới dùng thì bắt đầu ở đâu"],
+      "policy_claim_types": ["safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ mình mới dùng thì bắt đầu từ nhu cầu nhỏ trước là dễ nhất ạ. TOAN AAS có thể hỗ trợ ảnh, video, SubDub, voice/nhạc và nạp Xu trong bot; phần nào cần phí thì bot sẽ cho mình xem trước khi xác nhận. Anh/chị đang muốn làm video, ảnh hay phụ đề trước ạ?",
+        "Dạ em hướng dẫn mình từng bước được ạ. Mình nói giúp em mục tiêu chính: tạo video bán hàng, tạo ảnh, dịch/lồng tiếng hay kiểm tra nạp Xu? {quote_before_confirm_text}"
+      ],
+      "next_question": "Anh/chị muốn bắt đầu với video, ảnh hay SubDub ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "xu_conversion_safe",
+      "group": "new_user_pricing_xu",
+      "intent_ids": ["pricing_general", "pricing", "pricing_topup"],
+      "signals": ["1 xu bằng bao nhiêu", "1000 xu là bao nhiêu", "xu tính sao", "bảng giá xu"],
+      "examples": ["1 xu bằng bao nhiêu", "1000 xu là bao nhiêu"],
+      "policy_claim_types": ["policy_confirm_required"],
+      "safe_reply_templates": [
+        "Dạ phần quy đổi Xu mình xem theo mục Nạp Xu / Bảng giá trong bot để đúng số hiện tại ạ. Em không báo một con số cố định nếu chưa lấy từ cấu hình đang dùng. Anh/chị định dùng Xu cho video, ảnh hay SubDub để em hướng gói phù hợp hơn?"
+      ],
+      "next_question": "Anh/chị định dùng Xu cho công cụ nào ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "charge_safety",
+      "group": "new_user_pricing_xu",
+      "intent_ids": ["pricing_general", "pricing"],
+      "signals": ["bấm nhầm có mất xu", "có trừ tiền trước không", "có trừ xu trước không", "có báo giá trước không"],
+      "examples": ["bấm nhầm có mất Xu không", "có báo giá trước không"],
+      "policy_claim_types": ["safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ mình cứ yên tâm hỏi trước ạ. Với các phần có phí, em sẽ hướng mình xem đúng gói/Xu trước khi xác nhận, không tự bịa giá trong chat. Anh/chị đang lo phần video, ảnh hay nạp Xu ạ?"
+      ],
+      "next_question": "Anh/chị đang lo phần video, ảnh hay nạp Xu ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "video_sales_consulting",
+      "group": "video_sales_consultation",
+      "intent_ids": ["product_video_consulting", "product_video_how_to", "product_video_pricing"],
+      "signals": ["video quảng cáo", "video bán hàng", "video nhiều cảnh", "video 30 giây", "clip sản phẩm", "chọn gói nào"],
+      "examples": ["làm video quảng cáo", "video bán hàng", "video nhiều cảnh"],
+      "policy_claim_types": ["safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ làm video bán hàng được ạ. Để chọn đúng luồng, em cần biết sản phẩm gì, mục tiêu là quảng cáo hay giới thiệu, và mình muốn dùng ảnh có sẵn hay viết prompt từ đầu. {quote_before_confirm_text}",
+        "Dạ với video nhiều cảnh, mình nên chốt sản phẩm, độ dài mong muốn và có cần voice/phụ đề/logo không. Anh/chị gửi em sản phẩm và mục tiêu video, em gợi ý hướng làm vừa đủ trước ạ."
+      ],
+      "next_question": "Sản phẩm gì và mình muốn video để quảng cáo hay giới thiệu ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "image_ai_safe",
+      "group": "image_ai",
+      "intent_ids": ["image_ai_pricing", "image_prompt_help"],
+      "signals": ["giá ảnh", "tạo ảnh ai", "bảo hành ảnh", "ảnh sai tay", "ảnh không giống", "ảnh sản phẩm"],
+      "examples": ["giá ảnh sao", "tạo ảnh AI", "ảnh sai tay"],
+      "policy_claim_types": ["safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ phần ảnh có mấy hướng: tạo ảnh AI mới, dùng ảnh làm tư liệu video, hoặc ghép ảnh thành video. Anh/chị muốn tạo ảnh mới hay đã có ảnh sẵn rồi ạ? {quote_before_confirm_text}",
+        "Dạ ảnh AI nếu chưa đúng ý thì mình nên nói rõ phong cách, bối cảnh và chi tiết sản phẩm cần giữ. Anh/chị gửi em mục tiêu ảnh hoặc ảnh mẫu, em hướng prompt cho sát hơn ạ."
+      ],
+      "next_question": "Anh/chị muốn tạo ảnh mới hay dùng ảnh có sẵn ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "img2vid_safe",
+      "group": "image_to_video",
+      "intent_ids": ["image_to_video_pricing", "mixed_product_pricing"],
+      "signals": ["ảnh rồi ghép video", "dùng ảnh có sẵn", "ảnh thành video", "ghép ảnh", "video từ ảnh", "slideshow"],
+      "examples": ["ảnh rồi ghép video được không", "ghép ảnh thành video bao nhiêu"],
+      "policy_claim_types": ["config_priced_fact", "safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ được ạ. Nếu anh/chị đã có ảnh sẵn thì mình có thể ghép thành video; nếu chưa có ảnh thì tạo ảnh AI trước rồi mới ghép. {price_text_if_configured} Anh/chị muốn dùng bao nhiêu ảnh và mỗi ảnh khoảng mấy giây ạ?"
+      ],
+      "next_question": "Anh/chị muốn dùng bao nhiêu ảnh và mỗi ảnh khoảng mấy giây ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "subdub_combo_safe",
+      "group": "subdub_combo",
+      "intent_ids": ["subdub_pricing", "subtitle_pricing", "dub_pricing", "subdub_how_to"],
+      "signals": ["dịch video", "phụ đề với lồng tiếng", "chỉ phụ đề", "chỉ lồng tiếng", "file srt", "lồng tiếng việt"],
+      "examples": ["dịch video tiếng Trung sang tiếng Việt", "phụ đề + lồng tiếng"],
+      "policy_claim_types": ["safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ SubDub có thể làm phụ đề, lồng tiếng hoặc cả hai ạ. Mình gửi video và ngôn ngữ cần dịch, em sẽ hướng đúng luồng trước khi xác nhận. Anh/chị muốn chỉ phụ đề hay vừa phụ đề vừa lồng tiếng ạ?"
+      ],
+      "next_question": "Anh/chị muốn chỉ phụ đề hay vừa phụ đề vừa lồng tiếng ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "voice_clone_safe",
+      "group": "voice_clone",
+      "intent_ids": ["voice_tts_how_to", "voice_pricing"],
+      "signals": ["clone giọng", "giọng của tôi", "voice riêng", "gửi file ghi âm", "dùng giọng của mình"],
+      "examples": ["dùng giọng của tôi", "clone giọng", "gửi file ghi âm"],
+      "policy_claim_types": ["safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ phần voice/giọng riêng cần file ghi âm rõ, ít tạp âm và đủ dài để kiểm tra chất lượng ạ. Em chưa báo giá hay hứa miễn phí khi chưa có cấu hình xác nhận. Anh/chị muốn tạo giọng đọc mới hay dùng giọng có sẵn trong bot trước ạ?"
+      ],
+      "next_question": "Anh/chị muốn tạo giọng riêng hay dùng giọng có sẵn ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "payment_issue_handoff",
+      "group": "payment_xu_support",
+      "intent_ids": ["payment_xu_not_received", "payment_issue", "payment_wrong_amount", "payment_duplicate"],
+      "signals": ["nạp chưa cộng", "chuyển khoản rồi", "momo chưa cộng", "không nhận bonus", "bị trừ xu", "bill rồi"],
+      "examples": ["nạp tiền chưa thấy Xu", "chuyển khoản rồi", "không nhận bonus"],
+      "policy_claim_types": ["admin_action_required", "policy_confirm_required"],
+      "safe_reply_templates": [
+        "Dạ em hiểu phần này liên quan tiền/Xu nên mình cần đối soát đúng giao dịch ạ. {payment_evidence_request} Em sẽ chuyển admin kiểm tra, chưa tự hứa cộng Xu, bonus hay hoàn tiền khi chưa có kết quả.",
+        "Dạ để tránh xử lý nhầm giao dịch, mình gửi em bill hoặc mã giao dịch kèm thời gian nạp nhé. {handoff_line}"
+      ],
+      "next_question": "Anh/chị gửi giúp bill, số tiền và thời gian nạp ạ.",
+      "handoff_required": true,
+      "ticket_required": true
+    },
+    {
+      "id": "technical_failure_safe",
+      "group": "technical_failure",
+      "intent_ids": ["product_video_failed_no_file", "product_video_stuck", "technical_error", "subdub_subtitle_error", "subdub_dubbing_error", "voice_tts_error"],
+      "signals": ["video xong chưa thấy file", "chờ lâu quá", "file lỗi", "lồng tiếng sai", "phụ đề sai", "ảnh không giống", "lỗi render"],
+      "examples": ["video xong chưa thấy file", "file lỗi", "lồng tiếng sai"],
+      "policy_claim_types": ["admin_action_required"],
+      "safe_reply_templates": [
+        "Dạ em xin lỗi vì phần này làm mình mất thời gian ạ. {job_code_request} Em sẽ chuyển admin kiểm tra đầu ra thực tế; nếu hệ thống chưa tạo được file hợp lệ thì bên em sẽ báo rõ trước khi xử lý tiếp."
+      ],
+      "next_question": "Anh/chị gửi giúp mã xử lý hoặc ảnh trạng thái lỗi ạ.",
+      "handoff_required": true,
+      "ticket_required": true
+    },
+    {
+      "id": "price_objection",
+      "group": "objection_handling",
+      "intent_ids": ["pricing_general", "pricing", "product_video_pricing"],
+      "signals": ["đắt quá", "bên khác free", "để suy nghĩ", "có giảm giá không", "rẻ nhất"],
+      "examples": ["đắt quá", "bên khác free", "có giảm giá không"],
+      "policy_claim_types": ["policy_confirm_required", "safe_public_fact"],
+      "safe_reply_templates": [
+        "Dạ em hiểu mình muốn tối ưu chi phí ạ. Em không tự hứa giảm giá nếu chưa có chính sách, nhưng có thể giúp mình chọn luồng nhỏ nhất để test trước. Anh/chị đang cần video, ảnh hay SubDub là chính ạ?"
+      ],
+      "next_question": "Anh/chị muốn tối ưu chi phí cho công cụ nào ạ?",
+      "handoff_required": false,
+      "ticket_required": false
+    },
+    {
+      "id": "angry_customer_deescalation",
+      "group": "angry_escalation",
+      "intent_ids": ["angry_scam_accusation", "refund_request", "refund", "admin_handoff"],
+      "signals": ["lừa đảo", "gọi quản lý", "trả tiền lại", "không nói chuyện với em", "kiện", "bóc phốt"],
+      "examples": ["lừa đảo", "gọi quản lý", "trả tiền lại"],
+      "policy_claim_types": ["admin_action_required", "never_auto_promise"],
+      "safe_reply_templates": [
+        "Dạ em xin lỗi vì trải nghiệm này làm mình rất bực ạ. Em không tranh luận hay hứa hoàn khi chưa kiểm tra, nhưng em sẽ chuyển admin xem ngay. Anh/chị gửi giúp mã xử lý hoặc bill liên quan để admin đối soát đúng ca nhé."
+      ],
+      "next_question": "Anh/chị gửi giúp mã xử lý hoặc bill liên quan ạ.",
+      "handoff_required": true,
+      "ticket_required": true,
+      "severity": "urgent"
+    },
+    {
+      "id": "public_complaint_safe",
+      "group": "public_complaint",
+      "intent_ids": ["public_negative_comment", "angry_scam_accusation"],
+      "signals": ["đăng bài bóc phốt", "đưa lên group", "cảnh báo mọi người", "phốt"],
+      "examples": ["tôi sẽ đăng bài bóc phốt", "tôi đưa lên group cảnh báo"],
+      "policy_claim_types": ["admin_action_required"],
+      "safe_reply_templates": [
+        "Dạ em hiểu mình đang muốn phản ánh công khai vì chưa được xử lý rõ. Để bảo vệ thông tin riêng của mình, anh/chị gửi mã xử lý/bill trong tin nhắn riêng giúp em, em chuyển admin kiểm tra và phản hồi minh bạch ạ."
+      ],
+      "next_question": "Anh/chị gửi mã xử lý hoặc bill trong tin nhắn riêng giúp em ạ.",
+      "handoff_required": true,
+      "ticket_required": true,
+      "severity": "urgent"
+    },
+    {
+      "id": "vip_loyalty_safe",
+      "group": "vip_loyalty",
+      "intent_ids": ["premium_private_bot", "bot_private_pricing", "pricing_general"],
+      "signals": ["vip", "khách thân thiết", "dùng nhiều", "gói tháng", "chiết khấu", "ưu đãi"],
+      "examples": ["khách VIP có giảm không", "dùng nhiều có ưu đãi không"],
+      "policy_claim_types": ["policy_confirm_required"],
+      "safe_reply_templates": [
+        "Dạ nếu mình dùng nhiều, em có thể chuyển admin tư vấn gói phù hợp theo nhu cầu thực tế ạ. Em chưa tự hứa VIP/giảm giá khi chưa có chính sách xác nhận. Anh/chị cho em biết mỗi tháng dự kiến dùng video, ảnh hay SubDub nhiều hơn?"
+      ],
+      "next_question": "Anh/chị dự kiến dùng công cụ nào nhiều nhất mỗi tháng ạ?",
+      "handoff_required": true,
+      "ticket_required": true
+    }
+  ]
+}
