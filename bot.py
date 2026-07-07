@@ -167155,6 +167155,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_upload(update, context):
         return
 
+    if await handle_image_menu_pending_photo(update, context):
+        return
+
     frame_state = get_frame_video_state(uid)
     if frame_state and bool(frame_state.get("img2vid_lock1")) and await handle_frame_video_photo(update, context):
         return
@@ -167163,9 +167166,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_developing_video_pending_image(update, context):
-        return
-
-    if await handle_image_menu_pending_photo(update, context):
         return
 
     if await handle_frame_video_photo(update, context):
