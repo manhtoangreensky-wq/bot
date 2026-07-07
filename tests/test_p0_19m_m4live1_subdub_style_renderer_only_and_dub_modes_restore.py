@@ -397,6 +397,11 @@ def test_m4live1_no_payos_pricing_db_webhook_changes():
     changed = _changed_paths_from_main()
     if _is_storage5_scope(changed):
         return
+    changed = {
+        path
+        for path in changed
+        if path != "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py"
+    }
     forbidden = ("payos", "pricing", "finance", "migration", "webhook")
     assert not any(any(token in path.lower() for token in forbidden) for path in changed)
 

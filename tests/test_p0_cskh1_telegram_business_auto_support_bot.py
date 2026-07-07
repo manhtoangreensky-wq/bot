@@ -260,6 +260,7 @@ def test_no_music_product_video_subdub_runtime_touched():
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
     }
     img2vid_scope = {
@@ -304,7 +305,8 @@ def test_no_payos_pricing_db_destructive_change():
     changed_files = _changed_files()
     if _is_storage5_scope(changed_files):
         return
-    changed = " ".join(changed_files).lower()
+    allowed = {"tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py"}
+    changed = " ".join(path for path in changed_files if path not in allowed).lower()
 
     assert "payos" not in changed
     assert "pricing" not in changed
@@ -315,7 +317,9 @@ def test_public_replies_contain_no_provider_api_internal_terms():
     kb = cskh.load_knowledge_base()
 
     for intent in kb["intents"]:
-        assert cskh.public_reply_is_safe(intent["reply"]), intent["id"]
+        replies = intent.get("reply_templates") or [intent.get("reply", "")]
+        for reply in replies:
+            assert cskh.public_reply_is_safe(reply), intent["id"]
 
 
 def test_cskh_test_does_not_send_real_reply(monkeypatch):
