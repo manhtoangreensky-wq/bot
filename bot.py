@@ -83830,6 +83830,7 @@ def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str
     last_message = payload.get("last_business_message_at")
     last_update = payload.get("last_business_update_at")
     last_debug = payload.get("last_debug") or {}
+    buffer_summary = payload.get("last_debounce_buffer_summary") or {}
     lines = [
         "🤖 <b>CSKH Telegram Business Status</b>",
         "",
@@ -83846,15 +83847,40 @@ def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str
         f"• Handoff chats: <code>{payload.get('handoff_count') or 0}</code>",
         f"• Last business update: <code>{html.escape(cskh_format_ts(last_update) if last_update else '-')}</code>",
         f"• Last business message: <code>{html.escape(cskh_format_ts(last_message) if last_message else '-')}</code>",
-        f"• Last intent: <code>{html.escape(str(last_debug.get('classified_intent') or '-'))}</code>",
-        f"• Last reply sent: <code>{'yes' if last_debug.get('reply_sent') else 'no'}</code>",
+        f"• Last intent: <code>{html.escape(str(payload.get('last_intent') or last_debug.get('classified_intent') or '-'))}</code>",
+        f"• Last reply sent: <code>{'yes' if payload.get('last_reply_sent') else 'no'}</code>",
         f"• Last block reason: <code>{html.escape(str(payload.get('last_block_reason') or '-'))}</code>",
+        f"• Last block detail: <code>{html.escape(str(payload.get('last_block_reason_detail') or '-'))}</code>",
+        f"• Last cooldown key: <code>{html.escape(str(payload.get('last_cooldown_key') or '-'))}</code>",
+        f"• Last duplicate key: <code>{html.escape(str(payload.get('last_duplicate_key') or '-'))}</code>",
+        f"• Last handler path: <code>{html.escape(str(payload.get('last_handler_path') or '-'))}</code>",
+        f"• Last brain path: <code>{html.escape(str(payload.get('last_brain_path') or '-'))}</code>",
+        f"• Last buffer: <code>{html.escape(str(buffer_summary.get('count', 0)))} msg</code>",
+        f"• State source: <code>{html.escape(str(payload.get('state_source') or '-'))}</code>",
     ]
     if payload.get("waiting_for_first_business_message"):
         lines.extend(
             [
                 "",
                 "Đã bật chế độ chờ. Hãy nhắn từ selected Business chat để bot ghi nhận connection.",
+            ]
+        )
+    return lines
+
+def cskh_business_trace_lines(payload: dict) -> list[str]:
+    trace = list(payload.get("business_trace") or [])[-5:]
+    lines = ["🧭 <b>CSKH Business Trace</b>", ""]
+    if not trace:
+        lines.append("Chưa có business message trace.")
+        return lines
+    for index, item in enumerate(trace, 1):
+        text = str(item.get("text") or "").replace("\n", " ")[:160]
+        lines.extend(
+            [
+                f"<b>{index}.</b> <code>{html.escape(text or '-')}</code>",
+                f"   intent=<code>{html.escape(str(item.get('intent_id') or '-'))}</code> eligible=<code>{'yes' if item.get('eligible') else 'no'}</code> replied=<code>{'yes' if item.get('replied') else 'no'}</code>",
+                f"   block=<code>{html.escape(str(item.get('block_reason') or '-'))}</code> detail=<code>{html.escape(str(item.get('block_reason_detail') or '-'))}</code>",
+                f"   brain=<code>{html.escape(str(item.get('brain_path') or '-'))}</code> reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
             ]
         )
     return lines
@@ -83930,6 +83956,20 @@ async def cmd_cskh_business_status(update: Update, context: ContextTypes.DEFAULT
         allowed_updates=allowed_updates,
     )
     await update.message.reply_text("\n".join(cskh_status_lines(payload, bot_status)), parse_mode="HTML")
+
+async def cmd_cskh_business_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    state = cskh_business_state()
+    bot_status, allowed_updates = await cskh_business_runtime_probe(context)
+    payload = telegram_business_support.status_payload(
+        state,
+        bot_status=bot_status,
+        allowed_updates=allowed_updates,
+    )
+    await update.message.reply_text("\n".join(cskh_business_trace_lines(payload)), parse_mode="HTML")
 
 async def cmd_cskh_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):
@@ -183714,6 +183754,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("support_ticket", cmd_support_ticket))
     tg_app.add_handler(CommandHandler("support_close", cmd_support_close))
     tg_app.add_handler(CommandHandler("cskh_business_status", cmd_cskh_business_status))
+    tg_app.add_handler(CommandHandler("cskh_business_trace", cmd_cskh_business_trace))
     tg_app.add_handler(CommandHandler("cskh_on", cmd_cskh_on))
     tg_app.add_handler(CommandHandler("cskh_off", cmd_cskh_off))
     tg_app.add_handler(CommandHandler("cskh_mode", cmd_cskh_mode))
