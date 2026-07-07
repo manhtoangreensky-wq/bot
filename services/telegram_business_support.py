@@ -351,6 +351,37 @@ def upsert_business_connection(state: dict, connection: Any) -> dict:
     return clean
 
 
+def upsert_business_connection_from_message(state: dict, event: BusinessMessageEvent) -> dict:
+    clean = normalize_state(state)
+    connection_id = str(event.business_connection_id or "").strip()
+    if not connection_id:
+        clean["last_debug"] = {
+            **dict(clean.get("last_debug") or {}),
+            "missing_business_connection_id": True,
+            "reply_sent": False,
+        }
+        return clean
+    now = time.time()
+    existing = dict(clean["connections"].get(connection_id) or {})
+    payload = {
+        "id": connection_id,
+        "masked_id": mask_business_connection_id(connection_id),
+        "user_id": str(existing.get("user_id") or ""),
+        "username": str(existing.get("username") or ""),
+        "user_chat_id": str(existing.get("user_chat_id") or ""),
+        "is_enabled": bool(existing.get("is_enabled", True)),
+        "can_reply": bool(existing.get("can_reply", True)),
+        "updated_at": now,
+        "source": existing.get("source") or "business_message",
+        "last_chat_id": str(event.chat_id or ""),
+        "last_message_id": str(event.message_id or ""),
+        "last_message_at": event.timestamp or now,
+    }
+    clean["connections"][connection_id] = payload
+    clean["last_business_update_at"] = now
+    return clean
+
+
 def mark_deleted_business_messages(state: dict, deleted_payload: dict) -> dict:
     clean = normalize_state(state)
     bcid = str(deleted_payload.get("business_connection_id") or "")
@@ -784,9 +815,12 @@ def evaluate_auto_reply_guard(
         "admin_manual_suppressed": False,
         "command_suppressed": False,
         "deleted_suppressed": False,
+        "missing_business_connection_id_suppressed": False,
     }
     if not clean.get("enabled"):
         debug["disabled_suppressed"] = True
+    if not str(event.business_connection_id or "").strip():
+        debug["missing_business_connection_id_suppressed"] = True
     if key in clean["processed_messages"]:
         debug["duplicate_suppressed"] = True
     if key in clean["deleted_messages"]:
@@ -806,6 +840,7 @@ def evaluate_auto_reply_guard(
     debug["allowed"] = not any(value for key_name, value in debug.items() if key_name.endswith("_suppressed"))
     debug["message_key"] = key
     debug["cooldown_seconds"] = cooldown
+    debug["block_reason"] = guard_block_reason(debug)
     return debug
 
 
@@ -856,23 +891,50 @@ def allowed_updates_include_business(allowed_updates: Any) -> bool:
     return all(item in updates for item in BUSINESS_UPDATE_TYPES)
 
 
+def guard_block_reason(debug: dict | None) -> str:
+    payload = dict(debug or {})
+    reasons = (
+        ("disabled_suppressed", "disabled"),
+        ("missing_business_connection_id_suppressed", "missing_business_connection_id"),
+        ("duplicate_suppressed", "duplicate"),
+        ("cooldown_suppressed", "cooldown"),
+        ("handoff_suppressed", "handoff"),
+        ("self_message_suppressed", "self_message"),
+        ("admin_manual_suppressed", "admin_manual"),
+        ("command_suppressed", "command"),
+        ("deleted_suppressed", "deleted"),
+    )
+    for key, label in reasons:
+        if payload.get(key):
+            return label
+    return ""
+
+
 def status_payload(state: dict, *, bot_status: dict | None = None, allowed_updates: Any = None) -> dict:
     clean = normalize_state(state)
     connections = list(clean["connections"].values())
     latest = max(connections, key=lambda item: float(item.get("updated_at") or 0), default={})
+    active_connection_count = len([item for item in connections if item.get("is_enabled", True)])
+    enabled = bool(clean.get("enabled"))
+    auto_reply_mode = "off"
+    if enabled:
+        auto_reply_mode = "on" if active_connection_count else "armed"
+    last_debug = dict(clean.get("last_debug") or {})
     return {
-        "enabled": bool(clean.get("enabled")),
+        "enabled": enabled,
         "bot_can_connect_to_business": (bot_status or {}).get("can_connect_to_business", "unknown"),
-        "active_connection_count": len([item for item in connections if item.get("is_enabled", True)]),
+        "active_connection_count": active_connection_count,
         "latest_connection_id_masked": latest.get("masked_id") or "-",
         "allowed_updates_include_business": allowed_updates_include_business(allowed_updates),
-        "auto_reply_mode": clean.get("mode") if clean.get("enabled") else "off",
+        "auto_reply_mode": auto_reply_mode,
+        "waiting_for_first_business_message": bool(enabled and not active_connection_count),
         "handoff_count": len(clean["handoff_chats"]),
         "last_business_update_at": clean.get("last_business_update_at"),
         "last_business_message_at": clean.get("last_business_message_at"),
         "receiving_business_updates": bool(clean.get("last_business_update_at")),
         "receiving_business_messages": bool(clean.get("last_business_message_at")),
-        "last_debug": dict(clean.get("last_debug") or {}),
+        "last_debug": last_debug,
+        "last_block_reason": last_debug.get("block_reason") or guard_block_reason(last_debug),
     }
 
 

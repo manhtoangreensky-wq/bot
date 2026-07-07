@@ -228,17 +228,23 @@ def test_ai_disabled_by_default():
     assert state["mode"] == "rules_only"
 
 
-def test_cskh_on_requires_active_business_connection(monkeypatch):
+def test_cskh_on_allows_armed_mode_without_active_business_connection(monkeypatch):
     import bot
 
     state = cskh.default_state()
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
     monkeypatch.setattr(bot, "cskh_business_state", lambda: state)
-    monkeypatch.setattr(bot, "save_cskh_business_state", lambda next_state: (_ for _ in ()).throw(AssertionError("must not save")))
+
+    def save(next_state):
+        state.clear()
+        state.update(next_state)
+        return state
+
+    monkeypatch.setattr(bot, "save_cskh_business_state", save)
     update = _obj(effective_user=_obj(id=1), message=FakeMessage())
-    asyncio.run(bot.cmd_cskh_on(update, _obj(args=[])))
-    assert state["enabled"] is False
-    assert "Business connection" in update.message.replies[-1][0]
+    asyncio.run(bot.cmd_cskh_on(update, _obj(args=[], bot=FakeBot())))
+    assert state["enabled"] is True
+    assert "chế độ chờ Business chat" in update.message.replies[-1][0]
 
 
 def test_cskh2_off_suppresses_business_auto_reply():
@@ -342,3 +348,9 @@ class FakeMessage:
 class FakeBot:
     def __init__(self):
         self.sent = None
+
+    async def get_me(self):
+        return _obj(id=999, username="toanaasbot", can_connect_to_business=True)
+
+    async def get_webhook_info(self):
+        return _obj(allowed_updates=cskh.BUSINESS_UPDATE_TYPES)

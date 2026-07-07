@@ -93,7 +93,7 @@ def test_admin_cskh_on_enables(monkeypatch):
 
     monkeypatch.setattr(bot, "save_cskh_business_state", save)
     update = _obj(effective_user=_obj(id=1), message=FakeMessage())
-    context = _obj(args=[])
+    context = _obj(args=[], bot=FakeBot())
 
     asyncio.run(bot.cmd_cskh_on(update, context))
 
@@ -236,6 +236,7 @@ def test_no_music_product_video_subdub_runtime_touched():
         "docs/cskh_toan_aas_playbook.md",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
+        "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
     }
 
@@ -292,6 +293,12 @@ class FakeBot:
             raise TypeError("unexpected keyword argument 'business_connection_id'")
         self.sent = kwargs
         return _obj(message_id=1)
+
+    async def get_me(self):
+        return _obj(id=self.id, username="toanaasbot", can_connect_to_business=True)
+
+    async def get_webhook_info(self):
+        return _obj(allowed_updates=cskh.BUSINESS_UPDATE_TYPES)
 
     async def raw_bot_api_request(self, method, payload):
         self.raw_payload = payload
