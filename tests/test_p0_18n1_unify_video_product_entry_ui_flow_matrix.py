@@ -389,15 +389,18 @@ def test_frame_video_intro_first():
     text, markup, session = _open(181927, "frame_video_local")
     assert "Ghép ảnh thành video" in text
     assert session["current_step"] == "intro"
-    assert "vproduct|frame_send_images|frame_video_local" in _callbacks(markup)
+    callbacks = _callbacks(markup)
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
 
 
 def test_frame_video_image_collection_then_optional_profile():
     text, markup, session = _open(181928, "frame_video_local")
     callbacks = _callbacks(markup)
-    assert "vproduct|frame_send_images|frame_video_local" in callbacks
-    assert "vproduct|frame_recent|frame_video_local" in callbacks
-    assert "vproduct|asset_storyboard_prompt" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
+    assert "vproduct|asset_storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
     assert session["video_tool"] == "frame_video_local"
 
 

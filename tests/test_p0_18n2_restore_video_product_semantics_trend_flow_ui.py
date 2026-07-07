@@ -171,9 +171,11 @@ def test_image_to_video_starts_with_image_flow():
     callbacks = _callbacks(markup)
     assert "Ghép ảnh thành video" in text
     assert session["current_step"] == "intro"
-    assert "vproduct|frame_send_images|frame_video_local" in callbacks
-    assert "vproduct|frame_suggest_image|frame_video_local" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
     assert "vproduct|b14_profile|storytelling" not in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
 
 
 def test_self_shot_starts_with_source_video_and_idea_option():

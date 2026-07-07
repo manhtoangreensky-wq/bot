@@ -62374,7 +62374,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎞 图片合成视频",
         "entry_callback": "vproduct|open|frame_video_local",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|frame_send_images|frame_video_local", "vproduct|frame_recent|frame_video_local", "vproduct|asset_storyboard_prompt", "vproduct|frame_suggest_image|frame_video_local"),
+        "expected_children": ("framevideo|start", "framevideo|ai_first"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
@@ -63237,7 +63237,7 @@ def video_semantics_audit_payload() -> dict:
 
 
 def video_callback_audit_payload() -> dict:
-    handled_prefixes = ("vproduct|", "menu|", "vpromptlib|", "vdownload|", "videoedit|")
+    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "vdownload|", "videoedit|")
     rows = []
     for tool_id in VIDEO_PUBLIC_ROUTE_MATRIX:
         if tool_id in {"prompt_library", "video_downloader"}:
@@ -70890,7 +70890,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "asset_ai_image", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(
             query,
-            ivf.frame_video_ai_first_guard_text(lang),
+            (
+                "🖼 <b>Tạo ảnh AI trước</b>\n\n"
+                "Anh/chị có thể mở công cụ tạo ảnh AI hiện có, dùng prompt ảnh từ storyboard, "
+                "hoặc quay lại gửi ảnh sẵn. TOAN AAS chỉ tạo ảnh/video thật sau bước xác nhận "
+                "rõ ràng và chưa trừ Xu ở màn này."
+                if normalize_user_language(lang) == "vi"
+                else
+                "🖼 <b>Create AI images first</b>\n\n"
+                "Open the existing AI image tool, use image prompts from the storyboard, "
+                "or return to send existing images. TOAN AAS only creates real images/video "
+                "after explicit confirmation and has not charged Xu on this screen."
+            ),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [

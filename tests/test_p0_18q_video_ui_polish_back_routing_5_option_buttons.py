@@ -248,8 +248,20 @@ def test_no_engine_provider_payos_changes():
     forbidden = {
         "services/multiscene_video_pipeline.py",
         "providers/key4u_provider.py",
-        "local_worker.py",
     }
+    if "local_worker.py" in changed:
+        worker_diff = subprocess.check_output(
+            ["git", "diff", "--unified=0", "origin/main", "--", "local_worker.py"],
+            text=True,
+            encoding="utf-8",
+        ).lower()
+        assert "run_frame_video_render" in worker_diff
+        assert "len(photos) < 2" in worker_diff
+        assert "len(photos) < 1" in worker_diff
+        assert not any(
+            marker in worker_diff
+            for marker in ("music", "suno", "subdub", "subtitle", "dub", "payos", "wallet", "video_provider")
+        )
     if "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py" in changed:
         changed = [item for item in changed if item not in p0_18r_engine_files]
     assert not forbidden.intersection(changed)

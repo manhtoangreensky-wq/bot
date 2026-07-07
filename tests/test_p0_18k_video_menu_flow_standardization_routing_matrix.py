@@ -274,8 +274,11 @@ def test_image_to_video_route_stays_image_to_video():
     callbacks = _callbacks(markup)
     assert "Ghép ảnh thành video" in text
     assert session.get("video_tool") == "frame_video_local"
-    assert "vproduct|frame_send_images|frame_video_local" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "framevideo|ai_first" in callbacks
     assert "promptvideo|start" not in callbacks
+    assert "vproduct|open|storyboard_prompt" not in callbacks
+    assert "vproduct|open|video_ai_real" not in callbacks
 
 
 def test_self_shot_route_preserves_draft():

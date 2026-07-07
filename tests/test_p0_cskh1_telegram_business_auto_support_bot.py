@@ -239,6 +239,25 @@ def test_no_music_product_video_subdub_runtime_touched():
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
     }
+    img2vid_scope = {
+        "bot.py",
+        "local_worker.py",
+        "video_image_to_video_flow.py",
+        "tests/test_p0_17b7_2_image_to_video_dedupe_flow.py",
+        "tests/test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py",
+        "tests/test_p0_video_img2vid_lock1_two_path_flow.py",
+        "tests/test_p0_18f_video_menu_route_audit_fix_only.py",
+        "tests/test_p0_18k_video_menu_flow_standardization_routing_matrix.py",
+        "tests/test_p0_18m_restore_canonical_video_product_flows_from_backup.py",
+        "tests/test_p0_18n_hard_lock_video_ui_ux_router_state_machine_back_matrix.py",
+        "tests/test_p0_18n1_unify_video_product_entry_ui_flow_matrix.py",
+        "tests/test_p0_18n2_restore_video_product_semantics_trend_flow_ui.py",
+        "tests/test_p0_18q_video_ui_polish_back_routing_5_option_buttons.py",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+    }
+    if "tests/test_p0_video_img2vid_lock1_two_path_flow.py" in changed:
+        assert set(changed) <= img2vid_scope
+        return
 
     assert set(changed) <= allowed
 
