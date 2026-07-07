@@ -3,6 +3,13 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.skip(
+    reason="Superseded by P0.19M.M4LIVE6: exact SubDub runtime restore baseline is M4LIVE2/526dfac3, not M4LIVE1/974d264."
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BOT = (ROOT / "bot.py").read_text(encoding="utf-8")
