@@ -61,8 +61,8 @@ def test_untrusted_provider_progress_shows_zero_public_render_bar():
     assert telemetry["render_progress_public_mode"] == "zero_waiting"
     assert telemetry["render_video_progress_percent_public"] == "0"
     assert "▱▱▱▱▱▱▱▱▱▱ <b>0%</b>" in block
-    assert "Đã gửi yêu cầu dựng video." in block
-    assert "Đang chờ kết quả dựng video." in block
+    assert "Đã gửi yêu cầu dựng video, đang chờ kết quả." in block
+    assert "Hệ thống đang dựng video" in block
     assert "78%" not in block
     assert "90%" not in block
 
@@ -131,7 +131,7 @@ def test_public_hides_poll_count_when_source_payload():
         _telemetry(_provider_alive_payload(provider_poll_count=13, provider_poll_count_source="payload"))
     )
 
-    assert "Đang chờ kết quả dựng video" in block
+    assert "đang chờ kết quả" in block
     assert "13 lần" not in block
 
 
@@ -147,7 +147,9 @@ def test_public_shows_poll_count_only_when_internal_worker_source_and_progress_t
         )
     )
 
-    assert "Đã kiểm tra: <b>2 lần</b>" in block
+    assert "Đã kiểm tra" not in block
+    assert "2 lần" not in block
+    assert "Hệ thống đang dựng video" in block
 
 
 def test_router_pending_telemetry_uses_zero_waiting_debug_fields():

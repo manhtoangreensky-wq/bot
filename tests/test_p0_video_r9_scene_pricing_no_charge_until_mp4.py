@@ -54,7 +54,7 @@ def test_source_registers_read_only_video_job_finance_debug():
 
 def test_source_has_safe_provider_in_progress_public_copy():
     assert "def product_video_provider_pending_public_copy" in BOT_SOURCE
-    assert "Đang chờ provider xử lý. Bot chưa trừ Xu. TOAN AAS chỉ trừ Xu khi có MP4 hợp lệ." in BOT_SOURCE
+    assert "Hệ thống đang dựng video. TOAN AAS chưa trừ Xu và chỉ trừ Xu khi có MP4 hợp lệ." in BOT_SOURCE
     assert "product_video_provider_pending_public_copy" in BOT_SOURCE
 
 
