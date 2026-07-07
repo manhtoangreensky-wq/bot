@@ -223,7 +223,8 @@ def test_cover_bar_if_enabled_is_small():
 def test_subtitle_style_bold_outline_readable():
     style = bot.subdub_normalize_style({"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "output_type": "burn", "video_width": 1280, "video_height": 720})
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
-    assert style["size"] >= 44
+    assert int(style.get("subtitle_style_design_base_size") or style["size"]) >= 44
+    assert int(style["render_size"]) <= int(style.get("subtitle_style_design_base_size") or style["size"])
     assert style["outline"] >= 4
     assert style["shadow"] >= 1
     assert "Style: Default" in ass
