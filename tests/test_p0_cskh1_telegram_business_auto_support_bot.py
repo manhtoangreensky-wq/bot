@@ -253,6 +253,11 @@ def test_no_music_product_video_subdub_runtime_touched():
         "tests/test_p0_18n1_unify_video_product_entry_ui_flow_matrix.py",
         "tests/test_p0_18n2_restore_video_product_semantics_trend_flow_ui.py",
         "tests/test_p0_18q_video_ui_polish_back_routing_5_option_buttons.py",
+        "tests/test_p0_18q1_lock_video_ui_flow_compact_dynamic_status_steps.py",
+        "tests/test_p0_18q2_video_auto_refresh_status_like_subdub_only.py",
+        "tests/test_p0_23h14f_music_voice_preset_duet_progress_single_track_fix.py",
+        "tests/test_p0_23h14g_music_expose_custom_lyrics_button_on_idea_screen.py",
+        "tests/test_p0_23h14h_music_compact_idea_menu_restore_female_voice_pr173.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
     }
     if "tests/test_p0_video_img2vid_lock1_two_path_flow.py" in changed:
