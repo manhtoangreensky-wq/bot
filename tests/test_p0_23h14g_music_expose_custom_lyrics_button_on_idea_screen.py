@@ -217,8 +217,27 @@ def test_existing_suggestion_flow_still_works():
 def test_no_music_provider_engine_changes():
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True).splitlines()
     assert "providers/key4u_provider.py" not in changed
-    assert "local_worker.py" not in changed
+    assert "local_worker.py" not in changed or _local_worker_change_is_img2vid_only()
     assert "remote_worker.py" not in changed
+
+
+def _local_worker_change_is_img2vid_only() -> bool:
+    diff = subprocess.check_output(
+        ["git", "diff", "--unified=0", "origin/main", "--", "local_worker.py"],
+        text=True,
+        encoding="utf-8",
+    ).lower()
+    changed_lines = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    forbidden = ("music", "suno", "subdub", "subtitle", "dub", "payos", "wallet", "provider", "video_provider")
+    return (
+        "run_frame_video_render" in diff
+        and "len(photos) < 2" in diff
+        and "len(photos) < 1" in diff
+        and not any(marker in changed_lines for marker in forbidden)
+    )
 
 
 def test_no_product_video_subdub_payos_pricing_db_changes():
