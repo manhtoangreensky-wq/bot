@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import html
+import asyncio
 import os
 import re
 import time
@@ -22,8 +24,12 @@ BUSINESS_UPDATE_TYPES = (
 DEFAULT_MODE = "rules_only"
 VALID_MODES = {"off", "rules_only", "rules_plus_ai_draft"}
 DEFAULT_COOLDOWN_SECONDS = 60
+DEFAULT_CONVERSATION_TTL_SECONDS = 24 * 60 * 60
+DEFAULT_MESSAGE_DEBOUNCE_SECONDS = 3
 STATE_VERSION = 1
 TRAINING_DATA_VERSION_FALLBACK = "0"
+CONVERSATION_MEMORY_LIMIT = 500
+LEARNING_QUEUE_LIMIT = 200
 PUBLIC_FORBIDDEN_TERMS = (
     "provider",
     "api",
@@ -130,6 +136,9 @@ def default_state() -> dict:
         "deleted_messages": {},
         "last_auto_reply_at": {},
         "last_intent": {},
+        "conversations": {},
+        "message_buffers": {},
+        "learning_queue": {},
         "last_business_update_at": None,
         "last_business_message_at": None,
         "last_debug": {},
@@ -151,6 +160,9 @@ def normalize_state(state: dict | None) -> dict:
         "deleted_messages",
         "last_auto_reply_at",
         "last_intent",
+        "conversations",
+        "message_buffers",
+        "learning_queue",
         "last_debug",
     ):
         if not isinstance(clean.get(key), dict):
@@ -236,6 +248,451 @@ def _next_step_hint(intent: dict) -> str:
     if isinstance(steps, str):
         return steps
     return str(steps[0]) if steps else "Hỏi thêm thông tin còn thiếu"
+
+
+def conversation_ttl_seconds() -> int:
+    try:
+        return max(60, int(os.getenv("CSKH_CONVERSATION_TTL_SECONDS") or DEFAULT_CONVERSATION_TTL_SECONDS))
+    except Exception:
+        return DEFAULT_CONVERSATION_TTL_SECONDS
+
+
+def message_debounce_seconds() -> int:
+    try:
+        return max(1, min(10, int(os.getenv("CSKH_MESSAGE_DEBOUNCE_SECONDS") or DEFAULT_MESSAGE_DEBOUNCE_SECONDS)))
+    except Exception:
+        return DEFAULT_MESSAGE_DEBOUNCE_SECONDS
+
+
+def _redact_sensitive_text(text: str) -> str:
+    clean = str(text or "")
+    clean = re.sub(
+        r"(?i)\b(token|secret|api[_\s-]*key|password|mật khẩu|mat khau)\b\s*[:=]?\s*\S+",
+        r"\1=[redacted]",
+        clean,
+    )
+    clean = re.sub(r"\b\d{12,19}\b", "[redacted-number]", clean)
+    return clean[:700]
+
+
+def mask_chat_id(chat_id: str | int | None) -> str:
+    raw = str(chat_id or "").strip()
+    if not raw:
+        return "-"
+    if len(raw) <= 4:
+        return raw[:1] + "..." + raw[-1:]
+    return raw[:2] + "..." + raw[-2:]
+
+
+def prune_conversation_memory(state: dict, *, now: float | None = None, ttl_seconds: int | None = None) -> dict:
+    if not isinstance(state, dict):
+        return {}
+    current = time.time() if now is None else float(now)
+    ttl = int(ttl_seconds or conversation_ttl_seconds())
+    conversations = state.get("conversations")
+    if isinstance(conversations, dict):
+        expired = []
+        for chat_id, memory in conversations.items():
+            if not isinstance(memory, dict):
+                expired.append(chat_id)
+                continue
+            updated = float(memory.get("updated_at") or memory.get("last_reply_at") or 0)
+            expires_at = float(memory.get("expires_at") or (updated + ttl if updated else 0))
+            if expires_at and expires_at < current:
+                expired.append(chat_id)
+        for chat_id in expired:
+            conversations.pop(chat_id, None)
+        _prune_dict(conversations, CONVERSATION_MEMORY_LIMIT)
+    buffers = state.get("message_buffers")
+    if isinstance(buffers, dict):
+        stale = []
+        for chat_id, buffer in buffers.items():
+            if not isinstance(buffer, dict):
+                stale.append(chat_id)
+                continue
+            last_at = float(buffer.get("last_at") or 0)
+            if last_at and current - last_at > max(60, ttl):
+                stale.append(chat_id)
+        for chat_id in stale:
+            buffers.pop(chat_id, None)
+    return state
+
+
+def conversation_stage_for_intent(intent_id: str) -> str:
+    intent = str(intent_id or "")
+    if intent in {"greeting", "greeting_ping", "repeated_ping", "new_user_what_is_toan_aas"}:
+        return "greeting"
+    if intent in {"pricing", "pricing_general", "pricing_topup", "product_video_pricing"}:
+        return "pricing"
+    if intent in {"vague_or_unclear", "out_of_scope", "product_video_consulting", "product_video_how_to"}:
+        return "discovering_need"
+    if intent in URGENT_INTENTS or intent.endswith("_error") or "stuck" in intent or "failed" in intent:
+        return "troubleshooting"
+    if intent in {"admin_handoff"}:
+        return "handoff_pending"
+    return "discovering_need"
+
+
+def user_tone_for_text(text: str, *, repeated: bool = False) -> str:
+    folded = _fold(text)
+    if any(term in folded for term in ("lua dao", "scam", "boc phot", "kien", "buc", "chan", "khong tra loi")):
+        return "angry"
+    if repeated:
+        return "repeated_ping"
+    if any(term in folded for term in ("khong hieu", "sao vay", "bi gi", "lam sao", "ua")):
+        return "confused"
+    return "neutral"
+
+
+def update_conversation_memory(
+    state: dict,
+    event: BusinessMessageEvent,
+    classification: dict | None = None,
+    *,
+    reply: str = "",
+    now: float | None = None,
+    ttl_seconds: int | None = None,
+) -> dict:
+    clean = normalize_state(state)
+    current = time.time() if now is None else float(now)
+    ttl = int(ttl_seconds or conversation_ttl_seconds())
+    chat_id = str(event.chat_id or "")
+    if not chat_id:
+        return clean
+    conversations = clean["conversations"]
+    memory = dict(conversations.get(chat_id) or {})
+    messages = list(memory.get("last_messages") or [])
+    text = _redact_sensitive_text(event.text or event.caption)
+    if text:
+        messages.append(
+            {
+                "message_id": str(event.message_id or ""),
+                "text": text,
+                "at": event.timestamp or current,
+            }
+        )
+    messages = messages[-5:]
+    bot_replies = list(memory.get("last_bot_replies") or [])
+    if reply:
+        bot_replies.append({"text": _redact_sensitive_text(reply), "at": current})
+    bot_replies = bot_replies[-3:]
+    intent_id = str((classification or {}).get("intent_id") or memory.get("last_intent") or "")
+    product = str((classification or {}).get("product") or memory.get("last_product") or _infer_product(intent_id))
+    missing = list((classification or {}).get("missing_fields") or memory.get("last_missing_fields") or [])
+    repeated = bool(intent_id == "repeated_ping" or len([item for item in messages if _fold(item.get("text", "")) in {"alo", "hi", "hello", "co ai khong"}]) >= 2)
+    unresolved = str(memory.get("unresolved_question") or "")
+    if intent_id in {"vague_or_unclear", "out_of_scope", "repeated_ping"}:
+        unresolved = text[:240]
+    elif reply and intent_id:
+        unresolved = ""
+    conversations[chat_id] = {
+        "chat_id": chat_id,
+        "business_connection_id": str(event.business_connection_id or memory.get("business_connection_id") or ""),
+        "business_connection_id_masked": mask_business_connection_id(event.business_connection_id or memory.get("business_connection_id") or ""),
+        "last_messages": messages,
+        "last_bot_replies": bot_replies,
+        "last_intent": intent_id,
+        "last_product": product,
+        "last_missing_fields": missing,
+        "last_ticket_required": bool((classification or {}).get("ticket_required", memory.get("last_ticket_required", False))),
+        "last_handoff_required": bool((classification or {}).get("handoff_required", memory.get("last_handoff_required", False))),
+        "last_reply_at": current if reply else float(memory.get("last_reply_at") or 0),
+        "unresolved_question": unresolved,
+        "user_tone": user_tone_for_text(text, repeated=repeated),
+        "conversation_stage": conversation_stage_for_intent(intent_id),
+        "updated_at": current,
+        "expires_at": current + ttl,
+    }
+    prune_conversation_memory(clean, now=current, ttl_seconds=ttl)
+    return clean
+
+
+def get_conversation_memory(state: dict, chat_id: str | int, *, now: float | None = None, ttl_seconds: int | None = None) -> dict:
+    clean = normalize_state(state)
+    prune_conversation_memory(clean, now=now, ttl_seconds=ttl_seconds)
+    return dict(clean["conversations"].get(str(chat_id)) or {})
+
+
+def append_message_buffer(
+    state: dict,
+    event: BusinessMessageEvent,
+    *,
+    now: float | None = None,
+    debounce_seconds: int | None = None,
+) -> dict:
+    clean = normalize_state(state)
+    current = time.time() if now is None else float(now)
+    debounce = int(debounce_seconds or message_debounce_seconds())
+    chat_id = str(event.chat_id or "")
+    if not chat_id:
+        return clean
+    existing = dict(clean["message_buffers"].get(chat_id) or {})
+    messages = list(existing.get("messages") or [])
+    messages.append(
+        {
+            "business_connection_id": str(event.business_connection_id or ""),
+            "chat_id": chat_id,
+            "from_user_id": str(event.from_user_id or ""),
+            "message_id": str(event.message_id or ""),
+            "text": _redact_sensitive_text(event.text or event.caption),
+            "media_type": str(event.media_type or ""),
+            "at": event.timestamp or current,
+        }
+    )
+    messages = messages[-5:]
+    clean["message_buffers"][chat_id] = {
+        "chat_id": chat_id,
+        "business_connection_id": str(event.business_connection_id or existing.get("business_connection_id") or ""),
+        "from_user_id": str(event.from_user_id or existing.get("from_user_id") or ""),
+        "first_at": float(existing.get("first_at") or current),
+        "last_at": current,
+        "ready_at": current + debounce,
+        "messages": messages,
+    }
+    return clean
+
+
+def message_buffer_ready(state: dict, chat_id: str | int, *, now: float | None = None) -> bool:
+    clean = normalize_state(state)
+    buffer = clean["message_buffers"].get(str(chat_id)) or {}
+    if not buffer:
+        return False
+    current = time.time() if now is None else float(now)
+    return current >= float(buffer.get("ready_at") or 0)
+
+
+def pop_message_buffer(
+    state: dict,
+    chat_id: str | int,
+    *,
+    now: float | None = None,
+    force: bool = False,
+) -> tuple[dict, dict]:
+    clean = normalize_state(state)
+    key = str(chat_id or "")
+    buffer = dict(clean["message_buffers"].get(key) or {})
+    if not buffer:
+        return clean, {}
+    if not force and not message_buffer_ready(clean, key, now=now):
+        return clean, {}
+    clean["message_buffers"].pop(key, None)
+    return clean, buffer
+
+
+def combined_text_from_buffer(buffer: dict) -> str:
+    parts = []
+    for item in buffer.get("messages") or []:
+        text = str(item.get("text") or "").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def event_from_buffer(buffer: dict) -> BusinessMessageEvent | None:
+    messages = list(buffer.get("messages") or [])
+    if not messages:
+        return None
+    last = messages[-1]
+    return BusinessMessageEvent(
+        update_type="business_message",
+        business_connection_id=str(buffer.get("business_connection_id") or last.get("business_connection_id") or ""),
+        chat_id=str(buffer.get("chat_id") or last.get("chat_id") or ""),
+        from_user_id=str(buffer.get("from_user_id") or last.get("from_user_id") or ""),
+        from_is_bot=False,
+        text=combined_text_from_buffer(buffer),
+        caption="",
+        message_id=str(last.get("message_id") or ""),
+        timestamp=float(last.get("at") or time.time()),
+        media_type=str(last.get("media_type") or ""),
+    )
+
+
+def should_debounce_message(state: dict, event: BusinessMessageEvent, classification: dict, *, now: float | None = None) -> bool:
+    clean = normalize_state(state)
+    if event.is_edited or event.media_type:
+        return False
+    if str(classification.get("severity") or "") == "urgent":
+        return False
+    chat_id = str(event.chat_id or "")
+    if chat_id and clean["message_buffers"].get(chat_id):
+        return True
+    folded = _fold(event.text or event.caption)
+    intent_id = str(classification.get("intent_id") or "")
+    if intent_id in {"greeting", "greeting_ping", "repeated_ping"}:
+        return True
+    if len(folded.split()) <= 4 and not any(term in folded for term in ("gia", "bao nhieu", "xu", "video", "nap", "loi")):
+        return True
+    return False
+
+
+def classify_thread_messages(messages: list[str], *, variation_seed: str | int | None = None) -> dict:
+    cleaned = [str(item or "").strip() for item in messages if str(item or "").strip()]
+    combined = "\n".join(cleaned)
+    result = classify_cskh_message(combined, variation_seed=variation_seed or combined)
+    result["combined_text"] = combined
+    result["buffered"] = len(cleaned) > 1
+    result["conversation_stage"] = conversation_stage_for_intent(str(result.get("intent_id") or ""))
+    result["would_queue_learning"] = should_queue_learning(result, combined)
+    return result
+
+
+def should_queue_learning(classification: dict, text: str = "") -> bool:
+    intent_id = str(classification.get("intent_id") or "")
+    confidence = str(classification.get("confidence") or "")
+    folded = _fold(text)
+    if confidence == "low":
+        return True
+    if intent_id in {"out_of_scope", "vague_or_unclear"}:
+        return True
+    if intent_id == "repeated_ping" and any(term in folded for term in ("khong tra loi", "sao khong", "co ai khong")):
+        return True
+    if any(term in folded for term in ("khong dung", "khong hieu", "tra loi sai", "khong huu ich", "bot ngu")):
+        return True
+    return False
+
+
+def is_distinct_followup_question(event: BusinessMessageEvent) -> bool:
+    folded = _fold(event.text or event.caption)
+    if not folded:
+        return False
+    if len(folded.split()) < 3:
+        return False
+    signals = (
+        "gia",
+        "bao nhieu",
+        "xu",
+        "video",
+        "nap",
+        "loi",
+        "khong duoc",
+        "ho tro",
+        "subdub",
+        "nhac",
+        "voice",
+        "anh",
+        "bot rieng",
+    )
+    return "?" in str(event.text or event.caption or "") or any(term in folded for term in signals)
+
+
+def learning_reason(classification: dict, text: str = "") -> str:
+    if str(classification.get("confidence") or "") == "low":
+        return "low_confidence"
+    intent_id = str(classification.get("intent_id") or "")
+    if intent_id in {"out_of_scope", "vague_or_unclear"}:
+        return "unclear_or_unanswered"
+    if intent_id == "repeated_ping":
+        return "repeated_ping"
+    if any(term in _fold(text) for term in ("khong dung", "khong hieu", "tra loi sai", "khong huu ich", "bot ngu")):
+        return "customer_said_not_helpful"
+    return "review"
+
+
+def add_learning_candidate(
+    state: dict,
+    event: BusinessMessageEvent | None,
+    classification: dict,
+    *,
+    text: str = "",
+    reply_sent: str = "",
+    reason: str = "",
+    now: float | None = None,
+) -> tuple[dict, dict]:
+    clean = normalize_state(state)
+    current = time.time() if now is None else float(now)
+    source_text = text or (event.text if event else "") or (event.caption if event else "")
+    digest = hashlib.sha1(f"{source_text}:{current}:{(event.chat_id if event else '')}".encode("utf-8")).hexdigest()[:10]
+    candidate_id = f"learn-{digest}"
+    candidate = {
+        "id": candidate_id,
+        "customer_message": _redact_sensitive_text(source_text),
+        "chat_id_masked": mask_chat_id(event.chat_id if event else ""),
+        "business_connection_id_masked": mask_business_connection_id(event.business_connection_id if event else ""),
+        "detected_intent": str(classification.get("intent_id") or "out_of_scope"),
+        "confidence": str(classification.get("confidence") or ""),
+        "reply_sent": _redact_sensitive_text(reply_sent or classification.get("reply") or classification.get("reply_preview") or ""),
+        "why_queued": reason or learning_reason(classification, source_text),
+        "suggested_better_intent": str(classification.get("suggested_better_intent") or ""),
+        "status": "open",
+        "created_at": current,
+        "updated_at": current,
+    }
+    clean["learning_queue"][candidate_id] = candidate
+    _prune_dict(clean["learning_queue"], LEARNING_QUEUE_LIMIT)
+    return clean, candidate
+
+
+def list_learning_candidates(state: dict, *, status: str = "open", limit: int = 10) -> list[dict]:
+    clean = normalize_state(state)
+    rows = [dict(item) for item in clean["learning_queue"].values() if not status or str(item.get("status") or "") == status]
+    rows.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return rows[: max(1, int(limit or 10))]
+
+
+def get_learning_candidate(state: dict, candidate_id: str) -> dict:
+    clean = normalize_state(state)
+    return dict(clean["learning_queue"].get(str(candidate_id or "").strip()) or {})
+
+
+def mark_learning_candidate(state: dict, candidate_id: str, status: str, *, now: float | None = None) -> tuple[dict, bool]:
+    clean = normalize_state(state)
+    key = str(candidate_id or "").strip()
+    if key not in clean["learning_queue"]:
+        return clean, False
+    clean["learning_queue"][key]["status"] = str(status or "resolved").strip() or "resolved"
+    clean["learning_queue"][key]["updated_at"] = time.time() if now is None else float(now)
+    return clean, True
+
+
+def thread_preview_text(messages: list[str], classification: dict) -> str:
+    combined = str(classification.get("combined_text") or "\n".join(messages))
+    return (
+        "🧪 <b>CSKH thread test</b>\n\n"
+        f"Buffered: <code>{'yes' if classification.get('buffered') else 'no'}</code>\n"
+        f"Combined text:\n<code>{html.escape(combined[:1000])}</code>\n\n"
+        f"Intent: <code>{html.escape(str(classification.get('intent_id') or '-'))}</code>\n"
+        f"Confidence: <code>{html.escape(str(classification.get('confidence') or '-'))}</code>\n"
+        f"Severity: <code>{html.escape(str(classification.get('severity') or '-'))}</code>\n"
+        f"Conversation stage: <code>{html.escape(str(classification.get('conversation_stage') or '-'))}</code>\n"
+        f"Would queue learning: <code>{'yes' if classification.get('would_queue_learning') else 'no'}</code>\n\n"
+        f"Reply preview:\n{html.escape(str(classification.get('reply_preview') or classification.get('reply') or '')[:1200])}"
+    )
+
+
+def learning_queue_text(state: dict) -> str:
+    rows = list_learning_candidates(state, limit=10)
+    lines = ["🧠 <b>CSKH learning queue</b>", "", "Auto-learning: <code>off / admin review only</code>"]
+    if not rows:
+        lines.append("Chưa có case cần review.")
+        return "\n".join(lines)
+    for item in rows:
+        lines.append(
+            f"• <code>{html.escape(str(item.get('id') or '-'))}</code> "
+            f"| intent=<code>{html.escape(str(item.get('detected_intent') or '-'))}</code> "
+            f"| chat=<code>{html.escape(str(item.get('chat_id_masked') or '-'))}</code> "
+            f"| reason=<code>{html.escape(str(item.get('why_queued') or '-'))}</code>"
+        )
+    return "\n".join(lines)
+
+
+def learning_show_text(item: dict) -> str:
+    if not item:
+        return "\n".join(["🧠 <b>CSKH learning item</b>", "", "Không tìm thấy case."])
+    lines = [
+        "🧠 <b>CSKH learning item</b>",
+        "",
+        f"ID: <code>{html.escape(str(item.get('id') or '-'))}</code>",
+        f"Status: <code>{html.escape(str(item.get('status') or '-'))}</code>",
+        f"Chat: <code>{html.escape(str(item.get('chat_id_masked') or '-'))}</code>",
+        f"Intent: <code>{html.escape(str(item.get('detected_intent') or '-'))}</code>",
+        f"Confidence: <code>{html.escape(str(item.get('confidence') or '-'))}</code>",
+        f"Why queued: <code>{html.escape(str(item.get('why_queued') or '-'))}</code>",
+        "",
+        f"Customer:\n<code>{html.escape(str(item.get('customer_message') or '-')[:1200])}</code>",
+        "",
+        f"Reply sent:\n<code>{html.escape(str(item.get('reply_sent') or '-')[:1200])}</code>",
+    ]
+    return "\n".join(lines)
 
 
 def _training_fallback() -> dict:
@@ -512,7 +969,9 @@ INTENT_PRIORITY = (
     "job_status_check",
     "account_or_usage_limit",
     "product_video_quality_issue",
+    "product_video_pricing",
     "product_video_how_to",
+    "product_video_consulting",
     "subdub_file_too_large",
     "subdub_how_to",
     "music_how_to",
@@ -523,7 +982,10 @@ INTENT_PRIORITY = (
     "pricing_general",
     "pricing",
     "new_user_what_is_toan_aas",
+    "repeated_ping",
+    "greeting_ping",
     "greeting",
+    "vague_or_unclear",
     "media_unknown",
     "out_of_scope",
 )
@@ -593,11 +1055,57 @@ def _score_intent(intent: dict, query: str) -> tuple[int, list[str]]:
     return score, matches
 
 
+def _heuristic_intent_id(query: str) -> str:
+    folded = _fold(query)
+    if not folded:
+        return ""
+    urgent_terms = (
+        "chua thay xu",
+        "chua nhan xu",
+        "chua cong",
+        "da thanh toan",
+        "chuyen khoan",
+        "hoan xu",
+        "hoan tien",
+        "refund",
+        "lua dao",
+        "scam",
+        "boc phot",
+        "khong ra file",
+        "bi tru xu",
+        "ket",
+        "treo",
+        "fail",
+    )
+    if any(term in folded for term in urgent_terms):
+        return ""
+    video_terms = ("video", "clip", "mp4", "quang cao", "san pham")
+    price_terms = ("gia", "bao nhieu", "xu", "bao tien", "tinh tien", "chi phi", "gia sao", "gia nhu nao", "gia the nao")
+    if any(term in folded for term in video_terms) and any(term in folded for term in price_terms):
+        return "product_video_pricing"
+    if any(term in folded for term in ("video ban hang", "video san pham", "video quang cao", "lam clip", "muon tao video", "muon lam video")):
+        return "product_video_consulting"
+    ping_count = sum(folded.count(term) for term in ("alo", "hi", "hello", "co ai khong"))
+    if ping_count >= 2 or any(term in folded for term in ("sao khong tra loi", "co ai khong vay", "sao im vay")):
+        return "repeated_ping"
+    greeting_terms = ("alo", "hi", "hello", "co ai khong", "co ho tro khong", "cho minh hoi voi")
+    if folded in greeting_terms or (len(folded.split()) <= 5 and any(term in folded for term in greeting_terms)):
+        return "greeting_ping"
+    vague_terms = ("loi roi", "khong duoc", "sao vay", "bi gi roi", "ua", "lam sao day", "khong hieu")
+    if folded in vague_terms or (len(folded.split()) <= 4 and any(term in folded for term in vague_terms)):
+        return "vague_or_unclear"
+    return ""
+
+
 def _select_intent(text: str, media_type: str, training_data: dict, kb: dict) -> tuple[dict, int, list[str]]:
     query = _fold(text)
     if not query and media_type:
         query = "media file tep anh video audio"
     intents = _intent_lookup(training_data, kb)
+    heuristic = _heuristic_intent_id(query)
+    if heuristic and heuristic in intents:
+        score = max(8, int(intents[heuristic].get("priority") or 0) // 8)
+        return intents[heuristic], score, [heuristic]
     candidates: list[tuple[int, int, dict, list[str]]] = []
     for intent_id, intent in intents.items():
         score, matches = _score_intent(intent, query)
@@ -758,6 +1266,8 @@ def classify_cskh_message(
     result = {
         "intent": intent_id,
         "intent_id": intent_id,
+        "product": _infer_product(intent_id),
+        "conversation_stage": conversation_stage_for_intent(intent_id),
         "reply": reply,
         "reply_preview": reply,
         "reply_template_id": template_id,
@@ -774,6 +1284,7 @@ def classify_cskh_message(
         "safe_next_step": _next_step_hint(selected),
         "forbidden_claims": list(selected.get("forbidden_claims") or []),
     }
+    result["would_queue_learning"] = should_queue_learning(result, text)
     if ticket or handoff:
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     return result
@@ -790,6 +1301,80 @@ def public_reply_is_safe(reply: str) -> bool:
     folded = _fold(reply)
     hard_forbidden = tuple(_fold(term) for term in PUBLIC_FORBIDDEN_TERMS + UNSAFE_PROMISE_TERMS)
     return not any(term and term in folded for term in hard_forbidden)
+
+
+async def process_business_event_runtime(
+    event: BusinessMessageEvent,
+    context: Any,
+    *,
+    state: dict,
+    save_state_fn: Any,
+    bot_user_id: str = "",
+    allow_debounce: bool = True,
+    schedule_buffer_fn: Any = None,
+    notify_admin_fn: Any = None,
+) -> dict:
+    clean = record_business_message_received(state, event)
+    if clean.get("enabled"):
+        clean = upsert_business_connection_from_message(clean, event)
+    classification = classify_business_event(event)
+    chat_id = str(event.chat_id or "")
+    if str(classification.get("severity") or "") == "urgent" and clean.get("message_buffers", {}).get(chat_id):
+        clean, _dropped = pop_message_buffer(clean, chat_id, force=True)
+    guard = evaluate_auto_reply_guard(clean, event, bot_user_id=bot_user_id)
+    if not guard.get("allowed"):
+        clean = record_suppressed(clean, event, classification, guard)
+        clean = update_conversation_memory(clean, event, classification)
+        save_state_fn(clean)
+        return {"sent": False, "classification": classification, "guard": guard}
+    if allow_debounce and should_debounce_message(clean, event, classification):
+        clean = append_message_buffer(clean, event)
+        clean = update_conversation_memory(clean, event, classification)
+        save_state_fn(clean)
+        if schedule_buffer_fn:
+            schedule_buffer_fn(event.chat_id, context)
+        return {"sent": False, "buffered": True, "classification": classification, "guard": guard}
+    reply = str(classification.get("reply") or "").strip()
+    if not reply or not classification.get("public_safe", True):
+        classification["intent_id"] = "out_of_scope"
+        classification["handoff"] = True
+        classification["handoff_required"] = True
+        classification["ticket"] = True
+        classification["ticket_required"] = True
+        reply = "TOAN AAS đã nhận tin nhắn. Nội dung này cần admin xem thêm để tránh trả lời sai."
+    send_result = await send_business_message(
+        context.bot,
+        event.business_connection_id,
+        event.chat_id,
+        reply,
+        reply_to_message_id=event.message_id,
+    )
+    clean = record_auto_reply(clean, event, classification, send_result)
+    clean = update_conversation_memory(clean, event, classification, reply=reply)
+    if should_queue_learning(classification, event.text or event.caption):
+        clean, _candidate = add_learning_candidate(
+            clean,
+            event,
+            classification,
+            text=event.text or event.caption,
+            reply_sent=reply,
+        )
+    if classification.get("handoff"):
+        clean = set_handoff(clean, event.chat_id, True, str(classification.get("intent_id") or "handoff"))
+    save_state_fn(clean)
+    if classification.get("handoff") and notify_admin_fn:
+        await notify_admin_fn(
+            context,
+            "🎧 <b>CSKH business handoff required</b>",
+            [
+                f"• Chat: <code>{html.escape(str(event.chat_id))}</code>",
+                f"• Connection: <code>{html.escape(mask_business_connection_id(event.business_connection_id))}</code>",
+                f"• Intent: <code>{html.escape(str(classification.get('intent_id') or '-'))}</code>",
+                f"• Message id: <code>{html.escape(str(event.message_id or '-'))}</code>",
+                "• Auto-reply sent once, handoff guard is now active.",
+            ],
+        )
+    return {"sent": True, "classification": classification, "guard": guard, "send_result": send_result}
 
 
 def evaluate_auto_reply_guard(
@@ -835,7 +1420,7 @@ def evaluate_auto_reply_guard(
     if str(event.text or event.caption or "").strip().startswith("/"):
         debug["command_suppressed"] = True
     last_reply = float(clean["last_auto_reply_at"].get(chat_id) or 0)
-    if last_reply and current - last_reply < cooldown:
+    if last_reply and current - last_reply < cooldown and not is_distinct_followup_question(event):
         debug["cooldown_suppressed"] = True
     debug["allowed"] = not any(value for key_name, value in debug.items() if key_name.endswith("_suppressed"))
     debug["message_key"] = key
