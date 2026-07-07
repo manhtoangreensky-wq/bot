@@ -243,6 +243,23 @@ def _intent_templates(intent: dict) -> list[str]:
     return templates
 
 
+PRICING_SIGNAL_TERMS = (
+    "gia",
+    "bao nhieu",
+    "nhieu tien",
+    "nhieu xu",
+    "phi",
+    "goi",
+    "re nhat",
+    "mien phi",
+    "xu",
+)
+
+
+def _is_pricing_question(folded: str) -> bool:
+    return any(term in folded for term in PRICING_SIGNAL_TERMS)
+
+
 def _next_step_hint(intent: dict) -> str:
     steps = intent.get("safe_next_steps") or []
     if isinstance(steps, str):
@@ -322,7 +339,22 @@ def conversation_stage_for_intent(intent_id: str) -> str:
     intent = str(intent_id or "")
     if intent in {"greeting", "greeting_ping", "repeated_ping", "new_user_what_is_toan_aas"}:
         return "greeting"
-    if intent in {"pricing", "pricing_general", "pricing_topup", "product_video_pricing"}:
+    if intent in {
+        "pricing",
+        "pricing_general",
+        "pricing_topup",
+        "product_video_pricing",
+        "image_ai_pricing",
+        "image_to_video_pricing",
+        "subdub_pricing",
+        "subtitle_pricing",
+        "dub_pricing",
+        "voice_pricing",
+        "music_pricing",
+        "bot_private_pricing",
+        "mixed_product_pricing",
+        "unknown_pricing_product",
+    }:
         return "pricing"
     if intent in {"vague_or_unclear", "out_of_scope", "product_video_consulting", "product_video_how_to"}:
         return "discovering_need"
@@ -542,6 +574,8 @@ def should_queue_learning(classification: dict, text: str = "") -> bool:
     folded = _fold(text)
     if confidence == "low":
         return True
+    if _is_pricing_question(folded) and not classification.get("primary_product"):
+        return True
     if intent_id in {"out_of_scope", "vague_or_unclear"}:
         return True
     if intent_id == "repeated_ping" and any(term in folded for term in ("khong tra loi", "sao khong", "co ai khong")):
@@ -588,6 +622,35 @@ def learning_reason(classification: dict, text: str = "") -> str:
     return "review"
 
 
+def _learning_detected_keywords(text: str, classification: dict) -> list[str]:
+    existing = list(classification.get("matched_aliases") or classification.get("matched_keyword_groups") or [])
+    folded = _fold(text)
+    signals = (
+        "video",
+        "anh",
+        "hinh",
+        "ghep anh",
+        "phu de",
+        "long tieng",
+        "nhac",
+        "voice",
+        "bot rieng",
+        "nap",
+        "xu",
+        "gia",
+        "bao nhieu",
+        "combo",
+        "loai kia",
+        "mau nay",
+    )
+    combined = existing + [term for term in signals if term in folded]
+    deduped: list[str] = []
+    for term in combined:
+        if term and term not in deduped:
+            deduped.append(term)
+    return deduped[:10]
+
+
 def add_learning_candidate(
     state: dict,
     event: BusinessMessageEvent | None,
@@ -610,6 +673,8 @@ def add_learning_candidate(
         "business_connection_id_masked": mask_business_connection_id(event.business_connection_id if event else ""),
         "detected_intent": str(classification.get("intent_id") or "out_of_scope"),
         "confidence": str(classification.get("confidence") or ""),
+        "detected_keywords": _learning_detected_keywords(source_text, classification),
+        "suggested_product": str(classification.get("primary_product") or classification.get("product") or ""),
         "reply_sent": _redact_sensitive_text(reply_sent or classification.get("reply") or classification.get("reply_preview") or ""),
         "why_queued": reason or learning_reason(classification, source_text),
         "suggested_better_intent": str(classification.get("suggested_better_intent") or ""),
@@ -651,6 +716,13 @@ def thread_preview_text(messages: list[str], classification: dict) -> str:
         f"Buffered: <code>{'yes' if classification.get('buffered') else 'no'}</code>\n"
         f"Combined text:\n<code>{html.escape(combined[:1000])}</code>\n\n"
         f"Intent: <code>{html.escape(str(classification.get('intent_id') or '-'))}</code>\n"
+        f"Primary product: <code>{html.escape(str(classification.get('primary_product') or '-'))}</code>\n"
+        f"Secondary products: <code>{html.escape(', '.join(map(str, classification.get('secondary_products') or [])) or '-')}</code>\n"
+        f"Mixed intent: <code>{'yes' if classification.get('mixed_intent') else 'no'}</code>\n"
+        f"Pricing source: <code>{html.escape(str(classification.get('pricing_source') or '-'))}</code>\n"
+        f"Matched aliases: <code>{html.escape(', '.join(map(str, classification.get('matched_aliases') or [])) or '-')}</code>\n"
+        f"Knowledge entry: <code>{html.escape(str(classification.get('knowledge_entry_id') or '-'))}</code>\n"
+        f"Next question: <code>{html.escape(str(classification.get('next_question') or '-'))}</code>\n"
         f"Confidence: <code>{html.escape(str(classification.get('confidence') or '-'))}</code>\n"
         f"Severity: <code>{html.escape(str(classification.get('severity') or '-'))}</code>\n"
         f"Conversation stage: <code>{html.escape(str(classification.get('conversation_stage') or '-'))}</code>\n"
@@ -948,6 +1020,132 @@ def load_training_data(path: str | Path | None = None) -> dict:
     return clean
 
 
+def _knowledge_products(kb: dict) -> dict[str, dict]:
+    products = kb.get("products") or kb.get("product_knowledge") or {}
+    if isinstance(products, list):
+        return {
+            str(item.get("canonical_product_id") or item.get("id") or "").strip(): item
+            for item in products
+            if isinstance(item, dict) and str(item.get("canonical_product_id") or item.get("id") or "").strip()
+        }
+    if isinstance(products, dict):
+        clean: dict[str, dict] = {}
+        for key, value in products.items():
+            if isinstance(value, dict):
+                product_id = str(value.get("canonical_product_id") or key).strip()
+                clean[product_id] = value
+        return clean
+    return {}
+
+
+def _pricing_matrix(kb: dict) -> dict[str, dict]:
+    matrix = kb.get("pricing_matrix") or kb.get("pricing") or {}
+    return matrix if isinstance(matrix, dict) else {}
+
+
+def _product_alias_terms(product: dict) -> list[str]:
+    terms: list[str] = []
+    for key in ("aliases", "synonyms", "typical_user_questions", "display_name"):
+        values = product.get(key) or []
+        if isinstance(values, str):
+            values = [values]
+        for value in values:
+            folded = _fold(str(value or ""))
+            if folded and folded not in terms:
+                terms.append(folded)
+    return terms
+
+
+def detect_product_context(text: str, kb: dict | None = None) -> dict:
+    base = kb or load_knowledge_base()
+    folded = _fold(text)
+    products = _knowledge_products(base)
+    matched: list[tuple[str, list[str]]] = []
+    for product_id, product in products.items():
+        aliases = [term for term in _product_alias_terms(product) if _fold_contains(folded, term)]
+        if aliases:
+            matched.append((product_id, aliases[:5]))
+
+    # Keep payment/support issues first when they are mixed with product asks.
+    priority = {
+        "payment_xu": 100,
+        "product_video": 80,
+        "image_to_video": 78,
+        "image_ai": 76,
+        "subdub": 74,
+        "voice": 70,
+        "music": 68,
+        "premium_private_bot": 66,
+        "free_tools": 60,
+    }
+    matched.sort(key=lambda item: priority.get(item[0], 0), reverse=True)
+    product_ids = [product_id for product_id, _aliases in matched]
+    matched_aliases = [alias for _product_id, aliases in matched for alias in aliases]
+
+    secondary = product_ids[1:]
+    sub_products: list[str] = []
+    if any(term in folded for term in ("phu de", "subtitle", "sub", "srt", "dich chu", "dich video")):
+        sub_products.append("subtitle")
+    if any(term in folded for term in ("long tieng", "dub", "voice over", "doc tieng viet")):
+        sub_products.append("dub")
+    if len(sub_products) > 1:
+        secondary = list(dict.fromkeys(secondary + sub_products))
+
+    primary = product_ids[0] if product_ids else ""
+    if any(term in folded for term in ("ghep anh", "anh thanh video", "video tu anh", "slideshow", "ghep hinh", "anh roi ghep video")):
+        previous_primary = primary
+        primary = "image_to_video"
+        secondary = [item for item in secondary if item != "image_to_video"]
+        if previous_primary and previous_primary != "image_to_video" and previous_primary not in secondary:
+            secondary.insert(0, previous_primary)
+        if "image_ai" not in secondary:
+            secondary.insert(0, "image_ai")
+
+    product_count = len(set(product_ids + sub_products))
+    mixed = product_count > 1 or any(term in folded for term in (" va ", " voi ", " + ", " roi ", "kem", "cung luc"))
+    entry = products.get(primary) or {}
+    pricing = _pricing_matrix(base).get(str(entry.get("pricing_source_key") or primary), {})
+    pricing_source = str(pricing.get("source") or ("config" if pricing else "unknown"))
+    if not pricing:
+        pricing_source = "unknown"
+    return {
+        "primary_product": primary,
+        "secondary_products": secondary[:5],
+        "mixed_intent": bool(primary and mixed and secondary),
+        "matched_aliases": matched_aliases[:10],
+        "knowledge_entry_id": primary,
+        "next_question": str(entry.get("next_question") or ""),
+        "pricing_source": pricing_source,
+        "price_text": str(pricing.get("price_text") or ""),
+    }
+
+
+def _pricing_source_for_intent(kb: dict, intent_id: str, product_id: str) -> str:
+    if intent_id not in {
+        "product_video_pricing",
+        "image_ai_pricing",
+        "image_to_video_pricing",
+        "subdub_pricing",
+        "subtitle_pricing",
+        "dub_pricing",
+        "voice_pricing",
+        "music_pricing",
+        "bot_private_pricing",
+        "mixed_product_pricing",
+        "unknown_pricing_product",
+        "pricing_general",
+        "pricing",
+    }:
+        return "unknown"
+    products = _knowledge_products(kb)
+    product = products.get(product_id) or {}
+    key = str(product.get("pricing_source_key") or product_id or intent_id).strip()
+    pricing = _pricing_matrix(kb).get(key) or {}
+    if pricing:
+        return str(pricing.get("source") or "config")
+    return "unknown"
+
+
 INTENT_PRIORITY = (
     "angry_scam_accusation",
     "public_negative_comment",
@@ -969,6 +1167,16 @@ INTENT_PRIORITY = (
     "job_status_check",
     "account_or_usage_limit",
     "product_video_quality_issue",
+    "mixed_product_pricing",
+    "image_to_video_pricing",
+    "image_ai_pricing",
+    "subdub_pricing",
+    "subtitle_pricing",
+    "dub_pricing",
+    "voice_pricing",
+    "music_pricing",
+    "bot_private_pricing",
+    "unknown_pricing_product",
     "product_video_pricing",
     "product_video_how_to",
     "product_video_consulting",
@@ -1002,17 +1210,17 @@ def _legacy_intents_from_kb(kb: dict) -> list[dict]:
         intents.append(
             {
                 "id": intent_id,
-                "description": f"Legacy CSKH.1 intent {intent_id}",
-                "priority": 10,
-                "confidence_keywords": list(item.get("keywords") or []),
-                "example_user_messages": list(item.get("keywords") or [])[:8],
-                "required_context_fields": [],
-                "reply_templates": [str(item.get("reply") or "")],
-                "handoff_required": bool(item.get("handoff")),
-                "ticket_required": bool(item.get("ticket") or item.get("handoff")),
-                "safe_next_steps": ["Hỏi thêm thông tin còn thiếu"],
-                "forbidden_claims": [],
-                "severity": "urgent" if intent_id in URGENT_INTENTS else "normal",
+                "description": str(item.get("description") or f"Knowledge base intent {intent_id}"),
+                "priority": int(item.get("priority") or 10),
+                "confidence_keywords": list(item.get("confidence_keywords") or item.get("keywords") or []),
+                "example_user_messages": list(item.get("example_user_messages") or item.get("keywords") or [])[:12],
+                "required_context_fields": list(item.get("required_context_fields") or []),
+                "reply_templates": _intent_templates(item),
+                "handoff_required": bool(item.get("handoff_required", item.get("handoff", False))),
+                "ticket_required": bool(item.get("ticket_required", item.get("ticket", item.get("handoff", False)))),
+                "safe_next_steps": list(item.get("safe_next_steps") or ["Hỏi thêm thông tin còn thiếu"]),
+                "forbidden_claims": list(item.get("forbidden_claims") or []),
+                "severity": str(item.get("severity") or ("urgent" if intent_id in URGENT_INTENTS else "normal")),
             }
         )
     return intents
@@ -1059,6 +1267,26 @@ def _heuristic_intent_id(query: str) -> str:
     folded = _fold(query)
     if not folded:
         return ""
+    price_question = _is_pricing_question(folded)
+    payment_terms = ("nap", "chuyen khoan", "thanh toan", "bill", "hoa don", "chua cong", "chua thay xu", "mat xu", "tru xu")
+    video_terms = ("video", "clip", "mp4", "quang cao", "san pham", "tiktok", "reels", "short", "trailer", "phim")
+    image_terms = ("anh", "hinh", "hinh anh", "tao hinh", "avatar", "logo", "nhan vat", "boi canh")
+    img2vid_terms = ("ghep anh", "anh thanh video", "video tu anh", "anh chay", "ghep hinh", "slideshow", "anh roi ghep video")
+    subtitle_terms = ("phu de", "subtitle", "sub", "srt", "dich chu", "dich video")
+    dub_terms = ("long tieng", "dub", "voice over", "doc tieng viet")
+    voice_terms = ("voice", "tts", "giong doc", "giong nam", "giong nu")
+    music_terms = ("nhac", "music", "bai hat", "suno", "nhac nen")
+    private_bot_terms = ("bot rieng", "premium", "he thong rieng", "cskh tu dong", "shop", "doanh nghiep")
+
+    if any(term in folded for term in video_terms) and any(
+        term in folded
+        for term in ("chua thay file", "chua co file", "khong thay file", "khong ra file", "chua ra file", "video fail", "bi tru xu")
+    ):
+        return "product_video_failed_no_file"
+    if any(term in folded for term in payment_terms) and any(term in folded for term in video_terms + image_terms):
+        if any(term in folded for term in ("roi", "xong", "chua", "da thanh toan", "chuyen khoan")):
+            return "payment_xu_not_received"
+        return "pricing_topup"
     urgent_terms = (
         "chua thay xu",
         "chua nhan xu",
@@ -1079,10 +1307,30 @@ def _heuristic_intent_id(query: str) -> str:
     )
     if any(term in folded for term in urgent_terms):
         return ""
-    video_terms = ("video", "clip", "mp4", "quang cao", "san pham")
-    price_terms = ("gia", "bao nhieu", "xu", "bao tien", "tinh tien", "chi phi", "gia sao", "gia nhu nao", "gia the nao")
-    if any(term in folded for term in video_terms) and any(term in folded for term in price_terms):
+    if price_question and any(term in folded for term in private_bot_terms):
+        return "bot_private_pricing"
+    if any(term in folded for term in img2vid_terms):
+        return "image_to_video_pricing"
+    has_video = any(term in folded for term in video_terms)
+    has_image = any(term in folded for term in image_terms)
+    if has_video and has_image:
+        return "mixed_product_pricing"
+    if price_question and has_image:
+        return "image_ai_pricing"
+    if price_question and any(term in folded for term in subtitle_terms) and any(term in folded for term in dub_terms):
+        return "subdub_pricing"
+    if price_question and any(term in folded for term in subtitle_terms):
+        return "subtitle_pricing"
+    if price_question and any(term in folded for term in dub_terms):
+        return "dub_pricing"
+    if price_question and any(term in folded for term in voice_terms):
+        return "voice_pricing"
+    if price_question and any(term in folded for term in music_terms):
+        return "music_pricing"
+    if price_question and has_video:
         return "product_video_pricing"
+    if price_question and any(term in folded for term in ("cai kia", "loai kia", "combo nay", "dich vu kia")):
+        return "unknown_pricing_product"
     if any(term in folded for term in ("video ban hang", "video san pham", "video quang cao", "lam clip", "muon tao video", "muon lam video")):
         return "product_video_consulting"
     ping_count = sum(folded.count(term) for term in ("alo", "hi", "hello", "co ai khong"))
@@ -1180,9 +1428,15 @@ def _missing_fields(intent: dict, text: str) -> list[str]:
 def _infer_product(intent_id: str) -> str:
     if intent_id.startswith("payment") or intent_id in {"refund", "refund_request"}:
         return "payment_xu"
+    if intent_id in {"mixed_product_pricing"}:
+        return "mixed"
+    if intent_id in {"image_to_video_pricing"}:
+        return "image_to_video"
+    if intent_id in {"image_ai_pricing"}:
+        return "image_ai"
     if intent_id.startswith("product_video"):
         return "product_video"
-    if intent_id.startswith("subdub"):
+    if intent_id.startswith("subdub") or intent_id in {"subtitle_pricing", "dub_pricing"}:
         return "subdub"
     if intent_id.startswith("music"):
         return "music"
@@ -1190,8 +1444,10 @@ def _infer_product(intent_id: str) -> str:
         return "voice"
     if intent_id.startswith("image"):
         return "image_ai"
-    if intent_id in {"premium_private_bot"}:
+    if intent_id in {"premium_private_bot", "bot_private_pricing"}:
         return "premium_private_bot"
+    if intent_id == "free_tools_help":
+        return "free_tools"
     return "general"
 
 
@@ -1263,10 +1519,31 @@ def classify_cskh_message(
         ticket = bool(fallback.get("ticket_required", fallback.get("ticket", handoff)))
         selected = fallback
     missing = _missing_fields(selected, text)
+    product_context = detect_product_context(text, base)
+    inferred_product = _infer_product(intent_id)
+    primary_product = product_context.get("primary_product") or ("" if inferred_product == "general" else inferred_product)
+    secondary_products = list(product_context.get("secondary_products") or [])
+    if inferred_product not in {"general", "mixed"} and inferred_product != primary_product and inferred_product not in secondary_products:
+        if primary_product:
+            secondary_products.append(inferred_product)
+        else:
+            primary_product = inferred_product
+    next_question = str(product_context.get("next_question") or _next_step_hint(selected))
+    pricing_source = _pricing_source_for_intent(base, intent_id, primary_product or inferred_product)
+    if pricing_source == "unknown" and product_context.get("pricing_source") == "config":
+        pricing_source = "config"
     result = {
         "intent": intent_id,
         "intent_id": intent_id,
         "product": _infer_product(intent_id),
+        "primary_product": primary_product or _infer_product(intent_id),
+        "secondary_products": secondary_products[:5],
+        "mixed_intent": bool(product_context.get("mixed_intent") or (intent_id == "mixed_product_pricing")),
+        "matched_aliases": list(product_context.get("matched_aliases") or []),
+        "next_question": next_question,
+        "knowledge_entry_id": str(product_context.get("knowledge_entry_id") or primary_product or ""),
+        "pricing_source": pricing_source,
+        "price_text": str(product_context.get("price_text") or ""),
         "conversation_stage": conversation_stage_for_intent(intent_id),
         "reply": reply,
         "reply_preview": reply,
