@@ -88,6 +88,7 @@ def _env(**updates):
         "VIDEO_PROVIDER_CHAIN": "shopaikey_video,key4u_video",
         "VIDEO_PROVIDER_MAX_POLL_ATTEMPTS": "1",
         "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS": "0",
+        "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "1",
     }
     data.update({key: str(value) for key, value in updates.items()})
     return data

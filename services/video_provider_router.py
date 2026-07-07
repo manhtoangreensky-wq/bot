@@ -189,7 +189,7 @@ def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dic
     return _env_flag_detail(
         env,
         "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED",
-        "1",
+        "0",
         fallback_to_process_env=True,
     )
 

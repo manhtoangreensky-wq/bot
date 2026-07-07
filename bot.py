@@ -10714,6 +10714,99 @@ def provider_spend_add_record(records: list[dict], *, provider: str, product_typ
         "external_provider": external_provider,
     })
 
+
+def provider_spend_audit_payload_submit_markers(payload: dict | None) -> dict:
+    data = payload if isinstance(payload, dict) else {}
+    direct_true_keys = {
+        "provider_submit_called",
+        "submit_accepted",
+        "provider_task_id_saved",
+        "provider_submit_http_accepted",
+        "provider_submit_succeeded",
+    }
+    direct_id_keys = {
+        "provider_task_id",
+        "canonical_provider_task_id",
+        "selected_provider_task_id",
+        "provider_video_id",
+        "canonical_provider_video_id",
+    }
+    for key in direct_true_keys:
+        if truthy_value(data.get(key), False):
+            return {"submit_detected": True, "source": key}
+    for key in direct_id_keys:
+        if str(data.get(key) or "").strip():
+            return {"submit_detected": True, "source": key}
+    for key in ("provider_task_ids", "provider_video_ids", "provider_job_ids"):
+        value = data.get(key)
+        if isinstance(value, (list, tuple)) and any(str(item or "").strip() for item in value):
+            return {"submit_detected": True, "source": key}
+    for list_key in ("provider_attempts", "provider_pending_attempts", "provider_fallback_attempts", "fallback_provider_attempts"):
+        attempts = data.get(list_key)
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            for key in direct_true_keys:
+                if truthy_value(attempt.get(key), False):
+                    return {"submit_detected": True, "source": f"{list_key}.{key}"}
+            status_text = " ".join(str(attempt.get(key) or "") for key in ("status", "normalized_status", "submit_status", "provider_status")).lower()
+            if any(term in status_text for term in ("accepted", "submitted", "in_progress", "running", "success", "completed")):
+                return {"submit_detected": True, "source": f"{list_key}.status"}
+            http_status = safe_int(attempt.get("submit_http_status") or attempt.get("http_status"), 0)
+            if 200 <= http_status < 300:
+                return {"submit_detected": True, "source": f"{list_key}.http_{http_status}"}
+            for key in direct_id_keys | {"task_id", "id_base", "video_id"}:
+                if str(attempt.get(key) or "").strip():
+                    return {"submit_detected": True, "source": f"{list_key}.{key}"}
+    return {"submit_detected": False, "source": ""}
+
+
+def provider_spend_audit_payload_provider(payload: dict | None) -> str:
+    data = payload if isinstance(payload, dict) else {}
+    for key in ("selected_provider", "provider", "primary_provider", "canonical_provider", "provider_pending_provider"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    for list_key in ("provider_attempts", "provider_pending_attempts", "provider_fallback_attempts", "fallback_provider_attempts"):
+        attempts = data.get(list_key)
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if isinstance(attempt, dict):
+                value = str(attempt.get("provider") or attempt.get("selected_provider") or "").strip()
+                if value:
+                    return value
+    return "unknown"
+
+
+def provider_spend_audit_payload_task_id(payload: dict | None) -> str:
+    data = payload if isinstance(payload, dict) else {}
+    for key in ("provider_task_id", "canonical_provider_task_id", "selected_provider_task_id", "provider_video_id", "canonical_provider_video_id"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    for key in ("provider_task_ids", "provider_video_ids", "provider_job_ids"):
+        value = data.get(key)
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if str(item or "").strip():
+                    return str(item).strip()
+    for list_key in ("provider_attempts", "provider_pending_attempts", "provider_fallback_attempts", "fallback_provider_attempts"):
+        attempts = data.get(list_key)
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            for key in ("provider_task_id", "task_id", "id_base", "video_id", "provider_video_id"):
+                value = str(attempt.get(key) or "").strip()
+                if value:
+                    return value
+    return ""
+
+
 def provider_spend_audit_records(limit: int = 80) -> dict:
     limit = max(1, min(int(limit or 80), 200))
     since = vn_now().strftime("%Y-%m-%d 00:00:00")
@@ -10722,7 +10815,7 @@ def provider_spend_audit_records(limit: int = 80) -> dict:
     conn = db_connect()
     conn.row_factory = sqlite3.Row
     try:
-        for table in ("provider_usage_events", "shopaikey_jobs", "shopaikey_billing_events", "api_debug_events", "usage_events", "local_worker_jobs", "music_generation_jobs"):
+        for table in ("provider_usage_events", "shopaikey_jobs", "shopaikey_billing_events", "api_debug_events", "usage_events", "local_worker_jobs", "music_generation_jobs", "video_jobs"):
             exists = provider_spend_table_exists(conn, table)
             count = 0
             if exists:
@@ -10909,6 +11002,61 @@ def provider_spend_audit_records(limit: int = 80) -> dict:
                         status=row["status"],
                         evidence=f"job_type={row['job_type']}",
                         table="local_worker_jobs",
+                    )
+
+        if tables["video_jobs"]["exists"]:
+            cols = provider_spend_table_columns(conn, "video_jobs")
+            if {"id", "result_json"}.issubset(cols):
+                user_expr = "user_id" if "user_id" in cols else ("owner_id" if "owner_id" in cols else "''")
+                job_type_expr = "job_type" if "job_type" in cols else ("topic" if "topic" in cols else "''")
+                status_expr = "status" if "status" in cols else "''"
+                created_expr = "created_at" if "created_at" in cols else "''"
+                updated_expr = "updated_at" if "updated_at" in cols else "''"
+                rows = conn.execute(
+                    f"""SELECT id, {user_expr} AS user_id, {job_type_expr} AS job_type,
+                              {status_expr} AS status, result_json,
+                              {created_expr} AS created_at, {updated_expr} AS updated_at
+                       FROM video_jobs
+                       WHERE COALESCE({created_expr}, {updated_expr}, '') >= ?
+                       ORDER BY id DESC LIMIT ?""",
+                    (since, limit),
+                ).fetchall()
+                for row in rows:
+                    payload = _video_debug_json(row["result_json"], {})
+                    marker = provider_spend_audit_payload_submit_markers(payload)
+                    if not marker.get("submit_detected"):
+                        continue
+                    provider = provider_spend_audit_payload_provider(payload)
+                    task_id = provider_spend_audit_payload_task_id(payload)
+                    text = " ".join(
+                        str(item or "")
+                        for item in (
+                            provider,
+                            row["job_type"],
+                            row["status"],
+                            payload.get("source"),
+                            payload.get("product_type"),
+                            payload.get("video_flow_type"),
+                            marker.get("source"),
+                        )
+                    )
+                    product = provider_spend_audit_product_type(text, job_type=row["job_type"])
+                    source = provider_spend_audit_source(f"public callback confirmed product_video {text}")
+                    command = provider_spend_audit_command(text, product, source)
+                    provider_spend_add_record(
+                        records,
+                        provider=provider,
+                        product_type=product,
+                        command=command,
+                        source=source,
+                        job_id=row["id"],
+                        user_id=row["user_id"],
+                        task_id=task_id,
+                        timestamp=row["created_at"] or row["updated_at"],
+                        estimated_cost_xu=payload.get("estimated_cost_xu") or payload.get("total_xu") or payload.get("price_xu") or 0,
+                        status=row["status"] or payload.get("provider_status") or payload.get("status") or "provider_submit_detected",
+                        evidence=f"video_jobs.result_json {marker.get('source')}; charge={payload.get('charge', payload.get('charged_xu', 0))}",
+                        table="video_jobs",
                     )
 
         product_counts = {key: 0 for key in PROVIDER_SPEND_AUDIT_BUCKETS}
@@ -86933,6 +87081,8 @@ def video_public_status_payload() -> dict:
     frame_gate = frame_video_public_gate()
     ai_gate = video_ai_provider_smoke_gate()
     billing_gate = video_billing_public_gate()
+    product_video_submit_switch = video_provider_router.product_video_submit_switch_detail()
+    product_video_submit_enabled = bool(product_video_submit_switch.get("resolved"))
     freeze = provider_freeze_display("shopaikey_video")
     worker = local_worker_status_payload()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
@@ -86986,6 +87136,12 @@ def video_public_status_payload() -> dict:
             "VIDEO_TREND_RENDER_ENABLED": bool(VIDEO_TREND_RENDER_ENABLED),
             "FRAME_VIDEO_PUBLIC_ENABLED": bool(FRAME_VIDEO_PUBLIC_ENABLED),
             "LOCAL_WORKER_ENABLED": bool(LOCAL_WORKER_ENABLED),
+            "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": product_video_submit_enabled,
+        },
+        "product_video_provider_submit": {
+            "enabled": product_video_submit_enabled,
+            "state": "ENABLED" if product_video_submit_enabled else "LOCKED",
+            "source": str(product_video_submit_switch.get("source") or "default"),
         },
         "conclusion": {
             "planning_video": "PUBLIC" if planning_public else "OFF",
@@ -87024,6 +87180,7 @@ def video_public_status_text() -> str:
     ops = payload["ops"]
     freeze = payload["freeze"]
     conclusion = payload["conclusion"]
+    product_submit = payload.get("product_video_provider_submit") or {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
         "",
@@ -87060,6 +87217,7 @@ def video_public_status_text() -> str:
         f"• Last video task status: <code>{html.escape(shopaikey_video_status_text())}</code>",
         f"• Last video output: <code>{'confirmed' if ai_gate.get('has_output') else 'not_confirmed'}</code>",
         f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
+        f"• Product Video provider submit: <code>{html.escape(str(product_submit.get('state') or 'LOCKED'))}</code>",
         "",
         "<b>Local Worker</b>",
         f"• connected: <code>{video_public_bool_label(frame.get('local_worker_connected'))}</code>",
