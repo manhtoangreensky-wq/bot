@@ -171743,17 +171743,27 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
     outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
     public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
+    final_mp4_delivery = subdub_final_mp4_delivery_marker_present(state, result)
+    delivered_video = bool(
+        final_mp4_delivery
+        or (
+            result.get("video_delivered")
+            and not public_error_already_sent
+        )
+    )
+    terminal_delivered = bool(
+        str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
+        and (final_mp4_delivery or not public_error_already_sent)
+    )
     if outcome_type == "partial_audio_delivered" or result.get("partial_audio_delivered") or state.get("partial_audio_delivered"):
         if SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
             return subdub_audio_fallback_text(mode, lang)
         return subdub_final_video_failed_text(lang) if subdub_video_requires_final_mp4(mode) else subdub_mode_fail_text(mode, lang)
-    if outcome_type == "failure" or (
+    if not (delivered_video or terminal_delivered) and (outcome_type == "failure" or (
         public_error_already_sent
         and not bool(result.get("late_fail_suppressed") or state.get("late_fail_suppressed"))
-    ):
+    )):
         return subdub_mode_fail_text(mode, lang)
-    delivered_video = bool(result.get("video_delivered") or result.get("video_delivery_message_id") or int(result.get("sent_video") or 0) or int(result.get("sent_video_document") or 0))
-    terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
     charged_xu = int(result.get("charged") or result.get("charged_xu") or state.get("charged_xu") or 0)
     cost_line = subdub_success_cost_line(charged_xu, lang)
     if delivered_video or terminal_delivered:
@@ -172920,6 +172930,36 @@ def subdub_result_terminal_state(result: dict | None = None) -> str:
         return "needs_admin_review"
     return "delivered"
 
+def subdub_final_mp4_delivery_marker_present(*payloads) -> bool:
+    current: dict = {}
+    for payload in payloads:
+        if isinstance(payload, dict):
+            current.update(payload)
+    artifact_type = str(current.get("terminal_artifact_type") or "").strip().lower()
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
+    video_message_id = str(
+        current.get("final_video_message_id")
+        or current.get("subdub_final_video_message_id")
+        or current.get("video_delivery_message_id")
+        or ""
+    ).strip()
+    video_count = _safe_int(current.get("sent_video"), 0) + _safe_int(current.get("sent_video_document"), 0)
+    if video_message_id or video_count > 0 or truthy_value(current.get("final_mp4_delivered"), False):
+        return True
+    if artifact_type == "video" and (
+        str(current.get("delivery_message_id") or current.get("telegram_message_id") or "").strip()
+        or truthy_value(current.get("delivery_succeeded"), False)
+        or truthy_value(current.get("delivery_success"), False)
+    ):
+        return True
+    return bool(
+        artifact_type == "video"
+        and terminal == "delivered"
+        and outcome == "success"
+        and truthy_value(current.get("terminal_public_outcome_sent"), False)
+    )
+
 def subdub_terminal_blocks_late_delivery(job: dict | None = None) -> bool:
     terminal = str((job or {}).get("terminal_state") or "").strip().lower()
     outcome = str((job or {}).get("terminal_public_outcome_type") or "").strip().lower()
@@ -172951,18 +172991,23 @@ def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
     current = dict(job or {})
     terminal = str(current.get("terminal_state") or "").strip().lower()
     outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
-    message_id = str(
-        current.get("final_video_message_id")
-        or current.get("subdub_final_video_message_id")
-        or current.get("video_delivery_message_id")
-        or current.get("delivery_message_id")
-        or current.get("telegram_message_id")
-        or ""
-    ).strip()
+    requires_final_mp4 = subdub_video_requires_final_mp4(
+        str(current.get("mode") or current.get("mapped_mode") or ""),
+        str(current.get("product_type") or current.get("mapped_product_type") or ""),
+    )
     terminal_success = bool(
         current.get("terminal_public_outcome_sent")
         and outcome == "success"
     )
+    if requires_final_mp4:
+        return bool(
+            subdub_final_mp4_delivery_marker_present(current)
+            or (
+                terminal == "delivered"
+                and terminal_success
+                and str(current.get("terminal_artifact_type") or "").strip().lower() == "video"
+            )
+        )
     return bool(
         terminal == "delivered"
         or truthy_value(current.get("delivery_succeeded"), False)
@@ -172971,7 +173016,7 @@ def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
         or truthy_value(current.get("output_sent"), False)
         or truthy_value(current.get("final_mp4_delivered"), False)
         or terminal_success
-        or bool(message_id)
+        or subdub_final_mp4_delivery_marker_present(current)
         or current.get("subdub_delivered_at")
         or current.get("delivered_at")
         or current.get("subdub_success_message_id")
@@ -173554,6 +173599,36 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
         fields.pop("terminal_state_history", None)
     current_terminal = str(job.get("terminal_state") or "")
     desired_terminal = str(fields.get("terminal_state") or "")
+    recovered_failure_after_mp4 = bool(
+        current_terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}
+        and desired_terminal == "delivered"
+        and subdub_final_mp4_delivery_marker_present(job, fields)
+    )
+    if recovered_failure_after_mp4:
+        history = list(job.get("terminal_state_history") or [])
+        history.append({"from": current_terminal, "to": "delivered", "at": time.time(), "reason": "mp4_delivery_marker"})
+        fields["terminal_state_history"] = history[-12:]
+        fields.update({
+            "status": "completed",
+            "lifecycle_state": "delivered",
+            "current_stage": "delivered",
+            "progress_stage": "delivered",
+            "progress_percent": 100,
+            "completed_steps": subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+            "terminal_public_outcome_type": "success",
+            "public_error_sent": False,
+            "public_failure_sent": False,
+            "public_error_sent_count": 0,
+            "late_fail_suppressed": True,
+            "late_public_error_suppressed": True,
+            "success_after_public_failure_prevented": False,
+            "suppress_reason": "mp4_already_delivered",
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
+            "panel_finalized": True,
+            "panel_final_percent": 100,
+        })
+        current_terminal = ""
     if current_terminal and desired_terminal and current_terminal != desired_terminal:
         if current_terminal in SUBDUB_TERMINAL_STATES or not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
             fields = {
@@ -173566,7 +173641,7 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
             history = list(job.get("terminal_state_history") or [])
             history.append({"from": current_terminal, "to": desired_terminal, "at": time.time()})
             fields["terminal_state_history"] = history[-12:]
-    elif desired_terminal and not current_terminal:
+    elif desired_terminal and not current_terminal and not recovered_failure_after_mp4:
         history = list(job.get("terminal_state_history") or [])
         history.append({"from": "", "to": desired_terminal, "at": time.time()})
         fields["terminal_state_history"] = history[-12:]
@@ -173580,6 +173655,60 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
             fields.setdefault("status", "completed")
         elif desired_terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
             fields["status"] = desired_terminal
+    incoming_outcome = str(fields.get("terminal_public_outcome_type") or "").strip().lower()
+    incoming_status = str(fields.get("status") or "").strip().lower()
+    incoming_failure_after_mp4 = bool(
+        current_terminal == "delivered"
+        and subdub_final_mp4_delivery_marker_present(job, fields)
+        and (
+            incoming_outcome == "failure"
+            or incoming_status.startswith("failed")
+            or truthy_value(fields.get("public_error_sent"), False)
+            or truthy_value(fields.get("public_failure_sent"), False)
+            or _safe_int(fields.get("public_error_sent_count"), 0) > 0
+        )
+    )
+    if incoming_failure_after_mp4:
+        ignored_reason = str(
+            fields.get("pipeline_blocker")
+            or fields.get("no_charge_reason")
+            or fields.get("last_error_stage")
+            or fields.get("status")
+            or "late_failure_after_mp4_delivery"
+        )[:180]
+        for blocked_key in {
+            "terminal_state", "status", "lifecycle_state", "current_stage", "progress_stage",
+            "progress_percent", "completed_steps", "terminal_public_outcome_type",
+            "public_error_sent", "public_failure_sent", "public_error_sent_count",
+            "last_error_safe", "last_error_stage", "pipeline_blocker", "input_save_blocker",
+            "no_charge_reason", "success_blocked_reason", "full_video_failed",
+        }:
+            fields.pop(blocked_key, None)
+        fields.update({
+            "terminal_state": "delivered",
+            "status": "completed",
+            "lifecycle_state": "delivered",
+            "current_stage": "delivered",
+            "progress_stage": "delivered",
+            "progress_percent": 100,
+            "completed_steps": subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+            "late_fail_suppressed": True,
+            "late_public_error_suppressed": True,
+            "duplicate_error_prevented": True,
+            "error_sent_after_delivery": False,
+            "public_error_sent": False,
+            "public_failure_sent": False,
+            "public_error_sent_count": 0,
+            "terminal_public_outcome_sent": True,
+            "terminal_public_outcome_type": "success",
+            "ignored_late_error_count": int(job.get("ignored_late_error_count") or 0) + 1,
+            "last_ignored_error_reason": ignored_reason,
+            "suppress_reason": "mp4_already_delivered",
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
+            "panel_finalized": True,
+            "panel_final_percent": 100,
+        })
     job.update(fields)
     job = subdub_normalize_input_save_failed_terminal(job)
     job = subdub_enrich_job_identity(job, job_key=str(job_key or ""), mode=str(job.get("mode") or fields.get("mode") or ""), state=job)
@@ -182137,17 +182266,42 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return None
         latest_pipeline_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
         if subdub_job_has_failure_public_outcome(latest_pipeline_job):
-            update_subtitle_dub_pipeline_job(
-                pipeline_job_key,
-                success_after_public_failure_prevented=True,
-                success_after_public_failure_video_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
-                duplicate_success_prevented=True,
-                terminal_public_outcome_type="failure",
-                refresh_stopped_after_terminal=True,
-                status_panel_terminalized=True,
-            )
-            set_video_dubbing_pending(uid, "confirm", processing="0")
-            return None
+            if subdub_final_mp4_delivery_marker_present(latest_pipeline_job, result):
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    status="completed",
+                    terminal_state="delivered",
+                    lifecycle_state="delivered",
+                    current_stage="delivered",
+                    progress_stage="delivered",
+                    progress_percent=100,
+                    completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+                    late_fail_suppressed=True,
+                    late_public_error_suppressed=True,
+                    duplicate_error_prevented=True,
+                    public_error_sent=False,
+                    public_failure_sent=False,
+                    public_error_sent_count=0,
+                    terminal_public_outcome_type="success",
+                    success_after_public_failure_prevented=False,
+                    suppress_reason="mp4_already_delivered",
+                    status_panel_terminalized=True,
+                    refresh_stopped_after_terminal=True,
+                    panel_finalized=True,
+                    panel_final_percent=100,
+                )
+            else:
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    success_after_public_failure_prevented=True,
+                    success_after_public_failure_video_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
+                    duplicate_success_prevented=True,
+                    terminal_public_outcome_type="failure",
+                    refresh_stopped_after_terminal=True,
+                    status_panel_terminalized=True,
+                )
+                set_video_dubbing_pending(uid, "confirm", processing="0")
+                return None
         result_state = dict(result.get("state") or {})
         completed_fields = {
             "processing": "0",
