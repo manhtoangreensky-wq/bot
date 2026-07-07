@@ -55417,6 +55417,201 @@ def format_quota_number(value) -> str:
         return str(int(number))
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
+def provider_quota_key(provider_key: str) -> str:
+    key = re.sub(r"[^a-z0-9_:-]", "_", str(provider_key or "").strip().lower())
+    return key.strip("_") or "shopaikey"
+
+def quota_float(value, default: float | None = 0.0) -> float | None:
+    try:
+        if value is None or value == "":
+            return None if default is None else float(default)
+        return float(str(value).replace("$", "").replace(",", "").strip())
+    except Exception:
+        return None if default is None else float(default)
+
+def provider_quota_cycle_prefix(provider_key: str) -> str:
+    return f"provider_quota_cycle_{provider_quota_key(provider_key)}"
+
+def provider_quota_default_low_threshold(provider_key: str) -> float:
+    key = provider_quota_key(provider_key)
+    if key == "shopaikey":
+        return float(SHOPAIKEY_USAGE_ALERT_PERCENT or SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 10)
+    return 20.0
+
+def provider_quota_default_critical_threshold(provider_key: str) -> float:
+    key = provider_quota_key(provider_key)
+    if key == "shopaikey":
+        return float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5)
+    return 5.0
+
+def provider_quota_cycle_baseline(provider_key: str = "shopaikey") -> dict:
+    key = provider_quota_key(provider_key)
+    prefix = provider_quota_cycle_prefix(key)
+    cycle_total = quota_float(get_system_setting(f"{prefix}_cycle_total_usd", ""), 0.0)
+    low = quota_float(
+        get_system_setting(f"{prefix}_alert_threshold_low_percent", ""),
+        provider_quota_default_low_threshold(key),
+    )
+    critical = quota_float(
+        get_system_setting(f"{prefix}_alert_threshold_critical_percent", ""),
+        provider_quota_default_critical_threshold(key),
+    )
+    enabled = bool_from_runtime_value(get_system_setting(f"{prefix}_enabled", ""), False) and cycle_total > 0
+    return {
+        "provider_key": key,
+        "enabled": bool(enabled),
+        "cycle_total_usd": cycle_total,
+        "cycle_started_at": get_system_setting(f"{prefix}_cycle_started_at", ""),
+        "cycle_note": get_system_setting(f"{prefix}_cycle_note", ""),
+        "created_by_admin": get_system_setting(f"{prefix}_created_by_admin", ""),
+        "updated_at": get_system_setting(f"{prefix}_updated_at", ""),
+        "alert_threshold_low_percent": low,
+        "alert_threshold_critical_percent": critical,
+    }
+
+def set_provider_quota_cycle_baseline(provider_key: str, cycle_total_usd, note: str = "", admin_id: str | int = "") -> dict:
+    key = provider_quota_key(provider_key)
+    total = quota_float(cycle_total_usd, 0.0)
+    if total <= 0:
+        raise ValueError("cycle_total_usd_must_be_positive")
+    prefix = provider_quota_cycle_prefix(key)
+    now = now_text()
+    set_system_setting(f"{prefix}_enabled", "1", "Provider quota cycle baseline enabled", admin_id)
+    set_system_setting(f"{prefix}_cycle_total_usd", format_quota_number(total), "Provider quota cycle total USD", admin_id)
+    set_system_setting(f"{prefix}_cycle_started_at", now, "Provider quota cycle started", admin_id)
+    set_system_setting(f"{prefix}_cycle_note", str(note or "")[:240], "Provider quota cycle note", admin_id)
+    set_system_setting(f"{prefix}_created_by_admin", str(admin_id or ""), "Provider quota cycle admin", admin_id)
+    set_system_setting(f"{prefix}_updated_at", now, "Provider quota cycle updated", admin_id)
+    existing = provider_quota_cycle_baseline(key)
+    low = existing.get("alert_threshold_low_percent") or provider_quota_default_low_threshold(key)
+    critical = existing.get("alert_threshold_critical_percent") or provider_quota_default_critical_threshold(key)
+    set_system_setting(f"{prefix}_alert_threshold_low_percent", format_quota_number(low), "Provider quota low threshold percent", admin_id)
+    set_system_setting(f"{prefix}_alert_threshold_critical_percent", format_quota_number(critical), "Provider quota critical threshold percent", admin_id)
+    return provider_quota_cycle_baseline(key)
+
+def clear_provider_quota_cycle_baseline(provider_key: str, admin_id: str | int = "") -> dict:
+    key = provider_quota_key(provider_key)
+    prefix = provider_quota_cycle_prefix(key)
+    set_system_setting(f"{prefix}_enabled", "0", "Provider quota cycle baseline disabled", admin_id)
+    set_system_setting(f"{prefix}_updated_at", now_text(), "Provider quota cycle cleared", admin_id)
+    return provider_quota_cycle_baseline(key)
+
+def provider_quota_usage_payload(provider_key: str, usage: dict | None = None) -> dict:
+    key = provider_quota_key(provider_key)
+    usage = dict(usage or (shopaikey_last_usage_snapshot() if key == "shopaikey" else {}))
+    baseline = provider_quota_cycle_baseline(key)
+    provider_total = quota_float(usage.get("total"), 0.0)
+    provider_used = quota_float(usage.get("used"), 0.0)
+    provider_balance = quota_float(usage.get("balance") if usage.get("balance") not in (None, "") else usage.get("remaining"), 0.0)
+    provider_remaining = quota_float(usage.get("remaining") if usage.get("remaining") not in (None, "") else provider_balance, 0.0)
+    legacy_percent = quota_float(usage.get("remaining_percent"), None) if usage.get("remaining_percent") not in (None, "") else None
+    if legacy_percent is None:
+        legacy_percent = round((provider_remaining / provider_total * 100), 2) if provider_total > 0 else 0.0
+    if baseline.get("enabled"):
+        denominator = float(baseline.get("cycle_total_usd") or 0)
+        percent = round((provider_balance / denominator * 100), 2) if denominator > 0 else 0.0
+        denominator_label = "cycle"
+    else:
+        denominator = provider_total
+        percent = round(float(legacy_percent), 2)
+        denominator_label = "total"
+    low_threshold = float(baseline.get("alert_threshold_low_percent") or provider_quota_default_low_threshold(key))
+    critical_threshold = float(baseline.get("alert_threshold_critical_percent") or provider_quota_default_critical_threshold(key))
+    if denominator <= 0:
+        alert_state = "UNKNOWN"
+    elif percent <= critical_threshold:
+        alert_state = "CRITICAL"
+    elif percent <= low_threshold:
+        alert_state = "LOW"
+    else:
+        alert_state = "NORMAL"
+    return {
+        "provider_key": key,
+        "usage": usage,
+        "provider_total": provider_total,
+        "provider_used": provider_used,
+        "provider_balance": provider_balance,
+        "provider_remaining": provider_remaining,
+        "legacy_remaining_percent": round(float(legacy_percent or 0), 2),
+        "baseline": baseline,
+        "baseline_active": bool(baseline.get("enabled")),
+        "denominator": denominator,
+        "denominator_label": denominator_label,
+        "remaining_percent": percent,
+        "alert_state": alert_state,
+        "low_threshold": low_threshold,
+        "critical_threshold": critical_threshold,
+    }
+
+def provider_quota_alert_due(provider_key: str, remaining_percent: float, low_threshold: float | None = None) -> bool:
+    threshold = float(low_threshold if low_threshold is not None else provider_quota_default_low_threshold(provider_key))
+    if float(remaining_percent or 0) > threshold:
+        return False
+    last_at = get_system_setting(f"{provider_quota_cycle_prefix(provider_key)}_low_quota_alert_at", "")
+    if not last_at and provider_quota_key(provider_key) == "shopaikey":
+        last_at = get_system_setting("shopaikey_low_quota_alert_at", "")
+    if not last_at:
+        return True
+    try:
+        last_dt = datetime.strptime(last_at, "%Y-%m-%d %H:%M:%S")
+        return datetime.now() - last_dt >= timedelta(hours=max(1, int(SHOPAIKEY_USAGE_ALERT_COOLDOWN_HOURS or 6)))
+    except Exception:
+        return True
+
+def provider_quota_status_lines(provider_key: str = "shopaikey", usage: dict | None = None) -> list[str]:
+    payload = provider_quota_usage_payload(provider_key, usage)
+    baseline = payload["baseline"]
+    title = f"{provider_quota_key(provider_key).upper()} QUOTA STATUS"
+    denominator_name = "cycle" if payload["baseline_active"] else "total"
+    lines = [
+        f"📊 <b>{html.escape(title)}</b>",
+        "",
+        f"• Provider/group: <code>{html.escape(payload['provider_key'])}</code>",
+        f"• Provider lifetime total: <code>{format_quota_number(payload['provider_total'])}</code>",
+        f"• Provider used: <code>{format_quota_number(payload['provider_used'])}</code>",
+        f"• Provider balance: <code>{format_quota_number(payload['provider_balance'])}</code>",
+        f"• Remaining: <code>{format_quota_number(payload['provider_balance'])}</code> / {denominator_name} <code>{format_quota_number(payload['denominator'])}</code> (<code>{payload['remaining_percent']:.2f}%</code>)",
+        f"• Alert state: <code>{html.escape(payload['alert_state'])}</code>",
+        f"• Thresholds: low <code>{format_quota_number(payload['low_threshold'])}%</code> / critical <code>{format_quota_number(payload['critical_threshold'])}%</code>",
+    ]
+    if payload["baseline_active"]:
+        lines.extend([
+            f"• Baseline: <code>active</code>",
+            f"• Cycle total: <code>{format_quota_number(baseline.get('cycle_total_usd'))} USD</code>",
+            f"• Reset at: <code>{html.escape(str(baseline.get('cycle_started_at') or '-'))}</code>",
+            f"• Note: <code>{html.escape(str(baseline.get('cycle_note') or '-'))}</code>",
+        ])
+    else:
+        lines.append("• Baseline: <code>No local quota cycle baseline set.</code>")
+    lines.extend([
+        "",
+        f"Admin: dùng <code>/provider_quota_reset {html.escape(payload['provider_key'])} 100</code> để đặt lại mốc cảnh báo.",
+        f"Clear: <code>/provider_quota_clear {html.escape(payload['provider_key'])}</code>",
+        "Không gọi provider, không sửa provider balance, không hiển thị key/token.",
+    ])
+    return lines
+
+def provider_quota_alert_text(provider_key: str, usage: dict) -> str:
+    payload = provider_quota_usage_payload(provider_key, usage)
+    title_state = "LOW" if payload["alert_state"] in {"LOW", "CRITICAL"} else "STATUS"
+    denominator_name = "cycle" if payload["baseline_active"] else "total"
+    lines = [
+        f"⚠️ {payload['provider_key'].upper()} QUOTA {title_state}",
+        "",
+        f"Remaining: {format_quota_number(payload['provider_balance'])} / {denominator_name} {format_quota_number(payload['denominator'])} ({payload['remaining_percent']:.2f}%)",
+        f"Provider lifetime total: {format_quota_number(payload['provider_total'])}",
+        f"Provider used: {format_quota_number(payload['provider_used'])}",
+        f"Provider balance: {format_quota_number(payload['provider_balance'])}",
+    ]
+    if payload["baseline_active"]:
+        baseline = payload["baseline"]
+        lines.append(f"Baseline: active, reset at {baseline.get('cycle_started_at') or '-'}")
+    else:
+        lines.append("No local quota cycle baseline set.")
+        lines.append(f"Admin: dùng /provider_quota_reset {payload['provider_key']} 100 để đặt lại mốc cảnh báo.")
+    lines.append("Không có key/URL secret trong cảnh báo.")
+    return "\n".join(lines)
+
 def parse_key_value_detail(detail: str) -> dict:
     parsed = {}
     for part in str(detail or "").split(";"):
@@ -55495,7 +55690,12 @@ def shopaikey_usage_summary_text(usage: dict) -> str:
     percent = str(usage.get("remaining_percent") or "-")
     group = str(usage.get("group_name") or "-")
     last_at = str(usage.get("last_at") or "-")
-    return f"remaining {remaining} / total {total} ({percent}%) | group {group} | last {last_at}"
+    quota = provider_quota_usage_payload("shopaikey", usage)
+    if quota.get("baseline_active"):
+        cycle_text = f" | cycle {format_quota_number(quota.get('denominator'))} ({float(quota.get('remaining_percent') or 0):.2f}%)"
+    else:
+        cycle_text = " | No local quota cycle baseline set."
+    return f"remaining {remaining} / total {total} ({percent}%) | group {group} | last {last_at}{cycle_text}"
 
 def save_shopaikey_chat_snapshot(result: dict, detail: str, updated_by=""):
     save_shopaikey_component_snapshot("chat", result, detail, updated_by)
@@ -55675,38 +55875,27 @@ async def get_shopaikey_usage() -> dict:
         latency_ms = int((time.perf_counter() - started) * 1000)
         return {"status": "FAIL", "http_status": 0, "latency_ms": latency_ms, "usage": {}, "error_class": type(e).__name__, "detail": shopaikey_sanitize_error(str(e))}
 
-def shopaikey_low_quota_alert_due(remaining_percent: float) -> bool:
-    if remaining_percent > float(SHOPAIKEY_USAGE_ALERT_PERCENT or 10):
-        return False
-    last_at = get_system_setting("shopaikey_low_quota_alert_at", "")
-    if not last_at:
-        return True
-    try:
-        last_dt = datetime.strptime(last_at, "%Y-%m-%d %H:%M:%S")
-        return datetime.now() - last_dt >= timedelta(hours=max(1, int(SHOPAIKEY_USAGE_ALERT_COOLDOWN_HOURS or 6)))
-    except Exception:
-        return True
+def shopaikey_low_quota_alert_due(remaining_percent: float, low_threshold: float | None = None) -> bool:
+    return provider_quota_alert_due("shopaikey", remaining_percent, low_threshold)
 
 async def maybe_alert_shopaikey_low_quota(bot_client, usage: dict, updated_by="monitor") -> bool:
     if not bot_client or not ADMIN_ID or not usage:
         return False
-    remaining_percent = float(usage.get("remaining_percent") or 0)
-    if not shopaikey_low_quota_alert_due(remaining_percent):
+    quota = provider_quota_usage_payload("shopaikey", usage)
+    remaining_percent = float(quota.get("remaining_percent") or 0)
+    if quota.get("alert_state") not in {"LOW", "CRITICAL"}:
+        return False
+    if not shopaikey_low_quota_alert_due(remaining_percent, float(quota.get("low_threshold") or SHOPAIKEY_USAGE_ALERT_PERCENT or 10)):
         return False
     freeze_note = ""
-    if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5):
+    if quota.get("alert_state") == "CRITICAL":
         freeze_note = "\n⚠️ ShopAIKey video credit thấp. Public video đã tạm khóa để bảo vệ chi phí.\n"
-    text = (
-        "⚠️ SHOPAIKEY QUOTA LOW\n\n"
-        f"Remaining: {format_quota_number(usage.get('remaining'))} / total {format_quota_number(usage.get('total'))} ({remaining_percent:.2f}%)\n"
-        f"Used: {format_quota_number(usage.get('used'))}\n"
-        f"Balance: {format_quota_number(usage.get('balance'))}\n"
-        f"Group: {usage.get('group_name') or '-'}\n"
-        f"{freeze_note}\n"
-        "Action: nạp thêm credit hoặc dùng fallback provider. Không có key/URL secret trong cảnh báo."
-    )
+    text = provider_quota_alert_text("shopaikey", usage)
+    if freeze_note:
+        text = text + f"\n{freeze_note}"
     await bot_client.send_message(chat_id=ADMIN_ID, text=text)
     set_system_setting("shopaikey_low_quota_alert_at", now_text(), f"remaining_percent={remaining_percent:.2f}", updated_by)
+    set_system_setting(f"{provider_quota_cycle_prefix('shopaikey')}_low_quota_alert_at", now_text(), f"remaining_percent={remaining_percent:.2f}", updated_by)
     return True
 
 def shopaikey_classify_error(http_status: int = 0, detail: str = "") -> str:
@@ -58703,18 +58892,19 @@ def record_provider_error(provider: str, tool: str, error_class: str, message: s
 
 def evaluate_shopaikey_usage_freeze(usage: dict, updated_by="") -> str:
     try:
-        remaining_percent = float(usage.get("remaining_percent") or 0)
+        quota = provider_quota_usage_payload("shopaikey", usage)
+        remaining_percent = float(quota.get("remaining_percent") or 0)
         total_value = float(usage.get("total") or 0)
         remaining_value = float(usage.get("remaining") or usage.get("balance") or 0)
     except Exception:
         return ""
     balance_very_low = total_value > 0 and remaining_value <= 1
-    if (remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_FREEZE_PERCENT or 5) or balance_very_low) and SHOPAIKEY_AUTO_FREEZE_ENABLED:
+    if (quota.get("alert_state") == "CRITICAL" or balance_very_low) and SHOPAIKEY_AUTO_FREEZE_ENABLED:
         set_provider_freeze_state(
             "shopaikey_video",
             True,
             "CREDIT_LOW_OR_EMPTY",
-            f"remaining_percent={remaining_percent:.2f}; remaining={remaining_value:.2f}; public video frozen",
+            f"remaining_percent={remaining_percent:.2f}; remaining={remaining_value:.2f}; baseline={'cycle' if quota.get('baseline_active') else 'legacy'}; public video frozen",
             updated_by or "usage_check",
             cooldown_minutes=max(1, int(SHOPAIKEY_FREEZE_COOLDOWN_MINUTES or 30)),
         )
@@ -58724,17 +58914,17 @@ def evaluate_shopaikey_usage_freeze(usage: dict, updated_by="") -> str:
             tool="video",
             severity="critical",
             code="CREDIT_LOW_OR_EMPTY",
-            message=f"remaining_percent={remaining_percent:.2f}; remaining={remaining_value:.2f}; public video frozen",
+            message=f"remaining_percent={remaining_percent:.2f}; remaining={remaining_value:.2f}; baseline={'cycle' if quota.get('baseline_active') else 'legacy'}; public video frozen",
         )
         return "freeze_video"
-    if remaining_percent <= float(SHOPAIKEY_LOW_CREDIT_WARN_PERCENT or 10):
+    if quota.get("alert_state") == "LOW":
         record_system_event(
             "provider_low_credit_warning",
             provider="shopaikey_video",
             tool="video",
             severity="warning",
             code="LOW_CREDIT_WARN",
-            message=f"remaining_percent={remaining_percent:.2f}",
+            message=f"remaining_percent={remaining_percent:.2f}; baseline={'cycle' if quota.get('baseline_active') else 'legacy'}",
         )
         return "warn"
     return ""
@@ -95548,8 +95738,10 @@ async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE
     if result.get("status") == "PASS":
         save_shopaikey_usage_snapshot(usage, uid)
         alert_sent = await maybe_alert_shopaikey_low_quota(context.bot, usage, uid)
-        remaining_percent = float(usage.get("remaining_percent") or 0)
-        status_label = "LOW" if remaining_percent <= float(SHOPAIKEY_USAGE_ALERT_PERCENT or 10) else "OK"
+        quota = provider_quota_usage_payload("shopaikey", usage)
+        remaining_percent = float(quota.get("remaining_percent") or 0)
+        status_label = str(quota.get("alert_state") or "UNKNOWN")
+        denominator_name = "cycle" if quota.get("baseline_active") else "total"
         return await update.message.reply_text(
             "📊 <b>ShopAIKey Usage</b>\n\n"
             f"• Status: <code>{status_label}</code>\n"
@@ -95557,11 +95749,14 @@ async def cmd_shopaikey_usage(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"• Used: <code>{format_quota_number(usage.get('used'))}</code>\n"
             f"• Balance: <code>{format_quota_number(usage.get('balance'))}</code>\n"
             f"• Remaining: <code>{format_quota_number(usage.get('remaining'))}</code>\n"
-            f"• Remaining percent: <code>{remaining_percent:.2f}%</code>\n"
+            f"• Alert percent: <code>{remaining_percent:.2f}%</code> / {denominator_name} <code>{format_quota_number(quota.get('denominator'))}</code>\n"
+            f"• Provider lifetime percent: <code>{float(quota.get('legacy_remaining_percent') or 0):.2f}%</code>\n"
+            f"• Local baseline: <code>{'active' if quota.get('baseline_active') else 'No local quota cycle baseline set.'}</code>\n"
             f"• Group: <code>{html.escape(usage.get('group_name') or '-')}</code>\n"
             f"• Token: <code>{html.escape(mask_key_fingerprint(usage.get('token_name') or ''))}</code>\n"
-            f"• Alert threshold: <code>{SHOPAIKEY_USAGE_ALERT_PERCENT}%</code>\n"
+            f"• Alert threshold: <code>{format_quota_number(quota.get('low_threshold'))}%</code>\n"
             f"• Alert sent now: <code>{'yes' if alert_sent else 'no'}</code>\n\n"
+            "Admin: <code>/provider_quota_reset shopaikey 100</code> để đặt lại mốc cảnh báo sau khi nạp.\n"
             "Không hiển thị API key hoặc usage URL đầy đủ.",
             parse_mode="HTML",
         )
@@ -95603,6 +95798,55 @@ async def cmd_provider_spend_audit(update: Update, context: ContextTypes.DEFAULT
             "Không gọi provider, không chạy smoke, không tạo video/ảnh/TTS."
         )
     await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_provider_quota_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider_key = context.args[0] if getattr(context, "args", None) else "shopaikey"
+    await reply_html_lines(update, provider_quota_status_lines(provider_key))
+
+async def cmd_provider_quota_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    if len(args) < 2:
+        return await update.message.reply_text(
+            "Cú pháp: /provider_quota_reset <provider> <cycle_total_usd> [note=ghi_chú]\n"
+            "Ví dụ: /provider_quota_reset shopaikey 100 note=nap_100_usd_2026_07_07"
+        )
+    provider_key = provider_quota_key(args[0])
+    cycle_total = args[1]
+    note = ""
+    for item in args[2:]:
+        if str(item).startswith("note="):
+            note = str(item).split("=", 1)[1]
+        elif item:
+            note = (note + " " + str(item)).strip()
+    try:
+        baseline = set_provider_quota_cycle_baseline(provider_key, cycle_total, note, update.effective_user.id)
+    except ValueError:
+        return await update.message.reply_text("Cycle total không hợp lệ. Dùng số USD > 0, ví dụ: /provider_quota_reset shopaikey 100")
+    lines = [
+        "✅ <b>Đã đặt quota cycle baseline</b>",
+        "",
+        f"• Provider/group: <code>{html.escape(provider_key)}</code>",
+        f"• Cycle total: <code>{format_quota_number(baseline.get('cycle_total_usd'))} USD</code>",
+        f"• Reset at: <code>{html.escape(str(baseline.get('cycle_started_at') or '-'))}</code>",
+        f"• Note: <code>{html.escape(str(baseline.get('cycle_note') or '-'))}</code>",
+        "",
+        "Đây chỉ là mốc cảnh báo local. Không sửa provider balance, không gọi provider, không trừ Xu.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_provider_quota_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    provider_key = provider_quota_key(args[0] if args else "shopaikey")
+    clear_provider_quota_cycle_baseline(provider_key, update.effective_user.id)
+    await update.message.reply_text(
+        f"✅ Đã tắt quota cycle baseline cho {provider_key}. Alert quay về cách tính legacy theo provider total."
+    )
 
 async def cmd_tool_test_shopaikey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -183646,6 +183890,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("provider_detail", cmd_provider_detail))
     tg_app.add_handler(CommandHandler("provider_usage", cmd_provider_usage))
     tg_app.add_handler(CommandHandler("provider_usage_status", cmd_provider_usage))
+    tg_app.add_handler(CommandHandler("provider_quota_status", cmd_provider_quota_status))
+    tg_app.add_handler(CommandHandler("provider_quota_reset", cmd_provider_quota_reset))
+    tg_app.add_handler(CommandHandler("provider_quota_clear", cmd_provider_quota_clear))
     tg_app.add_handler(CommandHandler("core_4_status", cmd_core_4_status))
     tg_app.add_handler(CommandHandler("core_blockers", cmd_core_4_status))
     tg_app.add_handler(CommandHandler("free_hub_status", cmd_free_hub_status))
