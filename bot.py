@@ -82924,14 +82924,27 @@ def cskh_status_lines(payload: dict, bot_status: dict | None = None) -> list[str
     ]
 
 def cskh_classification_preview(text: str, classification: dict) -> str:
+    missing_fields = classification.get("missing_fields") or []
+    matched_groups = classification.get("matched_keyword_groups") or []
+    ticket_preview = classification.get("ticket_preview") or {}
+    ticket_block = ""
+    if ticket_preview:
+        ticket_json = json.dumps(ticket_preview, ensure_ascii=False, indent=2)
+        ticket_block = f"\n\nTicket preview:\n<code>{html.escape(ticket_json[:1400])}</code>"
     return (
         "🧪 <b>CSKH classifier test</b>\n\n"
+        f"Input: <code>{html.escape(text[:800])}</code>\n"
         f"Intent: <code>{html.escape(str(classification.get('intent_id') or '-'))}</code>\n"
-        f"Handoff: <code>{'yes' if classification.get('handoff') else 'no'}</code>\n"
-        f"Ticket path: <code>{'yes' if classification.get('ticket') else 'no'}</code>\n"
+        f"Confidence: <code>{html.escape(str(classification.get('confidence') or '-'))}</code>\n"
+        f"Severity: <code>{html.escape(str(classification.get('severity') or '-'))}</code>\n"
+        f"Handoff required: <code>{'yes' if classification.get('handoff_required', classification.get('handoff')) else 'no'}</code>\n"
+        f"Ticket required: <code>{'yes' if classification.get('ticket_required', classification.get('ticket')) else 'no'}</code>\n"
+        f"Missing fields: <code>{html.escape(', '.join(map(str, missing_fields)) or '-')}</code>\n"
+        f"Matched groups: <code>{html.escape(', '.join(map(str, matched_groups[:8])) or '-')}</code>\n"
+        f"Training data: <code>{html.escape(str(classification.get('training_data_version') or '-'))}</code>\n"
         f"Would send: <code>no</code>\n\n"
-        f"Input:\n<code>{html.escape(text[:800])}</code>\n\n"
-        f"Reply preview:\n{html.escape(str(classification.get('reply') or '')[:1200])}"
+        f"Reply preview:\n{html.escape(str(classification.get('reply_preview') or classification.get('reply') or '')[:1200])}"
+        f"{ticket_block}"
     )
 
 async def notify_cskh_business_admin(
@@ -82973,7 +82986,14 @@ async def cmd_cskh_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
         return
-    state = telegram_business_support.set_enabled(cskh_business_state(), True)
+    current_state = cskh_business_state()
+    if not telegram_business_support.has_active_business_connection(current_state):
+        await update.message.reply_text(
+            "⚠️ Chưa bật CSKH tự động vì bot chưa ghi nhận Business connection hợp lệ.\n\n"
+            "Hãy nhắn thử từ một selected chat rồi kiểm tra /cskh_business_status trước khi bật."
+        )
+        return
+    state = telegram_business_support.set_enabled(current_state, True)
     save_cskh_business_state(state)
     await update.message.reply_text(
         "✅ CSKH tự động đã bật ở chế độ rules_only.\n\n"
@@ -83045,6 +83065,24 @@ async def cmd_cskh_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     classification = telegram_business_support.classify_cskh_message(text)
     await update.message.reply_text(cskh_classification_preview(text, classification), parse_mode="HTML")
+
+async def cmd_cskh_intents(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        if update.message:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+        return
+    data = telegram_business_support.load_training_data()
+    intents = data.get("intents") or []
+    scenarios = data.get("conversation_scenarios") or []
+    lines = [
+        "🤖 <b>CSKH intents</b>",
+        "",
+        f"Version: <code>{html.escape(str(data.get('version') or '-'))}</code>",
+        f"Intent count: <code>{len(intents)}</code>",
+        f"Scenario count: <code>{len(scenarios)}</code>",
+        "AI default: <code>off / rules_only</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def handle_cskh_business_connection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     connection = getattr(update, "business_connection", None)
@@ -181930,6 +181968,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("cskh_handoff_on", cmd_cskh_handoff_on))
     tg_app.add_handler(CommandHandler("cskh_handoff_off", cmd_cskh_handoff_off))
     tg_app.add_handler(CommandHandler("cskh_test", cmd_cskh_test))
+    tg_app.add_handler(CommandHandler("cskh_intents", cmd_cskh_intents))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
