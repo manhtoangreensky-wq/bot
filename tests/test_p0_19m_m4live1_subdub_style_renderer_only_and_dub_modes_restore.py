@@ -143,7 +143,7 @@ def test_m4live1_subtitle_margin_near_bottom_edge():
     style = bot.subdub_normalize_style(_style_state())
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, _style_state())
     fields = _style_fields(ass)
-    assert 0 <= style["subtitle_margin_v_after"] <= 2
+    assert 4 <= style["subtitle_margin_v_after"] <= 14
     assert int(fields[21]) == style["subtitle_margin_v_after"]
 
 

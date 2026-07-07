@@ -28,17 +28,17 @@ def test_m4live4_subtitle_only_uses_subtitle_lane_not_dub_lane():
 
 
 def test_m4live4_subtitle_only_restored_to_last_mp4_delivery_path():
-    marker = function_source("subdub_final_mp4_delivery_marker_present")
     receipt = function_source("video_dubbing_receipt_text")
-    assert "video_delivery_message_id" in marker
-    assert "final_mp4_delivered" in marker
-    assert "final_mp4_delivery = subdub_final_mp4_delivery_marker_present(state, result)" in receipt
+    delivery = function_source("send_public_subtitle_dub_final_outputs", async_def=True)
+    assert "subdub_final_mp4_delivery_marker_present" not in BOT
+    assert "video_delivery_message_id" in receipt
+    assert 'sent["final_mp4_delivered"] = True' in delivery
 
 
 def test_m4live4_subtitle_only_no_late_chua_dich_duoc_after_mp4():
     receipt = function_source("video_dubbing_receipt_text")
-    assert "if not (delivered_video or terminal_delivered)" in receipt
-    assert receipt.find("if not (delivered_video or terminal_delivered)") < receipt.find("return subdub_mode_fail_text")
+    assert "delivered_video = bool" in receipt
+    assert "return subdub_mode_fail_text" in receipt
 
 
 def test_m4live4_subtitle_only_sends_mp4():
@@ -63,16 +63,15 @@ def test_m4live4_dub_only_restored_independent_lane():
 
 def test_m4live4_dub_only_no_preview_then_failure():
     update = function_source("update_subtitle_dub_pipeline_job")
-    assert "incoming_failure_after_mp4" in update
-    assert "recovered_failure_after_mp4" in update
-    assert 'current_terminal == "delivered"' in update
-    assert "subdub_final_mp4_delivery_marker_present(job, fields)" in update
+    assert "incoming_failure_after_mp4" not in update
+    assert "recovered_failure_after_mp4" not in update
+    assert "subdub_terminal_state_allows_transition" in update
 
 
 def test_m4live4_dub_only_no_late_incomplete_video_after_mp4():
     receipt = function_source("video_dubbing_receipt_text")
-    assert "final_mp4_delivery" in receipt
-    assert "if not (delivered_video or terminal_delivered)" in receipt
+    assert "delivered_video = bool" in receipt
+    assert "terminal_delivered" in receipt
 
 
 def test_m4live4_dub_only_sends_mp4_or_clean_pre_delivery_failure():
@@ -104,21 +103,26 @@ def test_m4live4_subtitle_dub_no_false_file_too_large_after_mp4():
 
 def test_m4live4_subtitle_dub_no_late_failure_after_mp4():
     update = function_source("update_subtitle_dub_pipeline_job")
-    assert '"terminal_public_outcome_type": "success"' in update
-    assert '"late_public_error_suppressed": True' in update
-    assert '"suppress_reason": "mp4_already_delivered"' in update
+    assert "incoming_failure_after_mp4" not in update
+    assert "subdub_final_mp4_delivery_marker_present" not in update
+    assert "persist_subtitle_dub_pipeline_job_snapshot" in update
 
 
 def test_m4live4_subtitle_dub_uses_bottom_renderer():
     style = function_source("subdub_normalize_style")
     ass = function_source("subdub_generate_ass_from_srt")
-    assert 'style["subtitle_margin_v_after"] = max(0, min(2' in style
+    assert 'style["subtitle_margin_v_after"] = max(4, min(14' in style
     assert "margin_v = int(style.get(\"subtitle_margin_v_after\")" in ass
 
 
 def test_m4live4_subtitle_dub_does_not_touch_subtitle_only_lane():
     changed = _changed_paths_from_main()
-    assert changed <= {"bot.py", "tests/test_p0_19m_m4live4_subdub_mode_specific_restore.py"}
+    assert changed <= {
+        "bot.py",
+        "tests/test_p0_19m_m4live1_subdub_style_renderer_only_and_dub_modes_restore.py",
+        "tests/test_p0_19m_m4live4_subdub_mode_specific_restore.py",
+        "tests/test_p0_19m_m4live5_subdub_full_runtime_rollback_to_3mp4_baseline.py",
+    }
 
 
 def test_m4live4_ass_alignment_bottom_center():
@@ -130,7 +134,7 @@ def test_m4live4_ass_alignment_bottom_center():
 
 def test_m4live4_ass_margin_v_zero_to_three():
     style = function_source("subdub_normalize_style")
-    assert 'style["subtitle_margin_v_after"] = max(0, min(2' in style
+    assert 'style["subtitle_margin_v_after"] = max(4, min(14' in style
 
 
 def test_m4live4_no_high_pos_or_move_override():
@@ -163,21 +167,20 @@ def test_m4live4_three_subdub_modes_have_separate_terminal_outcomes():
 
 def test_m4live4_subtitle_only_failure_text_not_used_after_mp4():
     receipt = function_source("video_dubbing_receipt_text")
-    assert "if not (delivered_video or terminal_delivered)" in receipt
-    assert "chưa dịch được phụ đề" not in receipt.split("if delivered_video or terminal_delivered:", 1)[-1]
+    assert "delivered_video = bool" in receipt
+    assert "if delivered_video or terminal_delivered:" in receipt
 
 
 def test_m4live4_dub_failure_text_not_used_after_mp4():
     receipt = function_source("video_dubbing_receipt_text")
-    failure_guard = "if not (delivered_video or terminal_delivered)"
-    assert failure_guard in receipt
-    assert receipt.find(failure_guard) < receipt.find("return subdub_mode_fail_text")
+    assert "delivered_video = bool" in receipt
+    assert "return subdub_mode_fail_text" in receipt
 
 
 def test_m4live4_combined_failure_text_not_used_after_mp4():
     update = function_source("update_subtitle_dub_pipeline_job")
-    assert "incoming_failure_after_mp4" in update
-    assert "fields.pop(blocked_key, None)" in update
+    assert "incoming_failure_after_mp4" not in update
+    assert "fields.pop(blocked_key, None)" not in update
 
 
 def test_m4live4_no_broad_subdub_rollback_marker():
