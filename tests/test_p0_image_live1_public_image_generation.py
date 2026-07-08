@@ -78,13 +78,15 @@ def test_image_live_result_validation_rejects_obvious_non_image_payloads():
 
 def test_image_provider_submit_guard_blocks_hidden_but_allows_live_guard_path():
     guard = _section(BOT_SOURCE, "def shopaikey_provider_submit_guard", "def shopaikey_active_job_for_user")
+    public_image_guard = _section(BOT_SOURCE, "def shopaikey_image_public_confirm_submit_guard", "def shopaikey_non_public_submit_guard")
 
     for token in ("smoke", "background", "debug", "codex", "hidden", "status", "worker"):
         assert f'"{token}"' in BOT_SOURCE
     assert "missing_user_final_confirm" in guard
-    assert "hidden_submit_source_blocked" in guard
-    assert "image_public_flag_off" in guard
-    assert "image_provider_not_configured" in guard
+    assert "shopaikey_non_public_submit_guard(submit_kind)" in guard
+    assert "hidden_submit_source_blocked" in BOT_SOURCE
+    assert "image_public_flag_off" in public_image_guard
+    assert "image_provider_not_configured" in public_image_guard
     assert "shopaikey_public_generation_guard(job)" in guard
     assert "provider_submit_allowed" in guard
 
@@ -93,7 +95,7 @@ def test_image_maintenance_message_is_not_used_for_hidden_or_missing_config_bloc
     callback = _section(BOT_SOURCE, "async def handle_shopaikey_public_callback", "def provider_error_summary")
     block = _section(callback, "if not provider_submit_allowed and not key4u_runtime_fallback_allowed:", "active_public_job =")
 
-    assert 'block_reason in {"hidden_submit_source_blocked", "image_provider_not_configured"}' in block
+    assert "shopaikey_image_block_uses_direct_message(block_reason)" in block
     assert "shopaikey_provider_submit_maintenance_message" in block
     assert "restore_shopaikey_pending_confirmation(token, uid, pending)" in block
 
@@ -104,7 +106,9 @@ def test_image_public_status_command_is_registered_safe_and_readonly():
     command = _section(BOT_SOURCE, "async def cmd_image_public_status", "async def cmd_providers")
 
     assert "public_user_final_confirm" in status_payload
-    assert "smoke_background_debug" in status_payload
+    assert 'source="hidden_submit"' in status_payload
+    assert 'source="smoke"' in status_payload
+    assert 'source="background"' in status_payload
     assert '"provider_called": False' in status_payload
     assert '"billing_policy": "delivery_before_charge"' in status_payload
     assert '"xu_charge_allowed": "after_successful_telegram_delivery_only"' in status_payload
@@ -123,6 +127,7 @@ def test_image_live1_no_forbidden_runtime_scope_or_provider_submit_in_tests():
     allowed = {
         "bot.py",
         "tests/test_p0_image_live1_public_image_generation.py",
+        "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
         "tests/test_p0_aichat5_live_context_action_trace.py",
         "tests/test_p0_aichat6_open_public_live_flows.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",

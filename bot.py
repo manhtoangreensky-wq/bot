@@ -870,6 +870,7 @@ SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL", "chirp-fenix")
 SHOPAIKEY_MUSIC_GROUP = _env("SHOPAIKEY_MUSIC_GROUP")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
 IMAGE_MAINTENANCE = env_flag("IMAGE_MAINTENANCE", "false")
+IMAGE_GENERATION_DISABLED = env_flag("IMAGE_GENERATION_DISABLED", "false")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
@@ -913,7 +914,10 @@ SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT = env_flag("SHOPAIKEY_REQUIRE_CONFIRM_BE
 SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED = env_flag("SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED", "true")
 SYSTEM_MAINTENANCE_MODE = env_flag("SYSTEM_MAINTENANCE_MODE", "false")
 SYSTEM_MAINTENANCE_MESSAGE = _env("SYSTEM_MAINTENANCE_MESSAGE", "⚙️ TOAN AAS đang bảo trì ngắn để nâng cấp hệ thống. Vui lòng quay lại sau ít phút.")
-PROVIDER_FREEZE_ENABLED = env_flag("PROVIDER_FREEZE_ENABLED", "false")
+PROVIDER_FREEZE = env_flag("PROVIDER_FREEZE", "false")
+PROVIDER_FREEZE_ENABLED = env_flag("PROVIDER_FREEZE_ENABLED", "true" if PROVIDER_FREEZE else "false")
+PROVIDER_SPEND_FREEZE = env_flag("PROVIDER_SPEND_FREEZE", "false")
+REAL_PROVIDER_SMOKE_ENABLED = env_flag("REAL_PROVIDER_SMOKE_ENABLED", "false")
 PROVIDER_FREEZE_MESSAGE = _env("PROVIDER_FREEZE_MESSAGE", "⚙️ Nhà cung cấp AI đang bận hoặc tạm giới hạn. Vui lòng thử lại sau ít phút.")
 TOOL_FREEZE_IMAGE = env_flag("TOOL_FREEZE_IMAGE", "false")
 TOOL_FREEZE_VIDEO = env_flag("TOOL_FREEZE_VIDEO", "false")
@@ -59825,6 +59829,120 @@ HIDDEN_PROVIDER_SUBMIT_SOURCE_TOKENS = {
     "worker",
 }
 
+IMAGE_PROVIDER_DIRECT_BLOCK_REASONS = {
+    "background_blocked_by_provider_freeze",
+    "codex_test_blocked_by_provider_freeze",
+    "debug_blocked_by_provider_freeze",
+    "hidden_submit_blocked_by_provider_freeze",
+    "hidden_submit_source_blocked",
+    "image_public_flag_off",
+    "image_provider_not_configured",
+    "missing_user_final_confirm",
+    "provider_spend_freeze_non_public_submit_blocked",
+    "retry_loop_blocked_by_provider_freeze",
+    "smoke_blocked_by_provider_freeze",
+    "smoke_blocked_real_provider_smoke_disabled",
+    "system_maintenance",
+    "unknown_non_public_blocked_by_provider_freeze",
+}
+
+def classify_provider_submit_source(source: str = "") -> str:
+    src = str(source or "").strip().lower()
+    if src in {"public_user_confirm", "public_user_final_confirm", "public_confirm"}:
+        return "public_user_confirm"
+    if src.startswith("public_user_confirm") or src.startswith("public_user_final_confirm"):
+        return "public_user_confirm"
+    if "smoke" in src or "tool_test" in src:
+        return "smoke"
+    if any(token in src for token in ("background", "worker", "status")):
+        return "background"
+    if "debug" in src:
+        return "debug"
+    if "codex" in src or "dryrun" in src or src == "test":
+        return "codex_test"
+    if any(token in src for token in ("recover", "recovery", "retry")):
+        return "retry_loop"
+    if "hidden" in src:
+        return "hidden_submit"
+    return "unknown_non_public"
+
+def image_explicit_maintenance_on() -> bool:
+    return bool(IMAGE_MAINTENANCE or IMAGE_GENERATION_DISABLED or TOOL_FREEZE_IMAGE)
+
+def provider_freeze_non_public_on() -> bool:
+    state = current_system_mode()
+    return bool(PROVIDER_FREEZE or PROVIDER_FREEZE_ENABLED or state.get("provider_freeze") or provider_freeze_display("shopaikey").get("frozen"))
+
+def shopaikey_image_public_confirm_submit_guard() -> dict:
+    system_on, system_message = is_system_maintenance()
+    if system_on:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "system_maintenance",
+            "provider_submit_source_kind": "public_user_confirm",
+            "message": system_message or USER_PROVIDER_MAINTENANCE_MESSAGE,
+        }
+    if image_explicit_maintenance_on():
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "image_explicit_maintenance",
+            "provider_submit_source_kind": "public_user_confirm",
+            "message": USER_PROVIDER_MAINTENANCE_MESSAGE,
+        }
+    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "image_public_flag_off",
+            "provider_submit_source_kind": "public_user_confirm",
+            "message": "Tạo ảnh public đang tạm tắt. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+        }
+    if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "image_provider_not_configured",
+            "provider_submit_source_kind": "public_user_confirm",
+            "message": "🛠 Cấu hình tạo ảnh đang thiếu hoặc chưa sẵn sàng. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+        }
+    return {
+        "provider_submit_allowed": True,
+        "provider_submit_block_reason": "",
+        "provider_submit_source_kind": "public_user_confirm",
+        "message": "",
+    }
+
+def shopaikey_non_public_submit_guard(submit_kind: str) -> dict:
+    kind = submit_kind if submit_kind in {"hidden_submit", "smoke", "background", "codex_test", "debug", "retry_loop"} else "unknown_non_public"
+    if kind == "smoke" and not REAL_PROVIDER_SMOKE_ENABLED:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "smoke_blocked_real_provider_smoke_disabled",
+            "provider_submit_source_kind": kind,
+            "message": "Provider smoke thật đang tắt. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+        }
+    if PROVIDER_SPEND_FREEZE:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "provider_spend_freeze_non_public_submit_blocked",
+            "provider_submit_source_kind": kind,
+            "message": "Provider spend freeze đang chặn submit nền/test/debug. Chỉ user bấm xác nhận live mới được chạy thật.",
+        }
+    if provider_freeze_non_public_on():
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": f"{kind}_blocked_by_provider_freeze",
+            "provider_submit_source_kind": kind,
+            "message": "Provider freeze đang chặn submit nền/test/debug. Chỉ user bấm xác nhận live mới được chạy thật.",
+        }
+    return {
+        "provider_submit_allowed": False,
+        "provider_submit_block_reason": "hidden_submit_source_blocked",
+        "provider_submit_source_kind": kind,
+        "message": "Provider submit nền/test/debug bị chặn. Chỉ user bấm xác nhận live mới được chạy thật.",
+    }
+
+def shopaikey_image_block_uses_direct_message(block_reason: str = "") -> bool:
+    return str(block_reason or "") in IMAGE_PROVIDER_DIRECT_BLOCK_REASONS
+
 def shopaikey_public_flow_access_guard(job_type: str) -> dict:
     job = str(job_type or "").strip().lower()
     return {
@@ -59854,41 +59972,37 @@ def shopaikey_provider_submit_maintenance_message(job_type: str, lang: str = "vi
 def shopaikey_provider_submit_guard(job_type: str, *, source: str = "", confirmed: bool = False) -> dict:
     job = str(job_type or "").strip().lower()
     src = str(source or "").strip().lower()
+    submit_kind = classify_provider_submit_source(src)
     if not confirmed:
         return {
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "missing_user_final_confirm",
+            "provider_submit_source_kind": submit_kind,
             "message": "Bot chưa có xác nhận cuối từ user nên chưa gọi provider và chưa trừ Xu.",
         }
+    if job == "image" and submit_kind == "public_user_confirm":
+        return shopaikey_image_public_confirm_submit_guard()
+    if job == "image":
+        return shopaikey_non_public_submit_guard(submit_kind)
     if src and any(token in src for token in HIDDEN_PROVIDER_SUBMIT_SOURCE_TOKENS):
         return {
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "hidden_submit_source_blocked",
+            "provider_submit_source_kind": submit_kind,
             "message": "Provider submit nền/test/debug bị chặn. Chỉ user bấm xác nhận live mới được chạy thật.",
         }
-    if job == "image":
-        if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
-            return {
-                "provider_submit_allowed": False,
-                "provider_submit_block_reason": "image_public_flag_off",
-                "message": "Tạo ảnh public đang tạm tắt. TOAN AAS chưa gọi provider và chưa trừ Xu.",
-            }
-        if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
-            return {
-                "provider_submit_allowed": False,
-                "provider_submit_block_reason": "image_provider_not_configured",
-                "message": "🛠 Cấu hình tạo ảnh đang thiếu hoặc chưa sẵn sàng. TOAN AAS chưa gọi provider và chưa trừ Xu.",
-            }
     enabled, message = shopaikey_public_generation_guard(job)
     if not enabled:
         return {
             "provider_submit_allowed": False,
             "provider_submit_block_reason": "provider_submit_runtime_guard_blocked",
+            "provider_submit_source_kind": submit_kind,
             "message": message,
         }
     return {
         "provider_submit_allowed": True,
         "provider_submit_block_reason": "",
+        "provider_submit_source_kind": submit_kind,
         "message": "",
     }
 
@@ -94362,30 +94476,53 @@ def image_public_status_payload() -> dict:
     )
     hidden_guard = shopaikey_provider_submit_guard(
         "image",
-        source="smoke_background_debug",
+        source="hidden_submit",
         confirmed=True,
     )
+    smoke_guard = shopaikey_provider_submit_guard(
+        "image",
+        source="smoke",
+        confirmed=True,
+    )
+    background_guard = shopaikey_provider_submit_guard(
+        "image",
+        source="background",
+        confirmed=True,
+    )
+    live_reason = str(live_guard.get("provider_submit_block_reason") or "allowed")
     return {
         "flow_access_allowed": bool(flow_guard.get("flow_access_allowed")),
         "flow_block_reason": str(flow_guard.get("flow_block_reason") or ""),
         "public_image_enabled": bool(SHOPAIKEY_PUBLIC_IMAGE_ENABLED),
         "image_maintenance": bool(IMAGE_MAINTENANCE),
+        "image_generation_disabled": bool(IMAGE_GENERATION_DISABLED),
+        "explicit_image_maintenance": bool(image_explicit_maintenance_on()),
         "system_maintenance": bool(maintenance_on),
         "system_maintenance_message_set": bool(maintenance_message),
         "tool_freeze_image": bool(TOOL_FREEZE_IMAGE),
         "tool_env_freeze_image_effective": bool(tool_env_freeze("image")),
-        "provider_freeze": bool(provider_freeze.get("frozen")),
+        "provider_freeze": bool(PROVIDER_FREEZE or PROVIDER_FREEZE_ENABLED or provider_freeze.get("frozen")),
+        "provider_spend_freeze": bool(PROVIDER_SPEND_FREEZE),
+        "real_provider_smoke_enabled": bool(REAL_PROVIDER_SMOKE_ENABLED),
         "provider_freeze_reason": str(provider_freeze.get("reason") or "-"),
         "shopaikey_enabled": bool(SHOPAIKEY_ENABLED),
         "shopaikey_api_key_configured": bool(SHOPAIKEY_API_KEY),
         "image_endpoint_configured": bool(SHOPAIKEY_IMAGE_URL),
         "image_tier_public_status": image_tier_public_status_text(),
-        "final_confirm_source": "public_user_final_confirm",
+        "final_confirm_source": "public_user_confirm",
         "provider_submit_allowed": bool(live_guard.get("provider_submit_allowed")),
         "provider_submit_block_reason": str(live_guard.get("provider_submit_block_reason") or ""),
+        "provider_submit_source_kind": str(live_guard.get("provider_submit_source_kind") or ""),
         "provider_submit_message": str(live_guard.get("message") or ""),
         "hidden_submit_allowed": bool(hidden_guard.get("provider_submit_allowed")),
         "hidden_submit_block_reason": str(hidden_guard.get("provider_submit_block_reason") or ""),
+        "smoke_submit_allowed": bool(smoke_guard.get("provider_submit_allowed")),
+        "smoke_submit_block_reason": str(smoke_guard.get("provider_submit_block_reason") or ""),
+        "background_submit_allowed": bool(background_guard.get("provider_submit_allowed")),
+        "background_submit_block_reason": str(background_guard.get("provider_submit_block_reason") or ""),
+        "public_live_confirm_allowed": bool(live_guard.get("provider_submit_allowed")),
+        "hidden_submit_blocked": not bool(hidden_guard.get("provider_submit_allowed")),
+        "final_decision_reason": live_reason,
         "provider_called": False,
         "billing_policy": "delivery_before_charge",
         "xu_charge_allowed": "after_successful_telegram_delivery_only",
@@ -94402,10 +94539,14 @@ def image_public_status_text() -> str:
         f"• Flow block reason: <code>{html.escape(payload['flow_block_reason'] or '-')}</code>",
         f"• Public image flag: <code>{'ON' if payload['public_image_enabled'] else 'OFF'}</code>",
         f"• IMAGE_MAINTENANCE: <code>{'ON' if payload['image_maintenance'] else 'OFF'}</code>",
+        f"• IMAGE_GENERATION_DISABLED: <code>{'ON' if payload['image_generation_disabled'] else 'OFF'}</code>",
+        f"• Explicit image maintenance: <code>{'ON' if payload['explicit_image_maintenance'] else 'OFF'}</code>",
         f"• System maintenance: <code>{'ON' if payload['system_maintenance'] else 'OFF'}</code>",
         f"• TOOL_FREEZE_IMAGE: <code>{'ON' if payload['tool_freeze_image'] else 'OFF'}</code>",
         f"• Effective image freeze: <code>{'ON' if payload['tool_env_freeze_image_effective'] else 'OFF'}</code>",
         f"• Provider freeze: <code>{'ON' if payload['provider_freeze'] else 'OFF'}</code> | reason <code>{html.escape(payload['provider_freeze_reason'])}</code>",
+        f"• Provider spend freeze: <code>{'ON' if payload['provider_spend_freeze'] else 'OFF'}</code>",
+        f"• Real provider smoke enabled: <code>{'YES' if payload['real_provider_smoke_enabled'] else 'NO'}</code>",
         "",
         "<b>Provider Config</b>",
         f"• ShopAIKey enabled: <code>{'true' if payload['shopaikey_enabled'] else 'false'}</code>",
@@ -94415,10 +94556,16 @@ def image_public_status_text() -> str:
         "",
         "<b>Submit Guard</b>",
         f"• Source checked: <code>{html.escape(payload['final_confirm_source'])}</code>",
+        f"• Source kind: <code>{html.escape(payload['provider_submit_source_kind'] or '-')}</code>",
+        f"• Public live confirm allowed: <code>{'YES' if payload['public_live_confirm_allowed'] else 'NO'}</code>",
         f"• Provider submit allowed: <code>{'YES' if payload['provider_submit_allowed'] else 'NO'}</code>",
         f"• Provider block reason: <code>{html.escape(payload['provider_submit_block_reason'] or '-')}</code>",
-        f"• Hidden/smoke/debug submit allowed: <code>{'YES' if payload['hidden_submit_allowed'] else 'NO'}</code>",
+        f"• Hidden submit blocked: <code>{'YES' if payload['hidden_submit_blocked'] else 'NO'}</code>",
+        f"• Hidden submit allowed: <code>{'YES' if payload['hidden_submit_allowed'] else 'NO'}</code>",
         f"• Hidden block reason: <code>{html.escape(payload['hidden_submit_block_reason'] or '-')}</code>",
+        f"• Smoke submit allowed: <code>{'YES' if payload['smoke_submit_allowed'] else 'NO'}</code> | reason <code>{html.escape(payload['smoke_submit_block_reason'] or '-')}</code>",
+        f"• Background submit allowed: <code>{'YES' if payload['background_submit_allowed'] else 'NO'}</code> | reason <code>{html.escape(payload['background_submit_block_reason'] or '-')}</code>",
+        f"• Final decision reason: <code>{html.escape(payload['final_decision_reason'])}</code>",
         "",
         "<b>Billing/Delivery</b>",
         f"• Provider called by this command: <code>{'YES' if payload['provider_called'] else 'NO'}</code>",
@@ -101226,7 +101373,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             block_markup = shopaikey_confirm_keyboard("image", token, image_tier, lang)
         block_message = (
             str(provider_submit_guard.get("message") or "")
-            if block_reason in {"hidden_submit_source_blocked", "image_provider_not_configured"}
+            if shopaikey_image_block_uses_direct_message(block_reason)
             else shopaikey_provider_submit_maintenance_message("image", lang, str(provider_submit_guard.get("message") or ""))
         )
         return await safe_edit_or_send(query, block_message, parse_mode=None, reply_markup=block_markup)
