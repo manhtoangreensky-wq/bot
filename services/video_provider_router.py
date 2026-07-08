@@ -53,29 +53,71 @@ VIDEO_CREDIT_BLOCKED_STATUSES = {
 PROVIDER_NONTERMINAL_STATUSES = {"not_start", "queued", "running", "processing", "in_progress", "pending"}
 PROVIDER_PENDING_BLOCKERS = {"provider_in_progress", "provider_pending", "provider_status_unknown"}
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
+PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS = {
+    "provider_failed_result_url_invalid",
+    "provider_result_url_missing",
+    "provider_download_failed",
+    "provider_timeout",
+    "duration_short",
+    "final_duration_short_scene_coverage_missing",
+    "provider_poll_failed",
+}
 PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY = (
     "TOAN AAS chưa nhận được video hoàn chỉnh từ hệ thống dựng video. "
     "Bot chưa trừ Xu. Anh/chị có thể gửi video khác hoặc thử lại sau."
 )
 
 
-def _failed_result_url_diagnostic(result_url: str) -> dict[str, Any]:
+def _result_url_validation(result_url: str) -> dict[str, Any]:
     raw_url = str(result_url or "").strip()
     if not raw_url:
         return {
-            "result_url_present": False,
+            "result_url_present_raw": False,
+            "result_url_valid": False,
+            "result_url_invalid_reason": "empty",
             "result_url_host": "",
             "result_url_scheme": "",
             "result_url_ext": "",
-            "result_url_trusted": False,
+        }
+    if raw_url[:1] in {"{", "["} or raw_url.lower() in {"none", "null", "false", "error"}:
+        return {
+            "result_url_present_raw": True,
+            "result_url_valid": False,
+            "result_url_invalid_reason": "provider_error_object",
+            "result_url_host": "",
+            "result_url_scheme": "",
+            "result_url_ext": "",
         }
     parsed = urlparse(raw_url)
     extension = os.path.splitext(parsed.path or "")[1].lower()
+    scheme = str(parsed.scheme or "").lower()
+    host = str(parsed.netloc or "").strip()
+    if scheme not in {"http", "https"} or not host:
+        return {
+            "result_url_present_raw": True,
+            "result_url_valid": False,
+            "result_url_invalid_reason": "missing_scheme_or_host",
+            "result_url_host": str(parsed.hostname or ""),
+            "result_url_scheme": scheme,
+            "result_url_ext": extension,
+        }
     return {
-        "result_url_present": True,
-        "result_url_host": str(parsed.hostname or ""),
-        "result_url_scheme": str(parsed.scheme or ""),
+        "result_url_present_raw": True,
+        "result_url_valid": True,
+        "result_url_invalid_reason": "",
+        "result_url_host": str(parsed.hostname or host),
+        "result_url_scheme": scheme,
         "result_url_ext": extension,
+    }
+
+
+def _failed_result_url_diagnostic(result_url: str) -> dict[str, Any]:
+    raw_url = str(result_url or "").strip()
+    url_check = _result_url_validation(raw_url)
+    return {
+        "result_url_present": bool(url_check.get("result_url_valid")),
+        "provider_result_url_present": bool(url_check.get("result_url_valid")),
+        **url_check,
         "download_http_status": 0,
         "download_content_type": "",
         "download_bytes": 0,
@@ -214,6 +256,7 @@ def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dic
 
 
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM = "public_user_final_confirm"
+PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE = "public_confirmed_fallback_once"
 PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK = "worker_poll_existing_task"
 PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES = {
     "codex_test",
@@ -233,6 +276,8 @@ def normalize_product_video_submit_source(value: Any = "") -> str:
         "final_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
         "user_final_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
         "b14_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        "public_confirmed_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        "public_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
         "poll_existing_task": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
         "worker_poll": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
         "worker_poll_existing": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
@@ -277,7 +322,10 @@ def product_video_provider_submit_source_policy(
         metadata.get("public_user_confirmed")
         or metadata.get("b14_public_user_confirmed")
         or metadata.get("user_final_confirmed")
-        or source == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+        or source in {
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        }
     )
     if poll_existing_task or source == PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
         return {
@@ -295,7 +343,10 @@ def product_video_provider_submit_source_policy(
             "provider_submit_block_reason": "hidden_submit_source_blocked",
             "poll_existing_task_allowed": False,
         }
-    if source != PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM:
+    if source not in {
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+    }:
         return {
             "submit_source": source or "missing",
             "public_user_confirmed": public_user_confirmed,
@@ -343,6 +394,42 @@ def product_video_retry_confirmed(metadata: dict[str, Any] | None = None) -> boo
     )
 
 
+def product_video_controlled_fallback_allowed(
+    blocker: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    metadata = dict(metadata or {})
+    source = normalize_product_video_submit_source(
+        metadata.get("submit_source")
+        or metadata.get("provider_submit_source")
+        or metadata.get("source_context")
+        or metadata.get("entry_source")
+        or ""
+    )
+    public_user_confirmed = bool(
+        metadata.get("public_user_confirmed")
+        or metadata.get("b14_public_user_confirmed")
+        or metadata.get("user_final_confirmed")
+        or source in {
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        }
+    )
+    try:
+        fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
+    except Exception:
+        fallback_count = 0
+    return bool(
+        public_user_confirmed
+        and source in {
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        }
+        and fallback_count < 1
+        and str(blocker or "").strip() in PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS
+    )
+
+
 def _product_video_paid_fallback_blocked(
     blocker: str,
     env: dict[str, str] | None,
@@ -354,6 +441,8 @@ def _product_video_paid_fallback_blocked(
     # Let the chain inspect the next provider so admin diagnostics can report
     # the exact all-config-missing state without triggering a paid retry path.
     if str(blocker or "").strip() == "provider_config_missing_at_submit":
+        return False
+    if product_video_controlled_fallback_allowed(blocker, metadata):
         return False
     return True
 
@@ -1554,6 +1643,8 @@ def run_provider_generation(
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
     adapter = candidate_adapters[0] if candidate_adapters else None
     provider_candidates = [item.provider_name for item in candidate_adapters]
+    initial_primary_provider = adapter.provider_name if adapter else ""
+    initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     configured_chain = list(status.get("configured_providers") or status.get("effective_provider_chain") or status.get("provider_chain") or [])
     skipped_provider_reasons = [
         {
@@ -1584,6 +1675,17 @@ def run_provider_generation(
     )
     metadata = dict(request.metadata or {})
     is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or allow_pending_result)
+    try:
+        current_fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
+    except Exception:
+        current_fallback_count = 0
+    if is_product_video and candidate_adapters:
+        max_provider_attempts = 1 if current_fallback_count >= 1 else 2
+        candidate_adapters = candidate_adapters[:max_provider_attempts]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     existing_provider, existing_task_id, existing_video_id = _metadata_existing_provider_task(metadata)
     pending_provider = str(metadata.get("provider_pending_provider") or existing_provider or "").strip()
     pending_task_id = str(metadata.get("provider_pending_task_id") or existing_task_id or "").strip()
@@ -1650,6 +1752,13 @@ def run_provider_generation(
         "usable_fallback_order": list(status.get("usable_fallback_order") or []),
         "fallback_used": False,
         "fallback_reason": "",
+        "primary_provider": initial_primary_provider,
+        "fallback_provider": initial_fallback_provider,
+        "fallback_attempted": False,
+        "fallback_count": current_fallback_count,
+        "fallback_submit_source": "",
+        "fallback_eligible": False,
+        "final_decision": "pending_provider_result" if adapter else "provider_unavailable",
         "skipped_providers": list(status.get("skipped_providers") or []),
         "skipped_provider_reasons": skipped_provider_reasons,
         "fallback_only_respected": bool(fallback_only_respected),
@@ -1917,6 +2026,13 @@ def run_provider_generation(
                 "selected_provider_after_fallback": current_adapter.provider_name if fallback_used else "",
                 "fallback_used": fallback_used,
                 "fallback_reason": fallback_reason,
+                "primary_provider": initial_primary_provider,
+                "fallback_provider": current_adapter.provider_name if fallback_used else initial_fallback_provider,
+                "fallback_attempted": bool(fallback_used),
+                "fallback_count": current_fallback_count + (1 if fallback_used else 0),
+                "fallback_submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE if fallback_used else "",
+                "fallback_eligible": bool(fallback_used or (attempt_index + 1 < len(candidate_adapters))),
+                "final_decision": "fallback_provider_once" if fallback_used else "waiting_primary_provider",
                 "provider_attempted": True,
                 "provider_submit_already_exists": bool(poll_existing_task),
                 "no_new_submit": bool(poll_existing_task),
@@ -2590,6 +2706,41 @@ def run_provider_generation(
                 "provider_result_url_present": False,
                 "provider_error": blocker,
                 "blocker": blocker,
+                "provider_status": poll_result.status,
+                "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                "provider_readiness": status,
+            }
+            if is_product_video:
+                payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
+            _mark_trace("result", blocker=blocker, result_url_present=False, normalized_status=poll_result.status)
+            payload["provider_attempts"] = _copy_attempt_traces()
+            return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+        result_url_value = str(poll_result.result_url or poll_result.file_url or "").strip()
+        result_diagnostic = _failed_result_url_diagnostic(result_url_value)
+        if not result_diagnostic.get("result_url_valid"):
+            blocker = "provider_failed_result_url_invalid"
+            if attempt_index + 1 < len(candidate_adapters):
+                _record_failure(blocker, {**(getattr(poll_result, "raw", {}) or {}), **result_diagnostic}, submit_failure=False)
+                if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                    return _paid_fallback_requires_confirmation_payload(blocker, {**(getattr(poll_result, "raw", {}) or {}), **result_diagnostic})
+                continue
+            _record_failure(blocker, {**(getattr(poll_result, "raw", {}) or {}), **result_diagnostic}, submit_failure=False)
+            payload = {
+                "ok": False,
+                **_attempt_base(),
+                **result_diagnostic,
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "provider_submit_called": submit_called_flag,
+                "provider_submit_http_status": submit_http_status,
+                "provider_task_id_saved": bool(submit.provider_task_id),
+                "submit_accepted": True,
+                "provider_poll_called": bool(not result_url),
+                "poll_allowed": bool(not result_url),
+                "poll_skipped_reason": "" if not result_url else "result_url_from_submit",
+                "provider_error": blocker,
+                "blocker": blocker,
+                "provider_result_blocker": blocker,
                 "provider_status": poll_result.status,
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                 "provider_readiness": status,

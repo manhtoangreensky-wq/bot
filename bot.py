@@ -8974,7 +8974,8 @@ def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, s
     if not video_job:
         return {}, ""
     result = _video_debug_json((video_job or {}).get("result_json"), {})
-    product_type = video_final_output.product_type_from_project(project or {}, result or {}) or "multiscene_video"
+    raw_product_type = video_final_output.product_type_from_project(project or {}, result or {}) or "multiscene_video"
+    product_type = "multiscene_video" if str(raw_product_type or "") == "video_trend" else raw_product_type
     provider_telemetry = video_b14_reconciled_provider_debug(video_job, project, result, refresh_source="progress_status_debug")
     provider_alive = bool(provider_telemetry.get("provider_task_alive"))
     reconciled_progress = safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 0)
@@ -8984,6 +8985,7 @@ def _video_progress_debug_recover_job_from_db(job_id: str = "") -> tuple[dict, s
         "internal_job_id": str(jid),
         "job_id": str(jid),
         "product_type": product_type,
+        "raw_product_type": raw_product_type,
         "feature": "video_single",
         "status": reconciled_status,
         "progress_percent": max(safe_int((video_job or {}).get("progress_percent") or result.get("progress_percent"), 0), reconciled_progress),
@@ -9152,6 +9154,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• elapsed_live_tick_enabled: <code>no</code>\n"
             f"• elapsed_monotonic_applied: <code>{'yes' if (job or {}).get('elapsed_monotonic_applied') else 'no'}</code>\n"
             f"• provider_wait_max_seconds: <code>{safe_int((job or {}).get('provider_wait_max_seconds'), 0)}</code>\n"
+            f"• timeout_at: <code>{html.escape(str((job or {}).get('timeout_at') or '-'))}</code>\n"
             f"• next_refresh_expected_at: <code>{html.escape(str((job or {}).get('next_poll_scheduled_at') or '-'))}</code>\n"
         )
     music_failure = music_failure_debug_fields(job, job_id, resolved_type) if progress_product_type_is_music(resolved_type, job_id) else {}
@@ -47376,10 +47379,21 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
     poll_count = safe_int(result.get("provider_poll_count"), 0)
     if not poll_count:
         poll_count = max(0, sum(1 for item in events if isinstance(item, dict) and (item.get("poll_called") or item.get("phase") == "poll")))
+    result_url_check = video_b14_result_url_validation(
+        result.get("result_url")
+        or result.get("provider_result_url")
+        or result.get("download_url")
+        or result.get("file_url")
+        or ""
+    )
+    result_url_present_raw = bool(result.get("result_url_present_raw") or result_url_check.get("result_url_present_raw"))
+    result_url_valid = bool(result.get("result_url_valid") or result_url_check.get("result_url_valid"))
     result_url_present = bool(
-        result.get("provider_result_url_present")
-        or result.get("result_url_present")
-        or any(item.get("download_url_present") for item in events)
+        result_url_valid
+        or (
+            (result.get("provider_result_url_present") or result.get("result_url_present"))
+            and not result.get("result_url_invalid_reason")
+        )
     )
     artifact_path = str(
         result.get("final_video_path")
@@ -47507,6 +47521,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider started at: <code>{html.escape(str(result.get('provider_started_at') or '-'))}</code>",
         f"• provider started source: <code>{html.escape(str(result.get('provider_started_at_source') or '-'))}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
+        f"• timeout at: <code>{html.escape(str(result.get('timeout_at') or '-'))}</code>",
         f"• elapsed wall clock: <code>{safe_int(result.get('elapsed_wall_clock_seconds'), 0)}</code>",
         f"• elapsed live tick enabled: <code>no</code>",
         f"• elapsed monotonic applied: <code>{'yes' if result.get('elapsed_monotonic_applied') else 'no'}</code>",
@@ -47563,6 +47578,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• last poll raw status: <code>{html.escape(str(result.get('provider_status_raw') or result.get('provider_status') or '-'))}</code>",
         f"• normalized status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
         f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• result url present raw: <code>{'yes' if result_url_present_raw else 'no'}</code>",
+        f"• result url valid: <code>{'yes' if result_url_valid else 'no'}</code>",
+        f"• result url invalid reason: <code>{html.escape(str(result.get('result_url_invalid_reason') or result_url_check.get('result_url_invalid_reason') or '-'))}</code>",
         f"• artifact path: <code>{html.escape(mask_provider_task_id(artifact_path) if artifact_path else '-')}</code>",
         f"• artifact size: <code>{artifact_size}</code>",
         f"• delivered: <code>{'yes' if delivered else 'no'}</code>",
@@ -47584,6 +47602,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• MP4 validator: <code>{html.escape(str(result.get('mp4_validator_result') or '-'))}</code>",
         f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
         f"• terminal state: <code>{html.escape(terminal_state)}</code>",
+        f"• fallback count: <code>{safe_int(result.get('fallback_count') or result.get('provider_fallback_count'), 0)}</code>",
+        f"• fallback submit source: <code>{html.escape(str(result.get('fallback_submit_source') or '-'))}</code>",
+        f"• final decision: <code>{html.escape(str(result.get('final_decision') or '-'))}</code>",
         f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
         f"• blocker: <code>{html.escape(blocker[:240])}</code>",
     ]
@@ -47643,6 +47664,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• fake progress prevented: <code>{'yes' if result.get('fake_progress_prevented') else 'no'}</code>",
         f"• render progress source: <code>{_video_debug_safe_value(result.get('render_progress_source'), 80)}</code>",
         f"• provider elapsed/max: <code>{safe_int(result.get('provider_elapsed_seconds') or result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
+        f"• timeout at: <code>{_video_debug_safe_value(result.get('timeout_at'), 80)}</code>",
         f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
         f"• provider poll count source: <code>{_video_debug_safe_value(result.get('provider_poll_count_source'), 60)}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
@@ -47662,10 +47684,15 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
         f"• normalized status: <code>{_video_debug_safe_value(result.get('normalized_provider_status') or result.get('provider_status'), 80)}</code>",
         f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• result url valid: <code>{'yes' if result_url_valid else 'no'}</code>",
+        f"• result url invalid reason: <code>{_video_debug_safe_value(result.get('result_url_invalid_reason') or result_url_check.get('result_url_invalid_reason'), 80)}</code>",
         f"• artifact size: <code>{artifact_size}</code>",
         f"• delivered: <code>{'yes' if delivered else 'no'}</code>",
         f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
         f"• terminal state: <code>{_video_debug_safe_value(terminal_state, 80)}</code>",
+        f"• fallback count: <code>{safe_int(result.get('fallback_count') or result.get('provider_fallback_count'), 0)}</code>",
+        f"• fallback submit source: <code>{_video_debug_safe_value(result.get('fallback_submit_source'), 80)}</code>",
+        f"• final decision: <code>{_video_debug_safe_value(result.get('final_decision'), 80)}</code>",
         f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
         f"• blocker: <code>{_video_debug_safe_value(blocker, 160)}</code>",
         "",
@@ -47726,11 +47753,19 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         or merged.get("blocker")
         or "-"
     )
+    result_url_check = video_b14_result_url_validation(
+        merged.get("result_url")
+        or merged.get("provider_result_url")
+        or merged.get("download_url")
+        or merged.get("file_url")
+        or ""
+    )
     result_url_present = bool(
-        merged.get("provider_result_url_present")
-        or merged.get("result_url_present")
-        or merged.get("shopaikey_result_url_from_data")
-        or merged.get("result_url")
+        result_url_check.get("result_url_valid")
+        or (
+            (merged.get("provider_result_url_present") or merged.get("result_url_present") or merged.get("shopaikey_result_url_from_data"))
+            and not merged.get("result_url_invalid_reason")
+        )
     )
     charge_gate = product_video_r9_charge_allowed(result, project)
     tx_ids = [
@@ -47760,9 +47795,12 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• refund ids: <code>{html.escape(masked_refund)}</code>",
         f"• provider status: <code>{html.escape(provider_status[:120])}</code>",
         f"• result_url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• result_url valid: <code>{'yes' if result_url_check.get('result_url_valid') or merged.get('result_url_valid') else 'no'}</code>",
+        f"• result_url invalid reason: <code>{html.escape(str(merged.get('result_url_invalid_reason') or result_url_check.get('result_url_invalid_reason') or '-'))}</code>",
         f"• artifact valid for charge: <code>{'yes' if charge_gate.get('ok') else 'no'}</code>",
         f"• charge gate blocker: <code>{html.escape(str(charge_gate.get('blocker') or '-'))}</code>",
         f"• final user-visible state: <code>{html.escape(terminal[:120])}</code>",
+        f"• wallet truth: <code>{'charge tx present' if charged > 0 else 'no wallet charge recorded'}</code>",
         f"• manual check hint: <code>{'refund/manual review if charged without valid MP4' if charged > 0 and not charge_gate.get('ok') else 'ok/no-charge until valid MP4'}</code>",
     ]
     return "\n".join(lines)
@@ -48027,10 +48065,188 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
     return list(merged.values())
 
 
+def video_b14_result_url_validation(result_url: str = "") -> dict:
+    raw_url = str(result_url or "").strip()
+    if not raw_url:
+        return {
+            "result_url_present_raw": False,
+            "result_url_valid": False,
+            "result_url_invalid_reason": "empty",
+            "result_url_host": "",
+            "result_url_scheme": "",
+            "result_url_ext": "",
+            "result_url_query_present": False,
+        }
+    if raw_url[:1] in {"{", "["} or raw_url.lower() in {"none", "null", "false", "error"}:
+        return {
+            "result_url_present_raw": True,
+            "result_url_valid": False,
+            "result_url_invalid_reason": "provider_error_object",
+            "result_url_host": "",
+            "result_url_scheme": "",
+            "result_url_ext": "",
+            "result_url_query_present": False,
+        }
+    parsed = urlparse(raw_url)
+    scheme = str(parsed.scheme or "").lower()
+    host = str(parsed.netloc or "").strip()
+    extension = os.path.splitext(parsed.path or "")[1].lower()
+    if scheme not in {"http", "https"} or not host:
+        return {
+            "result_url_present_raw": True,
+            "result_url_valid": False,
+            "result_url_invalid_reason": "missing_scheme_or_host",
+            "result_url_host": str(parsed.hostname or ""),
+            "result_url_scheme": scheme,
+            "result_url_ext": extension,
+            "result_url_query_present": bool(parsed.query),
+        }
+    return {
+        "result_url_present_raw": True,
+        "result_url_valid": True,
+        "result_url_invalid_reason": "",
+        "result_url_host": str(parsed.hostname or host),
+        "result_url_scheme": scheme,
+        "result_url_ext": extension,
+        "result_url_query_present": bool(parsed.query),
+    }
+
+
+PRODUCT_VIDEO_FALLBACK_BLOCKERS = {
+    "provider_failed_result_url_invalid",
+    "provider_result_url_missing",
+    "provider_download_failed",
+    "download_failed",
+    "raw_provider_video_download_failed",
+    "provider_poll_failed",
+    "provider_timeout",
+    "duration_short",
+    "final_duration_short_scene_coverage_missing",
+}
+
+
+def video_b14_product_video_fallback_policy(
+    result: dict | None = None,
+    project: dict | None = None,
+    blocker: str = "",
+    *,
+    source: str = "",
+) -> dict:
+    result = dict(result or {})
+    project = dict(project or {})
+    normalized_source = video_provider_router.normalize_product_video_submit_source(
+        source
+        or result.get("submit_source")
+        or result.get("provider_submit_source")
+        or project.get("submit_source")
+        or project.get("provider_submit_source")
+        or ""
+    )
+    blocker = str(blocker or result.get("provider_result_blocker") or result.get("blocker") or "").strip()
+    hidden_sources = {
+        "codex_test",
+        "smoke",
+        "debug",
+        "recover",
+        "status",
+        "background_retry",
+        "worker_poll_existing_task",
+    }
+    public_confirmed = bool(
+        result.get("public_user_confirmed")
+        or result.get("b14_public_user_confirmed")
+        or result.get("user_final_confirmed")
+        or project.get("is_confirmed")
+        or normalized_source == "public_user_final_confirm"
+    )
+    delivered = bool(
+        result.get("delivery_succeeded")
+        or result.get("video_delivered")
+        or result.get("delivered")
+        or project.get("video_delivered_at")
+        or project.get("final_video_file_id")
+    )
+    charged = safe_int(
+        result.get("charged_xu")
+        or result.get("charged_amount_xu")
+        or project.get("charged_xu")
+        or project.get("total_xu_charged"),
+        0,
+    )
+    fallback_count = safe_int(result.get("fallback_count") or result.get("provider_fallback_count"), 0)
+    status = {}
+    try:
+        status = video_provider_router.provider_status_payload()
+    except Exception:
+        status = {}
+    chain = [str(item) for item in (result.get("effective_provider_chain") or status.get("effective_provider_chain") or status.get("provider_chain") or []) if str(item or "").strip()]
+    primary = str(result.get("canonical_provider") or result.get("selected_provider") or result.get("provider_pending_provider") or (chain[0] if chain else "") or "").strip()
+    fallback_provider = ""
+    for provider_name in chain:
+        if provider_name and provider_name != primary:
+            fallback_provider = provider_name
+            break
+    fallback_public_enabled = bool(fallback_provider)
+    if fallback_provider:
+        provider_rows = {
+            str(item.get("provider") or ""): item
+            for item in (status.get("providers") or [])
+            if isinstance(item, dict)
+        }
+        row = provider_rows.get(fallback_provider, {})
+        fallback_public_enabled = bool(row.get("public_enabled", True) and row.get("configured", True))
+    block_reason = ""
+    eligible = True
+    if normalized_source in hidden_sources:
+        eligible = False
+        block_reason = "hidden_or_read_only_source"
+    elif normalized_source not in {"public_user_final_confirm", "public_confirmed_fallback_once"}:
+        eligible = False
+        block_reason = "source_not_public_confirmed_fallback"
+    elif not public_confirmed:
+        eligible = False
+        block_reason = "public_confirm_missing"
+    elif blocker not in PRODUCT_VIDEO_FALLBACK_BLOCKERS:
+        eligible = False
+        block_reason = "blocker_not_fallbackable"
+    elif delivered:
+        eligible = False
+        block_reason = "already_delivered"
+    elif charged > 0:
+        eligible = False
+        block_reason = "already_charged"
+    elif fallback_count >= 1:
+        eligible = False
+        block_reason = "fallback_limit_reached"
+    elif not fallback_provider:
+        eligible = False
+        block_reason = "fallback_provider_missing"
+    elif not fallback_public_enabled:
+        eligible = False
+        block_reason = "fallback_provider_public_disabled"
+    return {
+        "fallback_eligible": bool(eligible),
+        "fallback_reason": blocker if eligible else "",
+        "fallback_block_reason": block_reason,
+        "fallback_blocked_reason": block_reason,
+        "primary_provider": primary,
+        "fallback_provider": fallback_provider,
+        "fallback_attempted": False,
+        "fallback_count": fallback_count,
+        "fallback_submit_source": "public_confirmed_fallback_once" if eligible else "",
+        "final_decision": "fallback_provider_once" if eligible else "failed_no_charge",
+    }
+
+
+def video_b14_product_video_fallback_eligible(result: dict | None = None, project: dict | None = None, blocker: str = "", *, source: str = "") -> bool:
+    return bool(video_b14_product_video_fallback_policy(result, project, blocker, source=source).get("fallback_eligible"))
+
+
 def _video_provider_status_class(value: str, *, result_url: str = "") -> str:
     normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    result_url_valid = bool(video_b14_result_url_validation(result_url).get("result_url_valid"))
     if normalized in {"success", "succeeded", "completed", "complete", "done", "finished"} or (
-        result_url and normalized not in {"failed", "failure", "cancelled", "canceled", "error"}
+        result_url_valid and normalized not in {"failed", "failure", "cancelled", "canceled", "error"}
     ):
         return "succeeded"
     if normalized in {"running", "processing", "in_progress", "pending", "queued", "submitted", "created", "not_start"}:
@@ -48051,6 +48267,7 @@ def _video_provider_canonical_parser_fields(poll_result) -> dict:
     if progress_number in (None, ""):
         progress_number = raw.get("provider_progress_raw_number")
     result_url = str(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "") or "")
+    url_check = video_b14_result_url_validation(result_url)
     return {
         "shopaikey_status_endpoint_exact": bool(raw.get("shopaikey_status_endpoint_exact")),
         "shopaikey_status_http_code": safe_int(raw.get("shopaikey_status_http_code") or raw.get("poll_http_status"), 0),
@@ -48059,16 +48276,17 @@ def _video_provider_canonical_parser_fields(poll_result) -> dict:
         "shopaikey_data_progress_raw": progress_raw if progress_raw not in (None, "") else "",
         "shopaikey_progress_source": "data.progress" if progress_raw not in (None, "") else "none",
         "shopaikey_result_url_from_data": bool(raw.get("shopaikey_result_url_from_data")),
-        "shopaikey_data_result_url_present": bool(result_url),
+        "shopaikey_data_result_url_present": bool(url_check.get("result_url_valid")),
         "provider_progress_raw": progress_raw if progress_raw not in (None, "") else "",
         "provider_progress_raw_number": progress_number if progress_number not in (None, "") else "",
         "provider_progress_source": "data.progress" if progress_raw not in (None, "") else "none",
         "http_200_not_used_as_progress": True,
         "result_url_source_path": str(raw.get("result_url_source_path") or raw.get("result_field_path") or "none"),
         "result_url_primary_path_checked": bool(raw.get("result_url_primary_path_checked")),
-        "result_url_found": bool(result_url),
-        "result_url_present": bool(result_url),
-        "provider_result_url_present": bool(result_url),
+        "result_url_found": bool(url_check.get("result_url_valid")),
+        "result_url_present": bool(url_check.get("result_url_valid")),
+        "provider_result_url_present": bool(url_check.get("result_url_valid")),
+        **url_check,
         "normalized_provider_status": str(getattr(poll_result, "status", "") or ""),
         "provider_status": str(getattr(poll_result, "status", "") or ""),
     }
@@ -48098,6 +48316,7 @@ def resolve_canonical_video_provider_task(
         candidates = _video_provider_task_candidates(dict(result or {}), project)
         adapter_cache: dict[str, object] = {}
         for candidate in candidates:
+            candidate.update(video_b14_result_url_validation(str(candidate.get("result_url") or "")))
             candidate["status_class"] = _video_provider_status_class(
                 candidate.get("status"),
                 result_url=str(candidate.get("result_url") or ""),
@@ -48117,6 +48336,7 @@ def resolve_canonical_video_provider_task(
                 candidate["poll_result"] = polled
                 candidate["status"] = str(getattr(polled, "raw_status", "") or getattr(polled, "status", "") or "")
                 candidate["result_url"] = str(getattr(polled, "result_url", "") or getattr(polled, "file_url", "") or "")
+                candidate.update(video_b14_result_url_validation(candidate["result_url"]))
                 candidate["status_class"] = _video_provider_status_class(
                     str(getattr(polled, "status", "") or candidate.get("status") or ""),
                     result_url=candidate["result_url"],
@@ -48127,7 +48347,7 @@ def resolve_canonical_video_provider_task(
 
         successful = [
             item for item in candidates
-            if item.get("status_class") == "succeeded" and str(item.get("result_url") or "").strip()
+            if item.get("status_class") == "succeeded" and bool(item.get("result_url_valid"))
         ]
         active = [item for item in candidates if item.get("status_class") == "running"]
         failed = [item for item in candidates if item.get("status_class") == "failed"]
@@ -48171,7 +48391,10 @@ def resolve_canonical_video_provider_task(
                     "task_id_masked": mask_provider_task_id(item.get("task_id")),
                     "source": str(item.get("source") or ""),
                     "status": str(item.get("status_class") or "unknown"),
-                    "result_url_present": bool(item.get("result_url")),
+                    "result_url_present": bool(item.get("result_url_valid")),
+                    "result_url_present_raw": bool(item.get("result_url_present_raw")),
+                    "result_url_valid": bool(item.get("result_url_valid")),
+                    "result_url_invalid_reason": str(item.get("result_url_invalid_reason") or ""),
                     "poll_error": str(item.get("poll_error") or ""),
                 }
                 for item in candidates
@@ -48189,6 +48412,7 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
     task_id = str(canonical.get("canonical_task_id") or "").strip()
     provider = str(canonical.get("canonical_provider") or "").strip()
     result_url = str(canonical.get("canonical_result_url") or "").strip()
+    url_check = video_b14_result_url_validation(result_url)
     parser_keys = {
         "shopaikey_status_endpoint_exact",
         "shopaikey_status_http_code",
@@ -48207,6 +48431,13 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
         "result_url_found",
         "result_url_present",
         "provider_result_url_present",
+        "result_url_present_raw",
+        "result_url_valid",
+        "result_url_invalid_reason",
+        "result_url_host",
+        "result_url_scheme",
+        "result_url_ext",
+        "result_url_query_present",
         "normalized_provider_status",
         "provider_status",
     }
@@ -48223,7 +48454,8 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
                 "canonical_task_ambiguity": bool(canonical.get("canonical_task_ambiguity")),
                 "canonical_candidate_summaries": list(canonical.get("candidate_summaries") or []),
                 "canonical_status": canonical.get("canonical_status") or "-",
-                "canonical_result_url_present": bool(result_url),
+                "canonical_result_url_present": bool(url_check.get("result_url_valid")),
+                **url_check,
             }
         )
     if task_id:
@@ -48236,11 +48468,20 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
     if provider:
         current["provider_pending_provider"] = provider
         current.setdefault("selected_provider", provider)
-    if result_url:
+    if bool(url_check.get("result_url_valid")):
         current["provider_result_url_present"] = True
         current["result_url_present"] = True
         current["result_url_found"] = True
         current["result_url"] = result_url
+        current["provider_result_blocker"] = ""
+    elif bool(url_check.get("result_url_present_raw")):
+        current["provider_result_url_present"] = False
+        current["result_url_present"] = False
+        current["result_url_found"] = False
+        current["result_url_present_raw"] = True
+        current["result_url_valid"] = False
+        current["result_url_invalid_reason"] = str(url_check.get("result_url_invalid_reason") or "invalid_result_url")
+        current["provider_result_blocker"] = "provider_failed_result_url_invalid"
     for key in parser_keys:
         value = canonical.get(key)
         if value not in (None, "") and (
@@ -48277,6 +48518,8 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
 
 def _video_provider_recover_debug_from_poll(poll_result) -> dict:
     raw = dict(getattr(poll_result, "raw", {}) or {})
+    result_url = str(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "") or "")
+    url_check = video_b14_result_url_validation(result_url)
     return {
         "recovery_poll_called": True,
         "recovery_poll_endpoint_exact": bool(raw.get("shopaikey_status_endpoint_exact")),
@@ -48286,10 +48529,14 @@ def _video_provider_recover_debug_from_poll(poll_result) -> dict:
         "recovery_data_progress_raw": str(raw.get("shopaikey_data_progress_raw") or raw.get("provider_progress_raw") or ""),
         "recovery_progress_source": str(raw.get("shopaikey_progress_source") or raw.get("provider_progress_source") or "none"),
         "recovery_http_200_not_used_as_progress": bool(raw.get("http_200_not_used_as_progress")),
-        "recovery_result_url_found": bool(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "")),
+        "recovery_result_url_found": bool(url_check.get("result_url_valid")),
         "recovery_result_url_source_path": str(raw.get("result_url_source_path") or raw.get("result_field_path") or "none"),
-        "recovery_result_url_from_data": bool(raw.get("shopaikey_result_url_from_data")),
-        "recovery_result_url_present": bool(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "")),
+        "recovery_result_url_from_data": bool(raw.get("shopaikey_result_url_from_data") and url_check.get("result_url_valid")),
+        "recovery_result_url_present": bool(url_check.get("result_url_valid")),
+        "recovery_result_url_present_raw": bool(url_check.get("result_url_present_raw")),
+        "recovery_result_url_valid": bool(url_check.get("result_url_valid")),
+        "recovery_result_url_invalid_reason": str(url_check.get("result_url_invalid_reason") or ""),
+        **url_check,
     }
 
 
@@ -48435,7 +48682,7 @@ async def video_b14_autonomous_materialize_and_deliver(
     already = video_b14_delivered_video_artifact(jid)
     if already.get("ok"):
         return {"ok": True, "sent": False, "already_delivered": True, "download_button_visible": True, **already, "charge": 0}
-    recovery = video_provider_recover_existing_task(jid, download=True)
+    recovery = video_provider_recover_existing_task(jid, download=True, source=source)
     if recovery.get("waiting"):
         conn = db_connect()
         try:
@@ -48553,7 +48800,7 @@ async def video_b14_autonomous_materialize_and_deliver(
     }
 
 
-def video_provider_recover_existing_task(job_id: int, *, download: bool = False, conn=None) -> dict:
+def video_provider_recover_existing_task(job_id: int, *, download: bool = False, conn=None, source: str = "recover") -> dict:
     jid = safe_int(job_id, 0)
     if jid <= 0:
         return {"ok": False, "blocker": "job_id_required", "charge": 0}
@@ -48635,6 +48882,9 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
         if poll_result is None:
             poll_result = adapter.poll_video_job(task_id)
         poll_debug = _video_provider_recover_debug_from_poll(poll_result)
+        result_url_validation = video_b14_result_url_validation(
+            str(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "") or "")
+        )
         normalized = _video_provider_status_class(
             str(getattr(poll_result, "status", "") or poll_debug.get("recovery_normalized_status") or ""),
             result_url=str(getattr(poll_result, "result_url", "") or getattr(poll_result, "file_url", "") or ""),
@@ -48665,6 +48915,7 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             "postprocess_not_required_for_recovery": True,
             "delivery_type": "raw_provider_video",
             **poll_debug,
+            **result_url_validation,
         }
         if normalized == "running":
             poll_metadata = video_b14_autonomous_db_poll_metadata(
@@ -48696,11 +48947,14 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
                 "charge": 0,
             }
         if normalized == "failed":
+            failed_blocker = str(getattr(poll_result, "error_code", "") or normalized)
+            fallback_policy = video_b14_product_video_fallback_policy(result, project, failed_blocker, source=source)
             updates.update(
                 {
                     "recovery_status": "provider_failed",
-                    "recovery_blocker": str(getattr(poll_result, "error_code", "") or normalized),
+                    "recovery_blocker": failed_blocker,
                     "continue_polling": False,
+                    **fallback_policy,
                 }
             )
             _video_provider_update_job_result(conn, jid, updates)
@@ -48714,12 +48968,46 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
                 "debug": updates,
                 "charge": 0,
             }
+        if normalized == "succeeded" and poll_debug.get("recovery_result_url_present_raw") and not poll_debug.get("recovery_result_url_valid"):
+            fallback_policy = video_b14_product_video_fallback_policy(
+                result,
+                project,
+                "provider_failed_result_url_invalid",
+                source=source,
+            )
+            updates.update(
+                {
+                    "recovery_status": "completed_invalid_result_url",
+                    "recovery_blocker": "provider_failed_result_url_invalid",
+                    "provider_result_blocker": "provider_failed_result_url_invalid",
+                    "continue_polling": False,
+                    **fallback_policy,
+                }
+            )
+            _video_provider_update_job_result(conn, jid, updates)
+            return {
+                "ok": False,
+                "blocker": "provider_failed_result_url_invalid",
+                "job_id": jid,
+                "provider": provider,
+                "task_id_masked": identity.get("task_id_masked"),
+                "poll": poll_result,
+                "debug": updates,
+                "charge": 0,
+            }
         if normalized == "succeeded" and not poll_debug.get("recovery_result_url_present"):
+            fallback_policy = video_b14_product_video_fallback_policy(
+                result,
+                project,
+                "provider_result_url_missing",
+                source=source,
+            )
             updates.update(
                 {
                     "recovery_status": "completed_missing_result_url",
                     "recovery_blocker": "provider_result_url_missing",
                     "continue_polling": False,
+                    **fallback_policy,
                 }
             )
             _video_provider_update_job_result(conn, jid, updates)
@@ -48749,6 +49037,13 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
 
         artifact = adapter.materialize_result(poll_result, f"recovery_job_{jid}")
         download_debug = dict(getattr(artifact, "diagnostics", {}) or {})
+        download_blocker = "" if artifact.ok else (artifact.error_code or "provider_download_failed")
+        fallback_policy = video_b14_product_video_fallback_policy(
+            result,
+            project,
+            download_blocker or "provider_download_failed",
+            source=source,
+        )
         updates.update(
             {
                 "recovery_status": "raw_provider_video_downloaded" if artifact.ok else "raw_provider_video_download_failed",
@@ -48758,10 +49053,11 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
                 "raw_provider_video_valid": bool(artifact.ok and artifact.has_video_stream and artifact.bytes > 0),
                 "raw_provider_video_bytes": int(artifact.bytes or 0),
                 "raw_provider_video_duration": float(artifact.duration or 0.0),
-                "recovery_blocker": "" if artifact.ok else (artifact.error_code or "provider_download_failed"),
+                "recovery_blocker": download_blocker,
                 "continue_polling": False,
                 "terminal_state": "recover_ready_for_delivery" if artifact.ok else "recover_failed",
                 "no_charge": True,
+                **({} if artifact.ok else fallback_policy),
                 **download_debug,
             }
         )
@@ -70597,7 +70893,9 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             "• recovery: <code>db_auto_poll_can_follow_existing_provider_task</code>\n"
             "• recovery_compat: <code>recovered_from_db_read_only</code>\n"
             "• status_can_read_db_and_provider_task: <code>true</code>\n"
-            "• Auto poll DB: <code>đang theo dõi task provider</code>\n"
+            "• Auto poll DB: <code>đang theo dõi provider task</code>\n"
+            "• autonomous_db_poll_enabled: <code>yes</code>\n"
+            "• autonomous_db_poll_active: <code>yes</code>\n"
             f"• db_poll_candidate: <code>{'true' if autonomous.get('db_poll_candidate') else 'false'}</code>\n"
             f"• registry_required_for_poll: <code>{'true' if autonomous.get('registry_required_for_poll') else 'false'}</code>\n"
             f"• registry_missing_is_blocker: <code>{'true' if autonomous.get('registry_missing_is_blocker') else 'false'}</code>\n"

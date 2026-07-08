@@ -14,6 +14,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from services import video_final_output
 
@@ -250,14 +251,24 @@ def _extract_progress_raw(payload: dict[str, Any]) -> Any:
     return None
 
 
+def _provider_result_url_valid(value: Any = "") -> bool:
+    raw = str(value or "").strip()
+    if not raw or raw[:1] in {"{", "["} or raw.lower() in {"none", "null", "false", "error"}:
+        return False
+    parsed = urlparse(raw)
+    return bool(parsed.scheme in {"http", "https"} and parsed.netloc)
+
+
 def _provider_result_url_present(payload: dict[str, Any]) -> bool:
+    if payload.get("result_url_valid") is False or payload.get("provider_result_url_valid") is False:
+        return False
     for key in (
         "provider_result_url_present",
         "result_url_present",
         "provider_final_url_present",
         "final_url_present",
     ):
-        if payload.get(key):
+        if payload.get(key) and not payload.get("result_url_invalid_reason"):
             return True
     for key in (
         "provider_result_url",
@@ -269,7 +280,7 @@ def _provider_result_url_present(payload: dict[str, Any]) -> bool:
         "output_url",
         "final_video_url",
     ):
-        if str(payload.get(key) or "").strip():
+        if _provider_result_url_valid(payload.get(key)):
             return True
     return False
 
@@ -609,6 +620,7 @@ def reconcile_provider_progress_telemetry(
         "provider_elapsed_seconds": elapsed,
         "provider_wait_elapsed_seconds": elapsed,
         "provider_wait_max_seconds": wait_max,
+        "timeout_at": _format_epoch(started_epoch + wait_max) if started_epoch > 0 else "",
         "provider_elapsed_estimated": bool(estimated_started),
         "elapsed_public_mode": elapsed_public_mode,
         "elapsed_public_source": started_source,
