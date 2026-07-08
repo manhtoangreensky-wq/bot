@@ -41,15 +41,22 @@ def test_m4live8d_video_subtitle_upload_route_uses_video_path_not_file_path():
     assert 'VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE' not in video_only_branch.split("active =", 1)[-1]
 
 
-def test_m4live8d_subtitle_failure_copy_uses_m4live7_runtime_contract():
+def test_m4live8d_subtitle_failure_copy_has_internal_reason_fields():
     core = _function_source("_execute_video_dubbing_pipeline_core")
     debug_payload = _function_source("subtitle_dub_debug_job_payload")
 
-    for field in ("subtitle_translate_fail_reason", "public_failure_copy_source"):
-        assert field not in core
-        assert field not in debug_payload
+    for field in (
+        "subtitle_translate_fail_reason",
+        "subtitle_render_fail_reason",
+        "subtitle_delivery_fail_reason",
+        "source_mode",
+        "handler_name",
+        "public_failure_copy_source",
+    ):
+        assert field in core
+        assert field in debug_payload
     assert "video_dubbing_flow_failure_text(mode, lang)" in core
-    assert "subdub_should_suppress_generic_fail_for_active_job" not in BOT_SOURCE
+    assert "public_failure_copy_source" in core
 
 
 def test_m4live8d_subtitle_only_success_contract_still_has_mp4_receipt_buttons():
@@ -64,14 +71,14 @@ def test_m4live8d_subtitle_only_success_contract_still_has_mp4_receipt_buttons()
     assert "Tải SRT dịch" in keyboard
 
 
-def test_m4live8d_dub_modes_are_back_on_m4live7_runtime_contract():
+def test_m4live8d_dub_modes_not_restored_or_rewritten_here():
     diff_sensitive = "\n".join(
         [
             _function_source("resolve_video_dub_tts_voice"),
+            _function_source("subdub_default_tts_voice_for_gender"),
             _function_source("video_dubbing_voice_payload"),
         ]
     )
 
-    assert "subdub_default_tts_voice_for_gender" not in BOT_SOURCE
     assert "subtitle_translate_fail_reason" not in diff_sensitive
     assert "m4live7_subtitle_only_route_active" not in diff_sensitive

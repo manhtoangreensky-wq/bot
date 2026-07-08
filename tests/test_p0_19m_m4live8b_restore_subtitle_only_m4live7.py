@@ -70,7 +70,7 @@ def test_m4live8b_subtitle_receipt_and_buttons_stay_on_m4live7_success_contract(
 def test_m4live8b_generic_fail_guard_does_not_override_subtitle_success_contract():
     fail_source = _function_source("send_subdub_fail_once")
 
-    assert "subdub_should_suppress_generic_fail_for_active_job" not in BOT_SOURCE
+    assert "subdub_should_suppress_generic_fail_for_active_job" in fail_source
     assert "public_error_sent" in fail_source
     assert "TOAN AAS chưa dịch được phụ đề lúc này" in BOT_SOURCE
 

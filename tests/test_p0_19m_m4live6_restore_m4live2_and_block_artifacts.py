@@ -2,8 +2,6 @@ import hashlib
 import subprocess
 from pathlib import Path
 
-import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 M4LIVE2_SHA = "526dfac3"
@@ -33,19 +31,6 @@ def _hash(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
-def _current_branch() -> str:
-    return subprocess.check_output(
-        ["git", "branch", "--show-current"],
-        cwd=ROOT,
-        text=True,
-    ).strip()
-
-
-def _skip_when_superseded_by_m4live8f() -> None:
-    if "m4live8f" in _current_branch():
-        pytest.skip("M4LIVE8F intentionally restores SubDub runtime to M4LIVE7, not M4LIVE2")
-
-
 def test_m4live6_baseline_source_is_m4live2_526dfac3():
     short = subprocess.check_output(
         ["git", "show", "--no-patch", "--format=%h", M4LIVE2_SHA],
@@ -56,7 +41,6 @@ def test_m4live6_baseline_source_is_m4live2_526dfac3():
 
 
 def test_m4live6_subdub_delivery_runtime_is_exact_m4live2():
-    _skip_when_superseded_by_m4live8f()
     for name in (
         "send_public_subtitle_dub_final_outputs",
         "subtitle_plus_dub_send_subtitle_document",
@@ -66,7 +50,6 @@ def test_m4live6_subdub_delivery_runtime_is_exact_m4live2():
 
 
 def test_m4live6_subtitle_renderer_is_exact_m4live2():
-    _skip_when_superseded_by_m4live8f()
     for name in (
         "subdub_normalize_style",
         "subdub_generate_ass_from_srt",
@@ -107,18 +90,6 @@ def test_m4live6_auto_backup_db_is_internal_not_telegram_document():
 def test_m4live6_scope_is_subdub_and_backup_guard_only():
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], cwd=ROOT, text=True)
     changed_paths = {line.strip().replace("\\", "/") for line in changed.splitlines() if line.strip()}
-    if "m4live8f" in _current_branch():
-        assert changed_paths <= {
-            "bot.py",
-            "tests/test_p0_19m_m4live6_restore_m4live2_and_block_artifacts.py",
-            "tests/test_p0_19m_m4live7_bottom_subtitle_dub_align.py",
-            "tests/test_p0_19m_m4live8_subdub_timing_voice_long_video.py",
-            "tests/test_p0_19m_m4live8b_restore_subtitle_only_m4live7.py",
-            "tests/test_p0_19m_m4live8d_live_subtitle_only_route_restore.py",
-            "tests/test_p0_19m_m4live8e_hard_restore_subtitle_only_m4live7.py",
-            "tests/test_p0_19m_m4live8f_hard_restore_subdub_runtime_m4live7_no_extra_sends.py",
-        }
-        return
     assert changed_paths <= {
         "bot.py",
         "tests/test_p0_19m_m4live6_restore_m4live2_and_block_artifacts.py",

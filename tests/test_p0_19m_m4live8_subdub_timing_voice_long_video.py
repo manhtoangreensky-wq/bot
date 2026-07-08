@@ -43,22 +43,32 @@ def test_m4live8b_subtitle_only_no_single_cue_timing_override():
     assert "subdub_ass_wrap_text(chunk, style" in source
 
 
-def test_m4live8_generic_active_job_suppress_helper_removed_by_m4live8f():
-    assert "def subdub_should_suppress_generic_fail_for_active_job" not in BOT_SOURCE
+def test_m4live8_processing_65_suppresses_generic_fail_text():
+    job = {
+        "status": "running",
+        "terminal_state": "",
+        "progress_stage": "generating_voice",
+        "progress_percent": 65,
+    }
+
+    assert bot.subdub_should_suppress_generic_fail_for_active_job(job, {"status": "NO_OUTPUT_BYTES"})
 
 
-def test_m4live8_chunk_plan_helper_removed_by_m4live8f():
-    assert "def subdub_long_video_chunk_plan" not in BOT_SOURCE
+def test_m4live8_early_terminal_input_error_not_suppressed():
+    job = {
+        "status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "progress_stage": "input_save_failed",
+        "progress_percent": 5,
+    }
+
+    assert not bot.subdub_should_suppress_generic_fail_for_active_job(job, {"status": "INPUT_SAVE_FAILED"})
 
 
-def test_m4live8_send_fail_once_uses_m4live7_failure_path():
+def test_m4live8_send_fail_once_suppresses_active_or_delivered_job():
     class DummyMessage:
-        def __init__(self):
-            self.texts = []
-
         async def reply_text(self, *_args, **_kwargs):
-            self.texts.append(_args[0])
-            return type("Msg", (), {"message_id": "fail"})()
+            raise AssertionError("generic public fail should not be sent")
 
     key = "m4live8-active-suppress"
     bot.SUBTITLE_DUB_PIPELINE_JOBS[key] = {
@@ -68,21 +78,19 @@ def test_m4live8_send_fail_once_uses_m4live7_failure_path():
         "progress_stage": "generating_voice",
         "progress_percent": 65,
     }
-    message = DummyMessage()
     try:
         result = asyncio.run(
             bot.send_subdub_fail_once(
-                message,
+                DummyMessage(),
                 key,
                 mode=bot.VIDEO_SUBTITLE_MODE_DUB,
                 reason="late_generic",
             )
         )
         job = bot.SUBTITLE_DUB_PIPELINE_JOBS[key]
-        assert result["sent"] is True
-        assert result["suppressed"] is False
-        assert message.texts
-        assert job["public_error_sent"] is True
+        assert result["suppressed"] is True
+        assert job["generic_fail_suppressed_while_active_or_delivered"] is True
+        assert job["public_error_sent"] is False
     finally:
         bot.SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
 
@@ -125,27 +133,40 @@ def test_m4live8_missing_female_voice_blocks_instead_of_male_fallback(monkeypatc
     assert state.get("selected_tts_voice_id", "") != "male-real-voice"
 
 
-def test_m4live8_long_video_chunk_plan_not_used_after_m4live8f_restore():
-    assert "subdub_long_video_chunk_plan(" not in BOT_SOURCE
+def test_m4live8_long_video_chunk_plan_for_43s_and_75s():
+    short = bot.subdub_long_video_chunk_plan(24)
+    forty_three = bot.subdub_long_video_chunk_plan(43)
+    seventy_five = bot.subdub_long_video_chunk_plan(75)
+
+    assert short["chunking_enabled"] is False
+    assert forty_three["chunking_enabled"] is True
+    assert forty_three["chunk_count"] == 2
+    assert forty_three["chunk_ranges"] == [
+        {"index": 1, "start": 0, "end": 30},
+        {"index": 2, "start": 30, "end": 43},
+    ]
+    assert seventy_five["chunk_count"] == 3
+    assert seventy_five["concat_required"] is True
+    assert seventy_five["global_timing_preserved"] is True
 
 
-def test_m4live8_duration_gate_reports_m4live7_long_video_without_chunks():
+def test_m4live8_duration_gate_reports_long_video_chunks():
     payload = bot.subdub_duration_gate_payload({"duration": 75}, {}, is_admin=False)
 
     assert payload["duration_gate_result"] == "pass_long"
     assert payload["long_media_allowed"] is True
-    assert "chunking_enabled" not in payload
-    assert "chunk_count" not in payload
-    assert "concat_required" not in payload
-    assert "global_timing_preserved" not in payload
+    assert payload["chunking_enabled"] is True
+    assert payload["chunk_count"] == 3
+    assert payload["concat_required"] is True
+    assert payload["global_timing_preserved"] is True
 
 
-def test_m4live8_large_telegram_copy_restored_to_m4live7_baseline():
+def test_m4live8_large_telegram_copy_not_generic_or_shorter_video_blame():
     text = bot.subdub_large_telegram_media_public_text("vi")
 
-    assert "file quá lớn" in text
+    assert "chưa tải trực tiếp được file này từ Telegram" in text
     assert "chưa trừ Xu" in text
-    assert "video ngắn/nhẹ hơn" in text
+    assert "video ngắn/nhẹ hơn" not in text
     assert "thử video rõ tiếng hơn" not in text
 
 
@@ -153,8 +174,9 @@ def test_m4live8_no_real_provider_calls_in_touched_helpers():
     touched = "\n".join(
         [
             _function_source("subdub_generate_ass_from_srt"),
-            _function_source("send_subdub_fail_once"),
-            _function_source("subdub_duration_gate_payload"),
+            _function_source("subdub_should_suppress_generic_fail_for_active_job"),
+            _function_source("subdub_long_video_chunk_plan"),
+            _function_source("subdub_default_tts_voice_for_gender"),
         ]
     )
 
