@@ -49,6 +49,8 @@ LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES = {"image_to_video", "storyboard_prompt", "sc
 LOCAL_SCENE_CARD_PRODUCT_TYPES = {"script_to_video", "storyboard_prompt", "multi_scene_film"}
 PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
 PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S = "per_scene_8s"
+PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK = "single_task_legacy"
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO = 0.12
 PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO = 0.18
@@ -566,6 +568,197 @@ def _scene_count(job: dict | None = None) -> int:
     return max(1, min(20, _safe_int(value, 3)))
 
 
+def _job_base_id(job: dict | None = None) -> str:
+    job = dict(job or {})
+    return str(job.get("id") or job.get("job_id") or "video_job").strip() or "video_job"
+
+
+def product_video_scene_request_id(job: dict | None = None, scene_index: int = 1) -> str:
+    return f"{_job_base_id(job)}-{max(1, _safe_int(scene_index, 1))}"
+
+
+def _task_id_masked(value: Any, visible: int = 4) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= visible * 2:
+        return "*" * len(text)
+    return f"{text[:visible]}...{text[-visible:]}"
+
+
+def _product_video_pending_request_is_scene(job: dict | None = None) -> bool:
+    request_job_id = str((job or {}).get("provider_pending_request_job_id") or "").strip()
+    if not request_job_id:
+        return False
+    return bool(re.search(r"-\d+$", request_job_id))
+
+
+def product_video_orchestration_mode(job: dict | None = None) -> str:
+    """New Product Video jobs render one provider task per 8s scene.
+
+    Jobs that were already running before R16 may only have one provider task
+    id and no scene request id. Those stay on the legacy path so we do not
+    mutate live in-progress provider work.
+    """
+    job = dict(job or {})
+    invoice = _invoice_payload(job)
+    asset_pack = _asset_pack_payload(job)
+    project = job.get("project") if isinstance(job.get("project"), dict) else {}
+    explicit = str(
+        job.get("orchestration_mode")
+        or job.get("provider_orchestration_mode")
+        or asset_pack.get("orchestration_mode")
+        or invoice.get("orchestration_mode")
+        or (project or {}).get("orchestration_mode")
+        or ""
+    ).strip().lower()
+    aliases = {
+        "per_scene": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "scene": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "scene_orchestrator": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "per_scene_8s": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "single_task": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
+        "legacy": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
+        "legacy_single_task": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
+        "single_task_legacy": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
+    }
+    if explicit in aliases:
+        return aliases[explicit]
+    task_present = bool(
+        job.get("provider_pending_task_id")
+        or job.get("provider_pending_video_id")
+        or job.get("provider_task_ids")
+        or job.get("provider_video_ids")
+    )
+    if task_present and not _product_video_pending_request_is_scene(job):
+        return PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK
+    return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+
+
+def product_video_scene_duration_seconds(job: dict | None = None) -> int:
+    job = dict(job or {})
+    invoice = _invoice_payload(job)
+    scene_seconds = _safe_int(
+        job.get("scene_duration_seconds")
+        or job.get("scene_seconds")
+        or invoice.get("scene_duration_seconds")
+        or invoice.get("scene_seconds"),
+        PRODUCT_VIDEO_SCENE_SECONDS,
+    )
+    return max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
+
+
+def _existing_scene_tasks(job: dict | None = None) -> list[dict[str, Any]]:
+    job = dict(job or {})
+    result: list[dict[str, Any]] = []
+    for key in ("scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
+        value = job.get(key)
+        if isinstance(value, str):
+            value = _json_loads(value, [])
+        if isinstance(value, list):
+            result.extend(dict(item or {}) for item in value if isinstance(item, dict))
+    return result
+
+
+def _scene_task_index(item: dict | None = None, default: int = 1) -> int:
+    item = dict(item or {})
+    return max(1, _safe_int(item.get("scene_index") or item.get("scene_id") or item.get("index"), default))
+
+
+def product_video_scene_task_for_index(job: dict | None = None, scene_index: int = 1) -> dict[str, Any]:
+    wanted = max(1, _safe_int(scene_index, 1))
+    for item in _existing_scene_tasks(job):
+        if _scene_task_index(item) == wanted and (
+            str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip()
+        ):
+            return dict(item)
+    return {}
+
+
+def _scene_task_status(item: dict | None = None) -> str:
+    item = dict(item or {})
+    return str(
+        item.get("status")
+        or item.get("normalized_provider_status")
+        or item.get("provider_status")
+        or item.get("blocker")
+        or ""
+    ).strip() or "queued"
+
+
+def product_video_scene_tasks_debug(
+    job: dict | None = None,
+    *,
+    provider_events: list[dict[str, Any]] | None = None,
+    debug_results: list[dict[str, Any]] | None = None,
+    scene_count: int | None = None,
+) -> list[dict[str, Any]]:
+    total = max(1, min(20, _safe_int(scene_count, _scene_count(job))))
+    by_scene: dict[int, dict[str, Any]] = {}
+    for idx in range(1, total + 1):
+        by_scene[idx] = {
+            "scene_index": idx,
+            "scene_duration_seconds": product_video_scene_duration_seconds(job),
+            "request_job_id": product_video_scene_request_id(job, idx),
+            "provider": "",
+            "provider_task_id_masked": "",
+            "task_id_masked": "",
+            "provider_video_id_masked": "",
+            "status": "queued",
+            "result_url_valid": False,
+            "raw_clip_duration": 0,
+            "fallback_count": 0,
+        }
+    for item in _existing_scene_tasks(job):
+        idx = _scene_task_index(item)
+        if idx not in by_scene:
+            continue
+        task_id = str(item.get("provider_task_id") or item.get("task_id") or "").strip()
+        video_id = str(item.get("provider_video_id") or item.get("video_id") or "").strip()
+        by_scene[idx].update(
+            {
+                "provider": str(item.get("provider") or by_scene[idx].get("provider") or ""),
+                "provider_task_id_masked": _task_id_masked(task_id),
+                "task_id_masked": _task_id_masked(task_id),
+                "provider_video_id_masked": _task_id_masked(video_id),
+                "status": _scene_task_status(item),
+                "result_url_valid": bool(item.get("result_url_valid") or item.get("download_url_present") or item.get("provider_result_url_present")),
+                "raw_clip_duration": item.get("raw_clip_duration") or item.get("duration") or item.get("output_duration") or 0,
+                "fallback_count": _safe_int(item.get("fallback_count"), 0),
+            }
+        )
+    for source in (provider_events or []) + (debug_results or []):
+        if not isinstance(source, dict):
+            continue
+        idx = _scene_task_index(source, 1)
+        if idx not in by_scene:
+            continue
+        debug = source.get("debug") if isinstance(source.get("debug"), dict) else source
+        debug_task_ids = debug.get("provider_task_ids") if isinstance(debug.get("provider_task_ids"), list) else []
+        debug_video_ids = debug.get("provider_video_ids") if isinstance(debug.get("provider_video_ids"), list) else []
+        task_id = str(source.get("task_id") or (debug_task_ids[0] if debug_task_ids else "") or debug.get("provider_task_id") or "").strip()
+        video_id = str(source.get("video_id") or (debug_video_ids[0] if debug_video_ids else "") or debug.get("provider_video_id") or "").strip()
+        status = str(source.get("status") or debug.get("normalized_provider_status") or debug.get("provider_status") or debug.get("blocker") or "").strip()
+        by_scene[idx].update(
+            {
+                "provider": str(source.get("provider") or debug.get("selected_provider") or debug.get("provider") or by_scene[idx].get("provider") or ""),
+                "provider_task_id_masked": _task_id_masked(task_id),
+                "task_id_masked": _task_id_masked(task_id),
+                "provider_video_id_masked": _task_id_masked(video_id),
+                "status": status or by_scene[idx].get("status") or "queued",
+                "result_url_valid": bool(
+                    source.get("download_url_present")
+                    or debug.get("provider_result_url_present")
+                    or debug.get("result_url_present")
+                    or by_scene[idx].get("result_url_valid")
+                ),
+                "raw_clip_duration": source.get("duration") or debug.get("output_duration") or by_scene[idx].get("raw_clip_duration") or 0,
+                "fallback_count": _safe_int(debug.get("fallback_count") or source.get("fallback_count"), _safe_int(by_scene[idx].get("fallback_count"), 0)),
+            }
+        )
+    return [by_scene[idx] for idx in sorted(by_scene)]
+
+
 def _invoice_payload(job: dict | None = None) -> dict:
     job = dict(job or {})
     candidates = [
@@ -583,6 +776,9 @@ def _invoice_payload(job: dict | None = None) -> dict:
 def product_video_expected_duration_seconds(job: dict | None = None) -> int:
     job = dict(job or {})
     invoice = _invoice_payload(job)
+    scene_count = _safe_int(job.get("scene_count") or invoice.get("scene_count"), _scene_count(job))
+    if product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
+        return max(1, min(20, scene_count)) * product_video_scene_duration_seconds(job)
     direct = _safe_int(
         job.get("expected_duration_seconds")
         or job.get("duration_seconds")
@@ -591,7 +787,6 @@ def product_video_expected_duration_seconds(job: dict | None = None) -> int:
     )
     if direct > 0:
         return direct
-    scene_count = _safe_int(job.get("scene_count") or invoice.get("scene_count"), _scene_count(job))
     scene_seconds = _safe_int(job.get("scene_seconds") or invoice.get("scene_seconds"), PRODUCT_VIDEO_SCENE_SECONDS)
     return max(1, min(20, scene_count)) * max(1, scene_seconds)
 
@@ -728,11 +923,14 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
     job = dict(job or {})
     count = _scene_count(job)
     aspect_ratio = _aspect_ratio(job)
-    total_duration = _safe_int(job.get("expected_duration_seconds") or job.get("duration_seconds"), 0)
-    if total_duration > 0:
-        default_duration = max(1.0, min(8.0, float(total_duration) / max(1, count)))
+    orchestration_mode = product_video_orchestration_mode(job)
+    if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
+        default_duration = float(product_video_scene_duration_seconds(job))
     else:
-        default_duration = max(1.0, min(8.0, float(_safe_int(job.get("scene_duration") or PRODUCT_VIDEO_SCENE_SECONDS, PRODUCT_VIDEO_SCENE_SECONDS))))
+        total_duration = _safe_int(job.get("expected_duration_seconds") or job.get("duration_seconds"), 0)
+        if total_duration <= 0:
+            total_duration = product_video_expected_duration_seconds(job)
+        default_duration = max(1.0, min(8.0, float(total_duration) / max(1, count)))
     original = original_prompt_from_job(job)
     style = _safe_text(job.get("profile_id") or "", 120)
     cards = _scene_cards(job)
@@ -760,10 +958,23 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
                 "target_duration_sec": default_duration,
                 "aspect_ratio": aspect_ratio,
                 "transition": None if index == count else "cut",
-                "provider_params": {"real_provider": True, "original_user_prompt": original},
+                "provider_params": {
+                    "real_provider": True,
+                    "original_user_prompt": original,
+                    "orchestration_mode": orchestration_mode,
+                    "scene_duration_seconds": default_duration,
+                    "scene_index": index,
+                    "scene_count": count,
+                },
             }
         )
-    return {"scenes": scenes}
+    return {
+        "orchestration_mode": orchestration_mode,
+        "scene_duration_seconds": default_duration,
+        "expected_duration_seconds": product_video_expected_duration_seconds(job),
+        "scene_count": count,
+        "scenes": scenes,
+    }
 
 
 def real_video_llm_func_from_job(job: dict | None = None):
@@ -1048,14 +1259,31 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     product_type = _product_type(job)
     route = video_final_output.route_for_product_type(product_type)
     required_capability = str(route.get("provider_capability") or "text_to_video")
-    request_job_id = (
-        str((job or {}).get("id") or (job or {}).get("job_id") or "video_job")
-        + "-"
-        + str(_safe_int(getattr(scene, "scene_id", 0), 0) or 1)
-    )
-    pending_request_job_id = str((job or {}).get("provider_pending_request_job_id") or "").strip()
+    scene_index = _safe_int(getattr(scene, "scene_id", 0), 0) or 1
+    orchestration_mode = product_video_orchestration_mode(job)
+    scene_duration_seconds = product_video_scene_duration_seconds(job)
+    request_job_id = product_video_scene_request_id(job, scene_index)
+    pending_scene_task = product_video_scene_task_for_index(job, scene_index)
+    pending_request_job_id = str(
+        pending_scene_task.get("request_job_id")
+        or pending_scene_task.get("provider_pending_request_job_id")
+        or (job or {}).get("provider_pending_request_job_id")
+        or ""
+    ).strip()
+    pending_task_id = str(
+        pending_scene_task.get("provider_task_id")
+        or pending_scene_task.get("task_id")
+        or ((job or {}).get("provider_pending_task_id") if not pending_scene_task else "")
+        or ""
+    ).strip()
+    pending_video_id = str(
+        pending_scene_task.get("provider_video_id")
+        or pending_scene_task.get("video_id")
+        or ((job or {}).get("provider_pending_video_id") if not pending_scene_task else "")
+        or ""
+    ).strip()
     pending_matches_request = bool(
-        (job or {}).get("provider_pending_task_id") or (job or {}).get("provider_pending_video_id")
+        pending_task_id or pending_video_id
     ) and (not pending_request_job_id or pending_request_job_id == request_job_id)
     asset_pack = _json_loads((job or {}).get("asset_pack"), {})
     invoice = _json_loads((job or {}).get("invoice"), {})
@@ -1127,12 +1355,19 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         image_paths=_local_image_sequence_paths(job),
         source_video_path=str((job or {}).get("source_video_path") or ""),
         ratio=aspect_ratio,
-        duration_seconds=float(getattr(scene, "target_duration_sec", 6.0) or 6.0),
+        duration_seconds=float(scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0)),
         quality=str((job or {}).get("quality") or ""),
         style=str((job or {}).get("style") or ""),
         add_ons=_addon_plan(job),
         metadata={
-            "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
+            "scene_id": scene_index,
+            "scene_index": scene_index,
+            "scene_count": _scene_count(job),
+            "scene_duration_seconds": scene_duration_seconds,
+            "orchestration_mode": orchestration_mode,
+            "provider_orchestration_mode": orchestration_mode,
+            "expected_duration_seconds": product_video_expected_duration_seconds(job),
+            "provider_scene_request_id": request_job_id,
             "raw_output_path": raw_path,
             "product_video": bool(str((job or {}).get("source") or "") == "product_video" or (job or {}).get("product_video")),
             "render_mode": str((job or {}).get("render_mode") or ""),
@@ -1148,9 +1383,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
             "claim_payload_has_provider_config": bool((job or {}).get("provider_config") or (job or {}).get("provider_submit_url") or (job or {}).get("provider_auth_header_value")),
-            "provider_pending_provider": str((job or {}).get("provider_pending_provider") or "") if pending_matches_request else "",
-            "provider_pending_task_id": str((job or {}).get("provider_pending_task_id") or "") if pending_matches_request else "",
-            "provider_pending_video_id": str((job or {}).get("provider_pending_video_id") or "") if pending_matches_request else "",
+            "provider_pending_provider": str(pending_scene_task.get("provider") or (job or {}).get("provider_pending_provider") or "") if pending_matches_request else "",
+            "provider_pending_task_id": pending_task_id if pending_matches_request else "",
+            "provider_pending_video_id": pending_video_id if pending_matches_request else "",
             "provider_pending_request_job_id": pending_request_job_id if pending_matches_request else "",
             "provider_pending_attempts": ((job or {}).get("provider_pending_attempts") or []) if pending_matches_request else [],
             "provider_started_at": str((job or {}).get("provider_started_at") or "") if pending_matches_request else "",
@@ -1208,9 +1443,13 @@ def build_real_scene_renderer(
             if isinstance(debug_results, list) and diagnostics:
                 debug_results.append(diagnostics)
             if isinstance(events, list):
+                scene_index = _safe_int(getattr(scene, "scene_id", 0), 0)
                 events.append(
                     {
-                        "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
+                        "scene_id": scene_index,
+                        "scene_index": scene_index,
+                        "request_job_id": product_video_scene_request_id(job, scene_index),
+                        "scene_duration_seconds": product_video_scene_duration_seconds(job),
                         "provider": str(diagnostics.get("selected_provider") or diagnostics.get("provider") or ""),
                         "task_id": str((diagnostics.get("provider_task_ids") or [""])[0] or "")[:180],
                         "video_id": str((diagnostics.get("provider_video_ids") or [""])[0] or "")[:180],
@@ -1226,9 +1465,13 @@ def build_real_scene_renderer(
         if isinstance(debug_results, list) and isinstance(result, dict):
             debug_results.append(dict(result))
         if isinstance(events, list) and isinstance(result, dict):
+            scene_index = _safe_int(getattr(scene, "scene_id", 0), 0)
             events.append(
                 {
-                    "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
+                    "scene_id": scene_index,
+                    "scene_index": scene_index,
+                    "request_job_id": product_video_scene_request_id(job, scene_index),
+                    "scene_duration_seconds": product_video_scene_duration_seconds(job),
                     "provider": str(result.get("provider") or ""),
                     "task_id": str(result.get("task_id") or "")[:180],
                     "video_id": str(result.get("video_id") or "")[:180],
@@ -1627,7 +1870,10 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
     addon = _addon_plan(job)
     subtitle_requested = bool(addon.get("subtitle_enabled", True))
     subtitle_enabled = bool(subtitle_requested and _has_user_facing_subtitle_text(job))
-    per_scene_duration = max(1.0, min(8.0, product_video_expected_duration_seconds(job) / max(1, _scene_count(job))))
+    if product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
+        per_scene_duration = float(product_video_scene_duration_seconds(job))
+    else:
+        per_scene_duration = max(1.0, min(8.0, product_video_expected_duration_seconds(job) / max(1, _scene_count(job))))
     return process_multiscene_video_pipeline(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or int(time.time())),
@@ -1741,6 +1987,35 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["fallback_used"] = bool(fallback_used or data.get("fallback_used"))
         data["fallback_reason"] = str(data.get("fallback_reason") or fallback_reason or "")
         data["provider_events"] = data.get("provider_events") or provider_events
+        orchestration_mode = product_video_orchestration_mode(job)
+        scene_tasks = product_video_scene_tasks_debug(
+            job,
+            provider_events=data.get("provider_events") or provider_events,
+            debug_results=provider_runtime_debug,
+            scene_count=_scene_count(job),
+        )
+        completed_scenes = sum(1 for item in scene_tasks if str(item.get("status") or "").lower() in {"downloaded", "success", "completed"} or item.get("result_url_valid"))
+        active_scene = next(
+            (
+                item
+                for item in scene_tasks
+                if str(item.get("status") or "").lower() not in {"downloaded", "success", "completed"}
+            ),
+            scene_tasks[-1] if scene_tasks else {},
+        )
+        data["orchestration_mode"] = orchestration_mode
+        data["provider_orchestration_mode"] = orchestration_mode
+        data["scene_duration_seconds"] = product_video_scene_duration_seconds(job)
+        data["expected_duration_seconds"] = product_video_expected_duration_seconds(job)
+        data["scene_count"] = _scene_count(job)
+        data["scene_tasks"] = scene_tasks
+        data["scene_tasks_total"] = len(scene_tasks)
+        data["scene_tasks_completed"] = completed_scenes
+        data["scene_tasks_submitted"] = sum(1 for item in scene_tasks if item.get("provider_task_id_masked") or item.get("provider_video_id_masked"))
+        data["current_scene_index"] = _safe_int(active_scene.get("scene_index"), completed_scenes + 1) if scene_tasks else 0
+        data["current_scene_status"] = str(active_scene.get("status") or "")
+        data["final_concat_required"] = bool(orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S and _scene_count(job) > 1)
+        data["concat_ready"] = bool(completed_scenes >= len(scene_tasks) and scene_tasks)
         data["provider_task_ids"] = data.get("provider_task_ids") or [item.get("task_id") for item in provider_events if item.get("task_id")]
         data["provider_video_ids"] = data.get("provider_video_ids") or [item.get("video_id") for item in provider_events if item.get("video_id")]
         data["provider_models"] = data.get("provider_models") or [item.get("model") for item in provider_events if item.get("model")]
@@ -2125,6 +2400,35 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["logo_requested"] = bool(addon.get("logo_enabled"))
     if bgm_audio_path:
         result["bgm_audio_path"] = bgm_audio_path
+    orchestration_mode = product_video_orchestration_mode(job)
+    scene_tasks = product_video_scene_tasks_debug(
+        job,
+        provider_events=provider_events,
+        debug_results=provider_runtime_debug,
+        scene_count=_scene_count(job),
+    )
+    completed_scenes = sum(1 for item in scene_tasks if str(item.get("status") or "").lower() in {"downloaded", "success", "completed"} or item.get("result_url_valid"))
+    active_scene = next(
+        (
+            item
+            for item in scene_tasks
+            if str(item.get("status") or "").lower() not in {"downloaded", "success", "completed"}
+        ),
+        scene_tasks[-1] if scene_tasks else {},
+    )
+    result["orchestration_mode"] = orchestration_mode
+    result["provider_orchestration_mode"] = orchestration_mode
+    result["scene_duration_seconds"] = product_video_scene_duration_seconds(job)
+    result["expected_duration_seconds"] = product_video_expected_duration_seconds(job)
+    result["scene_count"] = _scene_count(job)
+    result["scene_tasks"] = scene_tasks
+    result["scene_tasks_total"] = len(scene_tasks)
+    result["scene_tasks_completed"] = completed_scenes
+    result["scene_tasks_submitted"] = sum(1 for item in scene_tasks if item.get("provider_task_id_masked") or item.get("provider_video_id_masked"))
+    result["current_scene_index"] = _safe_int(active_scene.get("scene_index"), completed_scenes + 1) if scene_tasks else 0
+    result["current_scene_status"] = str(active_scene.get("status") or "")
+    result["final_concat_required"] = bool(orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S and _scene_count(job) > 1)
+    result["concat_ready"] = bool(completed_scenes >= len(scene_tasks) and scene_tasks)
     result["chunk_count"] = result.get("chunk_count") or _scene_count(job)
     result["downloaded_clip_paths"] = result.get("downloaded_clip_paths") or list(result.get("created_files") or [])[:80]
     result["stitch_attempted"] = bool(result.get("master_video_path") or result.get("final_video_path") or result.get("stitch_attempted"))
