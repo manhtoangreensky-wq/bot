@@ -174725,9 +174725,25 @@ def subdub_should_suppress_generic_fail_for_active_job(job: dict | None = None, 
         return True
     terminal = str(current.get("terminal_state") or "").strip().lower()
     status = str(current.get("status") or "").strip().lower()
+    reason_text = subdub_voice_text_normalized(
+        " ".join(str(current.get(key) or "") for key in ("detail", "reason", "error_code", "last_error_stage"))
+    )
+    if any(
+        marker in reason_text
+        for marker in (
+            "missing_valid_delivered_mp4",
+            "input_save_failed",
+            "duration_limit_exceeded",
+            "voice_not_ready",
+        )
+    ):
+        return False
     if terminal.startswith("failed") or status.startswith("failed"):
         return False
     progress = _safe_int(current.get("progress_percent") or current.get("panel_final_percent"), 0)
+    mode = normalize_video_translate_mode(
+        current.get("mode") or current.get("video_processing_mode") or current.get("process_type")
+    )
     if bool(current.get("in_progress")):
         return True
     lifecycle = subdub_canonical_lifecycle_state(
@@ -174755,6 +174771,18 @@ def subdub_should_suppress_generic_fail_for_active_job(job: dict | None = None, 
         "delivering",
     }
     if lifecycle in active_stages and progress >= 10:
+        return True
+    if (
+        mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        and 5 <= progress < 100
+        and lifecycle in active_stages
+    ):
+        return True
+    if (
+        mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        and 5 <= progress < 100
+        and status not in {"input_save_failed", "duration_limit_exceeded", "voice_not_ready"}
+    ):
         return True
     if 10 <= progress < 100 and status in {"", "queued", "running", "processing", "submitted"}:
         return True
@@ -178148,6 +178176,89 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
             })
     return qc_segments
 
+def subdub_wrap_combo_translated_text_for_original_cue(text: str, *, max_chars: int = 42, max_lines: int = 2) -> str:
+    words = re.sub(r"\s+", " ", str(text or "")).strip().split()
+    if not words:
+        return ""
+    lines = []
+    line = ""
+    for word in words:
+        candidate = f"{line} {word}".strip()
+        if line and len(candidate) > max_chars and len(lines) < max_lines - 1:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    if line:
+        lines.append(line)
+    return "\n".join(lines[:max_lines]).strip()
+
+def subdub_preserve_subtitle_plus_dub_cue_timing(source_segments: list[dict], translated_segments: list[dict]) -> list[dict]:
+    sources = []
+    for index, item in enumerate(source_segments or [], start=1):
+        try:
+            start = max(0.0, float((item or {}).get("start") or 0))
+            end = float((item or {}).get("end") or 0)
+        except Exception:
+            continue
+        if end <= start:
+            end = start + 1.0
+        sources.append({
+            "index": int((item or {}).get("index") or index),
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": str((item or {}).get("text") or "").strip(),
+        })
+    translations = []
+    for index, item in enumerate(translated_segments or [], start=1):
+        text = str((item or {}).get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            start = max(0.0, float((item or {}).get("start") or 0))
+            end = float((item or {}).get("end") or 0)
+        except Exception:
+            start = 0.0
+            end = 0.0
+        translations.append({
+            "index": int((item or {}).get("index") or index),
+            "start": start,
+            "end": end if end > start else start + 1.0,
+            "text": text,
+        })
+    if not sources or not translations:
+        return list(translated_segments or [])
+
+    aligned = []
+    used_indexes = set()
+    for source_index, source in enumerate(sources):
+        texts = []
+        source_start = float(source.get("start") or 0)
+        source_end = float(source.get("end") or 0)
+        for trans_index, translated in enumerate(translations):
+            if trans_index in used_indexes:
+                continue
+            trans_start = float(translated.get("start") or 0)
+            trans_end = float(translated.get("end") or 0)
+            overlaps = trans_end > source_start and trans_start < source_end
+            if overlaps:
+                texts.append(str(translated.get("text") or "").strip())
+                used_indexes.add(trans_index)
+        if not texts and source_index < len(translations) and source_index not in used_indexes:
+            texts.append(str(translations[source_index].get("text") or "").strip())
+            used_indexes.add(source_index)
+        text = subdub_wrap_combo_translated_text_for_original_cue(" ".join(item for item in texts if item))
+        if not text:
+            text = subdub_wrap_combo_translated_text_for_original_cue(str(source.get("text") or ""))
+        aligned.append({
+            "index": int(source.get("index") or len(aligned) + 1),
+            "start": float(source.get("start") or 0),
+            "end": float(source.get("end") or 0),
+            "text": text,
+            "cue_timing_preserved": True,
+        })
+    return aligned
+
 def video_dubbing_srt_from_segments(segments: list[dict]) -> str:
     blocks = []
     for idx, item in enumerate(segments or [], start=1):
@@ -178926,8 +179037,10 @@ async def synthesize_dub_segment_chunks(
     voice_style: str = "",
     voice_id: str = "",
     base_speed: float = 1.0,
-    max_speed: float = 1.35,
+    max_speed: float = 1.15,
     allow_admin: bool = False,
+    preserve_cue_text: bool = False,
+    allow_compact_text: bool = True,
 ) -> dict:
     chunks = []
     providers = []
@@ -178940,7 +179053,8 @@ async def synthesize_dub_segment_chunks(
         if end <= start:
             end = start + 1
         slot_seconds = max(0.4, end - start)
-        speed = max(0.7, min(float(max_speed or 1.35), float(base_speed or 1.0)))
+        safe_max_speed = max(0.7, min(1.15, float(max_speed or 1.15)))
+        speed = max(0.7, min(safe_max_speed, float(base_speed or 1.0)))
         try:
             provider, audio_bytes, detail = await video_dubbing_tts_bytes(
                 text,
@@ -178957,8 +179071,8 @@ async def synthesize_dub_segment_chunks(
                 str(speed),
             )
         duration = await video_dubbing_audio_duration_seconds(audio_bytes)
-        if duration > slot_seconds * 1.05 and speed < float(max_speed or 1.35):
-            retry_speed = min(float(max_speed or 1.35), max(speed + 0.05, speed * duration / slot_seconds))
+        if duration > slot_seconds * 1.05 and speed < safe_max_speed:
+            retry_speed = min(safe_max_speed, max(speed + 0.05, speed * duration / slot_seconds))
             try:
                 retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
                     text,
@@ -178979,7 +179093,7 @@ async def synthesize_dub_segment_chunks(
                 provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
                 duration = retry_duration
                 speed = retry_speed
-        if duration > slot_seconds * 1.15:
+        if allow_compact_text and not preserve_cue_text and duration > slot_seconds * 1.15:
             target_chars = max(12, int(slot_seconds * 18))
             compact_words = []
             for word in text.split():
@@ -178989,7 +179103,7 @@ async def synthesize_dub_segment_chunks(
                 compact_words.append(word)
             compact_text = " ".join(compact_words).strip()
             if compact_text and compact_text != text:
-                compact_speed = min(float(max_speed or 1.35), max(speed, 1.1))
+                compact_speed = min(safe_max_speed, max(speed, 1.1))
                 try:
                     compact_provider, compact_audio, compact_detail = await video_dubbing_tts_bytes(
                         compact_text,
@@ -179022,6 +179136,10 @@ async def synthesize_dub_segment_chunks(
             "audio_bytes": bytes(audio_bytes),
             "audio_duration": float(duration or 0),
             "speed": round(speed, 3),
+            "tts_speed_ratio": round(speed, 3),
+            "audio_aligned_to_cues": True,
+            "max_speed_adjustment": round(max(0.0, speed - float(base_speed or 1.0)), 3),
+            "preserve_cue_text": bool(preserve_cue_text),
             "provider": provider,
             "detail": sanitize_log_text(str(detail or ""))[:180],
         })
@@ -179257,6 +179375,16 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             state = set_video_dubbing_pending(user_id, state.get("step") or "processing", **sync_fields, translated_subtitle_ref=translated_ref)
         else:
             output_segments = video_dubbing_segments_from_subtitle(output_subtitle) or output_segments
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            output_segments = subdub_preserve_subtitle_plus_dub_cue_timing(source_segments, output_segments)
+            output_subtitle = video_dubbing_srt_from_segments(output_segments)
+            state = {
+                **state,
+                "subtitle_only_locked": True,
+                "cue_timing_preserved": True,
+                "combo_cue_timing_preserved": True,
+                "subtitle_plus_dub_timing_source": "original_cues",
+            }
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
@@ -179593,10 +179721,15 @@ async def _execute_video_dubbing_pipeline_core(
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
         kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
         kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        kwargs["preserve_cue_text"] = True
+        kwargs["allow_compact_text"] = False
         result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
         if isinstance(result, dict):
             result.update({
                 **speech_config,
+                "dub_timing_mode": "cue_aligned",
+                "audio_aligned_to_cues": True,
+                "max_speed_adjustment": max(0.0, float(kwargs["max_speed"]) - float(kwargs["base_speed"])),
                 "male_fallback_used": False,
             })
         return result

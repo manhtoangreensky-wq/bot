@@ -179,6 +179,10 @@ async def process_subtitle_dub_job(
     normalization_detail = "not_requested"
     tts_chunks: list[dict] = []
     selected_tts_voice_id = ""
+    dub_timing_mode = ""
+    audio_aligned_to_cues = False
+    tts_speed_ratio = 0.0
+    max_speed_adjustment = 0.0
     if _mode_needs_dub(mode):
         selected_tts_voice_id = str(resolve_voice_id(user_id, pipeline_state) or "")
         if not selected_tts_voice_id:
@@ -196,6 +200,12 @@ async def process_subtitle_dub_job(
                 "route_attempts": route_attempts,
             }
         speed = float(parse_voice_speed(str(pipeline_state.get("voice_speed") or "1.0")))
+        configured_max_speed = pipeline_state.get("dub_max_speech_rate") or pipeline_state.get("subdub_dub_max_speech_rate") or pipeline_state.get("voice_max_speed")
+        try:
+            safe_max_speed = float(configured_max_speed)
+        except Exception:
+            safe_max_speed = max(1.02, speed)
+        safe_max_speed = max(speed, min(1.15, safe_max_speed))
         route_attempts["tts"] = True
         segment_tts = await _maybe_await(
             synthesize_segments(
@@ -203,12 +213,16 @@ async def process_subtitle_dub_job(
                 voice_style=pipeline_state.get("voice_style") or "",
                 voice_id=selected_tts_voice_id,
                 base_speed=speed,
-                max_speed=max(1.35, speed),
+                max_speed=safe_max_speed,
             )
         )
         segment_tts = dict(segment_tts or {})
         tts_chunks = list(segment_tts.get("chunks") or [])
         tts_provider = str(segment_tts.get("provider") or "")
+        dub_timing_mode = str(segment_tts.get("dub_timing_mode") or "cue_aligned")
+        audio_aligned_to_cues = bool(segment_tts.get("audio_aligned_to_cues") or tts_chunks)
+        tts_speed_ratio = max((float(item.get("tts_speed_ratio") or item.get("speed") or 0) for item in tts_chunks), default=float(speed or 0))
+        max_speed_adjustment = max((float(item.get("max_speed_adjustment") or 0) for item in tts_chunks), default=float(segment_tts.get("max_speed_adjustment") or 0))
         timeline_duration = max(
             _safe_int(pipeline_state.get("video_duration") or pipeline_state.get("source_duration"), 0),
             int(max((float(item.get("end") or 0) for item in output_segments), default=0)),
@@ -311,6 +325,11 @@ async def process_subtitle_dub_job(
         "video_output": video_output,
         "normalization_detail": normalization_detail,
         "selected_tts_voice_id": selected_tts_voice_id,
+        "dub_timing_mode": dub_timing_mode,
+        "tts_speed_ratio": round(float(tts_speed_ratio or 0), 3),
+        "audio_aligned_to_cues": bool(audio_aligned_to_cues),
+        "max_speed_adjustment": round(float(max_speed_adjustment or 0), 3),
+        "cue_timing_preserved": bool(pipeline_state.get("cue_timing_preserved") or pipeline_state.get("combo_cue_timing_preserved")),
         "output_type": output_type,
         "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider") or tts_provider),
         "charged": False,
