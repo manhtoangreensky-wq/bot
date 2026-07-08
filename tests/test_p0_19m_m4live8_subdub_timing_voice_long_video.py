@@ -22,24 +22,25 @@ def _function_source(name: str) -> str:
     return BOT_SOURCE[start:] if next_start < 0 else BOT_SOURCE[start:next_start]
 
 
-def test_m4live8_ass_preserves_original_start_end_not_text_weight_duration():
+def test_m4live8b_subtitle_only_ass_restored_to_m4live7_text_chunking():
     source = _function_source("subdub_generate_ass_from_srt")
 
-    assert "subtitle_timing_preserved: yes" in source
-    assert "subtitle_text_length_duration_split: no" in source
-    assert "total_weight" not in source
-    assert "elapsed_weight" not in source
-    assert "chunk_start = block_start + ((block_end - block_start)" not in source
-    assert "subdub_ass_timestamp(block_start)" in source
-    assert "subdub_ass_timestamp(block_end)" in source
+    assert "subtitle_timing_preserved: yes" not in source
+    assert "subtitle_text_length_duration_split: no" not in source
+    assert "subdub_ass_text_chunks" in source
+    assert "total_weight" in source
+    assert "elapsed_weight" in source
+    assert "chunk_start = block_start + ((block_end - block_start)" in source
+    assert "subdub_ass_timestamp(chunk_start)" in source
+    assert "subdub_ass_timestamp(chunk_end)" in source
 
 
-def test_m4live8_long_translation_text_does_not_shorten_last_segment():
+def test_m4live8b_subtitle_only_no_single_cue_timing_override():
     source = _function_source("subdub_generate_ass_from_srt")
 
-    assert "Long text wraps; it must not shorten the cue." in source
-    assert "last_dialogue_end = max(last_dialogue_end, block_end)" in source
-    assert "subdub_ass_wrap_text(str(block.get(\"text\") or \"\"), style" in source
+    assert "Long text wraps; it must not shorten the cue." not in source
+    assert "last_dialogue_end = max(last_dialogue_end, chunk_end)" in source
+    assert "subdub_ass_wrap_text(chunk, style" in source
 
 
 def test_m4live8_processing_65_suppresses_generic_fail_text():
