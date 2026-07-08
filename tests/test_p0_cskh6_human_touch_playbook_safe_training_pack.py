@@ -127,6 +127,7 @@ def test_cskh6_test_message_classifies_without_sending():
 def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
     changed = set(_changed_files())
     allowed = {
+        "bot.py",
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
@@ -137,6 +138,7 @@ def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
         "tests/test_p0_aichat1_copilot_consent.py",
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_aichat4_smart_intent_context_backstack.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",

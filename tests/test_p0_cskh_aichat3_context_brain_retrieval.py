@@ -126,7 +126,7 @@ def test_prompt_and_uploaded_clip_question_get_concrete_human_reply():
     prompt = cskh.classify_cskh_message("tạo prompt video nước hoa nam")
     clip = cskh.classify_cskh_message("chị gửi clip này làm gì được")
 
-    assert prompt["intent_id"] == "prompt_video_generation"
+    assert prompt["intent_id"] == "prompt_create_request"
     assert "nước hoa nam" in prompt["reply"]
     assert "9:16" in prompt["reply"]
     assert "provider" not in cskh._fold(prompt["reply"])

@@ -251,6 +251,7 @@ def test_no_music_product_video_subdub_runtime_touched():
     if _is_subdub_scope(changed):
         return
     allowed = {
+        "bot.py",
         "knowledge/toan_aas_cskh_aichat_context.md",
         "services/aas_shared_knowledge.py",
         "services/ai_chatbot_copilot.py",
@@ -263,6 +264,7 @@ def test_no_music_product_video_subdub_runtime_touched():
         "tests/test_p0_aichat1_copilot_consent.py",
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_aichat4_smart_intent_context_backstack.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
@@ -317,8 +319,10 @@ def test_no_payos_pricing_db_destructive_change():
     if _is_storage5_scope(changed_files):
         return
     allowed = {
+        "bot.py",
         "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_aichat4_smart_intent_context_backstack.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
     }

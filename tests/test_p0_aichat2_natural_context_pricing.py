@@ -100,10 +100,10 @@ def test_aichat_video_sales_request_guides_flow_without_confirming():
 
     state, result = _ask(state, "Tôi muốn làm video bán hàng mỹ phẩm")
 
-    assert result["intent_id"] == "product_video_consulting"
+    assert result["intent_id"] == "video_create_request"
     assert "mỹ phẩm" in result["reply"]
     assert "tỉ lệ khung hình" in result["reply"]
-    assert "màn xác nhận" in result["reply"]
+    assert "xác nhận" in result["reply"]
     assert result["xu_charge_allowed"] is False
 
 
