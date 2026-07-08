@@ -685,11 +685,11 @@ def _product_video_pending_request_is_scene(job: dict | None = None) -> bool:
 
 
 def product_video_orchestration_mode(job: dict | None = None) -> str:
-    """New Product Video jobs render one provider task per 8s scene.
+    """Return the Product Video provider orchestration mode.
 
-    Jobs that were already running before R16 may only have one provider task
-    id and no scene request id. Those stay on the legacy path so we do not
-    mutate live in-progress provider work.
+    Public jobs default to the R14B raw delivery path. The R16 per-scene
+    orchestrator remains available for explicitly marked jobs and live jobs
+    that already carry scene-task state.
     """
     job = dict(job or {})
     invoice = _invoice_payload(job)
@@ -715,6 +715,12 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
     }
     if explicit in aliases:
         return aliases[explicit]
+    for key in ("scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
+        value = job.get(key)
+        if isinstance(value, str):
+            value = _json_loads(value, [])
+        if isinstance(value, list) and any(isinstance(item, dict) for item in value):
+            return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
     task_present = bool(
         job.get("provider_pending_task_id")
         or job.get("provider_pending_video_id")
@@ -723,7 +729,9 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
     )
     if task_present and not _product_video_pending_request_is_scene(job):
         return PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK
-    return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+    if _product_video_pending_request_is_scene(job):
+        return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+    return PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK
 
 
 def product_video_scene_duration_seconds(job: dict | None = None) -> int:

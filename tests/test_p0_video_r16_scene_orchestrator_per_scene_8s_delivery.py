@@ -27,6 +27,8 @@ def _hydrated_job(*, scene_count=2, persisted_result=None):
         "submit_source": "public_user_final_confirm",
         "provider_submit_source": "public_user_final_confirm",
         "public_user_confirmed": True,
+        "orchestration_mode": "per_scene_8s",
+        "provider_orchestration_mode": "per_scene_8s",
     }
     invoice = {
         "source": "product_video",
@@ -38,6 +40,8 @@ def _hydrated_job(*, scene_count=2, persisted_result=None):
         "submit_source": "public_user_final_confirm",
         "provider_submit_source": "public_user_final_confirm",
         "public_user_confirmed": True,
+        "orchestration_mode": "per_scene_8s",
+        "provider_orchestration_mode": "per_scene_8s",
     }
     return {
         "id": 87,
@@ -67,7 +71,7 @@ def _hydrated_job(*, scene_count=2, persisted_result=None):
     }
 
 
-def test_product_video_worker_payload_defaults_to_per_scene_8s():
+def test_product_video_worker_payload_honors_explicit_per_scene_8s():
     payload = remote_worker_api.build_worker_job_payload(_hydrated_job(scene_count=3))
 
     assert payload["source"] == "product_video"
@@ -247,7 +251,7 @@ def test_scene_request_polls_existing_scene_task_without_public_submit_source(mo
 
 
 def test_debug_and_public_status_include_scene_orchestrator_fields():
-    assert '"orchestration_mode": "per_scene_8s"' in REMOTE_WORKER_API_SOURCE
+    assert '"per_scene_8s"' in REMOTE_WORKER_API_SOURCE
     assert '"provider_scene_tasks": scene_tasks' in REMOTE_WORKER_API_SOURCE
     assert '"provider_scene_tasks": connector_result.get("scene_tasks")' in REMOTE_WORKER_SOURCE
     assert "Đang dựng cảnh <b>{current_scene}/{scene_total}</b>" in BOT_SOURCE

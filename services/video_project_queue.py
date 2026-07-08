@@ -1390,6 +1390,9 @@ def heartbeat_video_job(
 PRODUCT_VIDEO_SCENE_SECONDS = 8
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
+PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY = "single_task_legacy"
+PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE = "per_scene_8s"
+PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES = {"per_scene_8s", "per_scene", "scene", "scene_orchestrator"}
 
 
 def _split_product_video_provider_chain(value: Any) -> list[str]:
@@ -1476,6 +1479,18 @@ def product_video_initial_scene_tasks(
     ]
 
 
+def _product_video_orchestration_mode_from_sources(*sources: dict[str, Any] | None) -> str:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        value = str(source.get("orchestration_mode") or source.get("provider_orchestration_mode") or "").strip().lower()
+        if value in PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES:
+            return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE
+        if value in {"single_task", "legacy", "legacy_single_task", "single_task_legacy", "raw_render_delivery"}:
+            return PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY
+    return PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY
+
+
 def build_product_video_confirm_kickoff_payload(
     job: dict[str, Any],
     project: dict[str, Any],
@@ -1486,7 +1501,19 @@ def build_product_video_confirm_kickoff_payload(
     current_dt = now or datetime.now()
     scene_count = _product_video_scene_count(project)
     scene_duration = PRODUCT_VIDEO_SCENE_SECONDS
-    scene_tasks = product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count, scene_duration)
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    orchestration_mode = _product_video_orchestration_mode_from_sources(dict(job or {}), asset_pack, invoice, dict(project or {}))
+    per_scene_orchestration = orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE
+    scene_tasks = (
+        product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count, scene_duration)
+        if per_scene_orchestration
+        else []
+    )
     chain = list(provider_chain if provider_chain is not None else resolve_product_video_provider_chain())
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
     provider_chain_resolved = bool(chain)
@@ -1506,8 +1533,10 @@ def build_product_video_confirm_kickoff_payload(
         "charge": 0,
         "charged_xu": 0,
         "no_charge_before_final_mp4": True,
-        "orchestration_mode": "per_scene_8s",
-        "provider_orchestration_mode": "per_scene_8s",
+        "orchestration_mode": orchestration_mode,
+        "provider_orchestration_mode": orchestration_mode,
+        "raw_render_delivery_baseline": not per_scene_orchestration,
+        "r18a_raw_render_delivery_default": not per_scene_orchestration,
         "scene_count": scene_count,
         "scenes_total": scene_count,
         "scene_duration_seconds": scene_duration,
@@ -1516,18 +1545,18 @@ def build_product_video_confirm_kickoff_payload(
         "duration_seconds": scene_count * scene_duration,
         "scene_tasks": scene_tasks,
         "provider_scene_tasks": scene_tasks,
-        "scene_tasks_total": scene_count,
-        "scene_tasks_created_count": scene_count,
+        "scene_tasks_total": scene_count if per_scene_orchestration else 0,
+        "scene_tasks_created_count": scene_count if per_scene_orchestration else 0,
         "scene_tasks_submitted": 0,
         "scene_tasks_submitted_count": 0,
         "scene_tasks_completed": 0,
         "scenes_done": 0,
-        "scenes_pending": scene_count,
+        "scenes_pending": scene_count if per_scene_orchestration else 0,
         "scenes_running": 0,
-        "current_scene": 1 if scene_count else 0,
-        "current_scene_index": 1 if scene_count else 0,
-        "current_scene_status": "pending_submit",
-        "final_concat_required": scene_count > 1,
+        "current_scene": 1 if per_scene_orchestration and scene_count else 0,
+        "current_scene_index": 1 if per_scene_orchestration and scene_count else 0,
+        "current_scene_status": "pending_submit" if per_scene_orchestration else "",
+        "final_concat_required": bool(per_scene_orchestration and scene_count > 1),
         "concat_ready": False,
         "configured_provider_chain": chain,
         "effective_provider_chain": chain,

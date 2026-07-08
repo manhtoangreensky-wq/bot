@@ -34,6 +34,8 @@ def _product_project(conn, *, user_id=9090, scene_count=2, total_xu=400):
         "original_submit_source": "public_user_final_confirm",
         "public_user_confirmed": True,
         "provider_order": "shopaikey_video,key4u_video",
+        "orchestration_mode": "per_scene_8s",
+        "provider_orchestration_mode": "per_scene_8s",
     }
     invoice = {
         **asset_pack,
