@@ -84880,6 +84880,16 @@ def aichat_control_keyboard(payload: dict | None = None) -> InlineKeyboardMarkup
     rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="aichat|back_freehub"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+def aichat_trace_keyboard(payload: dict | None = None) -> InlineKeyboardMarkup:
+    data = payload or {}
+    back_callback = "aichat|back_active" if data.get("enabled") else "aichat|back_freehub"
+    back_label = "⬅️ AI Chatbot" if data.get("enabled") else "⬅️ Công cụ miễn phí"
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(back_label, callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ]
+    )
+
 def aichat_result_keyboard(result: dict, payload: dict | None = None) -> InlineKeyboardMarkup:
     rows = []
     flow = dict((result or {}).get("target_flow") or {})
@@ -84900,6 +84910,10 @@ def aichat_status_text(payload: dict) -> str:
         f"• Assist actions: <code>{'yes' if payload.get('assist_actions') else 'no'}</code>\n"
         f"• Last intent: <code>{html.escape(str(last.get('intent_id') or '-'))}</code>\n"
         f"• Last source: <code>{html.escape(', '.join(map(str, last.get('source') or [])) or '-')}</code>\n"
+        f"• Context used: <code>{'yes' if last.get('context_file_used') else 'no'}</code>\n"
+        f"• Context version: <code>{html.escape(str(last.get('context_version') or last.get('context_file_version') or '-'))}</code>\n"
+        f"• Last topic: <code>{html.escape(str(last.get('previous_topic') or last.get('last_product_type') or '-'))}</code>\n"
+        f"• Last subject: <code>{html.escape(str(last.get('last_subject') or '-'))}</code>\n"
         f"• Last permission: <code>{html.escape(str(last.get('permission') or '-'))}</code>\n"
         f"• Last action guard: <code>{html.escape(str(last.get('action_guard') or '-'))}</code>\n"
         f"• State source: <code>{html.escape(str(payload.get('state_source') or '-'))}</code>\n\n"
@@ -84920,6 +84934,8 @@ def aichat_trace_text(payload: dict) -> str:
                 f"   intent=<code>{html.escape(str(item.get('intent_id') or '-'))}</code> replied=<code>{'yes' if item.get('replied') else 'no'}</code>",
                 f"   source=<code>{html.escape(', '.join(map(str, item.get('source') or [])) or '-')}</code>",
                 f"   permission=<code>{html.escape(str(item.get('permission') or '-'))}</code> guard=<code>{html.escape(str(item.get('action_guard') or '-'))}</code>",
+                f"   context=<code>{'yes' if item.get('context_file_used') else 'no'}</code> version=<code>{html.escape(str(item.get('context_version') or item.get('context_file_version') or '-'))}</code> topic=<code>{html.escape(str(item.get('previous_topic') or item.get('last_product_type') or '-'))}</code>",
+                f"   subject=<code>{html.escape(str(item.get('last_subject') or item.get('last_requested_asset') or '-'))}</code>",
                 f"   flow=<code>{html.escape(str(flow.get('callback') or '-'))}</code> learning=<code>{html.escape(str(item.get('learning_candidate_id') or '-'))}</code>",
                 f"   reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
             ]
@@ -84944,7 +84960,7 @@ async def cmd_aichat_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
         return
     payload = ai_chatbot_copilot.status_payload(aichat_state(), update.effective_user.id)
-    await update.message.reply_text(aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+    await update.message.reply_text(aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
 
 async def cmd_aichat_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
@@ -84972,7 +84988,7 @@ async def cmd_aichat_trace(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
         return
     payload = ai_chatbot_copilot.status_payload(aichat_state(), update.effective_user.id)
-    await update.message.reply_text(aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+    await update.message.reply_text(aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
 
 async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -84982,6 +84998,11 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
     lang = get_user_language(uid) or "vi"
     state = aichat_state()
     if action == "back_freehub":
+        return await safe_edit_or_send(query, free_hub_main_text(lang), parse_mode="HTML", reply_markup=free_hub_main_keyboard(lang))
+    if action == "back_active":
+        payload = ai_chatbot_copilot.status_payload(state, uid)
+        if payload.get("enabled"):
+            return await safe_edit_or_send(query, aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
         return await safe_edit_or_send(query, free_hub_main_text(lang), parse_mode="HTML", reply_markup=free_hub_main_keyboard(lang))
     if action == "on":
         state, result = ai_chatbot_copilot.request_enable(state, uid)
@@ -85005,8 +85026,8 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
         return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_control_keyboard(payload))
     payload = ai_chatbot_copilot.status_payload(state, uid)
     if action == "trace":
-        return await safe_edit_or_send(query, aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
-    return await safe_edit_or_send(query, aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_control_keyboard(payload))
+        return await safe_edit_or_send(query, aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
+    return await safe_edit_or_send(query, aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
 
 async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:

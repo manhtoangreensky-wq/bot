@@ -15,6 +15,7 @@ from services import telegram_business_support as cskh
 
 STATE_VERSION = 1
 TRACE_LIMIT = 10
+CONVERSATION_TTL_SECONDS = 30 * 60
 DEFAULT_REPLY = (
     "Dạ em chưa hiểu rõ ý mình. Anh/chị nói rõ hơn muốn hỏi về giá, cách dùng, "
     "tạo prompt, ảnh, video, voice, nhạc hay SubDub ạ?"
@@ -215,7 +216,12 @@ def status_payload(state: dict, user_id: str | int) -> dict:
 
 def conversation_memory(state: dict, user_id: str | int) -> dict:
     clean = normalize_state(state)
-    return dict(clean["conversations"].get(str(user_id)) or {})
+    uid = str(user_id)
+    memory = dict(clean["conversations"].get(uid) or {})
+    if memory and float(memory.get("expires_at") or 0) < time.time():
+        clean["conversations"].pop(uid, None)
+        return {}
+    return memory
 
 
 def update_conversation_memory(state: dict, user_id: str | int, text: str, result: dict, *, now: float | None = None) -> dict:
@@ -237,14 +243,37 @@ def update_conversation_memory(state: dict, user_id: str | int, text: str, resul
         or memory.get("last_product")
         or ""
     )
+    topic = str(
+        result.get("previous_topic")
+        or classification.get("previous_topic")
+        or result.get("last_product_type")
+        or classification.get("last_product_type")
+        or ("image" if product == "image_ai" else ("video" if product == "product_video" else product))
+        or ""
+    )
+    last_subject = str(
+        result.get("last_subject")
+        or classification.get("last_subject")
+        or result.get("last_requested_asset")
+        or classification.get("last_requested_asset")
+        or memory.get("last_subject")
+        or ""
+    ).strip()
     clean["conversations"][uid] = {
         "last_messages": messages,
+        "previous_intent": memory.get("last_intent") or memory.get("previous_intent") or "",
+        "previous_topic": topic or memory.get("previous_topic") or "",
         "last_intent": intent_id,
         "last_product": product,
+        "last_product_type": topic or product,
+        "last_requested_asset": str(result.get("last_requested_asset") or classification.get("last_requested_asset") or last_subject or memory.get("last_requested_asset") or ""),
+        "last_subject": last_subject,
+        "last_flow_suggestion": str(result.get("last_flow_suggestion") or classification.get("last_flow_suggestion") or memory.get("last_flow_suggestion") or ""),
         "conversation_stage": cskh.conversation_stage_for_intent(intent_id),
         "last_source": list(result.get("source") or []),
         "last_reply_preview": _safe_text(result.get("reply") or "", 240),
         "updated_at": current,
+        "expires_at": current + CONVERSATION_TTL_SECONDS,
     }
     return clean
 
@@ -423,6 +452,15 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
     elif _is_refund_or_credit_request(clean_text, classification):
         reply = POLICY_GUARD_REPLY
         action_guard = "admin_review_required"
+    elif intent_id in {"image_create_request", "video_create_request"}:
+        flow = _flow_for_text(clean_text, classification)
+        permission = "assist_actions" if assist_actions else "default_answer"
+        action_guard = "prepare_flow_stop_at_confirm" if assist_actions else "needs_action_permission"
+        if assist_actions:
+            reply = (
+                f"{reply}\n\n"
+                f"Em có thể dẫn mình tới flow <b>{flow['label']}</b>, nhưng tác vụ tốn Xu vẫn dừng ở màn báo giá hoặc xác nhận để anh/chị tự bấm."
+            )
     elif _is_real_creation_request(clean_text):
         flow = _flow_for_text(clean_text, classification)
         permission = "assist_actions" if assist_actions else "default_answer"
@@ -456,11 +494,18 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "learning_queue": bool(learning_candidate),
         "context_file_path": str(classification.get("context_file_path") or ""),
         "context_file_version": str(classification.get("context_file_version") or ""),
+        "context_file_used": bool(classification.get("context_file_used")),
+        "context_version": str(classification.get("context_version") or classification.get("context_file_version") or ""),
         "source_file_version": str(classification.get("source_file_version") or classification.get("context_file_version") or ""),
         "context_section_used": str(classification.get("context_section_used") or ""),
         "context_sections": list(classification.get("context_sections") or []),
         "retrieval": dict(classification.get("retrieval") or {}),
         "human_last_reply_required": bool(classification.get("human_last_reply_required", True)),
+        "previous_topic": str(classification.get("previous_topic") or ""),
+        "last_product_type": str(classification.get("last_product_type") or ""),
+        "last_requested_asset": str(classification.get("last_requested_asset") or ""),
+        "last_subject": str(classification.get("last_subject") or ""),
+        "last_flow_suggestion": str(classification.get("last_flow_suggestion") or ""),
         "provider_call_allowed": False,
         "xu_charge_allowed": False,
         "invoice_confirm_allowed": False,
@@ -512,9 +557,16 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "action_guard": str(result.get("action_guard") or ""),
         "confidence": str(result.get("confidence") or (result.get("classification") or {}).get("confidence") or ""),
         "context_file_version": str(result.get("context_file_version") or (result.get("classification") or {}).get("context_file_version") or ""),
+        "context_file_used": bool(result.get("context_file_used") or (result.get("classification") or {}).get("context_file_used")),
+        "context_version": str(result.get("context_version") or (result.get("classification") or {}).get("context_version") or ""),
         "source_file_version": str(result.get("source_file_version") or (result.get("classification") or {}).get("source_file_version") or ""),
         "context_section_used": str(result.get("context_section_used") or (result.get("classification") or {}).get("context_section_used") or ""),
         "context_sections": list(result.get("context_sections") or (result.get("classification") or {}).get("context_sections") or []),
+        "previous_topic": str(result.get("previous_topic") or (result.get("classification") or {}).get("previous_topic") or ""),
+        "last_product_type": str(result.get("last_product_type") or (result.get("classification") or {}).get("last_product_type") or ""),
+        "last_subject": str(result.get("last_subject") or (result.get("classification") or {}).get("last_subject") or ""),
+        "last_requested_asset": str(result.get("last_requested_asset") or (result.get("classification") or {}).get("last_requested_asset") or ""),
+        "last_flow_suggestion": str(result.get("last_flow_suggestion") or (result.get("classification") or {}).get("last_flow_suggestion") or ""),
         "learning_queue": bool(result.get("learning_queue") or result.get("learning_candidate_id")),
         "target_flow": dict(result.get("target_flow") or {}),
         "learning_candidate_id": str(result.get("learning_candidate_id") or ""),

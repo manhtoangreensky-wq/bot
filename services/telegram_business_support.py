@@ -729,6 +729,19 @@ def update_conversation_memory(
     bot_replies = bot_replies[-3:]
     intent_id = str((classification or {}).get("intent_id") or memory.get("last_intent") or "")
     product = str((classification or {}).get("product") or memory.get("last_product") or _infer_product(intent_id))
+    topic = str(
+        (classification or {}).get("previous_topic")
+        or (classification or {}).get("last_product_type")
+        or ("image" if product == "image_ai" else ("video" if product == "product_video" else product))
+        or memory.get("previous_topic")
+        or ""
+    )
+    last_subject = str(
+        (classification or {}).get("last_subject")
+        or (classification or {}).get("last_requested_asset")
+        or memory.get("last_subject")
+        or ""
+    ).strip()
     missing = list((classification or {}).get("missing_fields") or memory.get("last_missing_fields") or [])
     repeated = bool(intent_id == "repeated_ping" or len([item for item in messages if _fold(item.get("text", "")) in {"alo", "hi", "hello", "co ai khong"}]) >= 2)
     unresolved = str(memory.get("unresolved_question") or "")
@@ -742,8 +755,14 @@ def update_conversation_memory(
         "business_connection_id_masked": mask_business_connection_id(event.business_connection_id or memory.get("business_connection_id") or ""),
         "last_messages": messages,
         "last_bot_replies": bot_replies,
+        "previous_intent": memory.get("last_intent") or memory.get("previous_intent") or "",
+        "previous_topic": topic or memory.get("previous_topic") or "",
         "last_intent": intent_id,
         "last_product": product,
+        "last_product_type": topic or product,
+        "last_requested_asset": str((classification or {}).get("last_requested_asset") or last_subject or memory.get("last_requested_asset") or ""),
+        "last_subject": last_subject,
+        "last_flow_suggestion": str((classification or {}).get("last_flow_suggestion") or memory.get("last_flow_suggestion") or ""),
         "last_missing_fields": missing,
         "last_ticket_required": bool((classification or {}).get("ticket_required", memory.get("last_ticket_required", False))),
         "last_handoff_required": bool((classification or {}).get("handoff_required", memory.get("last_handoff_required", False))),
@@ -2384,6 +2403,8 @@ def _apply_shared_doc_answer(
             "shared_docs": dict(shared.get("shared_docs") or {}),
             "context_file_path": str(shared.get("context_file_path") or result.get("context_file_path") or ""),
             "context_file_version": str(shared.get("context_file_version") or result.get("context_file_version") or ""),
+            "context_file_used": bool(shared.get("context_file_used", result.get("context_file_used", False))),
+            "context_version": str(shared.get("context_version") or shared.get("context_file_version") or result.get("context_version") or ""),
             "source_file_version": str(shared.get("source_file_version") or result.get("source_file_version") or ""),
             "context_section_used": str(shared.get("context_section_used") or result.get("context_section_used") or ""),
             "context_sections": list(shared.get("context_sections") or result.get("context_sections") or []),
@@ -2391,6 +2412,11 @@ def _apply_shared_doc_answer(
             "human_last_reply_required": bool(shared.get("human_last_reply_required", result.get("human_last_reply_required", True))),
             "would_queue_learning": bool(shared.get("would_queue_learning", result.get("would_queue_learning", False))),
             "learning_queue": bool(shared.get("learning_queue", result.get("learning_queue", False))),
+            "previous_topic": str(shared.get("previous_topic") or result.get("previous_topic") or ""),
+            "last_product_type": str(shared.get("last_product_type") or result.get("last_product_type") or ""),
+            "last_requested_asset": str(shared.get("last_requested_asset") or result.get("last_requested_asset") or ""),
+            "last_subject": str(shared.get("last_subject") or result.get("last_subject") or ""),
+            "last_flow_suggestion": str(shared.get("last_flow_suggestion") or result.get("last_flow_suggestion") or ""),
             "conversation_stage": conversation_stage_for_intent(intent_id),
         }
     )

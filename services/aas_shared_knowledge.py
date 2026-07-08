@@ -285,7 +285,7 @@ def _section_for_intent(intent_id: str) -> str:
         return "fallback_policy"
     if intent.startswith("complaint") or intent in {"refund_request", "angry_customer", "public_negative_comment", "escalation_manager", "product_video_failed_no_file"}:
         return "scenario_dialogues"
-    if intent.startswith("prompt") or intent in {"prompt_video_generation", "content_asset_suggestion"}:
+    if intent.startswith("prompt") or intent in {"prompt_video_generation", "prompt_create_request", "image_create_request", "video_create_request", "content_asset_suggestion"}:
         return "usage_guides"
     if intent in {"farewell", "customer_silent_followup"}:
         return "human_last_reply_policy"
@@ -373,6 +373,181 @@ def _is_file_capability_question(folded: str) -> bool:
     return any(term in folded for term in ("gui clip nay", "gui file nay", "clip nay lam gi", "file nay lam gi", "anh nay lam gi", "video nay lam gi"))
 
 
+def _memory_topic(memory: dict | None) -> str:
+    data = memory or {}
+    topic = fold(str(data.get("previous_topic") or data.get("last_product_type") or data.get("last_product") or ""))
+    intent = fold(str(data.get("previous_intent") or data.get("last_intent") or ""))
+    if topic in {"image", "image_ai", "anh", "hinh"} or intent == "image_create_request":
+        return "image"
+    if topic in {"video", "product_video"} or intent == "video_create_request":
+        return "video"
+    if "pricing" in intent or topic in {"payment_xu", "xu"}:
+        return "pricing"
+    return topic
+
+
+def _memory_subject(memory: dict | None) -> str:
+    data = memory or {}
+    return str(data.get("last_subject") or data.get("last_requested_asset") or "").strip()
+
+
+def _has_image_keyword(raw: str, folded: str) -> bool:
+    raw_lower = str(raw or "").lower()
+    return (
+        "ảnh" in raw_lower
+        or "hình" in raw_lower
+        or any(term in folded for term in ("hinh", "image", "photo", "picture", "avatar", "logo"))
+    )
+
+
+def _has_video_keyword(folded: str) -> bool:
+    return any(term in folded for term in ("video", "clip", "reel", "short", "tiktok", "dung video", "lam phim"))
+
+
+def _has_create_action(folded: str) -> bool:
+    return any(term in folded for term in ("tao", "lam", "ve", "dung", "bien", "thiet ke", "viet", "soan"))
+
+
+def _has_prompt_keyword(folded: str) -> bool:
+    return any(term in folded for term in ("prompt", "caption", "hashtag", "y tuong", "kich ban"))
+
+
+def _is_short_image_followup(raw: str, folded: str, memory: dict | None) -> bool:
+    if str(raw or "").strip().lower() == "ảnh":
+        return True
+    return folded in {"anh", "hinh", "lam anh di", "tao anh di", "tiep", "tiep di", "lam di", "duoc", "ok", "duoc khong"} and _memory_topic(memory) == "image"
+
+
+def _is_short_video_followup(folded: str, memory: dict | None) -> bool:
+    return folded in {"video", "clip", "lam video di", "tao video di", "tiep", "tiep di", "lam di", "duoc", "ok", "duoc khong"} and _memory_topic(memory) == "video"
+
+
+def _is_short_price_followup(folded: str, memory: dict | None) -> bool:
+    return folded in {"gia", "bao gia", "bao nhieu", "nhieu xu", "xu", "phi"} and _memory_topic(memory) in {"image", "video", "pricing"}
+
+
+def _subject_from_match(raw: str, pattern: str) -> str:
+    match = re.search(pattern, str(raw or ""), flags=re.IGNORECASE)
+    return match.group(1).strip(" .,!?:;\"'") if match else ""
+
+
+def _clean_subject(subject: str) -> str:
+    clean = re.sub(r"\s+", " ", str(subject or "").strip(" .,!?:;\"'"))
+    clean = re.sub(r"^(về|ve|cho|của|cua|theo)\s+", "", clean, flags=re.IGNORECASE).strip()
+    clean = re.sub(r"\s+(được không|duoc khong|nhé|nha|đi|di)$", "", clean, flags=re.IGNORECASE).strip()
+    if not clean:
+        return ""
+    clean = re.sub(r"\blexus\b", "Lexus", clean, flags=re.IGNORECASE)
+    return clean[:120]
+
+
+def _extract_image_subject(raw: str) -> str:
+    patterns = (
+        r"(?:bức\s+ảnh|ảnh|hình)\s+(?:về|ve|cho|của|cua)?\s*(.+)$",
+        r"(?:tạo|tao|làm|lam|vẽ|ve|thiết kế|thiet ke)\s+(?:dùm|dum|giúp|giup)?\s*(?:tôi|toi|em|anh|chị|chi)?\s*(?:một|1)?\s*(?:bức\s+)?(?:ảnh|hình)\s*(?:về|ve|cho)?\s*(.+)$",
+        r"(?:biến|bien)\s+(.+?)\s+thành\s+(?:ảnh|hình)",
+    )
+    for pattern in patterns:
+        subject = _clean_subject(_subject_from_match(raw, pattern))
+        if subject and fold(subject) not in {"duoc khong", "di", "nha", "nhe"}:
+            return subject
+    return ""
+
+
+def _extract_video_subject(raw: str, folded: str) -> str:
+    if "my pham" in folded:
+        return "mỹ phẩm"
+    if "nuoc hoa" in folded:
+        return "nước hoa"
+    subject = _clean_subject(_subject_from_match(raw, r"(?:video|clip)\s+(?:bán hàng|ban hang|quảng cáo|quang cao)?\s*(.+)$"))
+    return subject
+
+
+def _extract_prompt_subject(raw: str) -> str:
+    return _clean_subject(
+        _subject_from_match(
+            raw,
+            r"(?:tạo|tao|viết|viet|cho tôi|cho toi)?\s*prompt\s+(?:tạo\s+ảnh|tao anh|ảnh|anh|video)?\s*(.+)$",
+        )
+    )
+
+
+def _is_image_create_request(raw: str, folded: str, memory: dict | None) -> bool:
+    if _is_short_image_followup(raw, folded, memory):
+        return True
+    if _has_image_keyword(raw, folded) and _has_create_action(folded):
+        return True
+    if _has_image_keyword(raw, folded) and any(term in folded for term in ("duoc khong", "duoc ko", "lam duoc khong", "tao duoc khong")):
+        return True
+    if _memory_topic(memory) == "image" and folded in {"duoc khong", "lam di", "tiep", "ok", "duoc"}:
+        return True
+    return False
+
+
+def _is_video_create_request(raw: str, folded: str, memory: dict | None) -> bool:
+    if _is_short_video_followup(folded, memory):
+        return True
+    return _has_video_keyword(folded) and any(term in folded for term in ("tao", "lam", "dung", "quang cao", "ban hang"))
+
+
+def image_create_reply(raw: str, *, memory: dict | None = None, subject: str = "") -> str:
+    remembered = _memory_subject(memory)
+    topic = subject or remembered
+    if topic:
+        if "lexus" in fold(topic):
+            prompt = (
+                "Ảnh quảng cáo xe Lexus màu đen chạy trên đường phố ban đêm, ánh đèn phản chiếu trên thân xe, "
+                "phong cách luxury automotive commercial, cinematic lighting, ultra realistic, sharp details, 9:16."
+            )
+        else:
+            prompt = (
+                f"Ảnh quảng cáo {topic}, bố cục rõ chủ thể, ánh sáng đẹp, phong cách thương mại cao cấp, "
+                "màu sắc sạch, chi tiết sắc nét, tỉ lệ 9:16, không chữ rối, không phóng đại."
+            )
+        if not subject and remembered and str(raw or "").strip().lower() in {"ảnh", "anh"}:
+            return (
+                f"Dạ mình đang muốn tiếp tục tạo ảnh {remembered} đúng không ạ? Em có thể giúp anh/chị theo 2 cách: "
+                f"tạo prompt ảnh {remembered} trước, hoặc hướng mình vào luồng Tạo ảnh để tạo ảnh thật trong bot."
+            )
+        return (
+            f"Dạ được ạ. Em soạn sẵn prompt ảnh {topic} cho anh/chị trước nha. Nếu anh/chị muốn tạo ảnh thật trong bot, "
+            "mình vào Tạo ảnh, chọn gói và xác nhận hóa đơn rồi hệ thống mới xử lý.\n\n"
+            f"Prompt đề xuất:\n<code>{prompt}</code>\n\n"
+            "Anh/chị muốn em hướng theo phong cách sang trọng, thể thao hay showroom cao cấp ạ?"
+        )
+    if _memory_topic(memory) == "image":
+        return (
+            "Dạ được ạ. Em có thể hỗ trợ anh/chị chuẩn bị prompt ảnh và hướng vào luồng Tạo ảnh. "
+            "Phần tạo ảnh thật sẽ có hóa đơn trước khi xử lý, anh/chị xác nhận rồi hệ thống mới trừ Xu nếu ảnh tạo hợp lệ. "
+            "Mình muốn tạo ảnh về nội dung gì ạ?"
+        )
+    return (
+        "Dạ anh/chị muốn tạo ảnh mới, xem giá tạo ảnh hay chỉnh ảnh có sẵn ạ? "
+        "Nếu muốn tạo ảnh thật, bot sẽ hiện hóa đơn trước khi xử lý; nếu chỉ cần prompt thì em viết miễn phí trước cho mình."
+    )
+
+
+def video_create_reply(raw: str, folded: str) -> str:
+    subject = _extract_video_subject(raw, folded) or "sản phẩm"
+    return (
+        f"Dạ làm video {subject} được ạ. Em có thể giúp anh/chị chuẩn bị kịch bản/prompt video trước, rồi hướng vào luồng Tạo video trong bot. "
+        "Khi tạo video thật, hệ thống sẽ hiện hóa đơn trước; anh/chị xác nhận rồi mới xử lý. "
+        "Mình gửi thêm sản phẩm cụ thể, tỉ lệ khung hình và muốn video khoảng mấy cảnh để em gợi ý sát hơn nha."
+    )
+
+
+def prompt_create_reply(raw: str, folded: str) -> str:
+    if "video" in folded:
+        return prompt_video_reply(raw)
+    subject = _extract_prompt_subject(raw) or _extract_image_subject(raw) or "sản phẩm"
+    return (
+        "Dạ được ạ. Đây là prompt miễn phí cho ảnh để mình dùng làm nháp:\n\n"
+        f"<code>Ảnh quảng cáo {subject}, chủ thể nổi bật, ánh sáng studio mềm, bố cục sạch, phong cách thương mại cao cấp, "
+        "màu sắc hài hòa, chi tiết sắc nét, tỉ lệ 9:16, không chữ rối, không phóng đại công dụng.</code>\n\n"
+        "Nếu muốn tạo ảnh thật trong bot, mình vào Tạo ảnh, xem gói và xác nhận hóa đơn trước khi xử lý ạ."
+    )
+
+
 def _base_result(
     intent_id: str,
     reply: str,
@@ -387,6 +562,10 @@ def _base_result(
     context_section: str = "",
     learning_queue: bool = False,
     human_last_reply_required: bool = True,
+    topic: str = "",
+    last_subject: str = "",
+    last_requested_asset: str = "",
+    last_flow_suggestion: str = "",
 ) -> dict:
     context = load_context_brain()
     context_version = str(context.get("version") or CONTEXT_FILE_VERSION_FALLBACK)
@@ -411,6 +590,8 @@ def _base_result(
         "ticket_required": ticket,
         "context_file_path": str(context.get("path") or context_doc_path()),
         "context_file_version": context_version,
+        "context_file_used": bool(context.get("loaded")),
+        "context_version": context_version,
         "source_file_version": context_version,
         "context_section_used": section,
         "context_sections": [section] if section else [],
@@ -423,6 +604,11 @@ def _base_result(
         "learning_queue": bool(learning_queue),
         "would_queue_learning": bool(learning_queue),
         "human_last_reply_required": bool(human_last_reply_required),
+        "previous_topic": topic,
+        "last_product_type": topic or product,
+        "last_requested_asset": last_requested_asset,
+        "last_subject": last_subject,
+        "last_flow_suggestion": last_flow_suggestion,
         "shared_docs": docs_status(),
     }
 
@@ -795,14 +981,85 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             context_section="scenario_dialogues",
         )
 
-    if "prompt" in folded and "video" in folded:
+    has_price = any(term in folded for term in ("gia", "bao nhieu", "nhieu xu", "nhieu tien", "bang gia", "phi", "tinh sao"))
+    chars = _extract_first_int(raw) if any(term in folded for term in ("ky tu", "kytu", "chu")) else 0
+
+    if not has_price and any(term in folded for term in ("nap tien", "nap xu", "chuyen khoan", "thanh toan")) and any(term in folded for term in ("video", "anh", "hinh")):
+        return {"matched": False}
+
+    if _has_prompt_keyword(folded) and not has_price:
+        prompt_topic = _extract_prompt_subject(raw) or _extract_image_subject(raw) or _extract_video_subject(raw, folded)
+        prompt_is_video = "video" in folded or _memory_topic(conversation_memory) == "video"
+        prompt_is_image = _has_image_keyword(raw, folded) or _memory_topic(conversation_memory) == "image"
         return _base_result(
-            "prompt_video_generation",
-            prompt_video_reply(raw),
+            "prompt_create_request",
+            prompt_create_reply(raw, folded),
             sources=["guide_doc", "cskh_knowledge"],
+            product="product_video" if prompt_is_video else ("image_ai" if prompt_is_image else "general"),
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+            topic="video" if prompt_is_video else ("image" if prompt_is_image else "content"),
+            last_subject=prompt_topic,
+            last_requested_asset=prompt_topic,
+            last_flow_suggestion="free_text_only",
+        )
+
+    if _is_short_price_followup(folded, conversation_memory):
+        topic = _memory_topic(conversation_memory)
+        if topic == "image":
+            return _base_result(
+                "image_ai_pricing",
+                image_pricing_reply(),
+                sources=doc_sources,
+                product="image_ai",
+                pricing_source="pricing_doc",
+                price_text=_list_prices([price for _name, price in IMAGE_TIERS]),
+                context_section="pricing_facts",
+                topic="image",
+            )
+        if topic == "video":
+            return _base_result(
+                "product_video_pricing",
+                video_pricing_reply(),
+                sources=doc_sources,
+                product="product_video",
+                pricing_source="pricing_doc",
+                price_text=_list_prices([price for _name, price in VIDEO_TIERS]),
+                context_section="pricing_facts",
+                topic="video",
+            )
+
+    if _is_image_create_request(raw, folded, conversation_memory) and not has_price:
+        explicit_subject = _extract_image_subject(raw)
+        subject = explicit_subject or _memory_subject(conversation_memory)
+        return _base_result(
+            "image_create_request",
+            image_create_reply(raw, memory=conversation_memory, subject=explicit_subject),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high" if subject else "medium",
+            product="image_ai",
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+            topic="image",
+            last_subject=subject,
+            last_requested_asset=subject or "image",
+            last_flow_suggestion="menu|main_image",
+        )
+
+    if _is_video_create_request(raw, folded, conversation_memory) and not has_price:
+        subject = _extract_video_subject(raw, folded)
+        return _base_result(
+            "video_create_request",
+            video_create_reply(raw, folded),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high",
             product="product_video",
             pricing_source="guide_doc",
             context_section="usage_guides",
+            topic="video",
+            last_subject=subject,
+            last_requested_asset=subject or "video",
+            last_flow_suggestion="menu|main_video",
         )
 
     if any(term in folded for term in ("video ban hang", "lam video ban hang", "muon lam video", "muon tao video")) and "gia" not in folded:
@@ -813,10 +1070,9 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="product_video",
             pricing_source="guide_doc",
             context_section="usage_guides",
+            topic="video",
         )
 
-    has_price = any(term in folded for term in ("gia", "bao nhieu", "nhieu xu", "nhieu tien", "bang gia", "phi", "tinh sao"))
-    chars = _extract_first_int(raw) if any(term in folded for term in ("ky tu", "kytu", "chu")) else 0
     if any(term in folded for term in ("ghep anh", "anh thanh video", "video tu anh", "anh chay", "slideshow", "anh roi ghep video")):
         return {"matched": False}
 
