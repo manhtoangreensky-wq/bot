@@ -869,6 +869,7 @@ SHOPAIKEY_MUSIC_CONTENT_ENDPOINT = _env("SHOPAIKEY_MUSIC_CONTENT_ENDPOINT", "")
 SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL", "chirp-fenix")
 SHOPAIKEY_MUSIC_GROUP = _env("SHOPAIKEY_MUSIC_GROUP")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
+IMAGE_MAINTENANCE = env_flag("IMAGE_MAINTENANCE", "false")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
@@ -59686,7 +59687,7 @@ def is_provider_frozen(provider: str) -> tuple[bool, dict, str]:
 def tool_env_freeze(tool: str) -> bool:
     tool = str(tool or "").strip().lower()
     return {
-        "image": TOOL_FREEZE_IMAGE,
+        "image": bool(TOOL_FREEZE_IMAGE or IMAGE_MAINTENANCE),
         "video": TOOL_FREEZE_VIDEO,
         "tts": TOOL_FREEZE_TTS,
         "chat": TOOL_FREEZE_CHAT,
@@ -59865,6 +59866,19 @@ def shopaikey_provider_submit_guard(job_type: str, *, source: str = "", confirme
             "provider_submit_block_reason": "hidden_submit_source_blocked",
             "message": "Provider submit nền/test/debug bị chặn. Chỉ user bấm xác nhận live mới được chạy thật.",
         }
+    if job == "image":
+        if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
+            return {
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "image_public_flag_off",
+                "message": "Tạo ảnh public đang tạm tắt. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            }
+        if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
+            return {
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": "image_provider_not_configured",
+                "message": "🛠 Cấu hình tạo ảnh đang thiếu hoặc chưa sẵn sàng. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            }
     enabled, message = shopaikey_public_generation_guard(job)
     if not enabled:
         return {
@@ -94336,6 +94350,91 @@ async def cmd_tool_public_status(update: Update, context: ContextTypes.DEFAULT_T
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(system_public_status_text(), parse_mode="HTML")
 
+def image_public_status_payload() -> dict:
+    maintenance_on, maintenance_message = is_system_maintenance()
+    image_freeze = is_tool_frozen("image", "shopaikey")
+    provider_freeze = provider_freeze_display("shopaikey")
+    flow_guard = shopaikey_public_flow_access_guard("image")
+    live_guard = shopaikey_provider_submit_guard(
+        "image",
+        source="public_user_final_confirm",
+        confirmed=True,
+    )
+    hidden_guard = shopaikey_provider_submit_guard(
+        "image",
+        source="smoke_background_debug",
+        confirmed=True,
+    )
+    return {
+        "flow_access_allowed": bool(flow_guard.get("flow_access_allowed")),
+        "flow_block_reason": str(flow_guard.get("flow_block_reason") or ""),
+        "public_image_enabled": bool(SHOPAIKEY_PUBLIC_IMAGE_ENABLED),
+        "image_maintenance": bool(IMAGE_MAINTENANCE),
+        "system_maintenance": bool(maintenance_on),
+        "system_maintenance_message_set": bool(maintenance_message),
+        "tool_freeze_image": bool(TOOL_FREEZE_IMAGE),
+        "tool_env_freeze_image_effective": bool(tool_env_freeze("image")),
+        "provider_freeze": bool(provider_freeze.get("frozen")),
+        "provider_freeze_reason": str(provider_freeze.get("reason") or "-"),
+        "shopaikey_enabled": bool(SHOPAIKEY_ENABLED),
+        "shopaikey_api_key_configured": bool(SHOPAIKEY_API_KEY),
+        "image_endpoint_configured": bool(SHOPAIKEY_IMAGE_URL),
+        "image_tier_public_status": image_tier_public_status_text(),
+        "final_confirm_source": "public_user_final_confirm",
+        "provider_submit_allowed": bool(live_guard.get("provider_submit_allowed")),
+        "provider_submit_block_reason": str(live_guard.get("provider_submit_block_reason") or ""),
+        "provider_submit_message": str(live_guard.get("message") or ""),
+        "hidden_submit_allowed": bool(hidden_guard.get("provider_submit_allowed")),
+        "hidden_submit_block_reason": str(hidden_guard.get("provider_submit_block_reason") or ""),
+        "provider_called": False,
+        "billing_policy": "delivery_before_charge",
+        "xu_charge_allowed": "after_successful_telegram_delivery_only",
+    }
+
+def image_public_status_text() -> str:
+    payload = image_public_status_payload()
+    lines = [
+        "🖼 <b>Image Public Status</b>",
+        "",
+        "Lệnh này chỉ đọc flag/guard; không gọi provider, không submit ẩn, không trừ Xu.",
+        "",
+        f"• Flow access allowed: <code>{'YES' if payload['flow_access_allowed'] else 'NO'}</code>",
+        f"• Flow block reason: <code>{html.escape(payload['flow_block_reason'] or '-')}</code>",
+        f"• Public image flag: <code>{'ON' if payload['public_image_enabled'] else 'OFF'}</code>",
+        f"• IMAGE_MAINTENANCE: <code>{'ON' if payload['image_maintenance'] else 'OFF'}</code>",
+        f"• System maintenance: <code>{'ON' if payload['system_maintenance'] else 'OFF'}</code>",
+        f"• TOOL_FREEZE_IMAGE: <code>{'ON' if payload['tool_freeze_image'] else 'OFF'}</code>",
+        f"• Effective image freeze: <code>{'ON' if payload['tool_env_freeze_image_effective'] else 'OFF'}</code>",
+        f"• Provider freeze: <code>{'ON' if payload['provider_freeze'] else 'OFF'}</code> | reason <code>{html.escape(payload['provider_freeze_reason'])}</code>",
+        "",
+        "<b>Provider Config</b>",
+        f"• ShopAIKey enabled: <code>{'true' if payload['shopaikey_enabled'] else 'false'}</code>",
+        f"• API key: <code>{'configured' if payload['shopaikey_api_key_configured'] else 'missing'}</code>",
+        f"• Image endpoint: <code>{'configured' if payload['image_endpoint_configured'] else 'missing'}</code>",
+        f"• Image tier public: <code>{html.escape(payload['image_tier_public_status'])}</code>",
+        "",
+        "<b>Submit Guard</b>",
+        f"• Source checked: <code>{html.escape(payload['final_confirm_source'])}</code>",
+        f"• Provider submit allowed: <code>{'YES' if payload['provider_submit_allowed'] else 'NO'}</code>",
+        f"• Provider block reason: <code>{html.escape(payload['provider_submit_block_reason'] or '-')}</code>",
+        f"• Hidden/smoke/debug submit allowed: <code>{'YES' if payload['hidden_submit_allowed'] else 'NO'}</code>",
+        f"• Hidden block reason: <code>{html.escape(payload['hidden_submit_block_reason'] or '-')}</code>",
+        "",
+        "<b>Billing/Delivery</b>",
+        f"• Provider called by this command: <code>{'YES' if payload['provider_called'] else 'NO'}</code>",
+        f"• Billing policy: <code>{html.escape(payload['billing_policy'])}</code>",
+        f"• Xu charge allowed: <code>{html.escape(payload['xu_charge_allowed'])}</code>",
+        "• Secret/raw response: <code>hidden</code>",
+    ]
+    if payload.get("provider_submit_message"):
+        lines.append(f"• Guard message: <code>{html.escape(str(payload['provider_submit_message'])[:220])}</code>")
+    return "\n".join(lines)
+
+async def cmd_image_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(image_public_status_text(), parse_mode="HTML")
+
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -100676,6 +100775,351 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
 async def cmd_shopaikey_video_from_image_public(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_shopaikey_video_public(update, context, from_image=True)
 
+def shopaikey_image_result_payload_looks_valid(image_url: str = "", b64_json: str = "") -> bool:
+    url = str(image_url or "").strip().lower()
+    if url:
+        if not (url.startswith("https://") or url.startswith("http://")):
+            return False
+        if url.endswith((".json", ".html", ".htm", ".txt")):
+            return False
+        if any(marker in url for marker in ("/error", "error=", "failed=", "status=fail")):
+            return False
+        return True
+    encoded = str(b64_json or "").strip()
+    if not encoded:
+        return False
+    try:
+        data = base64.b64decode(encoded, validate=False)
+    except Exception:
+        return False
+    head = data.lstrip()[:32].lower()
+    if len(data) <= 0 or head.startswith((b"<html", b"<!doctype", b"{", b"[")):
+        return False
+    return True
+
+async def handle_shopaikey_public_image_confirm_delivery_first(
+    context: ContextTypes.DEFAULT_TYPE,
+    query,
+    uid,
+    lang: str,
+    pending: dict,
+    action: str,
+    token: str,
+    provider_submit_source: str,
+    prompt: str,
+    base_cost: int,
+    image_tier: str,
+    tier_label: str,
+    image_aspect_ratio: str,
+    requested_image_aspect_ratio: str,
+    model: str,
+    source_job_id: str,
+    workflow_id: str,
+    trend_output_id: int,
+    scene_index: int,
+    retry_warranty_count: int,
+    package_item_type: str,
+    balance_before: int,
+) -> None:
+    package_used = action == "package"
+    package_item = {}
+    package_use_result = {}
+    final_preview_cost = int(shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image") or base_cost)
+    if package_used:
+        package_item = active_package_item_for_user(uid, package_item_type)
+        if not package_item:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Lượt trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.",
+            )
+    elif int(balance_before or 0) < final_preview_cost and not is_admin_user(uid):
+        record_shopaikey_billing_event(
+            uid,
+            0,
+            "insufficient_balance",
+            0,
+            int(balance_before or 0),
+            int(balance_before or 0),
+            f"shopaikey_image; tier={image_tier}; required={final_preview_cost}; submit_source={provider_submit_source}",
+        )
+        return await edit_insufficient_credits(query, int(balance_before or 0), final_preview_cost, uid)
+
+    job_id = create_shopaikey_job(
+        uid,
+        query.message.chat_id,
+        "image",
+        model=model,
+        prompt=prompt,
+        status="IN_PROGRESS",
+        admin_only=False,
+        xu_cost_planned=base_cost,
+        source_job_id=source_job_id,
+        retry_warranty_count=retry_warranty_count,
+        package_id=int(package_item.get("package_id") or 0) if package_used else 0,
+        package_item_id=int(package_item.get("id") or 0) if package_used else 0,
+        package_item_type=package_item_type if package_used else "",
+        package_units_used=0,
+    )
+    confirmed_at = now_text()
+    update_shopaikey_job(
+        job_id=job_id,
+        xu_deducted=0,
+        billing_status="package_awaiting_delivery" if package_used else "awaiting_delivery_before_charge",
+        confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
+        confirmed_at=confirmed_at,
+        retry_warranty_count=retry_warranty_count,
+        package_id=int(package_item.get("package_id") or 0) if package_used else 0,
+        package_item_id=int(package_item.get("id") or 0) if package_used else 0,
+        package_item_type=package_item_type if package_used else "",
+        package_units_used=0,
+    )
+    tier_reason = f"; tier={image_tier}; label={tier_label}; submit_source={provider_submit_source}"
+    record_shopaikey_billing_event(
+        uid,
+        job_id,
+        "confirm",
+        0,
+        int(balance_before or 0),
+        int(balance_before or 0),
+        f"confirmed_at={confirmed_at}; job_type=image{tier_reason}",
+    )
+    record_shopaikey_billing_event(
+        uid,
+        job_id,
+        "image_provider_submit_allowed",
+        0,
+        int(balance_before or 0),
+        int(balance_before or 0),
+        f"provider_submit_allowed=true{tier_reason}",
+    )
+
+    await safe_edit_or_send(query, public_image_waiting_text(image_tier, lang), parse_mode=None)
+    result = await shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)
+    status = str(result.get("status") or "FAIL")
+    record_api_debug(
+        "shopaikey",
+        "shopaikey_image",
+        status,
+        int(result.get("http_status") or 0),
+        f"submit_source={provider_submit_source}; " + shopaikey_image_debug_detail(result, requested_image_aspect_ratio),
+    )
+    image_url = str(result.get("image_url") or "")
+    b64_json = str(result.get("b64_json") or "")
+    output_sent = False
+    output_file_id = ""
+    if status == "PASS" and shopaikey_image_result_payload_looks_valid(image_url, b64_json):
+        update_shopaikey_job(job_id=job_id, status="DELIVERING", result_url=image_url, model=result.get("model") or model, attempts=1)
+        success_markup = trend_workflow_image_success_keyboard(job_id, scene_index, lang) if (workflow_id or trend_output_id) else public_image_success_keyboard(job_id, image_tier, lang)
+        success_caption = ui_text(
+            lang,
+            "image.success",
+            label=html.escape(tier_label),
+            job_id=int(job_id or 0),
+            billing_note=html.escape("TOAN AAS chỉ trừ Xu sau khi ảnh đã gửi thành công."),
+        )
+        success_caption = f"{success_caption}\n{image_aspect_result_line(result.get('aspect_ratio') or image_aspect_ratio, lang)}"
+        output_sent, output_file_id = await send_generated_image_result(
+            context,
+            query.message.chat_id,
+            image_url,
+            success_caption,
+            success_markup,
+            lang,
+            b64_json=b64_json,
+        )
+        if output_file_id:
+            update_shopaikey_job(job_id=job_id, output_file_id=output_file_id)
+        if output_sent and image_url and (workflow_id or trend_output_id):
+            update_trend_workflow_generated_image(
+                output_id=trend_output_id,
+                workflow_id=workflow_id,
+                scene_index=scene_index,
+                user_id=uid,
+                image_url=image_url,
+                job_id=job_id,
+            )
+            save_latest_workflow_image(
+                uid,
+                image_url,
+                prompt=prompt,
+                workflow_id=workflow_id,
+                scene_index=scene_index,
+                source="workflow_image_generation",
+                job_id=job_id,
+            )
+        if not output_sent:
+            status = "FAIL_SEND_IMAGE"
+            result["status"] = status
+            result["error_class"] = "FAIL_SEND_IMAGE"
+            result["detail"] = "telegram_image_output_send_failed"
+    elif status == "PASS":
+        status = "FAIL_INVALID_IMAGE_RESULT"
+        result["status"] = status
+        result["error_class"] = "FAIL_INVALID_IMAGE_RESULT"
+        result["detail"] = "provider_result_invalid_or_non_image"
+
+    if status != "PASS":
+        provider_error_text = result.get("detail") or result.get("provider_error_code") or result.get("error_class") or status
+        record_provider_error(
+            "shopaikey",
+            "image",
+            classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, provider_error_text),
+            provider_error_text,
+        )
+        balance_after_failure, _, _ = get_user(uid)
+        record_shopaikey_billing_event(
+            uid,
+            job_id,
+            "provider_fail",
+            0,
+            int(balance_after_failure or 0),
+            int(balance_after_failure or 0),
+            f"shopaikey_image; tier={image_tier}; error={provider_error_text}; submit_source={provider_submit_source}; no_charge_before_delivery=true",
+        )
+        update_shopaikey_job(
+            job_id=job_id,
+            status="FAILED",
+            error_class=result.get("error_class") or status,
+            provider_error_code=result.get("provider_error_code") or "",
+            provider_message=provider_error_text,
+            attempts=1,
+            finished_at=now_text(),
+            refund_status="not_charged",
+            refund_amount=0,
+            refund_reason=provider_error_text,
+            billing_status="failed_not_charged",
+            package_refund_status="not_needed" if package_used else "",
+        )
+        if getattr(context, "chat_data", None) is not None:
+            context.chat_data["shopaikey_public_image_error_notified_at"] = time.time()
+        return await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=public_image_provider_fail_message(0, False, lang),
+        )
+
+    deducted = 0
+    billing_status = "admin_free_after_delivery" if is_admin_user(uid) else "delivered_no_charge"
+    if package_used:
+        package_use_result = deduct_package_item_for_job(
+            uid,
+            package_item_type,
+            job_id,
+            f"shopaikey_image_delivered; tier={image_tier}; submit_source={provider_submit_source}",
+        )
+        if package_use_result.get("ok"):
+            billing_status = "package_deducted_after_delivery"
+            record_shopaikey_billing_event(
+                uid,
+                job_id,
+                "package_use_after_delivery",
+                0,
+                int(balance_before or 0),
+                int(balance_before or 0),
+                f"shopaikey_image{tier_reason}; package_item={package_item_type}",
+            )
+        else:
+            billing_status = "package_billing_failed_after_delivery"
+            record_shopaikey_billing_event(
+                uid,
+                job_id,
+                "package_billing_failed_after_delivery",
+                0,
+                int(balance_before or 0),
+                int(balance_before or 0),
+                f"shopaikey_image{tier_reason}; package_item={package_item_type}",
+            )
+    elif not is_admin_user(uid):
+        charge = spend_fixed_credit_info(
+            uid,
+            base_cost,
+            "shopaikey_image",
+            f"ShopAIKey image delivered: {shopaikey_safe_prompt_preview(prompt)}",
+            True,
+        )
+        if not charge.get("ok"):
+            credits_now, _, _ = get_user(uid)
+            update_shopaikey_job(
+                job_id=job_id,
+                status="SUCCESS",
+                result_url=image_url,
+                result_sent=1 if output_sent else 0,
+                model=result.get("model") or model,
+                attempts=1,
+                finished_at=now_text(),
+                billing_status="billing_failed_after_delivery",
+                provider_message="image delivered; balance changed; no Xu charged",
+                refund_status="not_charged",
+                refund_amount=0,
+                output_file_id=output_file_id,
+            )
+            record_shopaikey_billing_event(
+                uid,
+                job_id,
+                "image_billing_failed_after_delivery",
+                0,
+                int(credits_now or 0),
+                int(credits_now or 0),
+                f"shopaikey_image{tier_reason}; required={int(charge.get('final_cost') or base_cost)}",
+            )
+            return await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="✅ Ảnh đã gửi thành công. Số dư vừa thay đổi nên TOAN AAS chưa trừ Xu; vui lòng kiểm tra số dư trước khi tạo tiếp.",
+            )
+        deducted = int(charge.get("final_cost") or 0)
+        billing_status = "deducted_after_delivery"
+        balance_after_charge, _, _ = get_user(uid)
+        record_shopaikey_billing_event(
+            uid,
+            job_id,
+            "deduct_after_delivery",
+            deducted,
+            int(balance_before or 0),
+            int(balance_after_charge or 0),
+            f"shopaikey_image{tier_reason}; delivered_before_charge=true",
+        )
+    else:
+        record_shopaikey_billing_event(
+            uid,
+            job_id,
+            "admin_free_after_delivery",
+            0,
+            int(balance_before or 0),
+            int(balance_before or 0),
+            f"shopaikey_image{tier_reason}",
+        )
+
+    update_shopaikey_job(
+        job_id=job_id,
+        status="SUCCESS",
+        result_url=image_url,
+        result_sent=1 if output_sent else 0,
+        model=result.get("model") or model,
+        attempts=1,
+        finished_at=now_text(),
+        xu_deducted=deducted,
+        billing_status=billing_status,
+        refund_status="not_needed" if deducted > 0 or package_used else "not_charged",
+        refund_amount=0,
+        package_id=int((package_use_result.get("item") or {}).get("package_id") or package_item.get("package_id") or 0) if package_used else 0,
+        package_item_id=int((package_use_result.get("item") or {}).get("id") or package_item.get("id") or 0) if package_used else 0,
+        package_item_type=package_item_type if package_used else "",
+        package_units_used=1 if package_used and package_use_result.get("ok") else 0,
+        package_refund_status="not_needed" if package_used else "",
+        output_file_id=output_file_id,
+    )
+    credits_after_success, _, _ = get_user(uid)
+    record_shopaikey_billing_event(
+        uid,
+        job_id,
+        "success",
+        0,
+        int(credits_after_success or 0),
+        int(credits_after_success or 0),
+        f"shopaikey_image_success; tier={image_tier}; delivered_before_charge=true; charged={deducted}",
+    )
+    credits_after, _, _ = get_user(uid)
+    return await context.bot.send_message(chat_id=query.message.chat_id, text=ui_text(lang, "account.balance_left", credits=int(credits_after or 0)))
+
 async def handle_shopaikey_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data_override: str = ""):
     query = update.callback_query
     await query.answer()
@@ -100782,7 +101226,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             block_markup = shopaikey_confirm_keyboard("image", token, image_tier, lang)
         block_message = (
             str(provider_submit_guard.get("message") or "")
-            if block_reason == "hidden_submit_source_blocked"
+            if block_reason in {"hidden_submit_source_blocked", "image_provider_not_configured"}
             else shopaikey_provider_submit_maintenance_message("image", lang, str(provider_submit_guard.get("message") or ""))
         )
         return await safe_edit_or_send(query, block_message, parse_mode=None, reply_markup=block_markup)
@@ -100858,6 +101302,31 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             package_item_type_for_image_tier(image_tier) if job_type == "image" else package_item_type_for_video_tier(video_tier)
         )
     )
+    if job_type == "image":
+        return await handle_shopaikey_public_image_confirm_delivery_first(
+            context,
+            query,
+            uid,
+            lang,
+            pending,
+            action,
+            token,
+            provider_submit_source,
+            prompt,
+            base_cost,
+            image_tier,
+            tier_label,
+            image_aspect_ratio,
+            requested_image_aspect_ratio,
+            model,
+            source_job_id,
+            workflow_id,
+            trend_output_id,
+            scene_index,
+            retry_warranty_count,
+            package_item_type,
+            int(balance_before or 0),
+        )
     package_use_result = {}
     if action == "package":
         package_item = active_package_item_for_user(uid, package_item_type)
@@ -186304,6 +186773,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_pricing_status", cmd_video_pricing_status))
     tg_app.add_handler(CommandHandler("addon_pricing_status", cmd_addon_pricing_status))
     tg_app.add_handler(CommandHandler("image_pricing_status", cmd_image_pricing_status))
+    tg_app.add_handler(CommandHandler("image_public_status", cmd_image_public_status))
     tg_app.add_handler(CommandHandler("pricing_preview", cmd_pricing_preview))
     tg_app.add_handler(CommandHandler("pricing_validate", cmd_pricing_validate))
     tg_app.add_handler(CommandHandler("video_kling_status", cmd_video_kling_status))
