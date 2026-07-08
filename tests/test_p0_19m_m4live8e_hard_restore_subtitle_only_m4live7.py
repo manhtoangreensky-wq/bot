@@ -35,7 +35,6 @@ class _Message:
 
 
 def test_m4live8e_source_sha_and_failure_copy_source_identified():
-    assert bot.SUBDUB_SUBTITLE_ONLY_M4LIVE7_SOURCE_SHA == "0e06469c9c13d4998886dd8f5115c019ed65f24d"
     assert "TOAN AAS chưa dịch được phụ đề lúc này" in bot.video_dubbing_flow_failure_text(
         bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         "vi",
@@ -43,33 +42,27 @@ def test_m4live8e_source_sha_and_failure_copy_source_identified():
 
     core = _function_source("_execute_video_dubbing_pipeline_core")
     debug_payload = _function_source("subtitle_dub_debug_job_payload")
-    assert "public_failure_copy_source" in core
-    assert "subtitle_translate_fail_reason" in core
-    assert "public_failure_copy_source" in debug_payload
+    assert "public_failure_copy_source" not in core
+    assert "subtitle_translate_fail_reason" not in core
+    assert "public_failure_copy_source" not in debug_payload
 
 
 def test_m4live8e_subtitle_only_duration_fields_match_m4live7_no_chunking():
     gate = bot.subdub_duration_gate_payload({"duration": 60}, {}, is_admin=False)
     assert gate["is_long_media"] is True
-    assert "chunking_enabled" in gate
-
-    restored = bot.subdub_m4live7_subtitle_only_duration_fields(gate)
-    assert restored["duration_gate_result"] == gate["duration_gate_result"]
-    assert restored["is_long_media"] is True
-    assert restored["long_media_allowed"] == gate["long_media_allowed"]
-    assert restored["chunking_enabled"] is False
-    assert restored["chunk_count"] == 0
-    assert restored["chunk_ranges"] == []
-    assert restored["concat_required"] is False
+    assert "chunking_enabled" not in gate
+    assert "chunk_count" not in gate
+    assert "subdub_long_video_chunk_plan" not in BOT_SOURCE
+    assert "subdub_m4live7_subtitle_only_duration_fields" not in BOT_SOURCE
 
 
 def test_m4live8e_core_applies_m4live7_duration_only_to_subtitle_translate():
     core = _function_source("_execute_video_dubbing_pipeline_core")
-    assert "if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:" in core
-    assert "duration_gate = subdub_m4live7_subtitle_only_duration_fields(duration_gate)" in core
+    assert "duration_gate = subdub_m4live7_subtitle_only_duration_fields(duration_gate)" not in core
+    assert "subdub_should_suppress_generic_fail_for_active_job" not in core
 
     callback = _function_source("handle_video_dubbing_callback")
-    assert "mode != VIDEO_SUBTITLE_MODE_TRANSLATE and latest_failure_job" in callback
+    assert "mode != VIDEO_SUBTITLE_MODE_TRANSLATE and latest_failure_job" not in callback
 
 
 def test_m4live8e_send_fail_uses_m4live7_public_failure_for_subtitle_only():
@@ -96,13 +89,13 @@ def test_m4live8e_send_fail_uses_m4live7_public_failure_for_subtitle_only():
     assert result["sent"] is True
     assert result["suppressed"] is False
     assert msg.texts
-    assert "TOAN AAS chưa dịch được phụ đề lúc này" in msg.texts[0][0]
+    assert "TOAN AAS chưa tạo được phụ đề" in msg.texts[0][0]
     job = bot.SUBTITLE_DUB_PIPELINE_JOBS[key]
     assert job["public_error_sent"] is True
     assert job["terminal_public_outcome_type"] == "failure"
 
 
-def test_m4live8e_dub_combo_suppress_behavior_left_intact():
+def test_m4live8e_dub_combo_uses_m4live7_failure_behavior():
     key = "p019m8e-dub-active"
     bot.SUBTITLE_DUB_PIPELINE_JOBS[key] = {
         "job_id": key,
@@ -123,10 +116,10 @@ def test_m4live8e_dub_combo_suppress_behavior_left_intact():
         )
     )
 
-    assert result["sent"] is False
-    assert result["suppressed"] is True
-    assert msg.texts == []
-    assert bot.SUBTITLE_DUB_PIPELINE_JOBS[key]["generic_fail_suppressed_while_active_or_delivered"] is True
+    assert result["sent"] is True
+    assert result["suppressed"] is False
+    assert msg.texts
+    assert "chưa tạo được video hoàn chỉnh" in msg.texts[0][0]
 
 
 def test_m4live8e_subtitle_ass_runtime_stays_m4live7_chunked():
@@ -141,7 +134,6 @@ def test_m4live8e_subtitle_ass_runtime_stays_m4live7_chunked():
 def test_m4live8e_no_forbidden_modules_touched_by_restore_helpers():
     touched = "\n".join(
         [
-            _function_source("subdub_m4live7_subtitle_only_duration_fields"),
             _function_source("send_subdub_fail_once"),
             _function_source("_execute_video_dubbing_pipeline_core"),
         ]
