@@ -172651,20 +172651,76 @@ def video_dubbing_flow_failure_text(mode: str, lang: str = "vi") -> str:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
     return subdub_mode_fail_text(VIDEO_SUBTITLE_MODE_CREATE, lang)
 
+def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
+    current = dict(result or {})
+    message_id = str(
+        current.get("video_delivery_message_id")
+        or current.get("final_video_message_id")
+        or current.get("subdub_final_video_message_id")
+        or current.get("telegram_message_id")
+        or current.get("delivery_message_id")
+        or ""
+    ).strip()
+    sent_video_count = max(
+        _safe_int(current.get("sent_video"), 0),
+        _safe_int(current.get("sent_video_document"), 0),
+    )
+    return bool(
+        truthy_value(current.get("video_delivered"), False)
+        or truthy_value(current.get("final_mp4_delivered"), False)
+        or truthy_value(current.get("delivery_succeeded"), False)
+        or truthy_value(current.get("delivery_success"), False)
+        or bool(message_id)
+        or sent_video_count > 0
+    )
+
+def subdub_receipt_voice_label(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
+    current = {
+        **dict(state or {}),
+        **dict((result or {}).get("state") or {}),
+        **dict(result or {}),
+    }
+    gender = str(
+        current.get("resolved_gender")
+        or current.get("selected_voice_gender")
+        or current.get("requested_voice_gender")
+        or current.get("voice_gender")
+        or ""
+    ).strip().lower()
+    if gender not in {"female", "male"}:
+        gender = subdub_voice_gender_from_state(current)
+    if normalize_user_language(lang) != "vi":
+        if gender == "female":
+            return "female voice"
+        if gender == "male":
+            return "male voice"
+    else:
+        if gender == "female":
+            return "Giọng nữ"
+        if gender == "male":
+            return "Giọng nam"
+    label = str(
+        current.get("selected_voice_label")
+        or current.get("voice_label")
+        or current.get("voice_style")
+        or ""
+    ).strip()
+    if not label:
+        return ""
+    label_normalized = subdub_voice_text_normalized(label)
+    if any(token in label_normalized for token in {"provider", "api", "voice_id", "callback", "handler"}):
+        return ""
+    if minimax_voice_adapter.validate_provider_voice_id(label):
+        return ""
+    return label[:80]
+
 def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     result = result or {}
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
     outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
     public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
-    delivered_video = bool(
-        (result.get("video_delivered") and not public_error_already_sent)
-        or result.get("final_mp4_delivered")
-        or result.get("delivery_succeeded")
-        or result.get("video_delivery_message_id")
-        or int(result.get("sent_video") or 0)
-        or int(result.get("sent_video_document") or 0)
-    )
+    delivered_video = subdub_result_has_delivered_video(result)
     terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
     if outcome_type == "partial_audio_delivered" or result.get("partial_audio_delivered") or state.get("partial_audio_delivered"):
         if SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
@@ -172709,6 +172765,8 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
         job_line = f"• Mã xử lý: <code>{html.escape(subdub_public_job_code(str(job_code)))}</code>\n" if job_code else ""
         target_language = str(result.get("target_language") or state.get("target_language") or "").strip()
         language_line = f"• Ngôn ngữ đích: <b>{html.escape(target_language)}</b>\n" if target_language else ""
+        voice_label = subdub_receipt_voice_label(state, result, lang) if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else ""
+        voice_line = f"• Voice: <b>{html.escape(voice_label)}</b>\n" if voice_label and normalize_user_language(lang) != "vi" else (f"• Giọng: <b>{html.escape(voice_label)}</b>\n" if voice_label else "")
         if normalize_user_language(lang) != "vi":
             return (
                 "✅ <b>Completed</b>\n\n"
@@ -172717,6 +172775,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
                 f"• Type: <b>{html.escape(type_label)}</b>\n"
                 f"• Duration: <b>{html.escape(duration)}</b>\n"
                 f"• Plan/price: {cost_line}\n"
+                f"{voice_line}"
                 "• Status: <b>Video sent</b>"
             )
         success_titles = {
@@ -172734,6 +172793,7 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
             f"• Gói/Giá: {cost_line}\n"
             f"• Đã trừ: <b>{int(charged_xu or 0)} Xu</b>\n"
             f"{language_line}"
+            f"{voice_line}"
             "• Trạng thái: <b>Đã gửi video</b>"
         )
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -176201,7 +176261,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["subtitle_pos_override_removed"] = True
         style["m4live1_style_renderer_only"] = True
         style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
-        style["subtitle_margin_v_after"] = max(4, min(8, int(round(style["play_res_y"] * 0.004))))
+        style["subtitle_margin_v_after"] = max(1, min(3, int(round(style["play_res_y"] * 0.0015))))
         side_margin = int(round(style["play_res_x"] * ((1.0 - float(style["subtitle_max_width_ratio"])) / 2.0)))
         side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
         style["subtitle_margin_l_after"] = side_margin
@@ -176378,9 +176438,17 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     play_res_y = int(style.get("play_res_y") or 1920)
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
         if style.get("m4live1_style_renderer_only"):
-            margin_v = int(style.get("subtitle_margin_v_after") or max(4, min(14, int(play_res_y * 0.008))))
+            if style.get("subtitle_margin_v_after") is not None:
+                margin_v = int(style.get("subtitle_margin_v_after") or 0)
+            else:
+                margin_v = max(1, min(3, int(round(play_res_y * 0.0015))))
         else:
             margin_v = max(58, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+    if style.get("m4live1_style_renderer_only"):
+        if style.get("subtitle_margin_v_after") is not None:
+            margin_v = int(style.get("subtitle_margin_v_after") or 0)
+        else:
+            margin_v = max(1, min(3, int(round(play_res_y * 0.0015))))
     if style.get("m4live1_style_renderer_only"):
         margin_l = int(style.get("subtitle_margin_l_after") or max(32, int(play_res_x * 0.07)))
         margin_r = int(style.get("subtitle_margin_r_after") or max(32, int(play_res_x * 0.07)))
@@ -183095,7 +183163,8 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
             return None
         latest_pipeline_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
-        if subdub_job_has_failure_public_outcome(latest_pipeline_job):
+        delivered_result_video = subdub_result_has_delivered_video(result)
+        if subdub_job_has_failure_public_outcome(latest_pipeline_job) and not delivered_result_video:
             update_subtitle_dub_pipeline_job(
                 pipeline_job_key,
                 success_after_public_failure_prevented=True,
@@ -183107,6 +183176,37 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
             set_video_dubbing_pending(uid, "confirm", processing="0")
             return None
+        if subdub_job_has_failure_public_outcome(latest_pipeline_job) and delivered_result_video:
+            result["late_fail_suppressed"] = True
+            result["public_error_sent"] = False
+            result["public_error_sent_count"] = 0
+            result["terminal_public_outcome_type"] = "success"
+            update_subtitle_dub_pipeline_job(
+                pipeline_job_key,
+                late_fail_suppressed=True,
+                late_public_error_suppressed=True,
+                public_failure_overridden_by_video_delivery=True,
+                public_error_sent=False,
+                public_failure_sent=False,
+                public_error_sent_count=0,
+                terminal_public_outcome_type="success",
+                terminal_public_outcome_sent=True,
+                terminal_state="delivered",
+                status="completed",
+                lifecycle_state="delivered",
+                current_stage="delivered",
+                progress_stage="delivered",
+                progress_percent=100,
+                completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+                delivery_success=True,
+                delivery_succeeded=True,
+                final_mp4_delivered=True,
+                video_delivery_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
+                status_panel_terminalized=True,
+                refresh_stopped_after_terminal=True,
+                panel_finalized=True,
+                panel_final_percent=100,
+            )
         result_state = dict(result.get("state") or {})
         completed_fields = {
             "processing": "0",
@@ -183127,6 +183227,9 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "subtitle_ref", "source_subtitle_ref", "translated_subtitle_ref",
             "target_language", "source_language", "detected_language",
             "voice_style", "voice_id", "voice_kind", "voice_speed",
+            "selected_voice_label", "selected_voice_gender", "requested_voice_gender",
+            "selected_voice_id", "selected_tts_voice_id", "provider_voice_id",
+            "resolved_voice_id", "resolved_gender", "tts_payload_voice_id",
             "output_type", "output_format", "active_flow", "requested_mode",
             "keep_original_audio", "original_audio_volume_percent",
             "dubbed_voice_volume_percent", "audio_mix_mode", "volume_config_source",
@@ -183182,6 +183285,15 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     panel_final_percent=100,
                     status_panel_terminalized=True,
                     refresh_stopped_after_terminal=True,
+                    terminal_public_outcome_type="success",
+                    terminal_public_outcome_sent=True,
+                    public_error_sent=False,
+                    public_failure_sent=False,
+                    public_error_sent_count=0,
+                    delivery_success=True,
+                    delivery_succeeded=True,
+                    final_mp4_delivered=True,
+                    video_delivery_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
                 )
         receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
         sent_receipt = await query.message.reply_text(

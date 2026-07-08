@@ -30,7 +30,7 @@ def test_m4live2_hotfix_subtitle_style_is_bottom_center_without_safe_gap():
     assert style["subtitle_pipeline_untouched"] is True
     assert style["subtitle_alignment"] == "bottom_center"
     assert style["subtitle_max_lines"] == 2
-    assert 4 <= int(style["subtitle_margin_v_after"]) <= 8
+    assert 1 <= int(style["subtitle_margin_v_after"]) <= 3
 
 
 def test_m4live2_hotfix_ass_margin_v_sits_on_bottom_edge():
@@ -46,7 +46,7 @@ def test_m4live2_hotfix_ass_margin_v_sits_on_bottom_edge():
     style_fields = _style_line(ass)
 
     assert style_fields[18] == "2"
-    assert int(style_fields[21]) == 48
+    assert 1 <= int(style_fields[21]) <= 3
     assert "m4live2_subtitle_bottom_lock: yes" in ass
     assert "Xin chao" in ass
 
