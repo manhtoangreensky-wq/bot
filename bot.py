@@ -66198,6 +66198,19 @@ VIDEO_B14_2_SCENE_OPTIONS = (1, 3, 5, 10, 20)
 PRODUCT_VIDEO_R9E_ADDONS_LOCKED = True
 PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI = "Hậu kỳ đang khóa tạm thời cho Product Video. Hóa đơn này chỉ tính video chính."
 PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI = "Hệ thống dựng video đang tạm khóa để bảo vệ Xu. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+PRODUCT_VIDEO_LOGO_POSITIONS = ("top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right")
+PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI = {
+    "top_left": "Trên trái",
+    "top_center": "Trên giữa",
+    "top_right": "Trên phải",
+    "bottom_left": "Dưới trái",
+    "bottom_center": "Dưới giữa",
+    "bottom_right": "Dưới phải",
+}
+PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO = 0.12
+PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO = 0.18
+PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO = 0.04
+PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO = 0.035
 VIDEO_B14_2_VOICE_VOLUME_OPTIONS = (70, 80, 90, 100, 110, 120)
 VIDEO_B14_2_MUSIC_VOLUME_OPTIONS = (5, 10, 15, 20, 30)
 VIDEO_B14_2_PROJECT_WORKER_READY = env_flag("VIDEO_PROJECT_WORKER_READY", "false")
@@ -66600,27 +66613,26 @@ def video_asset_intake_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📷 Tôi có ảnh sẵn" if is_vi else "📷 I have images", callback_data="vproduct|asset_wait|subject"),
             InlineKeyboardButton("🖼 Tạo ảnh AI trước" if is_vi else "🖼 Create AI images first", callback_data="vproduct|asset_create_ai_image"),
-        ],
-        [
             InlineKeyboardButton("📚 Gợi ý bố cục ảnh" if is_vi else "📚 Image layout ideas", callback_data="vproduct|asset_layout_ideas"),
+        ],
+        [
             InlineKeyboardButton("🎨 Dùng prompt ảnh từ storyboard" if is_vi else "🎨 Use storyboard image prompts", callback_data="vproduct|asset_storyboard_prompt"),
-        ],
-        [
             InlineKeyboardButton("📸 Gửi ảnh nhân vật/sản phẩm" if is_vi else "📸 Character/product refs", callback_data="vproduct|asset_wait|subject"),
+        ],
+        [
             InlineKeyboardButton("🏞 Gửi ảnh bối cảnh" if is_vi else "🏞 Background refs", callback_data="vproduct|asset_wait|background"),
-        ],
-        [
             InlineKeyboardButton("🧩 Gửi ảnh storyboard" if is_vi else "🧩 Storyboard frames", callback_data="vproduct|asset_wait|storyboard"),
+        ],
+        [
             InlineKeyboardButton("🏷 Gửi logo" if is_vi else "🏷 Logo", callback_data="vproduct|asset_wait|logo"),
-        ],
-        [
             InlineKeyboardButton("🎙 Gửi voice/audio" if is_vi else "🎙 Voice/audio", callback_data="vproduct|asset_wait|voice"),
-            InlineKeyboardButton("🎵 Gửi nhạc nền" if is_vi else "🎵 Music", callback_data="vproduct|asset_wait|music"),
         ],
         [
+            InlineKeyboardButton("🎵 Gửi nhạc nền" if is_vi else "🎵 Music", callback_data="vproduct|asset_wait|music"),
             InlineKeyboardButton("⏭ Bỏ qua" if is_vi else "⏭ Skip", callback_data="vproduct|asset_skip"),
+        ],
+        [
             InlineKeyboardButton("✅ Xong phần tư liệu" if is_vi else "✅ Done", callback_data="vproduct|asset_done"),
         ],
         [
@@ -68192,6 +68204,129 @@ def video_b14_logo_file_id_from_session(session: dict | None = None) -> str:
     return ""
 
 
+def product_video_logo_position_label(position: str = "", lang: str = "vi") -> str:
+    code = logo_watermark_normalize_position(position, "top_right")
+    if code not in PRODUCT_VIDEO_LOGO_POSITIONS:
+        code = "top_right"
+    if normalize_user_language(lang) != "vi":
+        return logo_watermark_position_label(code, lang)
+    return PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI.get(code, "Trên phải")
+
+
+def product_video_logo_material_config(
+    *,
+    logo_file_id: str = "",
+    logo_path: str = "",
+    logo_position: str = "",
+    logo_enabled: bool = True,
+) -> dict:
+    position = logo_watermark_normalize_position(logo_position, "top_right")
+    if position not in PRODUCT_VIDEO_LOGO_POSITIONS:
+        position = "top_right"
+    file_id = str(logo_file_id or "").strip()
+    path = str(logo_path or "").strip()
+    enabled = bool(logo_enabled and (file_id or path))
+    return {
+        "logo_enabled": enabled,
+        "logo_file_id": file_id,
+        "logo_path": path,
+        "logo_position": position if enabled else "",
+        "logo_width_ratio": PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO,
+        "logo_max_width_ratio": PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO,
+        "logo_margin_x_ratio": PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO,
+        "logo_margin_y_ratio": PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO,
+        "logo_preserve_aspect_ratio": True,
+        "logo_material_only": True,
+        "logo_overlay_applied": False,
+    }
+
+
+def product_video_logo_material_from_session(session: dict | None = None) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    material = dict(draft.get("product_video_logo_material") or {})
+    if not material:
+        asset_pack = dict(draft.get("asset_pack") or {})
+        material = dict(asset_pack.get("logo_material") or {})
+    if not (str(material.get("logo_file_id") or material.get("logo_path") or "").strip()):
+        return {}
+    position = str(material.get("logo_position") or "").strip()
+    enabled = bool(material.get("logo_enabled") and position in PRODUCT_VIDEO_LOGO_POSITIONS)
+    return product_video_logo_material_config(
+        logo_file_id=str(material.get("logo_file_id") or ""),
+        logo_path=str(material.get("logo_path") or ""),
+        logo_position=position or "top_right",
+        logo_enabled=enabled,
+    )
+
+
+def product_video_set_logo_material(user_id, session: dict, material: dict | None = None) -> dict:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    clean = dict(material or {})
+    if clean:
+        clean = product_video_logo_material_config(
+            logo_file_id=str(clean.get("logo_file_id") or ""),
+            logo_path=str(clean.get("logo_path") or ""),
+            logo_position=str(clean.get("logo_position") or ""),
+            logo_enabled=bool(clean.get("logo_enabled")),
+        )
+        draft["product_video_logo_material"] = clean
+    else:
+        draft.pop("product_video_logo_material", None)
+    asset_pack = dict(draft.get("asset_pack") or {})
+    if clean:
+        asset_pack["logo_material"] = clean
+    else:
+        asset_pack.pop("logo_material", None)
+    draft["asset_pack"] = asset_pack
+    session["draft"] = draft
+    return save_video_session(user_id, session)
+
+
+def product_video_logo_material_invoice_line(session: dict | None = None, lang: str = "vi") -> str:
+    material = product_video_logo_material_from_session(session)
+    if not material.get("logo_enabled"):
+        return ""
+    position = product_video_logo_position_label(str(material.get("logo_position") or ""), lang)
+    width_percent = int(round(float(material.get("logo_width_ratio") or PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO) * 100))
+    if normalize_user_language(lang) != "vi":
+        return f"Logo: on · position {position} · small {width_percent}% width"
+    return f"Logo: bật · vị trí {position} · nhỏ {width_percent}% chiều ngang"
+
+
+def product_video_logo_position_text(session: dict | None = None, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🏷 <b>Choose logo position</b>\n\n"
+            "Choose one of 6 positions. TOAN AAS only saves this as Product Video material; no video processing and no Xu charge yet."
+        )
+    return (
+        "🏷 <b>Chọn vị trí logo</b>\n\n"
+        "Chọn 1 trong 6 vị trí trên màn hình. Logo mặc định nhỏ, giữ đúng tỉ lệ ảnh gốc.\n\n"
+        "Bước này chỉ lưu logo vào tư liệu Product Video, chưa xử lý video và chưa trừ Xu."
+    )
+
+
+def product_video_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("↖️ Trên trái", callback_data="vproduct|asset_logo_position|top_left"),
+            InlineKeyboardButton("⬆️ Trên giữa", callback_data="vproduct|asset_logo_position|top_center"),
+            InlineKeyboardButton("↗️ Trên phải", callback_data="vproduct|asset_logo_position|top_right"),
+        ],
+        [
+            InlineKeyboardButton("↙️ Dưới trái", callback_data="vproduct|asset_logo_position|bottom_left"),
+            InlineKeyboardButton("⬇️ Dưới giữa", callback_data="vproduct|asset_logo_position|bottom_center"),
+            InlineKeyboardButton("↘️ Dưới phải", callback_data="vproduct|asset_logo_position|bottom_right"),
+        ],
+        [InlineKeyboardButton("Không dùng logo", callback_data="vproduct|asset_logo_none")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|asset_intro"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+
 def video_b14_logo_text(session: dict | None = None, lang: str = "vi") -> str:
     plan = video_b14_addon_plan_from_session(session)
     source = str(plan.get("logo_source") or ("text" if plan.get("logo_enabled") else "none"))
@@ -68544,28 +68679,25 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         lines.append(f"• Giảm giá số cảnh: <b>-{safe_int(invoice.get('discount_percent'), 0)}%</b> = <b>-{xu_number(safe_int(invoice.get('discount_xu'), 0))} Xu</b>")
     if balance_text:
         lines.append(balance_text)
+    logo_material_line = product_video_logo_material_invoice_line(session, lang)
     if invoice["addons_disabled_by_package"]:
         lines.extend(["", PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI])
+        if logo_material_line:
+            lines.append(f"• {html.escape(logo_material_line)}")
     else:
         addon_plan = dict(draft.get("b14_addon_plan") or video_b14_addon_plan_from_session(session))
         voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
         subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
         dub_target = str(addon_plan.get("dub_target_language") or addon_plan.get("subtitle_target_language") or "").strip()
-        logo_source = str(addon_plan.get("logo_source") or "none") if addon_plan.get("logo_enabled") else "none"
-        logo_line = "Bật"
-        if addon_plan.get("logo_enabled"):
-            logo_text_value = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
-            logo_line = f"Bật · {video_b14_addon_label('logo', logo_source)} · {logo_text_value or 'chưa nhập'} · {video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right'))}"
-        else:
-            logo_line = "Tắt"
         lines.extend([
             "",
             f"• Voice: {'bật' if addon_plan.get('voice_enabled') else 'tắt'} · {html.escape(voice_label)} · {addon_plan.get('voice_volume_percent', 100)}%",
             f"• Nhạc: {'bật' if addon_plan.get('music_enabled') else 'tắt'} · {addon_plan.get('music_volume_percent', 10)}%",
             f"• Phụ đề: {'bật' if addon_plan.get('subtitle_enabled') else 'tắt'} · {html.escape(subtitle_label)}",
             f"• Lồng tiếng: {'bật' if addon_plan.get('dub_enabled') else 'tắt'}{(' · ' + html.escape(dub_target)) if dub_target else ''}",
-            f"• Logo: {html.escape(logo_line)}",
         ])
+        if logo_material_line:
+            lines.append(f"• {html.escape(logo_material_line)}")
     lines.extend(["", "Bấm xác nhận để đưa tác vụ vào hàng chờ xử lý nền. TOAN AAS chỉ trừ Xu khi MP4 hợp lệ đã được gửi thành công."])
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
@@ -69095,6 +69227,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         render_mode = "unavailable"
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
     postproduction_label = video_b14_compact_postproduction_label(addon_plan)
+    logo_material_line = product_video_logo_material_invoice_line(session, lang)
     lines = [
         "🎬 <b>Trạng thái tạo video</b>",
         "",
@@ -69110,6 +69243,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"• Thời lượng: <b>{duration}s</b>",
         f"• Hậu kỳ: <b>{html.escape(postproduction_label)}</b>",
     ]
+    if logo_material_line:
+        lines.append(f"• {html.escape(logo_material_line)}")
     if duplicate:
         lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
 
@@ -69849,6 +69984,11 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     product_type = video_engine_product_type_for_session(session)
     route = video_final_output.route_for_product_type(product_type)
     asset_pack_payload = dict(draft.get("asset_pack") or {})
+    logo_material = product_video_logo_material_from_session(session)
+    if logo_material.get("logo_enabled"):
+        asset_pack_payload["logo_material"] = logo_material
+    else:
+        asset_pack_payload.pop("logo_material", None)
     original_user_prompt = str((session or {}).get("original_user_prompt") or topic or draft.get("topic") or "").strip()
     cleaned_user_prompt = re.sub(r"\s+", " ", original_user_prompt).strip()
     asset_pack_payload.update({
@@ -72007,11 +72147,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "asset_wait":
         asset_type = video_b14_asset_type_for_button(value)
         session = task3d_session_step(uid, "asset_intake", asset_waiting_for=value, pending_asset_type=asset_type, provider_called=False, xu_charged=0)
+        wait_text = (
+            "🏷 Hãy gửi ảnh logo PNG/JPG. Sau khi nhận logo, TOAN AAS sẽ cho chọn vị trí trên màn hình. Chưa xử lý video và chưa trừ Xu."
+            if asset_type == "logo" and normalize_user_language(lang) == "vi"
+            else "🏷 Send the logo image. After receiving it, TOAN AAS will ask for screen position. No video processing or Xu charge."
+            if asset_type == "logo"
+            else "📎 Hãy gửi file tư liệu cho mục này. TOAN AAS chỉ lưu file trong kế hoạch, chưa tạo video và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "📎 Send the asset file for this slot. TOAN AAS only saves it in the plan; no video processing or Xu charge."
+        )
         return await safe_edit_or_send(
             query,
-            "📎 Hãy gửi file tư liệu cho mục này. TOAN AAS chỉ lưu file trong kế hoạch, chưa tạo video và chưa trừ Xu."
-            if normalize_user_language(lang) == "vi"
-            else "📎 Send the asset file for this slot. TOAN AAS only saves it in the plan; no video processing or Xu charge.",
+            wait_text,
             parse_mode=None,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_intro"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
@@ -72066,7 +72213,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("📷 Tôi có ảnh sẵn" if normalize_user_language(lang) == "vi" else "📷 I have images", callback_data="vproduct|asset_wait|subject"),
+                    InlineKeyboardButton("📸 Gửi ảnh nhân vật/sản phẩm" if normalize_user_language(lang) == "vi" else "📸 Character/product refs", callback_data="vproduct|asset_wait|subject"),
                     InlineKeyboardButton("🖼 Tạo ảnh AI trước" if normalize_user_language(lang) == "vi" else "🖼 Create AI images first", callback_data="vproduct|asset_create_ai_image"),
                 ],
                 [
@@ -72093,6 +72240,56 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
                 ],
             ]),
+        )
+    if action == "asset_logo_position":
+        position = value if value in PRODUCT_VIDEO_LOGO_POSITIONS else "top_right"
+        material = product_video_logo_material_from_session(session)
+        file_id = str(material.get("logo_file_id") or "").strip()
+        if not file_id:
+            try:
+                pack = video_b14_asset_pack_from_session(session)
+                if pack.logo_refs:
+                    file_id = str(pack.logo_refs[-1].file_id or "").strip()
+            except Exception:
+                file_id = ""
+        if not file_id:
+            session = task3d_session_step(uid, "asset_intake", asset_waiting_for="logo", pending_asset_type="logo", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(
+                query,
+                "🏷 Hãy gửi ảnh logo trước. TOAN AAS chưa xử lý video và chưa trừ Xu."
+                if normalize_user_language(lang) == "vi"
+                else "🏷 Send a logo image first. TOAN AAS has not processed video or charged Xu.",
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|asset_intro"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]),
+            )
+        session = product_video_set_logo_material(
+            uid,
+            session,
+            product_video_logo_material_config(
+                logo_file_id=file_id,
+                logo_position=position,
+                logo_enabled=True,
+            ),
+        )
+        session = task3d_session_step(uid, "asset_intake", asset_waiting_for="", pending_asset_type="", provider_called=False, xu_charged=0)
+        line = product_video_logo_material_invoice_line(session, lang)
+        return await safe_edit_or_send(
+            query,
+            f"✅ Đã lưu logo: {html.escape(line)}.\n\n{video_asset_intake_intro_text(lang)}",
+            parse_mode="HTML",
+            reply_markup=video_asset_intake_keyboard(lang),
+        )
+    if action == "asset_logo_none":
+        pack = video_b14_asset_pack_from_session(session)
+        pack.logo_refs = []
+        session = video_b14_save_asset_pack(uid, session, pack)
+        session = product_video_set_logo_material(uid, session, {})
+        session = task3d_session_step(uid, "asset_intake", asset_waiting_for="", pending_asset_type="", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            video_asset_intake_intro_text(lang),
+            parse_mode=None,
+            reply_markup=video_asset_intake_keyboard(lang),
         )
     if action == "asset_skip":
         return await safe_edit_or_send(
@@ -73741,11 +73938,14 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         scene_index = None
         if asset_type == "storyboard_frame":
             scene_index = len(pack.storyboard_frames) + 1
+        if asset_type == "logo":
+            pack.logo_refs = []
+        file_id = str(getattr(media, "file_id", "") or "")
         try:
             video_assets.add_asset(
                 pack,
                 asset_type=asset_type,
-                file_id=str(getattr(media, "file_id", "") or ""),
+                file_id=file_id,
                 mime_type=mime_type,
                 source_message_id=getattr(update.message, "message_id", None),
                 caption=str(getattr(update.message, "caption", "") or ""),
@@ -73758,6 +73958,23 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         pack.skipped_by_user = False
         session = video_b14_save_asset_pack(uid, session, pack)
         lang = get_user_language(uid) or "vi"
+        if asset_type == "logo":
+            session = product_video_set_logo_material(
+                uid,
+                session,
+                product_video_logo_material_config(
+                    logo_file_id=file_id,
+                    logo_position="",
+                    logo_enabled=False,
+                ),
+            )
+            session = task3d_session_step(uid, "asset_logo_position", asset_waiting_for="", pending_asset_type="", provider_called=False, xu_charged=0)
+            await update.message.reply_text(
+                product_video_logo_position_text(session, lang),
+                parse_mode="HTML",
+                reply_markup=product_video_logo_position_keyboard(lang),
+            )
+            return True
         await update.message.reply_text(
             f"✅ Đã lưu tư liệu: {video_assets.asset_reference_summary(pack)}.\n\n{video_asset_intake_intro_text(lang)}",
             reply_markup=video_asset_intake_keyboard(lang),

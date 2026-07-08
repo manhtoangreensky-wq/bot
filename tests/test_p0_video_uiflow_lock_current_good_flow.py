@@ -144,12 +144,12 @@ def test_videoflow_lock_style_customization_buttons_snapshot():
 
 def test_videoflow_lock_add_materials_buttons_snapshot():
     assert _rows(bot.video_asset_intake_keyboard("vi")) == [
-        [("📷 Tôi có ảnh sẵn", "vproduct|asset_wait|subject"), ("🖼 Tạo ảnh AI trước", "vproduct|asset_create_ai_image")],
-        [("📚 Gợi ý bố cục ảnh", "vproduct|asset_layout_ideas"), ("🎨 Dùng prompt ảnh từ storyboard", "vproduct|asset_storyboard_prompt")],
-        [("📸 Gửi ảnh nhân vật/sản phẩm", "vproduct|asset_wait|subject"), ("🏞 Gửi ảnh bối cảnh", "vproduct|asset_wait|background")],
-        [("🧩 Gửi ảnh storyboard", "vproduct|asset_wait|storyboard"), ("🏷 Gửi logo", "vproduct|asset_wait|logo")],
-        [("🎙 Gửi voice/audio", "vproduct|asset_wait|voice"), ("🎵 Gửi nhạc nền", "vproduct|asset_wait|music")],
-        [("⏭ Bỏ qua", "vproduct|asset_skip"), ("✅ Xong phần tư liệu", "vproduct|asset_done")],
+        [("🖼 Tạo ảnh AI trước", "vproduct|asset_create_ai_image"), ("📚 Gợi ý bố cục ảnh", "vproduct|asset_layout_ideas")],
+        [("🎨 Dùng prompt ảnh từ storyboard", "vproduct|asset_storyboard_prompt"), ("📸 Gửi ảnh nhân vật/sản phẩm", "vproduct|asset_wait|subject")],
+        [("🏞 Gửi ảnh bối cảnh", "vproduct|asset_wait|background"), ("🧩 Gửi ảnh storyboard", "vproduct|asset_wait|storyboard")],
+        [("🏷 Gửi logo", "vproduct|asset_wait|logo"), ("🎙 Gửi voice/audio", "vproduct|asset_wait|voice")],
+        [("🎵 Gửi nhạc nền", "vproduct|asset_wait|music"), ("⏭ Bỏ qua", "vproduct|asset_skip")],
+        [("✅ Xong phần tư liệu", "vproduct|asset_done")],
         [("🔙 Quay lại", "vproduct|b14_profile_back"), ("🏠 Menu chính", "menu|main")],
     ]
 
@@ -325,8 +325,8 @@ def test_videoflow_lock_menu_main_returns_main_menu():
 
 def test_videoflow_lock_add_materials_all_buttons_present():
     labels = _labels(bot.video_asset_intake_keyboard("vi"))
+    assert "📷 Tôi có ảnh sẵn" not in labels
     for expected in (
-        "📷 Tôi có ảnh sẵn",
         "🖼 Tạo ảnh AI trước",
         "📚 Gợi ý bố cục ảnh",
         "🎨 Dùng prompt ảnh từ storyboard",
