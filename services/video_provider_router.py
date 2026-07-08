@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -210,6 +211,121 @@ def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dic
                 "previous_raw": detail.get("raw", ""),
             }
     return detail
+
+
+PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM = "public_user_final_confirm"
+PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK = "worker_poll_existing_task"
+PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES = {
+    "codex_test",
+    "smoke",
+    "debug",
+    "recover",
+    "status",
+    "background_retry",
+    "fallback",
+}
+
+
+def normalize_product_video_submit_source(value: Any = "") -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    aliases = {
+        "public_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        "final_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        "user_final_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        "b14_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        "poll_existing_task": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
+        "worker_poll": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
+        "worker_poll_existing": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
+        "admin_smoke": "smoke",
+        "slash_smoke": "smoke",
+        "manual_debug": "debug",
+        "video_render_debug": "debug",
+        "video_provider_job_debug": "debug",
+        "admin_recover": "recover",
+        "provider_recover": "recover",
+        "manual_status": "status",
+        "auto_status": "status",
+        "manual_refresh": "status",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def product_video_provider_submit_source_policy(
+    metadata: dict[str, Any] | None = None,
+    *,
+    public_submit_enabled: bool = False,
+    poll_existing_task: bool = False,
+) -> dict[str, Any]:
+    metadata = dict(metadata or {})
+    source = normalize_product_video_submit_source(
+        metadata.get("submit_source")
+        or metadata.get("provider_submit_source")
+        or metadata.get("source_context")
+        or metadata.get("entry_source")
+        or ""
+    )
+    if not source and (
+        metadata.get("public_user_confirmed")
+        or metadata.get("interactive_product")
+        or metadata.get("product_video")
+        or metadata.get("public_user")
+    ):
+        # Legacy Product Video jobs created before R10B did not persist a source.
+        # They still represent a visible final-confirm route, not a hidden smoke.
+        source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    public_user_confirmed = bool(
+        metadata.get("public_user_confirmed")
+        or metadata.get("b14_public_user_confirmed")
+        or metadata.get("user_final_confirmed")
+        or source == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
+    if poll_existing_task or source == PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
+        return {
+            "submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
+            "public_user_confirmed": public_user_confirmed,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "worker_poll_existing_task_read_only",
+            "poll_existing_task_allowed": True,
+        }
+    if source in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES:
+        return {
+            "submit_source": source,
+            "public_user_confirmed": public_user_confirmed,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "hidden_submit_source_blocked",
+            "poll_existing_task_allowed": False,
+        }
+    if source != PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM:
+        return {
+            "submit_source": source or "missing",
+            "public_user_confirmed": public_user_confirmed,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "submit_source_not_public_final_confirm",
+            "poll_existing_task_allowed": False,
+        }
+    if not public_user_confirmed:
+        return {
+            "submit_source": source,
+            "public_user_confirmed": False,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "public_user_confirm_missing",
+            "poll_existing_task_allowed": False,
+        }
+    if not public_submit_enabled:
+        return {
+            "submit_source": source,
+            "public_user_confirmed": True,
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "public_provider_submit_disabled",
+            "poll_existing_task_allowed": False,
+        }
+    return {
+        "submit_source": source,
+        "public_user_confirmed": True,
+        "provider_submit_allowed": True,
+        "provider_submit_block_reason": "",
+        "poll_existing_task_allowed": False,
+    }
 
 
 def paid_retry_requires_confirmation(env: dict[str, str] | None = None) -> bool:
@@ -1476,6 +1592,11 @@ def run_provider_generation(
     pending_attempts = [dict(item) for item in (metadata.get("provider_pending_attempts") or []) if isinstance(item, dict)]
     submit_switch = product_video_submit_switch_detail(env)
     submit_enabled = bool(submit_switch.get("resolved"))
+    submit_source_policy = product_video_provider_submit_source_policy(
+        metadata,
+        public_submit_enabled=submit_enabled,
+        poll_existing_task=bool(pending_task_id or pending_video_id),
+    )
     cooldown_state = provider_failure_cooldown_state(metadata, env)
     submit_idempotency_key = hashlib.sha256(
         f"{request.job_id}|{request.product_type}|{request.video_flow_type}|{request.required_capability}".encode("utf-8")
@@ -1488,6 +1609,12 @@ def run_provider_generation(
         "product_video_provider_submit_enabled_raw": str(submit_switch.get("raw") or ""),
         "product_video_provider_submit_enabled_resolved": bool(submit_enabled),
         "product_video_provider_submit_enabled_source": str(submit_switch.get("source") or "default"),
+        "submit_source": str(submit_source_policy.get("submit_source") or "-"),
+        "public_user_confirmed": bool(submit_source_policy.get("public_user_confirmed")),
+        "provider_submit_allowed": bool(submit_source_policy.get("provider_submit_allowed")),
+        "provider_submit_block_reason": str(submit_source_policy.get("provider_submit_block_reason") or ""),
+        "poll_existing_task_allowed": bool(submit_source_policy.get("poll_existing_task_allowed")),
+        "charge_policy": str(metadata.get("charge_policy") or ("after_valid_mp4_delivery" if is_product_video else "")),
         "kill_switch_checked_before_submit": True,
         "provider_submit_blocked_by_kill_switch": False,
         "external_provider_spend_prevented": False,
@@ -1536,18 +1663,20 @@ def run_provider_generation(
         "provider_poll_called": False,
         "provider_result_url_present": False,
     }
-    if is_product_video and not submit_enabled and not (pending_task_id or pending_video_id):
+    if is_product_video and not submit_source_policy.get("provider_submit_allowed") and not (pending_task_id or pending_video_id):
+        policy_reason = str(submit_source_policy.get("provider_submit_block_reason") or "provider_submit_source_blocked")
+        legacy_kill_switch_block = policy_reason == "public_provider_submit_disabled"
         return {
             "ok": False,
             **base_debug,
             "provider_attempted": False,
             "provider_submit_called": False,
-            "provider_submit_blocked_by_kill_switch": True,
+            "provider_submit_blocked_by_kill_switch": bool(legacy_kill_switch_block),
             "external_provider_spend_prevented": True,
             "paid_submit_allowed": False,
-            "paid_submit_blocked_reason": "provider_submit_kill_switch",
-            "provider_error": "provider_submit_kill_switch",
-            "blocker": "provider_submit_kill_switch",
+            "paid_submit_blocked_reason": "provider_submit_kill_switch" if legacy_kill_switch_block else policy_reason,
+            "provider_error": "provider_submit_kill_switch" if legacy_kill_switch_block else policy_reason,
+            "blocker": "provider_submit_kill_switch" if legacy_kill_switch_block else policy_reason,
             "provider_status": "blocked_no_charge",
             "terminal_state": "blocked_no_charge",
             "status": "failed_no_charge",
@@ -1792,6 +1921,7 @@ def run_provider_generation(
                 "provider_submit_already_exists": bool(poll_existing_task),
                 "no_new_submit": bool(poll_existing_task),
                 "poll_existing_task": bool(poll_existing_task),
+                "poll_existing_task_allowed": bool(poll_existing_task or submit_source_policy.get("poll_existing_task_allowed")),
                 "duplicate_paid_submit_prevented": bool(poll_existing_task),
                 "duplicate_paid_submit_prevented_count": 1 if poll_existing_task else 0,
                 "provider_task_id_saved_before_retry": bool(pending_task_id or pending_video_id),
@@ -1801,7 +1931,16 @@ def run_provider_generation(
                     metadata.get("last_provider_submit_timestamp")
                     or ("" if poll_existing_task else str(int(time.time())))
                 ),
-                "paid_submit_allowed": bool(submit_enabled and not poll_existing_task),
+                "submit_source": str(submit_source_policy.get("submit_source") or "-"),
+                "public_user_confirmed": bool(submit_source_policy.get("public_user_confirmed")),
+                "provider_submit_allowed": bool(submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
+                "provider_submit_block_reason": (
+                    "worker_poll_existing_task_read_only"
+                    if poll_existing_task
+                    else str(submit_source_policy.get("provider_submit_block_reason") or "")
+                ),
+                "charge_policy": str(metadata.get("charge_policy") or ("after_valid_mp4_delivery" if is_product_video else "")),
+                "paid_submit_allowed": bool(submit_enabled and submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
                 "external_provider_spend_prevented": bool(poll_existing_task),
                 "provider_attempts": _copy_attempt_traces(),
             }

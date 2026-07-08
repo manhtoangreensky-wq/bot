@@ -24,6 +24,8 @@ from services import video_final_output
 from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
     PUBLIC_NO_VIDEO_PROVIDER_COPY,
+    PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+    PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
     capability_options,
     normalize_capability_values,
     provider_status_payload,
@@ -968,6 +970,33 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     pending_matches_request = bool(
         (job or {}).get("provider_pending_task_id") or (job or {}).get("provider_pending_video_id")
     ) and (not pending_request_job_id or pending_request_job_id == request_job_id)
+    asset_pack = _json_loads((job or {}).get("asset_pack"), {})
+    invoice = _json_loads((job or {}).get("invoice"), {})
+    if not asset_pack and isinstance((job or {}).get("project"), dict):
+        asset_pack = _json_loads(((job or {}).get("project") or {}).get("asset_pack_json"), {})
+    if not invoice and isinstance((job or {}).get("project"), dict):
+        invoice = _json_loads(((job or {}).get("project") or {}).get("invoice_json"), {})
+
+    def _meta_value(*keys: str) -> Any:
+        for source in (job or {}, asset_pack, invoice):
+            if not isinstance(source, dict):
+                continue
+            for key in keys:
+                value = source.get(key)
+                if value not in (None, "", [], {}):
+                    return value
+        return ""
+
+    submit_source = str(_meta_value("submit_source", "provider_submit_source") or "").strip()
+    if pending_matches_request:
+        submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK
+    elif not submit_source and bool(_meta_value("public_user", "interactive_product", "product_video")):
+        submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    public_user_confirmed = bool(
+        _meta_value("public_user_confirmed", "b14_public_user_confirmed", "user_final_confirmed")
+        or submit_source == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
+    charge_policy = str(_meta_value("charge_policy") or "after_valid_mp4_delivery").strip()
     request = VideoGenerationRequest(
         job_id=request_job_id,
         product_type=product_type or "video_ai_prompt",
@@ -988,6 +1017,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "raw_output_path": raw_path,
             "product_video": bool(str((job or {}).get("source") or "") == "product_video" or (job or {}).get("product_video")),
             "render_mode": str((job or {}).get("render_mode") or ""),
+            "submit_source": submit_source,
+            "provider_submit_source": submit_source,
+            "public_user_confirmed": public_user_confirmed,
+            "charge_policy": charge_policy,
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
             "claim_payload_has_provider_config": bool((job or {}).get("provider_config") or (job or {}).get("provider_submit_url") or (job or {}).get("provider_auth_header_value")),
