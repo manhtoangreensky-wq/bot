@@ -2069,6 +2069,29 @@ def _run_per_scene_provider_orchestrator(
         for item in scene_tasks
         if _safe_int(item.get("scene_index"), 0)
     }
+    scene_provider_status_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): str(item.get("status") or item.get("provider_status_raw") or "")
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
+    scene_elapsed_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): _safe_int(item.get("scene_not_start_elapsed") or item.get("provider_wait_elapsed_seconds"), 0)
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
+    fallback_provider_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): str((item.get("fallback_provider_order") or [""])[0])
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+        and item.get("fallback_allowed")
+        and isinstance(item.get("fallback_provider_order"), list)
+        and item.get("fallback_provider_order")
+    }
+    fallback_submit_source_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): str(item.get("fallback_submit_source") or PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE)
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0) and item.get("fallback_allowed")
+    }
     active_scene = next(
         (
             item
@@ -2099,6 +2122,10 @@ def _run_per_scene_provider_orchestrator(
         "scenes_stalled_count": scenes_stalled_count,
         "scene_success_count": counts["scene_tasks_completed"],
         "fallback_count_by_scene": fallback_count_by_scene,
+        "scene_provider_status_by_scene": scene_provider_status_by_scene,
+        "scene_elapsed_by_scene": scene_elapsed_by_scene,
+        "fallback_provider_by_scene": fallback_provider_by_scene,
+        "fallback_submit_source_by_scene": fallback_submit_source_by_scene,
         "current_scene_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_scene": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_scene_status": str(active_scene.get("status") or ""),
@@ -2120,6 +2147,14 @@ def _run_per_scene_provider_orchestrator(
         ),
         "fallback_submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE if any(bool(item.get("fallback_allowed")) for item in scene_tasks) else "",
         "source_of_truth": str(active_scene.get("source_of_truth") or ("scene_stalled_not_start" if scenes_stalled_count else "scene_orchestrator")),
+        "final_action": "continue_polling" if pending_seen and not hard_failures else "failed_no_charge",
+        "provider_health": job.get("provider_health") or {},
+        "selected_primary_provider": job.get("selected_primary_provider") or (provider_order[0] if provider_order else ""),
+        "provider_degraded_reason": job.get("provider_degraded_reason") or "",
+        "delivery_first_routing": bool(job.get("delivery_first_routing")),
+        "multiscene_live_ready": bool(job.get("multiscene_live_ready")),
+        "safe_live_scene_count": _safe_int(job.get("safe_live_scene_count"), _scene_count(job)),
+        "provider_health_gate_reason": job.get("provider_health_gate_reason") or "",
         "provider_events": provider_events,
         "provider_task_ids": [item.get("task_id") for item in provider_events if item.get("task_id")],
         "provider_video_ids": [item.get("video_id") for item in provider_events if item.get("video_id")],
@@ -2152,6 +2187,7 @@ def _run_per_scene_provider_orchestrator(
         base["provider_state_source"] = "scene_failure"
         base["provider_error"] = str(failure.get("provider_error") or failure.get("blocker") or PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START)
         base["blocker"] = base["provider_error"]
+        base["final_action"] = "failed_no_charge"
         return _enforce_product_video_terminal_consistency(base, reason=base["provider_error"])
     if len(scene_outputs) < _scene_count(job):
         base["continue_polling"] = True
@@ -2162,6 +2198,7 @@ def _run_per_scene_provider_orchestrator(
         base["terminal_state"] = "final_rendering"
         base["final_decision"] = "continue_polling"
         base["source_of_truth"] = str(active_scene.get("source_of_truth") or "scene_provider_task_alive")
+        base["final_action"] = "continue_polling"
         return base
 
     def _cached_scene_renderer(scene, raw_path: str):
@@ -2190,6 +2227,7 @@ def _run_per_scene_provider_orchestrator(
     final_result["no_charge"] = bool(job.get("no_charge"))
     final_result["final_decision"] = "final_mp4_ready"
     final_result["source_of_truth"] = "final_mp4_validated"
+    final_result["final_action"] = "download_clips_concat_deliver"
     return final_result
 
 
