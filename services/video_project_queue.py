@@ -361,10 +361,20 @@ def _render_subprogress(
         source = "provider_raw"
         estimated = False
     else:
-        del elapsed, wait_max, poll_count
-        progress = 0
-        source = "indeterminate"
-        estimated = False
+        wait_window = max(60, int(wait_max or 0))
+        elapsed_seconds = max(0, int(elapsed or 0))
+        if alive:
+            # Real elapsed wait is the only public-safe progress before result_url.
+            # It starts at 0, never trusts HTTP 200/raw provider numbers, and caps
+            # below completion until a downloadable MP4 URL exists.
+            progress = int(min(85, max(0, round((elapsed_seconds / wait_window) * 85))))
+            source = "elapsed_provider_wait"
+            estimated = False
+        else:
+            del poll_count
+            progress = 0
+            source = "indeterminate"
+            estimated = False
     if alive:
         progress = min(90, progress)
     if source != "indeterminate":
@@ -510,15 +520,15 @@ def reconcile_provider_progress_telemetry(
             or bool(parser_fields.get("http_200_not_used_as_progress") or payload.get("http_200_not_used_as_progress"))
         )
     )
-    if provider_progress_public_suppressed:
-        render_progress = 0
-        render_source = "indeterminate"
-    render_progress_public_mode = "zero_waiting" if provider_progress_public_suppressed else "percent"
-    render_progress_public_percent = "0" if provider_progress_public_suppressed else str(render_progress)
+    if provider_progress_public_suppressed and alive and render_source == "indeterminate":
+        render_progress = max(0, min(85, render_progress))
+        render_source = "elapsed_provider_wait"
+    render_progress_public_mode = "elapsed_wait" if provider_progress_public_suppressed and alive else ("zero_waiting" if provider_progress_public_suppressed else "percent")
+    render_progress_public_percent = str(render_progress)
     fake_progress_prevention_reason = "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else ""
     trusted_render_progress_available = bool(provider_progress_trusted or result_url_present or final_output_ready)
     why_render_bar_stays_zero = (
-        "provider_progress_untrusted_no_result_url" if provider_progress_public_suppressed else ""
+        "waiting_for_real_elapsed_or_result_url" if provider_progress_public_suppressed and render_progress <= 0 else ""
     )
     status_registry_missing_after_restart = bool(
         payload.get("status_registry_missing_after_restart")
@@ -536,8 +546,6 @@ def reconcile_provider_progress_telemetry(
         elapsed_public_mode = "hidden" if provider_progress_public_suppressed else "recovered_approx"
     render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
     overall_progress_from_render = 100 if final_output_ready else (95 if result_url_present else 20 + int(render_progress * 0.65))
-    if provider_progress_public_suppressed:
-        overall_progress_from_render = 20
     if alive and not final_output_ready:
         overall_progress_from_render = min(85, overall_progress_from_render)
     estimated = False
@@ -576,7 +584,7 @@ def reconcile_provider_progress_telemetry(
         "render_video_progress_percent_public": render_progress_public_percent,
         "provider_progress_public_suppressed": bool(provider_progress_public_suppressed),
         "render_progress_public_mode": render_progress_public_mode,
-        "public_zero_bar_due_to_untrusted_provider": bool(provider_progress_public_suppressed),
+        "public_zero_bar_due_to_untrusted_provider": bool(provider_progress_public_suppressed and render_progress <= 0),
         "fake_progress_prevented": bool(provider_progress_public_suppressed),
         "fake_progress_prevention_reason": fake_progress_prevention_reason,
         "percent_conservative_due_to_untrusted_provider": bool(provider_progress_public_suppressed),
@@ -1339,6 +1347,51 @@ def heartbeat_video_job(
     return {"ok": True, "job": get_video_render_job(conn, int(job_id))}
 
 
+PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
+
+
+def product_video_expected_duration_seconds(project: dict | None = None, payload: dict | None = None) -> int:
+    project = dict(project or {})
+    payload = dict(payload or {})
+    invoice = _json_loads(str(project.get("invoice_json") or payload.get("invoice_json") or ""), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    direct = _as_int(
+        payload.get("expected_duration_seconds")
+        or payload.get("duration_seconds")
+        or invoice.get("duration_seconds"),
+        0,
+    )
+    if direct > 0:
+        return direct
+    scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
+    scene_seconds = _as_int(payload.get("scene_seconds") or invoice.get("scene_seconds"), PRODUCT_VIDEO_SCENE_SECONDS)
+    return max(1, min(20, scene_count)) * max(1, scene_seconds)
+
+
+def product_video_duration_contract(project: dict | None, payload: dict | None, validation: dict | None) -> dict[str, Any]:
+    validation = dict(validation or {})
+    expected = product_video_expected_duration_seconds(project, payload)
+    duration = float(validation.get("duration") or validation.get("duration_seconds") or 0)
+    if not validation.get("ok"):
+        return {
+            "ok": False,
+            "expected_duration_seconds": expected,
+            "actual_duration_seconds": duration,
+            "duration_tolerance_seconds": PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS,
+            "reason": str(validation.get("reason") or "final_output_invalid"),
+        }
+    ok = duration + PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS >= float(expected)
+    return {
+        "ok": bool(ok),
+        "expected_duration_seconds": expected,
+        "actual_duration_seconds": duration,
+        "duration_tolerance_seconds": PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS,
+        "reason": "" if ok else "final_duration_short_scene_coverage_missing",
+    }
+
+
 def complete_video_job(
     conn: sqlite3.Connection,
     *,
@@ -1394,6 +1447,16 @@ def complete_video_job(
             conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
             conn.commit()
             return fail_video_job(conn, job_id=int(job_id), error=str(validation.get("reason") or "final_output_invalid"), retry=False)
+        duration_contract = product_video_duration_contract(project, payload, validation)
+        payload["final_duration_contract"] = duration_contract
+        payload["expected_duration_seconds"] = duration_contract["expected_duration_seconds"]
+        payload["final_duration_seconds"] = duration_contract["actual_duration_seconds"]
+        if not duration_contract.get("ok"):
+            payload["terminal_state"] = "failed_no_charge"
+            payload["finalizer_error"] = duration_contract["reason"]
+            conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
+            conn.commit()
+            return fail_video_job(conn, job_id=int(job_id), error=str(duration_contract.get("reason") or "final_duration_invalid"), retry=False)
         payload.update(
             {
                 "output_bytes": int(validation.get("bytes") or 0),

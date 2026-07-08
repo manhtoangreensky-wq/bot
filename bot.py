@@ -66245,9 +66245,16 @@ VIDEO_B14_2_ASSET_SKIP_WARNING_VI = (
 )
 VIDEO_B14_2_WORKER_NOT_READY_VI = "Hệ thống dựng video nền chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Phim AI nhiều cảnh đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
-VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Gói trải nghiệm chỉ tạo video gốc. Giọng đọc, nhạc, phụ đề và logo sẽ tắt trong hóa đơn này."
+VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 cảnh / 8 giây. Tư liệu miễn phí đã gửi như logo, ảnh, voice hoặc nhạc được giữ; add-on có phí không áp dụng."
 VIDEO_B14_2_QUALITY_OPTIONS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
 VIDEO_B14_2_SCENE_OPTIONS = (1, 3, 5, 10, 20)
+PRODUCT_VIDEO_TRIAL_QUALITY_XU = 200
+PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT = 1
+PRODUCT_VIDEO_TRIAL_DURATION_SECONDS = 8
+PRODUCT_VIDEO_TRIAL_LIMIT_DAY = 1
+PRODUCT_VIDEO_TRIAL_LIMIT_WEEK = 3
+PRODUCT_VIDEO_TRIAL_LIMIT_MONTH = 10
+PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 cảnh / 8 giây."
 PRODUCT_VIDEO_R9E_ADDONS_LOCKED = True
 PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI = "Hậu kỳ đang khóa tạm thời cho Product Video. Hóa đơn này chỉ tính video chính."
 PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI = "Hệ thống dựng video đang tạm khóa để bảo vệ Xu. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
@@ -68617,15 +68624,144 @@ def video_b14_public_max_scene_count() -> int:
     return max(1, min(20, env_int("VIDEO_PUBLIC_MAX_SCENE_COUNT", env_int("VIDEO_PUBLIC_MAX_SCENES", 20))))
 
 
-def video_b14_scene_count_keyboard(user_id=0, lang: str = "vi") -> InlineKeyboardMarkup:
-    choices = list(VIDEO_B14_2_SCENE_OPTIONS)
+def video_b14_is_trial_quality(quality_xu: int | str | None) -> bool:
+    return safe_int(quality_xu, 0) == PRODUCT_VIDEO_TRIAL_QUALITY_XU
+
+
+def video_b14_quality_for_session(session: dict | None = None) -> int:
+    draft = dict((session or {}).get("draft") or {})
+    return max(0, safe_int(draft.get("b14_quality_xu"), 0))
+
+
+def video_b14_trial_scene_policy(quality_xu: int | str | None, scene_count: int | str | None) -> dict:
+    requested = max(1, min(20, safe_int(scene_count, PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT)))
+    if not video_b14_is_trial_quality(quality_xu):
+        return {"trial": False, "requested": requested, "scene_count": requested, "clamped": False, "message": ""}
+    clamped = requested != PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT
+    return {
+        "trial": True,
+        "requested": requested,
+        "scene_count": PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT,
+        "clamped": bool(clamped),
+        "message": PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI if clamped else "",
+    }
+
+
+def video_b14_trial_usage_allowed(user_id: int, *, now_dt: datetime | None = None, conn=None) -> dict:
+    """Read-only Product Video trial limit check: 1/day, 3/week, 10/month."""
+    uid = int(user_id or 0)
+    current = now_dt or datetime.now()
+    own_conn = None
+    try:
+        db = conn
+        if db is None:
+            own_conn = db_connect()
+            db = own_conn
+        if db is None:
+            return {"ok": True, "day": 0, "week": 0, "month": 0, "reason": ""}
+        rows = db.execute(
+            """SELECT created_at, updated_at, confirmed_at
+               FROM video_projects
+               WHERE user_id=? AND quality_tier=? AND COALESCE(is_confirmed, 0)=1""",
+            (uid, PRODUCT_VIDEO_TRIAL_QUALITY_XU),
+        ).fetchall()
+    except Exception:
+        return {"ok": True, "day": 0, "week": 0, "month": 0, "reason": ""}
+    finally:
+        try:
+            if own_conn is not None:
+                own_conn.close()
+        except Exception:
+            pass
+    day_count = week_count = month_count = 0
+    day_start = current - timedelta(days=1)
+    week_start = current - timedelta(days=7)
+    month_start = current - timedelta(days=30)
+    def _parse_trial_dt(value: str) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for candidate in (text, text.replace("Z", "+00:00")):
+            try:
+                parsed = datetime.fromisoformat(candidate)
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone().replace(tzinfo=None)
+                return parsed
+            except Exception:
+                continue
+        return None
+    for row in rows:
+        raw = ""
+        try:
+            raw = str(row["confirmed_at"] or row["updated_at"] or row["created_at"] or "")
+        except Exception:
+            raw = str((row[2] if len(row) > 2 else "") or (row[1] if len(row) > 1 else "") or (row[0] if row else "") or "")
+        when = _parse_trial_dt(raw)
+        if when is None:
+            continue
+        if when >= day_start:
+            day_count += 1
+        if when >= week_start:
+            week_count += 1
+        if when >= month_start:
+            month_count += 1
+    reason = ""
+    if day_count >= PRODUCT_VIDEO_TRIAL_LIMIT_DAY:
+        reason = "trial_daily_limit_reached"
+    elif week_count >= PRODUCT_VIDEO_TRIAL_LIMIT_WEEK:
+        reason = "trial_weekly_limit_reached"
+    elif month_count >= PRODUCT_VIDEO_TRIAL_LIMIT_MONTH:
+        reason = "trial_monthly_limit_reached"
+    return {"ok": not bool(reason), "day": day_count, "week": week_count, "month": month_count, "reason": reason}
+
+
+def video_b14_trial_addon_policy(addon_plan: dict | None = None, *, quality_xu: int | str | None = None) -> dict:
+    if not video_b14_is_trial_quality(quality_xu):
+        return {"trial": False, "paid_blocked": False, "blocked_addons": [], "public_copy": ""}
+    plan = dict(addon_plan or {})
+    blocked: list[str] = []
+    if plan.get("dub_enabled"):
+        blocked.append("lồng tiếng")
+    if plan.get("voice_enabled") and str(plan.get("voice_source") or "").strip().lower() not in {"none", "uploaded", "media", "user", "sent"}:
+        blocked.append("voice tạo mới")
+    if plan.get("music_enabled") and str(plan.get("music_source") or "").strip().lower() not in {"none", "uploaded", "media", "user", "sent", "saved"}:
+        blocked.append("nhạc tạo mới")
+    if plan.get("subtitle_enabled") and str(plan.get("subtitle_source") or "").strip().lower() in {"translated", "auto_translate"}:
+        blocked.append("dịch phụ đề")
+    copy = ""
+    if blocked:
+        copy = "Gói Trải nghiệm chỉ dùng tư liệu miễn phí đã gửi. Add-on có phí sẽ được tắt khỏi hóa đơn này."
+    return {"trial": True, "paid_blocked": bool(blocked), "blocked_addons": blocked, "public_copy": copy}
+
+
+def video_b14_sanitize_trial_addons(addon_plan: dict | None = None, *, quality_xu: int | str | None = None) -> dict:
+    plan = dict(addon_plan or {})
+    policy = video_b14_trial_addon_policy(plan, quality_xu=quality_xu)
+    if not policy.get("paid_blocked"):
+        return plan
+    if "lồng tiếng" in policy["blocked_addons"]:
+        plan.update({"dub_enabled": False, "dub_source": "none"})
+    if "voice tạo mới" in policy["blocked_addons"]:
+        plan.update({"voice_enabled": False, "voice_source": "none", "voice_provider_voice_id": ""})
+    if "nhạc tạo mới" in policy["blocked_addons"]:
+        plan.update({"music_enabled": False, "music_source": "none"})
+    if "dịch phụ đề" in policy["blocked_addons"]:
+        plan.update({"subtitle_enabled": False, "subtitle_source": "none"})
+    return plan
+
+
+def video_b14_scene_count_keyboard(user_id=0, lang: str = "vi", session: dict | None = None) -> InlineKeyboardMarkup:
+    active_session = session if isinstance(session, dict) else get_video_session(user_id) if user_id else {}
+    quality = video_b14_quality_for_session(active_session)
+    choices = [PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT] if video_b14_is_trial_quality(quality) else list(VIDEO_B14_2_SCENE_OPTIONS)
     rows = []
     for index in range(0, len(choices), 3):
         rows.append([
             InlineKeyboardButton(f"🎞 {count} cảnh", callback_data=f"vproduct|b14_scene_count|{count}")
             for count in choices[index:index + 3]
         ])
-    rows.append([InlineKeyboardButton("✍️ Nhập số khác", callback_data="vproduct|b14_scene_custom")])
+    if not video_b14_is_trial_quality(quality):
+        rows.append([InlineKeyboardButton("✍️ Nhập số khác", callback_data="vproduct|b14_scene_custom")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_quality_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -68634,10 +68770,14 @@ def video_b14_scene_count_text(session: dict | None = None, lang: str = "vi") ->
     draft = dict((session or {}).get("draft") or {})
     quality = safe_int(draft.get("b14_quality_xu"), 0)
     package_text = video_b14_package_full_label(quality) if quality else "chưa chọn gói"
+    extra = ""
+    if video_b14_is_trial_quality(quality):
+        extra = f"\n• <b>{PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI}</b>\n"
     return (
         "🎞 <b>Chọn số cảnh</b>\n\n"
         f"• Gói hiện tại: <b>{html.escape(package_text)}</b>\n"
         f"• Mỗi cảnh dự kiến: <b>{TASK3D_SCENE_SECONDS} giây</b>\n\n"
+        f"{extra}"
         "Sau bước này TOAN AAS mới hiện hóa đơn tổng. Chưa xử lý video và chưa trừ Xu."
     )
 
@@ -68685,8 +68825,11 @@ def video_b14_total_xu(quality_xu: int, scene_count: int) -> int:
 def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     draft = dict((session or {}).get("draft") or {})
     quality = max(200, safe_int(draft.get("b14_quality_xu"), 200))
-    scenes = video_b14_scene_count_for_session(session, 1)
-    addons_disabled = bool(PRODUCT_VIDEO_R9E_ADDONS_LOCKED)
+    scene_policy = video_b14_trial_scene_policy(quality, video_b14_scene_count_for_session(session, 1))
+    scenes = safe_int(scene_policy.get("scene_count"), 1)
+    addon_plan = dict(draft.get("b14_addon_plan") or video_b14_addon_plan_from_session(session))
+    trial_addon_policy = video_b14_trial_addon_policy(addon_plan, quality_xu=quality)
+    addons_disabled = bool(trial_addon_policy.get("paid_blocked"))
     pricing = video_b14_invoice_breakdown(quality, scenes)
     return {
         "quality_xu": quality,
@@ -68699,6 +68842,9 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         "discount_percent": pricing["discount_percent"],
         "discount_xu": pricing["discount_xu"],
         "addons_disabled_by_package": bool(addons_disabled),
+        "trial_policy_applied": bool(scene_policy.get("trial")),
+        "trial_scene_clamped": bool(scene_policy.get("clamped")),
+        "trial_addon_policy": trial_addon_policy,
         "total_xu": pricing["total_xu"],
         "user_id": int(user_id or 0),
     }
@@ -68734,7 +68880,8 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         lines.append(balance_text)
     logo_material_line = product_video_logo_material_invoice_line(session, lang)
     if invoice["addons_disabled_by_package"]:
-        lines.extend(["", PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI])
+        trial_copy = str((invoice.get("trial_addon_policy") or {}).get("public_copy") or PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI)
+        lines.extend(["", trial_copy])
         if logo_material_line:
             lines.append(f"• {html.escape(logo_material_line)}")
     else:
@@ -68961,14 +69108,15 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
         or (elapsed_public_mode in {"hidden", "recovered", "recovered_approx"} and not trusted_render_progress)
     )
     lines = ["<b>Dựng video:</b>"]
-    if public_mode in {"indeterminate", "zero_waiting"} or telemetry.get("provider_progress_public_suppressed") or (not trusted_render_progress and not result_url_present):
-        progress = 0
+    if (public_mode in {"indeterminate", "zero_waiting"} and progress <= 0) or (not trusted_render_progress and not result_url_present and progress <= 0):
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
         lines.append("Đã gửi yêu cầu dựng video, đang chờ kết quả.")
         lines.append(product_video_provider_pending_public_copy("vi"))
     else:
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
-        if registry_missing or elapsed <= 0 or poll_count_source == "recovered":
+        if telemetry.get("provider_progress_public_suppressed") and not result_url_present:
+            lines.append("Hệ thống đang dựng video. Phần trăm này dựa trên thời gian chờ thật, chưa tính là hoàn tất.")
+        elif registry_missing or elapsed <= 0 or poll_count_source == "recovered":
             lines.append(product_video_provider_pending_public_copy("vi"))
         else:
             lines.append("Hệ thống đang dựng video và sẽ tự cập nhật khi có kết quả.")
@@ -69084,8 +69232,6 @@ def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict |
 
 
 def video_b14_compact_postproduction_label(addon_plan: dict | None) -> str:
-    if PRODUCT_VIDEO_R9E_ADDONS_LOCKED:
-        return "chỉ video chính"
     addon_plan = dict(addon_plan or {})
     items: list[str] = []
     if addon_plan.get("voice_enabled"):
@@ -70122,7 +70268,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     creative_controls = video_b14_creative_controls_to_storyboard(session)
     addon_plan = video_b14_addon_plan_from_session(session)
     if invoice["addons_disabled_by_package"]:
-        addon_plan = video_b14_lock_product_video_addons(addon_plan)
+        addon_plan = video_b14_sanitize_trial_addons(addon_plan, quality_xu=invoice["quality_xu"])
     update = update_video_project(
         project_id,
         status="draft_invoice",
@@ -73047,10 +73193,19 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
     if action == "b14_scene_custom":
+        if video_b14_is_trial_quality(video_b14_quality_for_session(session)):
+            return await safe_edit_or_send(
+                query,
+                f"{PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI}\n\n" + video_b14_scene_count_text(session, lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_scene_count_keyboard(uid, lang, session),
+            )
         session = task3d_session_step(uid, "waiting_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_custom_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "b14_scene_count":
         count = max(1, min(20, safe_int(value, 3)))
+        scene_policy = video_b14_trial_scene_policy(video_b14_quality_for_session(session), count)
+        count = safe_int(scene_policy.get("scene_count"), count)
         ok, guard_message = video_b14_extended_scene_guard(uid, count)
         if not ok:
             return await safe_edit_or_send(query, guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
@@ -73066,7 +73221,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
+        prefix = (html.escape(str(scene_policy.get("message") or "")) + "\n\n") if scene_policy.get("message") else ""
+        return await safe_edit_or_send(query, prefix + video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
         draft = dict(session.get("draft") or {})
         if not draft.get("b14_scene_count_selected"):
@@ -73079,6 +73235,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not project_id:
             project = video_b14_prepare_project_for_invoice(uid, session)
             project_id = safe_int(project.get("project_id"), 0)
+        if video_b14_is_trial_quality((draft.get("b14_invoice") or {}).get("quality_xu") or draft.get("b14_quality_xu")) and not video_b14_is_admin_or_owner(uid):
+            trial_usage = video_b14_trial_usage_allowed(uid)
+            if not trial_usage.get("ok"):
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Gói Trải nghiệm đã đạt giới hạn dùng thử trong kỳ này. TOAN AAS chưa xử lý và chưa trừ Xu.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+                )
         draft.update({
             "submit_source": "public_user_final_confirm",
             "provider_submit_source": "public_user_final_confirm",
@@ -73632,6 +73797,8 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
             )
             return True
+        scene_policy = video_b14_trial_scene_policy(video_b14_quality_for_session(session), requested)
+        requested = safe_int(scene_policy.get("scene_count"), requested)
         ok, guard_message = video_b14_extended_scene_guard(uid, requested)
         if not ok:
             await update.message.reply_text(guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
@@ -73650,7 +73817,11 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 return True
             video_b14_prepare_project_for_invoice(uid, session)
             session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
-            prefix = (resize_note + "\n\n") if resize_note else ""
+            prefix = ""
+            if scene_policy.get("message"):
+                prefix += html.escape(str(scene_policy.get("message"))) + "\n\n"
+            if resize_note:
+                prefix += resize_note + "\n\n"
             await update.message.reply_text(prefix + video_b14_invoice_text(get_video_session(uid), uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
             return True
         session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
