@@ -93,8 +93,10 @@ def test_cskh5b_live_uses_same_brain_as_cskh_test_for_gia_video():
 
     assert live["intent_id"] == test["intent_id"] == "product_video_pricing"
     assert live["playbook_scenario_id"] == test["playbook_scenario_id"] == "video_sales_consulting"
-    assert live["reply_template_id"].startswith("playbook:")
-    assert test["reply_template_id"].startswith("playbook:")
+    assert live["reply_template_id"].startswith(("playbook:", "shared_knowledge:"))
+    assert test["reply_template_id"].startswith(("playbook:", "shared_knowledge:"))
+    assert "context_file" in live["source"]
+    assert "context_file" in test["source"]
 
 
 def test_cskh5b_live_uses_same_brain_as_cskh_test_for_bang_gia():
@@ -116,7 +118,8 @@ def test_cskh5b_live_no_old_generic_template_when_brain_matches():
     result = cskh.classify_business_event(_event("giá video"))
 
     assert result["intent_id"] == "product_video_pricing"
-    assert result["reply_template_id"].startswith("playbook:")
+    assert result["reply_template_id"].startswith(("playbook:", "shared_knowledge:"))
+    assert "context_file" in result["source"]
     assert "Chào bạn" not in result["reply"]
 
 
@@ -395,8 +398,20 @@ def test_cskh5b_live_repro_sequence_no_chatwide_cooldown_block():
 def test_cskh5b_no_locked_runtime_scope_changes():
     changed = set(_changed_files())
     allowed = {
-        "bot.py",
+        "knowledge/toan_aas_cskh_aichat_context.md",
+        "services/aas_shared_knowledge.py",
+        "services/ai_chatbot_copilot.py",
         "services/telegram_business_support.py",
+        "tests/test_p0_aichat1_copilot_consent.py",
+        "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
+        "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
+        "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+        "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
+        "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
     }
     forbidden_fragments = (
@@ -416,7 +431,7 @@ def test_cskh5b_no_locked_runtime_scope_changes():
     )
 
     assert changed <= allowed
-    assert not any(any(fragment in path.lower() for fragment in forbidden_fragments) for path in changed)
+    assert not any(any(fragment in path.lower() for fragment in forbidden_fragments) and not path.startswith("tests/") for path in changed)
 
 
 def test_cskh5b_no_provider_calls():

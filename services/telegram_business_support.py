@@ -71,7 +71,7 @@ POLICY_CLAIM_TYPES = {
     "policy_confirm_required",
     "never_auto_promise",
 }
-TRUSTED_PRICING_SOURCES = {"config", "pricing_doc", "guide_doc"}
+TRUSTED_PRICING_SOURCES = {"config", "pricing_doc", "guide_doc", "context_file"}
 URGENT_INTENTS = {
     "payment_xu_not_received",
     "payment_wrong_amount",
@@ -349,6 +349,11 @@ def business_event_has_meaningful_text(event: BusinessMessageEvent | None) -> bo
     return bool(event and _has_customer_text_signal(_event_public_text(event)))
 
 
+def business_event_has_actionable_media(event: BusinessMessageEvent | None) -> bool:
+    media_type = _fold(event.media_type if event else "")
+    return bool(event and media_type in aas_shared_knowledge.ACTIONABLE_MEDIA_TYPES and not event.has_service_payload)
+
+
 def business_message_idempotency_key(event: BusinessMessageEvent | dict | None) -> str:
     payload = event.to_dict() if isinstance(event, BusinessMessageEvent) else dict(event or {})
     text = str(payload.get("text") or payload.get("caption") or "").strip()
@@ -425,7 +430,7 @@ def business_event_direction_guess(
         connection=connection,
     ):
         return "outbound_or_self"
-    if event.has_service_payload or not business_event_has_meaningful_text(event):
+    if event.has_service_payload or (not business_event_has_meaningful_text(event) and not business_event_has_actionable_media(event)):
         return "non_text_or_service"
     if event.from_user_id:
         return "inbound_customer"
@@ -2310,6 +2315,8 @@ def _apply_pricing_table_thread_hint(text: str, classification: dict) -> dict:
 
 def _result_sources_from_classification(classification: dict, *, fallback: bool = False) -> list[str]:
     sources = list(classification.get("source") or [])
+    if classification.get("context_file_version") or classification.get("source_file_version") or classification.get("context_section_used"):
+        sources.append("context_file")
     if classification.get("knowledge_entry_id") or classification.get("training_data_version"):
         sources.append("cskh_knowledge")
     if classification.get("playbook_scenario_id"):
@@ -2317,6 +2324,7 @@ def _result_sources_from_classification(classification: dict, *, fallback: bool 
     pricing_source = str(classification.get("pricing_source") or "")
     if pricing_source == "pricing_doc":
         sources.append("pricing_doc")
+        sources.append("pricing")
     elif pricing_source == "guide_doc":
         sources.append("guide_doc")
     elif pricing_source in {"config", "runtime"} or classification.get("price_text"):
@@ -2326,13 +2334,30 @@ def _result_sources_from_classification(classification: dict, *, fallback: bool 
     return list(dict.fromkeys(str(item) for item in sources if str(item or "").strip()))
 
 
-def _apply_shared_doc_answer(text: str, classification: dict, conversation_memory: dict | None = None) -> dict:
-    shared = aas_shared_knowledge.classify_shared_answer(text, conversation_memory=conversation_memory)
+def _apply_shared_doc_answer(
+    text: str,
+    classification: dict,
+    conversation_memory: dict | None = None,
+    *,
+    media_type: str = "",
+) -> dict:
+    shared = aas_shared_knowledge.classify_shared_answer(text, conversation_memory=conversation_memory, media_type=media_type)
     if not shared.get("matched"):
         classification = dict(classification)
         classification["source"] = _result_sources_from_classification(
             classification,
             fallback=str(classification.get("intent_id") or "") in {"out_of_scope", "vague_or_unclear"},
+        )
+        classification["learning_queue"] = bool(classification.get("would_queue_learning"))
+        return classification
+    original_intent = str(classification.get("intent_id") or "")
+    original_confidence = str(classification.get("confidence") or "")
+    shared_intent = str(shared.get("intent_id") or "")
+    if shared_intent == "out_of_scope" and original_intent not in {"out_of_scope", "vague_or_unclear"} and original_confidence != "low":
+        classification = dict(classification)
+        classification["source"] = _result_sources_from_classification(
+            classification,
+            fallback=original_intent in {"out_of_scope", "vague_or_unclear"},
         )
         classification["learning_queue"] = bool(classification.get("would_queue_learning"))
         return classification
@@ -2357,6 +2382,15 @@ def _apply_shared_doc_answer(text: str, classification: dict, conversation_memor
             "ticket": bool(shared.get("ticket", result.get("ticket", False))),
             "ticket_required": bool(shared.get("ticket_required", result.get("ticket_required", False))),
             "shared_docs": dict(shared.get("shared_docs") or {}),
+            "context_file_path": str(shared.get("context_file_path") or result.get("context_file_path") or ""),
+            "context_file_version": str(shared.get("context_file_version") or result.get("context_file_version") or ""),
+            "source_file_version": str(shared.get("source_file_version") or result.get("source_file_version") or ""),
+            "context_section_used": str(shared.get("context_section_used") or result.get("context_section_used") or ""),
+            "context_sections": list(shared.get("context_sections") or result.get("context_sections") or []),
+            "retrieval": dict(shared.get("retrieval") or result.get("retrieval") or {}),
+            "human_last_reply_required": bool(shared.get("human_last_reply_required", result.get("human_last_reply_required", True))),
+            "would_queue_learning": bool(shared.get("would_queue_learning", result.get("would_queue_learning", False))),
+            "learning_queue": bool(shared.get("learning_queue", result.get("learning_queue", False))),
             "conversation_stage": conversation_stage_for_intent(intent_id),
         }
     )
@@ -2463,8 +2497,8 @@ def classify_cskh_message(
     else:
         result["playbook_policy_claims"] = detect_policy_claims(result.get("reply") or "", pricing_source=pricing_source)
         result["public_safe"] = public_reply_is_safe(result["reply"]) and not bool(result["playbook_policy_claims"].get("unsafe"))
-    result = _apply_shared_doc_answer(text, result, conversation_memory)
-    result["would_queue_learning"] = should_queue_learning(result, text)
+    result = _apply_shared_doc_answer(text, result, conversation_memory, media_type=media_type)
+    result["would_queue_learning"] = bool(result.get("would_queue_learning") or result.get("learning_queue") or should_queue_learning(result, text))
     result["learning_queue"] = bool(result["would_queue_learning"])
     result["source"] = _result_sources_from_classification(
         result,
@@ -2676,6 +2710,7 @@ def evaluate_auto_reply_guard(
         connection=connection,
     )
     meaningful_text = business_event_has_meaningful_text(event)
+    actionable_media = business_event_has_actionable_media(event)
     debug = {
         "allowed": True,
         "disabled_suppressed": False,
@@ -2694,6 +2729,7 @@ def evaluate_auto_reply_guard(
         "direction_guess": event.direction_guess,
         "idempotency_key": idempotency_key,
         "self_outbound_detection": ",".join(self_outbound_reasons),
+        "actionable_media": actionable_media,
     }
     if not clean.get("enabled"):
         debug["disabled_suppressed"] = True
@@ -2704,7 +2740,7 @@ def evaluate_auto_reply_guard(
         debug["block_reason_detail"] = ",".join(self_outbound_reasons)
     if event.from_is_bot or (bot_user_id and str(event.from_user_id or "") == str(bot_user_id)):
         debug["self_message_suppressed"] = True
-    if (event.has_service_payload or event.media_type or not meaningful_text) and not meaningful_text:
+    if (event.has_service_payload or event.media_type or not meaningful_text) and not meaningful_text and not actionable_media:
         debug["non_text_or_service_suppressed"] = True
         debug.setdefault("block_reason_detail", "no useful customer text in business event")
     if key in clean["processed_messages"] or idempotency_key in clean.get("replied_event_keys", {}):

@@ -333,6 +333,8 @@ def _flow_reply(flow: dict, *, allowed_to_assist: bool) -> str:
 def _sources_for_classification(classification: dict, *, fallback: bool = False, learning: bool = False) -> list[str]:
     sources = ["aichat"]
     sources.extend(str(item) for item in (classification.get("source") or []) if str(item or "").strip())
+    if classification.get("context_file_version") or classification.get("source_file_version") or classification.get("context_section_used"):
+        sources.append("context_file")
     intent_id = str(classification.get("intent_id") or "")
     if classification.get("knowledge_entry_id") or classification.get("training_data_version"):
         sources.append("cskh_knowledge")
@@ -341,6 +343,7 @@ def _sources_for_classification(classification: dict, *, fallback: bool = False,
     pricing_source = str(classification.get("pricing_source") or "")
     if pricing_source == "pricing_doc":
         sources.append("pricing_doc")
+        sources.append("pricing")
     elif pricing_source == "guide_doc":
         sources.append("guide_doc")
     elif pricing_source == "config" or classification.get("price_text") or "pricing" in intent_id:
@@ -431,7 +434,7 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         action_guard = "free_text_only"
         permission = "default_answer"
     elif fallback:
-        reply = DEFAULT_REPLY
+        reply = str(classification.get("reply") or DEFAULT_REPLY).strip() or DEFAULT_REPLY
 
     reply = _safe_reply(reply)
     should_learn = bool(queue_unknown and (fallback or cskh.should_queue_learning(classification, clean_text)))
@@ -451,6 +454,13 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "target_flow": flow,
         "learning_candidate_id": learning_candidate.get("id") or "",
         "learning_queue": bool(learning_candidate),
+        "context_file_path": str(classification.get("context_file_path") or ""),
+        "context_file_version": str(classification.get("context_file_version") or ""),
+        "source_file_version": str(classification.get("source_file_version") or classification.get("context_file_version") or ""),
+        "context_section_used": str(classification.get("context_section_used") or ""),
+        "context_sections": list(classification.get("context_sections") or []),
+        "retrieval": dict(classification.get("retrieval") or {}),
+        "human_last_reply_required": bool(classification.get("human_last_reply_required", True)),
         "provider_call_allowed": False,
         "xu_charge_allowed": False,
         "invoice_confirm_allowed": False,
@@ -501,6 +511,10 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "permission": str(result.get("permission") or ""),
         "action_guard": str(result.get("action_guard") or ""),
         "confidence": str(result.get("confidence") or (result.get("classification") or {}).get("confidence") or ""),
+        "context_file_version": str(result.get("context_file_version") or (result.get("classification") or {}).get("context_file_version") or ""),
+        "source_file_version": str(result.get("source_file_version") or (result.get("classification") or {}).get("source_file_version") or ""),
+        "context_section_used": str(result.get("context_section_used") or (result.get("classification") or {}).get("context_section_used") or ""),
+        "context_sections": list(result.get("context_sections") or (result.get("classification") or {}).get("context_sections") or []),
         "learning_queue": bool(result.get("learning_queue") or result.get("learning_candidate_id")),
         "target_flow": dict(result.get("target_flow") or {}),
         "learning_candidate_id": str(result.get("learning_candidate_id") or ""),
