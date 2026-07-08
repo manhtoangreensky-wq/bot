@@ -47045,6 +47045,11 @@ def video_render_debug_compact_text(
         f"• fallback allowed: <code>{'yes' if (result or {}).get('fallback_allowed') else 'no'}</code>",
         f"• fallback block reason: <code>{_video_debug_safe_value((result or {}).get('fallback_block_reason') or (result or {}).get('fallback_blocked_reason'), 120)}</code>",
         f"• scene duration: <code>{safe_int((result or {}).get('scene_duration_seconds'), 0)}s</code>",
+        f"• public confirm kickoff: <code>{'yes' if (result or {}).get('public_confirm_kickoff_attempted') else 'no'}/{'yes' if (result or {}).get('public_confirm_kickoff_success') else 'no'}</code>",
+        f"• worker dispatch: <code>{'yes' if (result or {}).get('worker_dispatch_attempted') else 'no'}/{'yes' if (result or {}).get('worker_dispatch_success') else 'no'}</code>",
+        f"• worker dispatch blocker: <code>{_video_debug_safe_value((result or {}).get('worker_dispatch_blocker'), 120)}</code>",
+        f"• dispatch status: <code>{_video_debug_safe_value((result or {}).get('dispatch_status'), 100)}</code>",
+        f"• provider chain resolved: <code>{'yes' if (result or {}).get('provider_chain_resolved') else 'no'}</code>",
         f"• concat ready: <code>{'yes' if (result or {}).get('concat_ready') else 'no'}</code>",
         f"• Job status: <code>{_video_debug_safe_value((job or {}).get('status'), 80)}</code>",
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
@@ -47572,6 +47577,11 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• fallback scene index: <code>{safe_int(result.get('fallback_scene_index'), 0)}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') else 'no'}</code>",
         f"• fallback block reason: <code>{html.escape(str(result.get('fallback_block_reason') or result.get('fallback_blocked_reason') or '-')[:160])}</code>",
+        f"• public confirm kickoff: <code>{'yes' if result.get('public_confirm_kickoff_attempted') else 'no'}/{'yes' if result.get('public_confirm_kickoff_success') else 'no'}</code>",
+        f"• worker dispatch: <code>{'yes' if result.get('worker_dispatch_attempted') else 'no'}/{'yes' if result.get('worker_dispatch_success') else 'no'}</code>",
+        f"• worker dispatch blocker: <code>{html.escape(str(result.get('worker_dispatch_blocker') or '-')[:160])}</code>",
+        f"• dispatch status: <code>{html.escape(str(result.get('dispatch_status') or '-')[:120])}</code>",
+        f"• provider chain resolved: <code>{'yes' if result.get('provider_chain_resolved') else 'no'}</code>",
         f"• final concat required: <code>{'yes' if result.get('final_concat_required') else 'no'}</code>",
         f"• concat ready: <code>{'yes' if result.get('concat_ready') else 'no'}</code>",
         f"• summary_provider_attempt_source: <code>{html.escape(str(result.get('summary_provider_attempt_source') or '-'))}</code>",
@@ -70413,6 +70423,20 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             "current_scene_status",
             "final_concat_required",
             "concat_ready",
+            "scene_tasks_created_count",
+            "scene_tasks_submitted_count",
+            "scenes_total",
+            "scenes_pending",
+            "scenes_running",
+            "public_confirm_kickoff_attempted",
+            "public_confirm_kickoff_success",
+            "worker_dispatch_attempted",
+            "worker_dispatch_success",
+            "worker_dispatch_blocker",
+            "dispatch_status",
+            "provider_chain_resolved",
+            "configured_provider_chain",
+            "next_poll_scheduled",
         ):
             if key in job_result and key not in provider_telemetry:
                 provider_telemetry[key] = job_result.get(key)
@@ -70434,6 +70458,10 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if status in {"queued", "queued_for_worker"}:
         status_label = "Đang chuẩn bị"
         stage = "hệ thống đang xếp lịch dựng video"
+        if safe_int(provider_telemetry.get("scene_tasks_created_count") or job_result.get("scene_tasks_created_count"), 0) > 0:
+            scene_total = safe_int(provider_telemetry.get("scene_tasks_total") or provider_telemetry.get("scenes_total") or job_result.get("scene_count"), 0)
+            stage = f"hệ thống đang chuẩn bị dựng {scene_total} cảnh" if scene_total else "hệ thống đang chờ worker nhận job"
+            progress = max(progress, 10)
         if progress <= 0:
             progress = 5 if job_id else 0
     elif status in {"processing", "running"}:
