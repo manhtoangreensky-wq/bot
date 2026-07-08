@@ -60,14 +60,14 @@ def test_invoice_has_no_stale_addons_or_fake_scene_discount():
     assert "return 0" in discount_block
 
 
-def test_confirm_blocks_when_provider_submit_switch_is_locked_before_job_submit():
+def test_confirm_reaches_queue_submit_after_public_render_guard():
     block = _callback_block("b14_confirm")
-    switch_index = block.index("product_video_submit_switch_detail()")
     prepare_index = block.index("video_b14_prepare_project_for_invoice")
     confirm_index = block.index("confirm_video_project_invoice(")
-    assert switch_index < prepare_index < confirm_index
-    assert "PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI" in block
-    assert '"b14_provider_submit_locked"' in block
+    assert prepare_index < confirm_index
+    assert "product_video_submit_switch_detail()" not in block
+    assert "PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI" not in block
+    assert '"b14_provider_submit_locked"' not in block
 
 
 def test_confirm_never_charges_wallet_before_valid_mp4_delivery():

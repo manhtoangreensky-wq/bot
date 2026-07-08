@@ -183,15 +183,33 @@ def product_video_submit_enabled(env: dict[str, str] | None = None) -> bool:
 
 
 def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dict[str, Any]:
-    # Remote workers may pass a provider-only config dict to the router. The
-    # global Product Video spend switch must still be read from process env
-    # when the provider config payload does not include it.
-    return _env_flag_detail(
+    detail = _env_flag_detail(
         env,
         "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED",
-        "0",
+        "1",
         fallback_to_process_env=True,
     )
+    if detail.get("resolved"):
+        return detail
+    for public_flag in (
+        "SHOPAIKEY_PUBLIC_VIDEO_ENABLED",
+        "KEY4U_PUBLIC_VIDEO_ENABLED",
+        "KEY4U_PUBLIC_ENABLED",
+        "VIDEO_AI_PUBLIC_ENABLED",
+        "PUBLIC_VIDEO_GENERATION_ENABLED",
+    ):
+        flag_detail = _env_flag_detail(env, public_flag, "", fallback_to_process_env=True)
+        if flag_detail.get("resolved"):
+            return {
+                **detail,
+                "resolved": True,
+                "source": f"{public_flag.lower()}_override",
+                "override_flag": public_flag,
+                "override_raw": flag_detail.get("raw", ""),
+                "previous_source": detail.get("source", ""),
+                "previous_raw": detail.get("raw", ""),
+            }
+    return detail
 
 
 def paid_retry_requires_confirmation(env: dict[str, str] | None = None) -> bool:
@@ -2397,6 +2415,8 @@ def run_provider_generation(
                     "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                     "provider_readiness": status,
                 }
+                if is_product_video:
+                    payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
                 _mark_trace("poll", blocker=blocker, normalized_status="timeout")
                 payload["provider_attempts"] = _copy_attempt_traces()
                 return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
@@ -2435,6 +2455,8 @@ def run_provider_generation(
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                 "provider_readiness": status,
             }
+            if is_product_video:
+                payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
             _mark_trace("result", blocker=blocker, result_url_present=False, normalized_status=poll_result.status)
             payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
@@ -2457,6 +2479,8 @@ def run_provider_generation(
                 "provider_result_url_present": bool(poll_result.result_url or poll_result.file_url),
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
             }
+            if is_product_video:
+                exc_payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
             blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker)
@@ -2537,6 +2561,8 @@ def run_provider_generation(
                 "download_status": artifact.error_code or "failed",
                 "provider_readiness": status,
             }
+            if is_product_video:
+                payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
             payload["provider_result_blocker"] = payload["blocker"]
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
         _mark_trace(

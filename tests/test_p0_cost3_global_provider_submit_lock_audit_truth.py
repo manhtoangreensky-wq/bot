@@ -13,14 +13,43 @@ def _source_between(start: str, end: str) -> str:
     return BOT_SOURCE[start_idx:end_idx]
 
 
-def test_product_video_provider_submit_default_locked(monkeypatch):
+def test_product_video_provider_submit_default_reopened(monkeypatch):
     monkeypatch.delenv("PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED", raising=False)
 
     detail = video_provider_router.product_video_submit_switch_detail({})
 
-    assert detail["resolved"] is False
+    assert detail["resolved"] is True
     assert detail["source"] == "default"
-    assert video_provider_router.product_video_submit_enabled({}) is False
+    assert video_provider_router.product_video_submit_enabled({}) is True
+
+
+def test_product_video_provider_submit_explicit_false_without_public_flag_still_blocks(monkeypatch):
+    monkeypatch.delenv("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", raising=False)
+    monkeypatch.delenv("KEY4U_PUBLIC_VIDEO_ENABLED", raising=False)
+    monkeypatch.delenv("KEY4U_PUBLIC_ENABLED", raising=False)
+    monkeypatch.delenv("VIDEO_AI_PUBLIC_ENABLED", raising=False)
+    monkeypatch.delenv("PUBLIC_VIDEO_GENERATION_ENABLED", raising=False)
+
+    detail = video_provider_router.product_video_submit_switch_detail(
+        {"PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "false"}
+    )
+
+    assert detail["resolved"] is False
+    assert video_provider_router.product_video_submit_enabled({"PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "0"}) is False
+
+
+def test_product_video_public_provider_flag_overrides_old_submit_lock(monkeypatch):
+    monkeypatch.delenv("PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED", raising=False)
+
+    detail = video_provider_router.product_video_submit_switch_detail(
+        {
+            "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "false",
+            "SHOPAIKEY_PUBLIC_VIDEO_ENABLED": "true",
+        }
+    )
+
+    assert detail["resolved"] is True
+    assert detail["override_flag"] == "SHOPAIKEY_PUBLIC_VIDEO_ENABLED"
 
 
 def test_product_video_provider_submit_explicit_public_flag_allows_submit(monkeypatch):
@@ -34,17 +63,18 @@ def test_product_video_provider_submit_explicit_public_flag_allows_submit(monkey
     assert video_provider_router.product_video_submit_enabled({"PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": "1"}) is True
 
 
-def test_product_video_confirm_blocks_before_provider_call_when_locked():
+def test_product_video_confirm_does_not_block_public_provider_submit_before_queue():
     block = _source_between(
         'if action == "b14_confirm":',
         'if action == "b14_job_status":',
     )
 
-    switch_idx = block.index("product_video_submit_switch_detail()")
     prepare_idx = block.index("video_b14_prepare_project_for_invoice")
     confirm_idx = block.index("confirm_video_project_invoice")
-    assert switch_idx < prepare_idx < confirm_idx
-    assert "provider_submit_locked" in block
+    assert prepare_idx < confirm_idx
+    assert "product_video_submit_switch_detail()" not in block
+    assert "provider_submit_locked" not in block
+    assert "PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI" not in block
     assert "provider_called" in block
     assert "xu_charged" in block
 
