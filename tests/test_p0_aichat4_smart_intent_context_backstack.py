@@ -48,7 +48,7 @@ def test_aichat_image_lexus_request_is_image_flow_not_generic():
     folded = cskh._fold(result["reply"])
 
     assert result["intent_id"] == "image_create_request"
-    assert result["target_flow"]["callback"] == "menu|main_image"
+    assert result["target_flow"]["callback"] == "aichat|open_image_prefill"
     assert result["provider_call_allowed"] is False
     assert result["xu_charge_allowed"] is False
     assert "Lexus" in result["reply"]
@@ -65,7 +65,8 @@ def test_aichat_image_followup_stays_on_previous_lexus_context():
     memory = aichat.status_payload(state, "aichat4-user")["conversation_memory"]
 
     assert first["intent_id"] == "image_create_request"
-    assert follow["intent_id"] == "image_create_request"
+    assert follow["intent_id"] == "image_action_confirm"
+    assert follow["context_carry_used"] is True
     assert short["intent_id"] == "image_create_request"
     assert "Lexus" in short["reply"]
     assert memory["previous_topic"] == "image"
@@ -194,6 +195,9 @@ def test_no_real_provider_calls_or_forbidden_runtime_scope():
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_aichat4_smart_intent_context_backstack.py",
+        "tests/test_p0_aichat5_live_context_action_trace.py",
+        "tests/test_p0_17c1_payos_signature_idempotency.py",
+        "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",

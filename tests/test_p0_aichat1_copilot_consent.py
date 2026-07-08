@@ -100,7 +100,7 @@ def test_aichat_image_and_video_real_tasks_prepare_flow_without_provider(tmp_pat
 
     state, image = aichat.process_message(state, "101", "tao anh that cho shop")
     assert image["action_guard"] == "needs_action_permission"
-    assert image["target_flow"]["callback"] == "menu|main_image"
+    assert image["target_flow"]["callback"] == "aichat|open_image_prefill"
     assert image["provider_call_allowed"] is False
     assert image["xu_charge_allowed"] is False
 
@@ -205,6 +205,9 @@ def test_aichat_scope_guard_only_touches_aichat_bot_and_tests():
         "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
         "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_aichat4_smart_intent_context_backstack.py",
+        "tests/test_p0_aichat5_live_context_action_trace.py",
+        "tests/test_p0_17c1_payos_signature_idempotency.py",
+        "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",

@@ -85180,7 +85180,7 @@ def aichat_trace_keyboard(payload: dict | None = None) -> InlineKeyboardMarkup:
 def aichat_result_keyboard(result: dict, payload: dict | None = None) -> InlineKeyboardMarkup:
     rows = []
     flow = dict((result or {}).get("target_flow") or {})
-    if flow.get("callback") and result.get("action_guard") == "prepare_flow_stop_at_confirm":
+    if flow.get("callback") and result.get("action_guard") in {"prepare_flow_stop_at_confirm", "needs_action_permission"}:
         rows.append([InlineKeyboardButton(str(flow.get("label") or "Mở flow"), callback_data=str(flow.get("callback")))])
     if result.get("action_guard") == "needs_action_permission":
         rows.append([InlineKeyboardButton("Cấp quyền AI hỗ trợ thao tác trong bot", callback_data="aichat|assist_on")])
@@ -85220,14 +85220,75 @@ def aichat_trace_text(payload: dict) -> str:
                 f"<b>{index}.</b> <code>{html.escape(str(item.get('text_preview') or '-')[:160])}</code>",
                 f"   intent=<code>{html.escape(str(item.get('intent_id') or '-'))}</code> replied=<code>{'yes' if item.get('replied') else 'no'}</code>",
                 f"   source=<code>{html.escape(', '.join(map(str, item.get('source') or [])) or '-')}</code>",
+                f"   resolver=<code>{html.escape(str(item.get('resolver_version') or '-'))}</code> context_source=<code>{html.escape(str(item.get('context_source') or '-'))}</code>",
                 f"   permission=<code>{html.escape(str(item.get('permission') or '-'))}</code> guard=<code>{html.escape(str(item.get('action_guard') or '-'))}</code>",
                 f"   context=<code>{'yes' if item.get('context_file_used') else 'no'}</code> version=<code>{html.escape(str(item.get('context_version') or item.get('context_file_version') or '-'))}</code> topic=<code>{html.escape(str(item.get('previous_topic') or item.get('last_product_type') or '-'))}</code>",
                 f"   subject=<code>{html.escape(str(item.get('last_subject') or item.get('last_requested_asset') or '-'))}</code>",
+                f"   carry=<code>{'yes' if item.get('context_carry_used') else 'no'}</code> action=<code>{html.escape(str(item.get('action_selected') or item.get('selected_action') or '-'))}</code> executed=<code>{'yes' if item.get('action_executed') else 'no'}</code>",
                 f"   flow=<code>{html.escape(str(flow.get('callback') or '-'))}</code> learning=<code>{html.escape(str(item.get('learning_candidate_id') or '-'))}</code>",
                 f"   reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
             ]
         )
     return "\n".join(lines)
+
+def aichat_image_flow_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return quick_image_prepared_prompt_keyboard(
+        lang,
+        back_callback="aichat|back_active",
+        back_label="⬅️ AI Chatbot",
+    )
+
+def aichat_image_prefill_values(result: dict | None = None, payload: dict | None = None) -> tuple[str, str]:
+    result = result or {}
+    classification = dict(result.get("classification") or {})
+    memory = dict((payload or {}).get("conversation_memory") or {})
+    subject = str(
+        result.get("last_subject")
+        or classification.get("last_subject")
+        or result.get("last_requested_asset")
+        or classification.get("last_requested_asset")
+        or memory.get("last_subject")
+        or memory.get("last_requested_asset")
+        or ""
+    ).strip()
+    prompt = str(
+        result.get("last_generated_prompt")
+        or classification.get("last_generated_prompt")
+        or result.get("last_prompt")
+        or classification.get("last_prompt")
+        or memory.get("last_generated_prompt")
+        or memory.get("last_prompt")
+        or ""
+    ).strip()
+    if not prompt and subject:
+        package = build_image_prompt(subject, tier="standard")
+        prompt = str(package.get("prompt") or subject).strip()
+    if not subject:
+        subject = "ảnh theo yêu cầu AI Chatbot"
+    if not prompt:
+        package = build_image_prompt(subject, tier="standard")
+        prompt = str(package.get("prompt") or subject).strip()
+    return subject[:260], prompt[:1400]
+
+def aichat_prepare_image_prefill_flow(user_id, result: dict | None = None, payload: dict | None = None, lang: str = "vi") -> dict:
+    subject, prompt = aichat_image_prefill_values(result, payload)
+    package = build_image_prompt(subject or prompt, tier="standard")
+    suggested_ratio = "9:16" if "9:16" in prompt else str(package.get("suggested_ratio") or "1:1")
+    return set_quick_image_flow(
+        user_id,
+        "prepared_prompt",
+        selected_topic=subject,
+        original_request=subject,
+        prompt=prompt,
+        negative_prompt=str(package.get("negative_prompt") or ""),
+        prompt_source="aichat",
+        prompt_variant=0,
+        image_purpose=str(package.get("purpose") or "custom"),
+        purpose_label=str(package.get("purpose_label") or "AI Chatbot"),
+        suggested_ratio=suggested_ratio,
+        text_logo_caution=str(package.get("text_logo_caution") or ""),
+        ratio_back_target="prepared_prompt",
+    )
 
 async def cmd_aichat_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
@@ -85312,6 +85373,23 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_consent_keyboard())
         return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_control_keyboard(payload))
     payload = ai_chatbot_copilot.status_payload(state, uid)
+    if action == "open_image_prefill":
+        flow_state = aichat_prepare_image_prefill_flow(uid, payload=payload, lang=lang)
+        state = ai_chatbot_copilot.mark_action_execution(
+            state,
+            uid,
+            selected_action="open_image_ai_flow_with_prefill",
+            executed=True,
+            router_called=True,
+            action_result="quick_image_prefill_opened_by_button",
+        )
+        save_aichat_state(state)
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(flow_state, lang),
+            parse_mode="HTML",
+            reply_markup=aichat_image_flow_keyboard(lang),
+        )
     if action == "trace":
         return await safe_edit_or_send(query, aichat_trace_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
     return await safe_edit_or_send(query, aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
@@ -85323,12 +85401,32 @@ async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TY
     if not text or text.startswith("/"):
         return False
     state = aichat_state()
+    lang = get_user_language(update.effective_user.id) or "vi"
     state, result = ai_chatbot_copilot.process_message(state, update.effective_user.id, text)
     save_aichat_state(state)
     if result.get("action_guard") == "disabled_no_reply":
         return ai_chatbot_copilot.was_explicitly_disabled(state, update.effective_user.id)
     if not result.get("replied"):
         return False
+    if result.get("action_should_execute") and result.get("selected_action") == "open_image_ai_flow_with_prefill":
+        payload = ai_chatbot_copilot.status_payload(state, update.effective_user.id)
+        flow_state = aichat_prepare_image_prefill_flow(update.effective_user.id, result=result, payload=payload, lang=lang)
+        state = ai_chatbot_copilot.mark_action_execution(
+            state,
+            update.effective_user.id,
+            selected_action="open_image_ai_flow_with_prefill",
+            executed=True,
+            router_called=True,
+            action_result="quick_image_prefill_opened_live",
+        )
+        save_aichat_state(state)
+        await update.message.reply_text(
+            f"{result.get('reply') or ''}\n\n{quick_image_prepared_prompt_text(flow_state, lang)}",
+            parse_mode="HTML",
+            reply_markup=aichat_image_flow_keyboard(lang),
+            disable_web_page_preview=True,
+        )
+        return True
     await update.message.reply_text(
         str(result.get("reply") or ""),
         parse_mode="HTML",
@@ -132826,8 +132924,14 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
         "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
-def quick_image_prepared_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_prepared_prompt_keyboard(
+    lang: str = "vi",
+    *,
+    back_callback: str = "create_media|qi_back_suggestions",
+    back_label: str | None = None,
+) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
+    back_text = back_label or ("✨ Chọn chủ đề khác" if vi else "✨ Another topic")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
@@ -132839,7 +132943,7 @@ def quick_image_prepared_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMark
         ],
         [
             InlineKeyboardButton("✨ Chọn chủ đề khác" if vi else "✨ Another topic", callback_data="create_media|qi_topics"),
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_suggestions"),
+            InlineKeyboardButton(back_text, callback_data=back_callback),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -144946,6 +145050,18 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 quick_image_prepared_prompt_text(state, lang),
                 parse_mode="HTML",
                 reply_markup=quick_image_prepared_prompt_keyboard(lang),
+            )
+        if state.get("prompt_source") == "aichat":
+            state = set_quick_image_flow(uid, "prepared_prompt")
+            return await safe_edit_or_send(
+                query,
+                quick_image_prepared_prompt_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_prepared_prompt_keyboard(
+                    lang,
+                    back_callback="aichat|back_active",
+                    back_label="⬅️ AI Chatbot" if normalize_user_language(lang) == "vi" else "⬅️ AI Chatbot",
+                ),
             )
         state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
         return await safe_edit_or_send(

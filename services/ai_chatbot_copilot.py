@@ -16,6 +16,7 @@ from services import telegram_business_support as cskh
 STATE_VERSION = 1
 TRACE_LIMIT = 10
 CONVERSATION_TTL_SECONDS = 30 * 60
+RESOLVER_VERSION = "P0.AICHAT.5.2026-07-08"
 DEFAULT_REPLY = (
     "Dạ em chưa hiểu rõ ý mình. Anh/chị nói rõ hơn muốn hỏi về giá, cách dùng, "
     "tạo prompt, ảnh, video, voice, nhạc hay SubDub ạ?"
@@ -259,6 +260,15 @@ def update_conversation_memory(state: dict, user_id: str | int, text: str, resul
         or memory.get("last_subject")
         or ""
     ).strip()
+    generated_prompt = str(
+        result.get("last_generated_prompt")
+        or classification.get("last_generated_prompt")
+        or result.get("last_prompt")
+        or classification.get("last_prompt")
+        or memory.get("last_generated_prompt")
+        or memory.get("last_prompt")
+        or ""
+    ).strip()
     clean["conversations"][uid] = {
         "last_messages": messages,
         "previous_intent": memory.get("last_intent") or memory.get("previous_intent") or "",
@@ -269,6 +279,12 @@ def update_conversation_memory(state: dict, user_id: str | int, text: str, resul
         "last_requested_asset": str(result.get("last_requested_asset") or classification.get("last_requested_asset") or last_subject or memory.get("last_requested_asset") or ""),
         "last_subject": last_subject,
         "last_flow_suggestion": str(result.get("last_flow_suggestion") or classification.get("last_flow_suggestion") or memory.get("last_flow_suggestion") or ""),
+        "last_prompt": generated_prompt,
+        "last_generated_prompt": generated_prompt,
+        "last_offered_action": str(result.get("last_offered_action") or classification.get("last_offered_action") or memory.get("last_offered_action") or ""),
+        "last_flow": str(result.get("last_flow") or classification.get("last_flow") or memory.get("last_flow") or ""),
+        "last_action_button": str(result.get("last_action_button") or classification.get("last_action_button") or memory.get("last_action_button") or ""),
+        "action_permission_enabled": bool(result.get("action_permission_enabled")),
         "conversation_stage": cskh.conversation_stage_for_intent(intent_id),
         "last_source": list(result.get("source") or []),
         "last_reply_preview": _safe_text(result.get("reply") or "", 240),
@@ -282,8 +298,8 @@ def _flow_for_text(text: str, classification: dict | None = None) -> dict:
     folded = _fold(text)
     intent_id = str((classification or {}).get("intent_id") or "")
     product = str((classification or {}).get("primary_product") or (classification or {}).get("product") or "")
-    if any(term in folded for term in ("anh", "hinh", "tao anh", "sua anh", "prompt anh")) or product in {"image_ai", "image_to_video"}:
-        return {"kind": "image", "label": "Mở tạo ảnh AI", "callback": "menu|main_image"}
+    if any(term in folded for term in ("anh", "hinh", "tao anh", "sua anh", "prompt anh")) or product in {"image_ai", "image_to_video"} or intent_id.startswith("image_"):
+        return {"kind": "image", "label": "Mở tạo ảnh AI", "callback": "aichat|open_image_prefill"}
     if any(term in folded for term in ("video", "clip", "product video", "ghep anh")) or "video" in intent_id or product in {"product_video", "image_to_video"}:
         return {"kind": "video", "label": "Mở tạo video AI", "callback": "menu|main_video"}
     if any(term in folded for term in ("subdub", "phu de", "long tieng", "subtitle", "dub")):
@@ -432,7 +448,7 @@ def classify_message(text: str, *, user_id: str | int = "", conversation_memory:
     return classification
 
 
-def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True) -> dict:
+def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True, entry_source: str = "live_chat") -> dict:
     clean_text = _safe_text(text, 2000)
     memory = conversation_memory(state, user_id)
     classification = classify_message(clean_text, user_id=user_id, conversation_memory=memory)
@@ -444,6 +460,8 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
     permission = "default_answer"
     flow = {}
     reply = str(classification.get("reply") or DEFAULT_REPLY)
+    selected_action = ""
+    action_should_execute = False
 
     if _is_internal_question(clean_text):
         reply = INTERNAL_BLOCK_REPLY
@@ -454,12 +472,43 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         action_guard = "admin_review_required"
     elif intent_id in {"image_create_request", "video_create_request"}:
         flow = _flow_for_text(clean_text, classification)
+        selected_action = "open_image_ai_flow_with_prefill" if flow.get("kind") == "image" else "open_video_flow"
         permission = "assist_actions" if assist_actions else "default_answer"
         action_guard = "prepare_flow_stop_at_confirm" if assist_actions else "needs_action_permission"
-        if assist_actions:
+        if assist_actions and flow.get("kind") == "image":
+            subject = str(classification.get("last_subject") or classification.get("last_requested_asset") or "").strip()
+            reply = (
+                f"Dạ được ạ. Em đã chuẩn bị prompt ảnh {subject or 'này'} cho anh/chị. "
+                "Em có thể mở flow Tạo ảnh AI để mình chọn tỉ lệ/gói và xem hóa đơn. "
+                "Em sẽ không tự xác nhận hoặc trừ Xu thay anh/chị."
+            )
+        elif assist_actions:
             reply = (
                 f"{reply}\n\n"
                 f"Em có thể dẫn mình tới flow <b>{flow['label']}</b>, nhưng tác vụ tốn Xu vẫn dừng ở màn báo giá hoặc xác nhận để anh/chị tự bấm."
+            )
+    elif intent_id in {"image_action_confirm", "image_action_complaint_or_capability"}:
+        flow = _flow_for_text(clean_text, {**classification, "primary_product": "image_ai", "product": "image_ai"})
+        selected_action = "open_image_ai_flow_with_prefill"
+        permission = "assist_actions" if assist_actions else "default_answer"
+        action_guard = "prepare_flow_stop_at_confirm" if assist_actions else "needs_action_permission"
+        action_should_execute = bool(assist_actions)
+        subject = str(classification.get("last_subject") or classification.get("last_requested_asset") or "ảnh").strip()
+        if intent_id == "image_action_confirm":
+            if assist_actions:
+                reply = (
+                    f"Dạ được ạ, em mở flow Tạo ảnh AI với prompt {subject} vừa soạn cho mình. "
+                    "Đến màn hóa đơn anh/chị kiểm tra rồi tự bấm xác nhận nhé."
+                )
+            else:
+                reply = (
+                    "Dạ tạo được ạ. Anh/chị bấm Mở tạo ảnh AI để vào bước chọn tỉ lệ/gói và xác nhận hóa đơn nha. "
+                    "Bot chưa gọi provider và chưa trừ Xu."
+                )
+        else:
+            reply = (
+                "Dạ tạo được ạ. Em chỉ không được tự xác nhận hóa đơn hoặc tự trừ Xu thay anh/chị. "
+                "Em có thể mở sẵn flow Tạo ảnh AI với prompt đã soạn, tới màn hóa đơn anh/chị tự xác nhận là hệ thống mới xử lý."
             )
     elif _is_real_creation_request(clean_text):
         flow = _flow_for_text(clean_text, classification)
@@ -479,6 +528,9 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
     if should_learn:
         learning_candidate = _queue_learning(clean_text, classification, reply, user_id)
     sources = _sources_for_classification(classification, fallback=fallback, learning=bool(learning_candidate))
+    entry_label = str(entry_source or "live_chat")
+    if entry_label and entry_label not in sources:
+        sources.insert(1 if sources else 0, entry_label)
     return {
         "entry": "aichat",
         "intent_id": intent_id,
@@ -490,6 +542,16 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "permission": permission,
         "action_guard": action_guard,
         "target_flow": flow,
+        "resolver_version": RESOLVER_VERSION,
+        "context_source": str(entry_source or "live_chat"),
+        "context_carry_used": bool(classification.get("context_carry_used")),
+        "action_permission_enabled": bool(assist_actions),
+        "selected_action": selected_action,
+        "action_selected": selected_action,
+        "action_should_execute": bool(action_should_execute),
+        "action_executed": False,
+        "action_router_called": False,
+        "reply_template": str(classification.get("reply_template_id") or ""),
         "learning_candidate_id": learning_candidate.get("id") or "",
         "learning_queue": bool(learning_candidate),
         "context_file_path": str(classification.get("context_file_path") or ""),
@@ -501,11 +563,17 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "context_sections": list(classification.get("context_sections") or []),
         "retrieval": dict(classification.get("retrieval") or {}),
         "human_last_reply_required": bool(classification.get("human_last_reply_required", True)),
+        "previous_intent": str(memory.get("last_intent") or memory.get("previous_intent") or ""),
         "previous_topic": str(classification.get("previous_topic") or ""),
         "last_product_type": str(classification.get("last_product_type") or ""),
         "last_requested_asset": str(classification.get("last_requested_asset") or ""),
         "last_subject": str(classification.get("last_subject") or ""),
         "last_flow_suggestion": str(classification.get("last_flow_suggestion") or ""),
+        "last_prompt": str(classification.get("last_prompt") or ""),
+        "last_generated_prompt": str(classification.get("last_generated_prompt") or ""),
+        "last_offered_action": str(classification.get("last_offered_action") or ""),
+        "last_flow": str(classification.get("last_flow") or ""),
+        "last_action_button": str(classification.get("last_action_button") or ""),
         "provider_call_allowed": False,
         "xu_charge_allowed": False,
         "invoice_confirm_allowed": False,
@@ -513,7 +581,7 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
     }
 
 
-def process_message(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True) -> tuple[dict, dict]:
+def process_message(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True, entry_source: str = "live_chat") -> tuple[dict, dict]:
     clean = normalize_state(state)
     uid = str(user_id)
     if not is_enabled(clean, uid):
@@ -529,21 +597,21 @@ def process_message(state: dict, user_id: str | int, text: str, *, queue_unknown
         if was_explicitly_disabled(clean, uid):
             clean = record_trace(clean, uid, text=text, result=result, replied=False)
         return clean, result
-    result = build_reply(clean, uid, text, queue_unknown=queue_unknown)
+    result = build_reply(clean, uid, text, queue_unknown=queue_unknown, entry_source=entry_source)
     result["replied"] = True
     clean = update_conversation_memory(clean, uid, text, result)
-    clean = record_trace(clean, uid, text=text, result=result, replied=True)
+    clean = record_trace(clean, uid, text=text, result=result, replied=True, entry_source=entry_source)
     return clean, result
 
 
 def preview_message(text: str, *, user_id: str | int = "test") -> dict:
     state = default_state()
     state, _enabled = enable_with_consent(state, user_id)
-    state, result = process_message(state, user_id, text, queue_unknown=False)
+    state, result = process_message(state, user_id, text, queue_unknown=False, entry_source="aichat_test")
     return result
 
 
-def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, replied: bool) -> dict:
+def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, replied: bool, entry_source: str = "live_chat") -> dict:
     clean = normalize_state(state)
     uid = str(user_id)
     entry = {
@@ -551,10 +619,14 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "entry": "aichat",
         "text_hash": _hash_text(text),
         "text_preview": _safe_text(text, 180),
+        "last_user_message": _safe_text(text, 500),
         "intent_id": str(result.get("intent_id") or ""),
+        "resolved_intent": str(result.get("intent_id") or ""),
         "source": list(result.get("source") or ["aichat"]),
         "permission": str(result.get("permission") or ""),
         "action_guard": str(result.get("action_guard") or ""),
+        "resolver_version": str(result.get("resolver_version") or RESOLVER_VERSION),
+        "context_source": str(result.get("context_source") or entry_source or "live_chat"),
         "confidence": str(result.get("confidence") or (result.get("classification") or {}).get("confidence") or ""),
         "context_file_version": str(result.get("context_file_version") or (result.get("classification") or {}).get("context_file_version") or ""),
         "context_file_used": bool(result.get("context_file_used") or (result.get("classification") or {}).get("context_file_used")),
@@ -562,11 +634,24 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "source_file_version": str(result.get("source_file_version") or (result.get("classification") or {}).get("source_file_version") or ""),
         "context_section_used": str(result.get("context_section_used") or (result.get("classification") or {}).get("context_section_used") or ""),
         "context_sections": list(result.get("context_sections") or (result.get("classification") or {}).get("context_sections") or []),
+        "previous_intent": str(result.get("previous_intent") or (result.get("classification") or {}).get("previous_intent") or ""),
         "previous_topic": str(result.get("previous_topic") or (result.get("classification") or {}).get("previous_topic") or ""),
         "last_product_type": str(result.get("last_product_type") or (result.get("classification") or {}).get("last_product_type") or ""),
         "last_subject": str(result.get("last_subject") or (result.get("classification") or {}).get("last_subject") or ""),
         "last_requested_asset": str(result.get("last_requested_asset") or (result.get("classification") or {}).get("last_requested_asset") or ""),
         "last_flow_suggestion": str(result.get("last_flow_suggestion") or (result.get("classification") or {}).get("last_flow_suggestion") or ""),
+        "last_prompt": str(result.get("last_prompt") or (result.get("classification") or {}).get("last_prompt") or ""),
+        "last_generated_prompt": str(result.get("last_generated_prompt") or (result.get("classification") or {}).get("last_generated_prompt") or ""),
+        "last_offered_action": str(result.get("last_offered_action") or (result.get("classification") or {}).get("last_offered_action") or ""),
+        "last_flow": str(result.get("last_flow") or (result.get("classification") or {}).get("last_flow") or ""),
+        "last_action_button": str(result.get("last_action_button") or (result.get("classification") or {}).get("last_action_button") or ""),
+        "context_carry_used": bool(result.get("context_carry_used") or (result.get("classification") or {}).get("context_carry_used")),
+        "action_permission_enabled": bool(result.get("action_permission_enabled")),
+        "selected_action": str(result.get("selected_action") or result.get("action_selected") or ""),
+        "action_selected": str(result.get("action_selected") or result.get("selected_action") or ""),
+        "action_executed": bool(result.get("action_executed")),
+        "action_router_called": bool(result.get("action_router_called")),
+        "reply_template": str(result.get("reply_template") or (result.get("classification") or {}).get("reply_template_id") or ""),
         "learning_queue": bool(result.get("learning_queue") or result.get("learning_candidate_id")),
         "target_flow": dict(result.get("target_flow") or {}),
         "learning_candidate_id": str(result.get("learning_candidate_id") or ""),
@@ -577,6 +662,35 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
     }
     trace = list(clean["traces"].get(uid) or [])
     trace.append(entry)
+    clean["traces"][uid] = trace[-TRACE_LIMIT:]
+    clean["last_debug"][uid] = entry
+    return clean
+
+
+def mark_action_execution(
+    state: dict,
+    user_id: str | int,
+    *,
+    selected_action: str = "",
+    executed: bool = False,
+    router_called: bool = False,
+    action_result: str = "",
+) -> dict:
+    clean = normalize_state(state)
+    uid = str(user_id)
+    trace = list(clean["traces"].get(uid) or [])
+    if not trace:
+        return clean
+    entry = dict(trace[-1])
+    if selected_action:
+        entry["selected_action"] = selected_action
+        entry["action_selected"] = selected_action
+    entry["action_executed"] = bool(executed)
+    entry["action_router_called"] = bool(router_called)
+    entry["action_result"] = str(action_result or "")[:240]
+    entry["provider_call_allowed"] = False
+    entry["xu_charge_allowed"] = False
+    trace[-1] = entry
     clean["traces"][uid] = trace[-TRACE_LIMIT:]
     clean["last_debug"][uid] = entry
     return clean

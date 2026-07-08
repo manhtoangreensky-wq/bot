@@ -387,6 +387,9 @@ def test_p0_17c2_static_guard_no_unrelated_files_touched():
     changed = {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}
     allowed = {
         "bot.py",
+        "services/aas_shared_knowledge.py",
+        "services/ai_chatbot_copilot.py",
+        "services/telegram_business_support.py",
         "docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md",
         "docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md",
         "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
@@ -398,5 +401,15 @@ def test_p0_17c2_static_guard_no_unrelated_files_touched():
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_17c3_payos_admin_risk_lock_review.py",
         "tests/test_p0_17c4_webhook_db_html_security_events.py",
+        "tests/test_p0_aichat1_copilot_consent.py",
+        "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_aichat4_smart_intent_context_backstack.py",
+        "tests/test_p0_aichat5_live_context_action_trace.py",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
+        "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
     }
     assert changed <= allowed

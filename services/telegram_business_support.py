@@ -742,6 +742,13 @@ def update_conversation_memory(
         or memory.get("last_subject")
         or ""
     ).strip()
+    generated_prompt = str(
+        (classification or {}).get("last_generated_prompt")
+        or (classification or {}).get("last_prompt")
+        or memory.get("last_generated_prompt")
+        or memory.get("last_prompt")
+        or ""
+    ).strip()
     missing = list((classification or {}).get("missing_fields") or memory.get("last_missing_fields") or [])
     repeated = bool(intent_id == "repeated_ping" or len([item for item in messages if _fold(item.get("text", "")) in {"alo", "hi", "hello", "co ai khong"}]) >= 2)
     unresolved = str(memory.get("unresolved_question") or "")
@@ -763,6 +770,11 @@ def update_conversation_memory(
         "last_requested_asset": str((classification or {}).get("last_requested_asset") or last_subject or memory.get("last_requested_asset") or ""),
         "last_subject": last_subject,
         "last_flow_suggestion": str((classification or {}).get("last_flow_suggestion") or memory.get("last_flow_suggestion") or ""),
+        "last_prompt": generated_prompt,
+        "last_generated_prompt": generated_prompt,
+        "last_offered_action": str((classification or {}).get("last_offered_action") or memory.get("last_offered_action") or ""),
+        "last_flow": str((classification or {}).get("last_flow") or memory.get("last_flow") or ""),
+        "last_action_button": str((classification or {}).get("last_action_button") or memory.get("last_action_button") or ""),
         "last_missing_fields": missing,
         "last_ticket_required": bool((classification or {}).get("ticket_required", memory.get("last_ticket_required", False))),
         "last_handoff_required": bool((classification or {}).get("handoff_required", memory.get("last_handoff_required", False))),
@@ -2417,6 +2429,12 @@ def _apply_shared_doc_answer(
             "last_requested_asset": str(shared.get("last_requested_asset") or result.get("last_requested_asset") or ""),
             "last_subject": str(shared.get("last_subject") or result.get("last_subject") or ""),
             "last_flow_suggestion": str(shared.get("last_flow_suggestion") or result.get("last_flow_suggestion") or ""),
+            "last_prompt": str(shared.get("last_prompt") or result.get("last_prompt") or ""),
+            "last_generated_prompt": str(shared.get("last_generated_prompt") or result.get("last_generated_prompt") or ""),
+            "last_offered_action": str(shared.get("last_offered_action") or result.get("last_offered_action") or ""),
+            "last_flow": str(shared.get("last_flow") or result.get("last_flow") or ""),
+            "last_action_button": str(shared.get("last_action_button") or result.get("last_action_button") or ""),
+            "context_carry_used": bool(shared.get("context_carry_used", result.get("context_carry_used", False))),
             "conversation_stage": conversation_stage_for_intent(intent_id),
         }
     )
