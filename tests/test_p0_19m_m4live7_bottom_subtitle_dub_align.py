@@ -97,7 +97,7 @@ def test_m4live7_female_voice_mapping_does_not_silently_fallback_to_male():
 
     assert '"giong nu"' in gender_source
     assert "default_gender_requested" in voice_source
-    assert "subdub_default_tts_voice_for_gender(gender)" in voice_source
+    assert "get_tts_voice_id(f\"default_{gender}\") or get_tts_voice_id(gender)" in voice_source
     assert '"selected_voice_gender_unavailable"' in voice_source
     assert "SUBDUB_ALLOW_SILENT_VOICE_FALLBACK" in voice_source
 
