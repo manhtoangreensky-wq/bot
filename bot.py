@@ -61959,11 +61959,8 @@ def free_hub_main_text(lang: str = "vi") -> str:
 
 def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    return build_2col_keyboard(
+    keyboard = build_2col_keyboard(
         [
-            ("🤖 Bật AI Chatbot" if is_vi else "🤖 Enable AI Chatbot", "aichat|on"),
-            ("⏸ Tắt AI Chatbot" if is_vi else "⏸ Disable AI Chatbot", "aichat|off"),
-            ("🧭 Cấp quyền AI hỗ trợ thao tác" if is_vi else "🧭 Allow AI action assist", "aichat|assist_on"),
             ("🤖 Prompt Meta AI" if is_vi else "🤖 Meta AI prompt", "freehub|meta"),
             ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
             ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
@@ -61974,12 +61971,14 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📥 Lưu media tạm" if is_vi else "📥 Save temp media", "freehub|upload"),
             ("🎙 Script voice/SubDub" if is_vi else "🎙 Voice/SubDub script", "freehub|hook"),
             ("🎵 Ý tưởng nhạc/SFX" if is_vi else "🎵 Music/SFX ideas", "freehub|lib_music"),
-            ("🧑‍💼 Hỗ trợ" if is_vi else "🧑‍💼 Support", "support|start"),
-            ("💬 Góp ý / Báo lỗi" if is_vi else "💬 Feedback / bug", "feedback|start"),
         ],
         nav_back=None,
         nav_main=True,
         lang=lang,
+    )
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🤖 Bật AI Chatbot" if is_vi else "🤖 Enable AI Chatbot", callback_data="aichat|on")]]
+        + list(keyboard.inline_keyboard)
     )
 
 def free_hub_input_text(task_type: str, lang: str = "vi") -> str:
@@ -84417,7 +84416,7 @@ def aichat_consent_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("✅ Tôi đồng ý bật AI Chatbot", callback_data="aichat|consent_on")],
-            [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="aichat|back_freehub"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ]
     )
 
@@ -84432,7 +84431,8 @@ def aichat_control_keyboard(payload: dict | None = None) -> InlineKeyboardMarkup
             rows.append([InlineKeyboardButton("Cấp quyền AI hỗ trợ thao tác trong bot", callback_data="aichat|assist_on")])
     else:
         rows.append([InlineKeyboardButton("Bật AI Chatbot", callback_data="aichat|on")])
-    rows.append([InlineKeyboardButton("AI Chatbot status", callback_data="aichat|status"), InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")])
+    rows.append([InlineKeyboardButton("AI Chatbot status", callback_data="aichat|status"), InlineKeyboardButton("Trace", callback_data="aichat|trace")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="aichat|back_freehub"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def aichat_result_keyboard(result: dict, payload: dict | None = None) -> InlineKeyboardMarkup:
@@ -84443,6 +84443,7 @@ def aichat_result_keyboard(result: dict, payload: dict | None = None) -> InlineK
     if result.get("action_guard") == "needs_action_permission":
         rows.append([InlineKeyboardButton("Cấp quyền AI hỗ trợ thao tác trong bot", callback_data="aichat|assist_on")])
     rows.append([InlineKeyboardButton("Tắt AI Chatbot", callback_data="aichat|off"), InlineKeyboardButton("Trace", callback_data="aichat|trace")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="aichat|back_freehub"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def aichat_status_text(payload: dict) -> str:
@@ -84485,7 +84486,7 @@ async def cmd_aichat_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     state, result = ai_chatbot_copilot.request_enable(aichat_state(), update.effective_user.id)
     save_aichat_state(state)
-    await update.message.reply_text(result["reply"], reply_markup=aichat_consent_keyboard())
+    await update.message.reply_text("🤖 <b>AAS ONE AI Chatbot</b>\n\n" + result["reply"], parse_mode="HTML", reply_markup=aichat_consent_keyboard())
 
 async def cmd_aichat_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
@@ -84533,11 +84534,14 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "status"
     uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
     state = aichat_state()
+    if action == "back_freehub":
+        return await safe_edit_or_send(query, free_hub_main_text(lang), parse_mode="HTML", reply_markup=free_hub_main_keyboard(lang))
     if action == "on":
         state, result = ai_chatbot_copilot.request_enable(state, uid)
         save_aichat_state(state)
-        return await safe_edit_or_send(query, result["reply"], reply_markup=aichat_consent_keyboard())
+        return await safe_edit_or_send(query, "🤖 <b>AAS ONE AI Chatbot</b>\n\n" + result["reply"], parse_mode="HTML", reply_markup=aichat_consent_keyboard())
     if action == "consent_on":
         state, result = ai_chatbot_copilot.enable_with_consent(state, uid)
         save_aichat_state(state)
