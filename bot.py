@@ -870,7 +870,10 @@ SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL", "chirp-fenix")
 SHOPAIKEY_MUSIC_GROUP = _env("SHOPAIKEY_MUSIC_GROUP")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
 IMAGE_MAINTENANCE = env_flag("IMAGE_MAINTENANCE", "false")
+IMAGE_PUBLIC_MAINTENANCE = env_flag("IMAGE_PUBLIC_MAINTENANCE", "false")
 IMAGE_GENERATION_DISABLED = env_flag("IMAGE_GENERATION_DISABLED", "false")
+PUBLIC_IMAGE_DISABLED = env_flag("PUBLIC_IMAGE_DISABLED", "false")
+AAS_IMAGE_DISABLED = env_flag("AAS_IMAGE_DISABLED", "false")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
@@ -60144,9 +60147,9 @@ IMAGE_PROVIDER_DIRECT_BLOCK_REASONS = {
 
 def classify_provider_submit_source(source: str = "") -> str:
     src = str(source or "").strip().lower()
-    if src in {"public_user_confirm", "public_user_final_confirm", "public_confirm"}:
+    if src in {"public_user_confirm", "public_user_final_confirm", "public_confirm", "vproduct_public_user_final_confirm"}:
         return "public_user_confirm"
-    if src.startswith("public_user_confirm") or src.startswith("public_user_final_confirm"):
+    if src.startswith("public_user_confirm") or src.startswith("public_user_final_confirm") or src.startswith("vproduct_public_user_final_confirm"):
         return "public_user_confirm"
     if "smoke" in src or "tool_test" in src:
         return "smoke"
@@ -60162,8 +60165,11 @@ def classify_provider_submit_source(source: str = "") -> str:
         return "hidden_submit"
     return "unknown_non_public"
 
+def image_public_maintenance_enabled() -> bool:
+    return bool(IMAGE_MAINTENANCE or IMAGE_PUBLIC_MAINTENANCE or IMAGE_GENERATION_DISABLED or PUBLIC_IMAGE_DISABLED or AAS_IMAGE_DISABLED)
+
 def image_explicit_maintenance_on() -> bool:
-    return bool(IMAGE_MAINTENANCE or IMAGE_GENERATION_DISABLED or TOOL_FREEZE_IMAGE)
+    return image_public_maintenance_enabled()
 
 def provider_freeze_non_public_on() -> bool:
     state = current_system_mode()
@@ -74601,17 +74607,30 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not token or safe_int(pending.get("user_id"), 0) != safe_int(uid, 0):
             await query.answer()
             return await safe_edit_or_send(query, "⌛ Xác nhận tạo ảnh đã hết hạn. Bot chưa trừ Xu.", reply_markup=task3d_prompt_image_package_keyboard(lang))
-        enabled, _message = shopaikey_public_generation_guard("image")
-        if not enabled:
+        provider_submit_guard = shopaikey_provider_submit_guard(
+            "image",
+            source="vproduct_public_user_final_confirm",
+            confirmed=True,
+        )
+        if not provider_submit_guard.get("provider_submit_allowed"):
             await query.answer()
+            block_reason = str(provider_submit_guard.get("provider_submit_block_reason") or "provider_submit_blocked")
+            block_message = (
+                shopaikey_provider_submit_maintenance_message("image", lang, str(provider_submit_guard.get("message") or ""))
+                if block_reason == "image_explicit_maintenance"
+                else str(provider_submit_guard.get("message") or "TOAN AAS chưa gọi provider và chưa trừ Xu.")
+            )
             return await safe_edit_or_send(
                 query,
-                "🛠 Hệ thống tạo ảnh đang bảo trì/nâng cấp nhẹ nên chưa tạo được lúc này. TOAN AAS đã giữ nguyên prompt, cảnh và gói bạn chọn; bot chưa trừ Xu.",
+                block_message,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("⬅️ Xác nhận", callback_data="vproduct|prompt_image_confirm"),
                     InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
                 ]]),
             )
+        pending["provider_submit_source"] = "vproduct_public_user_final_confirm"
+        pending["submit_source"] = "vproduct_public_user_final_confirm"
+        restore_shopaikey_pending_confirmation(token, uid, pending)
         if shopaikey_active_job_for_user(uid, "image"):
             await query.answer()
             return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Xác nhận", callback_data="vproduct|prompt_image_confirm")]]))
@@ -94772,6 +94791,11 @@ def image_public_status_payload() -> dict:
         source="public_user_final_confirm",
         confirmed=True,
     )
+    vproduct_guard = shopaikey_provider_submit_guard(
+        "image",
+        source="vproduct_public_user_final_confirm",
+        confirmed=True,
+    )
     hidden_guard = shopaikey_provider_submit_guard(
         "image",
         source="hidden_submit",
@@ -94793,7 +94817,10 @@ def image_public_status_payload() -> dict:
         "flow_block_reason": str(flow_guard.get("flow_block_reason") or ""),
         "public_image_enabled": bool(SHOPAIKEY_PUBLIC_IMAGE_ENABLED),
         "image_maintenance": bool(IMAGE_MAINTENANCE),
+        "image_public_maintenance": bool(IMAGE_PUBLIC_MAINTENANCE),
         "image_generation_disabled": bool(IMAGE_GENERATION_DISABLED),
+        "public_image_disabled": bool(PUBLIC_IMAGE_DISABLED),
+        "aas_image_disabled": bool(AAS_IMAGE_DISABLED),
         "explicit_image_maintenance": bool(image_explicit_maintenance_on()),
         "system_maintenance": bool(maintenance_on),
         "system_maintenance_message_set": bool(maintenance_message),
@@ -94819,6 +94846,8 @@ def image_public_status_payload() -> dict:
         "background_submit_allowed": bool(background_guard.get("provider_submit_allowed")),
         "background_submit_block_reason": str(background_guard.get("provider_submit_block_reason") or ""),
         "public_live_confirm_allowed": bool(live_guard.get("provider_submit_allowed")),
+        "vproduct_image_confirm_allowed": bool(vproduct_guard.get("provider_submit_allowed")),
+        "vproduct_image_confirm_reason": str(vproduct_guard.get("provider_submit_block_reason") or "allowed"),
         "hidden_submit_blocked": not bool(hidden_guard.get("provider_submit_allowed")),
         "final_decision_reason": live_reason,
         "provider_called": False,
@@ -94837,7 +94866,10 @@ def image_public_status_text() -> str:
         f"• Flow block reason: <code>{html.escape(payload['flow_block_reason'] or '-')}</code>",
         f"• Public image flag: <code>{'ON' if payload['public_image_enabled'] else 'OFF'}</code>",
         f"• IMAGE_MAINTENANCE: <code>{'ON' if payload['image_maintenance'] else 'OFF'}</code>",
+        f"• IMAGE_PUBLIC_MAINTENANCE: <code>{'ON' if payload['image_public_maintenance'] else 'OFF'}</code>",
         f"• IMAGE_GENERATION_DISABLED: <code>{'ON' if payload['image_generation_disabled'] else 'OFF'}</code>",
+        f"• PUBLIC_IMAGE_DISABLED: <code>{'ON' if payload['public_image_disabled'] else 'OFF'}</code>",
+        f"• AAS_IMAGE_DISABLED: <code>{'ON' if payload['aas_image_disabled'] else 'OFF'}</code>",
         f"• Explicit image maintenance: <code>{'ON' if payload['explicit_image_maintenance'] else 'OFF'}</code>",
         f"• System maintenance: <code>{'ON' if payload['system_maintenance'] else 'OFF'}</code>",
         f"• TOOL_FREEZE_IMAGE: <code>{'ON' if payload['tool_freeze_image'] else 'OFF'}</code>",
@@ -94856,6 +94888,7 @@ def image_public_status_text() -> str:
         f"• Source checked: <code>{html.escape(payload['final_confirm_source'])}</code>",
         f"• Source kind: <code>{html.escape(payload['provider_submit_source_kind'] or '-')}</code>",
         f"• Public live confirm allowed: <code>{'YES' if payload['public_live_confirm_allowed'] else 'NO'}</code>",
+        f"• VProduct image confirm allowed: <code>{'YES' if payload['vproduct_image_confirm_allowed'] else 'NO'}</code> | reason <code>{html.escape(payload['vproduct_image_confirm_reason'] or '-')}</code>",
         f"• Provider submit allowed: <code>{'YES' if payload['provider_submit_allowed'] else 'NO'}</code>",
         f"• Provider block reason: <code>{html.escape(payload['provider_submit_block_reason'] or '-')}</code>",
         f"• Hidden submit blocked: <code>{'YES' if payload['hidden_submit_blocked'] else 'NO'}</code>",
