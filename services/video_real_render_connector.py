@@ -48,6 +48,12 @@ VISUAL_SOURCE_LOCAL_SCENE_CARD = video_final_output.VISUAL_SOURCE_LOCAL_SCENE_CA
 LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES = {"image_to_video", "storyboard_prompt", "script_to_video"}
 LOCAL_SCENE_CARD_PRODUCT_TYPES = {"script_to_video", "storyboard_prompt", "multi_scene_film"}
 PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
+PRODUCT_VIDEO_SCENE_SECONDS = 8
+PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
+PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO = 0.12
+PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO = 0.18
+PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO = 0.04
+PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO = 0.035
 PROVIDER_VIDEO_SOURCE = "provider"
 PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "video_ai_prompt",
@@ -560,6 +566,87 @@ def _scene_count(job: dict | None = None) -> int:
     return max(1, min(20, _safe_int(value, 3)))
 
 
+def _invoice_payload(job: dict | None = None) -> dict:
+    job = dict(job or {})
+    candidates = [
+        job.get("invoice_json"),
+        job.get("invoice"),
+        (job.get("project") or {}).get("invoice_json") if isinstance(job.get("project"), dict) else "",
+    ]
+    for candidate in candidates:
+        parsed = _json_loads(candidate, {})
+        if isinstance(parsed, dict) and parsed:
+            return parsed
+    return {}
+
+
+def product_video_expected_duration_seconds(job: dict | None = None) -> int:
+    job = dict(job or {})
+    invoice = _invoice_payload(job)
+    direct = _safe_int(
+        job.get("expected_duration_seconds")
+        or job.get("duration_seconds")
+        or invoice.get("duration_seconds"),
+        0,
+    )
+    if direct > 0:
+        return direct
+    scene_count = _safe_int(job.get("scene_count") or invoice.get("scene_count"), _scene_count(job))
+    scene_seconds = _safe_int(job.get("scene_seconds") or invoice.get("scene_seconds"), PRODUCT_VIDEO_SCENE_SECONDS)
+    return max(1, min(20, scene_count)) * max(1, scene_seconds)
+
+
+def product_video_duration_contract(job: dict | None, duration_seconds: float | int | None) -> dict[str, Any]:
+    expected = product_video_expected_duration_seconds(job)
+    actual = float(duration_seconds or 0)
+    ok = actual + PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS >= float(expected)
+    return {
+        "ok": bool(ok),
+        "expected_duration_seconds": expected,
+        "actual_duration_seconds": actual,
+        "duration_tolerance_seconds": PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS,
+        "reason": "" if ok else "final_duration_short_scene_coverage_missing",
+    }
+
+
+def _asset_pack_payload(job: dict | None = None) -> dict:
+    job = dict(job or {})
+    candidates = [
+        job.get("asset_pack"),
+        job.get("asset_pack_json"),
+        (job.get("project") or {}).get("asset_pack_json") if isinstance(job.get("project"), dict) else "",
+    ]
+    for candidate in candidates:
+        parsed = _json_loads(candidate, {})
+        if isinstance(parsed, dict) and parsed:
+            return parsed
+    return {}
+
+
+def product_video_logo_material(job: dict | None = None) -> dict:
+    asset_pack = _asset_pack_payload(job)
+    material = asset_pack.get("logo_material") if isinstance(asset_pack, dict) else {}
+    if not isinstance(material, dict):
+        return {}
+    enabled = bool(material.get("logo_enabled"))
+    if not enabled:
+        return {}
+    position = str(material.get("logo_position") or "top_right").strip().lower()
+    if position not in {"top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"}:
+        position = "top_right"
+    return {
+        "logo_enabled": True,
+        "logo_file_id": str(material.get("logo_file_id") or ""),
+        "logo_path": str(material.get("logo_path") or material.get("path") or ""),
+        "logo_position": position,
+        "logo_width_ratio": float(material.get("logo_width_ratio") or PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO),
+        "logo_max_width_ratio": float(material.get("logo_max_width_ratio") or PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO),
+        "logo_margin_x_ratio": float(material.get("logo_margin_x_ratio") or PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO),
+        "logo_margin_y_ratio": float(material.get("logo_margin_y_ratio") or PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO),
+        "logo_preserve_aspect_ratio": bool(material.get("logo_preserve_aspect_ratio", True)),
+    }
+
+
 def _product_type(job: dict | None = None) -> str:
     job = dict(job or {})
     project = dict(job.get("project") or {})
@@ -645,7 +732,7 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
     if total_duration > 0:
         default_duration = max(1.0, min(8.0, float(total_duration) / max(1, count)))
     else:
-        default_duration = max(1.0, min(8.0, float(_safe_int(job.get("scene_duration") or 6, 6))))
+        default_duration = max(1.0, min(8.0, float(_safe_int(job.get("scene_duration") or PRODUCT_VIDEO_SCENE_SECONDS, PRODUCT_VIDEO_SCENE_SECONDS))))
     original = original_prompt_from_job(job)
     style = _safe_text(job.get("profile_id") or "", 120)
     cards = _scene_cards(job)
@@ -1125,6 +1212,85 @@ def _logo_enabled(addon_plan: dict) -> bool:
     return bool(addon_plan.get("logo_enabled") and _safe_text(addon_plan.get("logo_text"), 120))
 
 
+def product_video_logo_overlay_xy(position: str, margin_x_ratio: float = PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO, margin_y_ratio: float = PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO) -> tuple[str, str]:
+    position = str(position or "top_right").strip().lower()
+    mx = max(0.0, min(0.2, float(margin_x_ratio or PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO)))
+    my = max(0.0, min(0.2, float(margin_y_ratio or PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO)))
+    x_map = {
+        "top_left": f"main_w*{mx}",
+        "bottom_left": f"main_w*{mx}",
+        "top_center": "(main_w-overlay_w)/2",
+        "bottom_center": "(main_w-overlay_w)/2",
+        "top_right": f"main_w-overlay_w-main_w*{mx}",
+        "bottom_right": f"main_w-overlay_w-main_w*{mx}",
+    }
+    y_map = {
+        "top_left": f"main_h*{my}",
+        "top_center": f"main_h*{my}",
+        "top_right": f"main_h*{my}",
+        "bottom_left": f"main_h-overlay_h-main_h*{my}",
+        "bottom_center": f"main_h-overlay_h-main_h*{my}",
+        "bottom_right": f"main_h-overlay_h-main_h*{my}",
+    }
+    return x_map.get(position, x_map["top_right"]), y_map.get(position, y_map["top_right"])
+
+
+def build_product_video_logo_overlay_command(source_video: str, logo_path: str, output_video: str, material: dict | None = None) -> list[str]:
+    material = dict(material or {})
+    width_ratio = max(0.01, min(PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO, float(material.get("logo_width_ratio") or PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO)))
+    max_width_ratio = max(width_ratio, min(0.5, float(material.get("logo_max_width_ratio") or PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO)))
+    x_expr, y_expr = product_video_logo_overlay_xy(
+        str(material.get("logo_position") or "top_right"),
+        float(material.get("logo_margin_x_ratio") or PRODUCT_VIDEO_LOGO_MARGIN_X_RATIO),
+        float(material.get("logo_margin_y_ratio") or PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO),
+    )
+    # scale2ref keeps the original logo aspect ratio. The min() guard keeps old
+    # configs from making a large logo even if a wider value is present.
+    filter_complex = (
+        f"[1:v][0:v]scale2ref=w='min(main_w*{max_width_ratio},main_w*{width_ratio})':h=-1[logo][base];"
+        f"[base][logo]overlay={x_expr}:{y_expr}:format=auto[v]"
+    )
+    return [
+        _ffmpeg_binary(),
+        "-y",
+        "-i",
+        str(source_video),
+        "-i",
+        str(logo_path),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[v]",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(output_video),
+    ]
+
+
+def apply_product_video_logo_overlay(source_video: str, logo_path: str, output_video: str, material: dict | None = None) -> dict[str, Any]:
+    if not _ffmpeg_binary():
+        return {"ok": False, "reason": "ffmpeg_missing"}
+    if not logo_path or not os.path.isfile(str(logo_path)):
+        return {"ok": False, "reason": "logo_file_not_available_to_worker"}
+    cmd = build_product_video_logo_overlay_command(source_video, logo_path, output_video, material)
+    result = safe_run_ffmpeg(cmd, timeout=300)
+    if result.returncode != 0:
+        return {"ok": False, "reason": "logo_overlay_ffmpeg_failed", "stderr": (result.stderr or "")[-600:]}
+    try:
+        ensured = ensure_video_output(output_video)
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"logo_overlay_invalid_output:{exc}"}
+    return {"ok": True, "path": ensured, "command": cmd}
+
+
 def _addon_degrade_notes(addon_plan: dict, *, bgm_audio_path: str | None = None, job: dict | None = None) -> list[dict[str, Any]]:
     notes: list[dict[str, Any]] = []
     if addon_plan.get("voice_enabled"):
@@ -1424,6 +1590,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
     addon = _addon_plan(job)
     subtitle_requested = bool(addon.get("subtitle_enabled", True))
     subtitle_enabled = bool(subtitle_requested and _has_user_facing_subtitle_text(job))
+    per_scene_duration = max(1.0, min(8.0, product_video_expected_duration_seconds(job) / max(1, _scene_count(job))))
     return process_multiscene_video_pipeline(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or int(time.time())),
@@ -1432,7 +1599,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         render_video_func=render_video_func,
         llm_func=real_video_llm_func_from_job(job),
         max_scenes=_scene_count(job),
-        default_scene_duration=6.0,
+        default_scene_duration=per_scene_duration,
         aspect_ratio=_aspect_ratio(job),
         enable_voice=False,
         bgm_audio_path=bgm_audio_path,
@@ -1446,7 +1613,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
 def render_real_video_job(job: dict, work_dir: str) -> dict:
     addon = _addon_plan(job)
     workspace = os.path.abspath(work_dir)
-    total_duration = max(1.0, float(_safe_int(job.get("expected_duration_seconds") or _scene_count(job) * 6, _scene_count(job) * 6)))
+    total_duration = max(1.0, float(product_video_expected_duration_seconds(job)))
     bgm_audio_path = _default_bgm_path(addon, workspace, total_duration)
     degrade_notes = _addon_degrade_notes(addon, bgm_audio_path=bgm_audio_path, job=job)
     readiness = real_video_provider_readiness(job)
@@ -1823,6 +1990,45 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["validation_status"] = "candidate_mp4_valid"
     else:
         result["validation_status"] = str(probe.get("reason") or "candidate_mp4_probe_failed")
+    if is_product_video:
+        duration_contract = product_video_duration_contract(job, result.get("output_duration"))
+        result["raw_provider_video_path"] = final_path
+        result["raw_duration_seconds"] = float(result.get("output_duration") or 0)
+        result["expected_duration_seconds"] = duration_contract["expected_duration_seconds"]
+        result["final_duration_contract"] = duration_contract
+        result["finalizer_invoked"] = True
+        if not duration_contract.get("ok"):
+            result["terminal_state"] = "failed_no_charge"
+            result["finalizer_error"] = duration_contract["reason"]
+            result["no_charge"] = True
+            _raise_render_error(str(duration_contract.get("reason") or "final_duration_invalid"), result)
+        result["final_duration_seconds"] = float(result.get("output_duration") or 0)
+        logo_material = product_video_logo_material(job)
+        if logo_material.get("logo_enabled"):
+            result["logo_overlay_requested"] = True
+            logo_path = str(logo_material.get("logo_path") or "")
+            overlay_path = os.path.join(workspace, "final_with_logo.mp4")
+            overlay = apply_product_video_logo_overlay(final_path, logo_path, overlay_path, logo_material)
+            result["logo_overlay_result"] = overlay
+            if not overlay.get("ok"):
+                result["terminal_state"] = "failed_no_charge"
+                result["logo_overlay_applied"] = False
+                result["logo_overlay_error"] = str(overlay.get("reason") or "logo_overlay_failed")
+                result["no_charge"] = True
+                _raise_render_error(str(overlay.get("reason") or "logo_overlay_failed"), result)
+            final_path = str(overlay.get("path") or overlay_path)
+            result["final_video_path"] = final_path
+            result["master_video_path"] = final_path
+            result["logo_overlay_applied"] = True
+            result["logo_overlay_position"] = str(logo_material.get("logo_position") or "")
+            probe = video_final_output.probe_video(final_path)
+            if probe.get("ok"):
+                result["output_bytes"] = int(probe.get("bytes") or 0)
+                result["output_duration"] = float(probe.get("duration") or 0)
+                result["final_duration_seconds"] = float(probe.get("duration") or 0)
+                result["has_video"] = bool(probe.get("has_video"))
+                result["has_audio"] = bool(probe.get("has_audio"))
+                result["validation_status"] = "candidate_mp4_valid_with_logo"
     if addon.get("music_enabled") and not result.get("has_audio"):
         for note in degrade_notes:
             if note.get("addon") == "music":

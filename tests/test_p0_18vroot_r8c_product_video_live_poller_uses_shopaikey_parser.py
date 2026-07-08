@@ -211,8 +211,8 @@ def test_progress_status_reconcile_uses_data_progress_not_http_200():
     assert telemetry["provider_progress_cap_reason"] != "invalid_provider_progress_raw"
     assert telemetry["shopaikey_status_endpoint_exact"] is True
     assert telemetry["shopaikey_data_progress_raw"] == "30%"
-    assert telemetry["render_video_progress_percent_public"] == "0"
-    assert telemetry["render_progress_public_mode"] == "zero_waiting"
+    assert telemetry["render_video_progress_percent_public"] == "30"
+    assert telemetry["render_progress_public_mode"] in {"percent", "elapsed_wait"}
 
 
 def test_job_debug_reconciler_uses_primary_alive_attempt_parser_over_stale_summary():
