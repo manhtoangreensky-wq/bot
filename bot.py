@@ -47569,14 +47569,20 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• scene tasks: <code>{safe_int(result.get('scene_tasks_submitted'), 0)}/{safe_int(result.get('scene_tasks_total'), 0)}</code>",
         f"• scene tasks created: <code>{safe_int(result.get('scene_tasks_created_count') or result.get('scene_tasks_total'), 0)}</code>",
         f"• scene tasks completed: <code>{safe_int(result.get('scene_tasks_completed'), 0)}</code>",
+        f"• scenes total/done/running/stalled: <code>{safe_int(result.get('scenes_total') or result.get('scene_tasks_total'), 0)}/{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_running'), 0)}/{safe_int(result.get('scenes_stalled') or result.get('scenes_stalled_count'), 0)}</code>",
         f"• scenes done/pending/running: <code>{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_pending'), 0)}/{safe_int(result.get('scenes_running'), 0)}</code>",
         f"• current scene index: <code>{safe_int(result.get('current_scene_index'), 0)}</code>",
         f"• current scene status: <code>{html.escape(str(result.get('current_scene_status') or '-'))}</code>",
         f"• scene not-start elapsed/stall: <code>{safe_int(result.get('scene_not_start_elapsed'), 0)}/{safe_int(result.get('stall_threshold'), 0)}</code>",
         f"• provider stalled NOT_START: <code>{'yes' if result.get('provider_stalled_not_start') else 'no'}</code>",
+        f"• fallbackable blocker: <code>{'yes' if result.get('fallbackable_blocker') else 'no'}</code>",
+        f"• fallback eligibility reason: <code>{html.escape(str(result.get('fallback_eligibility_reason') or '-')[:160])}</code>",
         f"• fallback scene index: <code>{safe_int(result.get('fallback_scene_index'), 0)}</code>",
+        f"• fallback provider: <code>{html.escape(str(result.get('fallback_provider') or '-')[:120])}</code>",
+        f"• fallback submit source: <code>{html.escape(str(result.get('fallback_submit_source') or '-')[:120])}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') else 'no'}</code>",
         f"• fallback block reason: <code>{html.escape(str(result.get('fallback_block_reason') or result.get('fallback_blocked_reason') or '-')[:160])}</code>",
+        f"• source of truth: <code>{html.escape(str(result.get('source_of_truth') or '-')[:120])}</code>",
         f"• public confirm kickoff: <code>{'yes' if result.get('public_confirm_kickoff_attempted') else 'no'}/{'yes' if result.get('public_confirm_kickoff_success') else 'no'}</code>",
         f"• worker dispatch: <code>{'yes' if result.get('worker_dispatch_attempted') else 'no'}/{'yes' if result.get('worker_dispatch_success') else 'no'}</code>",
         f"• worker dispatch blocker: <code>{html.escape(str(result.get('worker_dispatch_blocker') or '-')[:160])}</code>",
@@ -47839,6 +47845,20 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         ),
         0,
     )
+    scenes_stalled_count = safe_int(
+        merged.get("scenes_stalled_count")
+        or merged.get("scenes_stalled")
+        or sum(1 for item in scene_tasks if item.get("provider_stalled_not_start") or str(item.get("status") or "").strip().lower() == "provider_stalled_not_start"),
+        0,
+    )
+    fallback_count_by_scene = merged.get("fallback_count_by_scene") if isinstance(merged.get("fallback_count_by_scene"), dict) else {}
+    if not fallback_count_by_scene and scene_tasks:
+        fallback_count_by_scene = {
+            str(safe_int(item.get("scene_index"), 0)): safe_int(item.get("fallback_count") or item.get("provider_fallback_count"), 0)
+            for item in scene_tasks
+            if safe_int(item.get("scene_index"), 0)
+        }
+    provider_state_source = str(merged.get("provider_state_source") or merged.get("source_of_truth") or merged.get("status_source_priority_used") or "-")
     final_mp4_valid = bool(charge_gate.get("ok") or merged.get("final_mp4_valid") or merged.get("final_mp4_validated") or merged.get("output_validated"))
     final_delivered = bool(
         project.get("video_delivered_at")
@@ -47873,7 +47893,10 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• charge tx ids: <code>{html.escape(masked_tx)}</code>",
         f"• refund ids: <code>{html.escape(masked_refund)}</code>",
         f"• provider status: <code>{html.escape(provider_status[:120])}</code>",
+        f"• provider state source: <code>{html.escape(provider_state_source[:120])}</code>",
         f"• scene success count: <code>{scene_success_count}</code>",
+        f"• scenes stalled count: <code>{scenes_stalled_count}</code>",
+        f"• fallback count by scene: <code>{html.escape(str(fallback_count_by_scene)[:220])}</code>",
         f"• final MP4 valid: <code>{'yes' if final_mp4_valid else 'no'}</code>",
         f"• final delivered: <code>{'yes' if final_delivered else 'no'}</code>",
         f"• charge after final delivery: <code>{'yes' if final_mp4_valid and final_delivered else 'no'}</code>",
@@ -48325,7 +48348,7 @@ def video_b14_product_video_fallback_policy(
         "invoice_confirmed": invoice_confirmed,
         "provider_submit_accepted_before": provider_submit_accepted_before,
         "fallback_eligibility_source": str(fallback_policy.get("fallback_eligibility_source") or ""),
-        "fallback_submit_source": "public_confirmed_fallback_once" if eligible else "",
+        "fallback_submit_source": "public_confirmed_scene_fallback_once" if eligible else "",
         "final_decision": "fallback_provider_once" if eligible else "failed_no_charge",
     }
 

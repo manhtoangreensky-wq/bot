@@ -225,7 +225,7 @@ def test_stalled_scene_fallback_uses_next_provider_chain_and_fallback_source(mon
         result = asyncio.run(connector._render_scene_async(scene, str(Path(tmp_dir) / "raw_scene_1.mp4"), []))
 
     assert result["ok"] is True
-    assert captured["metadata"]["submit_source"] == "public_confirmed_fallback_once"
+    assert captured["metadata"]["submit_source"] == "public_confirmed_scene_fallback_once"
     assert captured["metadata"]["fallback_count"] == 1
     assert captured["metadata"]["fallback_scene_index"] == 1
     assert captured["chain"].split(",")[0] == "key4u_video"

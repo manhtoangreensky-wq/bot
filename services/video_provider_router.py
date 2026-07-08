@@ -257,6 +257,7 @@ def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dic
 
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM = "public_user_final_confirm"
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE = "public_confirmed_fallback_once"
+PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE = "public_confirmed_scene_fallback_once"
 PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK = "worker_poll_existing_task"
 PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES = {
     "codex_test",
@@ -278,6 +279,8 @@ def normalize_product_video_submit_source(value: Any = "") -> str:
         "b14_confirm": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
         "public_confirmed_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
         "public_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        "public_confirmed_scene_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
+        "public_scene_fallback_once": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
         "poll_existing_task": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
         "worker_poll": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
         "worker_poll_existing": PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
@@ -325,6 +328,7 @@ def product_video_provider_submit_source_policy(
         or source in {
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
         }
     )
     if poll_existing_task or source == PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
@@ -346,6 +350,7 @@ def product_video_provider_submit_source_policy(
     if source not in {
         PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
         PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
     }:
         return {
             "submit_source": source or "missing",
