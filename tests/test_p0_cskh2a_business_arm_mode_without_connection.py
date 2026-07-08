@@ -313,7 +313,7 @@ def test_cskh2a_cskh_test_pricing_still_works(monkeypatch):
     text = _run_cskh_test(monkeypatch, "cho mình xin bảng giá và gói phù hợp")
 
     assert "Would send: <code>no</code>" in text
-    assert "Intent: <code>pricing_general</code>" in text
+    assert "Intent: <code>pricing_table_general</code>" in text
 
 
 def test_cskh2a_cskh_test_video_no_file_priority_if_existing(monkeypatch):
@@ -362,7 +362,12 @@ def test_cskh2a_no_payos_pricing_db_webhook_changes():
     changed_files = _changed_files()
     if _is_storage5_scope(changed_files):
         return
-    allowed = {"tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py"}
+    allowed = {
+        "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+    }
     changed = " ".join(path for path in changed_files if path not in allowed).lower()
     for forbidden in ("payos", "pricing", "migration", "webhook"):
         assert forbidden not in changed

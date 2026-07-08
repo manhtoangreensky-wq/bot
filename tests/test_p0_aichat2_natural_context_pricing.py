@@ -67,7 +67,7 @@ def test_aichat_video_pricing_uses_doc_tiers_and_scene_hint():
     assert result["intent_id"] == "product_video_pricing"
     for marker in ["200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"]:
         assert marker in result["reply"]
-    assert "1 cảnh khoảng 6 giây" in result["reply"]
+    assert "1 cảnh = 8s" in result["reply"]
     assert "pricing_doc" in result["source"]
 
 

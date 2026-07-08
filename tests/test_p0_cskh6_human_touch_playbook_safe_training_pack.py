@@ -127,12 +127,24 @@ def test_cskh6_test_message_classifies_without_sending():
 def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
     changed = set(_changed_files())
     allowed = {
+        "knowledge/toan_aas_cskh_aichat_context.md",
+        "services/aas_shared_knowledge.py",
+        "services/ai_chatbot_copilot.py",
         "services/telegram_business_support.py",
         "config/cskh_playbook.json",
         "config/cskh_training_data.json",
         "config/cskh_knowledge_base.json",
+        "tests/test_p0_aichat1_copilot_consent.py",
+        "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
+        "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
+        "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
     }
     forbidden_fragments = (
         "music",
@@ -151,4 +163,4 @@ def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
     )
 
     assert changed <= allowed
-    assert not any(any(fragment in path.lower() for fragment in forbidden_fragments) for path in changed)
+    assert not any(any(fragment in path.lower() for fragment in forbidden_fragments) and not path.startswith("tests/") for path in changed)

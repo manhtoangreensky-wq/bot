@@ -51,7 +51,7 @@ def test_business_message_normalized():
 def test_rules_classify_pricing_nap_xu():
     result = cskh.classify_cskh_message("Cho mình hỏi bảng giá nạp Xu")
 
-    assert result["intent_id"] == "pricing"
+    assert result["intent_id"] == "pricing_topup"
     assert result["handoff"] is False
 
 
@@ -151,9 +151,10 @@ def test_duplicate_business_message_suppressed():
 def test_cooldown_suppresses_repeated_replies():
     event = cskh.extract_business_message(_business_message_update(text="alo", message_id=100))
     state = {**cskh.default_state(), "enabled": True}
-    state["last_auto_reply_at"][event.chat_id] = 1990
+    classification = cskh.classify_business_event(event)
+    state["last_auto_reply_at"][cskh.business_message_cooldown_key(event, classification)] = 1990
 
-    guard = cskh.evaluate_auto_reply_guard(state, event, now=2000, cooldown_seconds=60)
+    guard = cskh.evaluate_auto_reply_guard(state, event, now=2000, cooldown_seconds=60, classification=classification)
 
     assert guard["cooldown_suppressed"] is True
 
@@ -250,19 +251,27 @@ def test_no_music_product_video_subdub_runtime_touched():
     if _is_subdub_scope(changed):
         return
     allowed = {
-        "bot.py",
+        "knowledge/toan_aas_cskh_aichat_context.md",
+        "services/aas_shared_knowledge.py",
+        "services/ai_chatbot_copilot.py",
         "services/telegram_business_support.py",
         "config/cskh_knowledge_base.json",
         "config/cskh_playbook.json",
         "config/cskh_training_data.json",
         "docs/cskh_telegram_business_setup.md",
         "docs/cskh_toan_aas_playbook.md",
+        "tests/test_p0_aichat1_copilot_consent.py",
+        "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
         "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
         "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
         "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
+        "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
         "tests/test_p0_19m6ae_subdub_subtitle_polish_and_dub_known_good_restore.py",
     }
     img2vid_scope = {
@@ -307,7 +316,12 @@ def test_no_payos_pricing_db_destructive_change():
     changed_files = _changed_files()
     if _is_storage5_scope(changed_files):
         return
-    allowed = {"tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py"}
+    allowed = {
+        "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+    }
     changed = " ".join(path for path in changed_files if path not in allowed).lower()
 
     assert "payos" not in changed

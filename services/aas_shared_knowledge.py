@@ -32,6 +32,35 @@ IMAGE_TIERS = [
 MUSIC_BACKGROUND_TIERS = [100, 150, 200]
 MUSIC_SONG_TIERS = [200, 250, 300]
 XU_TO_VND = 100
+CONTEXT_FILE_VERSION_FALLBACK = "P0.CSKH.AICHAT.3.2026-07-08"
+CONTEXT_FILE_RELATIVE_PATH = "knowledge/toan_aas_cskh_aichat_context.md"
+
+VAGUE_REPLY = (
+    "Dạ em đây ạ. Anh/chị muốn hỏi về giá, tạo video, tạo ảnh, phụ đề/lồng tiếng "
+    "hay nạp Xu để em hỗ trợ đúng hơn nha?"
+)
+MEANINGLESS_REPLY = (
+    "Dạ em chưa hiểu chính xác ý anh/chị ạ. Mình nhắn giúp em rõ hơn một chút, "
+    "ví dụ: muốn xem giá, tạo video, tạo ảnh, dịch/lồng tiếng hay kiểm tra Xu ạ?"
+)
+FILE_WITHOUT_INSTRUCTION_REPLY = (
+    "Dạ em nhận được file rồi ạ. Anh/chị muốn em hỗ trợ tạo phụ đề, dịch/lồng tiếng, "
+    "dùng làm tư liệu tạo video hay kiểm tra file này ạ?"
+)
+PRICE_UNKNOWN_SAFE_REPLY = (
+    "Dạ phần này em cần kiểm tra theo hóa đơn trong bot để nói chính xác, vì giá cuối còn tùy gói/số lượng/nội dung. "
+    "Anh/chị chọn tới màn hóa đơn, hệ thống sẽ hiện tổng Xu trước khi xác nhận ạ."
+)
+COMPLAINT_REPLY = (
+    "Dạ em xin lỗi anh/chị vì trải nghiệm này chưa tốt ạ. Anh/chị gửi giúp em mã xử lý hoặc ID Telegram, "
+    "em kiểm tra trạng thái và phần Xu cho mình ngay nha."
+)
+CHARGED_NO_RESULT_REPLY = (
+    "Dạ nếu hệ thống đã trừ Xu nhưng không có kết quả hợp lệ, bên em sẽ kiểm tra và xử lý theo chính sách hoàn/no-charge. "
+    "Anh/chị gửi giúp em mã xử lý để em kiểm tra chính xác ạ."
+)
+LAST_REPLY_TEMPLATE = "Anh/chị gửi thêm giúp em [thông tin cần thiết], em sẽ hỗ trợ tiếp cho mình nha."
+ACTIONABLE_MEDIA_TYPES = {"photo", "image", "video", "document", "audio", "voice", "animation"}
 
 
 def repo_root() -> Path:
@@ -46,6 +75,10 @@ def guide_doc_path() -> Path:
     return repo_root() / "docs" / "public" / "huong-dan-su-dung-toan-aas.md"
 
 
+def context_doc_path() -> Path:
+    return repo_root() / CONTEXT_FILE_RELATIVE_PATH
+
+
 def _read_doc(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
@@ -53,20 +86,81 @@ def _read_doc(path: Path) -> str:
         return ""
 
 
+def _parse_context_metadata(raw: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    if not raw.strip().startswith("---"):
+        return metadata
+    parts = raw.split("---", 2)
+    if len(parts) < 3:
+        return metadata
+    for line in parts[1].splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        metadata[key.strip()] = value.strip()
+    return metadata
+
+
+def _parse_markdown_sections(raw: str) -> dict[str, str]:
+    sections: dict[str, list[str]] = {}
+    current = "root"
+    for line in raw.splitlines():
+        if line.startswith("## "):
+            current = fold(line.lstrip("#").strip()).replace(" ", "_")
+            sections.setdefault(current, [])
+            continue
+        sections.setdefault(current, []).append(line)
+    return {key: "\n".join(value).strip() for key, value in sections.items() if key}
+
+
+def load_context_brain() -> dict[str, Any]:
+    path = context_doc_path()
+    raw = _read_doc(path)
+    metadata = _parse_context_metadata(raw)
+    version = metadata.get("version") or CONTEXT_FILE_VERSION_FALLBACK
+    return {
+        "loaded": bool(raw),
+        "path": str(path),
+        "relative_path": CONTEXT_FILE_RELATIVE_PATH,
+        "version": version,
+        "updated_at": metadata.get("updated_at") or "",
+        "owner": metadata.get("owner") or "TOAN_AAS",
+        "applies_to": metadata.get("applies_to") or "ai_chatbot, cskh_business_support",
+        "sections": _parse_markdown_sections(raw),
+        "raw": raw,
+    }
+
+
+def context_status() -> dict[str, Any]:
+    context = load_context_brain()
+    return {
+        "context_file_loaded": bool(context.get("loaded")),
+        "context_file_path": str(context.get("path") or context_doc_path()),
+        "context_file_version": str(context.get("version") or CONTEXT_FILE_VERSION_FALLBACK),
+        "source_file_version": str(context.get("version") or CONTEXT_FILE_VERSION_FALLBACK),
+    }
+
+
 def load_shared_docs() -> dict[str, str]:
     return {
         "pricing_doc": _read_doc(pricing_doc_path()),
         "guide_doc": _read_doc(guide_doc_path()),
+        "context_file": _read_doc(context_doc_path()),
     }
 
 
 def docs_status() -> dict[str, Any]:
     docs = load_shared_docs()
+    context = context_status()
     return {
         "pricing_doc_loaded": bool(docs["pricing_doc"]),
         "guide_doc_loaded": bool(docs["guide_doc"]),
+        "context_file_loaded": bool(docs["context_file"]),
         "pricing_doc_path": str(pricing_doc_path()),
         "guide_doc_path": str(guide_doc_path()),
+        "context_file_path": context["context_file_path"],
+        "context_file_version": context["context_file_version"],
+        "source_file_version": context["source_file_version"],
     }
 
 
@@ -174,14 +268,137 @@ def _in_topup_context(folded: str, memory: dict | None) -> bool:
     )
 
 
-def _base_result(intent_id: str, reply: str, *, sources: list[str], confidence: str = "high", product: str = "general", pricing_source: str = "unknown", price_text: str = "", handoff: bool = False, ticket: bool = False) -> dict:
+def _section_for_intent(intent_id: str) -> str:
+    intent = str(intent_id or "")
+    if intent.startswith("pricing") or "pricing" in intent or intent in {
+        "ask_xu_conversion",
+        "image_ai_pricing",
+        "product_video_pricing",
+        "subdub_pricing",
+        "dub_pricing",
+        "subtitle_pricing",
+        "voice_pricing",
+        "music_pricing",
+    }:
+        return "pricing_facts"
+    if intent in {"greeting", "vague_message", "meaningless_message", "file_without_instruction", "out_of_scope_context_fallback"}:
+        return "fallback_policy"
+    if intent.startswith("complaint") or intent in {"refund_request", "angry_customer", "public_negative_comment", "escalation_manager", "product_video_failed_no_file"}:
+        return "scenario_dialogues"
+    if intent.startswith("prompt") or intent in {"prompt_video_generation", "content_asset_suggestion"}:
+        return "usage_guides"
+    if intent in {"farewell", "customer_silent_followup"}:
+        return "human_last_reply_policy"
+    return "intents"
+
+
+def retrieve_context_sections(text: str, *, intent_id: str = "", media_type: str = "") -> list[str]:
+    folded = fold(text)
+    sections: list[str] = []
+    if media_type:
+        sections.extend(["usage_guides", "fallback_policy"])
+    if any(term in folded for term in ("gia", "bao nhieu", "xu", "tien", "bang gia", "phi", "100k", "nap")):
+        sections.append("pricing_facts")
+    if any(term in folded for term in ("cach dung", "huong dan", "lam sao", "dung sao", "flow")):
+        sections.append("usage_guides")
+    if any(term in folded for term in ("loi", "ket", "khong ra", "chua thay", "lua dao", "hoan xu", "tru xu", "quan ly")):
+        sections.extend(["scenario_dialogues", "hard_rules"])
+    if any(term in folded for term in ("prompt", "caption", "y tuong", "kich ban")):
+        sections.append("usage_guides")
+    section = _section_for_intent(intent_id)
+    if section:
+        sections.append(section)
+    return list(dict.fromkeys(section for section in sections if section))
+
+
+def _is_actionable_media(media_type: str) -> bool:
+    return fold(media_type) in ACTIONABLE_MEDIA_TYPES
+
+
+def _is_noise_message(raw: str, folded: str) -> bool:
+    if folded in {"?", "??", "???", "sao", "ua", "u", "ok roi sao", "ok sao", "alo?", "alo"}:
+        return True
+    if raw and not re.search(r"[0-9A-Za-zÀ-ỹ]", raw):
+        return True
+    return False
+
+
+def _is_meaningless_message(raw: str, folded: str) -> bool:
+    if folded in {"?", "??", "???", "sao", "ua", "u", "ok roi sao", "ok sao"}:
+        return True
+    if raw and not re.search(r"[0-9A-Za-zÀ-ỹ]", raw):
+        return True
+    return False
+
+
+def _looks_farewell(folded: str) -> bool:
+    return any(term in folded for term in ("cam on xong roi", "xong roi", "ok de toi lam", "ok de anh lam", "dung nhan"))
+
+
+def _looks_silent_followup(folded: str) -> bool:
+    return any(term in folded for term in ("de suy nghi", "lat tinh", "de anh xem", "de chi xem"))
+
+
+def _is_charged_no_result(folded: str) -> bool:
+    charged = any(term in folded for term in ("tru xu", "mat xu", "tru tien", "bi tru", "mat tien"))
+    no_result = any(term in folded for term in ("khong ra", "chua ra", "khong co ket qua", "khong co file", "chua co file", "khong thay"))
+    return charged and no_result
+
+
+def _is_payment_issue(folded: str) -> bool:
+    payment = any(term in folded for term in ("nap", "chuyen khoan", "thanh toan", "momo", "payos", "giao dich"))
+    issue = any(term in folded for term in ("chua thay", "khong nhan", "chua nhan", "chua vao", "khong vao", "loi", "bonus"))
+    return payment and issue
+
+
+def _is_subdub_runtime_issue(folded: str) -> bool:
+    subdub = any(term in folded for term in ("phu de", "subtitle", "long tieng", "dub", "voice over"))
+    issue = any(term in folded for term in ("khong ra", "chua ra", "loi", "sai", "lech", "khong dung", "mat tieng"))
+    return subdub and issue
+
+
+def _is_render_stuck_issue(folded: str) -> bool:
+    return "video" in folded and any(term in folded for term in ("bi ket", "ket", "20%", "render lau", "qua lau"))
+
+
+def _is_video_runtime_error(folded: str) -> bool:
+    return "video" in folded and any(term in folded for term in ("bi loi", "loi", "khong chay", "fail", "hong"))
+
+
+def _is_angry_customer(folded: str) -> bool:
+    return any(term in folded for term in ("lua dao", "boc phot", "lam an chan", "bot gi ky", "app lua", "mat tien oan"))
+
+
+def _is_file_capability_question(folded: str) -> bool:
+    return any(term in folded for term in ("gui clip nay", "gui file nay", "clip nay lam gi", "file nay lam gi", "anh nay lam gi", "video nay lam gi"))
+
+
+def _base_result(
+    intent_id: str,
+    reply: str,
+    *,
+    sources: list[str],
+    confidence: str = "high",
+    product: str = "general",
+    pricing_source: str = "unknown",
+    price_text: str = "",
+    handoff: bool = False,
+    ticket: bool = False,
+    context_section: str = "",
+    learning_queue: bool = False,
+    human_last_reply_required: bool = True,
+) -> dict:
+    context = load_context_brain()
+    context_version = str(context.get("version") or CONTEXT_FILE_VERSION_FALLBACK)
+    section = context_section or _section_for_intent(intent_id)
+    result_sources = list(dict.fromkeys([*sources, "context_file"]))
     return {
         "matched": True,
         "intent_id": intent_id,
         "reply": reply,
         "reply_preview": reply,
         "reply_template_id": f"shared_knowledge:{intent_id}",
-        "source": list(dict.fromkeys(sources)),
+        "source": result_sources,
         "confidence": confidence,
         "primary_product": product,
         "product": product,
@@ -192,6 +409,20 @@ def _base_result(intent_id: str, reply: str, *, sources: list[str], confidence: 
         "handoff_required": handoff,
         "ticket": ticket,
         "ticket_required": ticket,
+        "context_file_path": str(context.get("path") or context_doc_path()),
+        "context_file_version": context_version,
+        "source_file_version": context_version,
+        "context_section_used": section,
+        "context_sections": [section] if section else [],
+        "retrieval": {
+            "intent_id": intent_id,
+            "context_section_used": section,
+            "source_file_version": context_version,
+            "source": result_sources,
+        },
+        "learning_queue": bool(learning_queue),
+        "would_queue_learning": bool(learning_queue),
+        "human_last_reply_required": bool(human_last_reply_required),
         "shared_docs": docs_status(),
     }
 
@@ -215,7 +446,7 @@ def image_pricing_reply() -> str:
     return (
         f"Dạ tạo/chỉnh ảnh AI đang theo các mức: {tiers}. "
         "Mức 50 Xu phù hợp tác vụ nhẹ; 150-200 Xu cho ảnh tiêu chuẩn; 300-400 Xu cho ảnh nhiều chi tiết; 500-600 Xu cho gói cao hơn. "
-        "Bot sẽ hiện hóa đơn trước khi xử lý, chưa xác nhận thì chưa trừ Xu."
+        "Nếu anh/chị chưa có prompt, em có thể viết prompt miễn phí trước. Bot sẽ hiện hóa đơn trước khi xử lý, chưa xác nhận thì chưa trừ Xu."
     )
 
 
@@ -223,8 +454,10 @@ def video_pricing_reply() -> str:
     tiers = "; ".join(f"{name} {price} Xu" for name, price in VIDEO_TIERS)
     return (
         f"Dạ video AI có các gói: {tiers}. "
-        "Nếu làm nhiều cảnh: 1 cảnh khoảng 6 giây; 2-9 cảnh giảm 10%, 10-19 cảnh giảm 15%, 20 cảnh giảm 20% theo từng cảnh. "
-        "Ví dụ gói Cơ bản 300 Xu làm 3 cảnh: 300 × 90% × 3 = 810 Xu. Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận."
+        "Product Video hiện tính 1 cảnh = 8s; video khoảng 30s thường cần 4 cảnh. "
+        "Nếu làm nhiều cảnh: 2-9 cảnh giảm 10%, 10-19 cảnh giảm 15%, 20 cảnh giảm 20% theo từng cảnh. "
+        "Ví dụ gói Cơ bản 300 Xu làm 4 cảnh: 300 × 90% × 4 = 1.080 Xu nếu đủ điều kiện giảm. "
+        "Bot sẽ dừng ở màn hóa đơn để mình tự xác nhận. Anh/chị muốn làm video về sản phẩm gì để em gợi ý gói phù hợp?"
     )
 
 
@@ -273,8 +506,8 @@ def topup_reply(vnd: int, *, include_examples: bool = False) -> str:
 
 def status_video_reply() -> str:
     return (
-        "Dạ nếu chưa thấy video, mình kiểm tra theo thứ tự này giúp em: mở trạng thái/tác vụ gần nhất trong bot, xem có mã xử lý hoặc thông báo đang chờ không, "
-        "đừng bấm tạo lại nhiều lần khi job còn chạy. Nếu đã bị trừ Xu mà chưa có file hợp lệ, gửi mã xử lý, thời gian và ảnh màn hình để admin đối soát; em không tự hứa hoàn Xu khi chưa kiểm tra."
+        "Dạ em xin lỗi vì mình chưa thấy video ạ. Anh/chị kiểm tra trạng thái/tác vụ gần nhất trong bot, xem có mã xử lý hoặc thông báo đang chờ không, "
+        "và đừng bấm tạo lại nhiều lần khi tác vụ còn chạy. Nếu đã bị trừ Xu mà chưa có file hợp lệ, anh/chị gửi mã xử lý, thời gian và ảnh màn hình để admin đối soát; em không tự hứa hoàn Xu khi chưa kiểm tra."
     )
 
 
@@ -282,6 +515,21 @@ def refund_reply() -> str:
     return (
         "Dạ em ghi nhận yêu cầu kiểm tra hoàn Xu. Chính sách là admin cần đối soát mã xử lý/giao dịch và kết quả thực tế trước; "
         "em không tự hứa hoàn Xu, cộng Xu, voucher hay hoàn tiền thay admin. Mình gửi giúp mã xử lý, thời gian và ảnh lỗi nếu có ạ."
+    )
+
+
+def charged_no_result_reply() -> str:
+    return CHARGED_NO_RESULT_REPLY
+
+
+def angry_customer_reply() -> str:
+    return COMPLAINT_REPLY
+
+
+def media_capability_reply() -> str:
+    return (
+        "Dạ clip/file này mình có thể dùng để tạo phụ đề, dịch phụ đề, lồng tiếng, lấy tư liệu dựng video, "
+        "hoặc kiểm tra nội dung trước khi chọn flow ạ. Anh/chị muốn em hỗ trợ theo hướng nào trước nha?"
     )
 
 
@@ -327,13 +575,24 @@ def guide_how_to_reply(product: str) -> str:
             "Dạ để làm phụ đề/lồng tiếng: mở Phụ đề / Dịch / Lồng tiếng, gửi video/audio, chọn tạo phụ đề gốc, dịch phụ đề hoặc lồng tiếng, xem số ký tự và hóa đơn rồi xác nhận."
         )
     return (
-        "Dạ cách dùng nhanh: chọn đúng công cụ, gửi mô tả rõ sản phẩm/mục tiêu, chọn gói nếu có, kiểm tra hóa đơn, rồi tự bấm xác nhận. Chưa xác nhận thì bot chưa trừ Xu."
+        "Dạ cách dùng nhanh: chọn đúng công cụ video, ảnh, phụ đề/lồng tiếng, voice/nhạc hoặc nạp Xu; gửi mô tả rõ sản phẩm/mục tiêu, chọn gói nếu có, kiểm tra hóa đơn, rồi tự bấm xác nhận. Chưa xác nhận thì bot chưa trừ Xu."
     )
 
 
-def classify_shared_answer(text: str, *, conversation_memory: dict | None = None) -> dict:
+def classify_shared_answer(text: str, *, conversation_memory: dict | None = None, media_type: str = "") -> dict:
     raw = str(text or "").strip()
     folded = fold(raw)
+    media = fold(media_type)
+    if not folded and _is_actionable_media(media):
+        return _base_result(
+            "file_without_instruction",
+            FILE_WITHOUT_INSTRUCTION_REPLY,
+            sources=["guide_doc"],
+            confidence="high",
+            product="general",
+            pricing_source="guide_doc",
+            context_section="fallback_policy",
+        )
     if not folded:
         return {"matched": False}
 
@@ -341,6 +600,134 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
     doc_sources = ["pricing_doc"]
     if docs["guide_doc_loaded"]:
         doc_sources.append("guide_doc")
+
+    if folded in {"alo", "alo alo", "em oi", "shop oi", "co ai khong", "co ho tro khong"}:
+        return _base_result(
+            "greeting_ping",
+            VAGUE_REPLY,
+            sources=["cskh_knowledge"],
+            confidence="high",
+            context_section="fallback_policy",
+        )
+
+    if _looks_farewell(folded):
+        return _base_result(
+            "farewell",
+            "Dạ vâng ạ. Khi nào anh/chị cần thêm về giá, video, ảnh, SubDub hay nạp Xu thì nhắn em hỗ trợ tiếp nha.",
+            sources=["context_file"],
+            confidence="high",
+            context_section="human_last_reply_policy",
+            human_last_reply_required=False,
+        )
+
+    if _looks_silent_followup(folded):
+        return _base_result(
+            "customer_silent_followup",
+            "Dạ anh/chị cứ suy nghĩ thêm nha. Nếu cần em tính thử giá hoặc gợi ý flow phù hợp thì nhắn em, em hỗ trợ tiếp cho mình ạ.",
+            sources=["context_file"],
+            confidence="high",
+            context_section="human_last_reply_policy",
+        )
+
+    if _is_meaningless_message(raw, folded):
+        return _base_result(
+            "vague_or_unclear",
+            MEANINGLESS_REPLY,
+            sources=["fallback"],
+            confidence="medium",
+            context_section="fallback_policy",
+            learning_queue=True,
+        )
+
+    if _is_file_capability_question(folded):
+        return _base_result(
+            "content_asset_suggestion",
+            media_capability_reply(),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high",
+            product="general",
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+        )
+
+    if _is_charged_no_result(folded):
+        return _base_result(
+            "complaint_charged_no_result",
+            charged_no_result_reply(),
+            sources=["guide_doc", "playbook"],
+            confidence="high",
+            product="general",
+            pricing_source="guide_doc",
+            handoff=True,
+            ticket=True,
+            context_section="scenario_dialogues",
+        )
+
+    if _is_angry_customer(folded):
+        return _base_result(
+            "angry_customer",
+            angry_customer_reply(),
+            sources=["playbook", "cskh_knowledge"],
+            confidence="high",
+            product="general",
+            pricing_source="guide_doc",
+            handoff=True,
+            ticket=True,
+            context_section="scenario_dialogues",
+        )
+
+    if any(term in folded for term in ("bot nay lam duoc gi", "ben em co gi", "toan aas lam gi", "bot lam gi")):
+        return _base_result(
+            "ask_capabilities",
+            (
+                "Dạ TOAN AAS hỗ trợ tạo video/ảnh AI, phụ đề-dịch-lồng tiếng, voice/audio, nhạc AI, "
+                "prompt/caption/ý tưởng content và một số công cụ tài liệu. Bot luôn hiện hóa đơn trước khi xử lý. "
+                "Anh/chị muốn bắt đầu với video, ảnh hay phụ đề/lồng tiếng trước ạ?"
+            ),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high",
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+        )
+
+    if _is_subdub_runtime_issue(folded):
+        intent_id = "subdub_dubbing_error" if any(term in folded for term in ("long tieng", "dub", "voice over")) else "subdub_subtitle_error"
+        reply = (
+            "Dạ em xin lỗi vì phần phụ đề/lồng tiếng chưa ra đúng ạ. Anh/chị gửi giúp em mã xử lý và file kết quả nếu có, "
+            "em chuyển kiểm tra lại trạng thái xử lý cho mình nha."
+        )
+        return _base_result(
+            intent_id,
+            reply,
+            sources=["cskh_knowledge", "playbook"],
+            confidence="high",
+            product="subdub",
+            pricing_source="guide_doc",
+            handoff=True,
+            ticket=True,
+            context_section="scenario_dialogues",
+        )
+
+    if _is_payment_issue(folded) or _is_render_stuck_issue(folded) or _is_video_runtime_error(folded):
+        return {"matched": False}
+
+    if any(term in folded for term in ("bot rieng", "he thong rieng", "tra loi khach cho shop", "lam he thong rieng")):
+        if any(term in folded for term in ("gia", "bao nhieu", "phi", "bao gia")):
+            return {"matched": False}
+        return _base_result(
+            "premium_private_bot",
+            (
+                "Dạ phần bot riêng/hệ thống trả lời khách cho shop bên em có thể tư vấn theo nhu cầu ạ. "
+                "Anh/chị gửi giúp em ngành hàng, kênh dùng chính và lượng khách dự kiến, em chuyển admin tư vấn cấu hình phù hợp cho mình."
+            ),
+            sources=["cskh_knowledge", "playbook"],
+            confidence="high",
+            product="premium_private_bot",
+            pricing_source="guide_doc",
+            handoff=True,
+            ticket=True,
+            context_section="scenario_dialogues",
+        )
 
     product_pricing_context = any(
         term in folded
@@ -370,6 +757,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="payment_xu",
             pricing_source="pricing_doc",
             price_text=f"1 Xu = 100đ; {format_vnd(amount)} = {format_xu(vnd_to_xu(amount))}",
+            context_section="pricing_facts",
         )
 
     if not product_pricing_context and any(term in folded for term in ("nap xu", "nap tien", "quy doi xu", "gia xu", "xu gia", "1 xu", "xu bang")):
@@ -380,6 +768,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="payment_xu",
             pricing_source="pricing_doc",
             price_text="1 Xu = 100đ",
+            context_section="pricing_facts",
         )
 
     if any(term in folded for term in ("hoan xu", "hoan tien", "refund", "cong xu cho toi", "tra xu")):
@@ -391,6 +780,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             pricing_source="guide_doc",
             handoff=True,
             ticket=True,
+            context_section="scenario_dialogues",
         )
 
     if "video" in folded and any(term in folded for term in ("chua thay", "khong thay", "chua co file", "khong ra file", "chua ra file", "bi ket", "ket")):
@@ -402,6 +792,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             pricing_source="guide_doc",
             handoff=True,
             ticket=True,
+            context_section="scenario_dialogues",
         )
 
     if "prompt" in folded and "video" in folded:
@@ -411,6 +802,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             sources=["guide_doc", "cskh_knowledge"],
             product="product_video",
             pricing_source="guide_doc",
+            context_section="usage_guides",
         )
 
     if any(term in folded for term in ("video ban hang", "lam video ban hang", "muon lam video", "muon tao video")) and "gia" not in folded:
@@ -420,6 +812,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             sources=["guide_doc", "cskh_knowledge"],
             product="product_video",
             pricing_source="guide_doc",
+            context_section="usage_guides",
         )
 
     has_price = any(term in folded for term in ("gia", "bao nhieu", "nhieu xu", "nhieu tien", "bang gia", "phi", "tinh sao"))
@@ -427,6 +820,16 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
     if any(term in folded for term in ("ghep anh", "anh thanh video", "video tu anh", "anh chay", "slideshow", "anh roi ghep video")):
         return {"matched": False}
 
+    if "bang gia" in folded and "video" in folded:
+        return _base_result(
+            "product_video_pricing",
+            video_pricing_reply(),
+            sources=doc_sources,
+            product="product_video",
+            pricing_source="pricing_doc",
+            price_text=_list_prices([price for _name, price in VIDEO_TIERS]),
+            context_section="pricing_facts",
+        )
     if "bang gia" in folded or folded in {"gia", "bao gia", "gia tong"}:
         return _base_result(
             "pricing_table_general",
@@ -434,6 +837,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             sources=doc_sources,
             pricing_source="pricing_doc",
             price_text="1 Xu = 100đ; full pricing table",
+            context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("anh", "hinh", "tao anh", "chinh anh", "logo", "avatar")) and "video" not in folded:
         return _base_result(
@@ -443,6 +847,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="image_ai",
             pricing_source="pricing_doc",
             price_text=_list_prices([price for _name, price in IMAGE_TIERS]),
+            context_section="pricing_facts",
         )
     if has_price and "video" in folded:
         return _base_result(
@@ -452,6 +857,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="product_video",
             pricing_source="pricing_doc",
             price_text=_list_prices([price for _name, price in VIDEO_TIERS]),
+            context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("phu de", "subtitle", "sub", "long tieng", "dub", "voice over")):
         private_voice = any(term in folded for term in ("voice rieng", "giong rieng"))
@@ -462,6 +868,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="subdub",
             pricing_source="pricing_doc",
             price_text="subtitle free; translation 0.1 Xu/char; default dub 0.10 Xu/char; custom voice 0.20 Xu/char",
+            context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("voice", "tts", "giong doc", "doc text")):
         return _base_result(
@@ -471,6 +878,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="voice",
             pricing_source="pricing_doc",
             price_text="custom voice first free, second 50 Xu; TTS 0.10 Xu/word min 1 Xu",
+            context_section="pricing_facts",
         )
     if has_price and any(term in folded for term in ("nhac", "music", "bai hat", "sfx")):
         return _base_result(
@@ -480,14 +888,34 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             product="music",
             pricing_source="pricing_doc",
             price_text="background 100/150/200 Xu; song 200/250/300 Xu",
+            context_section="pricing_facts",
         )
     if any(term in folded for term in ("huong dan", "cach dung", "su dung sao", "lam sao dung")):
-        product = "subdub" if any(term in folded for term in ("phu de", "long tieng", "subdub")) else ("image_ai" if "anh" in folded else "general")
+        image_guide = any(term in folded for term in ("tao anh", "chinh anh", "anh ai", "anh san pham", "hinh", "image"))
+        product = "subdub" if any(term in folded for term in ("phu de", "long tieng", "subdub")) else ("image_ai" if image_guide else "general")
         return _base_result(
             "guide_how_to",
             guide_how_to_reply(product),
             sources=["guide_doc"],
             product=product,
             pricing_source="guide_doc",
+            context_section="usage_guides",
         )
-    return {"matched": False}
+    if re.search(r"\bloi\b", folded) and "tra loi" not in folded:
+        return _base_result(
+            "vague_or_unclear",
+            "Dạ em chưa rõ mình đang lỗi ở phần nào ạ. Anh/chị đang lỗi ở video, ảnh, phụ đề/lồng tiếng, voice/nhạc hay nạp Xu/hóa đơn để em hướng dẫn đúng hơn nha?",
+            sources=["fallback"],
+            confidence="medium",
+            context_section="fallback_policy",
+            learning_queue=True,
+        )
+    return _base_result(
+        "out_of_scope",
+        MEANINGLESS_REPLY,
+        sources=["fallback"],
+        confidence="low",
+        pricing_source="unknown",
+        context_section="fallback_policy",
+        learning_queue=True,
+    )

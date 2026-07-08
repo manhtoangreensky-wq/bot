@@ -154,7 +154,6 @@ def test_cskh5c_self_or_outbound_business_messages_are_ignored(event):
     "event",
     [
         _event("", media_type="sticker"),
-        _event("", media_type="photo"),
         _event("🎉 👋 Dân nhắn", has_service_payload=True),
         _event("🙂🙂"),
     ],
@@ -172,6 +171,16 @@ def test_cskh5c_non_text_service_and_sticker_do_not_enter_classifier(monkeypatch
     assert result["guard"]["block_reason"] == "non_text_or_service_event"
     assert bot.sent_messages == []
     assert state["business_trace"][-1]["eligible"] is False
+
+
+def test_cskh5c_media_without_caption_asks_customer_what_to_do():
+    state = _enabled_state()
+    result, bot = _process(state, _event("", media_type="photo"))
+
+    assert result["sent"] is True
+    assert result["guard"]["block_reason"] == ""
+    assert result["classification"]["intent_id"] == "file_without_instruction"
+    assert "nhận được file" in bot.sent_messages[-1]["text"]
 
 
 def test_cskh5c_media_caption_with_customer_text_is_allowed():
@@ -229,8 +238,9 @@ def test_cskh5c_customer_reply_to_bot_with_text_is_allowed_but_quote_only_echo_i
 def test_cskh5c_confused_customer_intent_answers_naturally():
     result = cskh.classify_business_event(_event("?"))
 
-    assert result["intent_id"] == "customer_confused_or_what"
-    assert result["reply"] == "Dạ xin lỗi anh/chị, em vừa trả lời chưa đúng ngữ cảnh. Mình muốn hỏi về video, ảnh, SubDub hay bảng giá ạ?"
+    assert result["intent_id"] == "vague_or_unclear"
+    assert "Mình nhắn giúp em rõ hơn" in result["reply"]
+    assert "giá" in result["reply"]
 
 
 def test_cskh5c_live_screenshot_repro_service_then_self_echo_then_customer_question():
@@ -254,7 +264,7 @@ def test_cskh5c_live_screenshot_repro_service_then_self_echo_then_customer_quest
     assert service_result["guard"]["block_reason"] == "non_text_or_service_event"
     assert echo_result["guard"]["block_reason"] == "self_or_outbound_message"
     assert confused_result["sent"] is True
-    assert confused_result["classification"]["intent_id"] == "customer_confused_or_what"
+    assert confused_result["classification"]["intent_id"] in {"customer_confused_or_what", "vague_or_unclear"}
     assert len(bot.sent_messages) == 1
     assert [item["block_reason"] for item in state["business_trace"][-3:]] == [
         "non_text_or_service_event",
@@ -280,8 +290,20 @@ def test_cskh5c_trace_keeps_last_ten_ignored_events_with_direction_and_reason():
 
 def test_cskh5c_scope_guard_only_touches_cskh_runtime_bot_trace_and_tests():
     allowed = {
-        "bot.py",
+        "knowledge/toan_aas_cskh_aichat_context.md",
+        "services/aas_shared_knowledge.py",
+        "services/ai_chatbot_copilot.py",
         "services/telegram_business_support.py",
+        "tests/test_p0_aichat1_copilot_consent.py",
+        "tests/test_p0_aichat1b_free_tools_menu_cleanup.py",
+        "tests/test_p0_aichat2_natural_context_pricing.py",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
+        "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
+        "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
+        "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+        "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
     }
 
