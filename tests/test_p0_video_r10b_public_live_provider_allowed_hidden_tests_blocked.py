@@ -18,7 +18,7 @@ REMOTE_WORKER_SOURCE = (ROOT / "remote_worker.py").read_text(encoding="utf-8")
 class _FixtureProvider:
     provider_name = "shopaikey_video"
 
-    def __init__(self, *, result_url="fixture://video.mp4", status="completed", fail_download=False):
+    def __init__(self, *, result_url="https://provider.example/video.mp4", status="completed", fail_download=False):
         self.submit_calls = 0
         self.poll_calls = 0
         self.materialize_calls = 0

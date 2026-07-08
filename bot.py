@@ -48139,31 +48139,31 @@ def video_b14_product_video_fallback_policy(
 ) -> dict:
     result = dict(result or {})
     project = dict(project or {})
-    normalized_source = video_provider_router.normalize_product_video_submit_source(
-        source
-        or result.get("submit_source")
-        or result.get("provider_submit_source")
-        or project.get("submit_source")
-        or project.get("provider_submit_source")
-        or ""
-    )
-    blocker = str(blocker or result.get("provider_result_blocker") or result.get("blocker") or "").strip()
-    hidden_sources = {
-        "codex_test",
-        "smoke",
-        "debug",
-        "recover",
-        "status",
-        "background_retry",
-        "worker_poll_existing_task",
+    policy_metadata = {
+        **project,
+        **result,
+        "is_confirmed": project.get("is_confirmed") or result.get("is_confirmed"),
+        "project_is_confirmed": project.get("is_confirmed") or result.get("project_is_confirmed"),
     }
-    public_confirmed = bool(
-        result.get("public_user_confirmed")
-        or result.get("b14_public_user_confirmed")
-        or result.get("user_final_confirmed")
-        or project.get("is_confirmed")
-        or normalized_source == "public_user_final_confirm"
-    )
+    if source:
+        policy_metadata["submit_source"] = source
+        policy_metadata["provider_submit_source"] = source
+    elif not policy_metadata.get("original_submit_source"):
+        policy_metadata["original_submit_source"] = (
+            result.get("original_submit_source")
+            or result.get("public_confirm_submit_source")
+            or project.get("original_submit_source")
+            or project.get("public_confirm_submit_source")
+            or result.get("submit_source")
+            or project.get("submit_source")
+            or ""
+        )
+    fallback_policy = video_provider_router.product_video_controlled_fallback_policy(blocker or result.get("provider_result_blocker") or result.get("blocker") or "", policy_metadata)
+    normalized_source = str(fallback_policy.get("current_source") or "")
+    blocker = str(blocker or result.get("provider_result_blocker") or result.get("blocker") or "").strip()
+    public_confirmed = bool(fallback_policy.get("public_user_confirmed"))
+    invoice_confirmed = bool(fallback_policy.get("invoice_confirmed"))
+    provider_submit_accepted_before = bool(fallback_policy.get("provider_submit_accepted_before"))
     delivered = bool(
         result.get("delivery_succeeded")
         or result.get("video_delivered")
@@ -48202,15 +48202,18 @@ def video_b14_product_video_fallback_policy(
         fallback_public_enabled = bool(row.get("public_enabled", True) and row.get("configured", True))
     block_reason = ""
     eligible = True
-    if normalized_source in hidden_sources:
+    if not fallback_policy.get("fallback_allowed"):
         eligible = False
-        block_reason = "hidden_or_read_only_source"
-    elif normalized_source not in {"public_user_final_confirm", "public_confirmed_fallback_once"}:
-        eligible = False
-        block_reason = "source_not_public_confirmed_fallback"
+        block_reason = str(fallback_policy.get("fallback_blocked_reason") or "source_not_public_confirmed_fallback")
     elif not public_confirmed:
         eligible = False
         block_reason = "public_confirm_missing"
+    elif not invoice_confirmed:
+        eligible = False
+        block_reason = "invoice_confirm_missing"
+    elif not provider_submit_accepted_before:
+        eligible = False
+        block_reason = "provider_submit_not_accepted_before"
     elif blocker not in PRODUCT_VIDEO_FALLBACK_BLOCKERS:
         eligible = False
         block_reason = "blocker_not_fallbackable"
@@ -48238,6 +48241,12 @@ def video_b14_product_video_fallback_policy(
         "fallback_provider": fallback_provider,
         "fallback_attempted": False,
         "fallback_count": fallback_count,
+        "current_source": normalized_source,
+        "original_submit_source": str(fallback_policy.get("original_submit_source") or ""),
+        "public_user_confirmed": public_confirmed,
+        "invoice_confirmed": invoice_confirmed,
+        "provider_submit_accepted_before": provider_submit_accepted_before,
+        "fallback_eligibility_source": str(fallback_policy.get("fallback_eligibility_source") or ""),
         "fallback_submit_source": "public_confirmed_fallback_once" if eligible else "",
         "final_decision": "fallback_provider_once" if eligible else "failed_no_charge",
     }
@@ -70290,6 +70299,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     else:
         provider_telemetry = video_b14_provider_telemetry(job, job_result, refresh_source="public_panel")
     provider_task_alive = bool(provider_telemetry.get("provider_task_alive"))
+    fallback_running = bool(
+        provider_telemetry.get("fallback_used")
+        or provider_telemetry.get("provider_fallback_attempted")
+        or provider_telemetry.get("selected_provider_after_fallback")
+        or job_result.get("fallback_used")
+        or job_result.get("provider_fallback_attempted")
+        or job_result.get("selected_provider_after_fallback")
+    )
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
     if provider_task_alive and status not in {"completed", "success", "failed", "error"}:
@@ -70302,8 +70319,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         if progress <= 0:
             progress = 5 if job_id else 0
     elif status in {"processing", "running"}:
-        status_label = "Đang dựng video"
-        if progress >= 80:
+        if fallback_running:
+            status_label = "Đang dựng bằng hệ thống dự phòng"
+            stage = "hệ thống đang chuyển sang kênh dựng dự phòng"
+        else:
+            status_label = "Đang dựng video"
+        if fallback_running:
+            pass
+        elif progress >= 80:
             stage = "hệ thống đang đóng gói video cuối"
         elif progress >= 60:
             stage = "hệ thống đang ghép nhạc, phụ đề và logo"
@@ -70336,8 +70359,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if provider_task_alive and not has_final_artifact and status not in {"failed", "error"}:
         status = "processing"
         progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
-        status_label = "Đang dựng video"
-        stage = "hệ thống đang dựng video"
+        status_label = "Đang dựng bằng hệ thống dự phòng" if fallback_running else "Đang dựng video"
+        stage = "hệ thống đang chuyển sang kênh dựng dự phòng" if fallback_running else "hệ thống đang dựng video"
     if not has_final_artifact and progress >= 95:
         progress = 85
         if status in {"failed", "error"}:
@@ -88892,6 +88915,15 @@ def video_ai_provider_smoke_gate() -> dict:
         "blockers": blockers,
     }
 
+def product_video_public_maintenance_enabled() -> bool:
+    raw = str(os.getenv("PRODUCT_VIDEO_PUBLIC_MAINTENANCE", "") or "").strip().lower()
+    env_on = raw in {"1", "true", "yes", "on"}
+    return bool(
+        env_on
+        or flag_on("product_video_public_maintenance")
+        or flag_on("public_video_maintenance")
+    )
+
 def frame_video_public_gate() -> dict:
     frame = frame_video_status_payload()
     status = video_gate_tool_status("frame_video")
@@ -89014,6 +89046,9 @@ def video_public_status_payload() -> dict:
     product_video_submit_switch = video_provider_router.product_video_submit_switch_detail()
     product_video_submit_enabled = bool(product_video_submit_switch.get("resolved"))
     freeze = provider_freeze_display("shopaikey_video")
+    hidden_video_freeze = bool(freeze.get("frozen"))
+    public_video_maintenance = product_video_public_maintenance_enabled()
+    public_live_provider_allowed = bool(product_video_submit_enabled and not public_video_maintenance)
     worker = local_worker_status_payload()
     remote_worker = video_remote_worker_runtime_status()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
@@ -89069,11 +89104,20 @@ def video_public_status_payload() -> dict:
             "FRAME_VIDEO_PUBLIC_ENABLED": bool(FRAME_VIDEO_PUBLIC_ENABLED),
             "LOCAL_WORKER_ENABLED": bool(LOCAL_WORKER_ENABLED),
             "PRODUCT_VIDEO_PROVIDER_SUBMIT_ENABLED": product_video_submit_enabled,
+            "PRODUCT_VIDEO_PUBLIC_MAINTENANCE": public_video_maintenance,
         },
         "product_video_provider_submit": {
             "enabled": product_video_submit_enabled,
             "state": "ENABLED" if product_video_submit_enabled else "LOCKED",
             "source": str(product_video_submit_switch.get("source") or "default"),
+            "hidden_video_freeze": hidden_video_freeze,
+            "public_video_maintenance": public_video_maintenance,
+            "public_live_provider_allowed": public_live_provider_allowed,
+            "live_policy_note": (
+                "public_live_allowed_hidden_freeze_only"
+                if public_live_provider_allowed and hidden_video_freeze
+                else ("public_maintenance_block" if public_video_maintenance else "")
+            ),
         },
         "conclusion": {
             "planning_video": "PUBLIC" if planning_public else "OFF",
@@ -89122,7 +89166,9 @@ def video_public_status_text() -> str:
         f"• payment_freeze: <code>{video_public_bool_label(ops.get('payment_freeze'))}</code>",
         f"• tool_freeze: <code>{video_public_bool_label(ops.get('tool_freeze'))}</code>",
         f"• provider_freeze: <code>{video_public_bool_label(ops.get('provider_freeze'))}</code>",
-        f"• video_freeze: <code>{video_public_bool_label(freeze.get('frozen'))}</code>",
+        f"• hidden_video_freeze: <code>{video_public_bool_label(product_submit.get('hidden_video_freeze'))}</code>",
+        f"• public_video_maintenance: <code>{video_public_bool_label(product_submit.get('public_video_maintenance'))}</code>",
+        f"• public_live_provider_allowed: <code>{video_public_bool_label(product_submit.get('public_live_provider_allowed'))}</code>",
     ]
     for key in (
         "VIDEO_PUBLIC_BETA_ENABLED",
@@ -89151,6 +89197,7 @@ def video_public_status_text() -> str:
         f"• Last video output: <code>{'confirmed' if ai_gate.get('has_output') else 'not_confirmed'}</code>",
         f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
         f"• Product Video provider submit: <code>{html.escape(str(product_submit.get('state') or 'LOCKED'))}</code>",
+        f"• Product Video live note: <code>{html.escape(str(product_submit.get('live_policy_note') or 'normal'))}</code>",
         "",
         "<b>Local Worker</b>",
         f"• connected: <code>{video_public_bool_label(frame.get('local_worker_connected'))}</code>",

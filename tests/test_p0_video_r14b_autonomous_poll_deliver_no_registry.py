@@ -71,7 +71,7 @@ def test_auto_refresh_and_manual_status_poll_existing_task_then_materialize_deli
         "async def video_b14_autonomous_materialize_and_deliver",
         "def video_provider_recover_existing_task",
     )
-    assert "video_provider_recover_existing_task(jid, download=True)" in materialize
+    assert "video_provider_recover_existing_task(jid, download=True, source=source)" in materialize
     assert "complete_video_job" in materialize
     assert "maybe_send_remote_worker_final_video" in materialize
     assert "note_video_delivery_result" in materialize
