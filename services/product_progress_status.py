@@ -1374,6 +1374,29 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "terminal_fail_allowed",
         ):
             payload[key] = state.get(key)
+    if normalize_product_type(product_type) in VIDEO_PROGRESS_TYPES:
+        for key in (
+            "orchestration_mode",
+            "scene_count",
+            "scene_tasks_created_count",
+            "scene_tasks_submitted_count",
+            "scene_tasks_completed",
+            "scene_tasks_total",
+            "scenes_total",
+            "scenes_done",
+            "scenes_pending",
+            "scenes_running",
+            "current_scene",
+            "current_scene_index",
+            "current_scene_status",
+            "scene_not_start_elapsed",
+            "stall_threshold",
+            "provider_stalled_not_start",
+            "fallback_scene_index",
+            "fallback_allowed",
+            "fallback_block_reason",
+        ):
+            payload[key] = job.get(key)
     return payload
 
 

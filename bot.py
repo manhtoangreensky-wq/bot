@@ -9129,6 +9129,14 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• persisted_progress_before_reconcile: <code>{safe_int((job or {}).get('persisted_progress_before_reconcile'), 0)}%</code>\n"
             f"• final_status_after_reconcile: <code>{html.escape(str((job or {}).get('final_status_after_reconcile') or '-'))}</code>\n"
             f"• final_progress_after_reconcile: <code>{safe_int((job or {}).get('final_progress_after_reconcile'), 0)}%</code>\n"
+            f"• scenes_total/done/pending/running: <code>{safe_int((job or {}).get('scenes_total') or (job or {}).get('scene_tasks_total'), 0)}/{safe_int((job or {}).get('scenes_done') or (job or {}).get('scene_tasks_completed'), 0)}/{safe_int((job or {}).get('scenes_pending'), 0)}/{safe_int((job or {}).get('scenes_running'), 0)}</code>\n"
+            f"• scene_tasks_created/submitted: <code>{safe_int((job or {}).get('scene_tasks_created_count') or (job or {}).get('scene_tasks_total'), 0)}/{safe_int((job or {}).get('scene_tasks_submitted_count') or (job or {}).get('scene_tasks_submitted'), 0)}</code>\n"
+            f"• current_scene_status: <code>{html.escape(str((job or {}).get('current_scene_status') or '-'))}</code>\n"
+            f"• scene_not_start_elapsed/stall: <code>{safe_int((job or {}).get('scene_not_start_elapsed'), 0)}/{safe_int((job or {}).get('stall_threshold'), 0)}</code>\n"
+            f"• provider_stalled_not_start: <code>{'yes' if (job or {}).get('provider_stalled_not_start') else 'no'}</code>\n"
+            f"• fallback_scene_index: <code>{safe_int((job or {}).get('fallback_scene_index'), 0)}</code>\n"
+            f"• fallback_allowed: <code>{'yes' if (job or {}).get('fallback_allowed') else 'no'}</code>\n"
+            f"• fallback_block_reason: <code>{html.escape(str((job or {}).get('fallback_block_reason') or (job or {}).get('fallback_blocked_reason') or '-'))}</code>\n"
             f"• provider_progress_percent: <code>{safe_int((job or {}).get('provider_progress_percent'), 0)}%</code>\n"
             f"• provider_progress_raw: <code>{html.escape(str((job or {}).get('provider_progress_raw') or '-')[:80])}</code>\n"
             f"• provider_progress_raw_number: <code>{html.escape(str((job or {}).get('provider_progress_raw_number') or '-'))}</code>\n"
@@ -47027,7 +47035,15 @@ def video_render_debug_compact_text(
         f"• Engine adapter: <code>{_video_debug_safe_value((engine_route or {}).get('adapter'), 100)}</code>",
         f"• orchestration mode: <code>{_video_debug_safe_value((result or {}).get('orchestration_mode'), 80)}</code>",
         f"• scene tasks: <code>{safe_int((result or {}).get('scene_tasks_submitted'), 0)}/{safe_int((result or {}).get('scene_tasks_total'), 0)}</code>",
+        f"• scene tasks created: <code>{safe_int((result or {}).get('scene_tasks_created_count') or (result or {}).get('scene_tasks_total'), 0)}</code>",
+        f"• scenes done/pending/running: <code>{safe_int((result or {}).get('scenes_done') or (result or {}).get('scene_tasks_completed'), 0)}/{safe_int((result or {}).get('scenes_pending'), 0)}/{safe_int((result or {}).get('scenes_running'), 0)}</code>",
         f"• current scene: <code>{safe_int((result or {}).get('current_scene_index'), 0)}</code>",
+        f"• current scene status: <code>{_video_debug_safe_value((result or {}).get('current_scene_status'), 80)}</code>",
+        f"• scene not-start elapsed/stall: <code>{safe_int((result or {}).get('scene_not_start_elapsed'), 0)}/{safe_int((result or {}).get('stall_threshold'), 0)}</code>",
+        f"• provider stalled NOT_START: <code>{'yes' if (result or {}).get('provider_stalled_not_start') else 'no'}</code>",
+        f"• fallback scene: <code>{safe_int((result or {}).get('fallback_scene_index'), 0)}</code>",
+        f"• fallback allowed: <code>{'yes' if (result or {}).get('fallback_allowed') else 'no'}</code>",
+        f"• fallback block reason: <code>{_video_debug_safe_value((result or {}).get('fallback_block_reason') or (result or {}).get('fallback_blocked_reason'), 120)}</code>",
         f"• scene duration: <code>{safe_int((result or {}).get('scene_duration_seconds'), 0)}s</code>",
         f"• concat ready: <code>{'yes' if (result or {}).get('concat_ready') else 'no'}</code>",
         f"• Job status: <code>{_video_debug_safe_value((job or {}).get('status'), 80)}</code>",
@@ -47546,9 +47562,16 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• orchestration mode: <code>{html.escape(str(result.get('orchestration_mode') or '-'))}</code>",
         f"• scene duration seconds: <code>{safe_int(result.get('scene_duration_seconds'), 0)}</code>",
         f"• scene tasks: <code>{safe_int(result.get('scene_tasks_submitted'), 0)}/{safe_int(result.get('scene_tasks_total'), 0)}</code>",
+        f"• scene tasks created: <code>{safe_int(result.get('scene_tasks_created_count') or result.get('scene_tasks_total'), 0)}</code>",
         f"• scene tasks completed: <code>{safe_int(result.get('scene_tasks_completed'), 0)}</code>",
+        f"• scenes done/pending/running: <code>{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_pending'), 0)}/{safe_int(result.get('scenes_running'), 0)}</code>",
         f"• current scene index: <code>{safe_int(result.get('current_scene_index'), 0)}</code>",
         f"• current scene status: <code>{html.escape(str(result.get('current_scene_status') or '-'))}</code>",
+        f"• scene not-start elapsed/stall: <code>{safe_int(result.get('scene_not_start_elapsed'), 0)}/{safe_int(result.get('stall_threshold'), 0)}</code>",
+        f"• provider stalled NOT_START: <code>{'yes' if result.get('provider_stalled_not_start') else 'no'}</code>",
+        f"• fallback scene index: <code>{safe_int(result.get('fallback_scene_index'), 0)}</code>",
+        f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') else 'no'}</code>",
+        f"• fallback block reason: <code>{html.escape(str(result.get('fallback_block_reason') or result.get('fallback_blocked_reason') or '-')[:160])}</code>",
         f"• final concat required: <code>{'yes' if result.get('final_concat_required') else 'no'}</code>",
         f"• concat ready: <code>{'yes' if result.get('concat_ready') else 'no'}</code>",
         f"• summary_provider_attempt_source: <code>{html.escape(str(result.get('summary_provider_attempt_source') or '-'))}</code>",
@@ -47793,6 +47816,27 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         )
     )
     charge_gate = product_video_r9_charge_allowed(result, project)
+    scene_tasks = [item for item in (merged.get("scene_tasks") or merged.get("provider_scene_tasks") or []) if isinstance(item, dict)]
+    scene_success_count = safe_int(
+        merged.get("scene_success_count")
+        or merged.get("scenes_done")
+        or merged.get("scene_tasks_completed")
+        or sum(
+            1
+            for item in scene_tasks
+            if str(item.get("status") or "").strip().lower() in {"clip_downloaded", "downloaded", "success", "completed"}
+            or item.get("result_url_valid")
+        ),
+        0,
+    )
+    final_mp4_valid = bool(charge_gate.get("ok") or merged.get("final_mp4_valid") or merged.get("final_mp4_validated") or merged.get("output_validated"))
+    final_delivered = bool(
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+        or project.get("final_video_file_id")
+        or job.get("final_video_file_id")
+        or merged.get("final_delivered")
+    )
     tx_ids = [
         str(_video_finance_first_value(merged, ("wallet_tx_id", "ledger_tx_id", "charge_tx_id", "transaction_id"), "") or "")
     ]
@@ -47819,6 +47863,10 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• charge tx ids: <code>{html.escape(masked_tx)}</code>",
         f"• refund ids: <code>{html.escape(masked_refund)}</code>",
         f"• provider status: <code>{html.escape(provider_status[:120])}</code>",
+        f"• scene success count: <code>{scene_success_count}</code>",
+        f"• final MP4 valid: <code>{'yes' if final_mp4_valid else 'no'}</code>",
+        f"• final delivered: <code>{'yes' if final_delivered else 'no'}</code>",
+        f"• charge after final delivery: <code>{'yes' if final_mp4_valid and final_delivered else 'no'}</code>",
         f"• result_url present: <code>{'yes' if result_url_present else 'no'}</code>",
         f"• result_url valid: <code>{'yes' if result_url_check.get('result_url_valid') or merged.get('result_url_valid') else 'no'}</code>",
         f"• result_url invalid reason: <code>{html.escape(str(merged.get('result_url_invalid_reason') or result_url_check.get('result_url_invalid_reason') or '-'))}</code>",
@@ -70074,6 +70122,9 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     scene_total = safe_int(telemetry.get("scene_tasks_total") or len(scene_tasks), 0)
     scene_done = safe_int(telemetry.get("scene_tasks_completed"), 0)
     current_scene = safe_int(telemetry.get("current_scene_index"), 0)
+    current_scene_status = str(telemetry.get("current_scene_status") or "").strip().lower()
+    provider_stalled_not_start = bool(telemetry.get("provider_stalled_not_start"))
+    fallback_scene_index = safe_int(telemetry.get("fallback_scene_index"), 0)
     if scene_total and current_scene <= 0:
         for item in scene_tasks:
             status_text = str(item.get("status") or "").strip().lower()
@@ -70089,7 +70140,11 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     lines = ["<b>Dựng video:</b>"]
     if (public_mode in {"indeterminate", "zero_waiting"} and progress <= 0) or (not trusted_render_progress and not result_url_present and progress <= 0):
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
-        if scene_total > 1:
+        if provider_stalled_not_start and fallback_scene_index:
+            lines.append(f"Hệ thống đang chuyển cảnh <b>{fallback_scene_index}</b> sang kênh dựng dự phòng.")
+        elif current_scene_status in {"provider_not_start", "provider_stalled_not_start"} and scene_total > 1:
+            lines.append(f"Đang chờ hệ thống bắt đầu cảnh <b>{current_scene}/{scene_total}</b>.")
+        elif scene_total > 1:
             lines.append(f"Đang dựng cảnh <b>{current_scene}/{scene_total}</b>, đang chờ kết quả.")
         else:
             lines.append("Đã gửi yêu cầu dựng video, đang chờ kết quả.")
@@ -70106,6 +70161,10 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
         else:
             if scene_total > 1 and scene_done >= scene_total:
                 lines.append("Hệ thống đang ghép video cuối và sẽ tự cập nhật khi có kết quả.")
+            elif provider_stalled_not_start and fallback_scene_index:
+                lines.append(f"Hệ thống đang chuyển cảnh <b>{fallback_scene_index}</b> sang kênh dựng dự phòng.")
+            elif current_scene_status in {"provider_not_start", "provider_stalled_not_start"} and scene_total > 1:
+                lines.append(f"Đang chờ hệ thống bắt đầu cảnh <b>{current_scene}/{scene_total}</b>.")
             elif scene_total > 1:
                 lines.append(f"Hệ thống đang dựng cảnh <b>{current_scene}/{scene_total}</b> và sẽ tự cập nhật khi có kết quả.")
             else:
