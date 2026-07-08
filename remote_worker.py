@@ -329,6 +329,8 @@ def ping_server(
     payload = {
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
+        "worker_git_sha": worker_git_sha(),
+        "worker_parser_version": WORKER_PARSER_VERSION,
         "dry_run": True,
     }
     if canary:
@@ -350,6 +352,8 @@ def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") ->
         "job_id": str(job_id),
         "progress_percent": int(progress_percent or 0),
         "message": str(message or "")[:500],
+        "worker_git_sha": worker_git_sha(),
+        "worker_parser_version": WORKER_PARSER_VERSION,
     }
     http_json("POST", "/api/v1/worker/heartbeat", payload, timeout=20)
 
