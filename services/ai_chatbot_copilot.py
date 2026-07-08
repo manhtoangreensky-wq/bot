@@ -16,7 +16,7 @@ from services import telegram_business_support as cskh
 STATE_VERSION = 1
 TRACE_LIMIT = 10
 CONVERSATION_TTL_SECONDS = 30 * 60
-RESOLVER_VERSION = "P0.AICHAT.5.2026-07-08"
+RESOLVER_VERSION = "P0.AICHAT.6.2026-07-08"
 DEFAULT_REPLY = (
     "Dạ em chưa hiểu rõ ý mình. Anh/chị nói rõ hơn muốn hỏi về giá, cách dùng, "
     "tạo prompt, ảnh, video, voice, nhạc hay SubDub ạ?"
@@ -531,6 +531,11 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
     entry_label = str(entry_source or "live_chat")
     if entry_label and entry_label not in sources:
         sources.insert(1 if sources else 0, entry_label)
+    requested_action = selected_action
+    flow_access_allowed = True
+    flow_block_reason = ""
+    provider_submit_allowed = False
+    provider_submit_block_reason = "awaiting_user_final_confirm" if selected_action else "answer_only_no_provider_submit"
     return {
         "entry": "aichat",
         "intent_id": intent_id,
@@ -548,9 +553,16 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "action_permission_enabled": bool(assist_actions),
         "selected_action": selected_action,
         "action_selected": selected_action,
+        "requested_action": requested_action,
         "action_should_execute": bool(action_should_execute),
         "action_executed": False,
         "action_router_called": False,
+        "flow_access_allowed": bool(flow_access_allowed),
+        "flow_block_reason": flow_block_reason,
+        "provider_submit_allowed": bool(provider_submit_allowed),
+        "provider_submit_block_reason": provider_submit_block_reason,
+        "opened_flow": False,
+        "prefill_saved": False,
         "reply_template": str(classification.get("reply_template_id") or ""),
         "learning_candidate_id": learning_candidate.get("id") or "",
         "learning_queue": bool(learning_candidate),
@@ -647,10 +659,17 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "last_action_button": str(result.get("last_action_button") or (result.get("classification") or {}).get("last_action_button") or ""),
         "context_carry_used": bool(result.get("context_carry_used") or (result.get("classification") or {}).get("context_carry_used")),
         "action_permission_enabled": bool(result.get("action_permission_enabled")),
+        "requested_action": str(result.get("requested_action") or result.get("selected_action") or result.get("action_selected") or ""),
         "selected_action": str(result.get("selected_action") or result.get("action_selected") or ""),
         "action_selected": str(result.get("action_selected") or result.get("selected_action") or ""),
         "action_executed": bool(result.get("action_executed")),
         "action_router_called": bool(result.get("action_router_called")),
+        "flow_access_allowed": bool(result.get("flow_access_allowed", True)),
+        "flow_block_reason": str(result.get("flow_block_reason") or ""),
+        "provider_submit_allowed": bool(result.get("provider_submit_allowed")),
+        "provider_submit_block_reason": str(result.get("provider_submit_block_reason") or ""),
+        "opened_flow": bool(result.get("opened_flow")),
+        "prefill_saved": bool(result.get("prefill_saved")),
         "reply_template": str(result.get("reply_template") or (result.get("classification") or {}).get("reply_template_id") or ""),
         "learning_queue": bool(result.get("learning_queue") or result.get("learning_candidate_id")),
         "target_flow": dict(result.get("target_flow") or {}),
@@ -675,6 +694,13 @@ def mark_action_execution(
     executed: bool = False,
     router_called: bool = False,
     action_result: str = "",
+    requested_action: str = "",
+    flow_access_allowed: bool | None = None,
+    flow_block_reason: str = "",
+    provider_submit_allowed: bool | None = None,
+    provider_submit_block_reason: str = "",
+    opened_flow: bool | None = None,
+    prefill_saved: bool | None = None,
 ) -> dict:
     clean = normalize_state(state)
     uid = str(user_id)
@@ -685,9 +711,23 @@ def mark_action_execution(
     if selected_action:
         entry["selected_action"] = selected_action
         entry["action_selected"] = selected_action
+    if requested_action:
+        entry["requested_action"] = requested_action
     entry["action_executed"] = bool(executed)
     entry["action_router_called"] = bool(router_called)
     entry["action_result"] = str(action_result or "")[:240]
+    if flow_access_allowed is not None:
+        entry["flow_access_allowed"] = bool(flow_access_allowed)
+    if flow_block_reason:
+        entry["flow_block_reason"] = str(flow_block_reason or "")[:240]
+    if provider_submit_allowed is not None:
+        entry["provider_submit_allowed"] = bool(provider_submit_allowed)
+    if provider_submit_block_reason:
+        entry["provider_submit_block_reason"] = str(provider_submit_block_reason or "")[:240]
+    if opened_flow is not None:
+        entry["opened_flow"] = bool(opened_flow)
+    if prefill_saved is not None:
+        entry["prefill_saved"] = bool(prefill_saved)
     entry["provider_call_allowed"] = False
     entry["xu_charge_allowed"] = False
     trace[-1] = entry
