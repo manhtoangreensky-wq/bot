@@ -47340,6 +47340,21 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
     if not job:
         return f"⚠️ Không tìm thấy video job <code>{jid}</code>."
     result = _video_debug_json((job or {}).get("result_json"), {})
+    asset_pack_debug = _video_debug_json((project or {}).get("asset_pack_json"), {}) if project else {}
+    invoice_debug = _video_debug_json((project or {}).get("invoice_json"), {}) if project else {}
+    for debug_key in (
+        "submit_source",
+        "provider_submit_source",
+        "public_user_confirmed",
+        "provider_submit_allowed",
+        "provider_submit_block_reason",
+        "charge_policy",
+    ):
+        if result.get(debug_key) in (None, "", "-"):
+            for debug_source in (asset_pack_debug, invoice_debug, job or {}):
+                if isinstance(debug_source, dict) and debug_source.get(debug_key) not in (None, "", "-"):
+                    result[debug_key] = debug_source.get(debug_key)
+                    break
     result = video_b14_reconciled_provider_debug(job, project, result, refresh_source="video_provider_job_debug")
     events = [item for item in (result.get("provider_events") or []) if isinstance(item, dict)]
     provider = str(result.get("selected_provider") or result.get("provider") or (events[0].get("provider") if events else "") or "-")
@@ -47358,6 +47373,28 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         result.get("provider_result_url_present")
         or result.get("result_url_present")
         or any(item.get("download_url_present") for item in events)
+    )
+    artifact_path = str(
+        result.get("final_video_path")
+        or result.get("output_path")
+        or result.get("local_path")
+        or result.get("artifact_path")
+        or ""
+    )
+    artifact_size = safe_int(
+        result.get("bytes")
+        or result.get("output_bytes")
+        or result.get("download_bytes")
+        or result.get("artifact_size")
+        or 0,
+        0,
+    )
+    delivered = bool(
+        result.get("delivered")
+        or result.get("video_delivered")
+        or result.get("delivery_state") == "delivered"
+        or (project or {}).get("video_delivered_at")
+        or (project or {}).get("delivery_message_id")
     )
     blocker = str(
         result.get("blocker")
@@ -47393,6 +47430,11 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• submit source: <code>{html.escape(str(result.get('submit_source') or result.get('provider_submit_source') or '-'))}</code>",
+        f"• public user confirmed: <code>{'yes' if result.get('public_user_confirmed') else 'no'}</code>",
+        f"• provider submit allowed: <code>{'yes' if result.get('provider_submit_allowed') else 'no'}</code>",
+        f"• provider submit block reason: <code>{html.escape(str(result.get('provider_submit_block_reason') or '-'))}</code>",
+        f"• charge policy: <code>{html.escape(str(result.get('charge_policy') or 'after_valid_mp4_delivery'))}</code>",
         f"• provider submit kill switch enabled: <code>{'yes' if result.get('product_video_provider_submit_enabled') else 'no'}</code>",
         f"• provider submit kill switch raw: <code>{html.escape(str(result.get('product_video_provider_submit_enabled_raw') or '-'))}</code>",
         f"• provider submit kill switch resolved: <code>{'yes' if result.get('product_video_provider_submit_enabled_resolved', result.get('product_video_provider_submit_enabled')) else 'no'}</code>",
@@ -47466,6 +47508,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• worker parser version: <code>{html.escape(str(result.get('worker_parser_version') or '-'))}</code>",
         f"• worker started at: <code>{html.escape(str(result.get('worker_started_at') or '-'))}</code>",
         f"• worker code matches runtime: <code>{html.escape(str(result.get('worker_code_matches_runtime') or 'unknown'))}</code>",
+        f"• worker sync hint: <code>{'sync/restart worker' if str(result.get('worker_code_matches_runtime') or 'unknown') == 'no' else '-'}</code>",
         f"• submit exception: <code>{html.escape(str(result.get('provider_submit_exception_class') or result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('provider_submit_exception_message_safe') or result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• submit url configured: <code>{'yes' if result.get('provider_submit_url_configured') or result.get('submit_url_configured') else 'no'}</code>",
         f"• submit url host: <code>{html.escape(str(result.get('provider_submit_url_host') or '-'))}</code>",
@@ -47501,6 +47544,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• last poll raw status: <code>{html.escape(str(result.get('provider_status_raw') or result.get('provider_status') or '-'))}</code>",
         f"• normalized status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
         f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• artifact path: <code>{html.escape(mask_provider_task_id(artifact_path) if artifact_path else '-')}</code>",
+        f"• artifact size: <code>{artifact_size}</code>",
+        f"• delivered: <code>{'yes' if delivered else 'no'}</code>",
         f"• result URL host: <code>{html.escape(str(result.get('result_url_host') or '-'))}</code>",
         f"• result URL scheme/ext: <code>{html.escape(str(result.get('result_url_scheme') or '-'))}</code>/<code>{html.escape(str(result.get('result_url_ext') or '-'))}</code>",
         f"• result URL trusted: <code>{'yes' if result.get('result_url_trusted') else 'no'}</code>",
@@ -47538,6 +47584,11 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• submit source: <code>{_video_debug_safe_value(result.get('submit_source') or result.get('provider_submit_source'), 80)}</code>",
+        f"• public user confirmed: <code>{'yes' if result.get('public_user_confirmed') else 'no'}</code>",
+        f"• provider submit allowed: <code>{'yes' if result.get('provider_submit_allowed') else 'no'}</code>",
+        f"• provider submit block reason: <code>{_video_debug_safe_value(result.get('provider_submit_block_reason') or '-', 120)}</code>",
+        f"• charge policy: <code>{_video_debug_safe_value(result.get('charge_policy') or 'after_valid_mp4_delivery', 80)}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
         f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• ShopAIKey exact status endpoint: <code>{'yes' if result.get('shopaikey_status_endpoint_exact') else 'no'}</code>",
@@ -47582,6 +47633,8 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
         f"• normalized status: <code>{_video_debug_safe_value(result.get('normalized_provider_status') or result.get('provider_status'), 80)}</code>",
         f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• artifact size: <code>{artifact_size}</code>",
+        f"• delivered: <code>{'yes' if delivered else 'no'}</code>",
         f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
         f"• terminal state: <code>{_video_debug_safe_value(terminal_state, 80)}</code>",
         f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
@@ -70010,6 +70063,10 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
+        "submit_source": str(draft.get("submit_source") or draft.get("provider_submit_source") or "public_user_final_confirm"),
+        "provider_submit_source": str(draft.get("provider_submit_source") or draft.get("submit_source") or "public_user_final_confirm"),
+        "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
+        "charge_policy": "after_valid_mp4_delivery",
     })
     invoice.update({
         "product_type": product_type,
@@ -70023,6 +70080,10 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
+        "submit_source": str(draft.get("submit_source") or draft.get("provider_submit_source") or "public_user_final_confirm"),
+        "provider_submit_source": str(draft.get("provider_submit_source") or draft.get("submit_source") or "public_user_final_confirm"),
+        "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
+        "charge_policy": "after_valid_mp4_delivery",
     })
     if is_internal:
         asset_pack_payload.update({
@@ -73018,6 +73079,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not project_id:
             project = video_b14_prepare_project_for_invoice(uid, session)
             project_id = safe_int(project.get("project_id"), 0)
+        draft.update({
+            "submit_source": "public_user_final_confirm",
+            "provider_submit_source": "public_user_final_confirm",
+            "public_user_confirmed": True,
+            "b14_public_user_confirmed": True,
+            "charge_policy": "after_valid_mp4_delivery",
+        })
+        session["draft"] = draft
+        save_video_session(uid, session)
+        project = video_b14_prepare_project_for_invoice(uid, session)
+        project_id = safe_int(project.get("project_id"), project_id)
         is_internal = video_b14_is_admin_or_owner(uid)
         credits, _, _ = get_user(uid)
         provider_preflight = product_video_provider_availability_preflight()
