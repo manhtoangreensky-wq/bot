@@ -1395,6 +1395,15 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "fallback_scene_index",
             "fallback_allowed",
             "fallback_block_reason",
+            "public_confirm_kickoff_attempted",
+            "public_confirm_kickoff_success",
+            "worker_dispatch_attempted",
+            "worker_dispatch_success",
+            "worker_dispatch_blocker",
+            "dispatch_status",
+            "provider_chain_resolved",
+            "configured_provider_chain",
+            "next_poll_scheduled",
         ):
             payload[key] = job.get(key)
     return payload

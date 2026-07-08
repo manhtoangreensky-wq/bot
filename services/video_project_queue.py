@@ -1226,6 +1226,10 @@ def confirm_video_project_invoice(
         return {"ok": False, "reason": "project_not_at_invoice"}
     active = get_active_video_render_job(conn, int(project_id))
     if active:
+        kickoff = kickoff_product_video_job_after_confirm(conn, job_id=int(active.get("id") or 0))
+        if not kickoff.get("skipped"):
+            active = kickoff.get("job") or active
+            project = kickoff.get("project") or project
         return {"ok": True, "project": project, "job": active, "duplicate_prevented": True}
     total_xu = int(project.get("total_xu_estimated") or 0)
     if total_xu <= 0:
@@ -1250,7 +1254,13 @@ def confirm_video_project_invoice(
     )
     job = enqueue_video_render_job(conn, project_id=int(project_id), user_id=int(user_id))
     update_video_project(conn, int(project_id), job_id=int(job.get("id") or 0))
-    return {"ok": True, "project": get_video_project(conn, int(project_id)), "job": job, "duplicate_prevented": bool(job.get("duplicate_prevented"))}
+    kickoff = kickoff_product_video_job_after_confirm(conn, job_id=int(job.get("id") or 0))
+    if not kickoff.get("skipped"):
+        job = kickoff.get("job") or job
+        project = kickoff.get("project") or get_video_project(conn, int(project_id))
+    else:
+        project = get_video_project(conn, int(project_id))
+    return {"ok": True, "project": project, "job": job, "duplicate_prevented": bool(job.get("duplicate_prevented"))}
 
 
 def requeue_stale_video_jobs(conn: sqlite3.Connection, *, now: datetime | None = None) -> int:
@@ -1361,6 +1371,253 @@ def heartbeat_video_job(
 
 PRODUCT_VIDEO_SCENE_SECONDS = 8
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
+PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
+
+
+def _split_product_video_provider_chain(value: Any) -> list[str]:
+    raw = str(value or "").replace(">", ",").replace("|", ",")
+    aliases = {
+        "shopaikey": "shopaikey_video",
+        "shopai": "shopaikey_video",
+        "key4u": "key4u_video",
+        "k4u": "key4u_video",
+        "toanaas": "toanaas_video",
+        "generic": "generic_http",
+    }
+    result: list[str] = []
+    for item in raw.split(","):
+        token = aliases.get(item.strip().lower(), item.strip().lower())
+        if token and token not in result:
+            result.append(token)
+    return result
+
+
+def resolve_product_video_provider_chain(environ: dict[str, str] | None = None) -> list[str]:
+    env = os.environ if environ is None else environ
+    raw = env.get("VIDEO_PROVIDER_CHAIN") if hasattr(env, "get") else None
+    return _split_product_video_provider_chain(raw if raw is not None else PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN)
+
+
+def _product_video_truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_product_video_project(project: dict[str, Any]) -> bool:
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    if not isinstance(invoice, dict):
+        invoice = {}
+    source = str(asset_pack.get("source") or invoice.get("source") or "").strip()
+    render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or "").strip().lower().replace("-", "_")
+    return bool(
+        source == "product_video"
+        and (
+            render_mode == "real"
+            or _product_video_truthy(asset_pack.get("provider_call") or invoice.get("provider_call"))
+            or _product_video_truthy(asset_pack.get("public_user") or invoice.get("public_user"))
+        )
+    )
+
+
+def _product_video_scene_count(project: dict[str, Any], payload: dict[str, Any] | None = None) -> int:
+    payload = dict(payload or {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    return max(1, min(20, _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)))
+
+
+def product_video_initial_scene_tasks(
+    job_id: int | str,
+    scene_count: int,
+    scene_duration_seconds: int = PRODUCT_VIDEO_SCENE_SECONDS,
+) -> list[dict[str, Any]]:
+    safe_job_id = str(job_id or "").strip() or "job"
+    safe_count = max(1, min(20, int(scene_count or 1)))
+    safe_duration = max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS)))
+    return [
+        {
+            "scene_index": index,
+            "scene_id": index,
+            "request_job_id": f"{safe_job_id}-{index}",
+            "scene_duration_seconds": safe_duration,
+            "provider": "",
+            "provider_task_id": "",
+            "provider_video_id": "",
+            "status": "pending_submit",
+            "download_url_present": False,
+            "result_url_valid": False,
+            "raw_clip_duration": 0,
+            "fallback_count": 0,
+            "provider_wait_elapsed_seconds": 0,
+            "provider_started_at_epoch": "",
+        }
+        for index in range(1, safe_count + 1)
+    ]
+
+
+def build_product_video_confirm_kickoff_payload(
+    job: dict[str, Any],
+    project: dict[str, Any],
+    *,
+    provider_chain: list[str] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_dt = now or datetime.now()
+    scene_count = _product_video_scene_count(project)
+    scene_duration = PRODUCT_VIDEO_SCENE_SECONDS
+    scene_tasks = product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count, scene_duration)
+    chain = list(provider_chain if provider_chain is not None else resolve_product_video_provider_chain())
+    next_poll_at = now_text(current_dt + timedelta(seconds=25))
+    provider_chain_resolved = bool(chain)
+    dispatch_blocker = "" if provider_chain_resolved else "provider_chain_missing_no_charge"
+    return {
+        "source": "product_video",
+        "product_video": True,
+        "render_mode": "real",
+        "provider_call": True,
+        "submit_source": "public_user_final_confirm",
+        "provider_submit_source": "public_user_final_confirm",
+        "original_submit_source": "public_user_final_confirm",
+        "public_confirm_submit_source": "public_user_final_confirm",
+        "public_user_confirmed": True,
+        "invoice_confirmed": True,
+        "charge_policy": "after_valid_mp4_delivery",
+        "charge": 0,
+        "charged_xu": 0,
+        "no_charge_before_final_mp4": True,
+        "orchestration_mode": "per_scene_8s",
+        "provider_orchestration_mode": "per_scene_8s",
+        "scene_count": scene_count,
+        "scenes_total": scene_count,
+        "scene_duration_seconds": scene_duration,
+        "scene_seconds": scene_duration,
+        "expected_duration_seconds": scene_count * scene_duration,
+        "duration_seconds": scene_count * scene_duration,
+        "scene_tasks": scene_tasks,
+        "provider_scene_tasks": scene_tasks,
+        "scene_tasks_total": scene_count,
+        "scene_tasks_created_count": scene_count,
+        "scene_tasks_submitted": 0,
+        "scene_tasks_submitted_count": 0,
+        "scene_tasks_completed": 0,
+        "scenes_done": 0,
+        "scenes_pending": scene_count,
+        "scenes_running": 0,
+        "current_scene": 1 if scene_count else 0,
+        "current_scene_index": 1 if scene_count else 0,
+        "current_scene_status": "pending_submit",
+        "final_concat_required": scene_count > 1,
+        "concat_ready": False,
+        "configured_provider_chain": chain,
+        "effective_provider_chain": chain,
+        "provider_chain": chain,
+        "provider_order": chain,
+        "provider_chain_resolved": provider_chain_resolved,
+        "public_confirm_kickoff_attempted": True,
+        "public_confirm_kickoff_success": provider_chain_resolved,
+        "worker_dispatch_attempted": True,
+        "worker_dispatch_success": provider_chain_resolved,
+        "worker_dispatch_blocker": dispatch_blocker,
+        "dispatch_status": "queued_for_worker" if provider_chain_resolved else dispatch_blocker,
+        "actual_processor": "remote_worker" if provider_chain_resolved else "",
+        "worker_service_mode": "owner_product_video" if provider_chain_resolved else "",
+        "claimed_by_service_mode": "owner_product_video" if provider_chain_resolved else "",
+        "worker_claim_status": "dispatch_queued" if provider_chain_resolved else "dispatch_blocked",
+        "worker_claim_reason": dispatch_blocker,
+        "next_poll_scheduled": provider_chain_resolved,
+        "next_poll_scheduled_at": next_poll_at if provider_chain_resolved else "",
+        "next_poll_at": next_poll_at if provider_chain_resolved else "",
+        "next_refresh_expected_at": next_poll_at if provider_chain_resolved else "",
+        "autonomous_db_poller_enabled": provider_chain_resolved,
+        "autonomous_poll_enabled": provider_chain_resolved,
+        "db_poll_candidate": provider_chain_resolved,
+        "registry_required_for_poll": False,
+        "registry_missing_is_blocker": False,
+        "status_source_priority_used": "confirm_kickoff_db",
+        "provider_router_called": False,
+        "provider_submit_called": False,
+        "provider_attempted": False,
+        "provider_task_id_saved": False,
+        "no_new_paid_submit": True,
+    }
+
+
+def kickoff_product_video_job_after_confirm(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    provider_chain: list[str] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        return {"ok": False, "reason": "job_not_found"}
+    project = get_video_project(conn, int(job.get("project_id") or 0))
+    if not project or not _is_product_video_project(project):
+        return {"ok": True, "skipped": True, "reason": "not_product_video", "job": job, "project": project}
+    existing = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(existing, dict):
+        existing = {}
+    payload = dict(existing)
+    kickoff = build_product_video_confirm_kickoff_payload(job, project, provider_chain=provider_chain, now=now)
+    payload.update(kickoff)
+    current = now_text(now)
+    if not kickoff.get("provider_chain_resolved"):
+        payload.update(
+            {
+                "ok": False,
+                "blocker": "provider_chain_missing_no_charge",
+                "provider_error": "provider_chain_missing_no_charge",
+                "terminal_state": "provider_chain_missing_no_charge",
+                "no_charge": True,
+            }
+        )
+        conn.execute(
+            """UPDATE video_jobs
+               SET status='failed', last_error=?, result_json=?, progress_percent=?, progress_message=?, updated_at=?, completed_at=COALESCE(completed_at, ?)
+               WHERE id=?""",
+            (
+                "provider_chain_missing_no_charge",
+                _json_dumps(payload),
+                0,
+                "provider_chain_missing_no_charge",
+                current,
+                current,
+                int(job_id),
+            ),
+        )
+        conn.execute(
+            """UPDATE video_projects
+               SET status='failed', video_terminal_state='provider_chain_missing_no_charge',
+                   error_log=?, updated_at=?
+               WHERE project_id=?""",
+            ("provider_chain_missing_no_charge", current, int(project["project_id"])),
+        )
+    else:
+        conn.execute(
+            """UPDATE video_jobs
+               SET result_json=?, progress_percent=?, progress_message=?, updated_at=?
+               WHERE id=? AND status IN ('queued','processing')""",
+            (_json_dumps(payload), 10, "queued_for_worker_dispatch", current, int(job_id)),
+        )
+        conn.execute(
+            """UPDATE video_projects
+               SET status='processing', video_terminal_state='final_rendering', updated_at=?
+               WHERE project_id=?""",
+            (current, int(project["project_id"])),
+        )
+    conn.commit()
+    return {
+        "ok": bool(kickoff.get("provider_chain_resolved")),
+        "reason": "" if kickoff.get("provider_chain_resolved") else "provider_chain_missing_no_charge",
+        "job": get_video_render_job(conn, int(job_id)),
+        "project": get_video_project(conn, int(project["project_id"])),
+        "payload": payload,
+    }
 
 
 def product_video_expected_duration_seconds(project: dict | None = None, payload: dict | None = None) -> int:

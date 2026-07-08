@@ -456,6 +456,35 @@ def _product_video_safety_flags(project: dict) -> dict:
     }
 
 
+def _product_video_public_confirmed_for_owner_worker(project: dict) -> bool:
+    asset_pack = _json_loads(project.get("asset_pack_json"), {})
+    invoice = _json_loads(project.get("invoice_json"), {})
+    flags = _product_video_safety_flags(project)
+    submit_source = str(
+        asset_pack.get("submit_source")
+        or asset_pack.get("provider_submit_source")
+        or asset_pack.get("original_submit_source")
+        or invoice.get("submit_source")
+        or invoice.get("provider_submit_source")
+        or invoice.get("original_submit_source")
+        or ""
+    ).strip()
+    confirmed = _safe_bool(
+        asset_pack.get("public_user_confirmed")
+        or asset_pack.get("b14_public_user_confirmed")
+        or invoice.get("public_user_confirmed")
+        or invoice.get("b14_public_user_confirmed")
+    )
+    return bool(
+        flags["public_user"]
+        and confirmed
+        and submit_source == "public_user_final_confirm"
+        and flags["source"] == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE
+        and flags["render_mode"] == RENDER_MODE_REAL
+        and flags["provider_call"]
+    )
+
+
 def _is_admin_fake_video_job(project: dict) -> bool:
     asset_pack = _json_loads(project.get("asset_pack_json"), {})
     if str(asset_pack.get("source") or "") == "admin_fake_job" and _safe_bool(asset_pack.get("no_charge")):
@@ -525,7 +554,7 @@ def _product_video_is_claimable(project: dict, *, owner_only: bool = False, publ
     flags = _product_video_safety_flags(project)
     owner_product = bool(flags["admin_only"] and flags["no_charge"] and not flags["public_user"])
     if owner_only:
-        return owner_product
+        return bool(owner_product or _product_video_public_confirmed_for_owner_worker(project))
     return bool(flags["public_user"] and public_enabled)
 
 
@@ -801,6 +830,34 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "provider_call": bool(safety["provider_call"]) and not claim_only,
                 "public_user": bool(safety["public_user"]),
                 "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
+                "submit_source": str(
+                    persisted_result.get("submit_source")
+                    or asset_pack.get("submit_source")
+                    or invoice.get("submit_source")
+                    or ""
+                ),
+                "provider_submit_source": str(
+                    persisted_result.get("provider_submit_source")
+                    or asset_pack.get("provider_submit_source")
+                    or invoice.get("provider_submit_source")
+                    or ""
+                ),
+                "original_submit_source": str(
+                    persisted_result.get("original_submit_source")
+                    or asset_pack.get("original_submit_source")
+                    or invoice.get("original_submit_source")
+                    or asset_pack.get("submit_source")
+                    or invoice.get("submit_source")
+                    or ""
+                ),
+                "public_user_confirmed": _safe_bool(
+                    persisted_result.get("public_user_confirmed")
+                    or asset_pack.get("public_user_confirmed")
+                    or asset_pack.get("b14_public_user_confirmed")
+                    or invoice.get("public_user_confirmed")
+                    or invoice.get("b14_public_user_confirmed")
+                ),
+                "invoice_confirmed": True,
                 "expected_duration_seconds": safe_expected_duration,
                 "duration_seconds": safe_expected_duration,
                 "scene_count": safe_scene_count,
@@ -808,6 +865,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "scene_seconds": safe_scene_duration,
                 "orchestration_mode": "per_scene_8s",
                 "provider_orchestration_mode": "per_scene_8s",
+                "provider_router_called": bool(persisted_result.get("provider_router_called")),
+                "provider_submit_called": bool(persisted_result.get("provider_submit_called")),
+                "provider_attempted": bool(persisted_result.get("provider_attempted")),
             }
         )
         payload["output_requirements"].update(
@@ -872,6 +932,64 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 by_scene[idx] = merged
             return [by_scene[idx] for idx in sorted(by_scene)]
 
+        configured_chain = []
+        for candidate in (
+            persisted_result.get("configured_provider_chain"),
+            persisted_result.get("effective_provider_chain"),
+            persisted_result.get("provider_chain"),
+            asset_pack.get("provider_chain"),
+            asset_pack.get("provider_order"),
+            invoice.get("provider_chain"),
+            invoice.get("provider_order"),
+            provider_order,
+        ):
+            if isinstance(candidate, list):
+                configured_chain = [str(item).strip() for item in candidate if str(item).strip()]
+            else:
+                configured_chain = video_project_queue._split_product_video_provider_chain(candidate)
+            if configured_chain:
+                break
+        if not configured_chain:
+            configured_chain = video_project_queue.resolve_product_video_provider_chain()
+        seed_scene_tasks = [
+            dict(item)
+            for item in (persisted_result.get("scene_tasks") or persisted_result.get("provider_scene_tasks") or [])
+            if isinstance(item, dict)
+        ]
+        scene_tasks = _full_scene_tasks(seed_scene_tasks)
+        submitted_count = sum(
+            1
+            for item in scene_tasks
+            if str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip()
+            or str(item.get("status") or "").strip().lower() not in {"", "pending_submit", "pending"}
+        )
+        completed_count = sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"done", "completed", "success"})
+        payload.update(
+            {
+                "configured_provider_chain": configured_chain,
+                "effective_provider_chain": configured_chain,
+                "provider_chain": configured_chain,
+                "provider_order": configured_chain,
+                "provider_chain_resolved": bool(configured_chain),
+                "scene_tasks": scene_tasks,
+                "provider_scene_tasks": scene_tasks,
+                "scene_tasks_total": safe_scene_count,
+                "scene_tasks_created_count": safe_scene_count,
+                "scene_tasks_submitted": submitted_count,
+                "scene_tasks_submitted_count": submitted_count,
+                "scene_tasks_completed": completed_count,
+                "scenes_total": safe_scene_count,
+                "scenes_done": completed_count,
+                "scenes_pending": max(0, safe_scene_count - submitted_count),
+                "scenes_running": max(0, submitted_count - completed_count),
+                "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
+                "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
+                "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
+                "final_concat_required": safe_scene_count > 1,
+                "concat_ready": completed_count >= safe_scene_count,
+            }
+        )
+
         pending_provider = str(
             persisted_result.get("selected_provider")
             or persisted_result.get("provider")
@@ -918,6 +1036,13 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                         }
                     )
             scene_tasks = _full_scene_tasks(scene_tasks)
+            submitted_count = sum(
+                1
+                for item in scene_tasks
+                if str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip()
+                or str(item.get("status") or "").strip().lower() not in {"", "pending_submit", "pending"}
+            )
+            completed_count = sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"done", "completed", "success"})
             payload.update(
                 {
                     "provider_pending_provider": pending_provider,
@@ -931,6 +1056,18 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     ][:12],
                     "scene_tasks": scene_tasks,
                     "provider_scene_tasks": scene_tasks,
+                    "scene_tasks_total": safe_scene_count,
+                    "scene_tasks_created_count": safe_scene_count,
+                    "scene_tasks_submitted": submitted_count,
+                    "scene_tasks_submitted_count": submitted_count,
+                    "scene_tasks_completed": completed_count,
+                    "scenes_total": safe_scene_count,
+                    "scenes_done": completed_count,
+                    "scenes_pending": max(0, safe_scene_count - submitted_count),
+                    "scenes_running": max(0, submitted_count - completed_count),
+                    "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
+                    "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
+                    "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
                     "provider_pending_deferred": True,
                     "continue_polling": True,
                 }
@@ -1557,7 +1694,7 @@ def remote_worker_claim_lane_counts(conn: sqlite3.Connection, *, public_enabled:
         if is_remote_worker_product_video_job(job, project):
             flags = _product_video_safety_flags(project)
             owner_product = bool(flags["admin_only"] and flags["no_charge"] and not flags["public_user"])
-            if owner_product:
+            if owner_product or _product_video_public_confirmed_for_owner_worker(project):
                 counts["owner_product_video"] += 1
             elif flags["public_user"] and public_enabled:
                 counts["public_product_video"] += 1
@@ -1897,7 +2034,56 @@ def fail_stale_product_video_jobs(
             )
             conn.commit()
             continue
-        video_project_queue.fail_video_job(conn, job_id=int(job["id"]), error=reason, retry=False)
+        if isinstance(payload, dict) and payload.get("public_confirm_kickoff_attempted"):
+            clean_reason = "queued_dispatch_failed_no_charge"
+            payload.update(
+                {
+                    "ok": False,
+                    "worker_dispatch_attempted": True,
+                    "worker_dispatch_success": False,
+                    "worker_dispatch_blocker": clean_reason,
+                    "dispatch_status": clean_reason,
+                    "worker_claim_status": "dispatch_failed",
+                    "worker_claim_reason": clean_reason,
+                    "terminal_state": clean_reason,
+                    "blocker": clean_reason,
+                    "provider_submit_called": False,
+                    "provider_attempted": False,
+                    "provider_task_id_saved": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                    "no_charge": True,
+                    "no_new_paid_submit": True,
+                }
+            )
+            conn.execute(
+                """UPDATE video_jobs
+                   SET result_json=?, progress_percent=0, progress_message=?,
+                       last_error=?, status='failed', updated_at=?, completed_at=COALESCE(completed_at, ?)
+                   WHERE id=?""",
+                (
+                    json.dumps(payload, ensure_ascii=False),
+                    clean_reason,
+                    clean_reason,
+                    video_project_queue.now_text(current_dt),
+                    video_project_queue.now_text(current_dt),
+                    int(job["id"]),
+                ),
+            )
+            conn.execute(
+                """UPDATE video_projects
+                   SET status='failed', video_terminal_state=?, error_log=?, updated_at=?
+                   WHERE project_id=?""",
+                (
+                    clean_reason,
+                    clean_reason,
+                    video_project_queue.now_text(current_dt),
+                    int(project["project_id"]),
+                ),
+            )
+            conn.commit()
+        else:
+            video_project_queue.fail_video_job(conn, job_id=int(job["id"]), error=reason, retry=False)
         failed += 1
     return failed
 
