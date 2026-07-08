@@ -150,7 +150,8 @@ def test_subdub_duration_limit_supports_real_qa_lengths():
     assert payload["supports_60s"] is True
     assert payload["supports_180s"] is True
     assert payload["supports_300s"] is True
-    assert payload["chunking_enabled"] is False
+    assert payload["chunking_enabled"] is True
+    assert payload["chunk_count_for_60s"] >= 2
 
 
 def test_subdub_job_debug_has_live_qa_fields():
@@ -167,8 +168,8 @@ def test_subdub_job_debug_has_live_qa_fields():
             "input_file_exists": True,
             "duration_seconds": 65,
             "duration_limit_seconds": 300,
-            "chunking_enabled": False,
-            "chunk_count": 0,
+            "chunking_enabled": True,
+            "chunk_count": 3,
             "default_female_configured": True,
             "default_male_configured": True,
             "delivery_attempted": True,

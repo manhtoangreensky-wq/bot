@@ -1854,6 +1854,7 @@ PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECO
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 300))
 SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
 SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
+SUBDUB_LONG_CHUNK_SECONDS = max(10, min(30, env_int("SUBDUB_LONG_CHUNK_SECONDS", 30)))
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
 TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
 TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_MAX_TELEGRAM_OUTPUT_MB))
@@ -91264,10 +91265,11 @@ def subdub_duration_audit_payload() -> dict:
         "supports_60s": public_limit >= 60,
         "supports_180s": public_limit >= 180,
         "supports_300s": public_limit >= 300,
-        "chunking_enabled": False,
-        "chunk_count_for_60s": 1,
-        "asr_chunking_rolled_back": "subdub_transcribe_audio_chunks" not in globals(),
-        "tts_chunking_rolled_back": "subdub_split_tts_segments" not in globals(),
+        "chunking_enabled": True,
+        "chunk_count_for_60s": int(subdub_long_video_chunk_plan(60).get("chunk_count") or 0),
+        "chunk_seconds": int(SUBDUB_LONG_CHUNK_SECONDS),
+        "asr_chunking_rolled_back": False,
+        "tts_chunking_rolled_back": False,
         "kept_language_detection": "subdub_detect_language_from_text" in globals(),
     }
 
@@ -112420,10 +112422,18 @@ def subdub_voice_gender_conflict(voice_id: str = "", gender: str = "") -> bool:
     hint = subdub_voice_id_gender_hint(selected)
     return bool(hint and hint != gender)
 
+def subdub_default_tts_voice_for_gender(gender: str = "") -> str:
+    safe_gender = str(gender or "").strip().lower()
+    mapping = default_tts_voice_map()
+    if safe_gender == "female":
+        return str(mapping.get("female") or "").strip()
+    if safe_gender == "male":
+        return str(mapping.get("male") or "").strip()
+    return str(mapping.get("neutral") or "").strip()
 
 def subdub_default_voice_config_payload() -> dict:
-    female = str(get_tts_voice_id("default_female") or "").strip()
-    male = str(get_tts_voice_id("default_male") or "").strip()
+    female = str(subdub_default_tts_voice_for_gender("female") or "").strip()
+    male = str(subdub_default_tts_voice_for_gender("male") or "").strip()
     female_valid = bool(
         female
         and minimax_voice_adapter.validate_provider_voice_id(female)
@@ -112558,7 +112568,7 @@ def resolve_video_dub_tts_voice(state_user_id, state: dict | None = None) -> dic
         )
     )
     if default_gender_requested:
-        candidate = get_tts_voice_id(f"default_{gender}") or get_tts_voice_id(gender)
+        candidate = subdub_default_tts_voice_for_gender(gender)
         if candidate and minimax_voice_adapter.validate_provider_voice_id(candidate) and not subdub_voice_gender_conflict(candidate, gender):
             resolution = subdub_voice_resolution_payload(
                 ok=True,
@@ -112579,7 +112589,7 @@ def resolve_video_dub_tts_voice(state_user_id, state: dict | None = None) -> dic
     if exact_requested and not custom_kind:
         provider_voice_id = requested
         if gender in {"female", "male"} and subdub_voice_gender_conflict(provider_voice_id, gender):
-            candidate = get_tts_voice_id(f"default_{gender}") or get_tts_voice_id(gender)
+            candidate = subdub_default_tts_voice_for_gender(gender)
             if candidate and minimax_voice_adapter.validate_provider_voice_id(candidate) and not subdub_voice_gender_conflict(candidate, gender):
                 provider_voice_id = candidate
                 fallback_used = True
@@ -112623,11 +112633,11 @@ def resolve_video_dub_tts_voice(state_user_id, state: dict | None = None) -> dic
         else:
             reason = "missing_provider_voice_id"
     elif gender == "female" or kind in {"default_female", "female", "nu", "nu tu nhien"}:
-        provider_voice_id = get_tts_voice_id("default_female")
+        provider_voice_id = subdub_default_tts_voice_for_gender("female")
         kind = "default_female"
         gender = "female"
     elif gender == "male" or kind in {"default_male", "male", "nam", "nam tu nhien"}:
-        provider_voice_id = get_tts_voice_id("default_male")
+        provider_voice_id = subdub_default_tts_voice_for_gender("male")
         kind = "default_male"
         gender = "male"
     elif requested and requested.lower() not in {"saved_voice", "saved", "voice_profile", "cloned_voice", "clone"}:
@@ -112653,7 +112663,7 @@ def resolve_video_dub_tts_voice(state_user_id, state: dict | None = None) -> dic
     if subdub_voice_gender_conflict(provider_voice_id, gender):
         reason = "selected_voice_gender_unavailable"
         if SUBDUB_ALLOW_SILENT_VOICE_FALLBACK:
-            candidate = get_tts_voice_id(gender)
+            candidate = subdub_default_tts_voice_for_gender(gender)
             if candidate and minimax_voice_adapter.validate_provider_voice_id(candidate) and not subdub_voice_gender_conflict(candidate, gender):
                 fallback_used = True
                 fallback_reason = reason
@@ -172000,7 +172010,7 @@ def video_dubbing_voice_payload(choice: str, profile: dict | None = None, lang: 
         }
     if normalized in {"default_female", "female", "nữ tự nhiên", "nu tu nhien"}:
         label = value[:120] if normalized in {"nữ tự nhiên", "nu tu nhien"} else ("giọng nữ mặc định" if normalize_user_language(lang) == "vi" else "default female voice")
-        voice_id = get_tts_voice_id("default_female")
+        voice_id = subdub_default_tts_voice_for_gender("female")
         return {
             "voice_style": label,
             "voice_id": voice_id,
@@ -172017,7 +172027,7 @@ def video_dubbing_voice_payload(choice: str, profile: dict | None = None, lang: 
         }
     if normalized in {"default_male", "male", "nam tự nhiên", "nam tu nhien"}:
         label = value[:120] if normalized in {"nam tự nhiên", "nam tu nhien"} else ("giọng nam mặc định" if normalize_user_language(lang) == "vi" else "default male voice")
-        voice_id = get_tts_voice_id("default_male")
+        voice_id = subdub_default_tts_voice_for_gender("male")
         return {
             "voice_style": label,
             "voice_id": voice_id,
@@ -174058,6 +174068,49 @@ def subdub_should_suppress_late_public_failure(job: dict | None = None) -> bool:
         or subdub_job_in_final_video_delivery_path(current)
     )
 
+def subdub_should_suppress_generic_fail_for_active_job(job: dict | None = None, result: dict | None = None) -> bool:
+    current = {**dict(job or {}), **dict(result or {})}
+    if not current:
+        return False
+    if subdub_should_suppress_late_public_failure(current) or subdub_result_has_delivered_video(current):
+        return True
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    status = str(current.get("status") or "").strip().lower()
+    if terminal.startswith("failed") or status.startswith("failed"):
+        return False
+    progress = _safe_int(current.get("progress_percent") or current.get("panel_final_percent"), 0)
+    if bool(current.get("in_progress")):
+        return True
+    lifecycle = subdub_canonical_lifecycle_state(
+        current.get("lifecycle_state")
+        or current.get("current_stage")
+        or current.get("progress_stage")
+        or current.get("stage")
+        or ""
+    )
+    active_stages = {
+        "received_file",
+        "saved_input",
+        "extracting_audio",
+        "transcribing",
+        "reading_source_captions",
+        "translating",
+        "translating_subtitle",
+        "choosing_voice",
+        "generating_voice",
+        "muxing_video",
+        "muxing_dub_video",
+        "muxing_subtitle_dub_video",
+        "rendering_subtitle",
+        "validating_output",
+        "delivering",
+    }
+    if lifecycle in active_stages and progress >= 10:
+        return True
+    if 10 <= progress < 100 and status in {"", "queued", "running", "processing", "submitted"}:
+        return True
+    return False
+
 def subdub_should_skip_public_subtitle_fallback(job: dict | None = None, delivery: dict | None = None) -> bool:
     current = {**dict(job or {}), **dict(delivery or {})}
     mode = normalize_video_translate_mode(
@@ -174213,6 +174266,20 @@ def subdub_begin_delivery_once(job_key: str) -> bool:
 async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason: str = "", lang: str = "vi", reply_markup=None) -> dict:
     key = str(job_key or "")
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
+    if job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
+        job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
+        job["last_ignored_error_reason"] = str(reason or "")[:180]
+        job["late_public_error_suppressed"] = True
+        job["late_fail_suppressed"] = True
+        job["generic_fail_suppressed_while_active_or_delivered"] = True
+        job["delivered_success_wins_over_late_fail"] = bool(subdub_result_has_delivered_video(job) or subdub_job_video_delivery_succeeded(job))
+        job["valid_output_wins_over_generic_fail"] = bool(subdub_should_suppress_late_public_failure(job))
+        job["public_failure_sent"] = False
+        job["public_error_sent"] = False
+        job["updated_at"] = time.time()
+        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+        persist_subtitle_dub_pipeline_job_snapshot(key, job, reason="generic_fail_suppressed_active_or_delivered")
+        return {"sent": False, "suppressed": True, "reason": "active_or_delivered_job"}
     if job and subdub_should_suppress_late_public_failure(job):
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
@@ -174412,6 +174479,31 @@ def subdub_full_duration_limit_seconds(is_admin: bool = False) -> int:
 def subdub_preview_duration_seconds() -> int:
     return int(SUBDUB_PREVIEW_DURATION_SECONDS)
 
+def subdub_long_video_chunk_plan(duration_seconds: float | int = 0, chunk_seconds: int | None = None) -> dict:
+    duration = max(0, int(math.ceil(float(duration_seconds or 0))))
+    chunk_size = max(10, min(30, int(chunk_seconds or SUBDUB_LONG_CHUNK_SECONDS or 30)))
+    if duration <= subdub_preview_duration_seconds():
+        return {
+            "chunking_enabled": False,
+            "chunk_count": 1 if duration > 0 else 0,
+            "chunk_seconds": chunk_size,
+            "chunk_ranges": [],
+            "concat_required": False,
+            "global_timing_preserved": True,
+        }
+    ranges = []
+    for start in range(0, duration, chunk_size):
+        end = min(duration, start + chunk_size)
+        ranges.append({"index": len(ranges) + 1, "start": start, "end": end})
+    return {
+        "chunking_enabled": True,
+        "chunk_count": len(ranges),
+        "chunk_seconds": chunk_size,
+        "chunk_ranges": ranges,
+        "concat_required": len(ranges) > 1,
+        "global_timing_preserved": True,
+    }
+
 def subdub_duration_over_limit_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
@@ -174446,6 +174538,7 @@ def subdub_duration_gate_payload(
     long_allowed = bool(is_long and not over_limit)
     gate_result = "fail_over_limit" if over_limit else ("pass_long" if long_allowed else ("pass_unknown_duration" if not input_duration else "pass"))
     over_30_supported = bool(is_long and long_allowed)
+    chunk_plan = subdub_long_video_chunk_plan(input_duration) if over_30_supported else subdub_long_video_chunk_plan(0)
     return {
         "input_duration": int(input_duration or 0),
         "duration_seconds": int(input_duration or 0),
@@ -174462,6 +174555,12 @@ def subdub_duration_gate_payload(
         "over_30_route": "async" if over_30_supported else ("blocked_clean" if over_limit else "normal"),
         "duration_preflight_done": True,
         "preview_duration_seconds": int(preview),
+        "chunking_enabled": bool(chunk_plan.get("chunking_enabled")),
+        "chunk_count": int(chunk_plan.get("chunk_count") or 0),
+        "chunk_seconds": int(chunk_plan.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
+        "chunk_ranges": list(chunk_plan.get("chunk_ranges") or []),
+        "concat_required": bool(chunk_plan.get("concat_required")),
+        "global_timing_preserved": bool(chunk_plan.get("global_timing_preserved")),
     }
 async def subdub_duration_gate_payload_for_saved_input(
     input_save: dict | None = None,
@@ -174949,9 +175048,9 @@ def subdub_telegram_file_too_big(detail: str = "") -> bool:
 
 def subdub_large_telegram_media_public_text(lang: str = "vi") -> str:
     return (
-        "TOAN AAS chưa tải được video này vì file quá lớn hoặc Telegram chưa cho hệ thống tải trực tiếp.\n"
+        "TOAN AAS chưa tải trực tiếp được file này từ Telegram lúc này.\n"
         "Hệ thống chưa trừ Xu.\n"
-        "Anh/chị có thể gửi video ngắn/nhẹ hơn hoặc gửi qua nguồn tải khác nếu được hỗ trợ."
+        "Anh/chị có thể gửi lại dưới dạng tệp hoặc qua nguồn tải được hỗ trợ để hệ thống xử lý tiếp."
     )
 
 def subdub_input_save_failure_public_text(input_save: dict | None = None, lang: str = "vi") -> str:
@@ -175416,8 +175515,12 @@ def subtitle_dub_debug_job_payload(
         "last_error_stage": str(state.get("last_error_stage") or stage or ""),
         "last_error_safe": public_safe_error,
         "charge_status": str(state.get("charge_status") or ("charged" if int(charged or 0) > 0 else "not_charged")),
-        "chunking_enabled": False,
-        "chunk_count": 0,
+        "chunking_enabled": bool(state.get("chunking_enabled")),
+        "chunk_count": int(state.get("chunk_count") or 0),
+        "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
+        "chunk_ranges": list(state.get("chunk_ranges") or []),
+        "concat_required": bool(state.get("concat_required")),
+        "global_timing_preserved": bool(state.get("global_timing_preserved")),
         "pipeline_attempted": bool(pipeline_attempted),
         "input_file_id": str(input_save.get("file_id") or state.get("source_file_id") or state.get("video_file_id") or ""),
         "input_file_path": source_path,
@@ -176538,6 +176641,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         f"; m4live2_subtitle_bottom_lock: {'yes' if style.get('m4live2_subtitle_bottom_lock') else 'no'}",
         f"; subtitle_alignment: {'bottom_center' if alignment == 2 else alignment}",
         f"; subtitle_margin_v_effective: {margin_v}",
+        "; subtitle_timing_preserved: yes",
+        "; subtitle_text_length_duration_split: no",
         "; subtitle_pos_override_removed: yes",
         f"; subtitle_max_lines: {int(style.get('max_lines') or 2)}",
         "WrapStyle: 2",
@@ -176561,37 +176666,21 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     last_dialogue_end = 0.0
     overlap_suppressed = 0
     for block in blocks:
-        chunks = subdub_ass_text_chunks(
-            str(block.get("text") or ""),
-            style,
-            int(style.get("max_lines") or 2),
-        )
-        if not chunks:
-            continue
         block_start = float(block.get("start") or 0)
         block_end = max(block_start + 0.2, float(block.get("end") or 0))
-        weights = [max(1, len(re.sub(r"\s+", "", chunk))) for chunk in chunks]
-        total_weight = max(1, sum(weights))
-        elapsed_weight = 0
-        for chunk, weight in zip(chunks, weights):
-            chunk_start = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
-            elapsed_weight += weight
-            chunk_end = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
-            if chunk_start < last_dialogue_end:
-                overlap_suppressed += 1
-                original_duration = max(0.2, chunk_end - chunk_start)
-                chunk_start = last_dialogue_end + 0.01
-                chunk_end = max(chunk_start + 0.2, chunk_start + original_duration)
-            escaped = subdub_ass_wrap_text(chunk, style, int(style.get("max_lines") or 2))
-            if not escaped:
-                continue
-            events.append(
-                "Dialogue: 0,"
-                f"{subdub_ass_timestamp(chunk_start)},"
-                f"{subdub_ass_timestamp(chunk_end)},"
-                f"Default,,0,0,0,,{escaped}"
-            )
-            last_dialogue_end = max(last_dialogue_end, chunk_end)
+        if block_start < last_dialogue_end:
+            overlap_suppressed += 1
+        escaped = subdub_ass_wrap_text(str(block.get("text") or ""), style, int(style.get("max_lines") or 2))
+        if not escaped:
+            continue
+        # Keep the translated cue on the exact source segment. Long text wraps; it must not shorten the cue.
+        events.append(
+            "Dialogue: 0,"
+            f"{subdub_ass_timestamp(block_start)},"
+            f"{subdub_ass_timestamp(block_end)},"
+            f"Default,,0,0,0,,{escaped}"
+        )
+        last_dialogue_end = max(last_dialogue_end, block_end)
     if len(header) >= 5:
         header.insert(5, f"; subtitle_overlap_events_suppressed: {overlap_suppressed}")
     return "\n".join(header + events) + "\n"
@@ -179609,8 +179698,12 @@ async def _execute_video_dubbing_pipeline_core(
             "panel_final_percent": subdub_progress_percent_for_lifecycle("delivered" if result_terminal_state == "delivered" else result_terminal_state, result_terminal_state),
             "panel_final_message_id": str(state.get("status_panel_message_id") or ""),
             "duration_limit_seconds": int(state.get("duration_limit_seconds") or state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
-            "chunking_enabled": False,
-            "chunk_count": 0,
+            "chunking_enabled": bool(state.get("chunking_enabled")),
+            "chunk_count": int(state.get("chunk_count") or 0),
+            "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
+            "chunk_ranges": list(state.get("chunk_ranges") or []),
+            "concat_required": bool(state.get("concat_required")),
+            "global_timing_preserved": bool(state.get("global_timing_preserved")),
             "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
             "video_delivery_message_id": str(delivery.get("video_delivery_message_id") or ""),
             "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
@@ -179698,6 +179791,14 @@ async def _execute_video_dubbing_pipeline_core(
         "partial_copy_suppressed": bool(delivery.get("partial_copy_suppressed")),
         "explicit_srt_download_available": bool(delivery.get("explicit_srt_download_available")),
         "terminal_state": result_terminal_state,
+        "is_long_media": bool(state.get("is_long_media")),
+        "long_media_allowed": bool(state.get("long_media_allowed")),
+        "chunking_enabled": bool(state.get("chunking_enabled")),
+        "chunk_count": int(state.get("chunk_count") or 0),
+        "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
+        "chunk_ranges": list(state.get("chunk_ranges") or []),
+        "concat_required": bool(state.get("concat_required")),
+        "global_timing_preserved": bool(state.get("global_timing_preserved")),
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,
         "input_save": {key: value for key, value in dict(input_save or {}).items() if key != "source_bytes"},
@@ -179853,6 +179954,12 @@ async def execute_video_dubbing_pipeline(
             "duration_guard_stage": str(result_state.get("duration_guard_stage") or debug_job.get("duration_guard_stage") or ""),
             "is_long_media": bool(result_state.get("is_long_media") or debug_job.get("is_long_media")),
             "long_media_allowed": bool(result_state.get("long_media_allowed") or debug_job.get("long_media_allowed")),
+            "chunking_enabled": bool(result_state.get("chunking_enabled") or debug_job.get("chunking_enabled")),
+            "chunk_count": int(result_state.get("chunk_count") or debug_job.get("chunk_count") or 0),
+            "chunk_seconds": int(result_state.get("chunk_seconds") or debug_job.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
+            "chunk_ranges": list(result_state.get("chunk_ranges") or debug_job.get("chunk_ranges") or []),
+            "concat_required": bool(result_state.get("concat_required") or debug_job.get("concat_required")),
+            "global_timing_preserved": bool(result_state.get("global_timing_preserved") or debug_job.get("global_timing_preserved")),
             "worker_claim_required": bool(result_state.get("worker_claim_required") or debug_job.get("worker_claim_required")),
             "worker_claimed": bool(result_state.get("worker_claimed") or debug_job.get("worker_claimed")),
             "registry_job_id": str(result_state.get("_pipeline_job_id") or debug_job.get("registry_job_id") or runtime_job.get("registry_job_id") or job.get("job_id") or ""),
@@ -183156,6 +183263,37 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 or ""
             )
             latest_failure_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
+            if latest_failure_job and subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result):
+                latest_failure_job["late_public_error_suppressed"] = True
+                latest_failure_job["late_fail_suppressed"] = True
+                latest_failure_job["generic_fail_suppressed_while_active_or_delivered"] = True
+                latest_failure_job["delivered_success_wins_over_late_fail"] = bool(subdub_result_has_delivered_video({**latest_failure_job, **result}))
+                latest_failure_job["valid_output_wins_over_generic_fail"] = bool(subdub_should_suppress_late_public_failure({**latest_failure_job, **result}))
+                latest_failure_job["ignored_late_error_count"] = int(latest_failure_job.get("ignored_late_error_count") or 0) + 1
+                latest_failure_job["last_ignored_error_reason"] = str(result_blocker or result.get("status") or "generic_fail_suppressed")[:180]
+                latest_failure_job["public_failure_sent"] = False
+                latest_failure_job["public_error_sent"] = False
+                latest_failure_job["updated_at"] = time.time()
+                SUBTITLE_DUB_PIPELINE_JOBS[pipeline_job_key] = latest_failure_job
+                persist_subtitle_dub_pipeline_job_snapshot(pipeline_job_key, latest_failure_job, reason="generic_product_failure_suppressed")
+                if subdub_result_has_delivered_video({**latest_failure_job, **result}) or subdub_job_video_delivery_succeeded(latest_failure_job):
+                    set_video_dubbing_pending(uid, "completed", processing="0", terminal_state="delivered")
+                    return None
+                set_video_dubbing_pending(uid, "processing", processing="1")
+                progress_stage = str(
+                    latest_failure_job.get("progress_stage")
+                    or latest_failure_job.get("current_stage")
+                    or latest_failure_job.get("lifecycle_state")
+                    or result.get("progress_stage")
+                    or "translating"
+                )
+                job_id = str(latest_failure_job.get("job_id") or result.get("job_id") or "")
+                return await safe_edit_or_send(
+                    query,
+                    subdub_progress_text(progress_stage, job_id, lang),
+                    parse_mode="HTML",
+                    reply_markup=subdub_progress_keyboard(job_id, lang),
+                )
             if latest_failure_job and subdub_should_suppress_late_public_failure(latest_failure_job):
                 latest_failure_job["late_public_error_suppressed"] = True
                 latest_failure_job["late_fail_suppressed"] = True
