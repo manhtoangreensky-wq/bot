@@ -47025,6 +47025,11 @@ def video_render_debug_compact_text(
         f"• Project: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• Product type: <code>{_video_debug_safe_value(product_type, 80)}</code>",
         f"• Engine adapter: <code>{_video_debug_safe_value((engine_route or {}).get('adapter'), 100)}</code>",
+        f"• orchestration mode: <code>{_video_debug_safe_value((result or {}).get('orchestration_mode'), 80)}</code>",
+        f"• scene tasks: <code>{safe_int((result or {}).get('scene_tasks_submitted'), 0)}/{safe_int((result or {}).get('scene_tasks_total'), 0)}</code>",
+        f"• current scene: <code>{safe_int((result or {}).get('current_scene_index'), 0)}</code>",
+        f"• scene duration: <code>{safe_int((result or {}).get('scene_duration_seconds'), 0)}s</code>",
+        f"• concat ready: <code>{'yes' if (result or {}).get('concat_ready') else 'no'}</code>",
         f"• Job status: <code>{_video_debug_safe_value((job or {}).get('status'), 80)}</code>",
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
         f"• provider progress percent: <code>{safe_int((result or {}).get('provider_progress_percent'), 0)}%</code>",
@@ -47538,6 +47543,14 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• status_source_priority_used: <code>{html.escape(str(result.get('status_source_priority_used') or '-'))}</code>",
         f"• final_status_after_reconcile: <code>{html.escape(str(result.get('final_status_after_reconcile') or '-'))}</code>",
         f"• final_progress_after_reconcile: <code>{safe_int(result.get('final_progress_after_reconcile'), 0)}%</code>",
+        f"• orchestration mode: <code>{html.escape(str(result.get('orchestration_mode') or '-'))}</code>",
+        f"• scene duration seconds: <code>{safe_int(result.get('scene_duration_seconds'), 0)}</code>",
+        f"• scene tasks: <code>{safe_int(result.get('scene_tasks_submitted'), 0)}/{safe_int(result.get('scene_tasks_total'), 0)}</code>",
+        f"• scene tasks completed: <code>{safe_int(result.get('scene_tasks_completed'), 0)}</code>",
+        f"• current scene index: <code>{safe_int(result.get('current_scene_index'), 0)}</code>",
+        f"• current scene status: <code>{html.escape(str(result.get('current_scene_status') or '-'))}</code>",
+        f"• final concat required: <code>{'yes' if result.get('final_concat_required') else 'no'}</code>",
+        f"• concat ready: <code>{'yes' if result.get('concat_ready') else 'no'}</code>",
         f"• summary_provider_attempt_source: <code>{html.escape(str(result.get('summary_provider_attempt_source') or '-'))}</code>",
         f"• summary_fields_from_primary_alive_task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
         f"• stale_failed_attempt_ignored: <code>{'yes' if result.get('stale_failed_attempt_ignored') else 'no'}</code>",
@@ -47639,6 +47652,10 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• worker git SHA: <code>{_video_debug_safe_value(result.get('worker_git_sha'), 80)}</code>",
         f"• worker parser version: <code>{_video_debug_safe_value(result.get('worker_parser_version'), 80)}</code>",
         f"• worker code matches runtime: <code>{_video_debug_safe_value(result.get('worker_code_matches_runtime') or 'unknown', 40)}</code>",
+        f"• orchestration mode: <code>{_video_debug_safe_value(result.get('orchestration_mode'), 80)}</code>",
+        f"• scene tasks: <code>{safe_int(result.get('scene_tasks_submitted'), 0)}/{safe_int(result.get('scene_tasks_total'), 0)}</code>",
+        f"• current scene: <code>{safe_int(result.get('current_scene_index'), 0)}</code>",
+        f"• concat ready: <code>{'yes' if result.get('concat_ready') else 'no'}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
@@ -70053,6 +70070,17 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     elapsed_public_mode = str(telemetry.get("elapsed_public_mode") or "").strip().lower()
     trusted_render_progress = bool(telemetry.get("trusted_render_progress_available"))
     result_url_present = bool(telemetry.get("result_url_present") or telemetry.get("provider_result_url_present"))
+    scene_tasks = [item for item in (telemetry.get("scene_tasks") or []) if isinstance(item, dict)]
+    scene_total = safe_int(telemetry.get("scene_tasks_total") or len(scene_tasks), 0)
+    scene_done = safe_int(telemetry.get("scene_tasks_completed"), 0)
+    current_scene = safe_int(telemetry.get("current_scene_index"), 0)
+    if scene_total and current_scene <= 0:
+        for item in scene_tasks:
+            status_text = str(item.get("status") or "").strip().lower()
+            if status_text not in {"downloaded", "success", "completed"} and not item.get("result_url_valid"):
+                current_scene = safe_int(item.get("scene_index"), scene_done + 1)
+                break
+    current_scene = max(1, min(scene_total or 1, current_scene or scene_done + 1))
     registry_missing = bool(
         telemetry.get("status_registry_missing_after_restart")
         or telemetry.get("registry_missing_after_restart")
@@ -70061,16 +70089,27 @@ def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     lines = ["<b>Dựng video:</b>"]
     if (public_mode in {"indeterminate", "zero_waiting"} and progress <= 0) or (not trusted_render_progress and not result_url_present and progress <= 0):
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
-        lines.append("Đã gửi yêu cầu dựng video, đang chờ kết quả.")
+        if scene_total > 1:
+            lines.append(f"Đang dựng cảnh <b>{current_scene}/{scene_total}</b>, đang chờ kết quả.")
+        else:
+            lines.append("Đã gửi yêu cầu dựng video, đang chờ kết quả.")
         lines.append(product_video_provider_pending_public_copy("vi"))
     else:
         lines.append(f"{video_b14_render_bar(progress)} <b>{progress}%</b>")
         if telemetry.get("provider_progress_public_suppressed") and not result_url_present:
-            lines.append("Hệ thống đang dựng video. Phần trăm này dựa trên thời gian chờ thật, chưa tính là hoàn tất.")
+            if scene_total > 1:
+                lines.append(f"Hệ thống đang dựng cảnh <b>{current_scene}/{scene_total}</b>. Phần trăm dựa trên thời gian chờ thật, chưa tính là hoàn tất.")
+            else:
+                lines.append("Hệ thống đang dựng video. Phần trăm này dựa trên thời gian chờ thật, chưa tính là hoàn tất.")
         elif registry_missing or elapsed <= 0 or poll_count_source == "recovered":
             lines.append(product_video_provider_pending_public_copy("vi"))
         else:
-            lines.append("Hệ thống đang dựng video và sẽ tự cập nhật khi có kết quả.")
+            if scene_total > 1 and scene_done >= scene_total:
+                lines.append("Hệ thống đang ghép video cuối và sẽ tự cập nhật khi có kết quả.")
+            elif scene_total > 1:
+                lines.append(f"Hệ thống đang dựng cảnh <b>{current_scene}/{scene_total}</b> và sẽ tự cập nhật khi có kết quả.")
+            else:
+                lines.append("Hệ thống đang dựng video và sẽ tự cập nhật khi có kết quả.")
     if telemetry.get("panel_last_updated_at") or telemetry.get("provider_last_poll_at"):
         lines.append("Cập nhật lần cuối: <b>vừa xong</b>")
     lines.append("Video AI có thể mất vài phút tùy tải hệ thống.")
@@ -70304,6 +70343,20 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         provider_telemetry = reconciled_job_result
     else:
         provider_telemetry = video_b14_provider_telemetry(job, job_result, refresh_source="public_panel")
+        for key in (
+            "orchestration_mode",
+            "scene_duration_seconds",
+            "scene_tasks",
+            "scene_tasks_total",
+            "scene_tasks_submitted",
+            "scene_tasks_completed",
+            "current_scene_index",
+            "current_scene_status",
+            "final_concat_required",
+            "concat_ready",
+        ):
+            if key in job_result and key not in provider_telemetry:
+                provider_telemetry[key] = job_result.get(key)
     provider_task_alive = bool(provider_telemetry.get("provider_task_alive"))
     fallback_running = bool(
         provider_telemetry.get("fallback_used")

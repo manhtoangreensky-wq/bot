@@ -1369,6 +1369,22 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
     invoice = _json_loads(str(project.get("invoice_json") or payload.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
+    scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
+    orchestration_mode = str(
+        payload.get("orchestration_mode")
+        or payload.get("provider_orchestration_mode")
+        or invoice.get("orchestration_mode")
+        or ""
+    ).strip().lower()
+    if orchestration_mode in {"per_scene_8s", "scene_orchestrator", "per_scene"}:
+        scene_seconds = _as_int(
+            payload.get("scene_duration_seconds")
+            or payload.get("scene_seconds")
+            or invoice.get("scene_duration_seconds")
+            or invoice.get("scene_seconds"),
+            PRODUCT_VIDEO_SCENE_SECONDS,
+        )
+        return max(1, min(20, scene_count)) * max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, scene_seconds))
     direct = _as_int(
         payload.get("expected_duration_seconds")
         or payload.get("duration_seconds")
@@ -1377,7 +1393,6 @@ def product_video_expected_duration_seconds(project: dict | None = None, payload
     )
     if direct > 0:
         return direct
-    scene_count = _as_int(project.get("scene_count") or payload.get("scene_count") or invoice.get("scene_count"), 1)
     scene_seconds = _as_int(payload.get("scene_seconds") or invoice.get("scene_seconds"), PRODUCT_VIDEO_SCENE_SECONDS)
     return max(1, min(20, scene_count)) * max(1, scene_seconds)
 

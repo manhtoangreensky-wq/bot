@@ -782,6 +782,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     if is_remote_worker_product_video_job(hydrated_job, project):
         safety = _product_video_safety_flags(project)
         claim_only = bool(safety["claim_only_diagnostic"])
+        safe_scene_count = max(1, min(20, safety["scene_count"] or scene_count))
+        safe_scene_duration = 8
+        safe_expected_duration = safe_scene_count * safe_scene_duration
         payload.update(
             {
                 "product_video": True,
@@ -795,8 +798,13 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "provider_call": bool(safety["provider_call"]) and not claim_only,
                 "public_user": bool(safety["public_user"]),
                 "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
-                "expected_duration_seconds": max(1, min(120, safety["duration_seconds"] or scene_count * 6)),
-                "scene_count": max(1, min(20, safety["scene_count"] or scene_count)),
+                "expected_duration_seconds": safe_expected_duration,
+                "duration_seconds": safe_expected_duration,
+                "scene_count": safe_scene_count,
+                "scene_duration_seconds": safe_scene_duration,
+                "scene_seconds": safe_scene_duration,
+                "orchestration_mode": "per_scene_8s",
+                "provider_orchestration_mode": "per_scene_8s",
             }
         )
         payload["output_requirements"].update(
@@ -833,6 +841,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             persisted_result.get("provider_pending_request_job_id")
             or persisted_result.get("provider_request_job_id")
             or persisted_result.get("request_job_id")
+            or (provider_events[0].get("request_job_id") if provider_events else "")
             or ""
         ).strip()
         has_pending_provider = bool(
@@ -841,6 +850,28 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             or str(persisted_result.get("blocker") or persisted_result.get("provider_error") or "").strip() == "provider_in_progress"
         )
         if has_pending_provider and pending_provider and (pending_task_ids or pending_video_ids):
+            scene_tasks = [
+                dict(item)
+                for item in (persisted_result.get("scene_tasks") or persisted_result.get("provider_scene_tasks") or [])
+                if isinstance(item, dict)
+            ]
+            if not any(str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip() for item in scene_tasks):
+                scene_tasks = []
+                for event in provider_events:
+                    scene_index = _safe_int(event.get("scene_index") or event.get("scene_id"), len(scene_tasks) + 1)
+                    scene_tasks.append(
+                        {
+                            "scene_index": scene_index,
+                            "scene_id": scene_index,
+                            "request_job_id": str(event.get("request_job_id") or f"{payload.get('job_id')}-{scene_index}"),
+                            "provider": str(event.get("provider") or pending_provider),
+                            "provider_task_id": str(event.get("task_id") or ""),
+                            "provider_video_id": str(event.get("video_id") or ""),
+                            "status": str(event.get("status") or ""),
+                            "download_url_present": bool(event.get("download_url_present")),
+                            "raw_clip_duration": event.get("duration") or 0,
+                        }
+                    )
             payload.update(
                 {
                     "provider_pending_provider": pending_provider,
@@ -852,6 +883,8 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                         for item in (persisted_result.get("provider_attempts") or [])
                         if isinstance(item, dict)
                     ][:12],
+                    "scene_tasks": scene_tasks,
+                    "provider_scene_tasks": scene_tasks,
                     "provider_pending_deferred": True,
                     "continue_polling": True,
                 }
