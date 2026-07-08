@@ -817,6 +817,28 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         safe_scene_count = max(1, min(20, safety["scene_count"] or scene_count))
         safe_scene_duration = 8
         safe_expected_duration = safe_scene_count * safe_scene_duration
+        def _product_video_explicit_orchestration_mode() -> str:
+            for source in (persisted_result, asset_pack, invoice, project):
+                if not isinstance(source, dict):
+                    continue
+                value = str(source.get("orchestration_mode") or source.get("provider_orchestration_mode") or "").strip().lower()
+                if value in {"per_scene_8s", "per_scene", "scene", "scene_orchestrator"}:
+                    return "per_scene_8s"
+                if value in {"single_task", "legacy", "legacy_single_task", "single_task_legacy", "raw_render_delivery"}:
+                    return "single_task_legacy"
+            for item in (persisted_result.get("scene_tasks") or persisted_result.get("provider_scene_tasks") or []):
+                if isinstance(item, dict):
+                    return "per_scene_8s"
+            for item in (persisted_result.get("provider_events") or []):
+                if not isinstance(item, dict):
+                    continue
+                request_job_id = str(item.get("request_job_id") or item.get("provider_pending_request_job_id") or "").strip()
+                if item.get("scene_index") or item.get("scene_id") or re.search(r"-\d+$", request_job_id):
+                    return "per_scene_8s"
+            return "single_task_legacy"
+
+        product_video_orchestration_mode = _product_video_explicit_orchestration_mode()
+        product_video_per_scene_orchestration = product_video_orchestration_mode == "per_scene_8s"
         payload.update(
             {
                 "product_video": True,
@@ -863,8 +885,10 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "scene_count": safe_scene_count,
                 "scene_duration_seconds": safe_scene_duration,
                 "scene_seconds": safe_scene_duration,
-                "orchestration_mode": "per_scene_8s",
-                "provider_orchestration_mode": "per_scene_8s",
+                "orchestration_mode": product_video_orchestration_mode,
+                "provider_orchestration_mode": product_video_orchestration_mode,
+                "raw_render_delivery_baseline": not product_video_per_scene_orchestration,
+                "r18a_raw_render_delivery_default": not product_video_per_scene_orchestration,
                 "provider_router_called": bool(persisted_result.get("provider_router_called")),
                 "provider_submit_called": bool(persisted_result.get("provider_submit_called")),
                 "provider_attempted": bool(persisted_result.get("provider_attempted")),
@@ -951,19 +975,6 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 break
         if not configured_chain:
             configured_chain = video_project_queue.resolve_product_video_provider_chain()
-        seed_scene_tasks = [
-            dict(item)
-            for item in (persisted_result.get("scene_tasks") or persisted_result.get("provider_scene_tasks") or [])
-            if isinstance(item, dict)
-        ]
-        scene_tasks = _full_scene_tasks(seed_scene_tasks)
-        submitted_count = sum(
-            1
-            for item in scene_tasks
-            if str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip()
-            or str(item.get("status") or "").strip().lower() not in {"", "pending_submit", "pending"}
-        )
-        completed_count = sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"done", "completed", "success"})
         payload.update(
             {
                 "configured_provider_chain": configured_chain,
@@ -971,24 +982,62 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "provider_chain": configured_chain,
                 "provider_order": configured_chain,
                 "provider_chain_resolved": bool(configured_chain),
-                "scene_tasks": scene_tasks,
-                "provider_scene_tasks": scene_tasks,
-                "scene_tasks_total": safe_scene_count,
-                "scene_tasks_created_count": safe_scene_count,
-                "scene_tasks_submitted": submitted_count,
-                "scene_tasks_submitted_count": submitted_count,
-                "scene_tasks_completed": completed_count,
                 "scenes_total": safe_scene_count,
-                "scenes_done": completed_count,
-                "scenes_pending": max(0, safe_scene_count - submitted_count),
-                "scenes_running": max(0, submitted_count - completed_count),
-                "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
-                "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
-                "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
-                "final_concat_required": safe_scene_count > 1,
-                "concat_ready": completed_count >= safe_scene_count,
             }
         )
+        if product_video_per_scene_orchestration:
+            seed_scene_tasks = [
+                dict(item)
+                for item in (persisted_result.get("scene_tasks") or persisted_result.get("provider_scene_tasks") or [])
+                if isinstance(item, dict)
+            ]
+            scene_tasks = _full_scene_tasks(seed_scene_tasks)
+            submitted_count = sum(
+                1
+                for item in scene_tasks
+                if str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip()
+                or str(item.get("status") or "").strip().lower() not in {"", "pending_submit", "pending"}
+            )
+            completed_count = sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"done", "completed", "success"})
+            payload.update(
+                {
+                    "scene_tasks": scene_tasks,
+                    "provider_scene_tasks": scene_tasks,
+                    "scene_tasks_total": safe_scene_count,
+                    "scene_tasks_created_count": safe_scene_count,
+                    "scene_tasks_submitted": submitted_count,
+                    "scene_tasks_submitted_count": submitted_count,
+                    "scene_tasks_completed": completed_count,
+                    "scenes_done": completed_count,
+                    "scenes_pending": max(0, safe_scene_count - submitted_count),
+                    "scenes_running": max(0, submitted_count - completed_count),
+                    "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
+                    "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
+                    "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
+                    "final_concat_required": safe_scene_count > 1,
+                    "concat_ready": completed_count >= safe_scene_count,
+                }
+            )
+        else:
+            payload.update(
+                {
+                    "scene_tasks": [],
+                    "provider_scene_tasks": [],
+                    "scene_tasks_total": 0,
+                    "scene_tasks_created_count": 0,
+                    "scene_tasks_submitted": 0,
+                    "scene_tasks_submitted_count": 0,
+                    "scene_tasks_completed": 0,
+                    "scenes_done": 0,
+                    "scenes_pending": 0,
+                    "scenes_running": 0,
+                    "current_scene": 0,
+                    "current_scene_index": 0,
+                    "current_scene_status": "",
+                    "final_concat_required": False,
+                    "concat_ready": False,
+                }
+            )
 
         pending_provider = str(
             persisted_result.get("selected_provider")
@@ -1008,7 +1057,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             or persisted_result.get("provider_pending_deferred")
             or str(persisted_result.get("blocker") or persisted_result.get("provider_error") or "").strip() == "provider_in_progress"
         )
-        if has_pending_provider and pending_provider and (pending_task_ids or pending_video_ids):
+        if has_pending_provider and pending_provider and (pending_task_ids or pending_video_ids) and product_video_per_scene_orchestration:
             scene_tasks = [
                 dict(item)
                 for item in (persisted_result.get("scene_tasks") or persisted_result.get("provider_scene_tasks") or [])
@@ -1068,6 +1117,22 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
                     "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
                     "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
+                    "provider_pending_deferred": True,
+                    "continue_polling": True,
+                }
+            )
+        elif has_pending_provider and pending_provider and (pending_task_ids or pending_video_ids):
+            payload.update(
+                {
+                    "provider_pending_provider": pending_provider,
+                    "provider_pending_task_id": pending_task_ids[0] if pending_task_ids else "",
+                    "provider_pending_video_id": pending_video_ids[0] if pending_video_ids else "",
+                    "provider_pending_request_job_id": pending_request_job_id,
+                    "provider_pending_attempts": [
+                        dict(item)
+                        for item in (persisted_result.get("provider_attempts") or [])
+                        if isinstance(item, dict)
+                    ][:12],
                     "provider_pending_deferred": True,
                     "continue_polling": True,
                 }
