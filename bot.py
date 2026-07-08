@@ -176337,13 +176337,20 @@ def subdub_should_skip_public_subtitle_fallback(job: dict | None = None, deliver
     mode = normalize_video_translate_mode(
         current.get("mode") or current.get("video_processing_mode") or current.get("process_type")
     )
+    video_delivered = bool(
+        truthy_value(current.get("final_mp4_delivered"), False)
+        or truthy_value(current.get("delivery_succeeded"), False)
+        or truthy_value(current.get("delivery_success"), False)
+        or str(current.get("terminal_artifact_type") or "").strip().lower() == "video"
+        or str(current.get("video_delivery_message_id") or "").strip()
+        or str(current.get("telegram_message_id") or "").strip()
+    )
+    if video_delivered:
+        return True
     if mode == VIDEO_SUBTITLE_MODE_CREATE:
         return False
     return bool(
         subdub_should_suppress_late_public_failure(current)
-        or truthy_value(current.get("final_mp4_delivered"), False)
-        or str(current.get("terminal_artifact_type") or "").strip().lower() == "video"
-        or str(current.get("video_delivery_message_id") or "").strip()
     )
 
 def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
@@ -176487,12 +176494,18 @@ def subdub_begin_delivery_once(job_key: str) -> bool:
 async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason: str = "", lang: str = "vi", reply_markup=None) -> dict:
     key = str(job_key or "")
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
-    if not job and normalize_video_translate_mode(mode) in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+    safe_mode = normalize_video_translate_mode(mode)
+    if safe_mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         user_from_key = key.split("|", 1)[0] if key else ""
         fallback_user_id = _safe_int(user_from_key, 0)
         if fallback_user_id:
-            job = subtitle_dub_find_latest_dub_job_for_user_mode(fallback_user_id, mode)
-            key = str(job.get("job_key") or key)
+            fallback_job = subtitle_dub_find_latest_dub_job_for_user_mode(fallback_user_id, safe_mode)
+            if fallback_job and (
+                not job
+                or not subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason})
+            ):
+                job = dict(fallback_job)
+                key = str(job.get("job_key") or key)
     if job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
@@ -176661,6 +176674,18 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
         )
         return 1 if any(token and token in haystack for token in source_tokens) else 0
 
+    def _active_or_delivered_score(item: dict) -> int:
+        if subdub_should_suppress_late_public_failure(item) or subdub_job_blocks_public_fail(item):
+            return 3
+        if subdub_should_suppress_generic_fail_for_active_job(item, {}):
+            return 2
+        terminal = str(item.get("terminal_state") or "").strip().lower()
+        status = str(item.get("status") or "").strip().lower()
+        if terminal.startswith("failed") or status.startswith("failed"):
+            return 0
+        progress = _safe_int(item.get("progress_percent") or item.get("panel_final_percent"), 0)
+        return 1 if progress > 0 else 0
+
     candidates: list[dict] = []
     for raw in SUBTITLE_DUB_PIPELINE_JOBS.values():
         item = dict(raw or {})
@@ -176678,7 +176703,7 @@ def subtitle_dub_find_latest_dub_job_for_user_mode(user_id, mode: str = "", stat
     candidates.sort(
         key=lambda item: (
             _source_score(item),
-            1 if subdub_should_suppress_late_public_failure(item) or subdub_job_blocks_public_fail(item) else 0,
+            _active_or_delivered_score(item),
             subdub_job_timestamp(item.get("updated_at") or item.get("started_at") or item.get("created_at") or 0),
         ),
         reverse=True,
@@ -179356,12 +179381,16 @@ async def send_public_subtitle_dub_final_outputs(
 
         if validation.get("ok"):
             if await _deliver_video_payload(video_bytes, "original"):
+                if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
+                    return sent
                 if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
                     return sent
             compressed = b""
             if not sent.get("video_delivery_message_id") and (len(video_bytes) > doc_limit or len(video_bytes) >= compress_threshold):
                 compressed, _compress_detail = await subdub_compress_video_bytes(video_bytes, require_audio=require_audio)
                 if compressed and await _deliver_video_payload(compressed, "compressed"):
+                    if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
+                        return sent
                     if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
                         return sent
     if requires_final_mp4 and not sent.get("final_mp4_delivered") and not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
@@ -185599,8 +185628,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 or ""
             )
             latest_failure_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
-            if not latest_failure_job and mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-                latest_failure_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
+            if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+                fallback_failure_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
+                if fallback_failure_job and (
+                    not latest_failure_job
+                    or not subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result)
+                ):
+                    latest_failure_job = fallback_failure_job
             if latest_failure_job and subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result):
                 suppression_job_key = str(latest_failure_job.get("job_key") or pipeline_job_key)
                 latest_failure_job["late_public_error_suppressed"] = True
