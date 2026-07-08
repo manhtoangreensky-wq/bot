@@ -44,6 +44,7 @@ def default_state() -> dict:
     return {
         "version": STATE_VERSION,
         "users": {},
+        "conversations": {},
         "traces": {},
         "last_debug": {},
     }
@@ -54,7 +55,7 @@ def normalize_state(state: dict | None) -> dict:
     if isinstance(state, dict):
         clean.update(state)
     clean["version"] = STATE_VERSION
-    for key in ("users", "traces", "last_debug"):
+    for key in ("users", "conversations", "traces", "last_debug"):
         if not isinstance(clean.get(key), dict):
             clean[key] = {}
     return clean
@@ -207,8 +208,45 @@ def status_payload(state: dict, user_id: str | int) -> dict:
         "updated_at": user.get("updated_at"),
         "last_trace": trace[-1] if trace else {},
         "trace": trace[-TRACE_LIMIT:],
+        "conversation_memory": dict(clean["conversations"].get(str(user_id)) or {}),
         "state_source": str(default_state_path()),
     }
+
+
+def conversation_memory(state: dict, user_id: str | int) -> dict:
+    clean = normalize_state(state)
+    return dict(clean["conversations"].get(str(user_id)) or {})
+
+
+def update_conversation_memory(state: dict, user_id: str | int, text: str, result: dict, *, now: float | None = None) -> dict:
+    clean = normalize_state(state)
+    uid = str(user_id)
+    current = time.time() if now is None else float(now)
+    memory = dict(clean["conversations"].get(uid) or {})
+    messages = list(memory.get("last_messages") or [])
+    safe_text = _safe_text(text, 500)
+    if safe_text:
+        messages.append({"text": safe_text, "at": current})
+    messages = messages[-5:]
+    classification = dict(result.get("classification") or {})
+    intent_id = str(result.get("intent_id") or classification.get("intent_id") or "")
+    product = str(
+        result.get("primary_product")
+        or classification.get("primary_product")
+        or classification.get("product")
+        or memory.get("last_product")
+        or ""
+    )
+    clean["conversations"][uid] = {
+        "last_messages": messages,
+        "last_intent": intent_id,
+        "last_product": product,
+        "conversation_stage": cskh.conversation_stage_for_intent(intent_id),
+        "last_source": list(result.get("source") or []),
+        "last_reply_preview": _safe_text(result.get("reply") or "", 240),
+        "updated_at": current,
+    }
+    return clean
 
 
 def _flow_for_text(text: str, classification: dict | None = None) -> dict:
@@ -248,12 +286,29 @@ def _is_real_creation_request(text: str) -> bool:
     folded = _fold(text)
     if any(term in folded for term in ("bi ket", "ket file", "khong ra file", "chua ra file", "chua thay file", "loi", "fail", "hong file")):
         return False
+    if cskh.has_pricing_keyword(text):
+        return False
     real_terms = ("tao that", "lam that", "render", "xuat file", "ra file", "tao anh", "tao video", "tao nhac", "long tieng", "phu de", "doc voice")
     return any(term in folded for term in real_terms) and not any(term in folded for term in ("prompt", "y tuong", "caption", "huong dan"))
 
 
 def _prompt_reply(text: str) -> str:
     brief = _safe_text(text, 500)
+    folded = _fold(brief)
+    topic = brief
+    match = re.search(r"(?:prompt\s+video|video\s+prompt|tao\s+prompt\s+video|tạo\s+prompt\s+video)\s+(.+)", brief, flags=re.IGNORECASE)
+    if match:
+        topic = match.group(1).strip()
+    elif "nuoc hoa" in folded:
+        topic = "nước hoa nam"
+    if "video" in folded:
+        return (
+            "Dạ được ạ. Đây là prompt video miễn phí:\n\n"
+            f"<code>Video quảng cáo ngắn cho {html.escape(topic or 'sản phẩm')}, phong cách cao cấp, tự nhiên và dễ bán. "
+            "Mở đầu cận sản phẩm với ánh sáng mềm, nền sạch, chuyển động máy quay chậm. "
+            "Cảnh giữa thể hiện lợi ích chính và cảm giác sử dụng. "
+            "Cảnh cuối có CTA rõ, tỉ lệ 9:16, nhịp dựng nhanh, màu sắc sang, không phóng đại công dụng.</code>"
+        )
     return (
         "Dạ được ạ. Đây là prompt miễn phí để mình dùng làm nháp:\n\n"
         f"<code>{html.escape(brief)}\n\n"
@@ -277,12 +332,18 @@ def _flow_reply(flow: dict, *, allowed_to_assist: bool) -> str:
 
 def _sources_for_classification(classification: dict, *, fallback: bool = False, learning: bool = False) -> list[str]:
     sources = ["aichat"]
+    sources.extend(str(item) for item in (classification.get("source") or []) if str(item or "").strip())
     intent_id = str(classification.get("intent_id") or "")
     if classification.get("knowledge_entry_id") or classification.get("training_data_version"):
         sources.append("cskh_knowledge")
     if classification.get("playbook_scenario_id"):
         sources.append("cskh_playbook")
-    if classification.get("pricing_source") == "config" or classification.get("price_text") or "pricing" in intent_id:
+    pricing_source = str(classification.get("pricing_source") or "")
+    if pricing_source == "pricing_doc":
+        sources.append("pricing_doc")
+    elif pricing_source == "guide_doc":
+        sources.append("guide_doc")
+    elif pricing_source == "config" or classification.get("price_text") or "pricing" in intent_id:
         sources.append("pricing")
     if fallback:
         sources.append("fallback")
@@ -341,7 +402,8 @@ def classify_message(text: str, *, user_id: str | int = "", conversation_memory:
 
 def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bool = True) -> dict:
     clean_text = _safe_text(text, 2000)
-    classification = classify_message(clean_text, user_id=user_id)
+    memory = conversation_memory(state, user_id)
+    classification = classify_message(clean_text, user_id=user_id, conversation_memory=memory)
     intent_id = str(classification.get("intent_id") or "out_of_scope")
     assist_actions = action_permission_enabled(state, user_id)
     fallback = intent_id in {"out_of_scope", "vague_or_unclear"} or str(classification.get("confidence") or "") == "low"
@@ -364,7 +426,8 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         action_guard = "prepare_flow_stop_at_confirm" if assist_actions else "needs_action_permission"
         reply = _flow_reply(flow, allowed_to_assist=assist_actions)
     elif _is_prompt_request(clean_text):
-        reply = _prompt_reply(clean_text)
+        reply = str(classification.get("reply") or "").strip() if intent_id.startswith("prompt_") else ""
+        reply = reply or _prompt_reply(clean_text)
         action_guard = "free_text_only"
         permission = "default_answer"
     elif fallback:
@@ -379,12 +442,15 @@ def build_reply(state: dict, user_id: str | int, text: str, *, queue_unknown: bo
         "entry": "aichat",
         "intent_id": intent_id,
         "classification": classification,
+        "confidence": str(classification.get("confidence") or ""),
+        "primary_product": str(classification.get("primary_product") or classification.get("product") or ""),
         "reply": reply,
         "source": sources,
         "permission": permission,
         "action_guard": action_guard,
         "target_flow": flow,
         "learning_candidate_id": learning_candidate.get("id") or "",
+        "learning_queue": bool(learning_candidate),
         "provider_call_allowed": False,
         "xu_charge_allowed": False,
         "invoice_confirm_allowed": False,
@@ -410,6 +476,7 @@ def process_message(state: dict, user_id: str | int, text: str, *, queue_unknown
         return clean, result
     result = build_reply(clean, uid, text, queue_unknown=queue_unknown)
     result["replied"] = True
+    clean = update_conversation_memory(clean, uid, text, result)
     clean = record_trace(clean, uid, text=text, result=result, replied=True)
     return clean, result
 
@@ -433,6 +500,8 @@ def record_trace(state: dict, user_id: str | int, *, text: str, result: dict, re
         "source": list(result.get("source") or ["aichat"]),
         "permission": str(result.get("permission") or ""),
         "action_guard": str(result.get("action_guard") or ""),
+        "confidence": str(result.get("confidence") or (result.get("classification") or {}).get("confidence") or ""),
+        "learning_queue": bool(result.get("learning_queue") or result.get("learning_candidate_id")),
         "target_flow": dict(result.get("target_flow") or {}),
         "learning_candidate_id": str(result.get("learning_candidate_id") or ""),
         "provider_call_allowed": False,

@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+from services import aas_shared_knowledge
+
 
 BUSINESS_UPDATE_TYPES = (
     "business_connection",
@@ -69,6 +71,7 @@ POLICY_CLAIM_TYPES = {
     "policy_confirm_required",
     "never_auto_promise",
 }
+TRUSTED_PRICING_SOURCES = {"config", "pricing_doc", "guide_doc"}
 URGENT_INTENTS = {
     "payment_xu_not_received",
     "payment_wrong_amount",
@@ -1500,7 +1503,7 @@ def detect_policy_claims(
         claim_types.add("policy_confirm_required")
         blocked.append("vip_or_discount_policy_unverified")
         requires_admin_review = True
-    if hard_price and str(pricing_source or "unknown") != "config":
+    if hard_price and str(pricing_source or "unknown") not in TRUSTED_PRICING_SOURCES:
         claim_types.add("config_priced_fact")
         blocked.append("hardcoded_price_without_config_source")
         requires_admin_review = True
@@ -2305,6 +2308,65 @@ def _apply_pricing_table_thread_hint(text: str, classification: dict) -> dict:
     return classification
 
 
+def _result_sources_from_classification(classification: dict, *, fallback: bool = False) -> list[str]:
+    sources = list(classification.get("source") or [])
+    if classification.get("knowledge_entry_id") or classification.get("training_data_version"):
+        sources.append("cskh_knowledge")
+    if classification.get("playbook_scenario_id"):
+        sources.append("playbook")
+    pricing_source = str(classification.get("pricing_source") or "")
+    if pricing_source == "pricing_doc":
+        sources.append("pricing_doc")
+    elif pricing_source == "guide_doc":
+        sources.append("guide_doc")
+    elif pricing_source in {"config", "runtime"} or classification.get("price_text"):
+        sources.append("pricing")
+    if fallback or str(classification.get("confidence") or "") == "low":
+        sources.append("fallback")
+    return list(dict.fromkeys(str(item) for item in sources if str(item or "").strip()))
+
+
+def _apply_shared_doc_answer(text: str, classification: dict, conversation_memory: dict | None = None) -> dict:
+    shared = aas_shared_knowledge.classify_shared_answer(text, conversation_memory=conversation_memory)
+    if not shared.get("matched"):
+        classification = dict(classification)
+        classification["source"] = _result_sources_from_classification(
+            classification,
+            fallback=str(classification.get("intent_id") or "") in {"out_of_scope", "vague_or_unclear"},
+        )
+        classification["learning_queue"] = bool(classification.get("would_queue_learning"))
+        return classification
+    result = dict(classification)
+    intent_id = str(shared.get("intent_id") or result.get("intent_id") or "pricing_general")
+    product = str(shared.get("primary_product") or shared.get("product") or result.get("primary_product") or result.get("product") or "general")
+    result.update(
+        {
+            "intent": intent_id,
+            "intent_id": intent_id,
+            "product": product,
+            "primary_product": product,
+            "knowledge_entry_id": str(shared.get("knowledge_entry_id") or (product if product != "general" else "")),
+            "pricing_source": str(shared.get("pricing_source") or "pricing_doc"),
+            "price_text": str(shared.get("price_text") or result.get("price_text") or ""),
+            "reply": str(shared.get("reply") or result.get("reply") or ""),
+            "reply_preview": str(shared.get("reply_preview") or shared.get("reply") or result.get("reply_preview") or ""),
+            "reply_template_id": str(shared.get("reply_template_id") or f"shared_knowledge:{intent_id}"),
+            "confidence": str(shared.get("confidence") or "high"),
+            "handoff": bool(shared.get("handoff", result.get("handoff", False))),
+            "handoff_required": bool(shared.get("handoff_required", result.get("handoff_required", False))),
+            "ticket": bool(shared.get("ticket", result.get("ticket", False))),
+            "ticket_required": bool(shared.get("ticket_required", result.get("ticket_required", False))),
+            "shared_docs": dict(shared.get("shared_docs") or {}),
+            "conversation_stage": conversation_stage_for_intent(intent_id),
+        }
+    )
+    result["source"] = _result_sources_from_classification({**result, "source": list(shared.get("source") or [])})
+    policy = detect_policy_claims(result.get("reply") or "", pricing_source=str(result.get("pricing_source") or "unknown"))
+    result["playbook_policy_claims"] = policy
+    result["public_safe"] = public_reply_is_safe(result["reply"]) and not bool(policy.get("unsafe"))
+    return result
+
+
 def classify_cskh_message(
     text: str = "",
     *,
@@ -2401,7 +2463,13 @@ def classify_cskh_message(
     else:
         result["playbook_policy_claims"] = detect_policy_claims(result.get("reply") or "", pricing_source=pricing_source)
         result["public_safe"] = public_reply_is_safe(result["reply"]) and not bool(result["playbook_policy_claims"].get("unsafe"))
+    result = _apply_shared_doc_answer(text, result, conversation_memory)
     result["would_queue_learning"] = should_queue_learning(result, text)
+    result["learning_queue"] = bool(result["would_queue_learning"])
+    result["source"] = _result_sources_from_classification(
+        result,
+        fallback=str(result.get("intent_id") or "") in {"out_of_scope", "vague_or_unclear"},
+    )
     if ticket or handoff:
         result["ticket_preview"] = build_ticket_draft(result, text=text)
     elif result.get("ticket") or result.get("handoff"):
