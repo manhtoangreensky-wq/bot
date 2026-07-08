@@ -146,8 +146,8 @@ def test_uiflow1_realistic_video_prompt_flow_reaches_add_materials_then_review()
     text, markup, session = _press(user_id, "vproduct|b14_idea_select|0")
     assert session["current_step"] == "asset_intake"
     assert "Muốn video sát ý hơn" in text
+    assert "📷 Tôi có ảnh sẵn" not in _labels(markup)
     for expected in (
-        "📷 Tôi có ảnh sẵn",
         "🖼 Tạo ảnh AI trước",
         "📚 Gợi ý bố cục ảnh",
         "🎨 Dùng prompt ảnh từ storyboard",
