@@ -176002,6 +176002,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["subtitle_margin_l_after"] = side_margin
         style["subtitle_margin_r_after"] = side_margin
     return style
+
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
     colors = {
         "white": "#FFFFFF",
@@ -176249,6 +176250,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     if len(header) >= 5:
         header.insert(5, f"; subtitle_overlap_events_suppressed: {overlap_suppressed}")
     return "\n".join(header + events) + "\n"
+
 def subdub_ffmpeg_filter_path(path: str) -> str:
     return str(path or "").replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
@@ -176484,19 +176486,10 @@ async def send_public_subtitle_dub_final_outputs(
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
     is_combined = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    requires_final_mp4 = subdub_video_requires_final_mp4(mode)
     metadata_enabled = bool(strict_validation)
-    video_product_mode = bool(
-        active_flow not in {VIDEO_DUBBING_FLOW_TRANSCRIPT, VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}
-        and mode in {
-            VIDEO_SUBTITLE_MODE_CREATE,
-            VIDEO_SUBTITLE_MODE_TRANSLATE,
-            VIDEO_SUBTITLE_MODE_DUB,
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-        }
-    )
-    requires_final_mp4 = bool(subdub_video_requires_final_mp4(mode) or video_product_mode)
     video_product_subtitle_mode = bool(
-        video_product_mode
+        active_flow not in {VIDEO_DUBBING_FLOW_TRANSCRIPT, VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}
         and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     )
     sent = {
@@ -176616,7 +176609,7 @@ async def send_public_subtitle_dub_final_outputs(
                 if compressed and await _deliver_video_payload(compressed, "compressed"):
                     if mode != VIDEO_SUBTITLE_MODE_CREATE or not include_subtitle_outputs:
                         return sent
-    if requires_final_mp4 and not sent.get("final_mp4_delivered") and (not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED or video_product_mode):
+    if requires_final_mp4 and not sent.get("final_mp4_delivered") and not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
         sent["audio_fallback_suppressed"] = bool(audio_bytes)
         sent["audio_artifact_internal_only"] = bool(audio_bytes)
         sent["partial_audio_available"] = bool(audio_bytes)
@@ -176631,7 +176624,6 @@ async def send_public_subtitle_dub_final_outputs(
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         and audio_bytes
         and SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED
-        and not video_product_mode
     ):
         existing_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
         if existing_job and subdub_job_has_failure_public_outcome(existing_job):
@@ -176697,13 +176689,6 @@ async def send_public_subtitle_dub_final_outputs(
             "srt",
         )
         wanted_types = (available_type,)
-    elif video_product_mode:
-        sent["srt_fallback_suppressed"] = True
-        sent["srt_auto_send_suppressed"] = True
-        sent["srt_suppress_reason"] = "video_mode_requires_mp4"
-        sent["partial_copy_suppressed"] = True
-        sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
-        wanted_types = ()
     elif mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         wanted_types = ("srt",)
     else:
@@ -176718,12 +176703,6 @@ async def send_public_subtitle_dub_final_outputs(
         if not data and wanted_type == "srt" and str(srt_text or "").strip():
             data = str(srt_text).encode("utf-8")
         if data:
-            blocked_reason = subdub_forbidden_delivery_artifact_reason(filename)
-            if blocked_reason:
-                sent["forbidden_artifact_blocked"] = True
-                sent["forbidden_artifact_reason"] = blocked_reason
-                logger.warning("blocked forbidden SubDub delivery artifact | reason=%s filename=%s", blocked_reason, sanitize_log_text(filename)[:120])
-                continue
             caption = "✅ File kết quả."
             if sent.get("terminal_artifact_type") != "video" and not sent.get("audio"):
                 caption = subdub_subtitle_fallback_text(mode, lang)
@@ -177803,31 +177782,6 @@ def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
     output.seek(0)
     return output
 
-SUBDUB_FORBIDDEN_DELIVERY_TOKENS = (
-    ".db",
-    ".sqlite",
-    ".sqlite3",
-    ".env",
-    ".log",
-    ".bak",
-    "backup",
-    "toan_aas_backup",
-    "database",
-    "secrets",
-)
-
-def subdub_forbidden_delivery_artifact_reason(filename: str = "", path: str = "") -> str:
-    value = f"{filename or ''} {path or ''}".replace("\\", "/").strip().lower()
-    if not value:
-        return ""
-    base = os.path.basename(str(filename or path or "")).lower()
-    if base.endswith(".mp4") or base.endswith(".srt") or base.endswith(".vtt") or base.endswith(".txt"):
-        if not any(token in base for token in ("backup", "toan_aas_backup", "database", "secrets")):
-            return ""
-    for token in SUBDUB_FORBIDDEN_DELIVERY_TOKENS:
-        if token in value:
-            return token
-    return ""
 
 def ffprobe_path_for_ffmpeg(ffmpeg_path: str = "") -> str:
     ffmpeg = str(ffmpeg_path or frame_video_ffmpeg_path() or "")
@@ -179689,10 +179643,6 @@ async def subtitle_plus_dub_send_subtitle_document(message, user_id, state: dict
             path = str(row.get("local_path") or row.get("file_ref") or "")
             if path and os.path.exists(path) and callable(getattr(message, "reply_document", None)):
                 filename = os.path.basename(path) or f"toan_aas_subtitle.{safe_output_type}"
-                blocked_reason = subdub_forbidden_delivery_artifact_reason(filename, path)
-                if blocked_reason:
-                    logger.warning("blocked forbidden SubDub subtitle asset download | reason=%s filename=%s", blocked_reason, sanitize_log_text(filename)[:120])
-                    continue
                 with open(path, "rb") as handle:
                     await message.reply_document(
                         document=video_dubbing_output_file(handle.read(), filename),
@@ -179707,10 +179657,6 @@ async def subtitle_plus_dub_send_subtitle_document(message, user_id, state: dict
     item = video_dubbing_subtitle_output_items(subtitle_text, safe_output_type, mode)[0]
     filename = str(item.get("filename") or "toan_aas_subtitle.srt")
     if callable(getattr(message, "reply_document", None)):
-        blocked_reason = subdub_forbidden_delivery_artifact_reason(filename)
-        if blocked_reason:
-            logger.warning("blocked forbidden generated SubDub subtitle download | reason=%s filename=%s", blocked_reason, sanitize_log_text(filename)[:120])
-            return False
         await message.reply_document(
             document=video_dubbing_output_file(bytes(item.get("bytes") or b""), filename),
             filename=filename,

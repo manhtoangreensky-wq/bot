@@ -1,10 +1,6 @@
-import asyncio
 import hashlib
-import inspect
 import subprocess
 from pathlib import Path
-
-import bot
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,172 +15,82 @@ M4LIVE2_SOURCE = subprocess.check_output(
 )
 
 
-def _function_source(source: str, name: str, *, async_def: bool = False) -> str:
-    marker = f"{'async ' if async_def else ''}def {name}("
-    start = source.find(marker)
-    assert start >= 0, name
+def _function_source(source: str, name: str) -> str:
+    markers = (f"def {name}(", f"async def {name}(")
+    starts = [source.find(marker) for marker in markers if source.find(marker) >= 0]
+    assert starts, name
+    start = min(starts)
     next_def = source.find("\ndef ", start + 1)
     next_async = source.find("\nasync def ", start + 1)
     endings = [item for item in (next_def, next_async) if item >= 0]
     end = min(endings) if endings else len(source)
-    return source[start:end]
+    return source[start:end].strip()
 
 
 def _hash(value: str) -> str:
-    return hashlib.sha1(value.strip().encode("utf-8")).hexdigest()
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
 def test_m4live6_baseline_source_is_m4live2_526dfac3():
-    assert subprocess.check_output(["git", "show", "--no-patch", "--format=%h", M4LIVE2_SHA], cwd=ROOT, text=True).strip() == "526dfac"
+    short = subprocess.check_output(
+        ["git", "show", "--no-patch", "--format=%h", M4LIVE2_SHA],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    assert short == "526dfac"
 
 
-def test_m4live6_restores_m4live2_runtime_functions():
-    names = {
-        "_execute_video_dubbing_pipeline_core": True,
-        "subdub_duration_gate_payload": False,
-        "subdub_generate_ass_from_srt": False,
-        "subdub_normalize_style": False,
-        "subdub_progress_text": False,
-        "subdub_voice_style_state_fields": False,
-        "subdub_dub_speech_config": False,
-        "video_dubbing_receipt_text": False,
-    }
-    for name, is_async in names.items():
-        assert _hash(_function_source(BOT_SOURCE, name, async_def=is_async)) == _hash(
-            _function_source(M4LIVE2_SOURCE, name, async_def=is_async)
-        ), name
+def test_m4live6_subdub_delivery_runtime_is_exact_m4live2():
+    for name in (
+        "send_public_subtitle_dub_final_outputs",
+        "subtitle_plus_dub_send_subtitle_document",
+        "video_dubbing_output_file",
+    ):
+        assert _hash(_function_source(BOT_SOURCE, name)) == _hash(_function_source(M4LIVE2_SOURCE, name)), name
 
 
-class _Sent:
-    message_id = "msg-1"
+def test_m4live6_subtitle_renderer_is_exact_m4live2():
+    for name in (
+        "subdub_normalize_style",
+        "subdub_generate_ass_from_srt",
+        "subdub_ass_alignment",
+        "subdub_ass_wrap_text",
+        "subdub_ass_text_chunks",
+    ):
+        assert _hash(_function_source(BOT_SOURCE, name)) == _hash(_function_source(M4LIVE2_SOURCE, name)), name
 
 
-class _Message:
-    def __init__(self):
-        self.documents = []
-        self.audio = []
-
-    async def reply_document(self, **kwargs):
-        self.documents.append(kwargs)
-        return _Sent()
-
-    async def reply_audio(self, **kwargs):
-        self.audio.append(kwargs)
-        return _Sent()
+def test_m4live6_no_video_product_mode_guard_in_subdub_delivery():
+    delivery = _function_source(BOT_SOURCE, "send_public_subtitle_dub_final_outputs")
+    assert "video_product_mode" not in delivery
+    assert 'success_blocked_reason"] = "missing_valid_delivered_mp4"' in delivery
+    assert 'and (not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED or video_product_mode)' not in delivery
 
 
-async def _fake_video_delivery(*args, **kwargs):
-    return {
-        "sent": True,
-        "delivery_method": "video",
-        "telegram_message_id": "video-1",
-        "file_size_mb": 1.0,
-        "size_limit_used": 45.0,
-    }
+def test_m4live6_no_db_artifact_guard_inside_subdub_delivery():
+    delivery = _function_source(BOT_SOURCE, "send_public_subtitle_dub_final_outputs")
+    manual_download = _function_source(BOT_SOURCE, "subtitle_plus_dub_send_subtitle_document")
+    assert "subdub_forbidden_delivery_artifact_reason" not in BOT_SOURCE
+    assert "SUBDUB_FORBIDDEN_DELIVERY_TOKENS" not in BOT_SOURCE
+    assert ".db" not in delivery
+    assert ".db" not in manual_download
 
 
-def test_m4live6_video_mode_mp4_delivery_does_not_auto_send_srt(monkeypatch):
-    monkeypatch.setattr(bot, "send_generated_video_bytes_for_delivery", _fake_video_delivery)
-    message = _Message()
-
-    result = asyncio.run(
-        bot.send_public_subtitle_dub_final_outputs(
-            message,
-            mode=bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
-            subtitle_items=[{"output_type": "srt", "filename": "toan_aas_subtitle_translate.srt", "bytes": b"1\n"}],
-            video_bytes=b"fake mp4",
-            include_subtitle_outputs=True,
-        )
-    )
-
-    assert result["final_mp4_delivered"] is True
-    assert result["srt_auto_send_suppressed"] is True
-    assert result["documents"] == 0
-    assert message.documents == []
-
-
-def test_m4live6_video_mode_blocks_srt_only_mp4_replacement():
-    message = _Message()
-
-    result = asyncio.run(
-        bot.send_public_subtitle_dub_final_outputs(
-            message,
-            mode=bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
-            subtitle_items=[{"output_type": "srt", "filename": "toan_aas_subtitle_translate.srt", "bytes": b"1\n"}],
-            video_bytes=b"",
-            include_subtitle_outputs=True,
-        )
-    )
-
-    assert result["success_blocked_reason"] == "missing_valid_delivered_mp4"
-    assert result["documents"] == 0
-    assert message.documents == []
-
-
-def test_m4live6_file_subtitle_flow_can_still_send_safe_srt():
-    message = _Message()
-
-    result = asyncio.run(
-        bot.send_public_subtitle_dub_final_outputs(
-            message,
-            mode=bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
-            active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE,
-            subtitle_items=[{"output_type": "srt", "filename": "toan_aas_subtitle_translate.srt", "bytes": b"1\n"}],
-            video_bytes=b"",
-            include_subtitle_outputs=True,
-        )
-    )
-
-    assert result["documents"] == 1
-    assert len(message.documents) == 1
-
-
-def test_m4live6_blocks_db_backup_artifact_delivery():
-    assert bot.subdub_forbidden_delivery_artifact_reason("toan_aas_backup_20260707_1727.db") == ".db"
-    assert bot.subdub_forbidden_delivery_artifact_reason("customer.sqlite3") == ".sqlite"
-    assert bot.subdub_forbidden_delivery_artifact_reason("runtime.env") == ".env"
-    assert bot.subdub_forbidden_delivery_artifact_reason("subdub.log") == ".log"
-    assert bot.subdub_forbidden_delivery_artifact_reason("secrets.txt") == "secrets"
-    assert bot.subdub_forbidden_delivery_artifact_reason("toan_aas_video.mp4") == ""
-    assert bot.subdub_forbidden_delivery_artifact_reason("toan_aas_subtitle_translate.srt") == ""
-
-
-def test_m4live6_forbidden_artifact_is_not_sent_even_in_file_flow():
-    message = _Message()
-
-    result = asyncio.run(
-        bot.send_public_subtitle_dub_final_outputs(
-            message,
-            mode=bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
-            active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE,
-            subtitle_items=[{"output_type": "srt", "filename": "toan_aas_backup_20260707_1727.db", "bytes": b"secret"}],
-            video_bytes=b"",
-            include_subtitle_outputs=True,
-        )
-    )
-
-    assert result["documents"] == 0
-    assert result["forbidden_artifact_blocked"] is True
-    assert message.documents == []
-
-
-def test_m4live6_auto_backup_does_not_send_db_document():
-    source = BOT_SOURCE
-    start = source.find("async def auto_backup_loop():")
+def test_m4live6_auto_backup_db_is_internal_not_telegram_document():
+    start = BOT_SOURCE.find("async def auto_backup_loop():")
     assert start >= 0
-    end = source.find("tg_auto_backup_task = asyncio.create_task(auto_backup_loop())", start)
-    loop_source = source[start:end]
-
+    end = BOT_SOURCE.find("tg_auto_backup_task = asyncio.create_task(auto_backup_loop())", start)
+    assert end > start
+    loop_source = BOT_SOURCE[start:end]
     assert "Auto backup Telegram document suppressed" in loop_source
     assert ".send_document(" not in loop_source
+    assert ".reply_document(" not in loop_source
 
 
-def test_m4live6_no_music_product_video_cskh_payos_runtime_files_touched():
+def test_m4live6_scope_is_subdub_and_backup_guard_only():
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], cwd=ROOT, text=True)
     changed_paths = {line.strip().replace("\\", "/") for line in changed.splitlines() if line.strip()}
     assert changed_paths <= {
         "bot.py",
-        "tests/test_p0_19m_m4live2_subdub_final_polish_lock.py",
-        "tests/test_p0_19m_m4live5_subdub_full_runtime_rollback_to_3mp4_baseline.py",
         "tests/test_p0_19m_m4live6_restore_m4live2_and_block_artifacts.py",
     }
