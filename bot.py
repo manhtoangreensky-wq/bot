@@ -67357,6 +67357,159 @@ def video_b14_scene_count_for_session(session: dict | None = None, default: int 
     return max(1, min(20, safe_int(draft.get("b14_scene_count") or draft.get("scene_count") or default, default)))
 
 
+def product_video_requested_duration_seconds(text: str = "") -> int:
+    raw = str(text or "").lower()
+    if not raw:
+        return 0
+    patterns = (
+        (r"(\d{1,3})\s*(?:giây|giay|sec|secs|second|seconds|s)\b", 1),
+        (r"(\d{1,2})\s*(?:phút|phut|minute|minutes|min|m)\b", 60),
+    )
+    for pattern, multiplier in patterns:
+        match = re.search(pattern, raw)
+        if match:
+            return max(1, min(180, safe_int(match.group(1), 0) * multiplier))
+    if any(word in raw for word in ("1 phút", "mot phut", "một phút")):
+        return 60
+    return 0
+
+
+def product_video_predict_intent(text: str = "") -> str:
+    lower = str(text or "").lower()
+    if any(token in lower for token in ("before after", "trước sau", "truoc sau", "biến đổi", "bien doi")):
+        return "before_after"
+    if any(token in lower for token in ("demo", "hướng dẫn", "huong dan", "cách dùng", "cach dung", "sử dụng", "su dung")):
+        return "demo_usage"
+    if any(token in lower for token in ("cinematic", "điện ảnh", "dien anh", "sang trọng", "sang trong", "luxury", "phố đêm", "pho dem")):
+        return "cinematic_showcase"
+    if any(token in lower for token in ("thương hiệu", "thuong hieu", "brand", "logo", "giới thiệu", "gioi thieu")):
+        return "brand_intro"
+    if any(token in lower for token in ("bán hàng", "ban hang", "mỹ phẩm", "my pham", "sản phẩm", "san pham", "cta", "chốt đơn", "chot don")):
+        return "product_ad"
+    if any(token in lower for token in ("trend", "viral", "tiktok", "reels", "shorts")):
+        return "trend_short"
+    if any(token in lower for token in ("câu chuyện", "cau chuyen", "hành trình", "hanh trinh", "trailer", "phim ngắn", "phim ngan")):
+        return "story_video"
+    return "unknown"
+
+
+def product_video_scene_breakdown(intent: str, count: int, prompt: str = "") -> list[str]:
+    count = max(1, min(20, safe_int(count, 1)))
+    templates = {
+        "product_ad": ["hook gây chú ý", "giới thiệu sản phẩm", "công dụng/lợi ích", "CTA/chốt cảm xúc"],
+        "brand_intro": ["mở đầu nhận diện thương hiệu", "giá trị/câu chuyện", "sản phẩm hoặc dịch vụ chính", "kết thúc bằng logo/thông điệp"],
+        "cinematic_showcase": ["hook hình ảnh mạnh", "chuyển động/bối cảnh chính", "cận chi tiết sang trọng", "kết thúc cảm xúc"],
+        "demo_usage": ["vấn đề ban đầu", "cách dùng", "kết quả sau khi dùng", "CTA nhẹ"],
+        "before_after": ["trạng thái trước", "quá trình chuyển đổi", "kết quả sau", "nhấn lợi ích"],
+        "trend_short": ["hook trend", "cao trào/chuyển động chính", "điểm nhớ cuối", "CTA ngắn"],
+        "story_video": ["mở chuyện", "xung đột/chuyển động", "cao trào", "kết thúc"],
+        "unknown": ["mở đầu rõ chủ thể", "diễn biến chính", "chi tiết nổi bật", "kết thúc"],
+    }
+    base = templates.get(intent) or templates["unknown"]
+    lines: list[str] = []
+    for index in range(count):
+        label = base[index] if index < len(base) else f"mở rộng ý {index + 1}"
+        lines.append(f"Cảnh {index + 1}: {label}")
+    return lines
+
+
+def product_video_duration_predictor(session: dict | None = None, user_id=0) -> dict:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    prompt = str(session.get("topic") or draft.get("topic") or draft.get("idea") or draft.get("prompt") or "").strip()
+    quality = video_b14_quality_for_session(session) or PRODUCT_VIDEO_TRIAL_QUALITY_XU
+    requested_seconds = product_video_requested_duration_seconds(prompt)
+    intent = product_video_predict_intent(prompt)
+    addon_plan = dict(draft.get("b14_addon_plan") or video_b14_addon_plan_from_session(session))
+    trial = video_b14_is_trial_quality(quality)
+    lower = prompt.lower()
+    long_prompt_signals = sum(
+        1
+        for token in ("hook", "công dụng", "cong dung", "cta", "logo", "nội thất", "noi that", "hành trình", "hanh trinh", "chuyển cảnh", "chuyen canh")
+        if token in lower
+    )
+    if requested_seconds:
+        recommended = int(math.ceil(requested_seconds / max(1, TASK3D_SCENE_SECONDS)))
+    elif intent in {"product_ad", "demo_usage", "story_video", "before_after"} or long_prompt_signals >= 2:
+        recommended = 3 if long_prompt_signals >= 2 else 2
+    elif intent in {"cinematic_showcase", "brand_intro"}:
+        recommended = 2
+    else:
+        recommended = 1
+    recommended = max(1, min(20, recommended))
+    min_scene = 1
+    max_scene = 1 if trial else 20
+    upgrade_hint = ""
+    if trial:
+        if recommended > 1 or requested_seconds > PRODUCT_VIDEO_TRIAL_DURATION_SECONDS:
+            upgrade_hint = "Gói Trải nghiệm chỉ làm 1 cảnh/8s. Prompt này phù hợp hơn với 2–3 cảnh nếu muốn đầy đủ."
+        recommended = PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT
+    breakdown = product_video_scene_breakdown(intent, recommended, prompt)
+    pricing = video_b14_invoice_breakdown(quality, recommended)
+    trial_addons = video_b14_trial_addon_policy(addon_plan, quality_xu=quality)
+    add_on_impact = []
+    if product_video_logo_material_invoice_line(session):
+        add_on_impact.append("logo miễn phí vì anh/chị đã gửi logo")
+    if addon_plan.get("voice_enabled") and str(addon_plan.get("voice_source") or "").lower() in {"uploaded", "media", "user", "sent"}:
+        add_on_impact.append("voice/audio tự gửi không tính phí tạo mới")
+    if addon_plan.get("music_enabled") and str(addon_plan.get("music_source") or "").lower() in {"uploaded", "media", "user", "sent", "saved"}:
+        add_on_impact.append("nhạc tự gửi/đã lưu không tính phí tạo mới")
+    if trial_addons.get("paid_blocked"):
+        add_on_impact.append("add-on có phí bị tắt trong gói Trải nghiệm")
+    if not add_on_impact:
+        add_on_impact.append("chưa có add-on tính vào dự đoán")
+    confidence = "high" if prompt and (requested_seconds or intent != "unknown") else ("medium" if prompt else "low")
+    next_action = f"Chọn {recommended} cảnh / {recommended * TASK3D_SCENE_SECONDS}s"
+    return {
+        "predicted_intent": intent,
+        "recommended_scene_count": recommended,
+        "recommended_duration_seconds": recommended * TASK3D_SCENE_SECONDS,
+        "min_scene_count": min_scene,
+        "max_scene_count": max_scene,
+        "scene_breakdown": breakdown,
+        "add_on_impact": add_on_impact,
+        "price_estimate": {
+            "unit_price_xu": quality,
+            "scene_count": recommended,
+            "subtotal_xu": pricing["subtotal_xu"],
+            "discount_xu": pricing["discount_xu"],
+            "total_xu": pricing["total_xu"],
+        },
+        "confidence": confidence,
+        "next_action": next_action,
+        "requested_duration_seconds": requested_seconds,
+        "trial_upgrade_hint": upgrade_hint,
+        "trial_limits": {
+            "day": PRODUCT_VIDEO_TRIAL_LIMIT_DAY,
+            "week": PRODUCT_VIDEO_TRIAL_LIMIT_WEEK,
+            "month": PRODUCT_VIDEO_TRIAL_LIMIT_MONTH,
+        } if trial else {},
+    }
+
+
+def product_video_duration_predictor_text(session: dict | None = None, user_id=0, lang: str = "vi") -> str:
+    prediction = product_video_duration_predictor(session, user_id)
+    price = dict(prediction.get("price_estimate") or {})
+    lines = [
+        "🧭 <b>Gợi ý thời lượng</b>",
+        f"TOAN AAS đề xuất <b>{prediction['recommended_scene_count']} cảnh</b> khoảng <b>{prediction['recommended_duration_seconds']} giây</b> cho prompt hiện tại.",
+    ]
+    breakdown = list(prediction.get("scene_breakdown") or [])[:4]
+    if breakdown:
+        lines.append("")
+        lines.extend(f"• {html.escape(item)}" for item in breakdown)
+    hint = str(prediction.get("trial_upgrade_hint") or "").strip()
+    if hint:
+        lines.extend(["", html.escape(hint), "Giới hạn: 1 lần/ngày · 3 lần/tuần · 10 lần/tháng."])
+    lines.extend([
+        "",
+        f"Ước tính: <b>{xu_number(safe_int(price.get('unit_price_xu'), 0))} Xu/cảnh</b> · tổng <b>{xu_number(safe_int(price.get('total_xu'), 0))} Xu</b>.",
+        f"Bước tiếp theo: <b>{html.escape(str(prediction.get('next_action') or 'Chọn số cảnh'))}</b>.",
+        "Gợi ý này chỉ để lập kế hoạch, chưa dựng video và chưa trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+
 def video_b14_build_storyboard_for_session(user_id, session: dict, *, scene_count: int | None = None):
     draft = dict((session or {}).get("draft") or {})
     product_id = str(session.get("product_id") or "")
@@ -68778,6 +68931,7 @@ def video_b14_scene_count_text(session: dict | None = None, lang: str = "vi") ->
         "🎞 <b>Chọn số cảnh</b>\n\n"
         f"• Gói hiện tại: <b>{html.escape(package_text)}</b>\n"
         f"• Mỗi cảnh dự kiến: <b>{TASK3D_SCENE_SECONDS} giây</b>\n\n"
+        f"{product_video_duration_predictor_text(session, lang=lang)}\n\n"
         f"{extra}"
         "Sau bước này TOAN AAS mới hiện hóa đơn tổng. Chưa xử lý video và chưa trừ Xu."
     )
@@ -68879,6 +69033,13 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         lines.append(f"• Giảm giá số cảnh: <b>-{safe_int(invoice.get('discount_percent'), 0)}%</b> = <b>-{xu_number(safe_int(invoice.get('discount_xu'), 0))} Xu</b>")
     if balance_text:
         lines.append(balance_text)
+    prediction = product_video_duration_predictor(session, user_id)
+    lines.extend([
+        "",
+        f"• Gợi ý hệ thống: <b>{prediction['recommended_scene_count']} cảnh</b> · khoảng <b>{prediction['recommended_duration_seconds']}s</b> · độ tin cậy <b>{html.escape(str(prediction.get('confidence') or 'medium'))}</b>",
+    ])
+    if safe_int(prediction.get("recommended_scene_count"), 0) != safe_int(invoice["scene_count"], 0):
+        lines.append("• Anh/chị đang chọn khác gợi ý; hóa đơn vẫn tính theo số cảnh anh/chị đã chọn.")
     logo_material_line = product_video_logo_material_invoice_line(session, lang)
     if invoice["addons_disabled_by_package"]:
         trial_copy = str((invoice.get("trial_addon_policy") or {}).get("public_copy") or PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI)
@@ -69480,8 +69641,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
-def video_b14_queue_status_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def video_b14_queue_status_keyboard(lang: str = "vi", *, session: dict | None = None, result: dict | None = None, job_id: int | str = 0) -> InlineKeyboardMarkup:
+    draft = dict((session or {}).get("draft") or {})
+    job = dict((result or {}).get("job") or draft.get("b14_queue_job") or {})
+    jid = safe_int(job_id or job.get("id") or draft.get("b14_queue_job_id"), 0)
+    rows = []
+    if jid and video_b14_delivered_video_artifact(jid).get("ok"):
+        rows.append([InlineKeyboardButton("📥 Tải video", callback_data=f"vproduct|b14_download_video|{jid}")])
+    rows.extend([
         [
             InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data="vproduct|b14_job_status"),
             InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen"),
@@ -69491,6 +69658,7 @@ def video_b14_queue_status_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
+    return InlineKeyboardMarkup(rows)
 
 
 def video_b14_auto_refresh_key(job_id: int | str = "") -> str:
@@ -69527,6 +69695,102 @@ def video_b14_auto_refresh_final_artifact_state(job: dict | None = None, project
     return {"exists": exists, "valid": valid, "file_id": final_file_id, "path": final_path, "size": size}
 
 
+def video_b14_delivered_video_artifact(job_id: int | str = 0, *, job: dict | None = None, project: dict | None = None) -> dict:
+    jid = safe_int(job_id or (job or {}).get("id") or (job or {}).get("job_id"), 0)
+    current_job = dict(job or (video_b14_render_job_by_id(jid) if jid else {}) or {})
+    current_project = dict(project or {})
+    if current_job and not current_project:
+        try:
+            current_project = get_video_project(safe_int(current_job.get("project_id"), 0))
+        except Exception:
+            current_project = {}
+    payload = video_b14_job_result_payload(current_job)
+    artifact_meta = payload.get("artifact_storage") if isinstance(payload.get("artifact_storage"), dict) else {}
+    artifact = video_b14_auto_refresh_final_artifact_state(current_job, current_project)
+    ref = artifact_storage.delivery_reference(artifact_meta or {})
+    result_url_present = bool(
+        payload.get("result_url_present")
+        or payload.get("provider_result_url_present")
+        or payload.get("canonical_result_url_present")
+        or payload.get("result_url")
+        or payload.get("provider_result_url")
+        or payload.get("canonical_result_url")
+        or payload.get("download_url")
+        or payload.get("file_url")
+    )
+    delivered = bool(
+        current_project.get("video_delivered_at")
+        or current_project.get("video_delivery_message_id")
+        or current_project.get("final_video_file_id")
+        or current_job.get("final_video_file_id")
+    )
+    available = bool(
+        delivered
+        and (
+            artifact.get("valid")
+            or (ref.get("ok") and ref.get("kind") == "public_url")
+            or result_url_present
+        )
+    )
+    return {
+        "ok": bool(available),
+        "job_id": jid,
+        "delivered": delivered,
+        "file_id": str(artifact.get("file_id") or ""),
+        "path": str(artifact.get("path") or ""),
+        "size": safe_int(artifact.get("size"), 0),
+        "artifact_storage": artifact_meta,
+        "delivery_reference": ref,
+        "result_url_present": result_url_present,
+    }
+
+
+async def video_b14_resend_delivered_video(context, chat_id, job_id: int | str, lang: str = "vi") -> dict:
+    state = video_b14_delivered_video_artifact(job_id)
+    if not state.get("ok"):
+        return {"sent": False, "reason": "video_not_ready", **state}
+    caption = "📥 TOAN AAS gửi lại video đã hoàn tất. Không trừ thêm Xu."
+    file_id = str(state.get("file_id") or "").strip()
+    if file_id:
+        try:
+            sent = await context.bot.send_video(chat_id=chat_id, video=file_id, caption=caption, supports_streaming=True)
+            return {"sent": True, "method": "telegram_file_id", "telegram_message_id": telegram_delivery_message_id(sent), **state}
+        except Exception:
+            pass
+    if state.get("result_url_present") and not str(state.get("path") or "").strip():
+        recovery = video_provider_recover_existing_task(safe_int(job_id, 0), download=True)
+        artifact = recovery.get("artifact")
+        artifact_path = str(getattr(artifact, "local_path", "") or "").strip()
+        if recovery.get("ok") and artifact_path:
+            delivery = await send_generated_video_artifact_for_delivery(
+                context.bot,
+                chat_id,
+                artifact_path,
+                {},
+                filename=f"toan_aas_product_video_{safe_int(job_id, 0) or 'final'}.mp4",
+                caption=caption,
+                lang=lang,
+            )
+            return {**state, "recovered_from_result_url": True, "recovery": recovery, **delivery}
+        return {
+            "sent": False,
+            "reason": str(recovery.get("blocker") or "result_url_recovery_failed"),
+            "recovered_from_result_url": False,
+            "recovery": recovery,
+            **state,
+        }
+    delivery = await send_generated_video_artifact_for_delivery(
+        context.bot,
+        chat_id,
+        str(state.get("path") or ""),
+        state.get("artifact_storage") if isinstance(state.get("artifact_storage"), dict) else {},
+        filename=f"toan_aas_product_video_{safe_int(job_id, 0) or 'final'}.mp4",
+        caption=caption,
+        lang=lang,
+    )
+    return {**state, **delivery}
+
+
 def video_b14_auto_refresh_session_from_status(job: dict | None = None, project: dict | None = None, *, user_id=0) -> dict:
     job = dict(job or {})
     project = dict(project or {})
@@ -69538,8 +69802,8 @@ def video_b14_auto_refresh_session_from_status(job: dict | None = None, project:
     if scene_count and "duration_seconds" not in invoice:
         invoice["duration_seconds"] = scene_count * TASK3D_SCENE_SECONDS
     return {
-        "product_id": str(project.get("profile_id") or "multi_scene_film"),
-        "video_flow": str(project.get("profile_id") or "multi_scene_film"),
+        "product_id": "multiscene_video",
+        "video_flow": "product_video",
         "current_step": "b14_queue_status",
         "draft": {
             "b14_queue_job": job,
@@ -69871,7 +70135,7 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
                 message_id=record.get("message_id"),
                 text=str(snapshot.get("text") or ""),
                 parse_mode="HTML",
-                reply_markup=video_b14_queue_status_keyboard(record.get("lang") or "vi"),
+                reply_markup=video_b14_queue_status_keyboard(record.get("lang") or "vi", job_id=record.get("job_id") or ""),
             )
             record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
             record["last_edit_at"] = now_text()
@@ -69905,7 +70169,7 @@ async def video_b14_send_or_edit_status_panel(query, context, session: dict, res
         query,
         text,
         parse_mode="HTML",
-        reply_markup=video_b14_queue_status_keyboard(lang),
+        reply_markup=video_b14_queue_status_keyboard(lang, session=session, result=result),
     )
     message = sent or getattr(query, "message", None)
     video_b14_auto_refresh_register_message(message, context, session=session, result=result, user_id=user_id, lang=lang, start_task=True)
@@ -69933,8 +70197,9 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             "📊 <b>Video auto-refresh</b>\n\n"
             f"• job_id: <code>{html.escape(wanted)}</code>\n"
             "• registry_saved: <code>false</code>\n"
-            "• scheduler_mode: <code>not_restored</code>\n"
-            "• blocker: <code>no_registry_after_restart</code>\n"
+            "• scheduler_mode: <code>recovered_from_db_read_only</code>\n"
+            "• blocker: <code>-</code>\n"
+            "• recovery: <code>status_can_read_db_and_provider_task</code>\n"
             f"• current_stage: <code>{html.escape(str(snapshot.get('stage') or '-'))}</code>\n"
             f"• percent: <code>{int(snapshot.get('percent') or 0)}%</code>\n"
             f"• terminal_state: <code>{html.escape(str(snapshot.get('terminal_state') or '-'))}</code>\n"
@@ -73309,6 +73574,28 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "b14_job_status":
         session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
         return await video_b14_send_or_edit_status_panel(query, context, session, None, uid, lang)
+    if action == "b14_download_video":
+        draft = dict(session.get("draft") or {})
+        job_id = safe_int(value or draft.get("b14_queue_job_id"), 0)
+        if job_id <= 0:
+            return await safe_edit_or_send(query, "⚠️ Chưa tìm thấy mã video để tải lại. TOAN AAS chưa gọi hệ thống dựng mới.")
+        delivery = await video_b14_resend_delivered_video(context, query.message.chat_id, job_id, lang)
+        if delivery.get("sent"):
+            return await safe_edit_or_send(
+                query,
+                "✅ TOAN AAS đã gửi lại video hoàn chỉnh. Không trừ thêm Xu.",
+                reply_markup=video_b14_queue_status_keyboard(lang, session=session, job_id=job_id),
+            )
+        reason = str(delivery.get("reason") or "video_not_ready")
+        if delivery.get("result_url_present"):
+            reason = "đang tải lại file từ kết quả cũ"
+        return await safe_edit_or_send(
+            query,
+            "⏳ Video chưa có file hoàn chỉnh để tải lại. TOAN AAS chưa trừ thêm Xu.\n"
+            f"Lý do: {html.escape(reason)}",
+            parse_mode="HTML",
+            reply_markup=video_b14_queue_status_keyboard(lang, session=session, job_id=job_id),
+        )
     if action == "b14_invoice_screen":
         draft = dict(session.get("draft") or {})
         if not draft.get("b14_scene_count_selected"):
@@ -87701,6 +87988,49 @@ def video_billing_public_gate() -> dict:
         "blockers": blockers,
     }
 
+
+def video_remote_worker_runtime_status() -> dict:
+    runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
+    worker_sha = str(get_system_setting("remote_worker:worker_git_sha", "") or "").strip()
+    worker_parser = str(get_system_setting("remote_worker:worker_parser_version", "") or "").strip()
+    worker_id = str(get_system_setting("remote_worker:worker_id", "") or "").strip()
+    heartbeat_at = str(get_system_setting("remote_worker:last_heartbeat", "") or "").strip()
+    heartbeat_dt = parse_now_text(heartbeat_at)
+    age_seconds = None
+    connected = False
+    if heartbeat_dt:
+        age_seconds = max(0, int((datetime.now() - heartbeat_dt).total_seconds()))
+        connected = age_seconds <= max(300, safe_int(LOCAL_WORKER_MAX_JOB_SECONDS, 600))
+    if runtime_sha and worker_sha:
+        runtime_short = runtime_sha[:12]
+        worker_short = worker_sha[:12]
+        code_match = "yes" if worker_short.startswith(runtime_short) or runtime_short.startswith(worker_short) else "no"
+    else:
+        code_match = "unknown"
+    if not heartbeat_at:
+        reason = "worker heartbeat chưa ghi nhận"
+    elif not connected:
+        reason = "worker heartbeat đã cũ"
+    elif code_match == "no":
+        reason = "worker cần sync latest main"
+    else:
+        reason = "-"
+    return {
+        "runtime_sha": runtime_sha,
+        "runtime_short": (runtime_sha or APP_BUILD or "-")[:12],
+        "worker_sha": worker_sha,
+        "worker_short": (worker_sha or "-")[:12],
+        "worker_parser_version": worker_parser,
+        "worker_id": worker_id,
+        "last_heartbeat": heartbeat_at,
+        "heartbeat_age_seconds": age_seconds,
+        "connected": connected,
+        "worker_code_matches_runtime": code_match,
+        "sync_warning": code_match == "no",
+        "reason": reason,
+    }
+
+
 def video_public_status_payload() -> dict:
     ops = current_system_mode()
     frame_gate = frame_video_public_gate()
@@ -87710,6 +88040,7 @@ def video_public_status_payload() -> dict:
     product_video_submit_enabled = bool(product_video_submit_switch.get("resolved"))
     freeze = provider_freeze_display("shopaikey_video")
     worker = local_worker_status_payload()
+    remote_worker = video_remote_worker_runtime_status()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
     frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
     ai_public = bool(
@@ -87737,6 +88068,7 @@ def video_public_status_payload() -> dict:
         "ai_gate": ai_gate,
         "billing_gate": billing_gate,
         "worker": worker,
+        "remote_worker": remote_worker,
         "freeze": freeze,
         "public_flags": {
             "VIDEO_PLANNING_PUBLIC_ENABLED": bool(VIDEO_PLANNING_PUBLIC_ENABLED),
@@ -87806,6 +88138,7 @@ def video_public_status_text() -> str:
     freeze = payload["freeze"]
     conclusion = payload["conclusion"]
     product_submit = payload.get("product_video_provider_submit") or {}
+    remote_worker = payload.get("remote_worker") or {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
         "",
@@ -87849,6 +88182,14 @@ def video_public_status_text() -> str:
         f"• ffmpeg configured: <code>{video_public_bool_label(frame.get('ffmpeg_configured'))}</code>",
         f"• frame video tested: <code>{html.escape(str(payload['frame_gate'].get('status') or '-'))}</code>",
         f"• last frame video error: <code>{html.escape(str(frame.get('last_error') or '-'))}</code>",
+        "",
+        "<b>Product Video Worker</b>",
+        f"• runtime SHA: <code>{html.escape(str(remote_worker.get('runtime_short') or '-'))}</code>",
+        f"• worker SHA: <code>{html.escape(str(remote_worker.get('worker_short') or '-'))}</code>",
+        f"• worker connected: <code>{video_public_bool_label(remote_worker.get('connected'))}</code>",
+        f"• worker code matches runtime: <code>{html.escape(str(remote_worker.get('worker_code_matches_runtime') or 'unknown'))}</code>",
+        f"• last heartbeat: <code>{html.escape(vietnam_time_display(remote_worker.get('last_heartbeat') or '', '-'))}</code>",
+        f"• sync note: <code>{html.escape(str(remote_worker.get('reason') or '-'))}</code>",
         "",
         "<b>Billing safety</b>",
         f"• confirm before deduct: <code>{video_public_bool_label(SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT)}</code>",
@@ -186805,6 +187146,12 @@ async def api_worker_ping(request: Request):
     )
     capabilities = _safe_worker_ping_capabilities(payload, request)
     _record_remote_worker_ping(worker_id)
+    worker_sha = str(payload.get("worker_git_sha") or "").strip()
+    if worker_sha:
+        set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
+    worker_parser = str(payload.get("worker_parser_version") or "").strip()
+    if worker_parser:
+        set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
     logger.info(
         "remote_worker_api_ping | %s",
         json.dumps(
@@ -186872,6 +187219,12 @@ async def api_worker_heartbeat(request: Request):
         raise HTTPException(status_code=400, detail="job_id required")
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker heartbeat", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    worker_sha = str(payload.get("worker_git_sha") or "").strip()
+    if worker_sha:
+        set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
+    worker_parser = str(payload.get("worker_parser_version") or "").strip()
+    if worker_parser:
+        set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
     conn = db_connect()
     try:
         result = remote_worker_api.heartbeat_remote_worker_job(
