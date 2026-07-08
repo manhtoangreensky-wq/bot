@@ -176377,10 +176377,7 @@ def subdub_begin_delivery_once(job_key: str) -> bool:
 async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason: str = "", lang: str = "vi", reply_markup=None) -> dict:
     key = str(job_key or "")
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
-    safe_mode = normalize_video_translate_mode(
-        mode or job.get("mode") or job.get("video_processing_mode") or job.get("process_type")
-    )
-    if safe_mode != VIDEO_SUBTITLE_MODE_TRANSLATE and job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
+    if job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
         job["late_public_error_suppressed"] = True
@@ -176431,11 +176428,7 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
     if job and subdub_job_has_failure_public_outcome(job):
         subdub_record_duplicate_terminal(key, job, outcome="failure", reason="failure_public_outcome_already_sent")
         return {"sent": False, "suppressed": True, "reason": "already_failed"}
-    text = (
-        video_dubbing_flow_failure_text(safe_mode, lang)
-        if safe_mode == VIDEO_SUBTITLE_MODE_TRANSLATE
-        else subdub_mode_fail_text(mode, lang)
-    )
+    text = subdub_mode_fail_text(mode, lang)
     message_id = ""
     if callable(getattr(message, "reply_text", None)):
         sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
@@ -176596,22 +176589,6 @@ def subdub_full_duration_limit_seconds(is_admin: bool = False) -> int:
 
 def subdub_preview_duration_seconds() -> int:
     return int(SUBDUB_PREVIEW_DURATION_SECONDS)
-
-SUBDUB_SUBTITLE_ONLY_M4LIVE7_SOURCE_SHA = "0e06469c9c13d4998886dd8f5115c019ed65f24d"
-
-
-def subdub_m4live7_subtitle_only_duration_fields(payload: dict | None = None) -> dict:
-    restored = dict(payload or {})
-    restored.update({
-        "chunking_enabled": False,
-        "chunk_count": 0,
-        "chunk_seconds": 0,
-        "chunk_ranges": [],
-        "concat_required": False,
-        "global_timing_preserved": False,
-    })
-    return restored
-
 
 def subdub_long_video_chunk_plan(duration_seconds: float | int = 0, chunk_seconds: int | None = None) -> dict:
     duration = max(0, int(math.ceil(float(duration_seconds or 0))))
@@ -180820,8 +180797,6 @@ async def _execute_video_dubbing_pipeline_core(
         "ffprobe_duration": int(duration_gate.get("ffprobe_duration") or 0),
         "detected_duration_source": str(duration_gate.get("detected_duration_source") or ""),
     }
-    if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-        duration_gate = subdub_m4live7_subtitle_only_duration_fields(duration_gate)
     state = {**state, **duration_gate}
     if str(state.get("_pipeline_job_key") or ""):
         update_subtitle_dub_pipeline_job(
@@ -185436,7 +185411,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 or ""
             )
             latest_failure_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
-            if mode != VIDEO_SUBTITLE_MODE_TRANSLATE and latest_failure_job and subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result):
+            if latest_failure_job and subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result):
                 latest_failure_job["late_public_error_suppressed"] = True
                 latest_failure_job["late_fail_suppressed"] = True
                 latest_failure_job["generic_fail_suppressed_while_active_or_delivered"] = True
