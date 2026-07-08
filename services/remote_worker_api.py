@@ -692,6 +692,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "user_id": str(project.get("user_id") or hydrated_job.get("user_id") or ""),
         "job_type": str(hydrated_job.get("job_type") or video_project_queue.VIDEO_RENDER_JOB_TYPE),
         "status": str(hydrated_job.get("status") or ""),
+        "created_at": str(hydrated_job.get("created_at") or ""),
+        "updated_at": str(hydrated_job.get("updated_at") or ""),
+        "started_at": str(hydrated_job.get("started_at") or ""),
         "locked_by": str(hydrated_job.get("locked_by") or ""),
         "lease_expires_at": str(hydrated_job.get("lease_expires_at") or ""),
         "attempts": _safe_int(hydrated_job.get("attempts"), 0),
@@ -831,6 +834,44 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             pending_task_ids = [str(item.get("task_id") or "").strip() for item in provider_events if str(item.get("task_id") or "").strip()]
         if not pending_video_ids:
             pending_video_ids = [str(item.get("video_id") or "").strip() for item in provider_events if str(item.get("video_id") or "").strip()]
+        first_seen = _parse_queue_time(hydrated_job.get("started_at") or hydrated_job.get("updated_at") or hydrated_job.get("created_at"))
+        first_seen_epoch = int(first_seen.timestamp()) if first_seen else 0
+
+        def _full_scene_tasks(existing_items: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+            by_scene: dict[int, dict[str, Any]] = {}
+            for idx in range(1, safe_scene_count + 1):
+                by_scene[idx] = {
+                    "scene_index": idx,
+                    "scene_id": idx,
+                    "request_job_id": f"{payload.get('job_id')}-{idx}",
+                    "scene_duration_seconds": safe_scene_duration,
+                    "provider": "",
+                    "provider_task_id": "",
+                    "provider_video_id": "",
+                    "status": "pending_submit",
+                    "download_url_present": False,
+                    "result_url_valid": False,
+                    "raw_clip_duration": 0,
+                    "fallback_count": 0,
+                    "provider_wait_elapsed_seconds": 0,
+                    "provider_started_at_epoch": "",
+                }
+            for item in existing_items or []:
+                if not isinstance(item, dict):
+                    continue
+                idx = max(1, min(safe_scene_count, _safe_int(item.get("scene_index") or item.get("scene_id") or item.get("index"), 1)))
+                merged = dict(by_scene[idx])
+                merged.update(dict(item))
+                merged["scene_index"] = idx
+                merged["scene_id"] = idx
+                merged["request_job_id"] = str(merged.get("request_job_id") or f"{payload.get('job_id')}-{idx}")
+                merged["status"] = str(merged.get("status") or "pending_submit")
+                if first_seen_epoch and (merged.get("provider_task_id") or merged.get("task_id") or merged.get("provider_video_id") or merged.get("video_id")):
+                    merged.setdefault("provider_started_at_epoch", first_seen_epoch)
+                    merged.setdefault("provider_wait_started_epoch", first_seen_epoch)
+                by_scene[idx] = merged
+            return [by_scene[idx] for idx in sorted(by_scene)]
+
         pending_provider = str(
             persisted_result.get("selected_provider")
             or persisted_result.get("provider")
@@ -870,8 +911,13 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                             "status": str(event.get("status") or ""),
                             "download_url_present": bool(event.get("download_url_present")),
                             "raw_clip_duration": event.get("duration") or 0,
+                            "provider_progress_raw": event.get("provider_progress_raw") or "",
+                            "provider_progress_normalized": event.get("provider_progress_normalized") or 0,
+                            "provider_wait_elapsed_seconds": event.get("provider_wait_elapsed_seconds") or event.get("provider_elapsed_seconds") or 0,
+                            "provider_started_at_epoch": first_seen_epoch,
                         }
                     )
+            scene_tasks = _full_scene_tasks(scene_tasks)
             payload.update(
                 {
                     "provider_pending_provider": pending_provider,

@@ -15,6 +15,7 @@ import shutil
 import time
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -24,6 +25,7 @@ from services import video_final_output
 from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
     PUBLIC_NO_VIDEO_PROVIDER_COPY,
+    PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
     PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
     PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
     capability_options,
@@ -102,6 +104,10 @@ PROVIDER_PENDING_STATUS_MARKERS = {
     "media_generation_status_running",
 }
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
+DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 90
+DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS = 300
+DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS = 600
+PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START = "provider_stalled_not_start"
 
 
 class RealVideoRenderError(RuntimeError):
@@ -677,13 +683,215 @@ def product_video_scene_task_for_index(job: dict | None = None, scene_index: int
 
 def _scene_task_status(item: dict | None = None) -> str:
     item = dict(item or {})
-    return str(
+    raw = str(
         item.get("status")
         or item.get("normalized_provider_status")
         or item.get("provider_status")
+        or item.get("nonterminal_provider_status")
         or item.get("blocker")
         or ""
-    ).strip() or "queued"
+    ).strip()
+    return _normalize_scene_task_status(raw, item)
+
+
+def _normalize_scene_task_status(status: Any = "", item: dict | None = None) -> str:
+    text = str(status or "").strip().lower().replace("-", "_")
+    item = dict(item or {})
+    has_task = bool(
+        str(
+            item.get("provider_task_id")
+            or item.get("task_id")
+            or item.get("provider_video_id")
+            or item.get("video_id")
+            or item.get("provider_task_id_masked")
+            or item.get("task_id_masked")
+            or item.get("provider_video_id_masked")
+            or ""
+        ).strip()
+    )
+    has_result = bool(item.get("result_url_valid") or item.get("download_url_present") or item.get("provider_result_url_present"))
+    if has_result or text in {"downloaded", "success", "completed", "succeeded", "clip_downloaded"}:
+        return "clip_downloaded"
+    if text in {"not_start", "not_started", "provider_not_start", "media_generation_status_not_start"}:
+        return "provider_not_start"
+    if text in {"provider_stalled_not_start", PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START}:
+        return PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START
+    if text in {
+        "running",
+        "processing",
+        "in_progress",
+        "pending",
+        "queued",
+        "provider_running",
+        "provider_in_progress",
+        "provider_pending",
+        "media_generation_status_pending",
+        "media_generation_status_in_progress",
+    }:
+        return "provider_running" if has_task else "pending_submit"
+    if text in {"failed", "error", "failure", "provider_failed", "provider_submit_failed"}:
+        return "failed"
+    return "provider_running" if has_task else "pending_submit"
+
+
+def _scene_task_has_provider_id(item: dict | None = None) -> bool:
+    item = dict(item or {})
+    return bool(
+        str(
+            item.get("provider_task_id")
+            or item.get("task_id")
+            or item.get("provider_video_id")
+            or item.get("video_id")
+            or item.get("provider_task_id_masked")
+            or item.get("task_id_masked")
+            or item.get("provider_video_id_masked")
+            or ""
+        ).strip()
+    )
+
+
+def _scene_task_progress_number(item: dict | None = None) -> float:
+    item = dict(item or {})
+    for key in (
+        "provider_progress_normalized",
+        "provider_progress_percent",
+        "provider_progress_raw",
+        "shopaikey_data_progress_raw",
+        "data_progress_raw",
+        "progress",
+    ):
+        value = item.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            text = str(value).strip().rstrip("%")
+            return float(text)
+        except Exception:
+            continue
+    return 0.0
+
+
+def _scene_task_elapsed_seconds(item: dict | None = None, job: dict | None = None) -> int:
+    item = dict(item or {})
+    job = dict(job or {})
+    for key in (
+        "scene_not_start_elapsed",
+        "provider_wait_elapsed_seconds",
+        "provider_elapsed_seconds",
+        "elapsed_wall_clock_seconds",
+    ):
+        value = _safe_int(item.get(key), 0)
+        if value > 0:
+            return value
+    now = time.time()
+    for key in (
+        "provider_started_at_epoch",
+        "provider_wait_started_epoch",
+        "started_at_epoch",
+        "last_provider_submit_timestamp",
+    ):
+        try:
+            epoch = float(item.get(key) or 0)
+            if epoch > 0:
+                return max(0, int(now - epoch))
+        except Exception:
+            pass
+    for key in ("provider_started_at_epoch", "provider_wait_started_epoch", "started_at_epoch"):
+        try:
+            epoch = float(job.get(key) or 0)
+            if epoch > 0:
+                return max(0, int(now - epoch))
+        except Exception:
+            pass
+    return 0
+
+
+def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, scene_index: int = 1) -> dict[str, Any]:
+    job = dict(job or {})
+    scene_task = dict(scene_task or {})
+    status = _normalize_scene_task_status(_scene_task_status(scene_task), scene_task)
+    progress = _scene_task_progress_number(scene_task)
+    elapsed = _scene_task_elapsed_seconds(scene_task, job)
+    not_start_threshold = max(
+        1,
+        _env_int(
+            "PRODUCT_VIDEO_NOT_START_GRACE_SECONDS",
+            DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+        ),
+    )
+    running_threshold = max(
+        not_start_threshold,
+        _env_int(
+            "PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS",
+            DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS,
+        ),
+    )
+    total_threshold = max(
+        running_threshold,
+        _env_int("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS", DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS),
+    )
+    result_url_valid = bool(scene_task.get("result_url_valid") or scene_task.get("download_url_present") or scene_task.get("provider_result_url_present"))
+    is_not_start = status == "provider_not_start" or str(scene_task.get("provider_status_raw") or "").strip().lower() == "not_start"
+    not_start_stalled = bool(is_not_start and progress <= 0 and not result_url_valid and elapsed >= not_start_threshold)
+    running_stalled = bool(status == "provider_running" and not result_url_valid and elapsed >= running_threshold)
+    timed_out = bool(_scene_task_has_provider_id(scene_task) and not result_url_valid and elapsed >= total_threshold)
+    stalled = bool(not_start_stalled or running_stalled or timed_out)
+    fallback_count = _safe_int(scene_task.get("fallback_count") or scene_task.get("provider_fallback_count"), 0)
+    source = str(job.get("submit_source") or job.get("provider_submit_source") or job.get("original_submit_source") or "").strip()
+    public_confirmed = bool(
+        job.get("public_user_confirmed")
+        or job.get("invoice_confirmed")
+        or job.get("user_final_confirmed")
+        or source == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
+    provider_order = _provider_order(job)
+    current_provider = str(scene_task.get("provider") or job.get("provider_pending_provider") or "").strip()
+    fallback_chain = [item for item in provider_order if item and item != current_provider]
+    fallback_allowed = bool(stalled and public_confirmed and fallback_count <= 0 and fallback_chain)
+    if not stalled:
+        fallback_block_reason = "scene_not_stalled"
+    elif not public_confirmed:
+        fallback_block_reason = "not_public_user_final_confirm"
+    elif fallback_count > 0:
+        fallback_block_reason = "scene_fallback_already_used"
+    elif not fallback_chain:
+        fallback_block_reason = "no_fallback_provider"
+    else:
+        fallback_block_reason = ""
+    threshold = not_start_threshold if is_not_start else (running_threshold if running_stalled else total_threshold)
+    return {
+        "scene_index": max(1, _safe_int(scene_index, 1)),
+        "scene_not_start_elapsed": elapsed,
+        "stall_threshold": threshold,
+        "provider_stalled_not_start": bool(not_start_stalled),
+        "provider_scene_stalled": stalled,
+        "scene_running_without_result_stalled": bool(running_stalled),
+        "scene_total_timeout": bool(timed_out),
+        "fallback_scene_index": max(1, _safe_int(scene_index, 1)) if stalled else 0,
+        "fallback_allowed": fallback_allowed,
+        "fallback_block_reason": fallback_block_reason,
+        "fallback_provider_order": fallback_chain,
+        "fallback_count": fallback_count,
+    }
+
+
+def product_video_scene_task_counts(scene_tasks: list[dict[str, Any]] | None = None) -> dict[str, int]:
+    tasks = [dict(item or {}) for item in (scene_tasks or []) if isinstance(item, dict)]
+    total = len(tasks)
+    done = sum(1 for item in tasks if _normalize_scene_task_status(item.get("status"), item) == "clip_downloaded")
+    submitted = sum(1 for item in tasks if _scene_task_has_provider_id(item))
+    running = sum(1 for item in tasks if _normalize_scene_task_status(item.get("status"), item) in {"provider_running", "provider_not_start", PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START})
+    pending = sum(1 for item in tasks if _normalize_scene_task_status(item.get("status"), item) == "pending_submit")
+    return {
+        "scene_tasks_created_count": total,
+        "scene_tasks_submitted_count": submitted,
+        "scene_tasks_submitted": submitted,
+        "scene_tasks_completed": done,
+        "scenes_total": total,
+        "scenes_done": done,
+        "scenes_pending": pending,
+        "scenes_running": running,
+    }
 
 
 def product_video_scene_tasks_debug(
@@ -704,10 +912,19 @@ def product_video_scene_tasks_debug(
             "provider_task_id_masked": "",
             "task_id_masked": "",
             "provider_video_id_masked": "",
-            "status": "queued",
+            "status": "pending_submit",
             "result_url_valid": False,
             "raw_clip_duration": 0,
             "fallback_count": 0,
+            "provider_progress_raw": "",
+            "provider_progress_normalized": 0,
+            "provider_wait_elapsed_seconds": 0,
+            "scene_not_start_elapsed": 0,
+            "stall_threshold": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+            "provider_stalled_not_start": False,
+            "fallback_allowed": False,
+            "fallback_block_reason": "scene_not_stalled",
+            "fallback_scene_index": 0,
         }
     for item in _existing_scene_tasks(job):
         idx = _scene_task_index(item)
@@ -715,18 +932,21 @@ def product_video_scene_tasks_debug(
             continue
         task_id = str(item.get("provider_task_id") or item.get("task_id") or "").strip()
         video_id = str(item.get("provider_video_id") or item.get("video_id") or "").strip()
-        by_scene[idx].update(
-            {
+        merged = {
                 "provider": str(item.get("provider") or by_scene[idx].get("provider") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
                 "task_id_masked": _task_id_masked(task_id),
                 "provider_video_id_masked": _task_id_masked(video_id),
-                "status": _scene_task_status(item),
                 "result_url_valid": bool(item.get("result_url_valid") or item.get("download_url_present") or item.get("provider_result_url_present")),
                 "raw_clip_duration": item.get("raw_clip_duration") or item.get("duration") or item.get("output_duration") or 0,
                 "fallback_count": _safe_int(item.get("fallback_count"), 0),
-            }
-        )
+                "provider_progress_raw": item.get("provider_progress_raw") or item.get("shopaikey_data_progress_raw") or item.get("data_progress_raw") or item.get("progress") or "",
+                "provider_progress_normalized": _safe_int(item.get("provider_progress_normalized") or item.get("provider_progress_percent") or item.get("progress"), 0),
+                "provider_wait_elapsed_seconds": _safe_int(item.get("provider_wait_elapsed_seconds") or item.get("provider_elapsed_seconds") or item.get("elapsed_wall_clock_seconds"), 0),
+                "provider_status_raw": str(item.get("provider_status_raw") or item.get("nonterminal_provider_status") or item.get("provider_status") or ""),
+        }
+        merged["status"] = _normalize_scene_task_status(item.get("status") or merged.get("provider_status_raw"), {**item, **merged})
+        by_scene[idx].update(merged)
     for source in (provider_events or []) + (debug_results or []):
         if not isinstance(source, dict):
             continue
@@ -738,14 +958,20 @@ def product_video_scene_tasks_debug(
         debug_video_ids = debug.get("provider_video_ids") if isinstance(debug.get("provider_video_ids"), list) else []
         task_id = str(source.get("task_id") or (debug_task_ids[0] if debug_task_ids else "") or debug.get("provider_task_id") or "").strip()
         video_id = str(source.get("video_id") or (debug_video_ids[0] if debug_video_ids else "") or debug.get("provider_video_id") or "").strip()
-        status = str(source.get("status") or debug.get("normalized_provider_status") or debug.get("provider_status") or debug.get("blocker") or "").strip()
-        by_scene[idx].update(
-            {
+        status = str(
+            source.get("status")
+            or debug.get("normalized_provider_status")
+            or debug.get("nonterminal_provider_status")
+            or debug.get("provider_status_raw")
+            or debug.get("provider_status")
+            or debug.get("blocker")
+            or ""
+        ).strip()
+        merged = {
                 "provider": str(source.get("provider") or debug.get("selected_provider") or debug.get("provider") or by_scene[idx].get("provider") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
                 "task_id_masked": _task_id_masked(task_id),
                 "provider_video_id_masked": _task_id_masked(video_id),
-                "status": status or by_scene[idx].get("status") or "queued",
                 "result_url_valid": bool(
                     source.get("download_url_present")
                     or debug.get("provider_result_url_present")
@@ -754,8 +980,31 @@ def product_video_scene_tasks_debug(
                 ),
                 "raw_clip_duration": source.get("duration") or debug.get("output_duration") or by_scene[idx].get("raw_clip_duration") or 0,
                 "fallback_count": _safe_int(debug.get("fallback_count") or source.get("fallback_count"), _safe_int(by_scene[idx].get("fallback_count"), 0)),
+                "provider_progress_raw": debug.get("provider_progress_raw") or debug.get("shopaikey_data_progress_raw") or source.get("provider_progress_raw") or by_scene[idx].get("provider_progress_raw") or "",
+                "provider_progress_normalized": _safe_int(debug.get("provider_progress_normalized") or debug.get("provider_progress_percent") or source.get("provider_progress_normalized"), _safe_int(by_scene[idx].get("provider_progress_normalized"), 0)),
+                "provider_wait_elapsed_seconds": _safe_int(debug.get("provider_wait_elapsed_seconds") or debug.get("provider_elapsed_seconds") or debug.get("elapsed_wall_clock_seconds") or source.get("provider_wait_elapsed_seconds"), _safe_int(by_scene[idx].get("provider_wait_elapsed_seconds"), 0)),
+                "provider_status_raw": str(debug.get("provider_status_raw") or debug.get("nonterminal_provider_status") or source.get("provider_status_raw") or status or ""),
+                "provider_stalled_not_start": bool(debug.get("provider_stalled_not_start") or source.get("provider_stalled_not_start")),
+                "fallback_allowed": bool(debug.get("fallback_allowed") or source.get("fallback_allowed") or False),
+                "fallback_block_reason": str(debug.get("fallback_block_reason") or debug.get("fallback_blocked_reason") or source.get("fallback_block_reason") or by_scene[idx].get("fallback_block_reason") or ""),
+                "fallback_scene_index": _safe_int(debug.get("fallback_scene_index") or source.get("fallback_scene_index"), _safe_int(by_scene[idx].get("fallback_scene_index"), 0)),
+        }
+        merged["status"] = _normalize_scene_task_status(status or by_scene[idx].get("status"), {**source, **debug, **merged})
+        by_scene[idx].update(merged)
+    for idx in sorted(by_scene):
+        policy = product_video_scene_stall_policy(job, by_scene[idx], idx)
+        by_scene[idx].update(
+            {
+                "scene_not_start_elapsed": policy["scene_not_start_elapsed"],
+                "stall_threshold": policy["stall_threshold"],
+                "provider_stalled_not_start": bool(by_scene[idx].get("provider_stalled_not_start") or policy["provider_stalled_not_start"]),
+                "fallback_allowed": bool(by_scene[idx].get("fallback_allowed") or policy["fallback_allowed"]),
+                "fallback_block_reason": str(by_scene[idx].get("fallback_block_reason") or policy["fallback_block_reason"]),
+                "fallback_scene_index": _safe_int(by_scene[idx].get("fallback_scene_index"), policy["fallback_scene_index"]),
             }
         )
+        if by_scene[idx]["provider_stalled_not_start"]:
+            by_scene[idx]["status"] = PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START
     return [by_scene[idx] for idx in sorted(by_scene)]
 
 
@@ -1252,7 +1501,6 @@ def _download_output(source: str, destination: str) -> str:
 
 
 async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -> dict:
-    del provider_order
     prompt = _safe_text(getattr(scene, "video_prompt", "") or getattr(scene, "visual_prompt", ""), 1200)
     aspect_ratio = str(getattr(scene, "aspect_ratio", "") or "9:16")
     job = getattr(scene, "_toan_aas_job", {}) if hasattr(scene, "_toan_aas_job") else {}
@@ -1285,6 +1533,16 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     pending_matches_request = bool(
         pending_task_id or pending_video_id
     ) and (not pending_request_job_id or pending_request_job_id == request_job_id)
+    pending_policy = product_video_scene_stall_policy(job, pending_scene_task, scene_index) if pending_matches_request else {}
+    scene_fallback_order = list(pending_policy.get("fallback_provider_order") or [])
+    scene_fallback_allowed = bool(pending_policy.get("fallback_allowed"))
+    scene_stalled_not_start = bool(pending_policy.get("provider_stalled_not_start"))
+    scene_provider_stalled = bool(pending_policy.get("provider_scene_stalled"))
+    if pending_matches_request and scene_provider_stalled and scene_fallback_allowed:
+        pending_matches_request = False
+        pending_task_id = ""
+        pending_video_id = ""
+        pending_request_job_id = ""
     asset_pack = _json_loads((job or {}).get("asset_pack"), {})
     invoice = _json_loads((job or {}).get("invoice"), {})
     if not asset_pack and isinstance((job or {}).get("project"), dict):
@@ -1330,6 +1588,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     submit_source = str(_meta_value("submit_source", "provider_submit_source") or "").strip()
     if pending_matches_request:
         submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK
+    elif scene_fallback_allowed:
+        submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE
     elif not submit_source and confirmed_public_input:
         submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
     if not original_submit_source and confirmed_public_input:
@@ -1344,6 +1604,33 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         or public_user_confirmed
     )
     charge_policy = str(_meta_value("charge_policy") or "after_valid_mp4_delivery").strip()
+    if pending_matches_request and scene_provider_stalled and not scene_fallback_allowed:
+        raise RealVideoRenderError(
+            PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "provider": str(pending_scene_task.get("provider") or ""),
+                "selected_provider": str(pending_scene_task.get("provider") or ""),
+                "provider_task_ids": [pending_task_id] if pending_task_id else [],
+                "provider_video_ids": [pending_video_id] if pending_video_id else [],
+                "provider_error": PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
+                "blocker": PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
+                "provider_status": PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
+                "normalized_provider_status": PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
+                "provider_status_raw": str(pending_scene_task.get("provider_status_raw") or "NOT_START"),
+                "continue_polling": False,
+                "provider_stalled_not_start": scene_stalled_not_start,
+                "scene_not_start_elapsed": pending_policy.get("scene_not_start_elapsed") or 0,
+                "stall_threshold": pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+                "fallback_scene_index": scene_index,
+                "fallback_allowed": False,
+                "fallback_block_reason": pending_policy.get("fallback_block_reason") or "no_fallback_provider",
+                "no_charge": True,
+            },
+        )
     request = VideoGenerationRequest(
         job_id=request_job_id,
         product_type=product_type or "video_ai_prompt",
@@ -1379,6 +1666,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "invoice_confirmed": invoice_confirmed,
             "project_is_confirmed": invoice_confirmed,
             "provider_submit_accepted_before": bool(pending_matches_request),
+            "paid_fallback_confirmed": bool(scene_fallback_allowed),
+            "fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("fallback_count"), 0),
+            "provider_fallback_count": 1 if scene_fallback_allowed else _safe_int(pending_scene_task.get("provider_fallback_count") or pending_scene_task.get("fallback_count"), 0),
+            "fallback_scene_index": scene_index if scene_fallback_allowed else 0,
+            "provider_stalled_not_start": scene_stalled_not_start,
+            "scene_not_start_elapsed": pending_policy.get("scene_not_start_elapsed") or 0,
+            "stall_threshold": pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
             "charge_policy": charge_policy,
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
@@ -1396,7 +1690,29 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         required_capability=required_capability,
     )
     output_dir = os.path.dirname(os.path.abspath(raw_path))
-    result = run_provider_generation(request, output_dir=output_dir, environ=dict(os.environ))
+    provider_env = dict(os.environ)
+    if scene_fallback_allowed and scene_fallback_order:
+        provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(scene_fallback_order)
+    result = run_provider_generation(request, output_dir=output_dir, environ=provider_env)
+    result.setdefault("scene_index", scene_index)
+    result.setdefault("scene_id", scene_index)
+    result.setdefault("scene_duration_seconds", scene_duration_seconds)
+    result.setdefault("provider_scene_request_id", request_job_id)
+    result.setdefault("request_job_id", request_job_id)
+    result.setdefault("provider_stalled_not_start", scene_stalled_not_start)
+    result.setdefault("scene_not_start_elapsed", pending_policy.get("scene_not_start_elapsed") or 0)
+    result.setdefault("stall_threshold", pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS)
+    result.setdefault("fallback_scene_index", scene_index if scene_fallback_allowed else 0)
+    result.setdefault("fallback_allowed", scene_fallback_allowed)
+    result.setdefault("fallback_block_reason", pending_policy.get("fallback_block_reason") or "")
+    if scene_fallback_allowed:
+        result.setdefault("fallback_used", True)
+        result.setdefault("provider_fallback_attempted", True)
+        result.setdefault("provider_fallback_reason", PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START)
+        result.setdefault("fallback_reason", PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START)
+        result.setdefault("selected_provider_before_submit", str(pending_scene_task.get("provider") or ""))
+        result.setdefault("fallback_count", 1)
+        result.setdefault("provider_fallback_count", 1)
     if not result.get("ok"):
         raise RealVideoRenderError(str(result.get("blocker") or result.get("provider_error") or REAL_VIDEO_RENDER_UNAVAILABLE), diagnostics=result)
     output_path = str(result.get("output_path") or result.get("local_path") or "")
@@ -1486,6 +1802,194 @@ def build_real_scene_renderer(
         return result
 
     return _render
+
+
+def _provider_event_from_payload(job: dict | None, scene_index: int, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = dict(payload or {})
+    task_ids = payload.get("provider_task_ids") if isinstance(payload.get("provider_task_ids"), list) else []
+    video_ids = payload.get("provider_video_ids") if isinstance(payload.get("provider_video_ids"), list) else []
+    task_id = str(payload.get("task_id") or (task_ids[0] if task_ids else "") or payload.get("provider_pending_task_id") or "").strip()
+    video_id = str(payload.get("video_id") or (video_ids[0] if video_ids else "") or payload.get("provider_pending_video_id") or "").strip()
+    return {
+        "scene_id": scene_index,
+        "scene_index": scene_index,
+        "request_job_id": product_video_scene_request_id(job, scene_index),
+        "scene_duration_seconds": product_video_scene_duration_seconds(job),
+        "provider": str(payload.get("provider") or payload.get("selected_provider") or payload.get("provider_pending_provider") or ""),
+        "task_id": task_id[:180],
+        "video_id": video_id[:180],
+        "status": _normalize_scene_task_status(payload.get("status") or payload.get("normalized_provider_status") or payload.get("provider_status") or payload.get("blocker"), payload),
+        "model": str(payload.get("provider_payload_model") or payload.get("model") or "")[:120],
+        "mode": str(payload.get("selected_capability") or payload.get("mode") or "")[:80],
+        "duration": payload.get("output_duration") or payload.get("duration") or 0,
+        "download_url_present": bool(payload.get("provider_result_url_present") or payload.get("result_url_present")),
+        "provider_progress_raw": payload.get("provider_progress_raw") or payload.get("shopaikey_data_progress_raw") or "",
+        "provider_progress_normalized": payload.get("provider_progress_normalized") or payload.get("provider_progress_percent") or 0,
+        "provider_wait_elapsed_seconds": payload.get("provider_wait_elapsed_seconds") or payload.get("provider_elapsed_seconds") or 0,
+        "provider_status_raw": payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or "",
+        "provider_stalled_not_start": bool(payload.get("provider_stalled_not_start")),
+        "fallback_count": _safe_int(payload.get("fallback_count") or payload.get("provider_fallback_count"), 0),
+        "fallback_allowed": bool(payload.get("fallback_allowed")),
+        "fallback_block_reason": str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or ""),
+        "fallback_scene_index": _safe_int(payload.get("fallback_scene_index"), 0),
+        "debug": payload,
+    }
+
+
+def _scene_output_from_payload(payload: dict[str, Any] | None = None) -> str:
+    payload = dict(payload or {})
+    for key in ("output_path", "local_path", "final_video_path", "raw_provider_video_path"):
+        text = str(payload.get(key) or "").strip()
+        if text and os.path.isfile(text) and os.path.getsize(text) > 0:
+            return text
+    return ""
+
+
+def _run_per_scene_provider_orchestrator(
+    job: dict,
+    workspace: str,
+    *,
+    provider_order: list[str],
+    bgm_audio_path: str | None = None,
+    provider_events: list[dict[str, Any]],
+    debug_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    plan = real_video_scene_plan(job)
+    scene_outputs: dict[int, str] = {}
+    hard_failures: list[dict[str, Any]] = []
+    pending_seen = False
+    os.makedirs(workspace, exist_ok=True)
+    for scene_payload in plan.get("scenes") or []:
+        if not isinstance(scene_payload, dict):
+            continue
+        scene_index = _safe_int(scene_payload.get("scene_id"), len(scene_outputs) + 1)
+        scene = SimpleNamespace(**scene_payload)
+        setattr(scene, "_toan_aas_job", dict(job or {}))
+        raw_path = os.path.join(workspace, f"provider_scene_{scene_index:03d}.mp4")
+        try:
+            result = asyncio.run(_render_scene_async(scene, raw_path, provider_order))
+        except RealVideoRenderError as exc:
+            diagnostics = dict(getattr(exc, "diagnostics", {}) or {})
+            diagnostics.setdefault("scene_index", scene_index)
+            diagnostics.setdefault("scene_id", scene_index)
+            diagnostics.setdefault("request_job_id", product_video_scene_request_id(job, scene_index))
+            debug_results.append(diagnostics)
+            provider_events.append(_provider_event_from_payload(job, scene_index, diagnostics))
+            if diagnostics.get("continue_polling") or str(diagnostics.get("provider_error") or diagnostics.get("blocker") or "") in PROVIDER_PENDING_BLOCKERS:
+                pending_seen = True
+                continue
+            hard_failures.append(diagnostics)
+            continue
+        debug_results.append(dict(result))
+        provider_events.append(_provider_event_from_payload(job, scene_index, result))
+        output_path = _scene_output_from_payload(result)
+        if output_path:
+            scene_outputs[scene_index] = output_path
+
+    scene_tasks = product_video_scene_tasks_debug(
+        job,
+        provider_events=provider_events,
+        debug_results=debug_results,
+        scene_count=_scene_count(job),
+    )
+    counts = product_video_scene_task_counts(scene_tasks)
+    active_scene = next(
+        (
+            item
+            for item in scene_tasks
+            if _normalize_scene_task_status(item.get("status"), item) != "clip_downloaded"
+        ),
+        scene_tasks[-1] if scene_tasks else {},
+    )
+    base = {
+        "ok": False,
+        "status": "processing" if pending_seen and not hard_failures else "failed",
+        "orchestration_mode": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "provider_orchestration_mode": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "scene_duration_seconds": product_video_scene_duration_seconds(job),
+        "expected_duration_seconds": product_video_expected_duration_seconds(job),
+        "scene_count": _scene_count(job),
+        "scene_tasks": scene_tasks,
+        "scene_tasks_total": len(scene_tasks),
+        "scene_tasks_created_count": counts["scene_tasks_created_count"],
+        "scene_tasks_submitted": counts["scene_tasks_submitted"],
+        "scene_tasks_submitted_count": counts["scene_tasks_submitted_count"],
+        "scene_tasks_completed": counts["scene_tasks_completed"],
+        "scenes_total": counts["scenes_total"],
+        "scenes_done": counts["scenes_done"],
+        "scenes_pending": counts["scenes_pending"],
+        "scenes_running": counts["scenes_running"],
+        "current_scene_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
+        "current_scene": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
+        "current_scene_status": str(active_scene.get("status") or ""),
+        "scene_not_start_elapsed": _safe_int(active_scene.get("scene_not_start_elapsed"), 0),
+        "stall_threshold": _safe_int(active_scene.get("stall_threshold"), DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS),
+        "provider_stalled_not_start": any(bool(item.get("provider_stalled_not_start")) for item in scene_tasks),
+        "fallback_scene_index": next((_safe_int(item.get("fallback_scene_index"), 0) for item in scene_tasks if _safe_int(item.get("fallback_scene_index"), 0)), 0),
+        "fallback_allowed": any(bool(item.get("fallback_allowed")) for item in scene_tasks),
+        "fallback_block_reason": next((str(item.get("fallback_block_reason") or "") for item in scene_tasks if str(item.get("fallback_block_reason") or "")), ""),
+        "provider_events": provider_events,
+        "provider_task_ids": [item.get("task_id") for item in provider_events if item.get("task_id")],
+        "provider_video_ids": [item.get("video_id") for item in provider_events if item.get("video_id")],
+        "provider_models": [item.get("model") for item in provider_events if item.get("model")],
+        "provider_modes": [item.get("mode") for item in provider_events if item.get("mode")],
+        "downloaded_clip_paths": [scene_outputs[index] for index in sorted(scene_outputs)],
+        "final_concat_required": bool(_scene_count(job) > 1),
+        "concat_ready": bool(len(scene_outputs) >= _scene_count(job)),
+        "provider_router_called": True,
+        "provider_submit_called": any(bool(item.get("provider_submit_called")) for item in debug_results if isinstance(item, dict)),
+        "provider_poll_called": any(bool(item.get("provider_poll_called")) for item in debug_results if isinstance(item, dict)),
+        "provider_task_id_saved": any(bool(item.get("provider_task_id_saved")) for item in debug_results if isinstance(item, dict)),
+        "provider_attempted": True,
+        "route_requires_provider": True,
+        "placeholder_forbidden": True,
+        "visual_source": "provider_pending" if len(scene_outputs) < _scene_count(job) else VISUAL_SOURCE_PROVIDER_MP4,
+        "base_video_source": PROVIDER_VIDEO_SOURCE,
+        "no_charge": True,
+    }
+    if hard_failures:
+        failure = dict(hard_failures[0])
+        base.update(failure)
+        base["ok"] = False
+        base["continue_polling"] = False
+        base["terminal_state"] = "failed_no_charge"
+        base["provider_error"] = str(failure.get("provider_error") or failure.get("blocker") or PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START)
+        base["blocker"] = base["provider_error"]
+        return base
+    if len(scene_outputs) < _scene_count(job):
+        base["continue_polling"] = True
+        base["provider_error"] = "provider_in_progress"
+        base["blocker"] = "provider_in_progress"
+        base["provider_status"] = "running"
+        base["normalized_provider_status"] = "running"
+        base["terminal_state"] = "final_rendering"
+        return base
+
+    def _cached_scene_renderer(scene, raw_path: str):
+        scene_index = _safe_int(getattr(scene, "scene_id", 0), 0)
+        source = scene_outputs.get(scene_index)
+        if not source:
+            raise RealVideoRenderError("scene_clip_missing_after_provider_download")
+        if os.path.abspath(source) != os.path.abspath(raw_path):
+            shutil.copyfile(source, raw_path)
+        return {"ok": True, "output_path": raw_path, "duration": product_video_scene_duration_seconds(job)}
+
+    final_result = _run_multiscene_render(
+        job,
+        os.path.join(workspace, "final_concat"),
+        render_video_func=_cached_scene_renderer,
+        bgm_audio_path=bgm_audio_path,
+    )
+    final_result.update(base)
+    final_result["ok"] = bool(final_result.get("final_video_path"))
+    final_result["status"] = "completed" if final_result["ok"] else "error"
+    final_result["continue_polling"] = False
+    final_result["provider_error"] = ""
+    final_result["blocker"] = ""
+    final_result["visual_source"] = VISUAL_SOURCE_PROVIDER_MP4
+    final_result["base_video_source"] = PROVIDER_VIDEO_SOURCE
+    final_result["no_charge"] = bool(job.get("no_charge"))
+    return final_result
 
 
 def _logo_enabled(addon_plan: dict) -> bool:
@@ -2010,10 +2514,20 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["scene_count"] = _scene_count(job)
         data["scene_tasks"] = scene_tasks
         data["scene_tasks_total"] = len(scene_tasks)
+        counts = product_video_scene_task_counts(scene_tasks)
+        data.update(counts)
         data["scene_tasks_completed"] = completed_scenes
         data["scene_tasks_submitted"] = sum(1 for item in scene_tasks if item.get("provider_task_id_masked") or item.get("provider_video_id_masked"))
+        data["scene_tasks_submitted_count"] = data["scene_tasks_submitted"]
         data["current_scene_index"] = _safe_int(active_scene.get("scene_index"), completed_scenes + 1) if scene_tasks else 0
+        data["current_scene"] = data["current_scene_index"]
         data["current_scene_status"] = str(active_scene.get("status") or "")
+        data["scene_not_start_elapsed"] = _safe_int(active_scene.get("scene_not_start_elapsed"), 0)
+        data["stall_threshold"] = _safe_int(active_scene.get("stall_threshold"), DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS)
+        data["provider_stalled_not_start"] = any(bool(item.get("provider_stalled_not_start")) for item in scene_tasks)
+        data["fallback_scene_index"] = next((_safe_int(item.get("fallback_scene_index"), 0) for item in scene_tasks if _safe_int(item.get("fallback_scene_index"), 0)), 0)
+        data["fallback_allowed"] = any(bool(item.get("fallback_allowed")) for item in scene_tasks)
+        data["fallback_block_reason"] = next((str(item.get("fallback_block_reason") or "") for item in scene_tasks if str(item.get("fallback_block_reason") or "")), "")
         data["final_concat_required"] = bool(orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S and _scene_count(job) > 1)
         data["concat_ready"] = bool(completed_scenes >= len(scene_tasks) and scene_tasks)
         data["provider_task_ids"] = data.get("provider_task_ids") or [item.get("task_id") for item in provider_events if item.get("task_id")]
@@ -2179,16 +2693,26 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     elif readiness.get("ok") or not is_product_video:
         provider_attempted = True
         try:
-            try:
-                real_scene_renderer = build_real_scene_renderer(job, provider_events, provider_runtime_debug)
-            except TypeError:
-                real_scene_renderer = build_real_scene_renderer(job, provider_events)
-            result = _run_multiscene_render(
-                job,
-                workspace,
-                render_video_func=real_scene_renderer,
-                bgm_audio_path=bgm_audio_path,
-            )
+            if is_product_video and product_video_orchestration_mode(job) == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S:
+                result = _run_per_scene_provider_orchestrator(
+                    job,
+                    workspace,
+                    provider_order=_provider_order(job),
+                    bgm_audio_path=bgm_audio_path,
+                    provider_events=provider_events,
+                    debug_results=provider_runtime_debug,
+                )
+            else:
+                try:
+                    real_scene_renderer = build_real_scene_renderer(job, provider_events, provider_runtime_debug)
+                except TypeError:
+                    real_scene_renderer = build_real_scene_renderer(job, provider_events)
+                result = _run_multiscene_render(
+                    job,
+                    workspace,
+                    render_video_func=real_scene_renderer,
+                    bgm_audio_path=bgm_audio_path,
+                )
         except RealVideoRenderError as exc:
             provider_error = str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE
             result = dict(getattr(exc, "diagnostics", {}) or {})
@@ -2423,10 +2947,20 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["scene_count"] = _scene_count(job)
     result["scene_tasks"] = scene_tasks
     result["scene_tasks_total"] = len(scene_tasks)
+    counts = product_video_scene_task_counts(scene_tasks)
+    result.update(counts)
     result["scene_tasks_completed"] = completed_scenes
     result["scene_tasks_submitted"] = sum(1 for item in scene_tasks if item.get("provider_task_id_masked") or item.get("provider_video_id_masked"))
+    result["scene_tasks_submitted_count"] = result["scene_tasks_submitted"]
     result["current_scene_index"] = _safe_int(active_scene.get("scene_index"), completed_scenes + 1) if scene_tasks else 0
+    result["current_scene"] = result["current_scene_index"]
     result["current_scene_status"] = str(active_scene.get("status") or "")
+    result["scene_not_start_elapsed"] = _safe_int(active_scene.get("scene_not_start_elapsed"), 0)
+    result["stall_threshold"] = _safe_int(active_scene.get("stall_threshold"), DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS)
+    result["provider_stalled_not_start"] = any(bool(item.get("provider_stalled_not_start")) for item in scene_tasks)
+    result["fallback_scene_index"] = next((_safe_int(item.get("fallback_scene_index"), 0) for item in scene_tasks if _safe_int(item.get("fallback_scene_index"), 0)), 0)
+    result["fallback_allowed"] = any(bool(item.get("fallback_allowed")) for item in scene_tasks)
+    result["fallback_block_reason"] = next((str(item.get("fallback_block_reason") or "") for item in scene_tasks if str(item.get("fallback_block_reason") or "")), "")
     result["final_concat_required"] = bool(orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S and _scene_count(job) > 1)
     result["concat_ready"] = bool(completed_scenes >= len(scene_tasks) and scene_tasks)
     result["chunk_count"] = result.get("chunk_count") or _scene_count(job)
