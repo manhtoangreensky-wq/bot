@@ -472,6 +472,31 @@ def _extract_prompt_subject(raw: str) -> str:
     )
 
 
+def _memory_generated_prompt(memory: dict | None) -> str:
+    data = memory or {}
+    return str(data.get("last_generated_prompt") or data.get("last_prompt") or "").strip()
+
+
+def _memory_offered_action(memory: dict | None) -> str:
+    data = memory or {}
+    return str(data.get("last_offered_action") or data.get("last_flow_suggestion") or "").strip()
+
+
+def _is_image_action_confirm(folded: str, memory: dict | None) -> bool:
+    if _memory_topic(memory) != "image":
+        return False
+    offered = _memory_offered_action(memory)
+    if offered and any(term in folded for term in ("tu tao", "tao dum", "tao giup", "tao di", "lam di", "lam giup", "duoc", "ok")):
+        return True
+    return folded in {"lam di", "tao di", "tiep di", "duoc", "ok", "duoc roi", "lam luon di"}
+
+
+def _is_image_action_complaint(folded: str, memory: dict | None) -> bool:
+    if _memory_topic(memory) != "image":
+        return False
+    return any(term in folded for term in ("khong tao duoc", "khong lam duoc", "sao khong tao", "sao khong lam", "tao duoc khong", "lam duoc khong"))
+
+
 def _is_image_create_request(raw: str, folded: str, memory: dict | None) -> bool:
     if _is_short_image_followup(raw, folded, memory):
         return True
@@ -484,6 +509,19 @@ def _is_image_create_request(raw: str, folded: str, memory: dict | None) -> bool
     return False
 
 
+def image_prompt_for_subject(topic: str) -> str:
+    clean = str(topic or "").strip() or "sản phẩm"
+    if "lexus" in fold(clean):
+        return (
+            "Ảnh quảng cáo xe Lexus màu đen chạy trên đường phố ban đêm, ánh đèn phản chiếu trên thân xe, "
+            "phong cách luxury automotive commercial, cinematic lighting, ultra realistic, sharp details, 9:16."
+        )
+    return (
+        f"Ảnh quảng cáo {clean}, bố cục rõ chủ thể, ánh sáng đẹp, phong cách thương mại cao cấp, "
+        "màu sắc sạch, chi tiết sắc nét, tỉ lệ 9:16, không chữ rối, không phóng đại."
+    )
+
+
 def _is_video_create_request(raw: str, folded: str, memory: dict | None) -> bool:
     if _is_short_video_followup(folded, memory):
         return True
@@ -494,16 +532,7 @@ def image_create_reply(raw: str, *, memory: dict | None = None, subject: str = "
     remembered = _memory_subject(memory)
     topic = subject or remembered
     if topic:
-        if "lexus" in fold(topic):
-            prompt = (
-                "Ảnh quảng cáo xe Lexus màu đen chạy trên đường phố ban đêm, ánh đèn phản chiếu trên thân xe, "
-                "phong cách luxury automotive commercial, cinematic lighting, ultra realistic, sharp details, 9:16."
-            )
-        else:
-            prompt = (
-                f"Ảnh quảng cáo {topic}, bố cục rõ chủ thể, ánh sáng đẹp, phong cách thương mại cao cấp, "
-                "màu sắc sạch, chi tiết sắc nét, tỉ lệ 9:16, không chữ rối, không phóng đại."
-            )
+        prompt = image_prompt_for_subject(topic)
         if not subject and remembered and str(raw or "").strip().lower() in {"ảnh", "anh"}:
             return (
                 f"Dạ mình đang muốn tiếp tục tạo ảnh {remembered} đúng không ạ? Em có thể giúp anh/chị theo 2 cách: "
@@ -524,6 +553,22 @@ def image_create_reply(raw: str, *, memory: dict | None = None, subject: str = "
     return (
         "Dạ anh/chị muốn tạo ảnh mới, xem giá tạo ảnh hay chỉnh ảnh có sẵn ạ? "
         "Nếu muốn tạo ảnh thật, bot sẽ hiện hóa đơn trước khi xử lý; nếu chỉ cần prompt thì em viết miễn phí trước cho mình."
+    )
+
+
+def image_action_confirm_reply(memory: dict | None = None) -> str:
+    subject = _memory_subject(memory) or "ảnh này"
+    return (
+        f"Dạ được ạ. Em sẽ tiếp tục theo yêu cầu tạo ảnh {subject} vừa soạn. "
+        "Nếu tạo ảnh thật trong bot, mình sẽ đi tới luồng Tạo ảnh AI, chọn tỉ lệ/gói và dừng ở màn hóa đơn để anh/chị tự xác nhận."
+    )
+
+
+def image_action_complaint_reply(memory: dict | None = None) -> str:
+    subject = _memory_subject(memory) or "ảnh này"
+    return (
+        f"Dạ tạo được ảnh {subject} ạ. Em chỉ không được tự xác nhận hóa đơn hoặc tự trừ Xu thay anh/chị. "
+        "Em có thể mở sẵn flow Tạo ảnh AI với prompt đã soạn, tới màn hóa đơn anh/chị tự xác nhận thì hệ thống mới xử lý."
     )
 
 
@@ -566,6 +611,12 @@ def _base_result(
     last_subject: str = "",
     last_requested_asset: str = "",
     last_flow_suggestion: str = "",
+    last_prompt: str = "",
+    last_generated_prompt: str = "",
+    last_offered_action: str = "",
+    last_flow: str = "",
+    last_action_button: str = "",
+    context_carry_used: bool = False,
 ) -> dict:
     context = load_context_brain()
     context_version = str(context.get("version") or CONTEXT_FILE_VERSION_FALLBACK)
@@ -609,6 +660,12 @@ def _base_result(
         "last_requested_asset": last_requested_asset,
         "last_subject": last_subject,
         "last_flow_suggestion": last_flow_suggestion,
+        "last_prompt": last_prompt,
+        "last_generated_prompt": last_generated_prompt,
+        "last_offered_action": last_offered_action,
+        "last_flow": last_flow,
+        "last_action_button": last_action_button,
+        "context_carry_used": bool(context_carry_used),
         "shared_docs": docs_status(),
     }
 
@@ -987,6 +1044,52 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
     if not has_price and any(term in folded for term in ("nap tien", "nap xu", "chuyen khoan", "thanh toan")) and any(term in folded for term in ("video", "anh", "hinh")):
         return {"matched": False}
 
+    if _is_image_action_complaint(folded, conversation_memory):
+        subject = _memory_subject(conversation_memory)
+        prompt = _memory_generated_prompt(conversation_memory) or (image_prompt_for_subject(subject) if subject else "")
+        return _base_result(
+            "image_action_complaint_or_capability",
+            image_action_complaint_reply(conversation_memory),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high",
+            product="image_ai",
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+            topic="image",
+            last_subject=subject,
+            last_requested_asset=subject or "image",
+            last_prompt=prompt,
+            last_generated_prompt=prompt,
+            last_offered_action="open_image_ai_flow",
+            last_flow="image_ai",
+            last_action_button="Mở tạo ảnh AI",
+            last_flow_suggestion="aichat|open_image_prefill",
+            context_carry_used=True,
+        )
+
+    if _is_image_action_confirm(folded, conversation_memory):
+        subject = _memory_subject(conversation_memory)
+        prompt = _memory_generated_prompt(conversation_memory) or (image_prompt_for_subject(subject) if subject else "")
+        return _base_result(
+            "image_action_confirm",
+            image_action_confirm_reply(conversation_memory),
+            sources=["guide_doc", "cskh_knowledge"],
+            confidence="high",
+            product="image_ai",
+            pricing_source="guide_doc",
+            context_section="usage_guides",
+            topic="image",
+            last_subject=subject,
+            last_requested_asset=subject or "image",
+            last_prompt=prompt,
+            last_generated_prompt=prompt,
+            last_offered_action="open_image_ai_flow",
+            last_flow="image_ai",
+            last_action_button="Mở tạo ảnh AI",
+            last_flow_suggestion="aichat|open_image_prefill",
+            context_carry_used=True,
+        )
+
     if _has_prompt_keyword(folded) and not has_price:
         prompt_topic = _extract_prompt_subject(raw) or _extract_image_subject(raw) or _extract_video_subject(raw, folded)
         prompt_is_video = "video" in folded or _memory_topic(conversation_memory) == "video"
@@ -1032,6 +1135,7 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
     if _is_image_create_request(raw, folded, conversation_memory) and not has_price:
         explicit_subject = _extract_image_subject(raw)
         subject = explicit_subject or _memory_subject(conversation_memory)
+        prompt = image_prompt_for_subject(subject) if subject else ""
         return _base_result(
             "image_create_request",
             image_create_reply(raw, memory=conversation_memory, subject=explicit_subject),
@@ -1043,7 +1147,13 @@ def classify_shared_answer(text: str, *, conversation_memory: dict | None = None
             topic="image",
             last_subject=subject,
             last_requested_asset=subject or "image",
-            last_flow_suggestion="menu|main_image",
+            last_prompt=prompt,
+            last_generated_prompt=prompt,
+            last_offered_action="open_image_ai_flow",
+            last_flow="image_ai",
+            last_action_button="Mở tạo ảnh AI",
+            last_flow_suggestion="aichat|open_image_prefill",
+            context_carry_used=not bool(explicit_subject) and bool(_memory_subject(conversation_memory)),
         )
 
     if _is_video_create_request(raw, folded, conversation_memory) and not has_price:
