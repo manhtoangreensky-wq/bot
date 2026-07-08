@@ -419,6 +419,16 @@ def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]
 
 def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
     payload = dict(payload or {})
+    terminal = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower()
+    stalled_without_fallback = bool(
+        payload.get("provider_stalled_not_start")
+        and not payload.get("fallback_allowed")
+        and not payload.get("fallback_used")
+        and str(payload.get("fallback_submit_source") or payload.get("submit_source") or "").strip()
+        not in {"public_confirmed_fallback_once", "public_confirmed_scene_fallback_once"}
+    )
+    if terminal in {"failed", "failed_no_charge", "failed_refunded", "needs_admin_review"} or stalled_without_fallback:
+        return False
     status_text = " ".join(
         str(payload.get(key) or "").strip().lower()
         for key in (
@@ -465,6 +475,12 @@ def reconcile_provider_progress_telemetry(
     persisted_status = str(job.get("status") or "").strip().lower()
     persisted_progress = max(_as_int(job.get("progress_percent"), 0), _as_int(payload.get("progress_percent"), 0))
     alive = provider_task_alive(payload)
+    terminal_failure = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower() in {
+        "failed",
+        "failed_no_charge",
+        "failed_refunded",
+        "needs_admin_review",
+    }
     wait_max = max(60, _as_int(payload.get("provider_wait_max_seconds"), 20 * 60))
     started_source = "payload"
     started_epoch = _parse_time_epoch(payload.get("provider_started_at_epoch") or payload.get("provider_started_at"))
@@ -572,7 +588,9 @@ def reconcile_provider_progress_telemetry(
         final_progress = max(20, min(85, final_progress))
     else:
         final_progress = max(0, min(100, final_progress))
-    final_status = "processing" if alive else (persisted_status or "queued")
+    final_status = "failed" if terminal_failure else ("processing" if alive else (persisted_status or "queued"))
+    if terminal_failure:
+        final_progress = min(85, max(20, final_progress))
     return {
         "provider_task_alive": bool(alive),
         "progress_monotonic_applied": bool(final_progress > requested or final_progress > persisted_progress),
