@@ -1778,6 +1778,46 @@ def fail_stale_product_video_jobs(
         project = video_project_queue.get_video_project(conn, int(row[1]))
         if not is_remote_worker_product_video_job({"job_type": video_project_queue.VIDEO_RENDER_JOB_TYPE}, project):
             continue
+        payload = {}
+        try:
+            payload = json.loads(str((job or {}).get("result_json") or "{}"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and video_project_queue.provider_task_alive(payload):
+            telemetry = video_project_queue.reconcile_provider_progress_telemetry(
+                job,
+                payload,
+                refresh_source="stale_guard_provider_alive",
+            )
+            payload.update(
+                {
+                    **telemetry,
+                    "autonomous_db_poll_enabled": True,
+                    "db_poll_candidate": True,
+                    "registry_required_for_poll": False,
+                    "registry_missing_is_blocker": False,
+                    "terminal_before_reconcile": str(project.get("video_terminal_state") or payload.get("terminal_state") or ""),
+                    "terminal_after_reconcile": "final_rendering",
+                    "terminal_override_reason": "provider_running_overrides_failed_no_charge",
+                    "no_new_paid_submit": True,
+                }
+            )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=?, progress_percent=?, progress_message=?, updated_at=? WHERE id=?",
+                (
+                    json.dumps(payload, ensure_ascii=False),
+                    int(telemetry.get("final_progress_after_reconcile") or job.get("progress_percent") or 20),
+                    "provider_in_progress",
+                    video_project_queue.now_text(),
+                    int(job["id"]),
+                ),
+            )
+            conn.execute(
+                "UPDATE video_projects SET status='processing', video_terminal_state='final_rendering', error_log=?, updated_at=? WHERE project_id=?",
+                ("provider_in_progress", video_project_queue.now_text(), int(project["project_id"])),
+            )
+            conn.commit()
+            continue
         video_project_queue.fail_video_job(conn, job_id=int(job["id"]), error=reason, retry=False)
         failed += 1
     return failed

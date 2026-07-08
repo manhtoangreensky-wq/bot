@@ -9087,6 +9087,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             payload["percent"] = final_reconciled
         if (job or {}).get("provider_task_alive"):
             payload["current_stage"] = "generating_video"
+            payload["terminal_state"] = ""
     auto = progress_auto_refresh_status_text(job_id)
     auto_key = progress_auto_refresh_key(resolved_type, job_id) if job_id else ""
     auto_record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(auto_key) or {}) if auto_key else {}
@@ -9100,7 +9101,12 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         or ""
     ).strip()
     product_video_registry_present = bool(auto_record)
-    status_registry_missing_after_restart = bool(job_id and not product_video_registry_present and "no_registry_after_restart" in auto)
+    status_registry_missing_after_restart = bool(
+        job_id
+        and not product_video_registry_present
+        and "no_registry_after_restart" in auto
+        and not (job or {}).get("provider_task_alive")
+    )
     persisted_job_status = str((job or {}).get("persisted_job_status") or (job or {}).get("status") or "").strip()
     persisted_job_progress = safe_int((job or {}).get("persisted_job_progress") or (job or {}).get("progress_percent"), 0)
     video_provider_debug_text = ""
@@ -47397,6 +47403,18 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         or (project or {}).get("video_delivered_at")
         or (project or {}).get("delivery_message_id")
     )
+    delivered_artifact = video_b14_delivered_video_artifact(jid, job=job, project=project)
+    download_button_visible = bool(delivered_artifact.get("ok") or result.get("download_button_visible"))
+    download_source = str(result.get("download_source") or "").strip()
+    if not download_source:
+        if delivered_artifact.get("file_id"):
+            download_source = "telegram_file_id"
+        elif delivered_artifact.get("path"):
+            download_source = "artifact_path"
+        elif delivered_artifact.get("result_url_present"):
+            download_source = "result_url"
+        else:
+            download_source = "none"
     blocker = str(
         result.get("blocker")
         or result.get("provider_error")
@@ -47548,6 +47566,16 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• artifact path: <code>{html.escape(mask_provider_task_id(artifact_path) if artifact_path else '-')}</code>",
         f"• artifact size: <code>{artifact_size}</code>",
         f"• delivered: <code>{'yes' if delivered else 'no'}</code>",
+        f"• download button visible: <code>{'yes' if download_button_visible else 'no'}</code>",
+        f"• download source: <code>{html.escape(download_source)}</code>",
+        f"• autonomous DB poller: <code>{'yes' if result.get('autonomous_db_poller_enabled') or result.get('autonomous_poll_enabled') else 'no'}</code>",
+        f"• DB poll candidate: <code>{'yes' if result.get('db_poll_candidate') else 'no'}</code>",
+        f"• registry required for poll: <code>{'yes' if result.get('registry_required_for_poll') else 'no'}</code>",
+        f"• registry missing is blocker: <code>{'yes' if result.get('registry_missing_is_blocker') else 'no'}</code>",
+        f"• next poll at: <code>{html.escape(str(result.get('next_poll_at') or result.get('next_poll_scheduled_at') or '-'))}</code>",
+        f"• terminal before reconcile: <code>{html.escape(str(result.get('terminal_before_reconcile') or '-'))}</code>",
+        f"• terminal after reconcile: <code>{html.escape(str(result.get('terminal_after_reconcile') or result.get('final_status_after_reconcile') or '-'))}</code>",
+        f"• terminal override reason: <code>{html.escape(str(result.get('terminal_override_reason') or '-'))}</code>",
         f"• result URL host: <code>{html.escape(str(result.get('result_url_host') or '-'))}</code>",
         f"• result URL scheme/ext: <code>{html.escape(str(result.get('result_url_scheme') or '-'))}</code>/<code>{html.escape(str(result.get('result_url_ext') or '-'))}</code>",
         f"• result URL trusted: <code>{'yes' if result.get('result_url_trusted') else 'no'}</code>",
@@ -48281,6 +48309,250 @@ def _video_provider_update_job_result(conn, job_id: int, updates: dict) -> dict:
     return current
 
 
+def video_b14_autonomous_db_poll_metadata(
+    job_id: int | str,
+    *,
+    job: dict | None = None,
+    project: dict | None = None,
+    result: dict | None = None,
+    registry_present: bool = False,
+    refresh_source: str = "autonomous_db_poll",
+    persist: bool = False,
+    conn=None,
+) -> dict:
+    """Describe the DB-backed Product Video poll state without submitting new provider work."""
+    jid = safe_int(job_id or (job or {}).get("id") or (job or {}).get("job_id"), 0)
+    current_job = dict(job or (video_b14_render_job_by_id(jid) if jid else {}) or {})
+    current_project = dict(project or {})
+    if current_job and not current_project:
+        try:
+            current_project = get_video_project(safe_int(current_job.get("project_id"), 0))
+        except Exception:
+            current_project = {}
+    payload = dict(result or video_b14_job_result_payload(current_job) or {})
+    telemetry = video_b14_reconciled_provider_debug(current_job, current_project, payload, refresh_source=refresh_source) if current_job else dict(payload)
+    provider_alive = bool(
+        telemetry.get("provider_task_alive")
+        or telemetry.get("primary_provider_task_alive")
+        or telemetry.get("continue_polling")
+    )
+    delivered = bool(
+        current_project.get("video_delivered_at")
+        or current_project.get("video_delivery_message_id")
+        or current_project.get("final_video_file_id")
+        or current_job.get("final_video_file_id")
+    )
+    result_url_present = bool(
+        telemetry.get("provider_result_url_present")
+        or telemetry.get("result_url_present")
+        or telemetry.get("shopaikey_result_url_from_data")
+        or telemetry.get("canonical_result_url_present")
+    )
+    interval = max(5, safe_int(
+        telemetry.get("panel_refresh_interval_seconds")
+        or os.getenv("VIDEO_PROVIDER_EXISTING_TASK_POLL_SECONDS", "")
+        or VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS,
+        VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS,
+    ))
+    next_dt = datetime.now() + timedelta(seconds=interval)
+    next_poll_at = next_dt.isoformat(timespec="seconds")
+    terminal_before = str(
+        current_project.get("video_terminal_state")
+        or payload.get("terminal_state")
+        or current_job.get("status")
+        or ""
+    ).strip()
+    candidate = bool(provider_alive and not delivered and not result_url_present)
+    metadata = {
+        "autonomous_db_poller_enabled": True,
+        "autonomous_poll_enabled": True,
+        "db_poll_candidate": bool(candidate),
+        "registry_required_for_poll": False,
+        "registry_missing_is_blocker": False,
+        "product_video_registry_present": bool(registry_present),
+        "status_registry_missing_after_restart": bool(jid and not registry_present),
+        "provider_task_alive": bool(provider_alive),
+        "provider_result_url_present": bool(result_url_present),
+        "result_url_present": bool(result_url_present),
+        "next_poll_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
+        "next_poll_scheduled": bool(candidate or telemetry.get("next_poll_scheduled")),
+        "next_poll_scheduled_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
+        "next_refresh_expected_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
+        "poll_interval_seconds": interval,
+        "terminal_before_reconcile": terminal_before,
+        "terminal_after_reconcile": "final_rendering" if provider_alive else terminal_before,
+        "terminal_override_reason": "provider_running_overrides_failed_no_charge" if provider_alive and terminal_before == "failed_no_charge" else "",
+        "final_status_after_reconcile": "processing" if provider_alive else str(telemetry.get("final_status_after_reconcile") or current_job.get("status") or ""),
+        "final_progress_after_reconcile": safe_int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or current_job.get("progress_percent"), 0),
+        "no_new_paid_submit": True,
+        "paid_fallback_not_used": True,
+        "debug_status_read_only_no_submit": True,
+        "refresh_source": refresh_source,
+    }
+    metadata.update({key: telemetry.get(key) for key in (
+        "provider_started_at",
+        "provider_started_at_source",
+        "provider_wait_elapsed_seconds",
+        "provider_wait_max_seconds",
+        "provider_poll_count",
+        "provider_poll_count_source",
+        "provider_progress_raw",
+        "provider_progress_raw_number",
+        "provider_progress_source",
+        "render_video_progress_percent",
+        "render_video_progress_percent_public",
+        "render_progress_public_mode",
+        "status_source_priority_used",
+        "provider_state_overrode_registry",
+        "provider_state_overrode_persisted_status",
+        "persisted_status_before_reconcile",
+        "persisted_progress_before_reconcile",
+    ) if telemetry.get(key) not in (None, "")})
+    if persist and jid and (candidate or provider_alive or result_url_present):
+        owns_conn = conn is None
+        if conn is None:
+            conn = db_connect()
+        try:
+            _video_provider_update_job_result(conn, jid, metadata)
+        finally:
+            if owns_conn:
+                conn.close()
+    return metadata
+
+
+async def video_b14_autonomous_materialize_and_deliver(
+    context,
+    chat_id,
+    job_id: int | str,
+    *,
+    lang: str = "vi",
+    source: str = "autonomous_db_poll",
+) -> dict:
+    """Poll an existing provider task, download a ready result_url, finalize, and deliver once."""
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {"ok": False, "sent": False, "reason": "job_id_required", "no_new_paid_submit": True, "charge": 0}
+    already = video_b14_delivered_video_artifact(jid)
+    if already.get("ok"):
+        return {"ok": True, "sent": False, "already_delivered": True, "download_button_visible": True, **already, "charge": 0}
+    recovery = video_provider_recover_existing_task(jid, download=True)
+    if recovery.get("waiting"):
+        conn = db_connect()
+        try:
+            job = video_project_queue.get_video_render_job(conn, jid)
+            project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0)) if job else {}
+            metadata = video_b14_autonomous_db_poll_metadata(
+                jid,
+                job=job,
+                project=project,
+                result=dict((recovery.get("debug") or {})),
+                registry_present=bool(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(video_b14_auto_refresh_key(jid))),
+                refresh_source=source,
+                persist=True,
+                conn=conn,
+            )
+        finally:
+            conn.close()
+        return {
+            "ok": False,
+            "waiting": True,
+            "reason": "provider_in_progress",
+            "provider_running": True,
+            "autonomous_db_poll": metadata,
+            "no_new_paid_submit": True,
+            "charge": 0,
+        }
+    artifact = recovery.get("artifact")
+    artifact_path = str(getattr(artifact, "local_path", "") or "").strip()
+    if not recovery.get("ok") or not artifact_path:
+        return {
+            "ok": False,
+            "sent": False,
+            "reason": str(recovery.get("blocker") or "result_url_not_ready"),
+            "recovery": recovery,
+            "no_new_paid_submit": True,
+            "charge": 0,
+        }
+    conn = db_connect()
+    try:
+        result_payload = {
+            **dict(recovery.get("debug") or {}),
+            "ok": True,
+            "result_url_auto_materialized": True,
+            "autonomous_db_poller_enabled": True,
+            "autonomous_materialize_source": source,
+            "final_video_path": artifact_path,
+            "bytes": safe_int(getattr(artifact, "bytes", 0), 0),
+            "output_bytes": safe_int(getattr(artifact, "bytes", 0), 0),
+            "output_duration": float(getattr(artifact, "duration", 0.0) or 0.0),
+            "download_button_visible": False,
+            "no_new_paid_submit": True,
+            "paid_fallback_not_used": True,
+            "charge_policy": "after_valid_mp4_delivery",
+        }
+        complete = video_project_queue.complete_video_job(
+            conn,
+            job_id=jid,
+            final_video_path=artifact_path,
+            result=result_payload,
+        )
+        if not complete.get("ok"):
+            _video_provider_update_job_result(
+                conn,
+                jid,
+                {
+                    **result_payload,
+                    "autonomous_finalizer_invoked": True,
+                    "autonomous_finalizer_ok": False,
+                    "autonomous_finalizer_reason": str(complete.get("reason") or "finalizer_failed"),
+                    "download_button_visible": False,
+                    "charge": 0,
+                },
+            )
+            return {"ok": False, "sent": False, "reason": str(complete.get("reason") or "finalizer_failed"), "recovery": recovery, "charge": 0}
+    finally:
+        conn.close()
+    delivery = await maybe_send_remote_worker_final_video(complete)
+    conn = db_connect()
+    try:
+        noted = video_project_queue.note_video_delivery_result(
+            conn,
+            job_id=jid,
+            sent=bool(delivery.get("sent")),
+            delivery_message_id=str(delivery.get("telegram_message_id") or ""),
+            success_message_id=str(delivery.get("success_message_id") or delivery.get("telegram_message_id") or ""),
+            reason=str(delivery.get("reason") or delivery.get("delivery_reason") or "telegram_delivery_failed"),
+        )
+        _video_provider_update_job_result(
+            conn,
+            jid,
+            {
+                "autonomous_delivery_attempted": True,
+                "autonomous_delivery_source": source,
+                "autonomous_delivery_sent": bool(delivery.get("sent")),
+                "delivery_succeeded": bool(delivery.get("sent")),
+                "video_delivered": bool(delivery.get("sent")),
+                "download_button_visible": bool(delivery.get("sent")),
+                "download_source": "telegram_file_id_or_final_path" if delivery.get("sent") else "",
+                "result_url_auto_materialized": True,
+                "charge_policy": "after_valid_mp4_delivery",
+                "charge_after_delivery_gate": "valid_mp4_delivered" if delivery.get("sent") else "delivery_failed_no_charge",
+                "charge": 0,
+            },
+        )
+    finally:
+        conn.close()
+    return {
+        "ok": bool(delivery.get("sent")),
+        "sent": bool(delivery.get("sent")),
+        "delivery": delivery,
+        "note_delivery": noted,
+        "recovery": recovery,
+        "download_button_visible": bool(delivery.get("sent")),
+        "charge": 0,
+    }
+
+
 def video_provider_recover_existing_task(job_id: int, *, download: bool = False, conn=None) -> dict:
     jid = safe_int(job_id, 0)
     if jid <= 0:
@@ -48395,11 +48667,20 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             **poll_debug,
         }
         if normalized == "running":
+            poll_metadata = video_b14_autonomous_db_poll_metadata(
+                jid,
+                job=job,
+                project=project,
+                result={**result, **updates, **poll_debug},
+                registry_present=bool(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(video_b14_auto_refresh_key(jid))),
+                refresh_source="provider_recover_running",
+            )
             updates.update(
                 {
                     "recovery_status": "waiting_provider_result",
                     "recovery_blocker": "provider_in_progress",
                     "continue_polling": True,
+                    **poll_metadata,
                 }
             )
             _video_provider_update_job_result(conn, jid, updates)
@@ -69903,6 +70184,13 @@ def video_b14_auto_refresh_status_bundle(job_id: int | str = "", *, user_id=0, j
 def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict | None = None) -> str:
     job = dict(job or {})
     project = dict(project or {})
+    payload = video_b14_job_result_payload(job)
+    try:
+        telemetry = video_b14_reconciled_provider_debug(job, project, payload, refresh_source="auto_refresh_terminal")
+    except Exception:
+        telemetry = payload
+    if telemetry.get("provider_task_alive") or telemetry.get("continue_polling") or telemetry.get("primary_provider_task_alive"):
+        return ""
     status = str(job.get("status") or project.get("status") or "").strip().lower()
     terminal = str(project.get("video_terminal_state") or "").strip().lower()
     delivery_done = bool(
@@ -69956,10 +70244,23 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
     current_project = dict((result or {}).get("project") or bundle.get("project") or {})
     current_session = dict(session or bundle.get("session") or {})
     jid = safe_int(current_job.get("id") or job_id or ((current_session.get("draft") or {}).get("b14_queue_job_id")), 0)
+    registry_present = bool(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(video_b14_auto_refresh_key(jid))) if jid else False
+    autonomous = video_b14_autonomous_db_poll_metadata(
+        jid,
+        job=current_job,
+        project=current_project,
+        result=video_b14_job_result_payload(current_job),
+        registry_present=registry_present,
+        refresh_source="auto_refresh_snapshot",
+        persist=bool(jid),
+    ) if jid else {}
     text = video_b14_queue_status_text(current_session, {"job": current_job, "project": current_project}, user_id, lang)
     percent_match = re.search(r"Tiến độ:\s*<b>(\d+)%</b>", text)
     percent = safe_int(percent_match.group(1) if percent_match else current_job.get("progress_percent"), 0)
     status = str(current_job.get("status") or current_project.get("status") or ("queued" if jid else "draft")).strip().lower()
+    if autonomous.get("provider_task_alive"):
+        status = "processing"
+        percent = max(percent, safe_int(autonomous.get("final_progress_after_reconcile"), 20))
     artifact = video_b14_auto_refresh_final_artifact_state(current_job, current_project)
     delivery_done = bool(
         current_project.get("video_delivered_at")
@@ -69970,6 +70271,8 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
     blocked_reason = video_b14_product_result_block_reason(current_job, current_project)
     visual_classification = video_b14_result_visual_classification(current_job)
     terminal = video_b14_auto_refresh_terminal_state(current_job, current_project)
+    if autonomous.get("provider_task_alive"):
+        terminal = ""
     stage = video_b14_auto_refresh_stage_from_snapshot(
         status,
         percent,
@@ -69982,6 +70285,8 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
     blocker = ""
     if not current_job:
         blocker = "job_missing"
+    elif autonomous.get("provider_task_alive"):
+        blocker = ""
     elif blocked_reason:
         blocker = blocked_reason
     elif terminal == "failed_no_charge":
@@ -70002,6 +70307,11 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         "blocker": blocker,
         "job": current_job,
         "project": current_project,
+        "autonomous_db_poll": autonomous,
+        "db_poll_candidate": bool(autonomous.get("db_poll_candidate")),
+        "registry_required_for_poll": bool(autonomous.get("registry_required_for_poll")),
+        "registry_missing_is_blocker": bool(autonomous.get("registry_missing_is_blocker")),
+        "next_poll_at": str(autonomous.get("next_poll_at") or ""),
     }
 
 
@@ -70189,6 +70499,21 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         return {"status": "stopped", "reason": "max_updates"}
     record["last_tick_at"] = now_text()
     record["task_alive"] = True
+    delivery_result = await video_b14_autonomous_materialize_and_deliver(
+        context,
+        record.get("chat_id"),
+        record.get("job_id") or "",
+        lang=record.get("lang") or "vi",
+        source="auto_refresh_tick",
+    )
+    if delivery_result.get("waiting"):
+        record["db_poll_candidate"] = True
+        record["registry_required_for_poll"] = False
+        record["registry_missing_is_blocker"] = False
+        record["next_poll_at"] = str(((delivery_result.get("autonomous_db_poll") or {}).get("next_poll_at") or ""))
+    elif delivery_result.get("sent"):
+        record["download_button_visible"] = True
+        record["autonomous_delivery_sent"] = True
     snapshot = video_b14_auto_refresh_snapshot(
         record.get("job_id") or "",
         user_id=record.get("user_id") or 0,
@@ -70262,13 +70587,21 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
                 "• registry_saved: <code>false</code>\n"
                 "• blocker: <code>job_missing_or_no_registry_after_restart</code>"
             )
+        autonomous = dict(snapshot.get("autonomous_db_poll") or {})
         return (
             "📊 <b>Video auto-refresh</b>\n\n"
             f"• job_id: <code>{html.escape(wanted)}</code>\n"
             "• registry_saved: <code>false</code>\n"
-            "• scheduler_mode: <code>recovered_from_db_read_only</code>\n"
+            "• scheduler_mode: <code>autonomous_db_poll</code>\n"
             "• blocker: <code>-</code>\n"
-            "• recovery: <code>status_can_read_db_and_provider_task</code>\n"
+            "• recovery: <code>db_auto_poll_can_follow_existing_provider_task</code>\n"
+            "• recovery_compat: <code>recovered_from_db_read_only</code>\n"
+            "• status_can_read_db_and_provider_task: <code>true</code>\n"
+            "• Auto poll DB: <code>đang theo dõi task provider</code>\n"
+            f"• db_poll_candidate: <code>{'true' if autonomous.get('db_poll_candidate') else 'false'}</code>\n"
+            f"• registry_required_for_poll: <code>{'true' if autonomous.get('registry_required_for_poll') else 'false'}</code>\n"
+            f"• registry_missing_is_blocker: <code>{'true' if autonomous.get('registry_missing_is_blocker') else 'false'}</code>\n"
+            f"• next_poll_at: <code>{html.escape(str(autonomous.get('next_poll_at') or snapshot.get('next_poll_at') or '-'))}</code>\n"
             f"• current_stage: <code>{html.escape(str(snapshot.get('stage') or '-'))}</code>\n"
             f"• percent: <code>{int(snapshot.get('percent') or 0)}%</code>\n"
             f"• terminal_state: <code>{html.escape(str(snapshot.get('terminal_state') or '-'))}</code>\n"
@@ -73641,6 +73974,16 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
         return await video_b14_send_or_edit_status_panel(query, context, session, result, uid, lang)
     if action == "b14_job_status":
+        draft = dict(session.get("draft") or {})
+        job_id = safe_int(draft.get("b14_queue_job_id") or (draft.get("b14_queue_job") or {}).get("id"), 0)
+        if job_id > 0:
+            await video_b14_autonomous_materialize_and_deliver(
+                context,
+                query.message.chat_id,
+                job_id,
+                lang=lang,
+                source="manual_status_refresh",
+            )
         session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
         return await video_b14_send_or_edit_status_panel(query, context, session, None, uid, lang)
     if action == "b14_download_video":
