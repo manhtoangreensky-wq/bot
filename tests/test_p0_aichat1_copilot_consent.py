@@ -206,6 +206,7 @@ def test_aichat_scope_guard_only_touches_aichat_bot_and_tests():
         "tests/test_p0_aichat2_natural_context_pricing.py",
         "tests/test_p0_aichat4_smart_intent_context_backstack.py",
         "tests/test_p0_aichat5_live_context_action_trace.py",
+        "tests/test_p0_aichat6_open_public_live_flows.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",

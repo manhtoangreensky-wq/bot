@@ -59528,6 +59528,75 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
         return False, "Hệ thống tạo ảnh/video đang bảo trì ngắn hoặc chưa sẵn sàng."
     return True, ""
 
+HIDDEN_PROVIDER_SUBMIT_SOURCE_TOKENS = {
+    "background",
+    "codex",
+    "debug",
+    "dryrun",
+    "hidden",
+    "recover",
+    "recovery",
+    "smoke",
+    "status",
+    "test",
+    "tool_test",
+    "worker",
+}
+
+def shopaikey_public_flow_access_guard(job_type: str) -> dict:
+    job = str(job_type or "").strip().lower()
+    return {
+        "job_type": job,
+        "flow_access_allowed": job in {"image", "video"},
+        "flow_block_reason": "" if job in {"image", "video"} else "unsupported_public_flow",
+        "provider_submit_allowed": False,
+        "provider_submit_block_reason": "awaiting_user_final_confirm",
+        "provider_call_allowed": False,
+        "xu_charge_allowed": False,
+    }
+
+def shopaikey_provider_submit_maintenance_message(job_type: str, lang: str = "vi", detail: str = "") -> str:
+    job = str(job_type or "").strip().lower()
+    if job == "video":
+        return (
+            "🎬 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên hiện chưa xuất được video lúc này.\n"
+            "TOAN AAS đã giữ lại phần kịch bản, storyboard, prompt, nhạc, phụ đề hoặc lồng tiếng bạn đã chuẩn bị.\n"
+            "Bạn quay lại thử sau một chút nhé — bot chưa xử lý video và chưa trừ Xu."
+        )
+    if normalize_user_language(lang) == "zh":
+        return "🛠 图片生成正在维护中。TOAN AAS 已保留你的 prompt/套餐选择；尚未提交生成，也未扣除 Xu。"
+    if normalize_user_language(lang) != "vi":
+        return "🛠 Image generation is temporarily under maintenance. TOAN AAS kept your prompt/package choice; no provider call was submitted and no Xu was charged."
+    return "🛠 Hệ thống tạo ảnh đang bảo trì/nâng cấp nhẹ. TOAN AAS đã giữ prompt, tỉ lệ và gói bạn chọn; bot chưa gọi provider và chưa trừ Xu."
+
+def shopaikey_provider_submit_guard(job_type: str, *, source: str = "", confirmed: bool = False) -> dict:
+    job = str(job_type or "").strip().lower()
+    src = str(source or "").strip().lower()
+    if not confirmed:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "missing_user_final_confirm",
+            "message": "Bot chưa có xác nhận cuối từ user nên chưa gọi provider và chưa trừ Xu.",
+        }
+    if src and any(token in src for token in HIDDEN_PROVIDER_SUBMIT_SOURCE_TOKENS):
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "hidden_submit_source_blocked",
+            "message": "Provider submit nền/test/debug bị chặn. Chỉ user bấm xác nhận live mới được chạy thật.",
+        }
+    enabled, message = shopaikey_public_generation_guard(job)
+    if not enabled:
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "provider_submit_runtime_guard_blocked",
+            "message": message,
+        }
+    return {
+        "provider_submit_allowed": True,
+        "provider_submit_block_reason": "",
+        "message": "",
+    }
+
 def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
     if not (SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED and SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED):
         return None
@@ -85225,6 +85294,10 @@ def aichat_trace_text(payload: dict) -> str:
                 f"   context=<code>{'yes' if item.get('context_file_used') else 'no'}</code> version=<code>{html.escape(str(item.get('context_version') or item.get('context_file_version') or '-'))}</code> topic=<code>{html.escape(str(item.get('previous_topic') or item.get('last_product_type') or '-'))}</code>",
                 f"   subject=<code>{html.escape(str(item.get('last_subject') or item.get('last_requested_asset') or '-'))}</code>",
                 f"   carry=<code>{'yes' if item.get('context_carry_used') else 'no'}</code> action=<code>{html.escape(str(item.get('action_selected') or item.get('selected_action') or '-'))}</code> executed=<code>{'yes' if item.get('action_executed') else 'no'}</code>",
+                f"   requested_action=<code>{html.escape(str(item.get('requested_action') or item.get('action_selected') or item.get('selected_action') or '-'))}</code>",
+                f"   flow_access=<code>{'yes' if item.get('flow_access_allowed', True) else 'no'}</code> reason=<code>{html.escape(str(item.get('flow_block_reason') or '-'))}</code>",
+                f"   provider_submit=<code>{'yes' if item.get('provider_submit_allowed') else 'no'}</code> reason=<code>{html.escape(str(item.get('provider_submit_block_reason') or '-'))}</code>",
+                f"   opened_flow=<code>{'yes' if item.get('opened_flow') else 'no'}</code> prefill=<code>{'yes' if item.get('prefill_saved') else 'no'}</code>",
                 f"   flow=<code>{html.escape(str(flow.get('callback') or '-'))}</code> learning=<code>{html.escape(str(item.get('learning_candidate_id') or '-'))}</code>",
                 f"   reply=<code>{html.escape(str(item.get('reply_preview') or '-')[:220])}</code>",
             ]
@@ -85382,6 +85455,13 @@ async def handle_aichat_callback(update: Update, context: ContextTypes.DEFAULT_T
             executed=True,
             router_called=True,
             action_result="quick_image_prefill_opened_by_button",
+            requested_action="open_image_ai_flow_with_prefill",
+            flow_access_allowed=True,
+            flow_block_reason="",
+            provider_submit_allowed=False,
+            provider_submit_block_reason="awaiting_user_final_confirm",
+            opened_flow=True,
+            prefill_saved=True,
         )
         save_aichat_state(state)
         return await safe_edit_or_send(
@@ -85418,6 +85498,13 @@ async def handle_aichat_message(update: Update, context: ContextTypes.DEFAULT_TY
             executed=True,
             router_called=True,
             action_result="quick_image_prefill_opened_live",
+            requested_action="open_image_ai_flow_with_prefill",
+            flow_access_allowed=True,
+            flow_block_reason="",
+            provider_submit_allowed=False,
+            provider_submit_block_reason="awaiting_user_final_confirm",
+            opened_flow=True,
+            prefill_saved=True,
         )
         save_aichat_state(state)
         await update.message.reply_text(
@@ -98780,11 +98867,6 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
     prompt = shopaikey_public_prompt_from_args(context)
     if not prompt:
         return await update.message.reply_text("⚠️ Cú pháp: /shopaikey_image <mô tả ảnh>")
-    enabled, message = shopaikey_public_generation_guard("image")
-    if not enabled:
-        return await update.message.reply_text(f"{message}\nBot chưa trừ Xu.")
-    if shopaikey_active_job_for_user(uid, "image"):
-        return await update.message.reply_text(USER_JOB_LOCK_MESSAGE)
     credits, _, _ = get_user(uid, update.effective_user.first_name or update.effective_user.username or "Unknown")
     tier = normalize_image_tier(SHOPAIKEY_IMAGE_DEFAULT_TIER)
     tier_payload = image_tier_payload(tier)
@@ -98813,10 +98895,6 @@ async def start_public_image_prompt_from_tier_message(message, user_id, tier: st
     lang = user_ui_lang(user_id)
     if not payload.get("enabled"):
         return await message.reply_text(ui_text(lang, "image.tier_disabled_message"))
-    if not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
-        return await message.reply_text(ui_text(lang, "media.public_off"))
-    if shopaikey_active_job_for_user(user_id, "image"):
-        return await message.reply_text(ui_text(lang, "media.job_lock"))
     set_public_image_prompt_pending(user_id, payload["tier"])
     await message.reply_text(public_image_prompt_request_text(payload["tier"], lang), parse_mode="HTML")
 
@@ -98836,13 +98914,6 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
     payload = image_tier_payload(tier)
     if not payload.get("enabled"):
         await update.message.reply_text(ui_text(lang, "image.tier_disabled_message"))
-        return True
-    enabled, message = shopaikey_public_generation_guard("image")
-    if not enabled:
-        await update.message.reply_text(ui_text(lang, "media.public_off"))
-        return True
-    if shopaikey_active_job_for_user(uid, "image"):
-        await update.message.reply_text(ui_text(lang, "media.job_lock"))
         return True
     prompt_back_callback = f"create_media|image_tier_{tier}"
     set_media_aspect_pending(
@@ -98919,11 +98990,6 @@ async def show_image_prompt_confirmation(query, uid, tier: str, prompt: str, asp
     payload = image_tier_payload(tier)
     if not payload.get("enabled"):
         return await safe_edit_query_message(query, ui_text(lang, "image.tier_disabled_message"))
-    enabled, _message = shopaikey_public_generation_guard("image")
-    if not enabled:
-        return await safe_edit_query_message(query, ui_text(lang, "media.public_off"))
-    if shopaikey_active_job_for_user(uid, "image"):
-        return await safe_edit_query_message(query, image_action_locked_text(lang))
     credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image prompt user")
     base_cost = int(payload.get("cost") or 0)
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
@@ -98959,6 +99025,7 @@ async def show_image_prompt_confirmation(query, uid, tier: str, prompt: str, asp
         "aspect_ratio": aspect,
         "package_item_type": package_item_type,
         "source": source,
+        "provider_submit_source": "public_user_final_confirm",
         **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
     })
     confirm_text = public_image_confirm_text(
@@ -100297,8 +100364,6 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             return await safe_edit_or_send(query, shopaikey_processed_callback_text(lang, recent_image_job))
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     job_type = str(pending.get("job_type") or "").lower()
-    if str(pending.get("source") or "") == "quick_image_v6":
-        clear_quick_image_flow(uid)
     prompt = str(pending.get("prompt") or "").strip()
     base_cost = int(pending.get("base_cost") or 0)
     image_tier = normalize_image_tier(pending.get("image_tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
@@ -100312,6 +100377,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     trend_output_id = int(pending.get("trend_output_id") or 0)
     scene_index = int(pending.get("scene_index") or 0)
     retry_warranty_count = max(0, int(pending.get("retry_warranty_count") or 0)) if job_type == "image" else 0
+    provider_submit_source = str(
+        pending.get("provider_submit_source")
+        or pending.get("submit_source")
+        or pending.get("source")
+        or "public_user_final_confirm"
+    ).strip()
     if video_paid_preview_required(pending) and not pending.get("paid_preview_seen"):
         preview_gate = video_preview_gate_decision(uid, pending)
         if not preview_gate.get("allowed"):
@@ -100334,19 +100405,44 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             parse_mode="HTML",
             reply_markup=video_paid_preview_entry_keyboard(token, lang),
         )
-    enabled, message = shopaikey_public_generation_guard(job_type)
+    provider_submit_guard = shopaikey_provider_submit_guard(
+        job_type,
+        source=provider_submit_source,
+        confirmed=action in {"confirm", "package"},
+    )
     key4u_ready = key4u_public_video_route_ready() if video_tier in {"future_1000", "future_1200", "future_1500"} else key4u_public_video_fallback_ready()
-    if not enabled and not (job_type == "video" and key4u_ready):
+    provider_submit_allowed = bool(provider_submit_guard.get("provider_submit_allowed"))
+    key4u_runtime_fallback_allowed = (
+        job_type == "video"
+        and key4u_ready
+        and str(provider_submit_guard.get("provider_submit_block_reason") or "") == "provider_submit_runtime_guard_blocked"
+    )
+    if not provider_submit_allowed and not key4u_runtime_fallback_allowed:
+        restore_shopaikey_pending_confirmation(token, uid, pending)
+        block_reason = str(provider_submit_guard.get("provider_submit_block_reason") or "provider_submit_blocked")
         if job_type == "video":
             return await safe_edit_or_send(
                 query,
-                "🎬 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên hiện chưa xuất được video lúc này.\n"
-                "TOAN AAS đã giữ lại phần kịch bản, storyboard, prompt, nhạc, phụ đề hoặc lồng tiếng bạn đã chuẩn bị.\n"
-                "Bạn quay lại thử sau một chút nhé — bot chưa xử lý video và chưa trừ Xu.",
+                (
+                    str(provider_submit_guard.get("message") or "")
+                    if block_reason == "hidden_submit_source_blocked"
+                    else shopaikey_provider_submit_maintenance_message("video", lang, str(provider_submit_guard.get("message") or ""))
+                ),
                 parse_mode=None,
                 reply_markup=(video_finalization_tier_keyboard(lang) if get_video_finalization_state(uid) else public_video_tier_keyboard(lang)),
             )
-        return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+        if str(pending.get("source") or "") == "quick_image_v6":
+            block_markup = quick_image_confirm_keyboard(token, lang)
+        elif str(pending.get("source") or "") in {"image_prompt_tool", "image_edit_create_new"}:
+            block_markup = image_prompt_confirm_keyboard(token, image_tier, lang, str(pending.get("source") or "image_prompt_tool"))
+        else:
+            block_markup = shopaikey_confirm_keyboard("image", token, image_tier, lang)
+        block_message = (
+            str(provider_submit_guard.get("message") or "")
+            if block_reason == "hidden_submit_source_blocked"
+            else shopaikey_provider_submit_maintenance_message("image", lang, str(provider_submit_guard.get("message") or ""))
+        )
+        return await safe_edit_or_send(query, block_message, parse_mode=None, reply_markup=block_markup)
     if job_type == "video":
         tier_status = get_public_video_tier_ui_status(video_tier, is_admin_user(uid))
         if not tier_status.get("enabled"):
@@ -100399,6 +100495,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 reply_markup=public_video_active_job_keyboard(active_public_job, lang),
             )
         return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
+    if str(pending.get("source") or "") == "quick_image_v6":
+        clear_quick_image_flow(uid)
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
     if job_type == "video":
@@ -142791,11 +142889,6 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
-        enabled, _message = shopaikey_public_generation_guard("image")
-        if not enabled:
-            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
-        if shopaikey_active_job_for_user(uid, "image"):
-            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         idx = int(state.get("image_prompt_choice") or 1)
         prompt = trend_guided_image_prompt_for_index(state, idx, lang)
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend image user")
@@ -142813,6 +142906,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
             "tier_label": payload.get("label") or tier,
             "model": payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "source": "trend_guided_flow",
+            "provider_submit_source": "public_user_final_confirm",
         })
         return await safe_edit_or_send(
             query,
@@ -142984,15 +143078,6 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             if normalize_user_language(lang) == "zh":
                 return await safe_edit_or_send(query, "⚠️ 未找到最近 workflow 的图片 prompt。请重新运行 /trend_video_flow <主题>。\n本次未扣除 Xu。")
             return await safe_edit_or_send(query, "⚠️ No recent workflow image prompt was found. Please run /trend_video_flow <topic> again.\nThe bot has not charged Xu." if normalize_user_language(lang) != "vi" else "⚠️ Chưa tìm thấy prompt ảnh của workflow gần nhất. Vui lòng chạy lại /trend_video_flow <chủ đề>.\nBot chưa trừ Xu.")
-        enabled, message = shopaikey_public_generation_guard("image")
-        if not enabled:
-            if is_admin_user(uid) and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
-                if normalize_user_language(lang) == "zh":
-                    return await safe_edit_or_send(query, "🧪 Public image 当前 OFF。Admin 可用 /tool_test_workflow_image 单独测试。\nBot 未调用 public API，也未扣除 Xu。")
-                return await safe_edit_or_send(query, "🧪 Public image is OFF. Admin can test separately with /tool_test_workflow_image.\nThe bot has not called the public API and has not charged Xu." if normalize_user_language(lang) != "vi" else "🧪 Public image đang OFF. Admin có thể test riêng bằng /tool_test_workflow_image.\nBot chưa gọi API public và chưa trừ Xu.")
-            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
-        if shopaikey_active_job_for_user(uid, "image"):
-            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         prompt = str(output.get("image_prompt") or "").strip()
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Trend workflow user")
         base_cost = image_base_cost_xu()
@@ -143010,6 +143095,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
             "source_prompt_type": "image_prompt",
             "image_tier": "low",
             "retry_warranty_count": int(image_tier_payload("low").get("retry_warranty_count") or 0),
+            "provider_submit_source": "public_user_final_confirm",
         })
         return await safe_edit_or_send(
             query,
@@ -144850,8 +144936,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
         clear_image_menu_pending(uid)
-        if shopaikey_active_job_for_user(uid, "image"):
-            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         set_quick_image_flow(uid, "entry", suggest_offset=0)
         return await safe_edit_or_send(
             query,
@@ -145123,11 +145207,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
-        enabled, _message = shopaikey_public_generation_guard("image")
-        if not enabled:
-            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
-        if shopaikey_active_job_for_user(uid, "image"):
-            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
         base_cost = int(payload.get("cost") or 0)
         final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
@@ -145152,6 +145231,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "aspect_ratio": aspect,
             "package_item_type": package_item_type,
             "source": "quick_image_v6",
+            "provider_submit_source": "public_user_final_confirm",
             **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
         })
         set_quick_image_flow(uid, "confirm", tier=tier, confirm_token=token)
@@ -145310,11 +145390,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
-        enabled, message = shopaikey_public_generation_guard("image")
-        if not enabled:
-            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
-        if shopaikey_active_job_for_user(uid, "image"):
-            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Image user")
         base_cost = int(payload.get("cost") or 0)
         final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image")
@@ -145338,6 +145413,8 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
             "aspect_ratio": aspect,
             "package_item_type": package_item_type,
+            "source": str(pending_aspect.get("confirmation_source") or "public_image_aspect_flow"),
+            "provider_submit_source": "public_user_final_confirm",
             **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
         })
         confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect, logo_text, logo_position)
@@ -145417,11 +145494,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "image.tier_disabled_message"))
-        enabled, message = shopaikey_public_generation_guard("image")
-        if not enabled:
-            return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
-        if shopaikey_active_job_for_user(uid, "image"):
-            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
         set_public_image_prompt_pending(uid, tier)
         return await safe_edit_or_send(query, public_image_prompt_request_text(tier, lang), parse_mode="HTML")
     if action == "quick_video":
