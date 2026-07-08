@@ -1074,14 +1074,46 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                     return value
         return ""
 
+    original_submit_source = str(
+        _meta_value("original_submit_source", "public_confirm_submit_source", "initial_submit_source")
+        or ""
+    ).strip()
+    if not original_submit_source:
+        for source in (asset_pack, invoice, job or {}):
+            if not isinstance(source, dict):
+                continue
+            candidate = str(source.get("submit_source") or source.get("provider_submit_source") or "").strip()
+            if candidate and candidate != PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
+                original_submit_source = candidate
+                break
+    confirmed_public_input = bool(
+        _meta_value(
+            "public_user_confirmed",
+            "b14_public_user_confirmed",
+            "user_final_confirmed",
+            "invoice_confirmed",
+            "final_invoice_confirmed",
+            "project_is_confirmed",
+            "is_confirmed",
+            "confirmed",
+            "public_user",
+        )
+    )
     submit_source = str(_meta_value("submit_source", "provider_submit_source") or "").strip()
     if pending_matches_request:
         submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK
-    elif not submit_source and bool(_meta_value("public_user", "interactive_product", "product_video")):
+    elif not submit_source and confirmed_public_input:
         submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    if not original_submit_source and confirmed_public_input:
+        original_submit_source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
     public_user_confirmed = bool(
         _meta_value("public_user_confirmed", "b14_public_user_confirmed", "user_final_confirmed")
+        or original_submit_source == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
         or submit_source == PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
+    invoice_confirmed = bool(
+        _meta_value("invoice_confirmed", "final_invoice_confirmed", "project_is_confirmed", "is_confirmed", "confirmed")
+        or public_user_confirmed
     )
     charge_policy = str(_meta_value("charge_policy") or "after_valid_mp4_delivery").strip()
     request = VideoGenerationRequest(
@@ -1106,7 +1138,12 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "render_mode": str((job or {}).get("render_mode") or ""),
             "submit_source": submit_source,
             "provider_submit_source": submit_source,
+            "original_submit_source": original_submit_source or submit_source,
+            "public_confirm_submit_source": original_submit_source or submit_source,
             "public_user_confirmed": public_user_confirmed,
+            "invoice_confirmed": invoice_confirmed,
+            "project_is_confirmed": invoice_confirmed,
+            "provider_submit_accepted_before": bool(pending_matches_request),
             "charge_policy": charge_policy,
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),

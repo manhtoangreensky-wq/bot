@@ -394,40 +394,188 @@ def product_video_retry_confirmed(metadata: dict[str, Any] | None = None) -> boo
     )
 
 
-def product_video_controlled_fallback_allowed(
-    blocker: str,
-    metadata: dict[str, Any] | None = None,
-) -> bool:
+def _truthy_metadata(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on", "confirmed", "delivered", "charged"}
+
+
+def _int_metadata(value: Any, default: int = 0) -> int:
+    try:
+        if value in (None, ""):
+            return default
+        return int(float(str(value).strip()))
+    except Exception:
+        return default
+
+
+def product_video_public_confirm_context(metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return persisted Product Video confirmation context for paid fallback decisions."""
     metadata = dict(metadata or {})
-    source = normalize_product_video_submit_source(
+    current_source = normalize_product_video_submit_source(
         metadata.get("submit_source")
         or metadata.get("provider_submit_source")
         or metadata.get("source_context")
         or metadata.get("entry_source")
         or ""
     )
+    original_source = normalize_product_video_submit_source(
+        metadata.get("original_submit_source")
+        or metadata.get("public_confirm_submit_source")
+        or metadata.get("initial_submit_source")
+        or metadata.get("provider_original_submit_source")
+        or metadata.get("job_original_submit_source")
+        or metadata.get("invoice_submit_source")
+        or metadata.get("project_submit_source")
+        or ""
+    )
+    if not original_source and current_source not in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES | {PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK}:
+        original_source = current_source
+    if not original_source and (
+        _truthy_metadata(metadata.get("public_user_confirmed"))
+        or _truthy_metadata(metadata.get("b14_public_user_confirmed"))
+        or _truthy_metadata(metadata.get("user_final_confirmed"))
+        or _truthy_metadata(metadata.get("invoice_confirmed"))
+        or _truthy_metadata(metadata.get("final_invoice_confirmed"))
+        or _truthy_metadata(metadata.get("project_is_confirmed"))
+        or _truthy_metadata(metadata.get("is_confirmed"))
+        or _truthy_metadata(metadata.get("confirmed"))
+        or _truthy_metadata(metadata.get("public_user"))
+    ):
+        original_source = PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+
     public_user_confirmed = bool(
-        metadata.get("public_user_confirmed")
-        or metadata.get("b14_public_user_confirmed")
-        or metadata.get("user_final_confirmed")
-        or source in {
+        _truthy_metadata(metadata.get("public_user_confirmed"))
+        or _truthy_metadata(metadata.get("b14_public_user_confirmed"))
+        or _truthy_metadata(metadata.get("user_final_confirmed"))
+        or original_source
+        in {
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
             PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
         }
     )
-    try:
-        fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
-    except Exception:
-        fallback_count = 0
-    return bool(
-        public_user_confirmed
-        and source in {
-            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
-            PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
-        }
-        and fallback_count < 1
-        and str(blocker or "").strip() in PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS
+    invoice_confirmed = bool(
+        _truthy_metadata(metadata.get("invoice_confirmed"))
+        or _truthy_metadata(metadata.get("final_invoice_confirmed"))
+        or _truthy_metadata(metadata.get("project_is_confirmed"))
+        or _truthy_metadata(metadata.get("is_confirmed"))
+        or _truthy_metadata(metadata.get("confirmed"))
+        or _truthy_metadata(metadata.get("b14_invoice_confirmed"))
+        or (
+            public_user_confirmed
+            and original_source
+            in {
+                PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+                PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+            }
+        )
     )
+    delivered = bool(
+        _truthy_metadata(metadata.get("delivered"))
+        or _truthy_metadata(metadata.get("video_delivered"))
+        or _truthy_metadata(metadata.get("delivery_succeeded"))
+        or _truthy_metadata(metadata.get("telegram_delivery_succeeded"))
+        or _truthy_metadata(metadata.get("final_delivered"))
+        or bool(metadata.get("final_video_file_id") or metadata.get("video_delivery_message_id"))
+    )
+    charged_xu = max(
+        _int_metadata(metadata.get("charged_xu"), 0),
+        _int_metadata(metadata.get("charged_amount_xu"), 0),
+        _int_metadata(metadata.get("wallet_charged_xu"), 0),
+        _int_metadata(metadata.get("total_xu_charged"), 0),
+        _int_metadata(metadata.get("charge"), 0),
+    )
+    charged = bool(charged_xu > 0 or _truthy_metadata(metadata.get("wallet_charge_recorded")))
+    provider_submit_accepted_before = bool(
+        _truthy_metadata(metadata.get("provider_submit_accepted_before"))
+        or _truthy_metadata(metadata.get("submit_accepted"))
+        or _truthy_metadata(metadata.get("provider_task_id_saved"))
+        or bool(
+            metadata.get("provider_pending_task_id")
+            or metadata.get("provider_pending_video_id")
+            or metadata.get("provider_task_id")
+            or metadata.get("provider_video_id")
+            or metadata.get("canonical_provider_task_id")
+            or metadata.get("canonical_task_id")
+            or metadata.get("provider_task_ids")
+            or metadata.get("provider_video_ids")
+        )
+    )
+    fallback_count = _int_metadata(metadata.get("fallback_count") or metadata.get("provider_fallback_count"), 0)
+    current_hidden = current_source in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES
+    original_public = original_source in {
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+    }
+    fallback_eligibility_source = original_source or current_source or "missing"
+    return {
+        "current_source": current_source or "missing",
+        "original_submit_source": original_source or "",
+        "public_user_confirmed": public_user_confirmed,
+        "invoice_confirmed": invoice_confirmed,
+        "provider_submit_accepted_before": provider_submit_accepted_before,
+        "delivered": delivered,
+        "charged": charged,
+        "charged_xu": charged_xu,
+        "fallback_count": fallback_count,
+        "current_source_hidden": current_hidden,
+        "original_source_public": original_public,
+        "fallback_eligibility_source": fallback_eligibility_source,
+    }
+
+
+def product_video_controlled_fallback_policy(
+    blocker: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = dict(metadata or {})
+    context = product_video_public_confirm_context(metadata)
+    clean_blocker = str(blocker or "").strip()
+    allowed = True
+    reason = ""
+    if context["current_source_hidden"]:
+        allowed = False
+        reason = "hidden_or_read_only_source"
+    elif not context["original_source_public"]:
+        allowed = False
+        reason = "source_not_public_confirmed_fallback"
+    elif not context["public_user_confirmed"]:
+        allowed = False
+        reason = "public_confirm_missing"
+    elif not context["invoice_confirmed"]:
+        allowed = False
+        reason = "invoice_confirm_missing"
+    elif not context["provider_submit_accepted_before"]:
+        allowed = False
+        reason = "provider_submit_not_accepted_before"
+    elif context["delivered"]:
+        allowed = False
+        reason = "already_delivered"
+    elif context["charged"]:
+        allowed = False
+        reason = "already_charged"
+    elif context["fallback_count"] >= 1:
+        allowed = False
+        reason = "fallback_limit_reached"
+    elif clean_blocker not in PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS:
+        allowed = False
+        reason = "blocker_not_fallbackable"
+    return {
+        **context,
+        "fallback_allowed": bool(allowed),
+        "fallback_block_reason": reason,
+        "fallback_blocked_reason": reason,
+        "fallback_reason": clean_blocker if allowed else "",
+        "fallback_submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE if allowed else "",
+    }
+
+
+def product_video_controlled_fallback_allowed(
+    blocker: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    return bool(product_video_controlled_fallback_policy(blocker, metadata).get("fallback_allowed"))
 
 
 def _product_video_paid_fallback_blocked(
@@ -1699,6 +1847,7 @@ def run_provider_generation(
         public_submit_enabled=submit_enabled,
         poll_existing_task=bool(pending_task_id or pending_video_id),
     )
+    fallback_context = product_video_public_confirm_context(metadata)
     cooldown_state = provider_failure_cooldown_state(metadata, env)
     submit_idempotency_key = hashlib.sha256(
         f"{request.job_id}|{request.product_type}|{request.video_flow_type}|{request.required_capability}".encode("utf-8")
@@ -1712,7 +1861,12 @@ def run_provider_generation(
         "product_video_provider_submit_enabled_resolved": bool(submit_enabled),
         "product_video_provider_submit_enabled_source": str(submit_switch.get("source") or "default"),
         "submit_source": str(submit_source_policy.get("submit_source") or "-"),
+        "current_source": str(fallback_context.get("current_source") or submit_source_policy.get("submit_source") or "-"),
+        "original_submit_source": str(fallback_context.get("original_submit_source") or ""),
+        "fallback_eligibility_source": str(fallback_context.get("fallback_eligibility_source") or ""),
         "public_user_confirmed": bool(submit_source_policy.get("public_user_confirmed")),
+        "invoice_confirmed": bool(fallback_context.get("invoice_confirmed")),
+        "provider_submit_accepted_before": bool(fallback_context.get("provider_submit_accepted_before")),
         "provider_submit_allowed": bool(submit_source_policy.get("provider_submit_allowed")),
         "provider_submit_block_reason": str(submit_source_policy.get("provider_submit_block_reason") or ""),
         "poll_existing_task_allowed": bool(submit_source_policy.get("poll_existing_task_allowed")),
@@ -1958,7 +2112,21 @@ def run_provider_generation(
         fallback_used = attempt_index > 0
         fallback_reason = first_fallback_reason if fallback_used else ""
         selected_capability = preferred_provider_capability(current_adapter, request.required_capability)
-        provider_request = dataclasses.replace(request, required_capability=selected_capability)
+        provider_metadata = dict(request.metadata or {})
+        if fallback_used:
+            provider_metadata.update(
+                {
+                    "submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+                    "provider_submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+                    "original_submit_source": str(fallback_context.get("original_submit_source") or ""),
+                    "public_confirm_submit_source": str(fallback_context.get("original_submit_source") or ""),
+                    "public_user_confirmed": bool(fallback_context.get("public_user_confirmed")),
+                    "invoice_confirmed": bool(fallback_context.get("invoice_confirmed")),
+                    "provider_submit_accepted_before": True,
+                    "fallback_count": current_fallback_count + 1,
+                }
+            )
+        provider_request = dataclasses.replace(request, required_capability=selected_capability, metadata=provider_metadata)
         current_caps = dict(current_adapter.capabilities() or {})
         current_trace = _new_attempt_trace(current_adapter.provider_name, selected_capability)
         attempt_traces.append(current_trace)
@@ -1981,10 +2149,15 @@ def run_provider_generation(
             return ""
 
         def _attempt_base() -> dict[str, Any]:
-            metadata = dict(request.metadata or {})
+            metadata = dict(provider_request.metadata or request.metadata or {})
             submit_configured = _safe_cap_bool("submit_url_configured", "provider_submit_url_configured")
             auth_value_present = _safe_cap_bool("provider_auth_value_present", "auth_present", "auth_configured")
             model_present = _safe_cap_bool("provider_model_present", "model_present", "model_configured") or bool(_safe_cap_text("provider_payload_model"))
+            attempt_submit_source = (
+                PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE
+                if fallback_used
+                else str(submit_source_policy.get("submit_source") or "-")
+            )
             return {
                 **base_debug,
                 "selected_provider": current_adapter.provider_name,
@@ -2047,17 +2220,26 @@ def run_provider_generation(
                     metadata.get("last_provider_submit_timestamp")
                     or ("" if poll_existing_task else str(int(time.time())))
                 ),
-                "submit_source": str(submit_source_policy.get("submit_source") or "-"),
-                "public_user_confirmed": bool(submit_source_policy.get("public_user_confirmed")),
-                "provider_submit_allowed": bool(submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
+                "submit_source": attempt_submit_source,
+                "current_source": attempt_submit_source if fallback_used else str(fallback_context.get("current_source") or submit_source_policy.get("submit_source") or "-"),
+                "original_submit_source": str(fallback_context.get("original_submit_source") or ""),
+                "fallback_eligibility_source": str(fallback_context.get("fallback_eligibility_source") or ""),
+                "public_user_confirmed": bool(fallback_context.get("public_user_confirmed") or submit_source_policy.get("public_user_confirmed")),
+                "invoice_confirmed": bool(fallback_context.get("invoice_confirmed")),
+                "provider_submit_accepted_before": bool(fallback_context.get("provider_submit_accepted_before")),
+                "provider_submit_allowed": bool(True if fallback_used else submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
                 "provider_submit_block_reason": (
+                    ""
+                    if fallback_used
+                    else (
                     "worker_poll_existing_task_read_only"
                     if poll_existing_task
                     else str(submit_source_policy.get("provider_submit_block_reason") or "")
+                    )
                 ),
                 "charge_policy": str(metadata.get("charge_policy") or ("after_valid_mp4_delivery" if is_product_video else "")),
-                "paid_submit_allowed": bool(submit_enabled and submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
-                "external_provider_spend_prevented": bool(poll_existing_task),
+                "paid_submit_allowed": bool(submit_enabled if fallback_used else submit_enabled and submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
+                "external_provider_spend_prevented": bool(poll_existing_task and not fallback_used),
                 "provider_attempts": _copy_attempt_traces(),
             }
 
@@ -2553,8 +2735,10 @@ def run_provider_generation(
                         if terminal_result_url
                         else poll_result.error_code or f"provider_poll_{poll_result.status}"
                     )
-                    if attempt_index + 1 < len(candidate_adapters) and not is_product_video:
+                    if attempt_index + 1 < len(candidate_adapters):
                         _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
+                        if is_product_video and _product_video_paid_fallback_blocked(blocker, env, metadata):
+                            return _paid_fallback_requires_confirmation_payload(blocker, getattr(poll_result, "raw", {}))
                         break
                     _record_failure(blocker, getattr(poll_result, "raw", {}), submit_failure=False)
                     payload = {
@@ -2671,7 +2855,14 @@ def run_provider_generation(
                     "provider_readiness": status,
                 }
                 if is_product_video:
-                    payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
+                    payload.update({
+                        "status": "failed_no_charge",
+                        "terminal_state": "failed_no_charge",
+                        "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY,
+                        "no_charge": True,
+                        "charge": 0,
+                        "charged_xu": 0,
+                    })
                 _mark_trace("poll", blocker=blocker, normalized_status="timeout")
                 payload["provider_attempts"] = _copy_attempt_traces()
                 return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
@@ -2711,7 +2902,14 @@ def run_provider_generation(
                 "provider_readiness": status,
             }
             if is_product_video:
-                payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
+                payload.update({
+                    "status": "failed_no_charge",
+                    "terminal_state": "failed_no_charge",
+                    "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                })
             _mark_trace("result", blocker=blocker, result_url_present=False, normalized_status=poll_result.status)
             payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
@@ -2746,7 +2944,14 @@ def run_provider_generation(
                 "provider_readiness": status,
             }
             if is_product_video:
-                payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
+                payload.update({
+                    "status": "failed_no_charge",
+                    "terminal_state": "failed_no_charge",
+                    "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                })
             _mark_trace("result", blocker=blocker, result_url_present=False, normalized_status=poll_result.status)
             payload["provider_attempts"] = _copy_attempt_traces()
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
@@ -2770,7 +2975,14 @@ def run_provider_generation(
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
             }
             if is_product_video:
-                exc_payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
+                exc_payload.update({
+                    "status": "failed_no_charge",
+                    "terminal_state": "failed_no_charge",
+                    "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                })
             blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker)
@@ -2852,7 +3064,14 @@ def run_provider_generation(
                 "provider_readiness": status,
             }
             if is_product_video:
-                payload.update({"no_charge": True, "charge": 0, "charged_xu": 0})
+                payload.update({
+                    "status": "failed_no_charge",
+                    "terminal_state": "failed_no_charge",
+                    "public_message": PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY,
+                    "no_charge": True,
+                    "charge": 0,
+                    "charged_xu": 0,
+                })
             payload["provider_result_blocker"] = payload["blocker"]
             return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
         _mark_trace(

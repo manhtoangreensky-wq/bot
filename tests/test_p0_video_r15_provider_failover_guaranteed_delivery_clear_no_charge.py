@@ -44,6 +44,8 @@ def test_public_confirmed_fallback_source_allowed_once():
         {
             "submit_source": "public_user_final_confirm",
             "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
             "fallback_count": 0,
         },
     )
@@ -52,6 +54,8 @@ def test_public_confirmed_fallback_source_allowed_once():
         {
             "submit_source": "public_user_final_confirm",
             "public_user_confirmed": True,
+            "invoice_confirmed": True,
+            "provider_submit_accepted_before": True,
             "fallback_count": 1,
         },
     )
@@ -94,4 +98,3 @@ def test_auto_db_poll_text_and_product_mapping_are_clean():
     assert "autonomous_db_poll_active" in BOT_SOURCE
     assert "raw_product_type = video_final_output.product_type_from_project" in BOT_SOURCE
     assert "product_type = \"multiscene_video\" if str(raw_product_type or \"\") == \"video_trend\"" in BOT_SOURCE
-
