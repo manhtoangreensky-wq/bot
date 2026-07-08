@@ -1631,7 +1631,27 @@ def defer_video_job_for_provider_polling(
     )
     current = now_text()
     telemetry = reconcile_provider_progress_telemetry(job, payload, refresh_source="defer_provider_polling")
+    interval_seconds = max(5, _as_int(payload.get("panel_refresh_interval_seconds"), 25))
+    next_poll_at = now_text(datetime.now() + timedelta(seconds=interval_seconds))
     payload.update(telemetry)
+    payload.update(
+        {
+            "autonomous_db_poller_enabled": True,
+            "autonomous_poll_enabled": True,
+            "db_poll_candidate": True,
+            "registry_required_for_poll": False,
+            "registry_missing_is_blocker": False,
+            "next_poll_at": next_poll_at,
+            "next_poll_scheduled": True,
+            "next_poll_scheduled_at": next_poll_at,
+            "next_refresh_expected_at": next_poll_at,
+            "terminal_before_reconcile": str(payload.get("terminal_state") or job.get("status") or ""),
+            "terminal_after_reconcile": "final_rendering",
+            "terminal_override_reason": "provider_running_overrides_failed_no_charge",
+            "no_new_paid_submit": True,
+            "paid_fallback_not_used": True,
+        }
+    )
     progress = int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or 20)
     conn.execute(
         """UPDATE video_jobs
