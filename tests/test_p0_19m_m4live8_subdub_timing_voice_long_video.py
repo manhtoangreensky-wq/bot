@@ -25,22 +25,20 @@ def _function_source(name: str) -> str:
 def test_m4live8b_subtitle_only_ass_restored_to_m4live7_text_chunking():
     source = _function_source("subdub_generate_ass_from_srt")
 
-    assert "subtitle_timing_preserved: yes" not in source
-    assert "subtitle_text_length_duration_split: no" not in source
-    assert "subdub_ass_text_chunks" in source
-    assert "total_weight" in source
-    assert "elapsed_weight" in source
-    assert "chunk_start = block_start + ((block_end - block_start)" in source
-    assert "subdub_ass_timestamp(chunk_start)" in source
-    assert "subdub_ass_timestamp(chunk_end)" in source
+    assert 'if style.get("m4live1_style_renderer_only") or style.get("m4live2_subtitle_bottom_lock"):' in source
+    assert "subdub_ass_wrap_text(" in source
+    assert "subdub_ass_timestamp(block_start)" in source
+    assert "subdub_ass_timestamp(block_end)" in source
 
 
 def test_m4live8b_subtitle_only_no_single_cue_timing_override():
     source = _function_source("subdub_generate_ass_from_srt")
 
-    assert "Long text wraps; it must not shorten the cue." not in source
-    assert "last_dialogue_end = max(last_dialogue_end, chunk_end)" in source
-    assert "subdub_ass_wrap_text(chunk, style" in source
+    locked_branch = source.split('if style.get("m4live1_style_renderer_only") or style.get("m4live2_subtitle_bottom_lock"):', 1)[1].split("chunks = subdub_ass_text_chunks", 1)[0]
+    assert "total_weight" not in locked_branch
+    assert "elapsed_weight" not in locked_branch
+    assert "chunk_start" not in locked_branch
+    assert "last_dialogue_end = max(last_dialogue_end, block_end)" in locked_branch
 
 
 def test_m4live8_processing_65_suppresses_generic_fail_text():

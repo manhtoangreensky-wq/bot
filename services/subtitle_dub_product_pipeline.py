@@ -203,7 +203,7 @@ async def process_subtitle_dub_job(
                 voice_style=pipeline_state.get("voice_style") or "",
                 voice_id=selected_tts_voice_id,
                 base_speed=speed,
-                max_speed=max(1.35, speed),
+                max_speed=min(1.0, max(0.7, speed)),
             )
         )
         segment_tts = dict(segment_tts or {})

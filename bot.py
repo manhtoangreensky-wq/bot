@@ -1896,8 +1896,8 @@ DUB_AUDIO_FALLBACK_GAIN_DB = env_float("DUB_AUDIO_FALLBACK_GAIN_DB", 8.0)
 SUBDUB_DUB_VOICE_GAIN = max(1.0, min(4.0, env_float("SUBDUB_DUB_VOICE_GAIN", 2.0)))
 SUBDUB_DUB_LOUDNESS_NORMALIZE = env_flag("SUBDUB_DUB_LOUDNESS_NORMALIZE", "true")
 SUBDUB_DUB_MAX_PEAK_DB = max(-6.0, min(-0.1, env_float("SUBDUB_DUB_MAX_PEAK_DB", -1.0)))
-SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.85, min(0.92, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 0.90)))
-SUBDUB_DUB_MAX_SPEECH_RATE = max(SUBDUB_DUB_DEFAULT_SPEECH_RATE, min(1.05, env_float("SUBDUB_DUB_MAX_SPEECH_RATE", 1.02)))
+SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.7, min(1.0, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 1.0)))
+SUBDUB_DUB_MAX_SPEECH_RATE = max(SUBDUB_DUB_DEFAULT_SPEECH_RATE, min(1.0, env_float("SUBDUB_DUB_MAX_SPEECH_RATE", 1.0)))
 SUBDUB_DUB_MAX_START_EARLY_MS = max(0, env_int("SUBDUB_DUB_MAX_START_EARLY_MS", 0))
 ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
 SUBDUB_VOLUME_MIX_UI_ENABLED = env_flag("SUBDUB_VOLUME_MIX_UI_ENABLED", "true")
@@ -173742,12 +173742,11 @@ def subdub_dub_speech_config(state: dict | None = None, requested_speed: str | f
         parsed = 1.0
     explicit_custom_speed = bool(raw_speed_text and raw_speed_text not in {"1", "1.0", "1.00"})
     if explicit_custom_speed:
-        base = max(0.7, min(1.8, float(parsed)))
-        max_rate = max(base, min(1.8, base))
+        base = max(0.7, min(1.0, float(parsed)))
+        max_rate = base
     else:
-        base = parsed if parsed < 0.95 else float(SUBDUB_DUB_DEFAULT_SPEECH_RATE)
-        base = max(0.7, min(float(SUBDUB_DUB_DEFAULT_SPEECH_RATE), float(base)))
-        max_rate = max(base, min(float(SUBDUB_DUB_MAX_SPEECH_RATE), max(base, base + 0.12)))
+        base = max(0.7, min(1.0, float(SUBDUB_DUB_DEFAULT_SPEECH_RATE)))
+        max_rate = base
     return {
         "requested_dub_voice_gender": str(
             state.get("requested_voice_gender")
@@ -175829,6 +175828,35 @@ def subdub_input_save_failure_detected(job: dict | None = None) -> bool:
         return True
     return any("telegram_download_failed" in item or "file is too big" in item for item in blockers if item)
 
+SUBDUB_DUB_GENERIC_PUBLIC_FAIL_SUPPRESS_REASONS = {
+    "video_render_failed",
+    "final_video_not_created",
+    "final_video_invalid",
+    "no_output_bytes",
+    "dub_audio_not_generated",
+    "generated_tts_audio_missing",
+    "final_video_missing",
+}
+
+
+def subdub_should_suppress_dub_generic_public_fail(mode: str = "", reason: str = "", job: dict | None = None) -> bool:
+    safe_mode = normalize_video_translate_mode(mode)
+    if safe_mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        return False
+    reason_text = str(reason or "").strip().lower().replace("-", "_")
+    if not reason_text:
+        return False
+    if subdub_input_save_failure_detected(
+        {
+            **dict(job or {}),
+            "pipeline_blocker": reason_text,
+            "input_save_blocker": reason_text,
+            "detail": reason_text,
+        }
+    ):
+        return False
+    return any(token in reason_text for token in SUBDUB_DUB_GENERIC_PUBLIC_FAIL_SUPPRESS_REASONS)
+
 def subdub_normalize_input_save_failed_terminal(job: dict | None = None) -> dict:
     current = dict(job or {})
     if not current or not subdub_input_save_failure_detected(current):
@@ -176506,6 +176534,22 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
             ):
                 job = dict(fallback_job)
                 key = str(job.get("job_key") or key)
+    if subdub_should_suppress_dub_generic_public_fail(safe_mode, reason, job):
+        if key:
+            current = dict(job or SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
+            current["job_key"] = str(current.get("job_key") or key)
+            current["late_public_error_suppressed"] = True
+            current["late_fail_suppressed"] = True
+            current["generic_dub_fail_public_suppressed"] = True
+            current["generic_fail_suppressed_while_active_or_delivered"] = True
+            current["last_ignored_error_reason"] = str(reason or "")[:180]
+            current["ignored_late_error_count"] = int(current.get("ignored_late_error_count") or 0) + 1
+            current["public_failure_sent"] = False
+            current["public_error_sent"] = False
+            current["updated_at"] = time.time()
+            SUBTITLE_DUB_PIPELINE_JOBS[key] = current
+            persist_subtitle_dub_pipeline_job_snapshot(key, current, reason="generic_dub_video_fail_public_suppressed")
+        return {"sent": False, "suppressed": True, "reason": "generic_dub_video_fail_public_suppressed"}
     if job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
@@ -178996,6 +179040,28 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     last_dialogue_end = 0.0
     overlap_suppressed = 0
     for block in blocks:
+        block_start = float(block.get("start") or 0)
+        block_end = max(block_start + 0.2, float(block.get("end") or 0))
+        if style.get("m4live1_style_renderer_only") or style.get("m4live2_subtitle_bottom_lock"):
+            escaped = subdub_ass_wrap_text(
+                str(block.get("text") or ""),
+                style,
+                int(style.get("max_lines") or 2),
+            )
+            if not escaped:
+                continue
+            if block_start < last_dialogue_end:
+                overlap_suppressed += 1
+                block_start = last_dialogue_end + 0.01
+                block_end = max(block_start + 0.2, block_end)
+            events.append(
+                "Dialogue: 0,"
+                f"{subdub_ass_timestamp(block_start)},"
+                f"{subdub_ass_timestamp(block_end)},"
+                f"Default,,0,0,0,,{escaped}"
+            )
+            last_dialogue_end = max(last_dialogue_end, block_end)
+            continue
         chunks = subdub_ass_text_chunks(
             str(block.get("text") or ""),
             style,
@@ -179003,8 +179069,6 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         )
         if not chunks:
             continue
-        block_start = float(block.get("start") or 0)
-        block_end = max(block_start + 0.2, float(block.get("end") or 0))
         weights = [max(1, len(re.sub(r"\s+", "", chunk))) for chunk in chunks]
         total_weight = max(1, sum(weights))
         elapsed_weight = 0
@@ -179783,6 +179847,26 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
         if end <= start:
             end = start + 1.0
         duration = max(0.1, end - start)
+        if preserve_timestamps:
+            lines = []
+            line = ""
+            for word in text.split():
+                candidate = f"{line} {word}".strip()
+                if line and len(candidate) > 42 and len(lines) < 1:
+                    lines.append(line)
+                    line = word
+                else:
+                    line = candidate
+            if line:
+                lines.append(line)
+            qc_segments.append({
+                "index": len(qc_segments) + 1,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "text": "\n".join(lines[:2]).strip(),
+                "confidence": (source or {}).get("confidence"),
+            })
+            continue
         max_chars = 84 if preserve_timestamps else max(24, min(84, int(duration * 20)))
         words = text.split()
         chunks = []
@@ -180345,7 +180429,7 @@ async def build_subtitle_dubbed_video_pipeline(
             voice_style=voice,
             voice_id=voice,
             base_speed=1.0,
-            max_speed=1.35,
+            max_speed=1.0,
             allow_admin=allow_admin,
         )
         tts_chunks = list(tts_result.get("chunks") or [])
@@ -180605,11 +180689,13 @@ async def synthesize_dub_segment_chunks(
     voice_style: str = "",
     voice_id: str = "",
     base_speed: float = 1.0,
-    max_speed: float = 1.35,
+    max_speed: float = 1.0,
     allow_admin: bool = False,
 ) -> dict:
     chunks = []
     providers = []
+    safe_max_speed = max(0.7, min(1.0, float(max_speed or 1.0)))
+    safe_base_speed = max(0.7, min(safe_max_speed, float(base_speed or 1.0)))
     for index, segment in enumerate(segments or [], start=1):
         text = str((segment or {}).get("text") or "").strip()
         if not text:
@@ -180619,7 +180705,7 @@ async def synthesize_dub_segment_chunks(
         if end <= start:
             end = start + 1
         slot_seconds = max(0.4, end - start)
-        speed = max(0.7, min(float(max_speed or 1.35), float(base_speed or 1.0)))
+        speed = safe_base_speed
         try:
             provider, audio_bytes, detail = await video_dubbing_tts_bytes(
                 text,
@@ -180636,8 +180722,8 @@ async def synthesize_dub_segment_chunks(
                 str(speed),
             )
         duration = await video_dubbing_audio_duration_seconds(audio_bytes)
-        if duration > slot_seconds * 1.05 and speed < float(max_speed or 1.35):
-            retry_speed = min(float(max_speed or 1.35), max(speed + 0.05, speed * duration / slot_seconds))
+        if duration > slot_seconds * 1.05 and speed < safe_max_speed:
+            retry_speed = min(safe_max_speed, max(speed + 0.05, speed * duration / slot_seconds))
             try:
                 retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
                     text,
@@ -180658,7 +180744,7 @@ async def synthesize_dub_segment_chunks(
                 provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
                 duration = retry_duration
                 speed = retry_speed
-        if duration > slot_seconds * 1.15:
+        if duration > slot_seconds * 1.15 and safe_max_speed > speed:
             target_chars = max(12, int(slot_seconds * 18))
             compact_words = []
             for word in text.split():
@@ -180668,7 +180754,7 @@ async def synthesize_dub_segment_chunks(
                 compact_words.append(word)
             compact_text = " ".join(compact_words).strip()
             if compact_text and compact_text != text:
-                compact_speed = min(float(max_speed or 1.35), max(speed, 1.1))
+                compact_speed = min(safe_max_speed, max(speed, 1.0))
                 try:
                     compact_provider, compact_audio, compact_detail = await video_dubbing_tts_bytes(
                         compact_text,
