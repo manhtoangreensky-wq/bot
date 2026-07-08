@@ -203,16 +203,17 @@ def test_cskh5b_bang_gia_reply_lists_main_categories():
         assert expected in reply
 
 
-def test_cskh5b_bang_gia_no_hallucinated_numbers():
+def test_cskh5b_bang_gia_uses_verified_pricing_doc_numbers():
     reply = cskh.classify_cskh_message("bảng giá")["reply"].lower()
 
-    assert not re.search(r"\b\d+[\d.,]*(?:\s*(?:xu|vnd|đ|k|tr|triệu))\b", reply)
+    for marker in ("1 xu = 100đ", "50 / 150 / 200", "200 / 300 / 400", "0.1 xu/ký tự"):
+        assert marker in reply
 
 
-def test_cskh5b_bang_gia_asks_product_choice():
+def test_cskh5b_bang_gia_mentions_invoice_before_charge():
     reply = cskh.classify_cskh_message("bảng giá")["reply"]
 
-    assert "video, ảnh hay SubDub" in reply
+    assert "hiện hóa đơn trước" in reply
 
 
 def test_cskh5b_alo_new_chat_short_helpful():

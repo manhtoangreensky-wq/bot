@@ -59,7 +59,7 @@ def test_cskh6_playbook_is_curated_not_raw_script_ingested():
     [
         ("này sử dụng sao anh", "new_user_how_to_use", ("video", "ảnh")),
         ("tạo video giá sao", "video_sales_consulting", ("video", "sản phẩm")),
-        ("1 Xu bằng bao nhiêu", "xu_conversion_safe", ("Nạp Xu", "Bảng giá")),
+        ("1 Xu bằng bao nhiêu", "xu_conversion_safe", ("1 Xu = 100đ", "Nạp Xu")),
         ("tạo ảnh AI giá sao", "image_ai_safe", ("ảnh", "prompt")),
         ("ảnh rồi ghép video được không", "img2vid_safe", ("ảnh", "mấy giây")),
         ("phụ đề với lồng tiếng bao nhiêu", "subdub_combo_safe", ("phụ đề", "lồng tiếng")),
@@ -75,13 +75,13 @@ def test_cskh6_human_touch_product_replies(text, scenario_id, must_contain):
         assert expected in result["reply"]
 
 
-def test_cskh6_xu_conversion_does_not_invent_fixed_rate():
+def test_cskh6_xu_conversion_uses_verified_pricing_doc_rate():
     result = _classify("1 Xu bằng bao nhiêu tiền")
 
-    assert result["intent_id"] == "pricing_general"
+    assert result["intent_id"] == "pricing_topup"
     assert result["playbook_scenario_id"] == "xu_conversion_safe"
-    assert "không báo một con số cố định" in result["reply"]
-    assert not re.search(r"\b\d+[\d.,]*(?:\s*(?:vnd|đ|k|tr|triệu))\b", result["reply"].lower())
+    assert "1 Xu = 100đ" in result["reply"]
+    assert "pricing_doc" in result["source"]
 
 
 @pytest.mark.parametrize(
