@@ -72818,22 +72818,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         ok, guard_message = video_b14_public_render_guard(uid)
         if not ok:
             return await safe_edit_or_send(query, guard_message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
-        submit_switch = video_provider_router.product_video_submit_switch_detail()
-        if not submit_switch.get("resolved"):
-            draft["b14_provider_submit_locked"] = True
-            draft["provider_called"] = False
-            draft["xu_charged"] = 0
-            session["draft"] = draft
-            save_video_session(uid, session)
-            return await safe_edit_or_send(
-                query,
-                PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI,
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                ]),
-            )
         if not project_id:
             project = video_b14_prepare_project_for_invoice(uid, session)
             project_id = safe_int(project.get("project_id"), 0)
