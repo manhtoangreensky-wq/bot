@@ -9129,11 +9129,6 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             f"• persisted_progress_before_reconcile: <code>{safe_int((job or {}).get('persisted_progress_before_reconcile'), 0)}%</code>\n"
             f"• final_status_after_reconcile: <code>{html.escape(str((job or {}).get('final_status_after_reconcile') or '-'))}</code>\n"
             f"• final_progress_after_reconcile: <code>{safe_int((job or {}).get('final_progress_after_reconcile'), 0)}%</code>\n"
-            f"• multiscene_live_ready: <code>{'yes' if (job or {}).get('multiscene_live_ready') else 'no'}</code>\n"
-            f"• safe_live_scene_count: <code>{safe_int((job or {}).get('safe_live_scene_count'), 0)}</code>\n"
-            f"• provider_health_gate_reason: <code>{html.escape(str((job or {}).get('provider_health_gate_reason') or '-'))}</code>\n"
-            f"• selected_primary_provider: <code>{html.escape(str((job or {}).get('selected_primary_provider') or '-'))}</code>\n"
-            f"• provider_degraded_reason: <code>{html.escape(str((job or {}).get('provider_degraded_reason') or '-'))}</code>\n"
             f"• scenes_total/done/pending/running: <code>{safe_int((job or {}).get('scenes_total') or (job or {}).get('scene_tasks_total'), 0)}/{safe_int((job or {}).get('scenes_done') or (job or {}).get('scene_tasks_completed'), 0)}/{safe_int((job or {}).get('scenes_pending'), 0)}/{safe_int((job or {}).get('scenes_running'), 0)}</code>\n"
             f"• scene_tasks_created/submitted: <code>{safe_int((job or {}).get('scene_tasks_created_count') or (job or {}).get('scene_tasks_total'), 0)}/{safe_int((job or {}).get('scene_tasks_submitted_count') or (job or {}).get('scene_tasks_submitted'), 0)}</code>\n"
             f"• current_scene_status: <code>{html.escape(str((job or {}).get('current_scene_status') or '-'))}</code>\n"
@@ -47485,14 +47480,6 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• provider: <code>{html.escape(provider)}</code>",
         f"• configured provider chain: <code>{html.escape(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-')}</code>",
-        f"• provider health: <code>{html.escape(str(result.get('provider_health') or {})[:500])}</code>",
-        f"• selected primary provider: <code>{html.escape(str(result.get('selected_primary_provider') or '-'))}</code>",
-        f"• provider selected by health: <code>{'yes' if result.get('provider_primary_selected_by_health') else 'no'}</code>",
-        f"• provider degraded reason: <code>{html.escape(str(result.get('provider_degraded_reason') or '-')[:220])}</code>",
-        f"• delivery-first routing: <code>{'yes' if result.get('delivery_first_routing') else 'no'}</code>",
-        f"• multiscene live ready: <code>{'yes' if result.get('multiscene_live_ready') else 'no'}</code>",
-        f"• safe live scene count: <code>{safe_int(result.get('safe_live_scene_count'), 0)}</code>",
-        f"• provider health gate reason: <code>{html.escape(str(result.get('provider_health_gate_reason') or '-')[:220])}</code>",
         f"• initial selected provider: <code>{html.escape(str(result.get('initial_selected_provider') or '-'))}</code>",
         f"• selected provider before submit: <code>{html.escape(str(result.get('selected_provider_before_submit') or '-'))}</code>",
         f"• selected provider after fallback: <code>{html.escape(str(result.get('selected_provider_after_fallback') or '-'))}</code>",
@@ -47584,11 +47571,6 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• scene tasks completed: <code>{safe_int(result.get('scene_tasks_completed'), 0)}</code>",
         f"• scenes total/done/running/stalled: <code>{safe_int(result.get('scenes_total') or result.get('scene_tasks_total'), 0)}/{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_running'), 0)}/{safe_int(result.get('scenes_stalled') or result.get('scenes_stalled_count'), 0)}</code>",
         f"• scenes done/pending/running: <code>{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_pending'), 0)}/{safe_int(result.get('scenes_running'), 0)}</code>",
-        f"• scene provider status by scene: <code>{html.escape(str(result.get('scene_provider_status_by_scene') or {})[:500])}</code>",
-        f"• scene elapsed by scene: <code>{html.escape(str(result.get('scene_elapsed_by_scene') or {})[:500])}</code>",
-        f"• fallback provider by scene: <code>{html.escape(str(result.get('fallback_provider_by_scene') or {})[:500])}</code>",
-        f"• fallback submit source by scene: <code>{html.escape(str(result.get('fallback_submit_source_by_scene') or {})[:500])}</code>",
-        f"• final action: <code>{html.escape(str(result.get('final_action') or '-')[:160])}</code>",
         f"• current scene index: <code>{safe_int(result.get('current_scene_index'), 0)}</code>",
         f"• current scene status: <code>{html.escape(str(result.get('current_scene_status') or '-'))}</code>",
         f"• scene not-start elapsed/stall: <code>{safe_int(result.get('scene_not_start_elapsed'), 0)}/{safe_int(result.get('stall_threshold'), 0)}</code>",
@@ -69809,30 +69791,17 @@ def video_b14_sanitize_trial_addons(addon_plan: dict | None = None, *, quality_x
     return plan
 
 
-def product_video_public_safe_live_scene_count(default: int = 1) -> int:
-    try:
-        payload = video_public_status_payload()
-        product_submit = dict(payload.get("product_video_provider_submit") or {})
-        safe_count = safe_int(product_submit.get("safe_live_scene_count"), default)
-        return max(1, min(PRODUCT_VIDEO_R9_SCENE_MAX, safe_count))
-    except Exception:
-        return max(1, min(PRODUCT_VIDEO_R9_SCENE_MAX, safe_int(default, 1)))
-
-
 def video_b14_scene_count_keyboard(user_id=0, lang: str = "vi", session: dict | None = None) -> InlineKeyboardMarkup:
     active_session = session if isinstance(session, dict) else get_video_session(user_id) if user_id else {}
     quality = video_b14_quality_for_session(active_session)
-    safe_scene_limit = product_video_public_safe_live_scene_count()
-    choices = [PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT] if video_b14_is_trial_quality(quality) else [count for count in VIDEO_B14_2_SCENE_OPTIONS if int(count) <= safe_scene_limit]
-    if not choices:
-        choices = [1]
+    choices = [PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT] if video_b14_is_trial_quality(quality) else list(VIDEO_B14_2_SCENE_OPTIONS)
     rows = []
     for index in range(0, len(choices), 3):
         rows.append([
             InlineKeyboardButton(f"🎞 {count} cảnh", callback_data=f"vproduct|b14_scene_count|{count}")
             for count in choices[index:index + 3]
         ])
-    if not video_b14_is_trial_quality(quality) and safe_scene_limit > 1:
+    if not video_b14_is_trial_quality(quality):
         rows.append([InlineKeyboardButton("✍️ Nhập số khác", callback_data="vproduct|b14_scene_custom")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_quality_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
@@ -69845,9 +69814,6 @@ def video_b14_scene_count_text(session: dict | None = None, lang: str = "vi") ->
     extra = ""
     if video_b14_is_trial_quality(quality):
         extra = f"\n• <b>{PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI}</b>\n"
-    safe_scene_limit = product_video_public_safe_live_scene_count()
-    if safe_scene_limit <= 1:
-        extra += "\n• <b>Hiện hệ thống chỉ mở 1 cảnh để đảm bảo có MP4 hoàn chỉnh. TOAN AAS sẽ mở nhiều cảnh khi hệ thống dựng video ổn định.</b>\n"
     return (
         "🎞 <b>Chọn số cảnh</b>\n\n"
         f"• Gói hiện tại: <b>{html.escape(package_text)}</b>\n"
@@ -74520,25 +74486,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 parse_mode="HTML",
                 reply_markup=video_b14_scene_count_keyboard(uid, lang, session),
             )
-        if product_video_public_safe_live_scene_count() <= 1:
-            return await safe_edit_or_send(
-                query,
-                "Hiện hệ thống chỉ mở 1 cảnh để đảm bảo có MP4 hoàn chỉnh. TOAN AAS chưa xử lý và chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=video_b14_scene_count_keyboard(uid, lang, session),
-            )
         session = task3d_session_step(uid, "waiting_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_custom_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "b14_scene_count":
         count = max(1, min(20, safe_int(value, 3)))
-        safe_scene_limit = product_video_public_safe_live_scene_count()
-        if count > safe_scene_limit:
-            return await safe_edit_or_send(
-                query,
-                "Hiện hệ thống chỉ mở 1 cảnh để đảm bảo có MP4 hoàn chỉnh. TOAN AAS chưa xử lý và chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=video_b14_scene_count_keyboard(uid, lang, session),
-            )
         scene_policy = video_b14_trial_scene_policy(video_b14_quality_for_session(session), count)
         count = safe_int(scene_policy.get("scene_count"), count)
         ok, guard_message = video_b14_extended_scene_guard(uid, count)
@@ -75173,14 +75124,6 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         if requested < 1 or requested > 20:
             await update.message.reply_text(
                 "⚠️ Số cảnh hợp lệ là 1–20. TOAN AAS chưa xử lý và chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
-            )
-            return True
-        safe_scene_limit = product_video_public_safe_live_scene_count()
-        if requested > safe_scene_limit:
-            await update.message.reply_text(
-                "Hiện hệ thống chỉ mở 1 cảnh để đảm bảo có MP4 hoàn chỉnh. TOAN AAS chưa xử lý và chưa trừ Xu.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
             )
@@ -89284,24 +89227,6 @@ def video_public_status_payload() -> dict:
     billing_gate = video_billing_public_gate()
     product_video_submit_switch = video_provider_router.product_video_submit_switch_detail()
     product_video_submit_enabled = bool(product_video_submit_switch.get("resolved"))
-    product_video_health = {}
-    try:
-        health_conn = db_connect()
-        try:
-            product_video_health = video_project_queue.product_video_provider_health(health_conn)
-        finally:
-            health_conn.close()
-    except Exception as exc:
-        product_video_health = {
-            "provider_health": {},
-            "providers": {},
-            "healthy_provider_order": [],
-            "selected_primary_provider": "",
-            "provider_health_gate_reason": f"health_read_error:{type(exc).__name__}",
-            "multiscene_live_ready": False,
-            "safe_live_scene_count": 1,
-            "delivery_first_routing": True,
-        }
     freeze = provider_freeze_display("shopaikey_video")
     hidden_video_freeze = bool(freeze.get("frozen"))
     public_video_maintenance = product_video_public_maintenance_enabled()
@@ -89370,15 +89295,6 @@ def video_public_status_payload() -> dict:
             "hidden_video_freeze": hidden_video_freeze,
             "public_video_maintenance": public_video_maintenance,
             "public_live_provider_allowed": public_live_provider_allowed,
-            "provider_health": product_video_health.get("provider_health") or product_video_health.get("providers") or {},
-            "selected_primary_provider": str(product_video_health.get("selected_primary_provider") or ""),
-            "provider_primary_selected_by_health": bool(product_video_health.get("provider_primary_selected_by_health")),
-            "provider_degraded_reason": str(product_video_health.get("provider_degraded_reason") or ""),
-            "delivery_first_routing": bool(product_video_health.get("delivery_first_routing")),
-            "multiscene_live_ready": bool(product_video_health.get("multiscene_live_ready")),
-            "safe_live_scene_count": safe_int(product_video_health.get("safe_live_scene_count"), 1),
-            "provider_health_gate_reason": str(product_video_health.get("provider_health_gate_reason") or ""),
-            "healthy_provider_order": list(product_video_health.get("healthy_provider_order") or []),
             "live_policy_note": (
                 "public_live_allowed_hidden_freeze_only"
                 if public_live_provider_allowed and hidden_video_freeze
@@ -89424,7 +89340,6 @@ def video_public_status_text() -> str:
     conclusion = payload["conclusion"]
     product_submit = payload.get("product_video_provider_submit") or {}
     remote_worker = payload.get("remote_worker") or {}
-    product_health = product_submit.get("provider_health") or {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
         "",
@@ -89465,14 +89380,6 @@ def video_public_status_text() -> str:
         f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
         f"• Product Video provider submit: <code>{html.escape(str(product_submit.get('state') or 'LOCKED'))}</code>",
         f"• Product Video live note: <code>{html.escape(str(product_submit.get('live_policy_note') or 'normal'))}</code>",
-        f"• Product Video primary: <code>{html.escape(str(product_submit.get('selected_primary_provider') or '-'))}</code>",
-        f"• Product Video healthy chain: <code>{html.escape(','.join(str(item) for item in (product_submit.get('healthy_provider_order') or [])) or '-')}</code>",
-        f"• Product Video degraded reason: <code>{html.escape(str(product_submit.get('provider_degraded_reason') or '-'))}</code>",
-        f"• Product Video delivery-first routing: <code>{video_public_bool_label(product_submit.get('delivery_first_routing'))}</code>",
-        f"• Product Video multiscene live ready: <code>{video_public_bool_label(product_submit.get('multiscene_live_ready'))}</code>",
-        f"• Product Video safe live scene count: <code>{safe_int(product_submit.get('safe_live_scene_count'), 1)}</code>",
-        f"• Product Video health gate: <code>{html.escape(str(product_submit.get('provider_health_gate_reason') or '-'))}</code>",
-        f"• Product Video health summary: <code>{html.escape(str(product_health)[:500] or '-')}</code>",
         "",
         "<b>Local Worker</b>",
         f"• connected: <code>{video_public_bool_label(frame.get('local_worker_connected'))}</code>",
@@ -137557,10 +137464,6 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
     unit = int(price["unit_charge_xu"])
     list_unit = int(price["unit_list_xu"])
     promo_until = str(price.get("promo_until") or PRODUCT_VIDEO_R9_PROMO_UNTIL)
-    safe_scene_limit = product_video_public_safe_live_scene_count()
-    safe_note_vi = "\n\n<b>Hiện hệ thống chỉ mở 1 cảnh để đảm bảo có MP4 hoàn chỉnh. TOAN AAS sẽ mở nhiều cảnh khi hệ thống dựng video ổn định.</b>" if safe_scene_limit <= 1 else ""
-    safe_note_en = "\n\n<b>For now this flow only opens 1 scene so TOAN AAS can deliver a complete MP4 reliably.</b>" if safe_scene_limit <= 1 else ""
-    safe_note_zh = "\n\n<b>目前仅开放 1 个场景，以确保可以交付完整 MP4。</b>" if safe_scene_limit <= 1 else ""
     if lang == "zh":
         return (
             "🎞 <b>选择视频场景数量</b>\n\n"
@@ -137571,7 +137474,6 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             f"{price_lines}\n\n"
             "请选择或自定义场景数量。下一步是最终账单。\n"
             "只有生成有效 MP4 后才会扣除 Xu。"
-            f"{safe_note_zh}"
         )
     if lang == "en":
         return (
@@ -137583,7 +137485,6 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             f"{price_lines}\n\n"
             "Choose or enter the scene count you want. The next step is the final invoice.\n"
             "TOAN AAS charges only after a valid MP4 is ready."
-            f"{safe_note_en}"
         )
     return (
         "🎞 <b>Chọn số cảnh video</b>\n\n"
@@ -137594,7 +137495,6 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
         f"{price_lines}\n\n"
         "Chọn nhanh hoặc tự nhập số cảnh ở bước này. Bước kế tiếp là hóa đơn cuối.\n"
         "TOAN AAS chỉ trừ Xu khi có MP4 hợp lệ."
-        f"{safe_note_vi}"
     )
 
 def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -137602,24 +137502,19 @@ def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str
     lang = normalize_user_language(lang) or "vi"
     is_vi = lang == "vi"
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
-    safe_scene_limit = product_video_public_safe_live_scene_count()
-    first_row = [InlineKeyboardButton(video_scene_count_option_label(tier, 1, lang), callback_data="vfinal|scene_count|1")]
-    if safe_scene_limit >= 2:
-        first_row.append(InlineKeyboardButton(video_scene_count_option_label(tier, 2, lang), callback_data="vfinal|scene_count|2"))
-    second_row = []
-    if safe_scene_limit >= 3:
-        second_row.append(InlineKeyboardButton(video_scene_count_option_label(tier, 3, lang), callback_data="vfinal|scene_count|3"))
-    if safe_scene_limit > 1:
-        second_row.append(InlineKeyboardButton("✍️ Tự chọn" if is_vi else "✍️ 自定义" if lang == "zh" else "✍️ Custom", callback_data="vfinal|scene_custom"))
-    rows = [first_row]
-    if second_row:
-        rows.append(second_row)
-    rows.append([
-        InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ 返回" if lang == "zh" else "⬅️ Back", callback_data="vfinal|back"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
-    ])
     return InlineKeyboardMarkup([
-        *rows
+        [
+            InlineKeyboardButton(video_scene_count_option_label(tier, 1, lang), callback_data="vfinal|scene_count|1"),
+            InlineKeyboardButton(video_scene_count_option_label(tier, 2, lang), callback_data="vfinal|scene_count|2"),
+        ],
+        [
+            InlineKeyboardButton(video_scene_count_option_label(tier, 3, lang), callback_data="vfinal|scene_count|3"),
+            InlineKeyboardButton("✍️ Tự chọn" if is_vi else "✍️ 自定义" if lang == "zh" else "✍️ Custom", callback_data="vfinal|scene_custom"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ 返回" if lang == "zh" else "⬅️ Back", callback_data="vfinal|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+        ],
     ])
 
 def video_finalization_scene_count_custom_text(lang: str = "vi") -> str:
@@ -139069,14 +138964,6 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         count = safe_int(value, 0)
         if tier == "low":
             count = 1
-        safe_scene_limit = product_video_public_safe_live_scene_count()
-        if count > safe_scene_limit:
-            return await safe_edit_or_send(
-                query,
-                "Hiện hệ thống chỉ mở 1 cảnh để đảm bảo có MP4 hoàn chỉnh. TOAN AAS chưa xử lý và chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=video_finalization_scene_count_keyboard(state, lang),
-            )
         if count < 1:
             return await safe_edit_or_send(
                 query,

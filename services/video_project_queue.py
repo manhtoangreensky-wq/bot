@@ -1390,9 +1390,6 @@ def heartbeat_video_job(
 PRODUCT_VIDEO_SCENE_SECONDS = 8
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
-PRODUCT_VIDEO_HEALTH_RECENT_LIMIT = 30
-PRODUCT_VIDEO_HEALTH_NOT_START_THRESHOLD = 2
-PRODUCT_VIDEO_HEALTH_FAIL_THRESHOLD = 3
 
 
 def _split_product_video_provider_chain(value: Any) -> list[str]:
@@ -1417,276 +1414,6 @@ def resolve_product_video_provider_chain(environ: dict[str, str] | None = None) 
     env = os.environ if environ is None else environ
     raw = env.get("VIDEO_PROVIDER_CHAIN") if hasattr(env, "get") else None
     return _split_product_video_provider_chain(raw if raw is not None else PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN)
-
-
-def _product_video_provider_health_threshold(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, default) or default))
-    except Exception:
-        return max(1, int(default))
-
-
-def _product_video_provider_health_row(provider: str) -> dict[str, Any]:
-    return {
-        "provider": provider,
-        "degraded": False,
-        "degraded_reason": "",
-        "last_success_mp4_at": "",
-        "last_not_start_count": 0,
-        "last_invalid_result_count": 0,
-        "last_fail_count": 0,
-        "last_delivery_success_count": 0,
-    }
-
-
-def _product_video_provider_from_value(value: Any) -> str:
-    return (_split_product_video_provider_chain(str(value or "")) or [""])[0]
-
-
-def _product_video_truth_text(value: Any) -> str:
-    return str(value or "").strip().lower().replace("-", "_")
-
-
-def _product_video_result_url_present(payload: dict[str, Any]) -> bool:
-    return bool(
-        payload.get("result_url_valid")
-        or payload.get("result_url_present")
-        or payload.get("provider_result_url_present")
-        or payload.get("download_url_present")
-        or payload.get("shopaikey_result_url_from_data")
-    )
-
-
-def _product_video_payload_delivered_success(payload: dict[str, Any], job_row: dict[str, Any] | None = None) -> bool:
-    return bool(
-        payload.get("final_mp4_valid")
-        or payload.get("final_video_valid")
-        or payload.get("video_final_valid")
-        or payload.get("video_delivered")
-        or payload.get("final_delivered")
-        or payload.get("delivered")
-        or payload.get("delivery_state") == "delivered"
-    )
-
-
-def _product_video_mark_provider_success(stats: dict[str, dict[str, Any]], provider: str, timestamp: str = "") -> None:
-    provider = _product_video_provider_from_value(provider)
-    if not provider:
-        return
-    item = stats.setdefault(provider, _product_video_provider_health_row(provider))
-    item["last_delivery_success_count"] = _as_int(item.get("last_delivery_success_count"), 0) + 1
-    if timestamp and not item.get("last_success_mp4_at"):
-        item["last_success_mp4_at"] = str(timestamp)
-
-
-def _product_video_mark_provider_issue(stats: dict[str, dict[str, Any]], provider: str, issue: str) -> None:
-    provider = _product_video_provider_from_value(provider)
-    if not provider:
-        return
-    item = stats.setdefault(provider, _product_video_provider_health_row(provider))
-    if issue == "not_start":
-        item["last_not_start_count"] = _as_int(item.get("last_not_start_count"), 0) + 1
-    elif issue == "invalid_result":
-        item["last_invalid_result_count"] = _as_int(item.get("last_invalid_result_count"), 0) + 1
-    elif issue == "fail":
-        item["last_fail_count"] = _as_int(item.get("last_fail_count"), 0) + 1
-
-
-def _product_video_provider_outcomes_from_payload(
-    payload: dict[str, Any],
-    *,
-    job_row: dict[str, Any] | None = None,
-) -> dict[str, dict[str, Any]]:
-    payload = dict(payload or {})
-    stats: dict[str, dict[str, Any]] = {}
-    row = dict(job_row or {})
-    timestamp = str(row.get("completed_at") or row.get("updated_at") or row.get("created_at") or payload.get("completed_at") or "")
-    selected_provider = _product_video_provider_from_value(
-        payload.get("selected_provider")
-        or payload.get("selected_primary_provider")
-        or payload.get("provider_pending_provider")
-        or payload.get("provider")
-    )
-    delivered_success = _product_video_payload_delivered_success(payload, row)
-    if selected_provider and delivered_success:
-        _product_video_mark_provider_success(stats, selected_provider, timestamp)
-
-    iterable_keys = (
-        "provider_scene_tasks",
-        "scene_tasks",
-        "product_video_scene_tasks",
-        "provider_events",
-        "provider_attempts",
-    )
-    for key in iterable_keys:
-        items = payload.get(key)
-        if not isinstance(items, list):
-            continue
-        for raw_item in items:
-            if not isinstance(raw_item, dict):
-                continue
-            item = dict(raw_item)
-            provider = _product_video_provider_from_value(
-                item.get("provider")
-                or item.get("selected_provider")
-                or item.get("provider_pending_provider")
-                or selected_provider
-            )
-            if not provider:
-                continue
-            status_text = " ".join(
-                _product_video_truth_text(item.get(name))
-                for name in (
-                    "status",
-                    "provider_status",
-                    "provider_status_raw",
-                    "normalized_provider_status",
-                    "normalized_status",
-                    "provider_error",
-                    "blocker",
-                    "reason",
-                )
-            )
-            has_url = _product_video_result_url_present(item)
-            if (
-                delivered_success
-                or _product_video_truth_text(item.get("status")) in {"clip_downloaded", "downloaded", "success", "completed"}
-                or item.get("artifact_path")
-                or item.get("output_path")
-            ) and has_url:
-                _product_video_mark_provider_success(stats, provider, timestamp)
-                continue
-            if ("not_start" in status_text or "not start" in status_text) and not has_url:
-                _product_video_mark_provider_issue(stats, provider, "not_start")
-                continue
-            if "invalid_result" in status_text or "result_url_invalid" in status_text or "final_mp4_validation_failed" in status_text:
-                _product_video_mark_provider_issue(stats, provider, "invalid_result")
-                continue
-            if any(marker in status_text for marker in ("failed", "failure", "error", "timeout", "unavailable")):
-                _product_video_mark_provider_issue(stats, provider, "fail")
-
-    top_status = " ".join(
-        _product_video_truth_text(payload.get(name))
-        for name in (
-            "provider_status",
-            "provider_status_raw",
-            "normalized_provider_status",
-            "provider_error",
-            "blocker",
-            "terminal_state",
-            "last_error",
-        )
-    )
-    if selected_provider and not delivered_success:
-        if "not_start" in top_status and not _product_video_result_url_present(payload):
-            _product_video_mark_provider_issue(stats, selected_provider, "not_start")
-        elif "invalid_result" in top_status or "result_url_invalid" in top_status or "final_mp4_validation_failed" in top_status:
-            _product_video_mark_provider_issue(stats, selected_provider, "invalid_result")
-        elif any(marker in top_status for marker in ("failed", "failure", "timeout", "unavailable", "no_available_channel")):
-            _product_video_mark_provider_issue(stats, selected_provider, "fail")
-    return stats
-
-
-def product_video_provider_health_from_rows(
-    rows: list[dict[str, Any]] | tuple[dict[str, Any], ...],
-    *,
-    provider_chain: list[str] | None = None,
-) -> dict[str, Any]:
-    chain = list(provider_chain if provider_chain is not None else resolve_product_video_provider_chain())
-    stats: dict[str, dict[str, Any]] = {provider: _product_video_provider_health_row(provider) for provider in chain}
-    rows_observed = len(rows or [])
-    for row in rows or []:
-        row_dict = dict(row or {})
-        payload = row_dict.get("result_json")
-        if isinstance(payload, str):
-            payload = _json_loads(payload, {})
-        if not isinstance(payload, dict):
-            payload = {}
-        for provider, outcome in _product_video_provider_outcomes_from_payload(payload, job_row=row_dict).items():
-            item = stats.setdefault(provider, _product_video_provider_health_row(provider))
-            for key in ("last_not_start_count", "last_invalid_result_count", "last_fail_count", "last_delivery_success_count"):
-                item[key] = _as_int(item.get(key), 0) + _as_int(outcome.get(key), 0)
-            if outcome.get("last_success_mp4_at") and not item.get("last_success_mp4_at"):
-                item["last_success_mp4_at"] = str(outcome.get("last_success_mp4_at"))
-
-    not_start_threshold = _product_video_provider_health_threshold(
-        "PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_COUNT",
-        PRODUCT_VIDEO_HEALTH_NOT_START_THRESHOLD,
-    )
-    fail_threshold = _product_video_provider_health_threshold(
-        "PRODUCT_VIDEO_PROVIDER_FAIL_DEGRADE_COUNT",
-        PRODUCT_VIDEO_HEALTH_FAIL_THRESHOLD,
-    )
-    any_success = any(_as_int(item.get("last_delivery_success_count"), 0) > 0 for item in stats.values())
-    provider_outcome_count = sum(
-        _as_int(item.get("last_not_start_count"), 0)
-        + _as_int(item.get("last_invalid_result_count"), 0)
-        + _as_int(item.get("last_fail_count"), 0)
-        + _as_int(item.get("last_delivery_success_count"), 0)
-        for item in stats.values()
-    )
-    for provider, item in stats.items():
-        reasons: list[str] = []
-        if _as_int(item.get("last_not_start_count"), 0) >= not_start_threshold:
-            reasons.append("recent_not_start_without_result")
-        if _as_int(item.get("last_invalid_result_count"), 0) > 0:
-            reasons.append("recent_invalid_result_url_or_artifact")
-        if _as_int(item.get("last_fail_count"), 0) >= fail_threshold:
-            reasons.append("recent_provider_failures")
-        item["degraded"] = bool(reasons)
-        item["degraded_reason"] = ",".join(reasons)
-
-    healthy = [provider for provider in chain if not stats.setdefault(provider, _product_video_provider_health_row(provider)).get("degraded")]
-    primary = healthy[0] if healthy else ""
-    first_degraded = next((stats[provider].get("degraded_reason") for provider in chain if stats.get(provider, {}).get("degraded")), "")
-    safe_scene_count = 20 if any_success else 1
-    gate_reason = "" if any_success else "multiscene_live_delivery_not_verified"
-    if not healthy:
-        gate_reason = "all_video_providers_degraded_or_missing"
-    return {
-        "provider_health": stats,
-        "providers": stats,
-        "provider_order": chain,
-        "healthy_provider_order": healthy,
-        "selected_primary_provider": primary,
-        "provider_primary_selected_by_health": bool(primary),
-        "provider_degraded_reason": str(first_degraded or ""),
-        "delivery_first_routing": True,
-        "multiscene_live_ready": bool(any_success),
-        "safe_live_scene_count": safe_scene_count,
-        "provider_health_gate_reason": gate_reason,
-        "all_providers_degraded": not bool(healthy),
-        "rows_observed": rows_observed,
-        "provider_outcome_count": provider_outcome_count,
-    }
-
-
-def product_video_provider_health(
-    conn: sqlite3.Connection,
-    *,
-    provider_chain: list[str] | None = None,
-    recent_limit: int = PRODUCT_VIDEO_HEALTH_RECENT_LIMIT,
-) -> dict[str, Any]:
-    ensure_video_project_queue_schema(conn)
-    limit = max(1, min(200, _as_int(recent_limit, PRODUCT_VIDEO_HEALTH_RECENT_LIMIT)))
-    cursor = conn.execute(
-        """SELECT result_json, status, progress_percent, last_error, created_at, updated_at, completed_at
-           FROM video_jobs
-           WHERE job_type=?
-           ORDER BY id DESC
-           LIMIT ?""",
-        (VIDEO_RENDER_JOB_TYPE, limit),
-    )
-    columns = [str(item[0]) for item in (cursor.description or [])]
-    rows: list[dict[str, Any]] = []
-    for row in cursor.fetchall():
-        if isinstance(row, sqlite3.Row):
-            rows.append(dict(row))
-        elif isinstance(row, dict):
-            rows.append(dict(row))
-        else:
-            rows.append({columns[index]: row[index] for index in range(min(len(columns), len(row)))})
-    return product_video_provider_health_from_rows(rows, provider_chain=provider_chain)
 
 
 def _product_video_truthy(value: Any) -> bool:
@@ -1754,27 +1481,16 @@ def build_product_video_confirm_kickoff_payload(
     project: dict[str, Any],
     *,
     provider_chain: list[str] | None = None,
-    provider_health: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
     scene_count = _product_video_scene_count(project)
     scene_duration = PRODUCT_VIDEO_SCENE_SECONDS
     scene_tasks = product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count, scene_duration)
-    health = dict(provider_health or {})
     chain = list(provider_chain if provider_chain is not None else resolve_product_video_provider_chain())
-    if health:
-        chain = list(health.get("healthy_provider_order") or [])
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
-    safe_live_scene_count = _as_int(health.get("safe_live_scene_count"), scene_count if not health else 1)
-    multiscene_allowed = bool(scene_count <= max(1, safe_live_scene_count))
-    provider_chain_resolved = bool(chain and multiscene_allowed)
-    if not chain:
-        dispatch_blocker = str(health.get("provider_health_gate_reason") or "provider_chain_missing_no_charge")
-    elif not multiscene_allowed:
-        dispatch_blocker = "multiscene_live_not_ready_no_charge"
-    else:
-        dispatch_blocker = ""
+    provider_chain_resolved = bool(chain)
+    dispatch_blocker = "" if provider_chain_resolved else "provider_chain_missing_no_charge"
     return {
         "source": "product_video",
         "product_video": True,
@@ -1818,15 +1534,6 @@ def build_product_video_confirm_kickoff_payload(
         "provider_chain": chain,
         "provider_order": chain,
         "provider_chain_resolved": provider_chain_resolved,
-        "provider_health": health.get("provider_health") or health.get("providers") or {},
-        "provider_primary_selected_by_health": bool(health.get("provider_primary_selected_by_health") or (health and chain)),
-        "selected_primary_provider": str(health.get("selected_primary_provider") or (chain[0] if chain else "")),
-        "provider_degraded_reason": str(health.get("provider_degraded_reason") or ""),
-        "delivery_first_routing": bool(health.get("delivery_first_routing") or health),
-        "multiscene_live_ready": bool(health.get("multiscene_live_ready")) if health else True,
-        "safe_live_scene_count": safe_live_scene_count,
-        "provider_health_gate_reason": str(health.get("provider_health_gate_reason") or dispatch_blocker or ""),
-        "provider_health_blocked_before_submit": bool(dispatch_blocker),
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,
         "worker_dispatch_attempted": True,
@@ -1874,26 +1581,16 @@ def kickoff_product_video_job_after_confirm(
     if not isinstance(existing, dict):
         existing = {}
     payload = dict(existing)
-    initial_chain = list(provider_chain if provider_chain is not None else resolve_product_video_provider_chain())
-    health = product_video_provider_health(conn, provider_chain=initial_chain) if initial_chain else {}
-    apply_health = bool(initial_chain and _as_int(health.get("provider_outcome_count"), 0) > 0)
-    kickoff = build_product_video_confirm_kickoff_payload(
-        job,
-        project,
-        provider_chain=initial_chain,
-        provider_health=health if apply_health else None,
-        now=now,
-    )
+    kickoff = build_product_video_confirm_kickoff_payload(job, project, provider_chain=provider_chain, now=now)
     payload.update(kickoff)
     current = now_text(now)
     if not kickoff.get("provider_chain_resolved"):
-        blocker = str(kickoff.get("worker_dispatch_blocker") or kickoff.get("provider_health_gate_reason") or "provider_chain_missing_no_charge")
         payload.update(
             {
                 "ok": False,
-                "blocker": blocker,
-                "provider_error": blocker,
-                "terminal_state": blocker,
+                "blocker": "provider_chain_missing_no_charge",
+                "provider_error": "provider_chain_missing_no_charge",
+                "terminal_state": "provider_chain_missing_no_charge",
                 "no_charge": True,
             }
         )
@@ -1902,10 +1599,10 @@ def kickoff_product_video_job_after_confirm(
                SET status='failed', last_error=?, result_json=?, progress_percent=?, progress_message=?, updated_at=?, completed_at=COALESCE(completed_at, ?)
                WHERE id=?""",
             (
-                blocker,
+                "provider_chain_missing_no_charge",
                 _json_dumps(payload),
                 0,
-                blocker,
+                "provider_chain_missing_no_charge",
                 current,
                 current,
                 int(job_id),
@@ -1913,10 +1610,10 @@ def kickoff_product_video_job_after_confirm(
         )
         conn.execute(
             """UPDATE video_projects
-               SET status='failed', video_terminal_state=?,
+               SET status='failed', video_terminal_state='provider_chain_missing_no_charge',
                    error_log=?, updated_at=?
                WHERE project_id=?""",
-            (blocker, blocker, current, int(project["project_id"])),
+            ("provider_chain_missing_no_charge", current, int(project["project_id"])),
         )
     else:
         conn.execute(
@@ -1934,7 +1631,7 @@ def kickoff_product_video_job_after_confirm(
     conn.commit()
     return {
         "ok": bool(kickoff.get("provider_chain_resolved")),
-        "reason": "" if kickoff.get("provider_chain_resolved") else str(kickoff.get("worker_dispatch_blocker") or kickoff.get("provider_health_gate_reason") or "provider_chain_missing_no_charge"),
+        "reason": "" if kickoff.get("provider_chain_resolved") else "provider_chain_missing_no_charge",
         "job": get_video_render_job(conn, int(job_id)),
         "project": get_video_project(conn, int(project["project_id"])),
         "payload": payload,
