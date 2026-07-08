@@ -176812,8 +176812,6 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         f"; m4live2_subtitle_bottom_lock: {'yes' if style.get('m4live2_subtitle_bottom_lock') else 'no'}",
         f"; subtitle_alignment: {'bottom_center' if alignment == 2 else alignment}",
         f"; subtitle_margin_v_effective: {margin_v}",
-        "; subtitle_timing_preserved: yes",
-        "; subtitle_text_length_duration_split: no",
         "; subtitle_pos_override_removed: yes",
         f"; subtitle_max_lines: {int(style.get('max_lines') or 2)}",
         "WrapStyle: 2",
@@ -176837,21 +176835,37 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     last_dialogue_end = 0.0
     overlap_suppressed = 0
     for block in blocks:
+        chunks = subdub_ass_text_chunks(
+            str(block.get("text") or ""),
+            style,
+            int(style.get("max_lines") or 2),
+        )
+        if not chunks:
+            continue
         block_start = float(block.get("start") or 0)
         block_end = max(block_start + 0.2, float(block.get("end") or 0))
-        if block_start < last_dialogue_end:
-            overlap_suppressed += 1
-        escaped = subdub_ass_wrap_text(str(block.get("text") or ""), style, int(style.get("max_lines") or 2))
-        if not escaped:
-            continue
-        # Keep the translated cue on the exact source segment. Long text wraps; it must not shorten the cue.
-        events.append(
-            "Dialogue: 0,"
-            f"{subdub_ass_timestamp(block_start)},"
-            f"{subdub_ass_timestamp(block_end)},"
-            f"Default,,0,0,0,,{escaped}"
-        )
-        last_dialogue_end = max(last_dialogue_end, block_end)
+        weights = [max(1, len(re.sub(r"\s+", "", chunk))) for chunk in chunks]
+        total_weight = max(1, sum(weights))
+        elapsed_weight = 0
+        for chunk, weight in zip(chunks, weights):
+            chunk_start = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+            elapsed_weight += weight
+            chunk_end = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+            if chunk_start < last_dialogue_end:
+                overlap_suppressed += 1
+                original_duration = max(0.2, chunk_end - chunk_start)
+                chunk_start = last_dialogue_end + 0.01
+                chunk_end = max(chunk_start + 0.2, chunk_start + original_duration)
+            escaped = subdub_ass_wrap_text(chunk, style, int(style.get("max_lines") or 2))
+            if not escaped:
+                continue
+            events.append(
+                "Dialogue: 0,"
+                f"{subdub_ass_timestamp(chunk_start)},"
+                f"{subdub_ass_timestamp(chunk_end)},"
+                f"Default,,0,0,0,,{escaped}"
+            )
+            last_dialogue_end = max(last_dialogue_end, chunk_end)
     if len(header) >= 5:
         header.insert(5, f"; subtitle_overlap_events_suppressed: {overlap_suppressed}")
     return "\n".join(header + events) + "\n"
