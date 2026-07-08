@@ -2037,11 +2037,27 @@ def test_prompt_image_provider_guard_no_charge(monkeypatch):
     select_query = _FakeQuery(user_id, "vproduct|prompt_image_package|50")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=select_query), SimpleNamespace()))
     token = bot.get_video_session(user_id)["draft"]["prompt_image_confirm_token"]
-    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (False, "maintenance"))
+    captured = {}
+
+    def fake_submit_guard(job_type, *, source="", confirmed=False):
+        captured.update({"job_type": job_type, "source": source, "confirmed": confirmed})
+        return {
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "image_explicit_maintenance",
+            "provider_submit_source_kind": "public_user_confirm",
+            "message": "maintenance",
+        }
+
+    monkeypatch.setattr(bot, "shopaikey_provider_submit_guard", fake_submit_guard)
     execute_query = _FakeQuery(user_id, f"vproduct|prompt_image_execute|{token}")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=execute_query), SimpleNamespace()))
     assert "bảo trì/nâng cấp" in execute_query.edits[-1][0]
     assert "chưa trừ Xu" in execute_query.edits[-1][0]
+    assert captured == {
+        "job_type": "image",
+        "source": "vproduct_public_user_final_confirm",
+        "confirmed": True,
+    }
     assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
     bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
     bot.clear_video_session(user_id)

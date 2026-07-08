@@ -76,13 +76,16 @@ def test_image_live_background_blocked_with_provider_freeze_on():
 
 def test_image_live_maintenance_message_only_explicit_image_maintenance():
     public_guard = _section(BOT_SOURCE, "def shopaikey_image_public_confirm_submit_guard", "def shopaikey_non_public_submit_guard")
-    explicit = _section(BOT_SOURCE, "def image_explicit_maintenance_on", "def provider_freeze_non_public_on")
+    explicit = _section(BOT_SOURCE, "def image_public_maintenance_enabled", "def provider_freeze_non_public_on")
 
     assert "image_explicit_maintenance_on()" in public_guard
     assert "image_explicit_maintenance" in public_guard
     assert "IMAGE_MAINTENANCE" in explicit
+    assert "IMAGE_PUBLIC_MAINTENANCE" in explicit
     assert "IMAGE_GENERATION_DISABLED" in explicit
-    assert "TOOL_FREEZE_IMAGE" in explicit
+    assert "PUBLIC_IMAGE_DISABLED" in explicit
+    assert "AAS_IMAGE_DISABLED" in explicit
+    assert "TOOL_FREEZE_IMAGE" not in explicit
     assert "PROVIDER_FREEZE" not in explicit
     assert "PROVIDER_SPEND_FREEZE" not in explicit
 
@@ -150,8 +153,11 @@ def test_no_payos_wallet_payment_destructive_changes():
     changed = _changed_files()
     allowed = {
         "bot.py",
+        "tests/test_p0_aichat6_open_public_live_flows.py",
         "tests/test_p0_image_live1_public_image_generation.py",
         "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
+        "tests/test_p0_image_live1d_vproduct_public_confirm_unblocked.py",
+        "tests/test_task3d_video_product_prompt_engine.py",
     }
     assert changed <= allowed
     assert not any(

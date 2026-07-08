@@ -128,6 +128,8 @@ def test_image_live1_no_forbidden_runtime_scope_or_provider_submit_in_tests():
         "bot.py",
         "tests/test_p0_image_live1_public_image_generation.py",
         "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
+        "tests/test_p0_image_live1d_vproduct_public_confirm_unblocked.py",
+        "tests/test_task3d_video_product_prompt_engine.py",
         "tests/test_p0_aichat5_live_context_action_trace.py",
         "tests/test_p0_aichat6_open_public_live_flows.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
