@@ -176138,6 +176138,14 @@ def subtitle_dub_debug_job_payload(
         "job_id": str(state.get("_pipeline_job_id") or ""),
         "mode": normalize_video_translate_mode(mode),
         "product_type": subdub_product_type_from_mode(mode, state),
+        "source_mode": str(state.get("source_mode") or mode or ""),
+        "handler_name": str(state.get("handler_name") or ""),
+        "public_failure_copy_source": str(state.get("public_failure_copy_source") or ""),
+        "subtitle_translate_fail_reason": str(state.get("subtitle_translate_fail_reason") or ""),
+        "subtitle_render_fail_reason": str(state.get("subtitle_render_fail_reason") or ""),
+        "subtitle_delivery_fail_reason": str(state.get("subtitle_delivery_fail_reason") or ""),
+        "pr299_path_active": bool(state.get("pr299_path_active")),
+        "m4live7_subtitle_only_route_active": bool(state.get("m4live7_subtitle_only_route_active")),
         **route_debug,
         "status": str(status or "failed"),
         "stage": str(stage or ""),
@@ -179744,8 +179752,22 @@ async def _execute_video_dubbing_pipeline_core(
             "tts": str(product_result.get("tts_provider") or ""),
             "mux": str(product_result.get("partial_reason") or product_result.get("error_code") or ""),
         }
+        failure_reason = sanitize_log_text(str(detail or status or stage or "subtitle_only_failed"))[:180]
+        subtitle_debug_fields = {}
+        if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
+            subtitle_debug_fields = {
+                "source_mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+                "handler_name": "_execute_video_dubbing_pipeline_core",
+                "public_failure_copy_source": "video_dubbing_flow_failure_text",
+                "pr299_path_active": True,
+                "m4live7_subtitle_only_route_active": True,
+                "subtitle_translate_fail_reason": failure_reason if stage in {"subtitle", "dialogue", "pipeline"} else "",
+                "subtitle_render_fail_reason": failure_reason if stage == "video" else "",
+                "subtitle_delivery_fail_reason": failure_reason if stage == "delivery" else "",
+            }
         debug_state = {
             **state,
+            **subtitle_debug_fields,
             "_subdub_render_debug": dict(render_debug),
             "_subdub_terminal_state": "failed_no_charge",
             "last_error_stage": stage,
@@ -179790,6 +179812,7 @@ async def _execute_video_dubbing_pipeline_core(
             "debug_job": debug_job,
             "pipeline_attempted": True,
             "provider_route": provider_route,
+            **subtitle_debug_fields,
         }
 
     if not product_result.get("ok"):
