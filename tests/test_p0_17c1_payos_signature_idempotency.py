@@ -319,6 +319,7 @@ def test_p0_17c1_static_guard_no_unrelated_files_touched():
         "tests/test_p0_aichat4_smart_intent_context_backstack.py",
         "tests/test_p0_aichat5_live_context_action_trace.py",
         "tests/test_p0_aichat6_open_public_live_flows.py",
+        "tests/test_p0_image_live1_public_image_generation.py",
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
