@@ -28,6 +28,7 @@ from services.video_provider_catalog import (
     MODEL_UNKNOWN,
     enforce_payload_contract,
     enrich_metadata_with_model_contract,
+    model_interface_contract,
     provider_model_config,
     selected_model_for_provider,
 )
@@ -356,6 +357,11 @@ def _payload_debug(payload: dict[str, Any]) -> dict[str, Any]:
         "provider_catalog_model_found": bool(metadata.get("provider_catalog_model_found")),
         "supports_concat": bool(metadata.get("supports_concat")),
         "contract_validation_status": str(metadata.get("contract_validation_status") or ""),
+        "contract_block_reason": str(metadata.get("contract_block_reason") or ""),
+        "provider_interface": str(metadata.get("provider_interface") or ""),
+        "provider_endpoint_source": str(metadata.get("provider_endpoint_source") or ""),
+        "model_requires_exclusive_interface": bool(metadata.get("model_requires_exclusive_interface")),
+        "submit_skipped_due_to_contract": bool(metadata.get("submit_skipped_due_to_contract")),
         "payload_has_prompt": bool(payload.get("prompt")),
         "payload_has_duration": bool(payload.get("duration") or payload.get("duration_seconds")),
         "payload_has_ratio": bool(payload.get("ratio") or payload.get("aspect_ratio") or payload.get("aspectRatio")),
@@ -435,10 +441,19 @@ def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | o
         "selected_capabilities",
         "selected_clip_seconds",
         "selected_payload_adapter",
+        "selected_cost_tier",
+        "selected_role",
         "provider_model_map",
         "provider_catalog_model_found",
         "supports_concat",
         "contract_validation_status",
+        "contract_block_reason",
+        "provider_interface",
+        "provider_endpoint_source",
+        "provider_submit_url_override",
+        "provider_poll_url_override",
+        "model_requires_exclusive_interface",
+        "submit_skipped_due_to_contract",
         "required_capability_original",
         "normalized_capability_candidates",
     )
@@ -500,9 +515,24 @@ def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, st
                 stage="payload_build",
                 debug={"provider": "key4u_video", "model": model, "blocker": MODEL_UNKNOWN, "no_charge": True},
             )
+        interface = model_interface_contract("key4u_video", model, env=env)
+        if interface.get("contract_validation_status") == "blocked":
+            raise VideoProviderContractError(
+                str(interface.get("contract_block_reason") or "provider_contract_missing_no_charge"),
+                stage="payload_build",
+                debug={
+                    **interface,
+                    "provider": "key4u_video",
+                    "model": model,
+                    "blocker": interface.get("contract_block_reason") or "provider_contract_missing_no_charge",
+                    "no_charge": True,
+                    "submit_http_status": 0,
+                    "submit_skipped_due_to_contract": True,
+                },
+            )
         data["model"] = model
-        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "key4u_video", model)
-        data = enforce_payload_contract("key4u_video", model, data)
+        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "key4u_video", model, env=env)
+        data = enforce_payload_contract("key4u_video", model, data, env=env)
     return data
 
 
@@ -522,7 +552,7 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
                 debug={"provider": "shopaikey_video", "model": model, "blocker": MODEL_UNKNOWN, "no_charge": True},
             )
         data["model"] = model
-        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "shopaikey_video", model)
+        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "shopaikey_video", model, env=env)
     if _shopaikey_uses_historical_small_clip_contract(request):
         try:
             small_clip_seconds = int(float((env or os.environ).get("SHOPAIKEY_VIDEO_SMALL_CLIP_SECONDS") or 8))
@@ -546,7 +576,7 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
         )
         data["metadata"] = metadata
     if model:
-        data = enforce_payload_contract("shopaikey_video", model, data)
+        data = enforce_payload_contract("shopaikey_video", model, data, env=env)
     return data
 
 
@@ -819,11 +849,44 @@ class GenericHttpVideoProvider:
             )
         try:
             payload = _build_provider_payload(self.provider_name, request, self.env)
-        except VideoProviderContractError:
-            raise
+        except VideoProviderContractError as exc:
+            raw_debug = {
+                "smoke_stage": exc.stage or "payload_build",
+                "provider": self.provider_name,
+                "selected_provider_before_submit": self.provider_name,
+                "submit_provider_key": self.provider_name,
+                "provider_submit_blocker": exc.blocker,
+                "blocker": exc.blocker,
+                "contract_validation_status": "blocked",
+                "contract_block_reason": exc.blocker,
+                "submit_skipped_due_to_contract": True,
+                "contract_reject_consumed_fallback": False,
+                "submit_accepted": False,
+                "poll_allowed": False,
+                "poll_skipped_reason": "submit_skipped_due_to_contract",
+                "http_status": 0,
+                "submit_http_status": 0,
+                "provider_submit_http_status": 0,
+                "provider_response_http_status": 0,
+                "no_charge": True,
+                **dict(exc.debug or {}),
+            }
+            return VideoSubmitResult(
+                ok=False,
+                provider_name=self.provider_name,
+                provider_status="contract_blocked",
+                error_code=exc.blocker,
+                raw=raw_debug,
+            )
         except Exception as exc:
             raise VideoProviderContractError("provider_payload_invalid_shape", stage="payload_build", message=str(exc)) from exc
-        submit_url = self._submit_url()
+        payload_metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        submit_url = str(payload_metadata.get("provider_submit_url_override") or self._submit_url()).strip()
+        if isinstance(payload.get("metadata"), dict):
+            clean_metadata = dict(payload["metadata"])
+            clean_metadata.pop("provider_submit_url_override", None)
+            clean_metadata.pop("provider_poll_url_override", None)
+            payload["metadata"] = clean_metadata
         auth_name, auth_value = self._auth_header()
         result = self._open_json(submit_url, payload, timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90))
         body = result.get("body") or {}
@@ -845,6 +908,9 @@ class GenericHttpVideoProvider:
             "provider_submit_url_configured": bool(caps.get("submit_url_configured")),
             "provider_submit_url_host": _safe_url_host(submit_url),
             "provider_submit_url_path": _safe_url_path(submit_url),
+            "provider_interface": str(payload_metadata.get("provider_interface") or ""),
+            "provider_endpoint_source": str(payload_metadata.get("provider_endpoint_source") or ""),
+            "provider_submit_url_override_used": bool(payload_metadata.get("provider_submit_url_override")),
             "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
             "auth_present": bool(str(auth_value or "").strip()),

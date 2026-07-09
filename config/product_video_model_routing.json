@@ -29,55 +29,54 @@
       "quality": "low",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-fast"},
-        {"provider": "key4u_video", "model": "kling-3.0-turbo"},
-        {"provider": "key4u_video", "model": "MiniMax-Hailuo-02"}
+        {"provider": "shopaikey_video", "model": "grok-video-3", "cost_tier": "low", "role": "primary"},
+        {"provider": "shopaikey_video", "model": "veo3.1-fast", "cost_tier": "low", "role": "fallback"},
+        {"provider": "key4u_video", "model": "kling-3.0-turbo", "cost_tier": "low", "role": "fallback"}
       ]
     },
     "basic": {
       "quality": "basic",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-fast-components"},
-        {"provider": "shopaikey_video", "model": "veo3.1-fast"},
-        {"provider": "key4u_video", "model": "kling-3.0-turbo"}
+        {"provider": "shopaikey_video", "model": "veo3.1-fast", "cost_tier": "basic", "role": "primary"},
+        {"provider": "shopaikey_video", "model": "veo3.1-fast-components", "cost_tier": "basic", "role": "fallback"},
+        {"provider": "key4u_video", "model": "kling-3.0-turbo", "cost_tier": "basic", "role": "fallback"}
       ]
     },
     "common": {
       "quality": "common",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-fast-components"},
-        {"provider": "key4u_video", "model": "kling-video"},
-        {"provider": "key4u_video", "model": "MiniMax-Hailuo-02"}
+        {"provider": "shopaikey_video", "model": "veo3.1-fast-components", "cost_tier": "common", "role": "primary"},
+        {"provider": "key4u_video", "model": "kling-video", "cost_tier": "common", "role": "fallback"},
+        {"provider": "shopaikey_video", "model": "veo3.1-fast", "cost_tier": "basic", "role": "fallback"}
       ]
     },
     "advanced": {
       "quality": "advanced",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-pro"},
-        {"provider": "key4u_video", "model": "kling-video"},
-        {"provider": "key4u_video", "model": "kling-motion-control"}
+        {"provider": "shopaikey_video", "model": "veo3.1-pro", "cost_tier": "advanced", "role": "primary"},
+        {"provider": "key4u_video", "model": "MiniMax-Hailuo-02", "cost_tier": "advanced", "role": "fallback"},
+        {"provider": "key4u_video", "model": "kling-video", "cost_tier": "common", "role": "fallback"}
       ]
     },
     "standard": {
       "quality": "standard",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-pro-components"},
-        {"provider": "key4u_video", "model": "kling-video-extend"},
-        {"provider": "key4u_video", "model": "veo3.1-pro"}
+        {"provider": "shopaikey_video", "model": "veo3.1-pro-components", "cost_tier": "standard", "role": "primary"},
+        {"provider": "key4u_video", "model": "MiniMax-Hailuo-2.3", "cost_tier": "standard", "role": "fallback"},
+        {"provider": "shopaikey_video", "model": "veo3.1-pro", "cost_tier": "advanced", "role": "fallback"}
       ]
     },
     "high": {
       "quality": "high",
       "clip_seconds": 8,
       "preferred": [
-        {"provider": "shopaikey_video", "model": "veo3.1-pro-4k"},
-        {"provider": "shopaikey_video", "model": "grok-video-3-10s"},
-        {"provider": "key4u_video", "model": "MiniMax-Hailuo-2.3"},
-        {"provider": "key4u_video", "model": "veo3.1-pro"}
+        {"provider": "shopaikey_video", "model": "veo3.1-pro-4k", "cost_tier": "high", "role": "primary"},
+        {"provider": "shopaikey_video", "model": "veo3.1-pro-components", "cost_tier": "standard", "role": "fallback"},
+        {"provider": "key4u_video", "model": "MiniMax-Hailuo-2.3", "cost_tier": "high", "role": "fallback"}
       ]
     }
   }

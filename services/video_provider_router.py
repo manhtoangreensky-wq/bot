@@ -272,6 +272,11 @@ def product_video_submit_switch_detail(env: dict[str, str] | None = None) -> dic
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM = "public_user_final_confirm"
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE = "public_confirmed_fallback_once"
 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE = "public_confirmed_scene_fallback_once"
+PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS = {
+    "key4u_model_requires_exclusive_interface_no_endpoint",
+    "key4u_model_contract_missing_no_charge",
+    "provider_contract_missing_no_charge",
+}
 PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK = "worker_poll_existing_task"
 PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES = {
     "codex_test",
@@ -608,6 +613,8 @@ def _product_video_paid_fallback_blocked(
     # Let the chain inspect the next provider so admin diagnostics can report
     # the exact all-config-missing state without triggering a paid retry path.
     if str(blocker or "").strip() == "provider_config_missing_at_submit":
+        return False
+    if str(blocker or "").strip() in PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS:
         return False
     if product_video_controlled_fallback_allowed(blocker, metadata):
         return False
@@ -1843,6 +1850,18 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "provider_catalog_model_found",
         "supports_concat",
         "contract_validation_status",
+        "contract_block_reason",
+        "provider_interface",
+        "provider_endpoint_source",
+        "provider_submit_url_override_used",
+        "model_requires_exclusive_interface",
+        "submit_skipped_due_to_contract",
+        "contract_reject_consumed_fallback",
+        "fallback_candidate_after_contract_reject",
+        "next_candidate_after_reject",
+        "selected_cost_tier",
+        "selected_role",
+        "candidate_list_compact",
         "provider_response_http_status",
         "provider_response_body_shape",
         "provider_submit_exception_class",
@@ -2309,9 +2328,21 @@ def run_provider_generation(
     def _copy_attempt_traces() -> list[dict[str, Any]]:
         return [dict(item) for item in attempt_traces if isinstance(item, dict)]
 
+    def _previous_failure_was_contract_reject() -> bool:
+        if not attempt_failures:
+            return False
+        latest = attempt_failures[-1]
+        return bool(
+            str(latest.get("reason") or "") in PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS
+            and bool(latest.get("submit_skipped_due_to_contract"))
+            and int(latest.get("submit_http_status") or 0) == 0
+        )
+
     for attempt_index, current_adapter in enumerate(candidate_adapters):
         fallback_used = attempt_index > 0
         fallback_reason = first_fallback_reason if fallback_used else ""
+        fallback_after_contract_reject = bool(fallback_used and _previous_failure_was_contract_reject())
+        fallback_count_increment = 0 if fallback_after_contract_reject else (1 if fallback_used else 0)
         selected_capability = preferred_provider_capability(current_adapter, request.required_capability)
         provider_metadata = dict(request.metadata or {})
         if fallback_used:
@@ -2324,7 +2355,8 @@ def run_provider_generation(
                     "public_user_confirmed": bool(fallback_context.get("public_user_confirmed")),
                     "invoice_confirmed": bool(fallback_context.get("invoice_confirmed")),
                     "provider_submit_accepted_before": True,
-                    "fallback_count": current_fallback_count + 1,
+                    "fallback_count": current_fallback_count + fallback_count_increment,
+                    "contract_reject_consumed_fallback": False if fallback_after_contract_reject else True,
                 }
             )
         provider_request = dataclasses.replace(request, required_capability=selected_capability, metadata=provider_metadata)
@@ -2420,7 +2452,8 @@ def run_provider_generation(
                 "primary_provider": initial_primary_provider,
                 "fallback_provider": current_adapter.provider_name if fallback_used else initial_fallback_provider,
                 "fallback_attempted": bool(fallback_used),
-                "fallback_count": current_fallback_count + (1 if fallback_used else 0),
+                "fallback_count": current_fallback_count + fallback_count_increment,
+                "contract_reject_consumed_fallback": False if fallback_after_contract_reject else bool(fallback_used),
                 "fallback_submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE if fallback_used else "",
                 "fallback_eligible": bool(fallback_used or (attempt_index + 1 < len(candidate_adapters))),
                 "final_decision": "fallback_provider_once" if fallback_used else "waiting_primary_provider",
@@ -2485,6 +2518,9 @@ def run_provider_generation(
             }
             if raw.get("provider_submit_blocker"):
                 attempt["submit_blocker"] = str(raw.get("provider_submit_blocker") or "")
+            if raw.get("submit_skipped_due_to_contract") or clean_reason in PRODUCT_VIDEO_CONTRACT_REJECT_BLOCKERS:
+                attempt["submit_skipped_due_to_contract"] = True
+                attempt["contract_reject_consumed_fallback"] = False
             if raw.get("provider_error_message_safe"):
                 attempt["provider_error_message_safe"] = str(raw.get("provider_error_message_safe") or "")[:220]
             attempt_failures.append(attempt)

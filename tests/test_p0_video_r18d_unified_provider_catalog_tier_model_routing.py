@@ -90,13 +90,14 @@ def test_tier_resolution_is_not_single_hardcoded_veo_fast():
     assert low["ok"] is True
     assert basic["ok"] is True
     assert high["ok"] is True
-    assert low["selected_model"] == "veo3.1-fast"
+    assert low["selected_provider"] == "shopaikey_video"
+    assert low["selected_model"] in {"grok-video-3", "veo3.1-fast"}
     assert basic["selected_model"] in {"veo3.1-fast-components", "veo3.1-fast"}
     assert high["selected_model"] != "veo3.1-fast"
     assert len({low["selected_model"], basic["selected_model"], high["selected_model"]}) >= 2
 
 
-def test_env_override_wins_but_must_exist_in_catalog():
+def test_env_override_must_exist_and_stay_within_tier_cost_budget():
     env = {
         "VIDEO_PROVIDER_CHAIN": "shopaikey_video,key4u_video",
         "SHOPAIKEY_VIDEO_MODEL_BASIC": "veo3.1-pro",
@@ -104,8 +105,8 @@ def test_env_override_wins_but_must_exist_in_catalog():
     result = resolve_product_video_model(tier="basic", env=env)
     assert result["ok"] is True
     assert result["selected_provider"] == "shopaikey_video"
-    assert result["selected_model"] == "veo3.1-pro"
-    assert result["selected_model_source"] == "env:SHOPAIKEY_VIDEO_MODEL_BASIC"
+    assert result["selected_model"] == "veo3.1-fast"
+    assert any(item["reason"] == "model_cost_tier_exceeds_product_tier" for item in result["rejected_models"])
 
 
 def test_unknown_env_model_is_rejected_and_config_fallback_is_used():
@@ -134,6 +135,7 @@ def test_concat_requires_concat_capable_model_then_falls_back():
         provider_chain=["shopaikey_video", "key4u_video"],
         catalog=catalog,
         routing=routing,
+        env={"KEY4U_KLING_VIDEO_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/text2video"},
         requires_concat=True,
     )
     assert result["ok"] is True
@@ -218,7 +220,13 @@ def test_key4u_payload_uses_provider_model_map_and_removes_scene_fields():
         },
         required_capability="text_to_video",
     )
-    payload = build_key4u_video_payload(request, {"KEY4U_VIDEO_MODEL": "veo3.1-pro"})
+    payload = build_key4u_video_payload(
+        request,
+        {
+            "KEY4U_VIDEO_MODEL": "veo3.1-pro",
+            "KEY4U_KLING_VIDEO_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/text2video",
+        },
+    )
     assert payload["model"] == "kling-3.0-turbo"
     assert "scenes" not in payload
     assert "storyboard" not in payload

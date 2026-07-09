@@ -8,6 +8,7 @@
         "veo3.1-fast": {
           "family": "google_veo",
           "quality": "fast",
+          "cost_tier": "low",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -17,6 +18,7 @@
         "veo3.1-fast-components": {
           "family": "google_veo",
           "quality": "fast_components",
+          "cost_tier": "basic",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -26,6 +28,7 @@
         "veo3.1-pro": {
           "family": "google_veo",
           "quality": "pro",
+          "cost_tier": "advanced",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -35,6 +38,7 @@
         "veo3.1-pro-components": {
           "family": "google_veo",
           "quality": "pro_components",
+          "cost_tier": "standard",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -44,6 +48,7 @@
         "veo3.1-pro-4k": {
           "family": "google_veo",
           "quality": "pro_4k",
+          "cost_tier": "high",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -53,6 +58,7 @@
         "grok-video-3": {
           "family": "xai_grok",
           "quality": "creative",
+          "cost_tier": "low",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -62,6 +68,7 @@
         "grok-video-3-10s": {
           "family": "xai_grok",
           "quality": "creative_10s",
+          "cost_tier": "high",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 10,
           "max_single_task_seconds": 10,
@@ -77,6 +84,7 @@
         "kling-3.0-turbo": {
           "family": "kling",
           "quality": "fast",
+          "cost_tier": "low",
           "capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -86,6 +94,7 @@
         "kling-video": {
           "family": "kling",
           "quality": "standard",
+          "cost_tier": "common",
           "capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -95,6 +104,7 @@
         "kling-video-extend": {
           "family": "kling",
           "quality": "extend",
+          "cost_tier": "standard",
           "capabilities": ["text_to_video", "video_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -104,6 +114,7 @@
         "kling-motion-control": {
           "family": "kling",
           "quality": "motion_control",
+          "cost_tier": "advanced",
           "capabilities": ["text_to_video", "image_to_video", "video_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -113,6 +124,7 @@
         "MiniMax-Hailuo-02": {
           "family": "minimax_hailuo",
           "quality": "standard",
+          "cost_tier": "advanced",
           "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -122,6 +134,7 @@
         "MiniMax-Hailuo-2.3": {
           "family": "minimax_hailuo",
           "quality": "high",
+          "cost_tier": "high",
           "capabilities": ["text_to_video", "image_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -131,6 +144,7 @@
         "veo3.1-fast": {
           "family": "google_veo",
           "quality": "fast",
+          "cost_tier": "common",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
@@ -140,6 +154,7 @@
         "veo3.1-pro": {
           "family": "google_veo",
           "quality": "pro",
+          "cost_tier": "high",
           "capabilities": ["text_to_video", "scene_video", "short_video"],
           "clip_seconds": 8,
           "max_single_task_seconds": 8,
