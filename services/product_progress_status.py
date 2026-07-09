@@ -1071,6 +1071,12 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         or job.get("music_result_delivered_at")
         or job.get("output_file_id")
         or job.get("music_output_file_id")
+        or job.get("video_delivered_at")
+        or job.get("video_delivery_message_id")
+        or job.get("final_video_file_id")
+        or job.get("final_delivered")
+        or job.get("final_mp4_delivered")
+        or job.get("delivery_succeeded")
     )
     music_artifact_waiting = bool(
         canonical in {"music_bg", "music_song"}
@@ -1119,10 +1125,15 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         terminal = "failed_no_charge"
         status = "failed"
         progress = min(85, int(progress or 85))
+    elif canonical in VIDEO_PROGRESS_TYPES and status in {"completed", "complete", "success", "succeeded", "delivered"} and has_final_artifact and not has_delivery:
+        status = "processing"
+        progress = max(85, min(95, int(progress or 95)))
     elif canonical in VIDEO_PROGRESS_TYPES and str(job.get("visual_classification") or job.get("final_classification") or "").strip().lower() in {"partial_simple_video", "failed_no_real_visual"}:
         terminal = "failed_no_charge"
         status = "failed"
         progress = min(85, int(progress or 85))
+    elif canonical in VIDEO_PROGRESS_TYPES and status in {"completed", "complete", "success", "succeeded", "delivered"} and has_delivery:
+        terminal = "delivered"
     elif status in {"completed", "complete", "success", "succeeded", "delivered"}:
         terminal = "delivered"
     elif any(token in status for token in ("fail", "error", "cancel")):
@@ -1328,9 +1339,15 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         elif canonical == "subdub":
             stage_key = "generating_voice" if status else "received_file"
         elif canonical in VIDEO_PROGRESS_TYPES:
-            stage_key = "generating_video" if status else "received_request"
+            if has_final_artifact and not has_delivery:
+                stage_key = "validating_output"
+            else:
+                stage_key = "generating_video" if status else "received_request"
         else:
             stage_key = str(job.get("stage") or job.get("current_stage") or "received_request")
+    if canonical in VIDEO_PROGRESS_TYPES and has_final_artifact and not has_delivery and not terminal:
+        stage_key = "validating_output"
+        progress = max(85, min(95, _as_int(progress, 95)))
     if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"} and canonical in {"music_bg", "music_song"}:
         stage_key = "validating_audio"
     stage = product_progress_stage(canonical, str(job.get("stage") or job.get("current_stage") or stage_key))
