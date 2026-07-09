@@ -251,7 +251,12 @@ def test_quote_consistency_basic_300_persists_quoted_300(tmp_path):
     assert payload["selected_tier"] == "basic"
     assert payload["user_visible_price_xu"] == 300
     assert payload["persisted_quoted_price_xu"] == 300
-    assert payload["charge_amount_planned_xu"] == 400
+    assert payload["customer_charge_planned_xu"] == 300
+    assert payload["wallet_charge_amount_xu"] == 300
+    assert payload["charge_amount_planned_xu"] == 300
+    assert payload["list_price_xu"] == 400
+    assert payload["provider_budget_xu"] == 400
+    assert payload["promo_discount_xu"] == 100
     assert payload["quote_consistent"] is True
     assert payload["provider_chain_resolved"] is True
 
@@ -287,21 +292,25 @@ def test_quote_mismatch_blocks_before_submit_no_charge(tmp_path):
     )
 
     result = queue.confirm_video_project_invoice(conn, project_id=int(project["project_id"]), user_id=19)
-    payload = json.loads(result["job"]["result_json"])
 
-    assert payload["quote_consistent"] is False
-    assert payload["quote_mismatch_reason"] == "product_video_quote_mismatch_no_charge"
-    assert payload["provider_chain_resolved"] is False
-    assert payload["provider_submit_called"] is False
-    assert payload["charge"] == 0
-    assert result["job"]["status"] == "failed"
+    assert result["ok"] is False
+    assert result["reason"] == "product_video_quote_mismatch_no_charge"
+    assert result["quote"]["quote_consistent"] is False
+    assert result["quote"]["quote_mismatch_reason"] == "product_video_quote_mismatch_no_charge"
+    assert result["quote"]["user_visible_price_xu"] == 300
+    assert result["quote"]["persisted_quoted_price_xu"] == 400
+    assert result["quote"]["customer_charge_planned_xu"] == 400
+    assert result["quote"]["wallet_charge_amount_xu"] == 400
 
 
 def test_finance_debug_source_contract_exposes_quote_fields():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     assert "user visible price:" in source
     assert "persisted quoted price:" in source
-    assert "planned charge amount:" in source
+    assert "customer charge planned:" in source
+    assert "wallet charge amount:" in source
+    assert "list price:" in source
+    assert "provider budget:" in source
     assert "quote consistent:" in source
     assert "Product Video default chain:" in source
     assert "Low tier primary:" in source

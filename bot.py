@@ -47866,15 +47866,44 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         ),
         user_visible_price,
     )
-    charge_amount_planned = safe_int(
+    customer_charge_planned = safe_int(
         _video_finance_first_value(
             merged,
-            ("charge_amount_planned_xu", "total_xu", "total", "total_xu_estimated"),
+            ("customer_charge_planned_xu", "wallet_charge_amount_xu", "charge_amount_planned_xu"),
+            persisted_quoted_price,
+        ),
+        persisted_quoted_price,
+    )
+    list_price_xu = safe_int(
+        _video_finance_first_value(
+            merged,
+            ("list_price_xu", "standard_price_xu", "scene_list_total_xu", "total_xu", "total", "total_xu_estimated"),
             pricing["charge_total_xu"],
         ),
         int(pricing["charge_total_xu"]),
     )
-    quote_consistent = bool(merged.get("quote_consistent")) if merged.get("quote_consistent") not in (None, "") else persisted_quoted_price == user_visible_price
+    provider_budget_xu = safe_int(
+        _video_finance_first_value(
+            merged,
+            ("provider_budget_xu", "provider_cost_cap_xu", "total_xu", "total", "total_xu_estimated"),
+            customer_charge_planned,
+        ),
+        customer_charge_planned,
+    )
+    wallet_charge_amount_xu = safe_int(
+        _video_finance_first_value(
+            merged,
+            ("wallet_charge_amount_xu", "customer_charge_planned_xu", "charge_amount_planned_xu"),
+            customer_charge_planned,
+        ),
+        customer_charge_planned,
+    )
+    raw_quote_consistent = merged.get("quote_consistent")
+    fields_quote_consistent = user_visible_price == persisted_quoted_price == customer_charge_planned
+    if raw_quote_consistent in (None, ""):
+        quote_consistent = fields_quote_consistent
+    else:
+        quote_consistent = fields_quote_consistent and str(raw_quote_consistent).strip().lower() in {"1", "true", "yes", "on"}
     quote_mismatch_reason = str(merged.get("quote_mismatch_reason") or ("" if quote_consistent else "product_video_quote_mismatch_no_charge"))
     quoted = persisted_quoted_price
     charged = safe_int(
@@ -47962,7 +47991,10 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• selected tier: <code>{html.escape(str(selected_tier or '-'))}</code>",
         f"• user visible price: <code>{xu_number(user_visible_price)} Xu</code>",
         f"• persisted quoted price: <code>{xu_number(persisted_quoted_price)} Xu</code>",
-        f"• planned charge amount: <code>{xu_number(charge_amount_planned)} Xu</code>",
+        f"• customer charge planned: <code>{xu_number(customer_charge_planned)} Xu</code>",
+        f"• wallet charge amount: <code>{xu_number(wallet_charge_amount_xu)} Xu</code>",
+        f"• list price: <code>{xu_number(list_price_xu)} Xu</code>",
+        f"• provider budget: <code>{xu_number(provider_budget_xu)} Xu</code>",
         f"• quote consistent: <code>{'yes' if quote_consistent else 'no'}</code>",
         f"• quote mismatch reason: <code>{html.escape(quote_mismatch_reason or '-')}</code>",
         f"• quoted price: <code>{xu_number(quoted)} Xu</code>",

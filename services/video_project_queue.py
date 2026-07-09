@@ -143,21 +143,46 @@ def _product_video_quote_consistency(invoice: dict[str, Any], project: dict[str,
         or user_visible,
         user_visible,
     )
-    planned = _as_int(
-        invoice.get("charge_amount_planned_xu")
-        or invoice.get("total_xu")
-        or invoice.get("total")
-        or project.get("total_xu_estimated")
+    customer_charge = _as_int(
+        invoice.get("customer_charge_planned_xu")
+        or invoice.get("wallet_charge_amount_xu")
+        or invoice.get("charge_amount_planned_xu")
         or persisted,
         persisted,
     )
-    consistent = bool(user_visible > 0 and persisted == user_visible)
+    list_price = _as_int(
+        invoice.get("list_price_xu")
+        or invoice.get("standard_price_xu")
+        or invoice.get("scene_list_total_xu")
+        or invoice.get("total_xu")
+        or invoice.get("total")
+        or project.get("total_xu_estimated")
+        or customer_charge,
+        customer_charge,
+    )
+    provider_budget = _as_int(
+        invoice.get("provider_budget_xu")
+        or invoice.get("provider_cost_cap_xu")
+        or invoice.get("total_xu")
+        or invoice.get("total")
+        or project.get("total_xu_estimated")
+        or customer_charge,
+        customer_charge,
+    )
+    consistent = bool(user_visible > 0 and persisted == user_visible and customer_charge == user_visible)
     reason = "" if consistent else "product_video_quote_mismatch_no_charge"
     return {
         "selected_tier": selected_tier,
         "user_visible_price_xu": user_visible,
         "persisted_quoted_price_xu": persisted,
-        "charge_amount_planned_xu": planned,
+        "customer_charge_planned_xu": customer_charge,
+        "wallet_charge_amount_xu": customer_charge,
+        "charge_amount_planned_xu": customer_charge,
+        "list_price_xu": list_price,
+        "standard_price_xu": list_price,
+        "promo_discount_xu": max(0, list_price - customer_charge),
+        "provider_budget_xu": provider_budget,
+        "provider_cost_cap_xu": provider_budget,
         "quote_consistent": consistent,
         "quote_mismatch_reason": reason,
     }
@@ -1362,9 +1387,17 @@ def confirm_video_project_invoice(
             active = kickoff.get("job") or active
             project = kickoff.get("project") or project
         return {"ok": True, "project": project, "job": active, "duplicate_prevented": True}
-    total_xu = int(project.get("total_xu_estimated") or 0)
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    if _is_product_video_project(project):
+        quote_state = _product_video_quote_consistency(invoice, project)
+        if not quote_state.get("quote_consistent"):
+            return {"ok": False, "reason": quote_state.get("quote_mismatch_reason") or "product_video_quote_mismatch_no_charge", "quote": quote_state}
+        total_xu = int(quote_state.get("customer_charge_planned_xu") or 0)
+    else:
+        total_xu = int(project.get("total_xu_estimated") or 0)
     if total_xu <= 0:
-        invoice = _json_loads(str(project.get("invoice_json") or ""), {})
         total_xu = int(invoice.get("total_xu") or invoice.get("total") or 0)
     if balance_xu is not None and int(balance_xu) < total_xu:
         return {"ok": False, "reason": "insufficient_balance", "required_xu": total_xu}
