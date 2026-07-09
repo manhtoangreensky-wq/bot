@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import time
+from types import SimpleNamespace
 
 import bot
 import pytest
@@ -36,6 +37,15 @@ class _Message:
     async def reply_text(self, text, **kwargs):
         self.texts.append(text)
         return _Sent(904)
+
+
+class _Bot:
+    def __init__(self):
+        self.messages = []
+
+    async def send_message(self, **kwargs):
+        self.messages.append(kwargs)
+        return _Sent(905)
 
 
 @pytest.fixture(autouse=True)
@@ -134,10 +144,40 @@ def test_pr321_video_modes_do_not_auto_send_srt_partial_without_mp4():
 def test_pr321_outer_subdub_runtime_error_has_active_job_public_fail_guard():
     source = inspect.getsource(bot.on_telegram_error)
 
-    assert "subdub_should_suppress_generic_fail_for_active_job" in source
     assert "generic_fail_suppressed_while_active_or_delivered" in source
     guarded = source.split("subdub_error_reason == \"subdub_runtime_failure\"", 1)[1]
-    assert "return" in guarded.split("await context.bot.send_message", 1)[0]
+    assert "subdub_clean_failure_text" not in guarded.split("return", 1)[0]
+
+
+def test_pr321_subdub_runtime_error_never_sends_public_generic_fail(monkeypatch):
+    monkeypatch.setattr(bot, "Update", SimpleNamespace)
+    monkeypatch.setattr(bot, "persist_subtitle_dub_pipeline_job_snapshot", lambda *args, **kwargs: True)
+    key = "42|chat|video|runtime_fail"
+    bot.SUBTITLE_DUB_PIPELINE_JOBS[key] = {
+        "job_key": key,
+        "job_id": "runtime-fail",
+        "user_id": 42,
+        "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "status": "running",
+        "progress_stage": "generating_voice",
+        "progress_percent": 65,
+        "updated_at": time.time(),
+    }
+    fake = _Bot()
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=42),
+        effective_chat=SimpleNamespace(id=42),
+        effective_message=SimpleNamespace(text="", chat_id=42),
+        callback_query=SimpleNamespace(data="videodub|confirm_dub"),
+    )
+
+    asyncio.run(bot.on_telegram_error(update, SimpleNamespace(error=RuntimeError("worker callback failed"), bot=fake, chat_data={})))
+
+    assert fake.messages == []
+    stored = bot.SUBTITLE_DUB_PIPELINE_JOBS[key]
+    assert stored["generic_fail_suppressed_while_active_or_delivered"] is True
+    assert stored["public_error_sent"] is False
+    assert stored["public_failure_sent"] is False
 
 
 def test_pr321_dub_fail_prefers_active_job_over_same_key_failed_job(monkeypatch):
@@ -233,4 +273,5 @@ def test_pr321_no_product_video_music_payos_files_touched():
     assert changed <= {
         "bot.py",
         "tests/test_p0_19m_pr321_subdub_no_extra_srt_no_dub_fail.py",
+        "tests/test_p0_19m6r_subdub_live_runtime_terminal_outcome_path_fix.py",
     }

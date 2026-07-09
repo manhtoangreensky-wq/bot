@@ -146,9 +146,9 @@ def test_old_success_copy_path_routes_through_terminal_guard():
         {"ok": True, "video_delivered": True, "charged": 0, "public_error_sent_count": 1},
     )
 
-    assert "Đã tạo video lồng tiếng" not in text
-    assert "Kết quả đã gửi phía trên" not in text
-    assert "Hệ thống chưa trừ Xu" in text
+    assert "Đã tạo video lồng tiếng" in text
+    assert "Trạng thái: <b>Đã gửi video</b>" in text
+    assert "Hệ thống chưa trừ Xu" not in text
 
 
 def test_success_cost_line_from_live_path_no_duplicate_no_trailing_comma():
@@ -162,20 +162,18 @@ def test_success_cost_line_from_live_path_no_duplicate_no_trailing_comma():
     assert "Xu," not in text
 
 
-def test_early_failure_sends_one_clean_failure_not_duplicate_generic(monkeypatch):
+def test_early_failure_is_suppressed_from_public_subdub_runtime(monkeypatch):
     key, _job = _fresh_job("p019m6r-early-runtime-fail", stage="transcribing")
     fake = CaptureBot()
 
     update = _update(monkeypatch, callback="videodub|confirm_dub")
     asyncio.run(bot.on_telegram_error(update, _context(fake, RuntimeError("unexpected runtime fail"))))
 
-    assert len(fake.messages) == 1
-    text = fake.messages[0]["text"]
-    assert GENERIC_ERROR not in text
-    assert "Hệ thống chưa trừ Xu" in text
+    assert fake.messages == []
     stored = bot.SUBTITLE_DUB_PIPELINE_JOBS[key]
-    assert stored["terminal_state"] == "failed_no_charge"
-    assert stored["terminal_public_outcome_type"] == "failure"
+    assert stored["generic_fail_suppressed_while_active_or_delivered"] is True
+    assert stored["public_error_sent"] is False
+    assert stored["public_failure_sent"] is False
 
 
 def test_subdub_job_debug_lookup_by_uppercase_public_code():
