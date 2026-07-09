@@ -33,6 +33,7 @@ def _status_payload(*, key4u_configured=True):
 def _stuck_attempts():
     return [
         {
+            "job_id": 1,
             "provider": "shopaikey_video",
             "provider_status_raw": "NOT_START",
             "result_url": "",
@@ -40,6 +41,15 @@ def _stuck_attempts():
             "delivered": False,
         },
         {
+            "job_id": 2,
+            "provider": "shopaikey_video",
+            "provider_status_raw": "NOT_START",
+            "result_url": "",
+            "artifact_size": 0,
+            "delivered": False,
+        },
+        {
+            "job_id": 3,
             "provider": "shopaikey_video",
             "provider_status_raw": "NOT_START",
             "result_url": "",
@@ -59,9 +69,9 @@ def test_shopaikey_not_start_no_result_url_degrades_public_provider(monkeypatch)
     )
 
     assert result["provider_degraded_for_product_video_public"] is True
-    assert result["last_not_start_count"] == 2
-    assert result["last_result_url_empty_count"] == 2
-    assert result["last_artifact_size_zero_count"] == 2
+    assert result["last_not_start_count"] == 3
+    assert result["last_result_url_empty_count"] == 3
+    assert result["last_artifact_size_zero_count"] == 3
     assert "not_start_repeated" in result["degrade_reason"]
 
 
@@ -97,7 +107,7 @@ def test_shopaikey_degraded_key4u_missing_blocks_before_invoice():
 
     assert decision["ok"] is False
     assert decision["selected_provider"] == ""
-    assert decision["blocker"] == "product_video_no_public_mp4_provider"
+    assert decision["blocker"] == "no_healthy_video_provider_no_charge"
 
 
 def test_product_video_preflight_reads_recent_jobs_and_provider_status_source_contract():
@@ -137,17 +147,17 @@ def test_confirm_kickoff_uses_preflight_provider_chain_from_project():
         "asset_pack_json": json.dumps(
             {
                 "source": "product_video",
-                "provider_chain": ["key4u_video"],
-                "provider_order": "key4u_video",
+                "provider_chain": ["shopaikey_video"],
+                "provider_order": "shopaikey_video",
             }
         ),
-        "invoice_json": json.dumps({"provider_chain": ["key4u_video"]}),
+        "invoice_json": json.dumps({"provider_chain": ["shopaikey_video"]}),
     }
 
     payload = video_project_queue.build_product_video_confirm_kickoff_payload(job, project)
 
-    assert payload["configured_provider_chain"] == ["key4u_video"]
-    assert payload["effective_provider_chain"] == ["key4u_video"]
+    assert payload["configured_provider_chain"] == ["shopaikey_video"]
+    assert payload["effective_provider_chain"] == ["shopaikey_video"]
     assert payload["provider_chain_resolved"] is True
 
 

@@ -47547,6 +47547,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• duplicate submit prevented: <code>{safe_int(result.get('duplicate_paid_submit_prevented_count'), 0)}</code>",
         f"• recent provider failures: <code>{safe_int(result.get('recent_provider_failures'), 0)}</code>",
         f"• provider cooldown active: <code>{'yes' if result.get('provider_health_cooldown_active') else 'no'}</code>",
+        f"• provider health at submit: <code>{html.escape(str(result.get('provider_health_at_submit') or '-')[:500])}</code>",
+        f"• primary selected due to health: <code>{html.escape(str(result.get('primary_selected_due_to_health') or '-')[:160])}</code>",
+        f"• provider degraded reason: <code>{html.escape(str(result.get('provider_degraded_reason') or '-')[:220])}</code>",
         f"• last provider submit timestamp: <code>{html.escape(str(result.get('last_provider_submit_timestamp') or '-'))}</code>",
         f"• spend warning: <code>{html.escape(str(result.get('admin_external_spend_warning') or 'Creating a Product Video job may spend external provider credits even if no MP4 is produced.'))}</code>",
         f"• submit accepted: <code>{'yes' if result.get('submit_accepted') else 'no'}</code>",
@@ -47613,6 +47616,9 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• fallback scene index: <code>{safe_int(result.get('fallback_scene_index'), 0)}</code>",
         f"• fallback provider: <code>{html.escape(str(result.get('fallback_provider') or '-')[:120])}</code>",
         f"• fallback submit source: <code>{html.escape(str(result.get('fallback_submit_source') or '-')[:120])}</code>",
+        f"• fallback execution tick called: <code>{'yes' if result.get('fallback_execution_tick_called') else 'no'}</code>",
+        f"• fallback submit attempted: <code>{'yes' if result.get('fallback_submit_attempted') or result.get('provider_fallback_attempted') else 'no'}</code>",
+        f"• fallback idempotency key: <code>{html.escape(str(result.get('fallback_idempotency_key') or '-')[:120])}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') else 'no'}</code>",
         f"• fallback block reason: <code>{html.escape(str(result.get('fallback_block_reason') or result.get('fallback_blocked_reason') or '-')[:160])}</code>",
         f"• source of truth: <code>{html.escape(str(result.get('source_of_truth') or '-')[:120])}</code>",
@@ -71641,22 +71647,31 @@ def _product_video_provider_attempt_like(value: dict) -> bool:
 def _product_video_collect_provider_attempts_from_payload(payload: dict) -> list[dict]:
     attempts: list[dict] = []
 
-    def visit(item):
+    def visit(item, context: dict | None = None):
+        context = dict(context or {})
         if isinstance(item, dict):
+            next_context = dict(context)
+            for key in ("job_id", "project_id", "updated_at", "created_at"):
+                if item.get(key) not in (None, ""):
+                    next_context[key] = item.get(key)
             if _product_video_provider_attempt_like(item):
-                attempts.append(dict(item))
+                attempt = dict(item)
+                for key in ("job_id", "project_id", "updated_at", "created_at"):
+                    if attempt.get(key) in (None, "") and next_context.get(key) not in (None, ""):
+                        attempt[key] = next_context.get(key)
+                attempts.append(attempt)
             for child in item.values():
                 if isinstance(child, (dict, list, tuple)):
-                    visit(child)
+                    visit(child, next_context)
         elif isinstance(item, (list, tuple)):
             for child in item:
-                visit(child)
+                visit(child, context)
 
     visit(dict(payload or {}))
     return attempts
 
 
-def _product_video_recent_provider_attempt_evidence(conn, *, limit: int = 24) -> list[dict]:
+def _product_video_recent_provider_attempt_evidence(conn, *, limit: int = 5) -> list[dict]:
     attempts: list[dict] = []
     try:
         rows = conn.execute(
@@ -71711,34 +71726,98 @@ def _product_video_provider_status_for_preflight() -> dict:
         }
 
 
+def _product_video_contract_valid_provider_chain(chain: list[str] | tuple[str, ...]) -> tuple[list[str], list[dict]]:
+    valid: list[str] = []
+    invalid: list[dict] = []
+    for provider in [str(item or "").strip() for item in (chain or []) if str(item or "").strip()]:
+        try:
+            resolution = video_provider_catalog.resolve_product_video_model(
+                tier=300,
+                provider_chain=[provider],
+                scene_count=2,
+                required_capability="text_to_video_or_scene_video",
+                requires_concat=True,
+            )
+        except Exception as exc:
+            invalid.append({"provider": provider, "reason": f"model_contract_check_error:{type(exc).__name__}"})
+            continue
+        if resolution.get("ok"):
+            valid.append(provider)
+        else:
+            invalid.append(
+                {
+                    "provider": provider,
+                    "reason": str(
+                        resolution.get("blocker")
+                        or resolution.get("model_routing_blocker")
+                        or resolution.get("contract_validation_status")
+                        or "provider_contract_invalid"
+                    ),
+                }
+            )
+    return valid, invalid
+
+
 def product_video_provider_public_route_preflight(conn=None) -> dict:
     attempts = _product_video_recent_provider_attempt_evidence(conn)
     status = _product_video_provider_status_for_preflight()
     chain = status.get("effective_provider_chain") or status.get("provider_chain") or []
-    shopaikey_degradation = video_provider_router.product_video_provider_public_degradation(
-        "shopaikey_video",
-        attempts,
+    degraded_providers = {
+        str(provider): video_provider_router.product_video_provider_public_degradation(str(provider), attempts)
+        for provider in chain
+        if str(provider or "").strip()
+    }
+    shopaikey_degradation = degraded_providers.get("shopaikey_video") or video_provider_router.product_video_provider_public_degradation(
+        "shopaikey_video", attempts
+    )
+    key4u_degradation = degraded_providers.get("key4u_video") or video_provider_router.product_video_provider_public_degradation(
+        "key4u_video", attempts
     )
     decision = video_provider_router.product_video_public_provider_route_decision(
         status=status,
         chain=chain,
-        degraded_providers={"shopaikey_video": shopaikey_degradation},
+        degraded_providers=degraded_providers,
     )
-    selected_chain = list(decision.get("effective_provider_chain") or [])
+    decision_chain = list(decision.get("effective_provider_chain") or [])
+    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(decision_chain)
+    selected_chain = [provider for provider in decision_chain if provider in contract_valid_chain]
+    final_ok = bool(decision.get("ok") and selected_chain)
+    final_selected_provider = selected_chain[0] if selected_chain else ""
+    if not final_ok and contract_invalid_providers:
+        decision = {
+            **decision,
+            "ok": False,
+            "selected_provider": "",
+            "blocker": "no_healthy_video_provider_no_charge",
+            "contract_invalid_providers": contract_invalid_providers,
+        }
     result = {
         **decision,
         "provider_preflight_checked": True,
         "provider_preflight_source": "provider_status_and_recent_jobs",
-        "provider_preflight_result": "provider_route_ready" if decision.get("ok") else "no_real_mp4_provider_available",
+        "provider_preflight_result": "provider_route_ready" if final_ok else "no_real_mp4_provider_available",
         "provider_status_checked": True,
         "shopaikey_public_degradation": shopaikey_degradation,
+        "key4u_public_degradation": key4u_degradation,
+        "provider_health_summary": degraded_providers,
+        "provider_health_at_submit": degraded_providers,
+        "provider_degraded_reason": ";".join(
+            str(item.get("degrade_reason") or "")
+            for item in degraded_providers.values()
+            if item.get("provider_degraded_for_product_video_public") and str(item.get("degrade_reason") or "")
+        ),
+        "primary_selected_due_to_health": str(decision.get("primary_selected_due_to_health") or ""),
+        "effective_primary_for_low_basic": str(decision.get("effective_primary_for_low_basic") or decision.get("selected_provider") or ""),
         "configured_provider_chain": list(decision.get("provider_chain") or chain or []),
+        "contract_valid_provider_chain": contract_valid_chain,
+        "contract_invalid_providers": contract_invalid_providers,
         "effective_provider_chain": selected_chain,
-        "selected_provider": str(decision.get("selected_provider") or ""),
-        "job_creation_blocked_by_provider_availability": not bool(decision.get("ok")),
-        "no_charge_reason": "" if decision.get("ok") else "product_video_no_public_mp4_provider",
+        "selected_provider": final_selected_provider,
+        "job_creation_blocked_by_provider_availability": not final_ok,
+        "no_charge_reason": "" if final_ok else "no_healthy_video_provider_no_charge",
+        "legacy_no_charge_reason": "" if final_ok else "product_video_no_public_mp4_provider",
         "preflight_ttl_seconds": max(30, safe_int(os.getenv("PRODUCT_VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS"), 900)),
-        "public_message": "" if decision.get("ok") else PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+        "public_message": "" if final_ok else PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
     }
     return result
 
@@ -71783,6 +71862,10 @@ def product_video_apply_provider_preflight_to_session(user_id, session: dict, pr
         asset_pack["selected_provider"] = chain[0]
         asset_pack["provider_preflight_result"] = str(preflight.get("provider_preflight_result") or "")
         asset_pack["provider_degraded_for_product_video_public"] = bool(preflight.get("provider_degraded_for_product_video_public"))
+        asset_pack["provider_health_at_submit"] = dict(preflight.get("provider_health_summary") or preflight.get("provider_health_at_submit") or {})
+        asset_pack["primary_selected_due_to_health"] = str(preflight.get("primary_selected_due_to_health") or "")
+        asset_pack["provider_degraded_reason"] = str(preflight.get("provider_degraded_reason") or "")
+        asset_pack["effective_primary_for_low_basic"] = str(preflight.get("effective_primary_for_low_basic") or chain[0])
         draft["asset_pack"] = asset_pack
     session["draft"] = draft
     return save_video_session(user_id, session)
@@ -89760,6 +89843,17 @@ def video_public_status_payload() -> dict:
     billing_gate = video_billing_public_gate()
     product_video_submit_switch = video_provider_router.product_video_submit_switch_detail()
     product_video_submit_enabled = bool(product_video_submit_switch.get("resolved"))
+    try:
+        product_video_provider_health = product_video_provider_public_route_preflight()
+    except Exception as exc:
+        product_video_provider_health = {
+            "ok": False,
+            "provider_preflight_checked": False,
+            "provider_preflight_result": f"provider_health_unavailable:{type(exc).__name__}",
+            "provider_health_summary": {},
+            "effective_provider_chain": [],
+            "selected_provider": "",
+        }
     freeze = provider_freeze_display("shopaikey_video")
     hidden_video_freeze = bool(freeze.get("frozen"))
     public_video_maintenance = product_video_public_maintenance_enabled()
@@ -89835,6 +89929,7 @@ def video_public_status_payload() -> dict:
                 else ("public_maintenance_block" if public_video_maintenance else "")
             ),
         },
+        "product_video_provider_health": product_video_provider_health,
         "product_video_model_catalog": model_catalog,
         "conclusion": {
             "planning_video": "PUBLIC" if planning_public else "OFF",
@@ -89874,6 +89969,8 @@ def video_public_status_text() -> str:
     freeze = payload["freeze"]
     conclusion = payload["conclusion"]
     product_submit = payload.get("product_video_provider_submit") or {}
+    provider_health = payload.get("product_video_provider_health") or {}
+    health_summary = provider_health.get("provider_health_summary") or {}
     model_catalog = payload.get("product_video_model_catalog") or {}
     remote_worker = payload.get("remote_worker") or {}
     lines = [
@@ -89916,6 +90013,10 @@ def video_public_status_text() -> str:
         f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
         f"• Product Video provider submit: <code>{html.escape(str(product_submit.get('state') or 'LOCKED'))}</code>",
         f"• Product Video live note: <code>{html.escape(str(product_submit.get('live_policy_note') or 'normal'))}</code>",
+        f"• Product Video provider health: <code>{html.escape(str(provider_health.get('provider_preflight_result') or '-'))}</code>",
+        f"• Product Video effective primary: <code>{html.escape(str(provider_health.get('effective_primary_for_low_basic') or provider_health.get('selected_provider') or '-'))}</code>",
+        f"• ShopAIKey health: <code>{html.escape(str((health_summary.get('shopaikey_video') or {}).get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str((health_summary.get('shopaikey_video') or {}).get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str((health_summary.get('shopaikey_video') or {}).get('degraded_until') or '-'))}</code>",
+        f"• Key4U health: <code>{html.escape(str((health_summary.get('key4u_video') or {}).get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str((health_summary.get('key4u_video') or {}).get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str((health_summary.get('key4u_video') or {}).get('degraded_until') or '-'))}</code>",
         f"• Product Video model catalog: <code>{'loaded' if model_catalog.get('catalog_loaded') else 'missing'}</code>",
         f"• Product Video routing enabled: <code>{'yes' if model_catalog.get('routing_enabled') else 'no'}</code>",
         f"• Product Video catalog models: <code>{safe_int(model_catalog.get('model_count'), 0)}</code>",
