@@ -437,10 +437,11 @@ def _provider_status_value_is_not_start(*values: Any) -> bool:
 
 def _provider_status_for_progress(payload: dict[str, Any], alive: bool) -> str:
     if _provider_status_value_is_not_start(
+        payload.get("shopaikey_data_status"),
+        payload.get("shopaikey_raw_status"),
         payload.get("raw_provider_status"),
         payload.get("provider_status_raw"),
         payload.get("nonterminal_provider_status"),
-        payload.get("shopaikey_raw_status"),
     ):
         return "not_start"
     status = str(
@@ -652,6 +653,14 @@ def reconcile_provider_progress_telemetry(
     result_url_present = _provider_result_url_present(payload)
     final_output_ready = _provider_final_output_ready(payload)
     provider_status = _provider_status_for_progress(payload, alive)
+    actual_provider_status_raw = (
+        payload.get("shopaikey_raw_status")
+        or payload.get("shopaikey_data_status")
+        if str(payload.get("provider_status_payload_source") or "").strip().startswith("shopaikey.data.")
+        else None
+    )
+    if not actual_provider_status_raw:
+        actual_provider_status_raw = payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or ""
     provider_progress_effective, provider_progress_trusted, provider_progress_cap_reason, provider_progress_cap_applied = _provider_progress_effective(
         normalized_progress,
         raw_progress_number=raw_progress_number,
@@ -786,7 +795,7 @@ def reconcile_provider_progress_telemetry(
         "elapsed_monotonic_applied": bool(elapsed_monotonic_applied),
         "elapsed_display_text": _human_elapsed(elapsed),
         "panel_refresh_interval_seconds": _as_int(payload.get("panel_refresh_interval_seconds"), 25),
-        "provider_status_raw": payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or "",
+        "provider_status_raw": actual_provider_status_raw,
         "provider_status_normalized": provider_status or payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
         "result_url_present": bool(result_url_present),
         "provider_result_url_present": bool(result_url_present),
@@ -803,14 +812,14 @@ def reconcile_provider_progress_telemetry(
         "result_url_primary_path_checked": bool(parser_fields.get("result_url_primary_path_checked") or payload.get("result_url_primary_path_checked")),
         "result_url_found": bool(parser_fields.get("result_url_found") or payload.get("result_url_found")),
         "result_url_source_path": parser_fields.get("result_url_source_path") or payload.get("result_url_source_path") or "",
-        "next_poll_scheduled": bool(payload.get("next_poll_scheduled") or alive),
+        "next_poll_scheduled": False if terminal_failure else bool(payload.get("next_poll_scheduled") or alive),
         "next_poll_scheduled_at": payload.get("next_poll_scheduled_at") or "",
         "panel_last_updated_at": now_text(current_dt),
         "refresh_source": refresh_source,
         "stage_monotonic_applied": bool(alive),
-        "status_source_priority_used": "provider_task_alive" if alive else "persisted_status",
-        "provider_state_overrode_registry": bool(alive),
-        "provider_state_overrode_persisted_status": bool(alive and persisted_status in {"", "queued", "queued_for_worker", "draft"}),
+        "status_source_priority_used": "terminal_failed_no_charge" if terminal_failure else ("provider_task_alive" if alive else "persisted_status"),
+        "provider_state_overrode_registry": bool(alive and not terminal_failure),
+        "provider_state_overrode_persisted_status": bool(alive and not terminal_failure and persisted_status in {"", "queued", "queued_for_worker", "draft"}),
         "persisted_status_before_reconcile": persisted_status,
         "persisted_progress_before_reconcile": persisted_progress,
         "final_status_after_reconcile": final_status,
