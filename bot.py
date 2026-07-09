@@ -175404,9 +175404,6 @@ def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
         or sent_video_count > 0
     )
 
-def subdub_dub_only_result_should_complete_after_delivery(mode: str = "", result: dict | None = None) -> bool:
-    return bool(normalize_video_translate_mode(mode) == VIDEO_SUBTITLE_MODE_DUB and subdub_result_has_delivered_video(result))
-
 def subdub_receipt_voice_label(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     current = {
         **dict(state or {}),
@@ -186250,36 +186247,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
             return None
-        if not result.get("ok") and subdub_dub_only_result_should_complete_after_delivery(mode, result):
-            result["ok"] = True
-            result["late_fail_suppressed"] = True
-            result["public_error_sent"] = False
-            result["public_failure_sent"] = False
-            result["terminal_public_outcome_type"] = "success"
-            result["terminal_state"] = "delivered"
-            if pipeline_job_key:
-                update_subtitle_dub_pipeline_job(
-                    pipeline_job_key,
-                    late_fail_suppressed=True,
-                    late_public_error_suppressed=True,
-                    public_failure_overridden_by_video_delivery=True,
-                    public_error_sent=False,
-                    public_failure_sent=False,
-                    public_error_sent_count=0,
-                    terminal_public_outcome_type="success",
-                    terminal_public_outcome_sent=True,
-                    terminal_state="delivered",
-                    status="completed",
-                    lifecycle_state="delivered",
-                    current_stage="delivered",
-                    progress_stage="delivered",
-                    progress_percent=100,
-                    completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
-                    delivery_success=True,
-                    delivery_succeeded=True,
-                    final_mp4_delivered=True,
-                    video_delivery_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
-                )
         if not result.get("ok"):
             if result.get("in_progress"):
                 set_video_dubbing_pending(uid, "processing", processing="1")
