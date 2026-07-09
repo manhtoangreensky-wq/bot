@@ -1893,7 +1893,8 @@ PIPELINE_JOB_LOCK_TTL_SECONDS = max(60, env_int("PIPELINE_JOB_LOCK_TTL_SECONDS",
 DUB_AUDIO_NORMALIZE_ENABLED = env_flag("DUB_AUDIO_NORMALIZE_ENABLED", "true")
 DUB_AUDIO_TARGET_LUFS = env_float("DUB_AUDIO_TARGET_LUFS", -16.0)
 DUB_AUDIO_FALLBACK_GAIN_DB = env_float("DUB_AUDIO_FALLBACK_GAIN_DB", 8.0)
-SUBDUB_DUB_VOICE_GAIN = max(1.0, min(4.0, env_float("SUBDUB_DUB_VOICE_GAIN", 2.0)))
+SUBDUB_DUB_VOLUME_GAIN = max(1.0, min(4.0, env_float("SUBDUB_DUB_VOLUME_GAIN", env_float("SUBDUB_DUB_VOICE_GAIN", 2.0))))
+SUBDUB_DUB_VOICE_GAIN = SUBDUB_DUB_VOLUME_GAIN
 SUBDUB_DUB_LOUDNESS_NORMALIZE = env_flag("SUBDUB_DUB_LOUDNESS_NORMALIZE", "true")
 SUBDUB_DUB_MAX_PEAK_DB = max(-6.0, min(-0.1, env_float("SUBDUB_DUB_MAX_PEAK_DB", -1.0)))
 SUBDUB_DUB_DEFAULT_SPEECH_RATE = max(0.7, min(1.0, env_float("SUBDUB_DUB_DEFAULT_SPEECH_RATE", 1.0)))
@@ -178890,6 +178891,42 @@ SUBDUB_SUBTITLE_FONT_CANDIDATES = (
     },
 )
 
+SUBDUB_SUBTITLE_FONT_FALLBACKS = {
+    "japanese": (
+        {"family": "Noto Sans CJK JP", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf"), "vietnamese": True, "cjk": True},
+        {"family": "Noto Sans CJK", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"), "vietnamese": True, "cjk": True},
+    ),
+    "chinese": (
+        {"family": "Noto Sans CJK SC", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"), "vietnamese": True, "cjk": True},
+        {"family": "Noto Sans CJK TC", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf"), "vietnamese": True, "cjk": True},
+        {"family": "Noto Sans CJK", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"), "vietnamese": True, "cjk": True},
+    ),
+    "korean": (
+        {"family": "Noto Sans CJK KR", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf"), "vietnamese": True, "cjk": True},
+        {"family": "Noto Sans CJK", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"), "vietnamese": True, "cjk": True},
+    ),
+    "thai": (
+        {"family": "Noto Sans Thai", "paths": ("/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSansThai-Regular.otf"), "vietnamese": True, "cjk": False},
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf"), "vietnamese": True, "cjk": False},
+    ),
+    "arabic": (
+        {"family": "Noto Sans Arabic", "paths": ("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.otf"), "vietnamese": False, "cjk": False},
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf"), "vietnamese": True, "cjk": False},
+    ),
+    "devanagari": (
+        {"family": "Noto Sans Devanagari", "paths": ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.otf"), "vietnamese": False, "cjk": False},
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf"), "vietnamese": True, "cjk": False},
+    ),
+    "cyrillic": (
+        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf"), "vietnamese": True, "cjk": False},
+    ),
+    "latin": (
+        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf"), "vietnamese": True, "cjk": False},
+    ),
+}
+
 SUBDUB_BROKEN_GLYPH_CHARS = {
     "\ufffd", "□", "▯", "■", "�", "▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩",
 }
@@ -178917,9 +178954,49 @@ def subdub_normalize_subtitle_text(text) -> str:
 def subdub_font_path_available(path: str = "") -> bool:
     return bool(path and os.path.exists(os.path.expandvars(os.path.expanduser(str(path)))))
 
-def _subdub_font_candidates_for_request(requested_family: str = "", candidates=None) -> list[dict]:
+def subdub_detect_subtitle_script(text: str = "", language: str = "") -> str:
+    lang_text = str(language or "").strip().lower()
+    lang_code = re.split(r"[^a-z]+", lang_text, 1)[0]
+    payload = str(text or "").lower()
+    if lang_code in {"ja", "jp"} or any(token in lang_text for token in ("japanese", "日本", "日本語")) or re.search(r"[\u3040-\u30ff]", payload):
+        return "japanese"
+    if lang_code in {"zh", "zho", "chi"} or any(token in lang_text for token in ("chinese", "中文", "中国", "中國", "简体", "繁體")) or re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", payload):
+        return "chinese"
+    if lang_code == "ko" or any(token in lang_text for token in ("korean", "한국", "한국어")) or re.search(r"[\uac00-\ud7af]", payload):
+        return "korean"
+    if lang_code == "th" or any(token in lang_text for token in ("thai", "ไทย")) or re.search(r"[\u0e00-\u0e7f]", payload):
+        return "thai"
+    if lang_code in {"ar", "fa", "ur"} or any(token in lang_text for token in ("arabic", "persian", "urdu", "العربية", "فارسی", "اردو")) or re.search(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]", payload):
+        return "arabic"
+    if lang_code == "hi" or any(token in lang_text for token in ("hindi", "devanagari", "हिन्दी")) or re.search(r"[\u0900-\u097f]", payload):
+        return "devanagari"
+    if lang_code == "ru" or any(token in lang_text for token in ("russian", "рус")) or re.search(r"[\u0400-\u04ff]", payload):
+        return "cyrillic"
+    return "latin"
+
+def _subdub_dedupe_font_candidates(items) -> list[dict]:
+    seen: set[str] = set()
+    result: list[dict] = []
+    for item in items or ():
+        family = str((item or {}).get("family") or "").strip().lower()
+        if not family or family in seen:
+            continue
+        seen.add(family)
+        result.append(dict(item))
+    return result
+
+def _subdub_font_candidates_for_script(script: str = "") -> list[dict]:
+    script_key = str(script or "latin").strip().lower()
+    return _subdub_dedupe_font_candidates(
+        list(SUBDUB_SUBTITLE_FONT_FALLBACKS.get(script_key, ()))
+        + list(SUBDUB_SUBTITLE_FONT_CANDIDATES)
+    )
+
+def _subdub_font_candidates_for_request(requested_family: str = "", candidates=None, script: str = "") -> list[dict]:
     requested = re.sub(r"[^A-Za-z0-9 _.-]", "", str(requested_family or "")).strip()
-    base = list(candidates if candidates is not None else SUBDUB_SUBTITLE_FONT_CANDIDATES)
+    if str(script or "latin").lower() != "latin" and requested.lower() in {"arial", "segoe ui", "dejavu sans"}:
+        requested = ""
+    base = list(candidates if candidates is not None else _subdub_font_candidates_for_script(script))
     if not requested:
         return base
     matches = [dict(item) for item in base if str(item.get("family") or "").lower() == requested.lower()]
@@ -178929,6 +179006,19 @@ def _subdub_font_candidates_for_request(requested_family: str = "", candidates=N
 
 def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=None) -> dict:
     state = dict(style_or_state or {})
+    sample_text = subdub_visible_subtitle_text(
+        state.get("subtitle_text")
+        or state.get("srt_text")
+        or state.get("sample_text")
+        or state.get("text")
+        or ""
+    )
+    language = " ".join(
+        str(state.get(key) or "")
+        for key in ("target_language", "language", "detected_language", "source_language")
+        if state.get(key)
+    )
+    script = subdub_detect_subtitle_script(sample_text, language)
     requested = (
         os.getenv("SUBDUB_SUBTITLE_FONT")
         or state.get("subtitle_font")
@@ -178936,10 +179026,11 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
         or state.get("font")
         or ""
     )
-    cache_key = str(requested or "__default__").strip().lower()
+    cache_key = f"{script}:{str(requested or '__default__').strip().lower()}"
     if candidates is None and cache_key in SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE:
         return dict(SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key])
-    for candidate in _subdub_font_candidates_for_request(str(requested or ""), candidates):
+    attempted = _subdub_font_candidates_for_request(str(requested or ""), candidates, script)
+    for candidate in attempted:
         family = re.sub(r"[^A-Za-z0-9 _.-]", "", str(candidate.get("family") or "")).strip()
         if not family:
             continue
@@ -178952,12 +179043,14 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
                     "source": "path",
                     "supports_vietnamese": bool(candidate.get("vietnamese", True)),
                     "supports_cjk": bool(candidate.get("cjk", False)),
+                    "script": script,
+                    "font_fallback_used": False,
                     "blocker": "",
                 }
                 if candidates is None:
                     SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key] = dict(result)
                 return result
-        fc_match = shutil.which("fc-match")
+        fc_match = None if os.name == "nt" else shutil.which("fc-match")
         if fc_match:
             try:
                 proc = subprocess.run(
@@ -178977,6 +179070,8 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
                         "source": "fontconfig",
                         "supports_vietnamese": bool(candidate.get("vietnamese", True)),
                         "supports_cjk": bool(candidate.get("cjk", False)),
+                        "script": script,
+                        "font_fallback_used": str(matched_family or "").split(",", 1)[0].strip().lower() != family.lower(),
                         "blocker": "",
                     }
                     if candidates is None:
@@ -178984,6 +179079,24 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
                     return result
             except Exception:
                 continue
+    if candidates is None and attempted:
+        fallback = dict(attempted[0])
+        family = re.sub(r"[^A-Za-z0-9 _.-]", "", str(fallback.get("family") or "")).strip()
+        if family:
+            blocker = "FONT_FALLBACK_MISSING_CJK" if script in {"japanese", "chinese", "korean"} else ""
+            result = {
+                "ok": True,
+                "family": family,
+                "path": "",
+                "source": "font_family_fallback",
+                "supports_vietnamese": bool(fallback.get("vietnamese", True)),
+                "supports_cjk": bool(fallback.get("cjk", False)),
+                "script": script,
+                "font_fallback_used": True,
+                "blocker": blocker,
+            }
+            SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key] = dict(result)
+            return result
     result = {
         "ok": False,
         "family": "",
@@ -178991,6 +179104,8 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
         "source": "",
         "supports_vietnamese": False,
         "supports_cjk": False,
+        "script": script,
+        "font_fallback_used": False,
         "blocker": "subtitle_font_missing",
     }
     if candidates is None:
@@ -179330,13 +179445,15 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["text_margin_bottom_ratio"] = state.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO
         style["subtitle_style_profile"] = style.get("subtitle_style_profile") or subdub_style_profile_for_state(state)
     style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
-    font_resolution = resolve_subdub_subtitle_font(style)
+    font_resolution = resolve_subdub_subtitle_font({**state, **style})
     if font_resolution.get("ok"):
         style["font"] = str(font_resolution.get("family") or style["font"]).strip()[:80] or style["font"]
     style["subtitle_font_resolution_ok"] = bool(font_resolution.get("ok"))
     style["subtitle_font_family"] = str(font_resolution.get("family") or "")[:80]
     style["subtitle_font_path"] = str(font_resolution.get("path") or "")[:260]
     style["subtitle_font_blocker"] = str(font_resolution.get("blocker") or "")[:80]
+    style["subtitle_font_script"] = str(font_resolution.get("script") or "")[:40]
+    style["subtitle_font_fallback_used"] = bool(font_resolution.get("font_fallback_used"))
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["subtitle_font_multiplier"] = max(1.0, min(1.25, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     style["subtitle_font_size_before"] = int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
@@ -179487,6 +179604,71 @@ def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
         return ""
     return r"\N".join(lines[:max(1, int(max_lines or 2))])
 
+def subdub_subtitle_wrap_units(text: str) -> tuple[list[str], str]:
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    compact = re.sub(r"\s+", " ", normalized).strip()
+    if not compact:
+        return [], " "
+    script = subdub_detect_subtitle_script(compact, "")
+    if script in {"japanese", "chinese", "korean", "thai"} and " " not in compact:
+        return [char for char in compact if not char.isspace()], ""
+    return [word for word in compact.split(" ") if word], " "
+
+def subdub_join_wrap_units(units: list[str], joiner: str = " ") -> str:
+    if not units:
+        return ""
+    if joiner:
+        return joiner.join(units)
+    return "".join(units)
+
+def subdub_reading_glyph_count(text: str) -> int:
+    return len([char for char in subdub_normalize_subtitle_text(text) if not char.isspace()])
+
+def subdub_subtitle_target_cps(text: str, style: dict | None = None) -> float:
+    script = subdub_detect_subtitle_script(text, str((style or {}).get("target_language") or ""))
+    if script in {"japanese", "chinese", "korean"}:
+        return 12.0
+    if script in {"thai", "arabic", "devanagari"}:
+        return 14.0
+    return 18.0
+
+def subdub_apply_readable_pacing_to_blocks(blocks: list[dict], style: dict | None = None) -> tuple[list[dict], dict]:
+    style = dict(style or {})
+    min_duration = max(0.8, min(1.2, subdub_float_value(style.get("subtitle_min_display_duration"), 1.0)))
+    safe_gap = max(0.03, min(0.12, subdub_float_value(style.get("subtitle_pacing_safe_gap"), 0.05)))
+    adjusted = 0
+    warnings = 0
+    paced: list[dict] = []
+    for index, block in enumerate(blocks or []):
+        current = dict(block or {})
+        start = float(current.get("start") or 0)
+        end = max(start + 0.2, float(current.get("end") or 0))
+        text = str(current.get("text") or "")
+        glyphs = subdub_reading_glyph_count(text)
+        target_cps = subdub_subtitle_target_cps(text, style)
+        requested_duration = max(min_duration if glyphs else 0.2, glyphs / max(1.0, target_cps))
+        next_start = None
+        if index + 1 < len(blocks or []):
+            next_start = float((blocks[index + 1] or {}).get("start") or 0)
+        max_end = (next_start - safe_gap) if next_start is not None and next_start > start else end
+        paced_end = min(max(end, start + requested_duration), max_end) if max_end > end else end
+        if paced_end > end + 0.01:
+            adjusted += 1
+        duration = max(0.01, paced_end - start)
+        if glyphs / duration > target_cps * 1.15:
+            warnings += 1
+        current["original_start"] = start
+        current["original_end"] = end
+        current["end"] = paced_end
+        current["cue_duration_adjusted"] = paced_end > end + 0.01
+        current["chars_per_second"] = round(glyphs / duration, 2)
+        paced.append(current)
+    return paced, {
+        "adjusted_events": adjusted,
+        "fast_warning_events": warnings,
+        "min_display_duration": min_duration,
+    }
+
 def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
@@ -179495,12 +179677,12 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
     max_width_ratio = max(0.84, min(0.88, subdub_float_value(style.get("subtitle_max_width_ratio"), 0.86)))
     available_width = play_res_x * max_width_ratio if style.get("m4live1_style_renderer_only") else play_res_x * 0.76
     max_chars = max(16, min(48, int(available_width / (font_size * 0.62))))
-    words = re.sub(r"\s+", " ", normalized).strip().split(" ")
+    words, joiner = subdub_subtitle_wrap_units(normalized)
     limit = max(1, int(max_lines or 2))
     lines: list[str] = []
     current = ""
     for word in (item for item in words if item):
-        candidate = f"{current} {word}".strip()
+        candidate = subdub_join_wrap_units([current, word] if current else [word], joiner).strip()
         if current and len(candidate) > max_chars:
             lines.append(current)
             current = word
@@ -179515,25 +179697,25 @@ def subdub_ass_wrap_text(text: str, style: dict, max_lines: int = 2) -> str:
             best_split = midpoint
             best_score = 10**9
             for split_at in range(1, len(all_words)):
-                first = " ".join(all_words[:split_at])
-                second = " ".join(all_words[split_at:])
+                first = subdub_join_wrap_units(all_words[:split_at], joiner)
+                second = subdub_join_wrap_units(all_words[split_at:], joiner)
                 overflow = max(0, len(first) - max_chars) + max(0, len(second) - max_chars)
                 balance = abs(len(first) - len(second))
                 score = overflow * 10 + balance
                 if score < best_score:
                     best_score = score
                     best_split = split_at
-            lines = [" ".join(all_words[:best_split]), " ".join(all_words[best_split:])]
+            lines = [subdub_join_wrap_units(all_words[:best_split], joiner), subdub_join_wrap_units(all_words[best_split:], joiner)]
         else:
             consumed = sum(len(line.split()) for line in lines[:limit - 1])
             lines = lines[:limit]
-            lines[-1] = " ".join(words[consumed:])
+            lines[-1] = subdub_join_wrap_units(words[consumed:], joiner)
     return r"\N".join(line.replace("\\", r"\\") for line in lines if line)
 
 def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[str]:
     normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
     normalized = re.sub(r"[{}]", "", normalized)
-    words = [word for word in re.sub(r"\s+", " ", normalized).strip().split(" ") if word]
+    words, joiner = subdub_subtitle_wrap_units(normalized)
     if not words:
         return []
     play_res_x = max(480, int(style.get("play_res_x") or 1280))
@@ -179543,7 +179725,7 @@ def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[s
     lines: list[str] = []
     current = ""
     for word in words:
-        candidate = f"{current} {word}".strip()
+        candidate = subdub_join_wrap_units([current, word] if current else [word], joiner).strip()
         if current and len(candidate) > max_chars:
             lines.append(current)
             current = word
@@ -179555,7 +179737,9 @@ def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[s
     return ["\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
-    style = subdub_normalize_style(style_or_state)
+    style_input = dict(style_or_state or {})
+    style_input.setdefault("subtitle_text", str(srt_text or ""))
+    style = subdub_normalize_style(style_input)
     readability = subdub_validate_subtitle_text_for_delivery(srt_text)
     if not readability.get("ok"):
         return ""
@@ -179564,6 +179748,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     blocks = subdub_srt_blocks(str(readability.get("normalized_text") or ""))
     if not blocks or not style.get("show_subtitles"):
         return ""
+    blocks, pacing_detail = subdub_apply_readable_pacing_to_blocks(blocks, style)
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
     play_res_x = int(style.get("play_res_x") or 1080)
     play_res_y = int(style.get("play_res_y") or 1920)
@@ -179599,6 +179784,12 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         f"; subtitle_margin_v_effective: {margin_v}",
         "; subtitle_pos_override_removed: yes",
         f"; subtitle_max_lines: {int(style.get('max_lines') or 2)}",
+        f"; subtitle_pacing_adjusted_events: {int(pacing_detail.get('adjusted_events') or 0)}",
+        f"; subtitle_pacing_fast_warning_events: {int(pacing_detail.get('fast_warning_events') or 0)}",
+        f"; subtitle_font_selected: {style.get('font')}",
+        f"; subtitle_font_script: {style.get('subtitle_font_script') or 'latin'}",
+        f"; subtitle_font_fallback_used: {'yes' if style.get('subtitle_font_fallback_used') else 'no'}",
+        f"; subtitle_font_warning: {style.get('subtitle_font_blocker') or ''}",
         "WrapStyle: 2",
         "ScaledBorderAndShadow: yes",
         f"PlayResX: {play_res_x}",
@@ -179623,24 +179814,35 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         block_start = float(block.get("start") or 0)
         block_end = max(block_start + 0.2, float(block.get("end") or 0))
         if style.get("m4live1_style_renderer_only") or style.get("m4live2_subtitle_bottom_lock"):
-            escaped = subdub_ass_wrap_text(
+            chunks = subdub_ass_text_chunks(
                 str(block.get("text") or ""),
                 style,
                 int(style.get("max_lines") or 2),
             )
-            if not escaped:
+            if not chunks:
                 continue
-            if block_start < last_dialogue_end:
-                overlap_suppressed += 1
-                block_start = last_dialogue_end + 0.01
-                block_end = max(block_start + 0.2, block_end)
-            events.append(
-                "Dialogue: 0,"
-                f"{subdub_ass_timestamp(block_start)},"
-                f"{subdub_ass_timestamp(block_end)},"
-                f"Default,,0,0,0,,{escaped}"
-            )
-            last_dialogue_end = max(last_dialogue_end, block_end)
+            weights = [max(1, subdub_reading_glyph_count(chunk)) for chunk in chunks]
+            total_weight = max(1, sum(weights))
+            elapsed_weight = 0
+            for chunk, weight in zip(chunks, weights):
+                chunk_start = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+                elapsed_weight += weight
+                chunk_end = block_start + ((block_end - block_start) * elapsed_weight / total_weight)
+                escaped = subdub_ass_wrap_text(chunk, style, int(style.get("max_lines") or 2))
+                if not escaped:
+                    continue
+                if chunk_start < last_dialogue_end:
+                    overlap_suppressed += 1
+                    original_duration = max(0.2, chunk_end - chunk_start)
+                    chunk_start = last_dialogue_end + 0.01
+                    chunk_end = max(chunk_start + 0.2, chunk_start + original_duration)
+                events.append(
+                    "Dialogue: 0,"
+                    f"{subdub_ass_timestamp(chunk_start)},"
+                    f"{subdub_ass_timestamp(chunk_end)},"
+                    f"Default,,0,0,0,,{escaped}"
+                )
+                last_dialogue_end = max(last_dialogue_end, chunk_end)
             continue
         chunks = subdub_ass_text_chunks(
             str(block.get("text") or ""),
@@ -180892,10 +181094,11 @@ async def video_dubbing_render_video(
             with open(subtitle_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(subtitle_text)
             if style.get("show_subtitles"):
+                style = subdub_normalize_style({**style_state, "subtitle_text": subtitle_text})
                 fallback_subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
                 if not style.get("subtitle_font_resolution_ok"):
                     return b"", str(style.get("subtitle_font_blocker") or "subtitle_font_missing")
-                ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
+                ass_text = subdub_generate_ass_from_srt(subtitle_text, {**style, "subtitle_text": subtitle_text})
                 if not ass_text:
                     return b"", "subtitle_ass_generation_failed"
                 with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -181489,7 +181692,10 @@ def subdub_dub_audio_filter_chain(*, fallback: bool = False) -> str:
 
 def subdub_dub_audio_gain_debug() -> dict:
     return {
+        "dub_volume_gain": float(SUBDUB_DUB_VOLUME_GAIN),
         "gain": float(SUBDUB_DUB_VOICE_GAIN),
+        "gain_applied": bool(DUB_AUDIO_NORMALIZE_ENABLED),
+        "audio_gain_clip_warning": "AUDIO_GAIN_CLIP_RISK" if float(SUBDUB_DUB_VOICE_GAIN) > 2.5 else "",
         "loudness_normalize": bool(SUBDUB_DUB_LOUDNESS_NORMALIZE),
         "max_peak_db": float(SUBDUB_DUB_MAX_PEAK_DB),
         "filter": subdub_dub_audio_filter_chain(),
