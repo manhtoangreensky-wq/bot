@@ -181723,6 +181723,34 @@ def video_dubbing_video_render_ready(output_type: str = "", *, audio: bool = Fal
         return False
     return bool(video_dubbing_mux_ready() or video_dubbing_subtitle_render_ready())
 
+def video_dubbing_target_language_requires_translation_for_tts(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    target = str(
+        state.get("target_language")
+        or state.get("target_lang")
+        or state.get("dub_language")
+        or ""
+    ).strip()
+    if not target:
+        return False
+    normalized = unicodedata.normalize("NFKD", target).encode("ascii", "ignore").decode("ascii").lower()
+    compact = re.sub(r"[\s_\-]+", "", normalized)
+    original_markers = {
+        "auto",
+        "same",
+        "source",
+        "original",
+        "originalaudio",
+        "originalvoice",
+        "keeporiginal",
+        "keeporiginalaudio",
+        "goc",
+        "nguyenban",
+        "giugiongoc",
+        "giutienggoc",
+    }
+    return compact not in original_markers
+
 async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, state: dict, user_id, allow_admin: bool = False) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -181806,9 +181834,19 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         source_segments = video_dubbing_segments_from_text(source_script, _safe_int(state.get("video_duration") or state.get("source_duration"), 0))
     if not source_segments:
         raise RuntimeError("subtitle_segments_empty")
-    needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
-        mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-        and str(state.get("translate_requested") or "0") == "1"
+    needs_translation = (
+        mode == VIDEO_SUBTITLE_MODE_TRANSLATE
+        or (
+            mode == VIDEO_SUBTITLE_MODE_DUB
+            and str(state.get("translate_requested") or "0") == "1"
+        )
+        or (
+            mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+            and (
+                str(state.get("translate_requested") or "0") == "1"
+                or video_dubbing_target_language_requires_translation_for_tts(state)
+            )
+        )
     )
     output_subtitle = source_subtitle
     output_segments = list(source_segments)
@@ -182132,7 +182170,6 @@ async def _execute_video_dubbing_pipeline_core(
         "m4restore_shared_pipeline_active": True,
         "m4restore_source_commit": "7dd2210",
         "subdub_mode": mode,
-        "subdub_blackbox_lane": "",
         "entry_route": str(state.get("entry_route") or state.get("origin") or state.get("source_step") or ""),
         "wrapper_name": "_execute_video_dubbing_pipeline_core",
         "run_subdub_pipeline_called": False,
@@ -182165,46 +182202,6 @@ async def _execute_video_dubbing_pipeline_core(
         elif mode == VIDEO_SUBTITLE_MODE_CREATE:
             await _progress("auto_subtitle_ready")
         return prepared
-
-    def _subdub_blackbox_lane_for_mode(current_mode: str) -> str:
-        if current_mode == VIDEO_SUBTITLE_MODE_DUB:
-            return "dub_only"
-        if current_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            return "subtitle_plus_dub"
-        if current_mode == VIDEO_SUBTITLE_MODE_CREATE:
-            return "subtitle_create"
-        return "subtitle_only"
-
-    async def _prepare_subtitles_for_lane_blackbox(service_state: dict, lane: str) -> dict:
-        lane_state = dict(service_state or {})
-        lane_state["_subdub_blackbox_lane"] = lane
-        render_debug["subdub_blackbox_lane"] = lane
-        prepared = await _prepare_subtitles_for_blackbox(lane_state)
-        if isinstance(prepared, dict):
-            prepared = dict(prepared)
-            prepared["_subdub_blackbox_lane"] = lane
-            prepared["_subdub_blackbox_isolated"] = True
-        return prepared
-
-    async def _prepare_subtitle_only_blackbox(service_state: dict) -> dict:
-        return await _prepare_subtitles_for_lane_blackbox(service_state, "subtitle_only")
-
-    async def _prepare_dub_only_blackbox(service_state: dict) -> dict:
-        return await _prepare_subtitles_for_lane_blackbox(service_state, "dub_only")
-
-    async def _prepare_combo_blackbox(service_state: dict) -> dict:
-        return await _prepare_subtitles_for_lane_blackbox(service_state, "subtitle_plus_dub")
-
-    async def _prepare_create_subtitle_blackbox(service_state: dict) -> dict:
-        return await _prepare_subtitles_for_lane_blackbox(service_state, "subtitle_create")
-
-    selected_prepare_subtitles = {
-        VIDEO_SUBTITLE_MODE_CREATE: _prepare_create_subtitle_blackbox,
-        VIDEO_SUBTITLE_MODE_TRANSLATE: _prepare_subtitle_only_blackbox,
-        VIDEO_SUBTITLE_MODE_DUB: _prepare_dub_only_blackbox,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: _prepare_combo_blackbox,
-    }.get(mode, _prepare_subtitle_only_blackbox)
-    render_debug["subdub_blackbox_lane"] = _subdub_blackbox_lane_for_mode(mode)
 
     async def _synthesize_dub_segments_for_blackbox(*args, **kwargs):
         route_attempts["tts"] = True
@@ -182349,7 +182346,7 @@ async def _execute_video_dubbing_pipeline_core(
         mode=mode,
         state=state,
         user_id=uid,
-        prepare_subtitles=selected_prepare_subtitles,
+        prepare_subtitles=_prepare_subtitles_for_blackbox,
         srt_from_text=video_dubbing_srt_from_text,
         segments_from_text=video_dubbing_segments_from_text,
         segments_from_subtitle=video_dubbing_segments_from_subtitle,
