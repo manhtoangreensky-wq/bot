@@ -667,6 +667,14 @@ def reconcile_provider_progress_telemetry(
     poll_count, poll_count_source = _provider_poll_count_with_source(payload)
     result_url_present = _provider_result_url_present(payload)
     final_output_ready = _provider_final_output_ready(payload)
+    final_delivered = bool(
+        payload.get("final_delivered")
+        or payload.get("final_mp4_delivered")
+        or payload.get("delivery_succeeded")
+        or payload.get("video_delivered")
+        or payload.get("video_delivered_at")
+        or payload.get("video_delivery_message_id")
+    )
     provider_status = _provider_status_for_progress(payload, alive)
     provider_not_start = _provider_status_value_is_not_start(
         payload.get("shopaikey_raw_status"),
@@ -751,7 +759,7 @@ def reconcile_provider_progress_telemetry(
     else:
         elapsed_public_mode = "hidden" if provider_progress_public_suppressed else "recovered_approx"
     render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
-    overall_progress_from_render = 100 if final_output_ready else (95 if result_url_present else 20 + int(render_progress * 0.65))
+    overall_progress_from_render = 100 if final_delivered else (95 if final_output_ready else (90 if result_url_present else 20 + int(render_progress * 0.65)))
     if alive and not final_output_ready:
         overall_progress_from_render = min(85, overall_progress_from_render)
     estimated = False
@@ -770,6 +778,10 @@ def reconcile_provider_progress_telemetry(
     final_status = "failed" if terminal_failure else ("processing" if alive else (persisted_status or "queued"))
     if terminal_failure:
         final_progress = min(85, max(20, final_progress))
+    if final_delivered:
+        final_status = "completed"
+        final_progress = 100
+        progress_source = "final_delivered"
     return {
         "provider_task_alive": bool(alive),
         "progress_monotonic_applied": bool(final_progress > requested or final_progress > persisted_progress),
@@ -860,8 +872,8 @@ def reconcile_provider_progress_telemetry(
         "persisted_status_before_reconcile": persisted_status,
         "persisted_progress_before_reconcile": persisted_progress,
         "final_status_after_reconcile": final_status,
-        "terminal_state": "final_rendering" if alive and not terminal_failure else str(payload.get("terminal_state") or ""),
-        "final_user_visible_state": "final_rendering" if alive and not terminal_failure else ("failed_no_charge" if terminal_failure else final_status),
+        "terminal_state": "delivered" if final_delivered else ("final_rendering" if alive and not terminal_failure else str(payload.get("terminal_state") or "")),
+        "final_user_visible_state": "delivered" if final_delivered else ("final_rendering" if alive and not terminal_failure else ("failed_no_charge" if terminal_failure else final_status)),
         "final_progress_after_reconcile": final_progress,
     }
 
@@ -2017,6 +2029,127 @@ def product_video_duration_contract(project: dict | None, payload: dict | None, 
     }
 
 
+def _product_video_charge_first_int(source: dict[str, Any], keys: tuple[str, ...], default: int = 0) -> int:
+    for key in keys:
+        value = source.get(key)
+        if value not in (None, ""):
+            return _as_int(value, default)
+    return int(default or 0)
+
+
+def product_video_delivery_charge_decision(
+    project: dict | None = None,
+    job: dict | None = None,
+    result: dict | None = None,
+) -> dict[str, Any]:
+    """Pure Product Video charge gate for post-delivery billing.
+
+    This never touches wallet state. Runtime callers must execute the returned
+    amount only after this says ok=True, then persist the returned idempotency
+    key with the wallet result.
+    """
+    project = dict(project or {})
+    job = dict(job or {})
+    result = dict(result or {})
+    invoice = _json_loads(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
+    merged = {**project, **job, **invoice, **result}
+    job_id = _as_int(job.get("id") or job.get("job_id") or result.get("job_id"), 0)
+    delivered = bool(
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+        or result.get("final_delivered")
+        or result.get("final_mp4_delivered")
+        or result.get("delivery_succeeded")
+        or result.get("video_delivered")
+    )
+    already_charged = _product_video_charge_first_int(
+        merged,
+        ("charged_amount_xu", "total_xu_charged", "charged_xu"),
+        0,
+    )
+    if already_charged > 0 or (result.get("wallet_charge_recorded") and result.get("charge_tx_id")):
+        return {
+            "ok": True,
+            "already_charged": True,
+            "amount_xu": already_charged,
+            "charge_skip_reason": "already_charged",
+            "charge_idempotency_key": str(result.get("charge_idempotency_key") or ""),
+        }
+    if not delivered:
+        return {"ok": False, "amount_xu": 0, "charge_skip_reason": "delivery_required_before_charge"}
+    final_path = str(
+        result.get("final_video_path")
+        or result.get("final_mp4_path")
+        or result.get("output_path")
+        or project.get("final_video_path")
+        or ""
+    ).strip()
+    local_ok = False
+    if final_path:
+        try:
+            local_ok = os.path.isfile(final_path) and os.path.getsize(final_path) > 0
+        except OSError:
+            local_ok = False
+    valid = bool(
+        result.get("final_mp4_valid")
+        or result.get("final_mp4_validated")
+        or result.get("output_validated")
+        or result.get("validation_passed")
+        or result.get("mp4_validator_result") == "valid_mp4"
+        or local_ok
+    )
+    if not valid:
+        return {"ok": False, "amount_xu": 0, "charge_skip_reason": "valid_mp4_required_before_charge"}
+    user_visible = _product_video_charge_first_int(
+        merged,
+        ("user_visible_price_xu", "package_xu", "package_price_xu", "package_base_xu"),
+        0,
+    )
+    quoted = _product_video_charge_first_int(
+        merged,
+        ("persisted_quoted_price_xu", "quoted_price_xu", "quoted_price"),
+        user_visible,
+    )
+    planned = _product_video_charge_first_int(
+        merged,
+        ("customer_charge_planned_xu", "wallet_charge_amount_xu"),
+        quoted,
+    )
+    fallback_amount = _product_video_charge_first_int(
+        merged,
+        ("total_xu_estimated", "total_xu", "total"),
+        0,
+    )
+    amount = _as_int(planned or quoted or user_visible or fallback_amount, 0)
+    quote_values = [value for value in (user_visible, quoted, planned) if _as_int(value, 0) > 0]
+    quote_consistent = bool(not quote_values or len({_as_int(value, 0) for value in quote_values}) == 1)
+    if not quote_consistent:
+        return {
+            "ok": False,
+            "amount_xu": 0,
+            "user_visible_price_xu": user_visible or amount,
+            "persisted_quoted_price_xu": quoted or amount,
+            "customer_charge_planned_xu": planned or amount,
+            "wallet_charge_amount_xu": amount,
+            "quote_consistent": False,
+            "charge_skip_reason": "product_video_quote_mismatch_no_charge",
+        }
+    if amount <= 0:
+        return {"ok": False, "amount_xu": 0, "charge_skip_reason": "charge_amount_missing"}
+    return {
+        "ok": True,
+        "already_charged": False,
+        "amount_xu": amount,
+        "user_visible_price_xu": user_visible or amount,
+        "persisted_quoted_price_xu": quoted or amount,
+        "customer_charge_planned_xu": planned or amount,
+        "wallet_charge_amount_xu": amount,
+        "quote_consistent": True,
+        "charge_idempotency_key": f"product_video_final_delivery:{job_id}:{amount}",
+        "charge_skip_reason": "",
+    }
+
+
 def complete_video_job(
     conn: sqlite3.Connection,
     *,
@@ -2097,9 +2230,17 @@ def complete_video_job(
         payload["terminal_state"] = terminal_state
     conn.execute(
         """UPDATE video_jobs
-           SET status='completed', result_json=?, completed_at=?, updated_at=?, lease_expires_at=NULL
+           SET status='completed', result_json=?, progress_percent=?,
+               progress_message=?, completed_at=?, updated_at=?, lease_expires_at=NULL
            WHERE id=?""",
-        (_json_dumps(payload), current, current, int(job_id)),
+        (
+            _json_dumps(payload),
+            95 if product_job and not safe_claim_only_diagnostic else 100,
+            "final_mp4_ready_waiting_delivery" if product_job and not safe_claim_only_diagnostic else "completed",
+            current,
+            current,
+            int(job_id),
+        ),
     )
     conn.execute(
         """UPDATE video_projects
@@ -2138,12 +2279,31 @@ def note_video_delivery_result(
     project = get_video_project(conn, int(job.get("project_id") or 0))
     if not project:
         return {"ok": False, "reason": "project_not_found", "job": job}
+    payload = _json_loads(job.get("result_json"), {})
+    if not isinstance(payload, dict):
+        payload = {}
     already_delivered = bool(project.get("video_delivered_at") or project.get("video_delivery_message_id"))
     if already_delivered and sent:
         return {"ok": True, "duplicate_prevented": True, "job": job, "project": project}
     current = now_text()
     attempts = int(project.get("delivery_attempt_count") or 0) + 1
     if sent:
+        payload.update(
+            {
+                "final_delivery_attempted": True,
+                "telegram_delivery_status": "sent",
+                "final_delivered": True,
+                "final_mp4_delivered": True,
+                "delivery_succeeded": True,
+                "video_delivered": True,
+                "final_delivered_at": current,
+                "download_button_visible": True,
+                "public_progress_source": "final_delivered",
+                "final_progress_after_reconcile": 100,
+                "charge_after_delivery_attempted": bool(payload.get("charge_after_delivery_attempted")),
+                "charge_skip_reason": str(payload.get("charge_skip_reason") or ""),
+            }
+        )
         conn.execute(
             """UPDATE video_projects
                SET video_delivery_started_at=COALESCE(video_delivery_started_at, ?),
@@ -2166,8 +2326,29 @@ def note_video_delivery_result(
                 int(project["project_id"]),
             ),
         )
+        conn.execute(
+            """UPDATE video_jobs
+               SET status='completed', result_json=?, progress_percent=100,
+                   progress_message='delivered', completed_at=COALESCE(completed_at, ?), updated_at=?
+               WHERE id=?""",
+            (_json_dumps(payload), current, current, int(job_id)),
+        )
     else:
         clean_reason = str(reason or "telegram_delivery_failed").replace("\n", " ")[:500]
+        payload.update(
+            {
+                "final_delivery_attempted": True,
+                "telegram_delivery_status": clean_reason,
+                "final_delivered": False,
+                "final_mp4_delivered": False,
+                "delivery_succeeded": False,
+                "video_delivered": False,
+                "charge_after_delivery_attempted": bool(payload.get("charge_after_delivery_attempted")),
+                "charge_skip_reason": "delivery_failed_no_charge",
+                "public_progress_source": "delivery_failed_waiting_retry",
+                "final_progress_after_reconcile": max(85, min(95, _as_int(job.get("progress_percent"), 95))),
+            }
+        )
         conn.execute(
             """UPDATE video_projects
                SET video_delivery_started_at=COALESCE(video_delivery_started_at, ?),
@@ -2182,6 +2363,19 @@ def note_video_delivery_result(
                 attempts,
                 current,
                 int(project["project_id"]),
+            ),
+        )
+        conn.execute(
+            """UPDATE video_jobs
+               SET result_json=?, progress_percent=?,
+                   progress_message=?, updated_at=?
+               WHERE id=?""",
+            (
+                _json_dumps(payload),
+                int(payload.get("final_progress_after_reconcile") or 95),
+                clean_reason,
+                current,
+                int(job_id),
             ),
         )
     conn.commit()

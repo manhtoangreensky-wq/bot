@@ -2583,6 +2583,32 @@ def _run_per_scene_provider_orchestrator(
         for item in scene_tasks
         if _safe_int(item.get("scene_index"), 0)
     }
+    scene_result_urls_by_index = {
+        str(_safe_int(item.get("scene_index"), 0)): (
+            "yes"
+            if bool(item.get("result_url_valid") or item.get("download_url_present") or item.get("provider_result_url_present"))
+            else "no"
+        )
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
+    scene_clip_validation_by_index: dict[str, dict[str, Any]] = {}
+    for index, path in scene_outputs.items():
+        clip_path = str(path or "")
+        try:
+            clip_size = os.path.getsize(clip_path) if clip_path and os.path.isfile(clip_path) else 0
+        except OSError:
+            clip_size = 0
+        scene_clip_validation_by_index[str(index)] = {
+            "ok": bool(clip_size > 0),
+            "path_present": bool(clip_path),
+            "bytes": int(clip_size or 0),
+        }
+    for index in range(1, _scene_count(job) + 1):
+        scene_clip_validation_by_index.setdefault(
+            str(index),
+            {"ok": False, "path_present": False, "bytes": 0},
+        )
     active_scene = next(
         (
             item
@@ -2625,6 +2651,10 @@ def _run_per_scene_provider_orchestrator(
         "fallback_eligible_by_scene": fallback_eligible_by_scene,
         "fallback_reason_by_scene": fallback_reason_by_scene,
         "selected_model_by_scene": selected_model_by_scene,
+        "scene_coverage_expected": _scene_count(job),
+        "scene_coverage_valid": len(scene_outputs),
+        "scene_result_urls_by_index": scene_result_urls_by_index,
+        "scene_clip_validation_by_index": scene_clip_validation_by_index,
         "canonical_scene_index": _safe_int(active_scene.get("canonical_scene_index") or active_scene.get("scene_index"), 0),
         "canonical_task_selected": str(active_scene.get("canonical_task_selected") or ""),
         "canonical_task_candidates_by_scene": active_scene.get("canonical_task_candidates_by_scene") or {},
@@ -2675,6 +2705,8 @@ def _run_per_scene_provider_orchestrator(
         "downloaded_clip_paths": [scene_outputs[index] for index in sorted(scene_outputs)],
         "local_clip_path_count": len(scene_outputs),
         "final_concat_required": bool(_scene_count(job) > 1),
+        "concat_attempted": False,
+        "concat_output_valid": False,
         "concat_status": "ready_to_concat" if len(scene_outputs) >= _scene_count(job) else "waiting_for_clips",
         "concat_ready": bool(len(scene_outputs) >= _scene_count(job)),
         "provider_router_called": True,
@@ -2753,6 +2785,9 @@ def _run_per_scene_provider_orchestrator(
     final_result["final_decision"] = "final_mp4_ready"
     final_result["source_of_truth"] = "final_mp4_validated"
     final_result["concat_status"] = "completed"
+    final_result["concat_attempted"] = True
+    final_result["concat_output_valid"] = bool(final_result.get("final_video_path"))
+    final_result["concat_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
     final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
     final_result["final_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
     return final_result

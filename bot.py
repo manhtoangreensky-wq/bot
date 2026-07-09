@@ -44065,6 +44065,140 @@ def product_video_r9_charge_allowed(result: dict | None = None, project: dict | 
     }
 
 
+def product_video_charge_amount_after_delivery(project: dict | None = None, job: dict | None = None, result: dict | None = None) -> dict:
+    project = dict(project or {})
+    job = dict(job or {})
+    result = dict(result or {})
+    invoice = _video_debug_json(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
+    merged = {**project, **job, **invoice, **result}
+    user_visible = safe_int(
+        merged.get("user_visible_price_xu")
+        or merged.get("package_xu")
+        or merged.get("package_price_xu")
+        or merged.get("package_base_xu"),
+        0,
+    )
+    quoted = safe_int(
+        merged.get("persisted_quoted_price_xu")
+        or merged.get("quoted_price_xu")
+        or merged.get("quoted_price")
+        or user_visible,
+        user_visible,
+    )
+    planned = safe_int(
+        merged.get("customer_charge_planned_xu")
+        or merged.get("wallet_charge_amount_xu")
+        or quoted,
+        quoted,
+    )
+    fallback_amount = safe_int(project.get("total_xu_estimated") or invoice.get("total_xu") or invoice.get("total") or 0, 0)
+    amount = safe_int(planned or quoted or user_visible or fallback_amount, 0)
+    quote_values = [value for value in (user_visible, quoted, planned) if safe_int(value, 0) > 0]
+    quote_consistent = bool(not quote_values or len({safe_int(value, 0) for value in quote_values}) == 1)
+    return {
+        "amount_xu": amount,
+        "user_visible_price_xu": user_visible or amount,
+        "persisted_quoted_price_xu": quoted or amount,
+        "customer_charge_planned_xu": planned or amount,
+        "wallet_charge_amount_xu": amount,
+        "quote_consistent": quote_consistent,
+        "quote_mismatch_reason": "" if quote_consistent else "product_video_quote_mismatch_no_charge",
+    }
+
+
+def product_video_charge_after_final_delivery(
+    job_id: int | str,
+    *,
+    conn=None,
+    source: str = "final_delivery",
+    charge_func=None,
+) -> dict:
+    """Charge Product Video exactly once after a valid MP4 has been delivered."""
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {"ok": False, "charged_xu": 0, "charge_skip_reason": "job_id_required"}
+    owns_conn = conn is None
+    if conn is None:
+        conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0)) if job else {}
+        if not job or not project:
+            return {"ok": False, "charged_xu": 0, "charge_skip_reason": "job_or_project_missing"}
+        result = _video_debug_json((job or {}).get("result_json"), {})
+        if not isinstance(result, dict):
+            result = {}
+        decision = video_project_queue.product_video_delivery_charge_decision(project, job, result)
+        already_charged = safe_int(decision.get("amount_xu"), 0)
+        charge_tx_id = str(result.get("charge_tx_id") or result.get("wallet_tx_id") or result.get("ledger_tx_id") or "").strip()
+        if decision.get("already_charged"):
+            return {
+                "ok": True,
+                "charged_xu": already_charged,
+                "already_charged": True,
+                "charge_tx_id": charge_tx_id,
+                "charge_skip_reason": "already_charged",
+            }
+        if not decision.get("ok"):
+            updates = {
+                **decision,
+                "charge_after_delivery_attempted": True,
+                "charge_skip_reason": str(decision.get("charge_skip_reason") or "charge_not_allowed"),
+                "wallet_charge_recorded": False,
+            }
+            _video_provider_update_job_result(conn, jid, updates)
+            return {"ok": False, "charged_xu": 0, **updates}
+        amount_info = product_video_charge_amount_after_delivery(project, job, result)
+        amount_info.update({key: decision.get(key) for key in ("user_visible_price_xu", "persisted_quoted_price_xu", "customer_charge_planned_xu", "wallet_charge_amount_xu", "quote_consistent") if key in decision})
+        amount = safe_int(decision.get("amount_xu"), 0)
+        user_id = safe_int(project.get("user_id") or job.get("user_id"), 0)
+        idempotency_key = str(decision.get("charge_idempotency_key") or f"product_video_final_delivery:{jid}:{amount}")
+        charge_runner = charge_func or spend_fixed_credit_info
+        try:
+            charge = charge_runner(
+                user_id,
+                amount,
+                "product_video_final_delivery",
+                f"Product Video job #{jid} final MP4 delivered",
+                apply_member_discount_flag=False,
+            )
+        except TypeError:
+            charge = charge_runner(
+                user_id,
+                amount,
+                "product_video_final_delivery",
+                f"Product Video job #{jid} final MP4 delivered",
+            )
+        if not charge.get("ok"):
+            updates = {
+                **amount_info,
+                "charge_after_delivery_attempted": True,
+                "charge_idempotency_key": idempotency_key,
+                "charge_skip_reason": str(charge.get("message") or charge.get("status") or "wallet_charge_failed")[:160],
+                "wallet_charge_recorded": False,
+            }
+            _video_provider_update_job_result(conn, jid, updates)
+            return {"ok": False, "charged_xu": 0, "charge": charge, **updates}
+        charged = safe_int(charge.get("final_cost") if charge.get("final_cost") is not None else amount, amount)
+        updates = {
+            **amount_info,
+            "charge_after_delivery_attempted": True,
+            "charge_idempotency_key": idempotency_key,
+            "charge_tx_id": str(charge.get("transaction_id") or charge.get("tx_id") or idempotency_key),
+            "charge_source": source,
+            "wallet_charge_recorded": bool(charged > 0),
+            "charged_amount_xu": charged,
+            "charged_xu": charged,
+            "total_xu_charged": charged,
+            "charge_skip_reason": "admin_free" if charged <= 0 and is_admin_user(user_id) else "",
+        }
+        _video_provider_update_job_result(conn, jid, updates)
+        return {"ok": True, "charged_xu": charged, "charge": charge, **updates}
+    finally:
+        if owns_conn:
+            conn.close()
+
+
 def product_video_provider_pending_public_copy(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "en":
         return "The video system is still processing. TOAN AAS has not charged Xu and charges only after a valid MP4 is ready."
@@ -47998,6 +48132,26 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         or job.get("final_video_file_id")
         or merged.get("final_delivered")
     )
+    final_delivery_attempted = bool(merged.get("final_delivery_attempted") or merged.get("autonomous_delivery_attempted"))
+    telegram_delivery_status = str(merged.get("telegram_delivery_status") or ("sent" if final_delivered else "-"))
+    charge_after_delivery_attempted = bool(merged.get("charge_after_delivery_attempted"))
+    charge_idempotency_key = str(merged.get("charge_idempotency_key") or "-")
+    charge_skip_reason = str(merged.get("charge_skip_reason") or "-")
+    scene_coverage_expected = safe_int(merged.get("scene_coverage_expected") or scene_count, scene_count)
+    scene_coverage_valid = safe_int(
+        merged.get("scene_coverage_valid")
+        or merged.get("scene_success_count")
+        or merged.get("scenes_done")
+        or scene_success_count,
+        scene_success_count,
+    )
+    scene_clip_validation_by_index = merged.get("scene_clip_validation_by_index") if isinstance(merged.get("scene_clip_validation_by_index"), dict) else {}
+    scene_result_urls_by_index = merged.get("scene_result_urls_by_index") if isinstance(merged.get("scene_result_urls_by_index"), dict) else {}
+    concat_attempted = bool(merged.get("concat_attempted") or merged.get("stitch_attempted") or merged.get("final_concat_required"))
+    concat_output_valid = bool(merged.get("concat_output_valid") or (merged.get("concat_status") == "completed" and final_mp4_valid))
+    concat_duration_seconds = merged.get("concat_duration_seconds") or merged.get("final_duration_seconds") or merged.get("output_duration") or 0
+    final_duration_coverage_reason = str((merged.get("final_duration_contract") or {}).get("reason") if isinstance(merged.get("final_duration_contract"), dict) else merged.get("finalizer_error") or "-")
+    public_progress_source = str(merged.get("public_progress_source") or merged.get("progress_source") or merged.get("status_source_priority_used") or "-")
     tx_ids = [
         str(_video_finance_first_value(merged, ("wallet_tx_id", "ledger_tx_id", "charge_tx_id", "transaction_id"), "") or "")
     ]
@@ -48045,10 +48199,23 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• fallback count by scene: <code>{html.escape(str(fallback_count_by_scene)[:220])}</code>",
         f"• final MP4 valid: <code>{'yes' if final_mp4_valid else 'no'}</code>",
         f"• final delivered: <code>{'yes' if final_delivered else 'no'}</code>",
+        f"• final delivery attempted: <code>{'yes' if final_delivery_attempted else 'no'}</code>",
+        f"• telegram delivery status: <code>{html.escape(telegram_delivery_status[:120])}</code>",
         f"• charge after final delivery: <code>{'yes' if final_mp4_valid and final_delivered else 'no'}</code>",
+        f"• charge after delivery attempted: <code>{'yes' if charge_after_delivery_attempted else 'no'}</code>",
+        f"• charge idempotency key: <code>{html.escape(mask_provider_task_id(charge_idempotency_key))}</code>",
+        f"• charge skip reason: <code>{html.escape(charge_skip_reason[:160])}</code>",
         f"• result_url present: <code>{'yes' if result_url_present else 'no'}</code>",
         f"• result_url valid: <code>{'yes' if result_url_present and (result_url_check.get('result_url_valid') or merged.get('result_url_valid')) else 'no'}</code>",
         f"• result_url invalid reason: <code>{html.escape(str(merged.get('result_url_invalid_reason') or result_url_check.get('result_url_invalid_reason') or '-'))}</code>",
+        f"• scene coverage: <code>{scene_coverage_valid}/{scene_coverage_expected}</code>",
+        f"• scene result urls by index: <code>{html.escape(str(scene_result_urls_by_index)[:220])}</code>",
+        f"• scene clip validation by index: <code>{html.escape(str(scene_clip_validation_by_index)[:220])}</code>",
+        f"• concat attempted: <code>{'yes' if concat_attempted else 'no'}</code>",
+        f"• concat output valid: <code>{'yes' if concat_output_valid else 'no'}</code>",
+        f"• concat duration seconds: <code>{html.escape(str(concat_duration_seconds)[:40])}</code>",
+        f"• final duration coverage reason: <code>{html.escape(final_duration_coverage_reason[:160])}</code>",
+        f"• public progress source: <code>{html.escape(public_progress_source[:120])}</code>",
         f"• artifact valid for charge: <code>{'yes' if charge_gate.get('ok') else 'no'}</code>",
         f"• charge gate blocker: <code>{html.escape(str(charge_gate.get('blocker') or '-'))}</code>",
         f"• final user-visible state: <code>{html.escape(terminal[:120])}</code>",
@@ -49000,7 +49167,19 @@ async def video_b14_autonomous_materialize_and_deliver(
         return {"ok": False, "sent": False, "reason": "job_id_required", "no_new_paid_submit": True, "charge": 0}
     already = video_b14_delivered_video_artifact(jid)
     if already.get("ok"):
-        return {"ok": True, "sent": False, "already_delivered": True, "download_button_visible": True, **already, "charge": 0}
+        charge_after_delivery = product_video_charge_after_final_delivery(
+            jid,
+            source=f"{source}:already_delivered",
+        )
+        return {
+            "ok": True,
+            "sent": False,
+            "already_delivered": True,
+            "download_button_visible": True,
+            **already,
+            "charge": safe_int(charge_after_delivery.get("charged_xu"), 0),
+            "charge_after_delivery": charge_after_delivery,
+        }
     recovery = video_provider_recover_existing_task(jid, download=True, source=source)
     if recovery.get("waiting"):
         conn = db_connect()
@@ -49106,6 +49285,15 @@ async def video_b14_autonomous_materialize_and_deliver(
                 "charge": 0,
             },
         )
+        charge_after_delivery = (
+            product_video_charge_after_final_delivery(
+                jid,
+                conn=conn,
+                source=source,
+            )
+            if delivery.get("sent")
+            else {"ok": False, "charged_xu": 0, "charge_skip_reason": "delivery_failed_no_charge"}
+        )
     finally:
         conn.close()
     return {
@@ -49115,7 +49303,8 @@ async def video_b14_autonomous_materialize_and_deliver(
         "note_delivery": noted,
         "recovery": recovery,
         "download_button_visible": bool(delivery.get("sent")),
-        "charge": 0,
+        "charge": safe_int(charge_after_delivery.get("charged_xu"), 0),
+        "charge_after_delivery": charge_after_delivery,
     }
 
 
@@ -89961,18 +90150,21 @@ def video_public_status_payload() -> dict:
 
 def video_public_status_text() -> str:
     payload = video_public_status_payload()
-    flags = payload["public_flags"]
-    frame = payload["frame_gate"]["frame"]
-    ai_gate = payload["ai_gate"]
-    billing = payload["billing_gate"]
-    ops = payload["ops"]
-    freeze = payload["freeze"]
-    conclusion = payload["conclusion"]
-    product_submit = payload.get("product_video_provider_submit") or {}
-    provider_health = payload.get("product_video_provider_health") or {}
-    health_summary = provider_health.get("provider_health_summary") or {}
-    model_catalog = payload.get("product_video_model_catalog") or {}
-    remote_worker = payload.get("remote_worker") or {}
+    flags = payload.get("public_flags") if isinstance(payload.get("public_flags"), dict) else {}
+    frame_gate = payload.get("frame_gate") if isinstance(payload.get("frame_gate"), dict) else {}
+    frame = frame_gate.get("frame") if isinstance(frame_gate.get("frame"), dict) else {}
+    ai_gate = payload.get("ai_gate") if isinstance(payload.get("ai_gate"), dict) else {}
+    billing = payload.get("billing_gate") if isinstance(payload.get("billing_gate"), dict) else {}
+    ops = payload.get("ops") if isinstance(payload.get("ops"), dict) else {}
+    freeze = payload.get("freeze") if isinstance(payload.get("freeze"), dict) else {}
+    conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
+    product_submit = payload.get("product_video_provider_submit") if isinstance(payload.get("product_video_provider_submit"), dict) else {}
+    provider_health = payload.get("product_video_provider_health") if isinstance(payload.get("product_video_provider_health"), dict) else {}
+    health_summary = provider_health.get("provider_health_summary") if isinstance(provider_health.get("provider_health_summary"), dict) else {}
+    shopaikey_health = health_summary.get("shopaikey_video") if isinstance(health_summary.get("shopaikey_video"), dict) else {}
+    key4u_health = health_summary.get("key4u_video") if isinstance(health_summary.get("key4u_video"), dict) else {}
+    model_catalog = payload.get("product_video_model_catalog") if isinstance(payload.get("product_video_model_catalog"), dict) else {}
+    remote_worker = payload.get("remote_worker") if isinstance(payload.get("remote_worker"), dict) else {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
         "",
@@ -90015,8 +90207,8 @@ def video_public_status_text() -> str:
         f"• Product Video live note: <code>{html.escape(str(product_submit.get('live_policy_note') or 'normal'))}</code>",
         f"• Product Video provider health: <code>{html.escape(str(provider_health.get('provider_preflight_result') or '-'))}</code>",
         f"• Product Video effective primary: <code>{html.escape(str(provider_health.get('effective_primary_for_low_basic') or provider_health.get('selected_provider') or '-'))}</code>",
-        f"• ShopAIKey health: <code>{html.escape(str((health_summary.get('shopaikey_video') or {}).get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str((health_summary.get('shopaikey_video') or {}).get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str((health_summary.get('shopaikey_video') or {}).get('degraded_until') or '-'))}</code>",
-        f"• Key4U health: <code>{html.escape(str((health_summary.get('key4u_video') or {}).get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str((health_summary.get('key4u_video') or {}).get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str((health_summary.get('key4u_video') or {}).get('degraded_until') or '-'))}</code>",
+        f"• ShopAIKey health: <code>{html.escape(str(shopaikey_health.get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str(shopaikey_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(shopaikey_health.get('degraded_until') or '-'))}</code>",
+        f"• Key4U health: <code>{html.escape(str(key4u_health.get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str(key4u_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(key4u_health.get('degraded_until') or '-'))}</code>",
         f"• Product Video model catalog: <code>{'loaded' if model_catalog.get('catalog_loaded') else 'missing'}</code>",
         f"• Product Video routing enabled: <code>{'yes' if model_catalog.get('routing_enabled') else 'no'}</code>",
         f"• Product Video catalog models: <code>{safe_int(model_catalog.get('model_count'), 0)}</code>",
@@ -90032,7 +90224,7 @@ def video_public_status_text() -> str:
         "<b>Local Worker</b>",
         f"• connected: <code>{video_public_bool_label(frame.get('local_worker_connected'))}</code>",
         f"• ffmpeg configured: <code>{video_public_bool_label(frame.get('ffmpeg_configured'))}</code>",
-        f"• frame video tested: <code>{html.escape(str(payload['frame_gate'].get('status') or '-'))}</code>",
+        f"• frame video tested: <code>{html.escape(str(frame_gate.get('status') or '-'))}</code>",
         f"• last frame video error: <code>{html.escape(str(frame.get('last_error') or '-'))}</code>",
         "",
         "<b>Product Video Worker</b>",
@@ -190227,6 +190419,12 @@ async def api_worker_complete(request: Request):
                 success_message_id=str(delivery.get("success_message_id") or delivery.get("telegram_message_id") or ""),
                 reason=str(delivery.get("reason") or delivery.get("delivery_reason") or "telegram_delivery_failed"),
             )
+            if delivery.get("sent"):
+                product_video_charge_after_final_delivery(
+                    job_id,
+                    conn=conn,
+                    source="worker_complete_delivery",
+                )
         finally:
             conn.close()
     return {
