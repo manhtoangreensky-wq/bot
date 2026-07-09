@@ -2129,6 +2129,159 @@ def product_video_duration_contract(project: dict | None, payload: dict | None, 
     }
 
 
+def _product_video_index_map(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {str(key): item for key, item in value.items()}
+    return {}
+
+
+def _product_video_scene_task_index(item: dict[str, Any]) -> int:
+    return _as_int(item.get("scene_index") or item.get("scene_id") or item.get("clip_index") or item.get("index"), 0)
+
+
+def _product_video_scene_task_is_valid_clip(item: dict[str, Any]) -> bool:
+    status = str(item.get("status") or item.get("clip_status") or item.get("provider_status") or "").strip().lower()
+    return bool(
+        item.get("clip_valid")
+        or item.get("result_url_valid")
+        or item.get("download_url_present")
+        or item.get("provider_result_url_present")
+        or status in {"clip_downloaded", "downloaded", "success", "succeeded", "completed", "done"}
+    )
+
+
+def product_video_scene_coverage_state(
+    project: dict | None = None,
+    job: dict | None = None,
+    result: dict | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Authoritative Product Video scene coverage gate.
+
+    Multi-scene Product Video must have one valid clip for every scene index and
+    a valid concat output before delivery/charge can proceed. This function is
+    intentionally provider-free and works from persisted job/project metadata so
+    status/debug can recover after registry memory is lost.
+    """
+    project = dict(project or {})
+    job = dict(job or {})
+    result = dict(result or {})
+    invoice = _json_loads(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    scene_count = max(
+        1,
+        min(
+            20,
+            _as_int(
+                project.get("scene_count")
+                or job.get("scene_count")
+                or result.get("scene_count")
+                or result.get("scenes_total")
+                or invoice.get("scene_count"),
+                1,
+            ),
+        ),
+    )
+    expected = list(range(1, scene_count + 1))
+    tasks_source = "result.scene_tasks"
+    scene_tasks = result.get("scene_tasks") if isinstance(result.get("scene_tasks"), list) else []
+    if not scene_tasks and isinstance(job.get("scene_tasks"), list):
+        tasks_source = "job.scene_tasks"
+        scene_tasks = list(job.get("scene_tasks") or [])
+    if not scene_tasks:
+        tasks_source = "recovered_initial_scene_plan"
+        scene_tasks = product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count)
+    result_urls = _product_video_index_map(result.get("scene_result_urls_by_index"))
+    validations = _product_video_index_map(result.get("scene_clip_validation_by_index"))
+    task_scene_index_map: dict[str, int] = {}
+    valid_indexes: set[int] = set()
+    unknown_scene_task_ignored = False
+    for raw in scene_tasks:
+        if not isinstance(raw, dict):
+            continue
+        index = _product_video_scene_task_index(raw)
+        task_id = str(raw.get("provider_task_id") or raw.get("task_id") or raw.get("provider_video_id") or raw.get("video_id") or "").strip()
+        if task_id and index:
+            task_scene_index_map[task_id[-8:] if len(task_id) > 8 else task_id] = index
+        if task_id and not index and scene_count > 1:
+            unknown_scene_task_ignored = True
+        if index in expected and _product_video_scene_task_is_valid_clip(raw):
+            valid_indexes.add(index)
+    for key, value in validations.items():
+        index = _as_int(key, 0)
+        if index in expected and isinstance(value, dict) and bool(value.get("ok")):
+            valid_indexes.add(index)
+        elif scene_count > 1 and index <= 0 and value:
+            unknown_scene_task_ignored = True
+    for key, value in result_urls.items():
+        index = _as_int(key, 0)
+        if index in expected and str(value).strip().lower() in {"yes", "true", "1", "valid"}:
+            valid_indexes.add(index)
+        elif scene_count > 1 and index <= 0 and value:
+            unknown_scene_task_ignored = True
+    # A bare final/result URL without scene index is allowed for one-scene jobs
+    # only. For multi-scene jobs it is diagnostic evidence, not coverage.
+    if scene_count == 1 and bool(result.get("result_url_present") or result.get("provider_result_url_present") or result.get("final_mp4_valid")):
+        valid_indexes.add(1)
+    elif scene_count > 1 and bool(result.get("result_url_present") or result.get("provider_result_url_present")) and not valid_indexes:
+        unknown_scene_task_ignored = True
+    coverage_count = len(valid_indexes)
+    concat_attempted = bool(result.get("concat_attempted") or result.get("stitch_attempted"))
+    concat_output_valid = bool(
+        result.get("concat_output_valid")
+        or result.get("stitch_output_valid")
+        or (str(result.get("concat_status") or "").strip().lower() == "completed" and result.get("final_mp4_valid"))
+    )
+    scene_coverage_valid = bool(scene_count == 1 and coverage_count >= 1) or bool(scene_count > 1 and coverage_count >= scene_count and concat_attempted and concat_output_valid)
+    artifact_valid_for_charge = bool(
+        result.get("final_mp4_valid")
+        and (
+            scene_count == 1
+            or (scene_count > 1 and scene_coverage_valid and concat_output_valid)
+        )
+    )
+    missing = [index for index in expected if index not in valid_indexes]
+    now_dt = now or datetime.now()
+    created_epoch = _parse_time_epoch(result.get("provider_started_at") or job.get("started_at") or job.get("updated_at") or job.get("created_at"))
+    elapsed = max(
+        _as_int(result.get("scene_coverage_elapsed_seconds") or result.get("provider_wait_elapsed_seconds") or result.get("provider_elapsed_seconds"), 0),
+        int(max(0, now_dt.timestamp() - created_epoch)) if created_epoch > 0 else 0,
+    )
+    timeout_seconds = max(60, _as_int(result.get("missing_scene_timeout_seconds") or result.get("scene_coverage_timeout_seconds") or result.get("provider_wait_max_seconds"), 20 * 60))
+    timeout = bool(missing and elapsed >= timeout_seconds)
+    if not missing:
+        action = "concat" if scene_count > 1 and not concat_output_valid else "complete"
+    elif timeout:
+        action = "timeout"
+    elif any(_product_video_scene_task_is_valid_clip(item) is False for item in scene_tasks if isinstance(item, dict)):
+        action = "poll"
+    else:
+        action = "wait"
+    return {
+        "scene_plan_recovered": bool(tasks_source != "result.scene_tasks"),
+        "scene_plan_source": tasks_source,
+        "expected_scene_indexes": expected,
+        "task_scene_index_map": task_scene_index_map,
+        "unknown_scene_task_ignored_for_coverage": bool(unknown_scene_task_ignored),
+        "scene_coverage_expected": scene_count,
+        "scene_coverage_valid": bool(scene_coverage_valid),
+        "scene_coverage_count": coverage_count,
+        "missing_scene_indexes": missing,
+        "missing_scene_action": action,
+        "missing_scene_timeout_seconds": timeout_seconds,
+        "missing_scene_elapsed_seconds": elapsed,
+        "missing_scene_coverage_timeout": bool(timeout),
+        "delivery_blocked_by_scene_coverage": bool(scene_count > 1 and not scene_coverage_valid),
+        "invalid_delivery_attempt_prevented": bool(scene_count > 1 and not scene_coverage_valid),
+        "artifact_valid_for_charge_after_coverage": bool(artifact_valid_for_charge),
+        "concat_attempted": bool(concat_attempted),
+        "concat_output_valid": bool(concat_output_valid),
+        "concat_status": str(result.get("concat_status") or ("completed" if concat_output_valid else ("waiting_for_clips" if scene_count > 1 else ""))),
+    }
+
+
 def _product_video_charge_first_int(source: dict[str, Any], keys: tuple[str, ...], default: int = 0) -> int:
     for key in keys:
         value = source.get(key)
@@ -2200,6 +2353,14 @@ def product_video_delivery_charge_decision(
     )
     if not valid:
         return {"ok": False, "amount_xu": 0, "charge_skip_reason": "valid_mp4_required_before_charge"}
+    coverage = product_video_scene_coverage_state(project, job, result)
+    if not coverage.get("artifact_valid_for_charge_after_coverage"):
+        return {
+            "ok": False,
+            "amount_xu": 0,
+            "charge_skip_reason": "scene_coverage_required_before_charge",
+            **coverage,
+        }
     user_visible = _product_video_charge_first_int(
         merged,
         ("user_visible_price_xu", "package_xu", "package_price_xu", "package_base_xu"),
@@ -2293,6 +2454,67 @@ def complete_video_job(
     )
     terminal_state = "needs_admin_review" if safe_claim_only_diagnostic else "final_delivered"
     if product_job and not safe_claim_only_diagnostic:
+        coverage = product_video_scene_coverage_state(project, job, payload)
+        payload.update(coverage)
+        if coverage.get("delivery_blocked_by_scene_coverage"):
+            payload.update(
+                {
+                    "ok": False,
+                    "final_delivered": False,
+                    "final_mp4_delivered": False,
+                    "delivery_succeeded": False,
+                    "artifact_valid_for_charge": False,
+                    "charge_skip_reason": "scene_coverage_required_before_charge",
+                    "public_progress_source": "waiting_missing_scene_coverage",
+                    "final_progress_after_reconcile": min(84, max(20, _as_int(job.get("progress_percent"), 65))),
+                }
+            )
+            if coverage.get("missing_scene_coverage_timeout"):
+                payload.update(
+                    {
+                        "terminal_state": "failed_no_charge",
+                        "final_decision": "failed_no_charge",
+                        "provider_error": "missing_scene_coverage_timeout",
+                        "blocker": "missing_scene_coverage_timeout",
+                        "continue_polling": False,
+                        "no_charge": True,
+                    }
+                )
+                conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
+                conn.commit()
+                return fail_video_job(conn, job_id=int(job_id), error="missing_scene_coverage_timeout", retry=False)
+            payload.update(
+                {
+                    "terminal_state": "final_rendering",
+                    "final_decision": "continue_polling",
+                    "continue_polling": True,
+                    "provider_error": "missing_scene_coverage_waiting",
+                    "blocker": "missing_scene_coverage_waiting",
+                    "no_charge": True,
+                }
+            )
+            current = now_text()
+            conn.execute(
+                """UPDATE video_jobs
+                   SET status='processing', result_json=?, progress_percent=?,
+                       progress_message='waiting_missing_scene_coverage', updated_at=?
+                   WHERE id=?""",
+                (
+                    _json_dumps(payload),
+                    int(payload.get("final_progress_after_reconcile") or 65),
+                    current,
+                    int(job_id),
+                ),
+            )
+            conn.execute(
+                """UPDATE video_projects
+                   SET status='processing', video_terminal_state='final_rendering',
+                       error_log='missing_scene_coverage_waiting', updated_at=?
+                   WHERE project_id=?""",
+                (current, int(job["project_id"])),
+            )
+            conn.commit()
+            return {"ok": False, "reason": "missing_scene_coverage_waiting", "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}
         validation = video_final_output.validate_final_video_output(
             path=str(final_video_path or payload.get("final_video_path") or ""),
             result=payload,
@@ -2435,6 +2657,80 @@ def note_video_delivery_result(
         )
     else:
         clean_reason = str(reason or "telegram_delivery_failed").replace("\n", " ")[:500]
+        coverage = product_video_scene_coverage_state(project, job, payload)
+        coverage_reason = clean_reason in {
+            "scene_coverage_required_before_delivery",
+            "missing_scene_coverage_waiting",
+            "missing_scene_coverage_timeout",
+            "final_duration_short_scene_coverage_missing",
+        } or bool(payload.get("delivery_blocked_by_scene_coverage") or coverage.get("delivery_blocked_by_scene_coverage"))
+        if coverage_reason:
+            payload.update(
+                {
+                    **coverage,
+                    "final_delivery_attempted": False,
+                    "telegram_delivery_status": "delivery_blocked_by_scene_coverage",
+                    "final_delivered": False,
+                    "final_mp4_delivered": False,
+                    "delivery_succeeded": False,
+                    "video_delivered": False,
+                    "charge_after_delivery_attempted": bool(payload.get("charge_after_delivery_attempted")),
+                    "charge_skip_reason": "scene_coverage_required_before_charge",
+                    "public_progress_source": "waiting_missing_scene_coverage",
+                    "final_progress_after_reconcile": min(84, max(20, _as_int(job.get("progress_percent"), 65))),
+                    "no_charge": True,
+                }
+            )
+            if coverage.get("missing_scene_coverage_timeout") or clean_reason == "missing_scene_coverage_timeout":
+                payload.update(
+                    {
+                        "terminal_state": "failed_no_charge",
+                        "final_decision": "failed_no_charge",
+                        "continue_polling": False,
+                        "provider_error": "missing_scene_coverage_timeout",
+                        "blocker": "missing_scene_coverage_timeout",
+                    }
+                )
+                conn.execute(
+                    """UPDATE video_projects
+                       SET video_terminal_state='failed_no_charge', error_log='missing_scene_coverage_timeout',
+                           delivery_attempt_count=?, updated_at=?
+                       WHERE project_id=?""",
+                    (attempts, current, int(project["project_id"])),
+                )
+                conn.execute(
+                    """UPDATE video_jobs
+                       SET status='failed', result_json=?, progress_percent=?,
+                           progress_message='missing_scene_coverage_timeout', completed_at=COALESCE(completed_at, ?), updated_at=?
+                       WHERE id=?""",
+                    (_json_dumps(payload), int(payload.get("final_progress_after_reconcile") or 84), current, current, int(job_id)),
+                )
+            else:
+                payload.update(
+                    {
+                        "terminal_state": "final_rendering",
+                        "final_decision": "continue_polling",
+                        "continue_polling": True,
+                        "provider_error": "missing_scene_coverage_waiting",
+                        "blocker": "missing_scene_coverage_waiting",
+                    }
+                )
+                conn.execute(
+                    """UPDATE video_projects
+                       SET status='processing', video_terminal_state='final_rendering',
+                           error_log='missing_scene_coverage_waiting', delivery_attempt_count=?, updated_at=?
+                       WHERE project_id=?""",
+                    (attempts, current, int(project["project_id"])),
+                )
+                conn.execute(
+                    """UPDATE video_jobs
+                       SET status='processing', result_json=?, progress_percent=?,
+                           progress_message='waiting_missing_scene_coverage', updated_at=?
+                       WHERE id=?""",
+                    (_json_dumps(payload), int(payload.get("final_progress_after_reconcile") or 65), current, int(job_id)),
+                )
+            conn.commit()
+            return {"ok": True, "sent": False, "delivery_blocked_by_scene_coverage": True, "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(project["project_id"]))}
         payload.update(
             {
                 "final_delivery_attempted": True,

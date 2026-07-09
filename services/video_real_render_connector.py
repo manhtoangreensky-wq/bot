@@ -2723,6 +2723,20 @@ def _run_per_scene_provider_orchestrator(
             str(index),
             {"ok": False, "path_present": False, "bytes": 0},
         )
+    expected_scene_indexes = list(range(1, _scene_count(job) + 1))
+    missing_scene_indexes = [index for index in expected_scene_indexes if index not in scene_outputs]
+    scene_coverage_valid_bool = bool(len(scene_outputs) >= _scene_count(job))
+    task_scene_index_map = {
+        str((item.get("provider_task_id_masked") or item.get("provider_video_id_masked") or item.get("canonical_task_selected") or "")): _safe_int(item.get("scene_index"), 0)
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+        and str((item.get("provider_task_id_masked") or item.get("provider_video_id_masked") or item.get("canonical_task_selected") or ""))
+    }
+    unknown_scene_task_ignored = any(
+        bool((item.get("provider_task_id_masked") or item.get("provider_video_id_masked") or item.get("canonical_task_selected")))
+        and not _safe_int(item.get("scene_index"), 0)
+        for item in scene_tasks
+    )
     active_scene = next(
         (
             item
@@ -2767,6 +2781,14 @@ def _run_per_scene_provider_orchestrator(
         "selected_model_by_scene": selected_model_by_scene,
         "scene_coverage_expected": _scene_count(job),
         "scene_coverage_valid": len(scene_outputs),
+        "scene_coverage_valid_bool": bool(scene_coverage_valid_bool),
+        "scene_coverage_count": len(scene_outputs),
+        "expected_scene_indexes": expected_scene_indexes,
+        "missing_scene_indexes": missing_scene_indexes,
+        "scene_plan_recovered": False,
+        "scene_plan_source": "runtime_scene_plan",
+        "task_scene_index_map": task_scene_index_map,
+        "unknown_scene_task_ignored_for_coverage": bool(unknown_scene_task_ignored),
         "scene_result_urls_by_index": scene_result_urls_by_index,
         "scene_clip_validation_by_index": scene_clip_validation_by_index,
         "canonical_scene_index": _safe_int(active_scene.get("canonical_scene_index") or active_scene.get("scene_index"), 0),
@@ -2823,6 +2845,10 @@ def _run_per_scene_provider_orchestrator(
         "concat_output_valid": False,
         "concat_status": "ready_to_concat" if len(scene_outputs) >= _scene_count(job) else "waiting_for_clips",
         "concat_ready": bool(len(scene_outputs) >= _scene_count(job)),
+        "delivery_blocked_by_scene_coverage": bool(_scene_count(job) > 1 and not scene_coverage_valid_bool),
+        "invalid_delivery_attempt_prevented": bool(_scene_count(job) > 1 and not scene_coverage_valid_bool),
+        "artifact_valid_for_charge_after_coverage": bool(_scene_count(job) == 1 and len(scene_outputs) >= 1),
+        "missing_scene_action": "poll" if missing_scene_indexes else "concat",
         "provider_router_called": True,
         "provider_submit_called": any(bool(item.get("provider_submit_called")) for item in debug_results if isinstance(item, dict)),
         "provider_poll_called": any(bool(item.get("provider_poll_called")) for item in debug_results if isinstance(item, dict)),
@@ -2909,6 +2935,14 @@ def _run_per_scene_provider_orchestrator(
     final_result["concat_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
     final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
     final_result["final_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
+    final_result["scene_coverage_count"] = len(scene_outputs)
+    final_result["scene_coverage_valid"] = len(scene_outputs)
+    final_result["scene_coverage_valid_bool"] = bool(len(scene_outputs) >= _scene_count(job) and final_result["concat_output_valid"])
+    final_result["missing_scene_indexes"] = []
+    final_result["delivery_blocked_by_scene_coverage"] = False
+    final_result["invalid_delivery_attempt_prevented"] = False
+    final_result["artifact_valid_for_charge_after_coverage"] = bool(final_result["scene_coverage_valid_bool"])
+    final_result["missing_scene_action"] = "complete"
     return final_result
 
 
@@ -3702,7 +3736,21 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             result = {"ok": False, "error": provider_error}
         if not result.get("ok"):
             provider_error = str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
-    elif is_product_video:
+    if (
+        is_product_video
+        and isinstance(result, dict)
+        and not result.get("ok")
+        and bool(result.get("continue_polling"))
+        and str(result.get("terminal_state") or "") in {"", "final_rendering"}
+    ):
+        result["status"] = "processing"
+        result["terminal_state"] = "final_rendering"
+        result["final_decision"] = "continue_polling"
+        result["no_charge"] = True
+        result.setdefault("provider_error", provider_error or result.get("blocker") or "provider_in_progress")
+        result.setdefault("blocker", result.get("provider_error") or "provider_in_progress")
+        return _record_render_diagnostics(result)
+    if is_product_video and not readiness.get("ok"):
         provider_error = str(readiness.get("reason") or "provider_capability_missing")
     if is_product_video and route_requires_provider and (not result or not result.get("ok")):
         blocker = str((result or {}).get("blocker") or (result or {}).get("provider_error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
