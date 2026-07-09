@@ -1820,6 +1820,15 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "provider_auth_scheme_prefix",
         "provider_payload_keys",
         "provider_payload_model",
+        "model_used_in_payload",
+        "selected_model",
+        "selected_family",
+        "selected_model_source",
+        "selected_quality",
+        "selected_payload_adapter",
+        "provider_catalog_model_found",
+        "supports_concat",
+        "contract_validation_status",
         "provider_response_http_status",
         "provider_response_body_shape",
         "provider_submit_exception_class",
@@ -2330,7 +2339,8 @@ def run_provider_generation(
             metadata = dict(provider_request.metadata or request.metadata or {})
             submit_configured = _safe_cap_bool("submit_url_configured", "provider_submit_url_configured")
             auth_value_present = _safe_cap_bool("provider_auth_value_present", "auth_present", "auth_configured")
-            model_present = _safe_cap_bool("provider_model_present", "model_present", "model_configured") or bool(_safe_cap_text("provider_payload_model"))
+            selected_model = str(metadata.get("selected_model") or "").strip()
+            model_present = _safe_cap_bool("provider_model_present", "model_present", "model_configured") or bool(_safe_cap_text("provider_payload_model")) or bool(selected_model)
             attempt_submit_source = (
                 PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE
                 if fallback_used
@@ -2368,7 +2378,23 @@ def run_provider_generation(
                 "provider_auth_scheme_prefix": _safe_cap_text("provider_auth_scheme_prefix", "auth_scheme"),
                 "provider_model_present": model_present,
                 "model_present": model_present,
-                "provider_payload_model": _safe_cap_text("provider_payload_model"),
+                "provider_payload_model": _safe_cap_text("provider_payload_model") or selected_model,
+                "selected_model": selected_model,
+                "selected_family": str(metadata.get("selected_family") or ""),
+                "selected_model_source": str(metadata.get("selected_model_source") or ""),
+                "selected_quality": str(metadata.get("selected_quality") or ""),
+                "selected_capabilities": list(metadata.get("selected_capabilities") or []),
+                "selected_clip_seconds": int(metadata.get("selected_clip_seconds") or 0) if str(metadata.get("selected_clip_seconds") or "").strip() else 0,
+                "selected_payload_adapter": str(metadata.get("selected_payload_adapter") or ""),
+                "model_used_in_payload": selected_model,
+                "provider_model_map": dict(metadata.get("provider_model_map") or {}) if isinstance(metadata.get("provider_model_map"), dict) else {},
+                "provider_catalog_model_found": bool(metadata.get("provider_catalog_model_found")),
+                "supports_concat": bool(metadata.get("supports_concat")),
+                "contract_validation_status": str(metadata.get("contract_validation_status") or ""),
+                "model_routing_blocker": str(metadata.get("model_routing_blocker") or ""),
+                "rejected_models": list(metadata.get("rejected_models") or []),
+                "required_capability_original": str(metadata.get("required_capability_original") or request.required_capability or ""),
+                "normalized_capability_candidates": list(metadata.get("normalized_capability_candidates") or []),
                 "provider_chain_fallback_attempted": bool(fallback_used),
                 "fallback_provider_attempts": list(attempt_failures),
                 "provider_fallback_attempted": bool(attempt_failures or fallback_used),

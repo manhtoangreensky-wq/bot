@@ -24,6 +24,13 @@ from services.video_provider_base import (
     materialize_video_url,
     normalize_provider_status,
 )
+from services.video_provider_catalog import (
+    MODEL_UNKNOWN,
+    enforce_payload_contract,
+    enrich_metadata_with_model_contract,
+    provider_model_config,
+    selected_model_for_provider,
+)
 
 
 TASK_ID_PATHS = (
@@ -335,10 +342,20 @@ def _auth_scheme_prefix(value: Any) -> str:
 def _payload_debug(payload: dict[str, Any]) -> dict[str, Any]:
     keys = sorted(str(key) for key in payload.keys())[:80]
     model = str(payload.get("model") or payload.get("model_id") or payload.get("modelName") or "")[:120]
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
     return {
         "payload_keys": keys,
         "provider_payload_keys": keys,
         "provider_payload_model": model,
+        "model_used_in_payload": model,
+        "selected_model": str(metadata.get("selected_model") or model),
+        "selected_family": str(metadata.get("selected_family") or ""),
+        "selected_model_source": str(metadata.get("selected_model_source") or ""),
+        "selected_quality": str(metadata.get("selected_quality") or ""),
+        "selected_payload_adapter": str(metadata.get("selected_payload_adapter") or metadata.get("payload_adapter") or ""),
+        "provider_catalog_model_found": bool(metadata.get("provider_catalog_model_found")),
+        "supports_concat": bool(metadata.get("supports_concat")),
+        "contract_validation_status": str(metadata.get("contract_validation_status") or ""),
         "payload_has_prompt": bool(payload.get("prompt")),
         "payload_has_duration": bool(payload.get("duration") or payload.get("duration_seconds")),
         "payload_has_ratio": bool(payload.get("ratio") or payload.get("aspect_ratio") or payload.get("aspectRatio")),
@@ -389,10 +406,46 @@ def _validated_ratio(request: VideoGenerationRequest) -> str:
 
 def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     env = env or os.environ
-    source = str((request.metadata or {}).get("source") or ("admin_smoke" if (request.metadata or {}).get("admin_smoke") else "product_video"))
+    request_metadata = dict(request.metadata or {})
+    source = str(request_metadata.get("source") or ("admin_smoke" if request_metadata.get("admin_smoke") else "product_video"))
     duration = _validated_duration(request)
     ratio = _validated_ratio(request)
     quality = str(request.quality or env.get("VIDEO_PROVIDER_DEFAULT_QUALITY") or "basic").strip() or "basic"
+    safe_metadata_keys = (
+        "job_id",
+        "source",
+        "wallet_charge",
+        "product_video",
+        "scene_id",
+        "scene_index",
+        "clip_index",
+        "clip_count",
+        "scene_count",
+        "scene_duration_seconds",
+        "clip_duration_seconds",
+        "orchestration_mode",
+        "provider_orchestration_mode",
+        "render_pipeline_mode",
+        "expected_duration_seconds",
+        "selected_provider",
+        "selected_model",
+        "selected_family",
+        "selected_model_source",
+        "selected_quality",
+        "selected_capabilities",
+        "selected_clip_seconds",
+        "selected_payload_adapter",
+        "provider_model_map",
+        "provider_catalog_model_found",
+        "supports_concat",
+        "contract_validation_status",
+        "required_capability_original",
+        "normalized_capability_candidates",
+    )
+    metadata = {"job_id": request.job_id or "smoke", "source": source, "wallet_charge": False}
+    for key in safe_metadata_keys:
+        if key in request_metadata:
+            metadata[key] = request_metadata.get(key)
     return {
         "job_id": request.job_id or "smoke",
         "source": source,
@@ -413,7 +466,7 @@ def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | o
         "storyboard": list(request.storyboard or []),
         "image_paths": list(request.image_paths or []),
         "source_video_path": request.source_video_path,
-        "metadata": {"job_id": request.job_id or "smoke", "source": source, "wallet_charge": False},
+        "metadata": metadata,
     }
 
 
@@ -434,17 +487,42 @@ def _shopaikey_uses_historical_small_clip_contract(request: VideoGenerationReque
 
 def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
-    model = str((env or os.environ).get("KEY4U_VIDEO_MODEL") or (env or os.environ).get("VIDEO_PROVIDER_MODEL") or "").strip()
+    model = str(
+        selected_model_for_provider(request.metadata, "key4u_video")
+        or (env or os.environ).get("KEY4U_VIDEO_MODEL")
+        or (env or os.environ).get("VIDEO_PROVIDER_MODEL")
+        or ""
+    ).strip()
     if model:
+        if not provider_model_config("key4u_video", model):
+            raise VideoProviderContractError(
+                MODEL_UNKNOWN,
+                stage="payload_build",
+                debug={"provider": "key4u_video", "model": model, "blocker": MODEL_UNKNOWN, "no_charge": True},
+            )
         data["model"] = model
+        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "key4u_video", model)
+        data = enforce_payload_contract("key4u_video", model, data)
     return data
 
 
 def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
-    model = str((env or os.environ).get("SHOPAIKEY_VIDEO_MODEL") or (env or os.environ).get("VIDEO_PROVIDER_MODEL") or "").strip()
+    model = str(
+        selected_model_for_provider(request.metadata, "shopaikey_video")
+        or (env or os.environ).get("SHOPAIKEY_VIDEO_MODEL")
+        or (env or os.environ).get("VIDEO_PROVIDER_MODEL")
+        or ""
+    ).strip()
     if model:
+        if not provider_model_config("shopaikey_video", model):
+            raise VideoProviderContractError(
+                MODEL_UNKNOWN,
+                stage="payload_build",
+                debug={"provider": "shopaikey_video", "model": model, "blocker": MODEL_UNKNOWN, "no_charge": True},
+            )
         data["model"] = model
+        data["metadata"] = enrich_metadata_with_model_contract(data.get("metadata"), "shopaikey_video", model)
     if _shopaikey_uses_historical_small_clip_contract(request):
         try:
             small_clip_seconds = int(float((env or os.environ).get("SHOPAIKEY_VIDEO_SMALL_CLIP_SECONDS") or 8))
@@ -467,6 +545,8 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
             }
         )
         data["metadata"] = metadata
+    if model:
+        data = enforce_payload_contract("shopaikey_video", model, data)
     return data
 
 

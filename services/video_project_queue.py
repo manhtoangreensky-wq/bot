@@ -17,6 +17,10 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from services import video_final_output
+from services.video_provider_catalog import (
+    model_metadata_from_resolution,
+    resolve_product_video_model,
+)
 
 
 PROJECT_STATUSES = (
@@ -1553,9 +1557,43 @@ def build_product_video_confirm_kickoff_payload(
             or ""
         )
         chain = _split_product_video_provider_chain(source_chain) or resolve_product_video_provider_chain()
+    model_resolution = resolve_product_video_model(
+        tier=invoice.get("tier")
+        or invoice.get("tier_key")
+        or invoice.get("package_xu")
+        or invoice.get("quality_tier")
+        or project.get("quality_tier")
+        or project.get("total_xu_estimated")
+        or "basic",
+        provider_chain=chain,
+        scene_count=scene_count,
+        required_capability="text_to_video_or_scene_video",
+        requires_concat=per_scene_orchestration,
+    )
+    model_metadata = model_metadata_from_resolution(model_resolution)
+    if scene_tasks:
+        for task in scene_tasks:
+            task.update(
+                {
+                    "selected_provider": model_metadata.get("selected_provider") or "",
+                    "selected_model": model_metadata.get("selected_model") or "",
+                    "selected_family": model_metadata.get("selected_family") or "",
+                    "selected_model_source": model_metadata.get("selected_model_source") or "",
+                    "selected_payload_adapter": model_metadata.get("selected_payload_adapter") or "",
+                    "model_used": model_metadata.get("selected_model") or "",
+                    "model_used_in_payload": model_metadata.get("selected_model") or "",
+                    "provider_model_map": dict(model_metadata.get("provider_model_map") or {}),
+                    "contract_validation_status": model_metadata.get("contract_validation_status") or "",
+                    "supports_concat": bool(model_metadata.get("supports_concat")),
+                }
+            )
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
-    provider_chain_resolved = bool(chain)
-    dispatch_blocker = "" if provider_chain_resolved else "provider_chain_missing_no_charge"
+    provider_chain_resolved = bool(chain and model_resolution.get("ok"))
+    dispatch_blocker = ""
+    if not chain:
+        dispatch_blocker = "provider_chain_missing_no_charge"
+    elif not model_resolution.get("ok"):
+        dispatch_blocker = str(model_resolution.get("blocker") or "provider_contract_missing_no_charge")
     return {
         "source": "product_video",
         "product_video": True,
@@ -1611,6 +1649,7 @@ def build_product_video_confirm_kickoff_payload(
         "provider_chain": chain,
         "provider_order": chain,
         "provider_chain_resolved": provider_chain_resolved,
+        **model_metadata,
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,
         "worker_dispatch_attempted": True,

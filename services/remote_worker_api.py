@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from services import video_project_queue
+from services.video_provider_catalog import model_metadata_from_resolution, resolve_product_video_model
 
 
 SECRET_KEY_MARKERS = (
@@ -985,6 +986,47 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 break
         if not configured_chain:
             configured_chain = video_project_queue.resolve_product_video_provider_chain()
+        model_context: dict[str, Any] = {}
+        for source_dict in (persisted_result, invoice, asset_pack):
+            if not isinstance(source_dict, dict):
+                continue
+            for key in (
+                "model_routing_ok",
+                "product_video_tier",
+                "selected_provider",
+                "selected_model",
+                "selected_family",
+                "selected_model_source",
+                "selected_quality",
+                "selected_capabilities",
+                "selected_clip_seconds",
+                "selected_payload_adapter",
+                "provider_model_map",
+                "provider_catalog_model_found",
+                "supports_concat",
+                "contract_validation_status",
+                "rejected_models",
+                "required_capability_original",
+                "normalized_capability_candidates",
+                "model_routing_blocker",
+            ):
+                if key not in model_context and source_dict.get(key) not in (None, "", [], {}):
+                    model_context[key] = source_dict.get(key)
+        if not model_context.get("selected_model"):
+            model_resolution = resolve_product_video_model(
+                tier=invoice.get("tier")
+                or invoice.get("tier_key")
+                or invoice.get("package_xu")
+                or invoice.get("quality_tier")
+                or project.get("quality_tier")
+                or hydrated_job.get("quality_tier")
+                or "basic",
+                provider_chain=configured_chain,
+                scene_count=safe_scene_count,
+                required_capability="text_to_video_or_scene_video",
+                requires_concat=product_video_per_scene_orchestration,
+            )
+            model_context.update(model_metadata_from_resolution(model_resolution))
         payload.update(
             {
                 "configured_provider_chain": configured_chain,
@@ -993,6 +1035,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "provider_order": configured_chain,
                 "provider_chain_resolved": bool(configured_chain),
                 "scenes_total": safe_scene_count,
+                **model_context,
             }
         )
         if product_video_per_scene_orchestration:
@@ -1002,6 +1045,17 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 if isinstance(item, dict)
             ]
             scene_tasks = _full_scene_tasks(seed_scene_tasks)
+            for item in scene_tasks:
+                if isinstance(item, dict):
+                    item.setdefault("selected_provider", model_context.get("selected_provider") or "")
+                    item.setdefault("selected_model", model_context.get("selected_model") or "")
+                    item.setdefault("selected_family", model_context.get("selected_family") or "")
+                    item.setdefault("selected_model_source", model_context.get("selected_model_source") or "")
+                    item.setdefault("selected_payload_adapter", model_context.get("selected_payload_adapter") or "")
+                    item.setdefault("model_used", model_context.get("selected_model") or "")
+                    item.setdefault("model_used_in_payload", model_context.get("selected_model") or "")
+                    item.setdefault("provider_model_map", dict(model_context.get("provider_model_map") or {}))
+                    item.setdefault("contract_validation_status", model_context.get("contract_validation_status") or "")
             submitted_count = sum(
                 1
                 for item in scene_tasks
@@ -1111,6 +1165,17 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                         }
                     )
             scene_tasks = _full_scene_tasks(scene_tasks)
+            for item in scene_tasks:
+                if isinstance(item, dict):
+                    item.setdefault("selected_provider", model_context.get("selected_provider") or "")
+                    item.setdefault("selected_model", model_context.get("selected_model") or "")
+                    item.setdefault("selected_family", model_context.get("selected_family") or "")
+                    item.setdefault("selected_model_source", model_context.get("selected_model_source") or "")
+                    item.setdefault("selected_payload_adapter", model_context.get("selected_payload_adapter") or "")
+                    item.setdefault("model_used", model_context.get("selected_model") or "")
+                    item.setdefault("model_used_in_payload", model_context.get("selected_model") or "")
+                    item.setdefault("provider_model_map", dict(model_context.get("provider_model_map") or {}))
+                    item.setdefault("contract_validation_status", model_context.get("contract_validation_status") or "")
             submitted_count = sum(
                 1
                 for item in scene_tasks
