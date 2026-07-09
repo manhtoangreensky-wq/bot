@@ -90047,9 +90047,22 @@ def video_public_status_payload() -> dict:
     hidden_video_freeze = bool(freeze.get("frozen"))
     public_video_maintenance = product_video_public_maintenance_enabled()
     public_live_provider_allowed = bool(product_video_submit_enabled and not public_video_maintenance)
-    model_catalog = video_provider_catalog.catalog_status_payload()
-    worker = local_worker_status_payload()
-    remote_worker = video_remote_worker_runtime_status()
+    section_errors: list[str] = []
+    try:
+        model_catalog = video_provider_catalog.catalog_status_payload()
+    except Exception as exc:
+        model_catalog = {"catalog_loaded": False, "routing_enabled": False, "warning": f"catalog_status_unavailable:{type(exc).__name__}"}
+        section_errors.append(f"model_catalog:{type(exc).__name__}")
+    try:
+        worker = local_worker_status_payload()
+    except Exception as exc:
+        worker = {"frame": {"local_worker_connected": False, "ffmpeg_configured": False, "last_error": f"local_worker_status_unavailable:{type(exc).__name__}"}}
+        section_errors.append(f"local_worker:{type(exc).__name__}")
+    try:
+        remote_worker = video_remote_worker_runtime_status()
+    except Exception as exc:
+        remote_worker = {"connected": False, "reason": f"remote_worker_status_unavailable:{type(exc).__name__}"}
+        section_errors.append(f"product_video_worker:{type(exc).__name__}")
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
     frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
     ai_public = bool(
@@ -90120,6 +90133,7 @@ def video_public_status_payload() -> dict:
         },
         "product_video_provider_health": product_video_provider_health,
         "product_video_model_catalog": model_catalog,
+        "video_public_status_section_errors": section_errors,
         "conclusion": {
             "planning_video": "PUBLIC" if planning_public else "OFF",
             "trend_content": "PUBLIC" if VIDEO_TREND_CONTENT_PUBLIC_ENABLED else "OFF",
@@ -90150,6 +90164,7 @@ def video_public_status_payload() -> dict:
 
 def video_public_status_text() -> str:
     payload = video_public_status_payload()
+    section_errors = list(payload.get("video_public_status_section_errors") or [])
     flags = payload.get("public_flags") if isinstance(payload.get("public_flags"), dict) else {}
     frame_gate = payload.get("frame_gate") if isinstance(payload.get("frame_gate"), dict) else {}
     frame = frame_gate.get("frame") if isinstance(frame_gate.get("frame"), dict) else {}
@@ -90175,6 +90190,8 @@ def video_public_status_text() -> str:
     remote_worker = payload.get("remote_worker") if isinstance(payload.get("remote_worker"), dict) else {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
+        f"• video_public_status_chunked: <code>no</code>",
+        f"• video_public_status_section_errors: <code>{html.escape(','.join(section_errors) or '-')}</code>",
         "",
         "<b>Public flags</b>",
         f"• Maintenance: <code>{video_public_bool_label(ops.get('maintenance_mode'))}</code>",
@@ -90250,13 +90267,13 @@ def video_public_status_text() -> str:
         f"• job lock: <code>{video_public_bool_label(SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED and SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED)}</code>",
         f"• pricing source: <code>tiered_media_pricing</code>",
         f"• allowed public tiers: <code>{html.escape(', '.join(billing.get('allowed_tiers') or video_public_allowed_tiers()))}</code>",
-        f"• max duration: <code>{int(flags.get('VIDEO_PUBLIC_MAX_DURATION_SECONDS') or 0)}s</code>",
-        f"• max jobs/user/day: <code>{int(flags.get('VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY') or 0)}</code>",
-        f"• max concurrent jobs: <code>{int(flags.get('VIDEO_PUBLIC_MAX_CONCURRENT_JOBS') or 0)}</code>",
-        f"• 200 Xu starter limit/user/day: <code>{int(flags.get('VIDEO_BETA_200_MAX_USER_DAY') or 1)}</code>",
-        f"• 200 Xu starter limit/user/week: <code>{int(flags.get('VIDEO_BETA_200_MAX_USER_WEEK') or 1)}</code>",
-        f"• 200 Xu starter limit/user/month: <code>{int(flags.get('VIDEO_BETA_200_MAX_USER_MONTH') or 1)}</code>",
-        f"• 200 Xu starter global/day: <code>{int(flags.get('VIDEO_BETA_200_MAX_TOTAL_DAY') or 10)}</code>",
+        f"• max duration: <code>{safe_int(flags.get('VIDEO_PUBLIC_MAX_DURATION_SECONDS'), 0)}s</code>",
+        f"• max jobs/user/day: <code>{safe_int(flags.get('VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY'), 0)}</code>",
+        f"• max concurrent jobs: <code>{safe_int(flags.get('VIDEO_PUBLIC_MAX_CONCURRENT_JOBS'), 0)}</code>",
+        f"• 200 Xu starter limit/user/day: <code>{safe_int(flags.get('VIDEO_BETA_200_MAX_USER_DAY'), 1)}</code>",
+        f"• 200 Xu starter limit/user/week: <code>{safe_int(flags.get('VIDEO_BETA_200_MAX_USER_WEEK'), 1)}</code>",
+        f"• 200 Xu starter limit/user/month: <code>{safe_int(flags.get('VIDEO_BETA_200_MAX_USER_MONTH'), 1)}</code>",
+        f"• 200 Xu starter global/day: <code>{safe_int(flags.get('VIDEO_BETA_200_MAX_TOTAL_DAY'), 10)}</code>",
         "",
         "<b>Launch tier cost review</b>",
     ])
@@ -90282,6 +90299,42 @@ def video_public_status_text() -> str:
     for key, value in conclusion.items():
         lines.append(f"• {html.escape(key.replace('_', ' ').title())}: <code>{html.escape(str(value))}</code>")
     return "\n".join(lines)
+
+
+def video_public_status_chunks(max_chars: int = 3900) -> list[str]:
+    try:
+        text = video_public_status_text()
+    except Exception as exc:
+        text = (
+            "🎬 <b>VIDEO PUBLIC STATUS</b>\n"
+            f"• video_public_status_section_error=<code>top:{html.escape(type(exc).__name__)}</code>\n"
+            "• status: <code>partial_status_available</code>"
+        )
+    safe_max = max(900, min(3900, int(max_chars or 3900)))
+    if len(text) <= safe_max:
+        return [text]
+    lines = text.splitlines()
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in lines:
+        piece = line if len(line) <= safe_max - 10 else line[: safe_max - 40] + "…"
+        piece_len = len(piece) + 1
+        if current and current_len + piece_len > safe_max:
+            chunks.append("\n".join(current))
+            current = []
+            current_len = 0
+        current.append(piece)
+        current_len += piece_len
+    if current:
+        chunks.append("\n".join(current))
+    if chunks:
+        chunks[0] = chunks[0].replace(
+            "• video_public_status_chunked: <code>no</code>",
+            "• video_public_status_chunked: <code>yes</code>",
+            1,
+        )
+    return chunks or [text[:safe_max]]
 
 VIDEO_GATE_FEATURES = [
     ("Video menu", "tier_a", "video_menu"),
@@ -92380,7 +92433,15 @@ async def _cmd_video_smoke_tier(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_video_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
-    await update.message.reply_text(video_public_status_text(), parse_mode="HTML")
+    for chunk in video_public_status_chunks():
+        try:
+            await update.message.reply_text(chunk, parse_mode="HTML")
+        except Exception as exc:
+            await update.message.reply_text(
+                "🎬 VIDEO PUBLIC STATUS\n"
+                f"video_public_status_section_error=send:{type(exc).__name__}\n"
+                + html.unescape(re.sub(r"<[^>]+>", "", chunk))[:1800]
+            )
 
 async def cmd_video_gate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
