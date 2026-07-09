@@ -55,7 +55,9 @@ def test_m4live8b_subtitle_translate_ass_splits_long_text_like_m4live7():
     )
 
     assert ass
-    assert ass.count("Dialogue: 0,") >= 2
+    dialogue_lines = [line for line in ass.splitlines() if line.startswith("Dialogue: 0,")]
+    assert dialogue_lines
+    assert all(line.count("\\N") <= 1 for line in dialogue_lines)
     assert "subtitle_timing_preserved: yes" not in ass
     assert "subtitle_text_length_duration_split: no" not in ass
 
