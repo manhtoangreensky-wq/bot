@@ -335,8 +335,9 @@ def _enforce_product_video_terminal_consistency(data: dict[str, Any] | None = No
 
 
 def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None = None) -> dict[str, Any]:
-    if _product_video_terminal_failure_should_dominate(data):
-        return _enforce_product_video_terminal_consistency(data)
+    terminal_probe = {**dict(job or {}), **dict(data or {})}
+    if _product_video_terminal_failure_should_dominate(terminal_probe):
+        return _enforce_product_video_terminal_consistency({**dict(data or {}), **dict(job or {})})
     pending = _pending_attempt_from_payload(data)
     if not pending:
         return data
@@ -375,6 +376,15 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
         "provider_in_progress",
     }:
         existing_fallback_blocked = default_fallback_blocked
+    not_start_elapsed = max(
+        _safe_int(data.get("scene_not_start_elapsed"), 0),
+        _safe_int(data.get("provider_elapsed_seconds"), 0),
+        _safe_int(data.get("provider_wait_elapsed_seconds"), 0),
+        _safe_int(data.get("elapsed_wall_clock_seconds"), 0),
+        _safe_int(data.get("previous_elapsed_seconds"), 0),
+        _safe_int((job or {}).get("provider_elapsed_seconds"), 0),
+        _safe_int((job or {}).get("provider_wait_elapsed_seconds"), 0),
+    )
     data.update(
         {
             "ok": False,
@@ -457,6 +467,8 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
             "elapsed_wall_clock_seconds": int(data.get("elapsed_wall_clock_seconds") or data.get("provider_elapsed_seconds") or 0),
             "previous_elapsed_seconds": int(data.get("previous_elapsed_seconds") or 0),
             "elapsed_monotonic_applied": bool(data.get("elapsed_monotonic_applied")),
+            "scene_not_start_elapsed": not_start_elapsed if pending_raw_not_start else _safe_int(data.get("scene_not_start_elapsed"), 0),
+            "current_scene_status": "provider_not_start" if pending_raw_not_start else str(data.get("current_scene_status") or "provider_running"),
             "panel_refresh_interval_seconds": int(data.get("panel_refresh_interval_seconds") or 25),
             "provider_poll_count": int(data.get("provider_poll_count") or 0),
             "provider_poll_count_source": str(data.get("provider_poll_count_source") or ""),
@@ -1178,9 +1190,66 @@ def product_video_scene_tasks_debug(
 ) -> list[dict[str, Any]]:
     total = max(1, min(20, _safe_int(scene_count, _scene_count(job))))
     by_scene: dict[int, dict[str, Any]] = {}
+    canonical_task_candidates_by_scene: dict[str, list[dict[str, Any]]] = {str(idx): [] for idx in range(1, total + 1)}
+    canonical_task_reject_reasons: dict[str, list[dict[str, Any]]] = {str(idx): [] for idx in range(1, total + 1)}
+
+    def _record_canonical_candidate(source: dict[str, Any], debug: dict[str, Any] | None = None) -> None:
+        debug = dict(debug or {})
+        if not isinstance(source, dict):
+            return
+        idx = _scene_task_index(source, 1)
+        if idx not in by_scene:
+            return
+        debug_task_ids = debug.get("provider_task_ids") if isinstance(debug.get("provider_task_ids"), list) else []
+        debug_video_ids = debug.get("provider_video_ids") if isinstance(debug.get("provider_video_ids"), list) else []
+        task_id = str(
+            source.get("provider_task_id")
+            or source.get("task_id")
+            or (debug_task_ids[0] if debug_task_ids else "")
+            or debug.get("provider_task_id")
+            or ""
+        ).strip()
+        video_id = str(
+            source.get("provider_video_id")
+            or source.get("video_id")
+            or (debug_video_ids[0] if debug_video_ids else "")
+            or debug.get("provider_video_id")
+            or ""
+        ).strip()
+        if not task_id and not video_id:
+            return
+        actual_status, actual_status_source, raw_status_before_fix = _actual_status_payload_value({**source, **debug})
+        candidate = {
+            "scene_index": idx,
+            "task_id": task_id,
+            "task_id_masked": _task_id_masked(task_id),
+            "video_id_masked": _task_id_masked(video_id),
+            "provider": str(source.get("provider") or debug.get("selected_provider") or debug.get("provider") or ""),
+            "provider_status_raw": actual_status
+            or str(debug.get("provider_status_raw") or source.get("provider_status_raw") or source.get("status") or ""),
+            "provider_status_payload_source": actual_status_source,
+            "raw_provider_status_before_source_fix": raw_status_before_fix,
+        }
+        canonical_task_candidates_by_scene[str(idx)].append(candidate)
+        for other_idx in range(1, total + 1):
+            if other_idx == idx:
+                continue
+            canonical_task_reject_reasons[str(other_idx)].append(
+                {
+                    "candidate_scene_index": idx,
+                    "task_id_masked": candidate["task_id_masked"],
+                    "video_id_masked": candidate["video_id_masked"],
+                    "reason": "different_scene",
+                }
+            )
+
     for idx in range(1, total + 1):
         by_scene[idx] = {
             "scene_index": idx,
+            "canonical_scene_index": idx,
+            "canonical_task_selected": "",
+            "canonical_task_candidates_by_scene": {},
+            "canonical_task_reject_reasons": {},
             "scene_duration_seconds": product_video_scene_duration_seconds(job),
             "request_job_id": product_video_scene_request_id(job, idx),
             "provider": "",
@@ -1218,10 +1287,13 @@ def product_video_scene_tasks_debug(
         idx = _scene_task_index(item)
         if idx not in by_scene:
             continue
+        _record_canonical_candidate(item)
         task_id = str(item.get("provider_task_id") or item.get("task_id") or "").strip()
         video_id = str(item.get("provider_video_id") or item.get("video_id") or "").strip()
         actual_status, actual_status_source, raw_status_before_fix = _actual_status_payload_value(item)
         merged = {
+                "canonical_scene_index": idx,
+                "canonical_task_selected": task_id or video_id,
                 "provider": str(item.get("provider") or by_scene[idx].get("provider") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
                 "task_id_masked": _task_id_masked(task_id),
@@ -1252,6 +1324,7 @@ def product_video_scene_tasks_debug(
         if idx not in by_scene:
             continue
         debug = source.get("debug") if isinstance(source.get("debug"), dict) else source
+        _record_canonical_candidate(source, debug)
         debug_task_ids = debug.get("provider_task_ids") if isinstance(debug.get("provider_task_ids"), list) else []
         debug_video_ids = debug.get("provider_video_ids") if isinstance(debug.get("provider_video_ids"), list) else []
         task_id = str(source.get("task_id") or (debug_task_ids[0] if debug_task_ids else "") or debug.get("provider_task_id") or "").strip()
@@ -1268,6 +1341,8 @@ def product_video_scene_tasks_debug(
             or ""
         ).strip()
         merged = {
+                "canonical_scene_index": idx,
+                "canonical_task_selected": task_id or video_id or str(by_scene[idx].get("canonical_task_selected") or ""),
                 "provider": str(source.get("provider") or debug.get("selected_provider") or debug.get("provider") or by_scene[idx].get("provider") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
                 "task_id_masked": _task_id_masked(task_id),
@@ -1319,8 +1394,16 @@ def product_video_scene_tasks_debug(
         if current_source_of_truth in {"", "scene_pending_submit"} or policy["provider_not_start"] or policy["provider_scene_stalled"]:
             current_source_of_truth = policy_source_of_truth
         fallback_allowed = bool(policy["fallback_allowed"] if policy["provider_scene_stalled"] else (by_scene[idx].get("fallback_allowed") or policy["fallback_allowed"]))
+        own_candidates = canonical_task_candidates_by_scene.get(str(idx)) or []
+        canonical_selected = str(by_scene[idx].get("canonical_task_selected") or "")
+        if not canonical_selected and own_candidates:
+            canonical_selected = str(own_candidates[-1].get("task_id") or own_candidates[-1].get("video_id_masked") or "")
         by_scene[idx].update(
             {
+                "canonical_scene_index": idx,
+                "canonical_task_selected": canonical_selected,
+                "canonical_task_candidates_by_scene": canonical_task_candidates_by_scene,
+                "canonical_task_reject_reasons": canonical_task_reject_reasons,
                 "status": policy["current_scene_status"] if policy.get("provider_not_start") else by_scene[idx].get("status"),
                 "scene_not_start_elapsed": policy["scene_not_start_elapsed"],
                 "provider_elapsed_seconds": max(_safe_int(by_scene[idx].get("provider_elapsed_seconds"), 0), _safe_int(policy.get("provider_elapsed_seconds"), 0)),
@@ -2355,6 +2438,10 @@ def _run_per_scene_provider_orchestrator(
         "fallback_eligible_by_scene": fallback_eligible_by_scene,
         "fallback_reason_by_scene": fallback_reason_by_scene,
         "selected_model_by_scene": selected_model_by_scene,
+        "canonical_scene_index": _safe_int(active_scene.get("canonical_scene_index") or active_scene.get("scene_index"), 0),
+        "canonical_task_selected": str(active_scene.get("canonical_task_selected") or ""),
+        "canonical_task_candidates_by_scene": active_scene.get("canonical_task_candidates_by_scene") or {},
+        "canonical_task_reject_reasons": active_scene.get("canonical_task_reject_reasons") or {},
         "next_provider_or_model_candidate": next(
             (
                 str((item.get("fallback_provider_order") or [""])[0])
