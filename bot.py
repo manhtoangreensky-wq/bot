@@ -186048,9 +186048,116 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 latest_failure_job["updated_at"] = time.time()
                 SUBTITLE_DUB_PIPELINE_JOBS[suppression_job_key] = latest_failure_job
                 persist_subtitle_dub_pipeline_job_snapshot(suppression_job_key, latest_failure_job, reason="generic_product_failure_suppressed")
-                if subdub_result_has_delivered_video({**latest_failure_job, **result}) or subdub_job_video_delivery_succeeded(latest_failure_job):
-                    set_video_dubbing_pending(uid, "completed", processing="0", terminal_state="delivered")
-                    return None
+                delivery_message_id = str(
+                    result.get("video_delivery_message_id")
+                    or result.get("telegram_message_id")
+                    or latest_failure_job.get("video_delivery_message_id")
+                    or latest_failure_job.get("final_video_message_id")
+                    or latest_failure_job.get("subdub_final_video_message_id")
+                    or latest_failure_job.get("delivery_message_id")
+                    or ""
+                ).strip()
+                delivered_video_seen = bool(
+                    delivery_message_id
+                    or truthy_value(result.get("video_delivered"), False)
+                    or truthy_value(result.get("final_mp4_delivered"), False)
+                    or truthy_value(latest_failure_job.get("video_delivered"), False)
+                    or truthy_value(latest_failure_job.get("final_mp4_delivered"), False)
+                    or _safe_int(result.get("sent_video"), 0) > 0
+                    or _safe_int(result.get("sent_video_document"), 0) > 0
+                    or _safe_int(latest_failure_job.get("sent_video"), 0) > 0
+                    or _safe_int(latest_failure_job.get("sent_video_document"), 0) > 0
+                )
+                if delivered_video_seen:
+                    completed_job_id = str(
+                        latest_failure_job.get("job_id")
+                        or latest_failure_job.get("internal_job_id")
+                        or result.get("job_id")
+                        or result.get("internal_job_id")
+                        or ""
+                    )
+                    latest_failure_job.update({
+                        "status": "completed",
+                        "terminal_state": "delivered",
+                        "lifecycle_state": "delivered",
+                        "current_stage": "delivered",
+                        "progress_stage": "delivered",
+                        "progress_percent": 100,
+                        "completed_steps": subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+                        "panel_finalized": True,
+                        "panel_final_percent": 100,
+                        "status_panel_terminalized": True,
+                        "refresh_stopped_after_terminal": True,
+                        "terminal_public_outcome_type": "success",
+                        "terminal_public_outcome_sent": True,
+                        "terminal_public_outcome_message_id": str(latest_failure_job.get("terminal_public_outcome_message_id") or delivery_message_id or ""),
+                        "public_failure_sent": False,
+                        "public_error_sent": False,
+                        "delivery_success": True,
+                        "delivery_succeeded": True,
+                        "public_success_sent": True,
+                        "final_mp4_delivered": True,
+                        "video_delivery_message_id": delivery_message_id or str(latest_failure_job.get("video_delivery_message_id") or ""),
+                        "final_video_message_id": str(latest_failure_job.get("final_video_message_id") or delivery_message_id or ""),
+                        "subdub_final_video_message_id": str(latest_failure_job.get("subdub_final_video_message_id") or delivery_message_id or ""),
+                        "updated_at": time.time(),
+                    })
+                    SUBTITLE_DUB_PIPELINE_JOBS[suppression_job_key] = latest_failure_job
+                    persist_subtitle_dub_pipeline_job_snapshot(suppression_job_key, latest_failure_job, reason="generic_product_failure_suppressed_after_delivery")
+                    completed_state = set_video_dubbing_pending(
+                        uid,
+                        "completed",
+                        processing="0",
+                        terminal_state="delivered",
+                        mode=mode,
+                        video_processing_mode=mode,
+                        selected_voice_gender=str(latest_failure_job.get("selected_voice_gender") or state.get("selected_voice_gender") or ""),
+                        requested_voice_gender=str(latest_failure_job.get("requested_voice_gender") or state.get("requested_voice_gender") or ""),
+                        resolved_gender=str(latest_failure_job.get("resolved_gender") or state.get("resolved_gender") or ""),
+                        selected_voice_label=str(latest_failure_job.get("selected_voice_label") or state.get("selected_voice_label") or state.get("voice_style") or ""),
+                        target_language=str(latest_failure_job.get("target_language") or state.get("target_language") or ""),
+                        duration=str(latest_failure_job.get("duration") or state.get("duration") or result.get("duration") or ""),
+                        public_job_id=str(latest_failure_job.get("public_job_id") or latest_failure_job.get("subdub_public_job_id") or result.get("public_job_id") or ""),
+                    )
+                    rendered_panel = await safe_edit_or_send(
+                        query,
+                        subdub_progress_text("delivered", completed_job_id, lang),
+                        parse_mode="HTML",
+                        reply_markup=subdub_progress_keyboard(completed_job_id, lang),
+                    )
+                    sent_receipt = None
+                    if (
+                        int(latest_failure_job.get("success_sent_count") or 0) < 1
+                        and not str(latest_failure_job.get("subdub_success_message_id") or "").strip()
+                    ):
+                        receipt_result = {
+                            **latest_failure_job,
+                            **dict(result or {}),
+                            "mode": mode,
+                            "has_video": True,
+                            "video_delivered": True,
+                            "final_mp4_delivered": True,
+                            "delivery_succeeded": True,
+                            "delivery_success": True,
+                            "terminal_state": "delivered",
+                            "terminal_public_outcome_type": "success",
+                            "state": completed_state,
+                        }
+                        sent_receipt = await query.message.reply_text(
+                            video_dubbing_receipt_text(completed_state, receipt_result, lang),
+                            parse_mode="HTML",
+                            reply_markup=video_dubbing_receipt_keyboard(lang, origin, completed_state),
+                        )
+                        receipt_message_id = str(getattr(sent_receipt, "message_id", "") or "")
+                        latest_failure_job["subdub_success_message_id"] = receipt_message_id
+                        latest_failure_job["success_sent_count"] = 1
+                        latest_failure_job["terminal_public_outcome_message_id"] = receipt_message_id or latest_failure_job.get("terminal_public_outcome_message_id") or delivery_message_id
+                        latest_failure_job["cost_line_rendered"] = True
+                        latest_failure_job["cost_line_reason"] = "after_delivery_late_fail_suppressed"
+                        latest_failure_job["updated_at"] = time.time()
+                        SUBTITLE_DUB_PIPELINE_JOBS[suppression_job_key] = latest_failure_job
+                        persist_subtitle_dub_pipeline_job_snapshot(suppression_job_key, latest_failure_job, reason="generic_product_failure_suppressed_receipt_sent")
+                    return sent_receipt or rendered_panel
                 set_video_dubbing_pending(uid, "processing", processing="1")
                 progress_stage = str(
                     latest_failure_job.get("progress_stage")
