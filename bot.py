@@ -181834,18 +181834,11 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         source_segments = video_dubbing_segments_from_text(source_script, _safe_int(state.get("video_duration") or state.get("source_duration"), 0))
     if not source_segments:
         raise RuntimeError("subtitle_segments_empty")
-    needs_translation = (
-        mode == VIDEO_SUBTITLE_MODE_TRANSLATE
-        or (
-            mode == VIDEO_SUBTITLE_MODE_DUB
-            and str(state.get("translate_requested") or "0") == "1"
-        )
-        or (
-            mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-            and (
-                str(state.get("translate_requested") or "0") == "1"
-                or video_dubbing_target_language_requires_translation_for_tts(state)
-            )
+    needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
+        mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        and (
+            str(state.get("translate_requested") or "0") == "1"
+            or video_dubbing_target_language_requires_translation_for_tts(state)
         )
     )
     output_subtitle = source_subtitle
