@@ -68,7 +68,7 @@ def test_job_106_not_start_elapsed_uses_provider_elapsed_without_fallback_under_
     assert debug[0]["provider_stalled_not_start"] is False
     assert debug[0]["fallback_allowed"] is False
     assert debug[0]["fallback_block_reason"] == "not_start_under_threshold"
-    assert debug[0]["not_start_threshold_seconds"] == 90
+    assert debug[0]["not_start_threshold_seconds"] == 120
 
 
 def test_not_start_over_threshold_marks_stalled_and_fallback_candidate_from_job_elapsed():

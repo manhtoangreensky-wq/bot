@@ -158,7 +158,7 @@ def test_not_start_over_threshold_marks_stalled_and_allows_public_fallback_once(
     assert policy["fallback_allowed"] is True
     assert policy["fallback_scene_index"] == 1
     assert policy["fallback_provider_order"][0] == "key4u_video"
-    assert policy["stall_threshold"] == 90
+    assert policy["stall_threshold"] == 120
 
 
 def test_hidden_or_debug_source_does_not_allow_scene_fallback_submit():
