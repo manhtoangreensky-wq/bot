@@ -176713,6 +176713,22 @@ def subdub_should_suppress_generic_fail_for_active_job(job: dict | None = None, 
         return True
     return False
 
+def subtitle_plus_dub_should_suppress_public_failure(result: dict | None = None, job: dict | None = None) -> bool:
+    current = {**dict(job or {}), **dict(result or {})}
+    if not current:
+        return False
+    mode = normalize_video_translate_mode(
+        current.get("mode")
+        or current.get("mapped_mode")
+        or current.get("video_processing_mode")
+        or current.get("process_type")
+    )
+    if mode != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return False
+    if subdub_result_has_delivered_video(current) or subdub_job_video_delivery_succeeded(current):
+        return True
+    return subdub_should_suppress_generic_fail_for_active_job(job, result)
+
 def subdub_should_skip_public_subtitle_fallback(job: dict | None = None, delivery: dict | None = None) -> bool:
     current = {**dict(job or {}), **dict(delivery or {})}
     mode = normalize_video_translate_mode(
@@ -185425,6 +185441,37 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             await safe_edit_or_send(query, "TOAN AAS đang tạo video phụ đề + lồng tiếng hoàn chỉnh...")
             result = await execute_subtitle_plus_dub_full_from_callback(query, context, state, lang)
             if not result.get("ok"):
+                latest_combo_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, state)
+                if subtitle_plus_dub_should_suppress_public_failure(result, latest_combo_job):
+                    suppression_job_key = str(latest_combo_job.get("job_key") or state.get("_pipeline_job_key") or "")
+                    if suppression_job_key:
+                        latest_combo_job["late_public_error_suppressed"] = True
+                        latest_combo_job["late_fail_suppressed"] = True
+                        latest_combo_job["generic_combo_fail_public_suppressed"] = True
+                        latest_combo_job["ignored_late_error_count"] = int(latest_combo_job.get("ignored_late_error_count") or 0) + 1
+                        latest_combo_job["last_ignored_error_reason"] = str(result.get("detail") or result.get("status") or "combo_active_or_delivered")[:180]
+                        latest_combo_job["public_failure_sent"] = False
+                        latest_combo_job["public_error_sent"] = False
+                        latest_combo_job["updated_at"] = time.time()
+                        SUBTITLE_DUB_PIPELINE_JOBS[suppression_job_key] = latest_combo_job
+                        persist_subtitle_dub_pipeline_job_snapshot(suppression_job_key, latest_combo_job, reason="combo_public_failure_suppressed")
+                    if subdub_result_has_delivered_video({**latest_combo_job, **result}) or subdub_job_video_delivery_succeeded(latest_combo_job):
+                        set_video_dubbing_pending(uid, "completed", processing="0", terminal_state="delivered")
+                        return None
+                    set_video_dubbing_pending(uid, "generating_full_dub", processing="1")
+                    job_id = str(latest_combo_job.get("job_id") or result.get("job_id") or "")
+                    stage = str(
+                        latest_combo_job.get("progress_stage")
+                        or latest_combo_job.get("current_stage")
+                        or latest_combo_job.get("lifecycle_state")
+                        or "muxing_subtitle_dub_video"
+                    )
+                    return await safe_edit_or_send(
+                        query,
+                        subdub_progress_text(stage, job_id, lang),
+                        parse_mode="HTML",
+                        reply_markup=subdub_progress_keyboard(job_id, lang),
+                    )
                 state = set_video_dubbing_pending(uid, "dub_confirmation", processing="0")
                 return await query.message.reply_text(
                     result.get("text") or subtitle_plus_dub_safe_fail_text("tts_failed", lang),
