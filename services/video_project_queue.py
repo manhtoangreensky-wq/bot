@@ -41,6 +41,20 @@ PROJECT_DRAFT_STATUSES = tuple(status for status in PROJECT_STATUSES if status.s
 SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed")
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
+PRODUCT_VIDEO_TIER_PRICE_MAP = {
+    "low": 200,
+    "trial": 200,
+    "basic": 300,
+    "common": 400,
+    "good": 400,
+    "standard": 500,
+    "advanced": 600,
+    "premium": 800,
+    "pro": 1000,
+    "studio": 1200,
+    "high": 1200,
+    "max": 1500,
+}
 
 
 def now_text(moment: datetime | None = None) -> str:
@@ -76,6 +90,77 @@ def _json_loads(value: str | None, fallback: Any = None) -> Any:
         return json.loads(value)
     except Exception:
         return {} if fallback is None else fallback
+
+
+def _product_video_selected_tier(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"200", "trial", "low"}:
+        return "low"
+    if raw in {"300", "basic"}:
+        return "basic"
+    if raw in {"400", "good", "common"}:
+        return "common"
+    if raw in {"500", "standard"}:
+        return "standard"
+    if raw in {"600", "advanced"}:
+        return "advanced"
+    if raw in {"800", "premium"}:
+        return "premium"
+    if raw in {"1000", "pro"}:
+        return "pro"
+    if raw in {"1200", "studio", "high"}:
+        return "studio"
+    if raw in {"1500", "max"}:
+        return "max"
+    return raw or "basic"
+
+
+def _product_video_quote_consistency(invoice: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
+    invoice = dict(invoice or {})
+    project = dict(project or {})
+    selected_tier = _product_video_selected_tier(
+        invoice.get("tier")
+        or invoice.get("tier_key")
+        or invoice.get("package_xu")
+        or invoice.get("quality_tier")
+        or project.get("quality_tier")
+        or project.get("total_xu_estimated")
+        or "basic"
+    )
+    user_visible = _as_int(
+        invoice.get("user_visible_price_xu")
+        or invoice.get("package_xu")
+        or invoice.get("package_price_xu")
+        or invoice.get("quality_tier")
+        or PRODUCT_VIDEO_TIER_PRICE_MAP.get(selected_tier)
+        or 300,
+        300,
+    )
+    persisted = _as_int(
+        invoice.get("persisted_quoted_price_xu")
+        or invoice.get("quoted_price_xu")
+        or invoice.get("quoted_price")
+        or user_visible,
+        user_visible,
+    )
+    planned = _as_int(
+        invoice.get("charge_amount_planned_xu")
+        or invoice.get("total_xu")
+        or invoice.get("total")
+        or project.get("total_xu_estimated")
+        or persisted,
+        persisted,
+    )
+    consistent = bool(user_visible > 0 and persisted == user_visible)
+    reason = "" if consistent else "product_video_quote_mismatch_no_charge"
+    return {
+        "selected_tier": selected_tier,
+        "user_visible_price_xu": user_visible,
+        "persisted_quoted_price_xu": persisted,
+        "charge_amount_planned_xu": planned,
+        "quote_consistent": consistent,
+        "quote_mismatch_reason": reason,
+    }
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -1553,6 +1638,7 @@ def build_product_video_confirm_kickoff_payload(
     invoice = _json_loads(str(project.get("invoice_json") or ""), {})
     if not isinstance(invoice, dict):
         invoice = {}
+    quote_state = _product_video_quote_consistency(invoice, project)
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
@@ -1618,6 +1704,9 @@ def build_product_video_confirm_kickoff_payload(
         dispatch_blocker = "provider_chain_missing_no_charge"
     elif not model_resolution.get("ok"):
         dispatch_blocker = str(model_resolution.get("blocker") or "provider_contract_missing_no_charge")
+    elif not quote_state.get("quote_consistent"):
+        provider_chain_resolved = False
+        dispatch_blocker = "product_video_quote_mismatch_no_charge"
     return {
         "source": "product_video",
         "product_video": True,
@@ -1633,6 +1722,7 @@ def build_product_video_confirm_kickoff_payload(
         "charge": 0,
         "charged_xu": 0,
         "no_charge_before_final_mp4": True,
+        **quote_state,
         "orchestration_mode": orchestration_mode,
         "provider_orchestration_mode": orchestration_mode,
         "render_pipeline_mode": render_pipeline_mode,
@@ -1725,12 +1815,13 @@ def kickoff_product_video_job_after_confirm(
     payload.update(kickoff)
     current = now_text(now)
     if not kickoff.get("provider_chain_resolved"):
+        blocker = str(kickoff.get("worker_dispatch_blocker") or kickoff.get("dispatch_status") or "provider_chain_missing_no_charge")
         payload.update(
             {
                 "ok": False,
-                "blocker": "provider_chain_missing_no_charge",
-                "provider_error": "provider_chain_missing_no_charge",
-                "terminal_state": "provider_chain_missing_no_charge",
+                "blocker": blocker,
+                "provider_error": blocker,
+                "terminal_state": blocker,
                 "no_charge": True,
             }
         )
@@ -1739,10 +1830,10 @@ def kickoff_product_video_job_after_confirm(
                SET status='failed', last_error=?, result_json=?, progress_percent=?, progress_message=?, updated_at=?, completed_at=COALESCE(completed_at, ?)
                WHERE id=?""",
             (
-                "provider_chain_missing_no_charge",
+                blocker,
                 _json_dumps(payload),
                 0,
-                "provider_chain_missing_no_charge",
+                blocker,
                 current,
                 current,
                 int(job_id),
@@ -1750,10 +1841,10 @@ def kickoff_product_video_job_after_confirm(
         )
         conn.execute(
             """UPDATE video_projects
-               SET status='failed', video_terminal_state='provider_chain_missing_no_charge',
+               SET status='failed', video_terminal_state=?,
                    error_log=?, updated_at=?
                WHERE project_id=?""",
-            ("provider_chain_missing_no_charge", current, int(project["project_id"])),
+            (blocker, blocker, current, int(project["project_id"])),
         )
     else:
         conn.execute(

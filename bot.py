@@ -47828,7 +47828,55 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         )
     )
     pricing = product_video_r9_scene_pricing(scene_count)
-    quoted = int(pricing["charge_total_xu"])
+    tier_price_map = {
+        "low": 200,
+        "trial": 200,
+        "basic": 300,
+        "common": 400,
+        "good": 400,
+        "standard": 500,
+        "advanced": 600,
+        "premium": 800,
+        "pro": 1000,
+        "studio": 1200,
+        "high": 1200,
+        "max": 1500,
+    }
+    selected_tier = str(
+        _video_finance_first_value(
+            merged,
+            ("selected_tier", "product_video_tier", "tier", "tier_key", "quality_tier"),
+            "basic",
+        )
+        or "basic"
+    ).strip()
+    user_visible_raw = _video_finance_first_value(
+        merged,
+        ("user_visible_price_xu", "package_xu", "package_price_xu", "package_base_xu"),
+        "",
+    )
+    if user_visible_raw in (None, ""):
+        user_visible_raw = tier_price_map.get(selected_tier.lower(), 300)
+    user_visible_price = safe_int(user_visible_raw, tier_price_map.get(selected_tier.lower(), 300))
+    persisted_quoted_price = safe_int(
+        _video_finance_first_value(
+            merged,
+            ("persisted_quoted_price_xu", "quoted_price_xu", "quoted_price"),
+            user_visible_price,
+        ),
+        user_visible_price,
+    )
+    charge_amount_planned = safe_int(
+        _video_finance_first_value(
+            merged,
+            ("charge_amount_planned_xu", "total_xu", "total", "total_xu_estimated"),
+            pricing["charge_total_xu"],
+        ),
+        int(pricing["charge_total_xu"]),
+    )
+    quote_consistent = bool(merged.get("quote_consistent")) if merged.get("quote_consistent") not in (None, "") else persisted_quoted_price == user_visible_price
+    quote_mismatch_reason = str(merged.get("quote_mismatch_reason") or ("" if quote_consistent else "product_video_quote_mismatch_no_charge"))
+    quoted = persisted_quoted_price
     charged = safe_int(
         _video_finance_first_value(
             merged,
@@ -47911,6 +47959,12 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         "",
         f"• job id: <code>{jid}</code>",
         f"• user: <code>{html.escape(user_masked)}</code>",
+        f"• selected tier: <code>{html.escape(str(selected_tier or '-'))}</code>",
+        f"• user visible price: <code>{xu_number(user_visible_price)} Xu</code>",
+        f"• persisted quoted price: <code>{xu_number(persisted_quoted_price)} Xu</code>",
+        f"• planned charge amount: <code>{xu_number(charge_amount_planned)} Xu</code>",
+        f"• quote consistent: <code>{'yes' if quote_consistent else 'no'}</code>",
+        f"• quote mismatch reason: <code>{html.escape(quote_mismatch_reason or '-')}</code>",
         f"• quoted price: <code>{xu_number(quoted)} Xu</code>",
         f"• scene count: <code>{scene_count}</code>",
         f"• expected duration: <code>{scene_count * TASK3D_SCENE_SECONDS}s</code>",
@@ -89643,6 +89697,13 @@ def video_public_status_text() -> str:
         f"• Product Video model catalog: <code>{'loaded' if model_catalog.get('catalog_loaded') else 'missing'}</code>",
         f"• Product Video routing enabled: <code>{'yes' if model_catalog.get('routing_enabled') else 'no'}</code>",
         f"• Product Video catalog models: <code>{safe_int(model_catalog.get('model_count'), 0)}</code>",
+        f"• Product Video default chain: <code>{html.escape(','.join(model_catalog.get('default_public_provider_chain') or []) or '-')}</code>",
+        f"• Product Video effective chain: <code>{html.escape(','.join(model_catalog.get('effective_provider_chain') or []) or '-')}</code>",
+        f"• Product Video env chain override: <code>{video_public_bool_label(model_catalog.get('env_override_provider_chain_detected'))}</code>",
+        f"• Low tier primary: <code>{html.escape(str((model_catalog.get('low_tier_primary_model') or {}).get('provider') or '-'))}:{html.escape(str((model_catalog.get('low_tier_primary_model') or {}).get('model') or '-'))}</code>",
+        f"• Basic tier primary: <code>{html.escape(str((model_catalog.get('basic_tier_primary_model') or {}).get('provider') or '-'))}:{html.escape(str((model_catalog.get('basic_tier_primary_model') or {}).get('model') or '-'))}</code>",
+        f"• Common tier primary: <code>{html.escape(str((model_catalog.get('common_tier_primary_model') or {}).get('provider') or '-'))}:{html.escape(str((model_catalog.get('common_tier_primary_model') or {}).get('model') or '-'))}</code>",
+        f"• Product Video cost routing warning: <code>{html.escape(','.join(model_catalog.get('cost_routing_warnings') or []) or '-')}</code>",
         f"• Product Video routing warning: <code>{html.escape(str(model_catalog.get('warning') or '-'))}</code>",
         "",
         "<b>Local Worker</b>",
