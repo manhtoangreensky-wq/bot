@@ -1098,40 +1098,6 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
     )
     terminal = ""
     explicit_terminal = str(job.get("terminal_state") or job.get("music_terminal_state") or "").strip().lower()
-    subdub_video_message_id = str(
-        job.get("final_video_message_id")
-        or job.get("subdub_final_video_message_id")
-        or job.get("video_delivery_message_id")
-        or job.get("subdub_delivery_message_id")
-        or ""
-    ).strip()
-    subdub_video_artifact_delivered = bool(
-        _as_bool(job.get("video_delivered"))
-        or _as_bool(job.get("final_mp4_delivered"))
-        or _as_int(job.get("sent_video"), 0) > 0
-        or _as_int(job.get("sent_video_document"), 0) > 0
-    )
-    subdub_success_video_outcome = bool(
-        _as_bool(job.get("terminal_public_outcome_sent"))
-        and str(job.get("terminal_public_outcome_type") or "").strip().lower() == "success"
-        and (
-            str(job.get("terminal_artifact_type") or "").strip().lower() == "video"
-            or subdub_video_message_id
-            or subdub_video_artifact_delivered
-        )
-    )
-    subdub_video_delivered = bool(
-        canonical == "subdub"
-        and (
-            subdub_video_message_id
-            or subdub_video_artifact_delivered
-            or subdub_success_video_outcome
-        )
-    )
-    if subdub_video_delivered:
-        explicit_terminal = "delivered"
-        status = "delivered"
-        progress = 100
     if explicit_terminal in TERMINAL_STATES and not music_artifact_waiting:
         terminal = explicit_terminal
     elif canonical in {"music_bg", "music_song"} and status in {"completed", "complete", "success", "succeeded"} and output_bytes <= 0 and not has_delivery and not music_artifact_waiting:
