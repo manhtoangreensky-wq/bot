@@ -181555,6 +181555,34 @@ def video_dubbing_video_render_ready(output_type: str = "", *, audio: bool = Fal
         return False
     return bool(video_dubbing_mux_ready() or video_dubbing_subtitle_render_ready())
 
+def video_dubbing_target_language_requires_translation_for_tts(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    target = str(
+        state.get("target_language")
+        or state.get("target_lang")
+        or state.get("dub_language")
+        or ""
+    ).strip()
+    if not target:
+        return False
+    normalized = unicodedata.normalize("NFKD", target).encode("ascii", "ignore").decode("ascii").lower()
+    compact = re.sub(r"[\s_\-]+", "", normalized)
+    original_markers = {
+        "auto",
+        "same",
+        "source",
+        "original",
+        "originalaudio",
+        "originalvoice",
+        "keeporiginal",
+        "keeporiginalaudio",
+        "goc",
+        "nguyenban",
+        "giugiongoc",
+        "giutienggoc",
+    }
+    return compact not in original_markers
+
 async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, state: dict, user_id, allow_admin: bool = False) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -181640,7 +181668,10 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         raise RuntimeError("subtitle_segments_empty")
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-        and str(state.get("translate_requested") or "0") == "1"
+        and (
+            str(state.get("translate_requested") or "0") == "1"
+            or video_dubbing_target_language_requires_translation_for_tts(state)
+        )
     )
     output_subtitle = source_subtitle
     output_segments = list(source_segments)
