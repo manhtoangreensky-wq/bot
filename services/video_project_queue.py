@@ -771,6 +771,51 @@ def reconcile_provider_progress_telemetry(
         actual_provider_status_raw = payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or ""
     if actual_provider_running:
         actual_provider_status_raw = actual_provider_status
+    in_progress_stall_threshold = max(
+        60,
+        _as_int(
+            payload.get("in_progress_stall_threshold")
+            or payload.get("in_progress_stall_threshold_seconds")
+            or os.getenv("VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS")
+            or os.getenv("PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS"),
+            300,
+        ),
+    )
+    progress_last_changed_source = "elapsed"
+    progress_last_changed_at = str(payload.get("provider_progress_last_changed_at") or payload.get("progress_last_changed_at") or "").strip()
+    progress_last_changed_elapsed = _as_int(
+        payload.get("provider_progress_last_changed_elapsed_seconds")
+        or payload.get("progress_last_changed_elapsed_seconds"),
+        0,
+    )
+    if progress_last_changed_elapsed <= 0 and progress_last_changed_at:
+        changed_epoch = _parse_time_epoch(progress_last_changed_at)
+        if changed_epoch > 0:
+            progress_last_changed_elapsed = int(max(0, current_epoch - changed_epoch))
+            progress_last_changed_source = "timestamp"
+    if progress_last_changed_elapsed <= 0:
+        progress_last_changed_elapsed = elapsed if normalized_progress > 0 or actual_provider_running else 0
+    provider_progress_stuck = bool(
+        actual_provider_running
+        and not result_url_present
+        and not final_output_ready
+        and progress_last_changed_elapsed >= in_progress_stall_threshold
+    )
+    provider_in_progress_stalled = bool(
+        actual_provider_running
+        and not result_url_present
+        and not final_output_ready
+        and elapsed >= in_progress_stall_threshold
+        and provider_progress_stuck
+    )
+    in_progress_stall_decision = ""
+    if actual_provider_running and not result_url_present and not final_output_ready:
+        if provider_in_progress_stalled:
+            in_progress_stall_decision = "fallback_or_fail_after_in_progress_stall"
+        elif elapsed >= in_progress_stall_threshold and not provider_progress_stuck:
+            in_progress_stall_decision = "progress_changed_recently_continue_polling"
+        else:
+            in_progress_stall_decision = "under_threshold_continue_polling"
     provider_progress_effective, provider_progress_trusted, provider_progress_cap_reason, provider_progress_cap_applied = _provider_progress_effective(
         normalized_progress,
         raw_progress_number=raw_progress_number,
@@ -807,6 +852,16 @@ def reconcile_provider_progress_telemetry(
     if provider_progress_public_suppressed and alive and render_source == "indeterminate":
         render_progress = max(0, min(85, render_progress))
         render_source = "elapsed_provider_wait"
+    elapsed_estimate_progress = 0
+    public_progress_source = render_source
+    public_progress_cap = 85 if alive and not final_output_ready else (95 if not final_delivered else 100)
+    if actual_provider_running and alive and not result_url_present and not final_output_ready:
+        ratio = min(1.0, max(0.0, float(elapsed) / float(max(1, in_progress_stall_threshold))))
+        elapsed_estimate_progress = max(25, min(85, 25 + int(round(ratio * 60))))
+        if elapsed_estimate_progress > render_progress:
+            render_progress = elapsed_estimate_progress
+            public_progress_source = "provider_elapsed_in_progress"
+            render_source = "provider_elapsed_in_progress"
     render_progress_public_mode = "elapsed_wait" if provider_progress_public_suppressed and alive else ("zero_waiting" if provider_progress_public_suppressed else "percent")
     render_progress_public_percent = str(render_progress)
     fake_progress_prevention_reason = "untrusted_provider_progress_without_result_url" if provider_progress_public_suppressed else ""
@@ -830,6 +885,8 @@ def reconcile_provider_progress_telemetry(
         elapsed_public_mode = "hidden" if provider_progress_public_suppressed else "recovered_approx"
     render_monotonic_applied = bool(render_progress > max(0, _as_int(payload.get("render_video_progress_percent"), 0)) and previous_render_progress)
     overall_progress_from_render = 100 if final_delivered else (95 if final_output_ready else (90 if result_url_present else 20 + int(render_progress * 0.65)))
+    if elapsed_estimate_progress and alive and not result_url_present and not final_output_ready:
+        overall_progress_from_render = max(overall_progress_from_render, elapsed_estimate_progress)
     if alive and not final_output_ready:
         overall_progress_from_render = min(85, overall_progress_from_render)
     estimated = False
@@ -883,6 +940,18 @@ def reconcile_provider_progress_telemetry(
         "fake_progress_prevention_reason": fake_progress_prevention_reason,
         "percent_conservative_due_to_untrusted_provider": bool(provider_progress_public_suppressed),
         "render_progress_source": render_source,
+        "elapsed_estimate_progress": elapsed_estimate_progress,
+        "public_progress_source": public_progress_source,
+        "public_progress_cap": public_progress_cap,
+        "persisted_progress_updated": bool(final_progress > persisted_progress),
+        "in_progress_stall_elapsed": progress_last_changed_elapsed if actual_provider_running else 0,
+        "in_progress_stall_threshold": in_progress_stall_threshold,
+        "provider_progress_last_changed_at": progress_last_changed_at,
+        "provider_progress_last_changed_source": progress_last_changed_source,
+        "provider_progress_stuck": bool(provider_progress_stuck),
+        "provider_in_progress_stalled": bool(provider_in_progress_stalled),
+        "in_progress_stall_decision": in_progress_stall_decision,
+        "fallback_due_to_in_progress_stall": bool(provider_in_progress_stalled and payload.get("fallback_allowed")),
         "render_progress_raw_provider": raw_progress if raw_progress not in (None, "") else "",
         "render_progress_estimated": bool(render_estimated),
         "render_progress_cap_applied": bool(render_cap_applied or provider_progress_cap_applied),
@@ -910,11 +979,17 @@ def reconcile_provider_progress_telemetry(
             "not_start_under_threshold"
             if provider_not_start and not provider_stalled_not_start
             else (
+                "provider_in_progress_stalled"
+                if actual_provider_running
+                and provider_in_progress_stalled
+                and str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or "") == ""
+                else (
                 "primary_provider_in_progress"
                 if actual_provider_running
                 and str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or "")
                 in {"", "not_start_under_threshold", "provider_not_start", "provider_stalled_not_start"}
                 else str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or "")
+                )
             )
         ),
         "provider_wait_max_seconds": wait_max,
@@ -943,7 +1018,6 @@ def reconcile_provider_progress_telemetry(
             )
         ),
         "provider_progress_authoritative": bool(actual_provider_running or actual_provider_authoritative),
-        "elapsed_estimate_progress": render_progress if render_source in {"elapsed_provider_wait", "provider_raw_elapsed_max"} else 0,
         "provider_progress_capped_reason": provider_progress_cap_reason or ("capped_before_result_url" if alive and not result_url_present and render_progress >= 85 else ""),
         "no_fake_success_guard": bool(not final_delivered and final_progress < 100),
         "result_url_present": bool(result_url_present),
@@ -2228,12 +2302,14 @@ def product_video_scene_coverage_state(
     elif scene_count > 1 and bool(result.get("result_url_present") or result.get("provider_result_url_present")) and not valid_indexes:
         unknown_scene_task_ignored = True
     coverage_count = len(valid_indexes)
-    concat_attempted = bool(result.get("concat_attempted") or result.get("stitch_attempted"))
+    raw_concat_attempted = bool(result.get("concat_attempted") or result.get("stitch_attempted"))
     concat_output_valid = bool(
         result.get("concat_output_valid")
         or result.get("stitch_output_valid")
         or (str(result.get("concat_status") or "").strip().lower() == "completed" and result.get("final_mp4_valid"))
     )
+    concat_waiting_for_scene_coverage = bool(scene_count > 1 and coverage_count < scene_count)
+    concat_attempted = bool(raw_concat_attempted and not concat_waiting_for_scene_coverage)
     scene_coverage_valid = bool(scene_count == 1 and coverage_count >= 1) or bool(scene_count > 1 and coverage_count >= scene_count and concat_attempted and concat_output_valid)
     artifact_valid_for_charge = bool(
         result.get("final_mp4_valid")
@@ -2277,6 +2353,8 @@ def product_video_scene_coverage_state(
         "invalid_delivery_attempt_prevented": bool(scene_count > 1 and not scene_coverage_valid),
         "artifact_valid_for_charge_after_coverage": bool(artifact_valid_for_charge),
         "concat_attempted": bool(concat_attempted),
+        "concat_waiting_for_scene_coverage": bool(concat_waiting_for_scene_coverage),
+        "concat_attempted_raw": bool(raw_concat_attempted),
         "concat_output_valid": bool(concat_output_valid),
         "concat_status": str(result.get("concat_status") or ("completed" if concat_output_valid else ("waiting_for_clips" if scene_count > 1 else ""))),
     }

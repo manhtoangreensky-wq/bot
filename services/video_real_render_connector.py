@@ -1318,6 +1318,37 @@ def _scene_task_elapsed_seconds(item: dict | None = None, job: dict | None = Non
     return max(values) if values else 0
 
 
+def _product_video_in_progress_stall_threshold() -> int:
+    return max(
+        60,
+        _env_int(
+            "VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS",
+            _env_int(
+                "PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS",
+                DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS,
+            ),
+        ),
+    )
+
+
+def _scene_task_progress_last_changed_elapsed(item: dict | None, job: dict | None, elapsed: int) -> tuple[int, str, str]:
+    item = dict(item or {})
+    job = dict(job or {})
+    for source, current in (("scene", item), ("job", job)):
+        for key in ("provider_progress_last_changed_elapsed_seconds", "progress_last_changed_elapsed_seconds"):
+            value = _safe_int(current.get(key), 0)
+            if value > 0:
+                return value, source, str(current.get("provider_progress_last_changed_at") or current.get("progress_last_changed_at") or "")
+        for key in ("provider_progress_last_changed_at_epoch", "progress_last_changed_at_epoch"):
+            try:
+                epoch = float(current.get(key) or 0)
+                if epoch > 0:
+                    return max(0, int(time.time() - epoch)), source, str(current.get(key) or "")
+            except Exception:
+                pass
+    return max(0, elapsed), "elapsed", ""
+
+
 def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, scene_index: int = 1) -> dict[str, Any]:
     job = dict(job or {})
     scene_task = dict(scene_task or {})
@@ -1326,13 +1357,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     progress = _scene_task_progress_number(scene_task)
     elapsed = _scene_task_elapsed_seconds(scene_task, job)
     not_start_threshold, not_start_threshold_source = _product_video_not_start_threshold()
-    running_threshold = max(
-        not_start_threshold,
-        _env_int(
-            "PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS",
-            DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS,
-        ),
-    )
+    running_threshold = max(not_start_threshold, _product_video_in_progress_stall_threshold())
     total_threshold = max(
         running_threshold,
         _env_int("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS", DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS),
@@ -1341,7 +1366,10 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     is_not_start = bool(False if actual_running else (status == "provider_not_start" or _scene_task_has_raw_not_start(scene_task)))
     current_scene_status = PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START if is_not_start and elapsed >= not_start_threshold and progress <= 0 and not result_url_valid else ("provider_not_start" if is_not_start else status)
     not_start_stalled = bool(is_not_start and progress <= 0 and not result_url_valid and elapsed >= not_start_threshold)
-    running_stalled = bool(status == "provider_running" and not result_url_valid and elapsed >= running_threshold)
+    running_active = bool(actual_running or status == "provider_running")
+    progress_changed_elapsed, progress_changed_source, progress_changed_at = _scene_task_progress_last_changed_elapsed(scene_task, job, elapsed)
+    provider_progress_stuck = bool(running_active and not result_url_valid and progress_changed_elapsed >= running_threshold)
+    running_stalled = bool(status == "provider_running" and not result_url_valid and elapsed >= running_threshold and provider_progress_stuck)
     timed_out = bool(_scene_task_has_provider_id(scene_task) and not result_url_valid and elapsed >= total_threshold)
     stalled = bool(not_start_stalled or running_stalled or timed_out)
     fallback_count = _safe_int(scene_task.get("fallback_count") or scene_task.get("provider_fallback_count"), 0)
@@ -1385,7 +1413,12 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and not charged
     )
     if not stalled:
-        fallback_block_reason = "not_start_under_threshold" if is_not_start else ("primary_provider_in_progress" if actual_running else "scene_not_stalled")
+        if is_not_start:
+            fallback_block_reason = "not_start_under_threshold"
+        elif running_active and elapsed >= running_threshold and not provider_progress_stuck:
+            fallback_block_reason = "provider_progress_changed_recently"
+        else:
+            fallback_block_reason = "primary_provider_in_progress" if running_active else "scene_not_stalled"
     elif not public_confirmed:
         fallback_block_reason = "not_public_user_final_confirm"
     elif not invoice_confirmed:
@@ -1416,6 +1449,26 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         "provider_stalled_not_start": bool(not_start_stalled),
         "provider_scene_stalled": stalled,
         "scene_running_without_result_stalled": bool(running_stalled),
+        "in_progress_stall_elapsed": progress_changed_elapsed if running_active else 0,
+        "in_progress_stall_threshold": running_threshold,
+        "provider_progress_last_changed_at": progress_changed_at,
+        "provider_progress_last_changed_source": progress_changed_source,
+        "provider_progress_stuck": bool(provider_progress_stuck),
+        "provider_in_progress_stalled": bool(running_stalled),
+        "in_progress_stall_decision": (
+            "fallback_allowed"
+            if running_stalled and fallback_allowed
+            else (
+                "failed_no_charge_no_fallback"
+                if running_stalled and not fallback_allowed
+                else (
+                    "progress_changed_recently_continue_polling"
+                    if running_active and elapsed >= running_threshold and not provider_progress_stuck
+                    else ("under_threshold_continue_polling" if running_active else "")
+                )
+            )
+        ),
+        "fallback_due_to_in_progress_stall": bool(running_stalled and fallback_allowed),
         "scene_total_timeout": bool(timed_out),
         "fallback_scene_index": max(1, _safe_int(scene_index, 1)) if stalled else 0,
         "fallback_allowed": fallback_allowed,
