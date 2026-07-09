@@ -181051,19 +181051,32 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
 def subdub_retime_translated_segments_to_source(source_segments: list[dict], translated_segments: list[dict]) -> list[dict]:
     source = [dict(item or {}) for item in (source_segments or []) if str((item or {}).get("text") or "").strip()]
     translated = [dict(item or {}) for item in (translated_segments or []) if str((item or {}).get("text") or "").strip()]
-    if not source or not translated or len(source) != len(translated):
+    if not source:
         return translated
+    by_index: dict[int, dict] = {}
+    has_explicit_index = any((item or {}).get("index") for item in translated)
+    for pos, item in enumerate(translated, start=1):
+        idx = _safe_int((item or {}).get("index") or pos, pos)
+        if idx not in by_index:
+            by_index[idx] = item
     retimed = []
-    for index, (src, dst) in enumerate(zip(source, translated), start=1):
+    for index, src in enumerate(source, start=1):
+        dst = by_index.get(_safe_int(src.get("index") or index, index))
         start = float(src.get("start") or 0)
         end = float(src.get("end") or 0)
         if end <= start:
             end = start + 1
+        text = str((dst or {}).get("text") or src.get("text") or "").strip()
+        if not dst and not has_explicit_index and index <= len(translated):
+            dst = translated[index - 1]
+            text = str((dst or {}).get("text") or src.get("text") or "").strip()
         retimed.append({
-            **dst,
-            "index": int(dst.get("index") or src.get("index") or index),
+            **(dst or {}),
+            "index": int(src.get("index") or index),
             "start": round(start, 3),
             "end": round(end, 3),
+            "text": text,
+            "translate_missing": not bool(dst),
         })
     return retimed
 
@@ -181142,7 +181155,7 @@ async def translate_subtitle_segments(
         )
         translated_text = str(translated.get("text") or "").strip()
         if not translated_text:
-            raise RuntimeError("translation_empty_segment")
+            translated_text = text
         providers.append(str(translated.get("provider") or ""))
         translated_segments.append({
             "index": int((item or {}).get("index") or index),
