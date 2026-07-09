@@ -822,7 +822,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 if not isinstance(source, dict):
                     continue
                 value = str(source.get("orchestration_mode") or source.get("provider_orchestration_mode") or "").strip().lower()
-                if value in {"per_scene_8s", "per_scene", "scene", "scene_orchestrator"}:
+                if value in {"per_scene_8s", "per_scene", "scene", "scene_orchestrator", "multi_clip_concat", "historical_multi_clip_concat"}:
                     return "per_scene_8s"
                 if value in {"single_task", "legacy", "legacy_single_task", "single_task_legacy", "raw_render_delivery"}:
                     return "single_task_legacy"
@@ -835,10 +835,13 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 request_job_id = str(item.get("request_job_id") or item.get("provider_pending_request_job_id") or "").strip()
                 if item.get("scene_index") or item.get("scene_id") or re.search(r"-\d+$", request_job_id):
                     return "per_scene_8s"
+            if safe_scene_count > 1:
+                return "per_scene_8s"
             return "single_task_legacy"
 
         product_video_orchestration_mode = _product_video_explicit_orchestration_mode()
         product_video_per_scene_orchestration = product_video_orchestration_mode == "per_scene_8s"
+        product_video_render_pipeline_mode = "historical_multi_clip_concat" if product_video_per_scene_orchestration else "single_task_legacy"
         payload.update(
             {
                 "product_video": True,
@@ -882,11 +885,15 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "invoice_confirmed": True,
                 "expected_duration_seconds": safe_expected_duration,
                 "duration_seconds": safe_expected_duration,
+                "target_duration_seconds": safe_expected_duration,
                 "scene_count": safe_scene_count,
+                "clip_count": safe_scene_count if product_video_per_scene_orchestration else 0,
                 "scene_duration_seconds": safe_scene_duration,
+                "clip_duration_seconds": safe_scene_duration if product_video_per_scene_orchestration else 0,
                 "scene_seconds": safe_scene_duration,
                 "orchestration_mode": product_video_orchestration_mode,
                 "provider_orchestration_mode": product_video_orchestration_mode,
+                "render_pipeline_mode": product_video_render_pipeline_mode,
                 "raw_render_delivery_baseline": not product_video_per_scene_orchestration,
                 "r18a_raw_render_delivery_default": not product_video_per_scene_orchestration,
                 "provider_router_called": bool(persisted_result.get("provider_router_called")),
@@ -927,12 +934,15 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 by_scene[idx] = {
                     "scene_index": idx,
                     "scene_id": idx,
+                    "clip_index": idx,
                     "request_job_id": f"{payload.get('job_id')}-{idx}",
                     "scene_duration_seconds": safe_scene_duration,
+                    "clip_duration_seconds": safe_scene_duration,
                     "provider": "",
                     "provider_task_id": "",
                     "provider_video_id": "",
                     "status": "pending_submit",
+                    "clip_status": "pending_submit",
                     "download_url_present": False,
                     "result_url_valid": False,
                     "raw_clip_duration": 0,
@@ -1008,13 +1018,19 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     "scene_tasks_submitted": submitted_count,
                     "scene_tasks_submitted_count": submitted_count,
                     "scene_tasks_completed": completed_count,
+                    "clips_created_count": safe_scene_count,
+                    "clips_submitted_count": submitted_count,
+                    "clips_done_count": completed_count,
+                    "clips_failed_count": sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"failed", "error"}),
                     "scenes_done": completed_count,
                     "scenes_pending": max(0, safe_scene_count - submitted_count),
                     "scenes_running": max(0, submitted_count - completed_count),
                     "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
                     "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
+                    "current_clip_index": min(safe_scene_count, max(1, submitted_count + 1)),
                     "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
                     "final_concat_required": safe_scene_count > 1,
+                    "concat_status": "ready_to_concat" if completed_count >= safe_scene_count else "waiting_for_clips",
                     "concat_ready": completed_count >= safe_scene_count,
                 }
             )
@@ -1028,13 +1044,19 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     "scene_tasks_submitted": 0,
                     "scene_tasks_submitted_count": 0,
                     "scene_tasks_completed": 0,
+                    "clips_created_count": 0,
+                    "clips_submitted_count": 0,
+                    "clips_done_count": 0,
+                    "clips_failed_count": 0,
                     "scenes_done": 0,
                     "scenes_pending": 0,
                     "scenes_running": 0,
                     "current_scene": 0,
                     "current_scene_index": 0,
+                    "current_clip_index": 0,
                     "current_scene_status": "",
                     "final_concat_required": False,
+                    "concat_status": "",
                     "concat_ready": False,
                 }
             )
@@ -1071,11 +1093,15 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                         {
                             "scene_index": scene_index,
                             "scene_id": scene_index,
+                            "clip_index": scene_index,
                             "request_job_id": str(event.get("request_job_id") or f"{payload.get('job_id')}-{scene_index}"),
+                            "scene_duration_seconds": safe_scene_duration,
+                            "clip_duration_seconds": safe_scene_duration,
                             "provider": str(event.get("provider") or pending_provider),
                             "provider_task_id": str(event.get("task_id") or ""),
                             "provider_video_id": str(event.get("video_id") or ""),
                             "status": str(event.get("status") or ""),
+                            "clip_status": str(event.get("status") or ""),
                             "download_url_present": bool(event.get("download_url_present")),
                             "raw_clip_duration": event.get("duration") or 0,
                             "provider_progress_raw": event.get("provider_progress_raw") or "",
@@ -1110,13 +1136,19 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     "scene_tasks_submitted": submitted_count,
                     "scene_tasks_submitted_count": submitted_count,
                     "scene_tasks_completed": completed_count,
+                    "clips_created_count": safe_scene_count,
+                    "clips_submitted_count": submitted_count,
+                    "clips_done_count": completed_count,
+                    "clips_failed_count": sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"failed", "error"}),
                     "scenes_total": safe_scene_count,
                     "scenes_done": completed_count,
                     "scenes_pending": max(0, safe_scene_count - submitted_count),
                     "scenes_running": max(0, submitted_count - completed_count),
                     "current_scene": min(safe_scene_count, max(1, submitted_count + 1)),
                     "current_scene_index": min(safe_scene_count, max(1, submitted_count + 1)),
+                    "current_clip_index": min(safe_scene_count, max(1, submitted_count + 1)),
                     "current_scene_status": str(scene_tasks[min(safe_scene_count, max(1, submitted_count + 1)) - 1].get("status") or "pending_submit"),
+                    "concat_status": "ready_to_concat" if completed_count >= safe_scene_count else "waiting_for_clips",
                     "provider_pending_deferred": True,
                     "continue_polling": True,
                 }

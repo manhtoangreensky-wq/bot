@@ -1392,7 +1392,15 @@ PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY = "single_task_legacy"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE = "per_scene_8s"
-PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES = {"per_scene_8s", "per_scene", "scene", "scene_orchestrator"}
+PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT = "historical_multi_clip_concat"
+PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES = {
+    "per_scene_8s",
+    "per_scene",
+    "scene",
+    "scene_orchestrator",
+    "multi_clip_concat",
+    "historical_multi_clip_concat",
+}
 
 
 def _split_product_video_provider_chain(value: Any) -> list[str]:
@@ -1465,12 +1473,15 @@ def product_video_initial_scene_tasks(
         {
             "scene_index": index,
             "scene_id": index,
+            "clip_index": index,
             "request_job_id": f"{safe_job_id}-{index}",
             "scene_duration_seconds": safe_duration,
+            "clip_duration_seconds": safe_duration,
             "provider": "",
             "provider_task_id": "",
             "provider_video_id": "",
             "status": "pending_submit",
+            "clip_status": "pending_submit",
             "download_url_present": False,
             "result_url_valid": False,
             "raw_clip_duration": 0,
@@ -1483,14 +1494,21 @@ def product_video_initial_scene_tasks(
 
 
 def _product_video_orchestration_mode_from_sources(*sources: dict[str, Any] | None) -> str:
+    product_video_seen = False
+    requested_scene_count = 0
     for source in sources:
         if not isinstance(source, dict):
             continue
+        if str(source.get("source") or "").strip() == "product_video" or _product_video_truthy(source.get("product_video")):
+            product_video_seen = True
+        requested_scene_count = max(requested_scene_count, _as_int(source.get("scene_count") or source.get("scenes_total"), 0))
         value = str(source.get("orchestration_mode") or source.get("provider_orchestration_mode") or "").strip().lower()
         if value in PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES:
             return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE
         if value in {"single_task", "legacy", "legacy_single_task", "single_task_legacy", "raw_render_delivery"}:
             return PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY
+    if product_video_seen and requested_scene_count > 1:
+        return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE
     return PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY
 
 
@@ -1512,6 +1530,11 @@ def build_product_video_confirm_kickoff_payload(
         asset_pack = {}
     orchestration_mode = _product_video_orchestration_mode_from_sources(dict(job or {}), asset_pack, invoice, dict(project or {}))
     per_scene_orchestration = orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE
+    render_pipeline_mode = (
+        PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT
+        if per_scene_orchestration
+        else PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY
+    )
     scene_tasks = (
         product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count, scene_duration)
         if per_scene_orchestration
@@ -1550,10 +1573,14 @@ def build_product_video_confirm_kickoff_payload(
         "no_charge_before_final_mp4": True,
         "orchestration_mode": orchestration_mode,
         "provider_orchestration_mode": orchestration_mode,
+        "render_pipeline_mode": render_pipeline_mode,
         "raw_render_delivery_baseline": not per_scene_orchestration,
         "r18a_raw_render_delivery_default": not per_scene_orchestration,
         "scene_count": scene_count,
         "scenes_total": scene_count,
+        "clip_count": scene_count if per_scene_orchestration else 0,
+        "target_duration_seconds": scene_count * scene_duration,
+        "clip_duration_seconds": scene_duration if per_scene_orchestration else 0,
         "scene_duration_seconds": scene_duration,
         "scene_seconds": scene_duration,
         "expected_duration_seconds": scene_count * scene_duration,
@@ -1565,13 +1592,19 @@ def build_product_video_confirm_kickoff_payload(
         "scene_tasks_submitted": 0,
         "scene_tasks_submitted_count": 0,
         "scene_tasks_completed": 0,
+        "clips_created_count": scene_count if per_scene_orchestration else 0,
+        "clips_submitted_count": 0,
+        "clips_done_count": 0,
+        "clips_failed_count": 0,
         "scenes_done": 0,
         "scenes_pending": scene_count if per_scene_orchestration else 0,
         "scenes_running": 0,
         "current_scene": 1 if per_scene_orchestration and scene_count else 0,
         "current_scene_index": 1 if per_scene_orchestration and scene_count else 0,
+        "current_clip_index": 1 if per_scene_orchestration and scene_count else 0,
         "current_scene_status": "pending_submit" if per_scene_orchestration else "",
         "final_concat_required": bool(per_scene_orchestration and scene_count > 1),
+        "concat_status": "waiting_for_clips" if per_scene_orchestration and scene_count > 1 else "",
         "concat_ready": False,
         "configured_provider_chain": chain,
         "effective_provider_chain": chain,
