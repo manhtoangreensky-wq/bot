@@ -143,6 +143,23 @@ def _first_nonempty(*values: Any) -> str:
     return ""
 
 
+def _text_indicates_not_start(*values: Any) -> bool:
+    for value in values:
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if text in {
+            "not_start",
+            "not_started",
+            "notstart",
+            "provider_not_start",
+            "media_generation_status_not_start",
+            "media_generation_status_not_started",
+        }:
+            return True
+        if "not_start" in text or "not_started" in text:
+            return True
+    return False
+
+
 def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(payload or {})
     candidates: list[dict[str, Any]] = []
@@ -211,16 +228,17 @@ def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict
             )
             if str(value or "").strip()
         )
+        raw_not_start = _text_indicates_not_start(status_text)
         has_pending_status = any(marker in status_text for marker in PROVIDER_PENDING_STATUS_MARKERS)
         has_pending_blocker = any(marker in blocker_text for marker in PROVIDER_PENDING_BLOCKERS) or "in_progress" in blocker_text
         result_url_present = bool(item.get("provider_result_url_present") or item.get("result_url_present") or item.get("download_url_present"))
         download_called = bool(item.get("download_called") or item.get("download_status") == "downloaded")
-        if accepted_task and not result_url_present and not download_called and (item.get("continue_polling") or has_pending_status or has_pending_blocker):
+        if accepted_task and not result_url_present and not download_called and (item.get("continue_polling") or has_pending_status or has_pending_blocker or raw_not_start):
             return {
                 "provider": provider or "shopaikey_video",
                 "task_id": task_id,
                 "video_id": video_id,
-                "status": status_text or "running",
+                "status": "not_start" if raw_not_start else (status_text or "running"),
                 "request_job_id": _first_nonempty(
                     item.get("provider_pending_request_job_id"),
                     item.get("provider_request_job_id"),
@@ -312,15 +330,37 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
     wait_max = max(60, _env_int("PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
     started_at = str(data.get("provider_started_at") or (job or {}).get("provider_started_at") or "").strip()
     started_epoch = data.get("provider_started_at_epoch") or (job or {}).get("provider_started_at_epoch") or ""
+    pending_raw_not_start = _text_indicates_not_start(
+        pending.get("status"),
+        data.get("provider_status_raw"),
+        data.get("raw_provider_status"),
+        data.get("nonterminal_provider_status"),
+        data.get("normalized_provider_status"),
+        data.get("provider_status"),
+    )
+    provider_status_value = "not_start" if pending_raw_not_start else "running"
+    provider_error_value = "provider_not_start" if pending_raw_not_start else "provider_in_progress"
+    default_fallback_blocked = "not_start_under_threshold" if pending_raw_not_start else ("primary_provider_in_progress" if not data.get("fallback_used") else "")
+    existing_fallback_blocked = str(data.get("fallback_blocked_reason") or data.get("fallback_block_reason") or "")
+    if pending_raw_not_start and existing_fallback_blocked in {
+        "",
+        "primary_provider_in_progress",
+        "selected_provider_in_progress",
+        "provider_in_progress",
+    }:
+        existing_fallback_blocked = default_fallback_blocked
     data.update(
         {
             "ok": False,
             "continue_polling": True,
             "provider_pending_deferred": True,
-            "provider_error": "provider_in_progress",
-            "blocker": "provider_in_progress",
-            "provider_status": "running",
-            "normalized_provider_status": "running",
+            "provider_error": provider_error_value,
+            "blocker": provider_error_value,
+            "provider_status": provider_status_value,
+            "normalized_provider_status": provider_status_value,
+            "raw_provider_status": str(data.get("raw_provider_status") or data.get("provider_status_raw") or pending.get("status") or ""),
+            "canonical_status_before_not_start_override": str(data.get("canonical_status_before_not_start_override") or ("running" if pending_raw_not_start else provider_status_value)),
+            "not_start_override_applied": bool(pending_raw_not_start or data.get("not_start_override_applied")),
             "nonterminal_provider_status": str(pending.get("status") or "running"),
             "selected_provider": provider,
             "initial_selected_provider": str(data.get("initial_selected_provider") or provider),
@@ -340,11 +380,19 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
             "provider_fallback_attempted": False,
             "provider_fallback_reason": "",
             "fallback_allowed": bool(data.get("fallback_allowed") if data.get("fallback_allowed") is not None else False),
-            "fallback_blocked_reason": str(data.get("fallback_blocked_reason") or data.get("fallback_block_reason") or ("primary_provider_in_progress" if not data.get("fallback_used") else "")),
+            "fallback_blocked_reason": existing_fallback_blocked or default_fallback_blocked,
+            "fallback_block_reason": existing_fallback_blocked or default_fallback_blocked,
             "primary_provider_continue_polling": not bool(data.get("fallback_used")),
             "primary_provider_task_alive": not bool(data.get("fallback_used")),
             "primary_provider_task_id_present": bool(task_id or video_id or data.get("provider_task_ids") or data.get("provider_video_ids")),
             "key4u_submit_suppressed": True,
+            "key4u_submit_suppressed_reason": (
+                default_fallback_blocked
+                if pending_raw_not_start
+                and str(data.get("key4u_submit_suppressed_reason") or "")
+                in {"", "primary_provider_in_progress", "selected_provider_in_progress", "provider_in_progress"}
+                else str(data.get("key4u_submit_suppressed_reason") or default_fallback_blocked)
+            ),
             "next_poll_scheduled": True,
             "provider_started_at": started_at,
             "provider_started_at_epoch": started_epoch,
@@ -376,7 +424,7 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
             "render_progress_result_url_present": bool(data.get("render_progress_result_url_present")),
             "render_progress_monotonic_applied": bool(data.get("render_progress_monotonic_applied")),
             "overall_progress_from_render": int(data.get("overall_progress_from_render") or 20),
-            "provider_status_for_progress": str(data.get("provider_status_for_progress") or data.get("normalized_provider_status") or "running"),
+            "provider_status_for_progress": provider_status_value,
             "elapsed_wall_clock_seconds": int(data.get("elapsed_wall_clock_seconds") or data.get("provider_elapsed_seconds") or 0),
             "previous_elapsed_seconds": int(data.get("previous_elapsed_seconds") or 0),
             "elapsed_monotonic_applied": bool(data.get("elapsed_monotonic_applied")),
@@ -385,7 +433,7 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
             "provider_poll_count_source": str(data.get("provider_poll_count_source") or ""),
             "provider_last_poll_at": str(data.get("provider_last_poll_at") or ""),
             "terminal_state": "final_rendering",
-            "progress_message": "provider_in_progress",
+            "progress_message": provider_error_value,
             "public_message": "TOAN AAS đang dựng video. Anh/chị vui lòng kiểm tra lại sau.",
             "no_charge": True,
         }
@@ -1016,7 +1064,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         and not charged
     )
     if not stalled:
-        fallback_block_reason = "scene_not_stalled"
+        fallback_block_reason = "not_start_under_threshold" if is_not_start else "scene_not_stalled"
     elif not public_confirmed:
         fallback_block_reason = "not_public_user_final_confirm"
     elif not invoice_confirmed:
@@ -1216,11 +1264,11 @@ def product_video_scene_tasks_debug(
         policy_block_reason = str(policy["fallback_block_reason"] or "")
         policy_eligibility_reason = str(policy["fallback_eligibility_reason"] or "")
         policy_source_of_truth = str(policy["source_of_truth"] or "")
-        if current_block_reason in {"", "scene_not_stalled"} or policy["fallback_allowed"] or policy["provider_scene_stalled"]:
+        if current_block_reason in {"", "scene_not_stalled", "primary_provider_in_progress", "selected_provider_in_progress"} or policy["provider_not_start"] or policy["fallback_allowed"] or policy["provider_scene_stalled"]:
             current_block_reason = policy_block_reason
-        if current_eligibility_reason in {"", "scene_not_stalled"} or policy["fallback_allowed"] or policy["provider_scene_stalled"]:
+        if current_eligibility_reason in {"", "scene_not_stalled", "primary_provider_in_progress", "selected_provider_in_progress"} or policy["provider_not_start"] or policy["fallback_allowed"] or policy["provider_scene_stalled"]:
             current_eligibility_reason = policy_eligibility_reason
-        if current_source_of_truth in {"", "scene_pending_submit"} or policy["provider_scene_stalled"]:
+        if current_source_of_truth in {"", "scene_pending_submit"} or policy["provider_not_start"] or policy["provider_scene_stalled"]:
             current_source_of_truth = policy_source_of_truth
         fallback_allowed = bool(policy["fallback_allowed"] if policy["provider_scene_stalled"] else (by_scene[idx].get("fallback_allowed") or policy["fallback_allowed"]))
         by_scene[idx].update(
@@ -1237,6 +1285,7 @@ def product_video_scene_tasks_debug(
                 "fallbackable_blocker": bool(by_scene[idx].get("fallbackable_blocker") or policy["fallbackable_blocker"]),
                 "fallback_eligibility_reason": current_eligibility_reason,
                 "fallback_provider_order": policy["fallback_provider_order"],
+                "fallback_provider_candidate": str((policy["fallback_provider_order"] or [""])[0]),
                 "fallback_scene_index": _safe_int(by_scene[idx].get("fallback_scene_index"), policy["fallback_scene_index"]),
                 "source_of_truth": current_source_of_truth,
             }
@@ -2003,6 +2052,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         result.setdefault("selected_provider_before_submit", str(pending_scene_task.get("provider") or ""))
         result.setdefault("fallback_count", 1)
         result.setdefault("provider_fallback_count", 1)
+        result["key4u_submit_suppressed"] = False
+        result["key4u_submit_suppressed_reason"] = ""
     if not result.get("ok"):
         raise RealVideoRenderError(str(result.get("blocker") or result.get("provider_error") or REAL_VIDEO_RENDER_UNAVAILABLE), diagnostics=result)
     output_path = str(result.get("output_path") or result.get("local_path") or "")
@@ -2263,6 +2314,14 @@ def _run_per_scene_provider_orchestrator(
             ),
             "",
         ),
+        "fallback_provider_candidate": next(
+            (
+                str(item.get("fallback_provider_candidate") or "")
+                for item in scene_tasks
+                if str(item.get("fallback_provider_candidate") or "")
+            ),
+            "",
+        ),
         "current_scene_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_scene": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_clip_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
@@ -2321,13 +2380,26 @@ def _run_per_scene_provider_orchestrator(
         base["blocker"] = base["provider_error"]
         return _enforce_product_video_terminal_consistency(base, reason=base["provider_error"])
     if len(scene_outputs) < _scene_count(job):
+        active_status = str(active_scene.get("status") or "")
+        active_raw_status = str(active_scene.get("provider_status_raw") or active_status or "")
+        active_is_not_start = _text_indicates_not_start(active_status, active_raw_status)
+        normalized_pending_status = "not_start" if active_is_not_start else (active_status or "running")
+        pending_error = "provider_not_start" if active_is_not_start else "provider_in_progress"
         base["continue_polling"] = True
-        base["provider_error"] = "provider_in_progress"
-        base["blocker"] = "provider_in_progress"
-        base["provider_status"] = "running"
-        base["normalized_provider_status"] = "running"
+        base["provider_error"] = pending_error
+        base["blocker"] = pending_error
+        base["provider_status"] = normalized_pending_status
+        base["normalized_provider_status"] = normalized_pending_status
+        base["raw_provider_status"] = active_raw_status
+        base["provider_status_raw"] = active_raw_status
+        base["canonical_status_before_not_start_override"] = str(base.get("canonical_status_before_not_start_override") or ("running" if active_is_not_start else normalized_pending_status))
+        base["not_start_override_applied"] = bool(active_is_not_start)
+        base["provider_elapsed_seconds"] = max(_safe_int(base.get("provider_elapsed_seconds"), 0), _safe_int(active_scene.get("provider_elapsed_seconds"), 0), _safe_int(active_scene.get("scene_not_start_elapsed"), 0))
+        base["provider_wait_elapsed_seconds"] = max(_safe_int(base.get("provider_wait_elapsed_seconds"), 0), _safe_int(active_scene.get("provider_wait_elapsed_seconds"), 0), _safe_int(base.get("provider_elapsed_seconds"), 0))
         base["terminal_state"] = "final_rendering"
         base["final_decision"] = "continue_polling"
+        base["key4u_submit_suppressed"] = not bool(base.get("fallback_allowed"))
+        base["key4u_submit_suppressed_reason"] = str(base.get("fallback_block_reason") or ("not_start_under_threshold" if active_is_not_start else "primary_provider_in_progress"))
         base["source_of_truth"] = str(active_scene.get("source_of_truth") or "scene_provider_task_alive")
         return base
 
@@ -2947,6 +3019,11 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
                 ),
                 "",
             )
+        )
+        data["fallback_provider_candidate"] = str(
+            data.get("fallback_provider_candidate")
+            or data.get("next_provider_or_model_candidate")
+            or ""
         )
         data["fallback_submit_source"] = str(data.get("fallback_submit_source") or (PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE if data.get("fallback_allowed") else ""))
         data["source_of_truth"] = str(data.get("source_of_truth") or active_scene.get("source_of_truth") or ("scene_stalled_not_start" if data["scenes_stalled"] else "scene_orchestrator"))

@@ -67,7 +67,7 @@ def test_job_106_not_start_elapsed_uses_provider_elapsed_without_fallback_under_
     assert debug[0]["provider_elapsed_seconds"] >= 59
     assert debug[0]["provider_stalled_not_start"] is False
     assert debug[0]["fallback_allowed"] is False
-    assert debug[0]["fallback_block_reason"] == "scene_not_stalled"
+    assert debug[0]["fallback_block_reason"] == "not_start_under_threshold"
     assert debug[0]["not_start_threshold_seconds"] == 90
 
 
@@ -113,7 +113,7 @@ def test_scene_debug_maps_status_fallback_reason_and_selected_model_by_scene():
 
     assert scene_status_by_scene["1"] == "provider_not_start"
     assert fallback_eligible_by_scene["1"] is False
-    assert fallback_reason_by_scene["1"] == "scene_not_stalled"
+    assert fallback_reason_by_scene["1"] == "not_start_under_threshold"
     assert selected_model_by_scene["1"] == "veo3.1-fast"
     assert debug[0]["fallback_provider_order"][0] == "key4u_video"
 

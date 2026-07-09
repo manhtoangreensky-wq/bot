@@ -308,7 +308,31 @@ def _provider_final_output_ready(payload: dict[str, Any]) -> bool:
     return False
 
 
+def _provider_status_value_is_not_start(*values: Any) -> bool:
+    for value in values:
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if text in {
+            "not_start",
+            "not_started",
+            "notstart",
+            "provider_not_start",
+            "media_generation_status_not_start",
+            "media_generation_status_not_started",
+        }:
+            return True
+        if "not_start" in text or "not_started" in text:
+            return True
+    return False
+
+
 def _provider_status_for_progress(payload: dict[str, Any], alive: bool) -> str:
+    if _provider_status_value_is_not_start(
+        payload.get("raw_provider_status"),
+        payload.get("provider_status_raw"),
+        payload.get("nonterminal_provider_status"),
+        payload.get("shopaikey_raw_status"),
+    ):
+        return "not_start"
     status = str(
         payload.get("normalized_provider_status")
         or payload.get("provider_status")
@@ -653,7 +677,7 @@ def reconcile_provider_progress_telemetry(
         "elapsed_display_text": _human_elapsed(elapsed),
         "panel_refresh_interval_seconds": _as_int(payload.get("panel_refresh_interval_seconds"), 25),
         "provider_status_raw": payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or "",
-        "provider_status_normalized": payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
+        "provider_status_normalized": provider_status or payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
         "result_url_present": bool(result_url_present),
         "provider_result_url_present": bool(result_url_present),
         "http_200_not_used_as_progress": bool(parser_fields.get("http_200_not_used_as_progress") or payload.get("http_200_not_used_as_progress")),

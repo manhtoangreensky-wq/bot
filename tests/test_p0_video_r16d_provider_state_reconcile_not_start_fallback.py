@@ -75,7 +75,7 @@ def test_not_start_under_grace_waits_without_terminal_failure():
 
     assert policy["provider_stalled_not_start"] is False
     assert policy["fallback_allowed"] is False
-    assert policy["fallback_block_reason"] == "scene_not_stalled"
+    assert policy["fallback_block_reason"] == "not_start_under_threshold"
 
 
 def test_not_start_over_grace_without_fallback_provider_fails_no_charge_consistently():
@@ -156,6 +156,8 @@ def test_stalled_scene_fallback_submit_source_and_chain_are_preserved(monkeypatc
     assert diagnostics["continue_polling"] is True
     assert diagnostics["fallback_used"] is True
     assert diagnostics["fallback_submit_source"] == "public_confirmed_scene_fallback_once"
+    assert diagnostics["key4u_submit_suppressed"] is False
+    assert diagnostics["key4u_submit_suppressed_reason"] == ""
 
 
 def test_failed_no_charge_never_coexists_with_continue_polling_or_provider_alive():
