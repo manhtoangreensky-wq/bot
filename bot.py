@@ -89408,26 +89408,59 @@ def video_billing_public_gate() -> dict:
 
 def video_remote_worker_runtime_status() -> dict:
     runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
-    worker_sha = str(get_system_setting("remote_worker:worker_git_sha", "") or "").strip()
-    worker_parser = str(get_system_setting("remote_worker:worker_parser_version", "") or "").strip()
-    worker_id = str(get_system_setting("remote_worker:worker_id", "") or "").strip()
-    heartbeat_at = str(get_system_setting("remote_worker:last_heartbeat", "") or "").strip()
+    settings = get_system_settings(
+        [
+            "remote_worker:last_heartbeat",
+            "remote_worker:heartbeat_updated_at",
+            "remote_worker:worker_id",
+            "remote_worker:worker_sha",
+            "remote_worker:worker_git_sha",
+            "remote_worker:worker_git_head_sha",
+            "remote_worker:worker_sha_source",
+            "remote_worker:worker_cwd",
+            "remote_worker:worker_service_mode",
+            "remote_worker:worker_parser_version",
+        ]
+    )
+    settings, heartbeat_record_selected_by = remote_worker_api.select_latest_worker_heartbeat([settings])
+    raw_worker_sha = str(settings.get("remote_worker:worker_sha") or settings.get("remote_worker:worker_git_sha") or "").strip()
+    worker_git_head_sha = str(settings.get("remote_worker:worker_git_head_sha") or "").strip()
+    worker_sha = worker_git_head_sha or raw_worker_sha
+    worker_parser = str(settings.get("remote_worker:worker_parser_version") or "").strip()
+    worker_id = str(settings.get("remote_worker:worker_id") or "").strip()
+    worker_sha_source = str(settings.get("remote_worker:worker_sha_source") or ("git_rev_parse_head" if worker_sha else "unknown")).strip()
+    worker_cwd = str(settings.get("remote_worker:worker_cwd") or "").strip()
+    worker_service_mode = str(settings.get("remote_worker:worker_service_mode") or "").strip()
+    heartbeat_at = str(settings.get("remote_worker:heartbeat_updated_at") or settings.get("remote_worker:last_heartbeat") or "").strip()
     heartbeat_dt = parse_now_text(heartbeat_at)
     age_seconds = None
     connected = False
     if heartbeat_dt:
         age_seconds = max(0, int((datetime.now() - heartbeat_dt).total_seconds()))
         connected = age_seconds <= max(300, safe_int(LOCAL_WORKER_MAX_JOB_SECONDS, 600))
-    if runtime_sha and worker_sha:
+    compare_sha = worker_git_head_sha or worker_sha
+    if runtime_sha and compare_sha:
         runtime_short = runtime_sha[:12]
-        worker_short = worker_sha[:12]
+        worker_short = compare_sha[:12]
         code_match = "yes" if worker_short.startswith(runtime_short) or runtime_short.startswith(worker_short) else "no"
     else:
         code_match = "unknown"
+    raw_worker_mismatch = bool(raw_worker_sha and worker_git_head_sha and raw_worker_sha[:12] != worker_git_head_sha[:12])
+    runtime_git_head_match = bool(
+        runtime_sha
+        and worker_git_head_sha
+        and (
+            worker_git_head_sha[:12].startswith(runtime_sha[:12])
+            or runtime_sha[:12].startswith(worker_git_head_sha[:12])
+        )
+    )
+    heartbeat_sha_source_bug = bool(raw_worker_mismatch and runtime_git_head_match)
     if not heartbeat_at:
         reason = "worker heartbeat chưa ghi nhận"
     elif not connected:
         reason = "worker heartbeat đã cũ"
+    elif heartbeat_sha_source_bug:
+        reason = "heartbeat_sha_source_bug"
     elif code_match == "no":
         reason = "worker cần sync latest main"
     else:
@@ -89437,10 +89470,19 @@ def video_remote_worker_runtime_status() -> dict:
         "runtime_short": (runtime_sha or APP_BUILD or "-")[:12],
         "worker_sha": worker_sha,
         "worker_short": (worker_sha or "-")[:12],
+        "raw_worker_sha": raw_worker_sha,
+        "raw_worker_short": (raw_worker_sha or "-")[:12],
+        "worker_git_head_sha": worker_git_head_sha,
+        "worker_git_head_short": (worker_git_head_sha or "-")[:12],
+        "worker_sha_source": worker_sha_source or "unknown",
+        "worker_cwd": worker_cwd,
+        "worker_service_mode": worker_service_mode,
         "worker_parser_version": worker_parser,
         "worker_id": worker_id,
         "last_heartbeat": heartbeat_at,
         "heartbeat_age_seconds": age_seconds,
+        "heartbeat_record_selected_by": heartbeat_record_selected_by,
+        "heartbeat_sha_source_bug": heartbeat_sha_source_bug,
         "connected": connected,
         "worker_code_matches_runtime": code_match,
         "sync_warning": code_match == "no",
@@ -89618,9 +89660,15 @@ def video_public_status_text() -> str:
         "<b>Product Video Worker</b>",
         f"• runtime SHA: <code>{html.escape(str(remote_worker.get('runtime_short') or '-'))}</code>",
         f"• worker SHA: <code>{html.escape(str(remote_worker.get('worker_short') or '-'))}</code>",
+        f"• worker SHA source: <code>{html.escape(str(remote_worker.get('worker_sha_source') or 'unknown'))}</code>",
+        f"• worker git HEAD: <code>{html.escape(str(remote_worker.get('worker_git_head_short') or '-'))}</code>",
+        f"• worker cwd: <code>{html.escape(str(remote_worker.get('worker_cwd') or '-'))}</code>",
         f"• worker connected: <code>{video_public_bool_label(remote_worker.get('connected'))}</code>",
         f"• worker code matches runtime: <code>{html.escape(str(remote_worker.get('worker_code_matches_runtime') or 'unknown'))}</code>",
         f"• last heartbeat: <code>{html.escape(vietnam_time_display(remote_worker.get('last_heartbeat') or '', '-'))}</code>",
+        f"• heartbeat age: <code>{html.escape(str(remote_worker.get('heartbeat_age_seconds') if remote_worker.get('heartbeat_age_seconds') is not None else '-'))}s</code>",
+        f"• heartbeat selected by: <code>{html.escape(str(remote_worker.get('heartbeat_record_selected_by') or '-'))}</code>",
+        f"• heartbeat SHA source bug: <code>{video_public_bool_label(remote_worker.get('heartbeat_sha_source_bug'))}</code>",
         f"• sync note: <code>{html.escape(str(remote_worker.get('reason') or '-'))}</code>",
         "",
         "<b>Billing safety</b>",
@@ -189297,10 +189345,25 @@ def _safe_worker_ping_capabilities(payload: dict, request: Request) -> list[str]
     return remote_worker_api.sanitize_capabilities([part for part in str(raw or "").split(",") if part.strip()])
 
 
-def _record_remote_worker_ping(worker_id: str) -> None:
+def _remote_worker_sha_from_payload(payload: dict | None = None) -> dict:
+    return remote_worker_api.normalize_worker_sha_payload(payload)
+
+
+def _record_remote_worker_ping(worker_id: str, payload: dict | None = None, *, note: str = "remote worker ping") -> None:
     try:
-        set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker ping", worker_id)
+        heartbeat_at = now_text()
+        sha = _remote_worker_sha_from_payload(payload)
+        set_system_setting("remote_worker:last_heartbeat", heartbeat_at, note, worker_id)
+        set_system_setting("remote_worker:heartbeat_updated_at", heartbeat_at, note, worker_id)
         set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+        set_system_setting("remote_worker:worker_sha", sha["worker_sha"], "remote worker effective sha", worker_id)
+        set_system_setting("remote_worker:worker_git_sha", sha["worker_git_sha"], "remote worker git sha", worker_id)
+        set_system_setting("remote_worker:worker_git_head_sha", sha["worker_git_head_sha"], "remote worker git head sha", worker_id)
+        set_system_setting("remote_worker:worker_sha_source", sha["worker_sha_source"], "remote worker sha source", worker_id)
+        set_system_setting("remote_worker:worker_cwd", sha["worker_cwd"], "remote worker cwd", worker_id)
+        set_system_setting("remote_worker:worker_service_mode", sha["worker_service_mode"], "remote worker service mode", worker_id)
+        if sha["worker_parser_version"]:
+            set_system_setting("remote_worker:worker_parser_version", sha["worker_parser_version"], "remote worker parser version", worker_id)
     except Exception as exc:
         logger.warning("remote worker ping setting skipped: %s", type(exc).__name__)
 
@@ -189501,13 +189564,7 @@ async def api_worker_ping(request: Request):
         payload.get("worker_id") or request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker"
     )
     capabilities = _safe_worker_ping_capabilities(payload, request)
-    _record_remote_worker_ping(worker_id)
-    worker_sha = str(payload.get("worker_git_sha") or "").strip()
-    if worker_sha:
-        set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
-    worker_parser = str(payload.get("worker_parser_version") or "").strip()
-    if worker_parser:
-        set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
+    _record_remote_worker_ping(worker_id, payload, note="remote worker ping")
     logger.info(
         "remote_worker_api_ping | %s",
         json.dumps(
@@ -189545,8 +189602,7 @@ async def api_worker_claim(request: Request):
     admin_video_only = str(payload.get("admin_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     product_video_only = str(payload.get("product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     owner_product_video_only = str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
-    set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
-    set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    _record_remote_worker_ping(worker_id, payload, note="remote worker claim")
     conn = db_connect()
     try:
         return remote_worker_api.claim_remote_worker_job(
@@ -189573,14 +189629,7 @@ async def api_worker_heartbeat(request: Request):
     job_id = safe_int(payload.get("job_id"), 0)
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
-    set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker heartbeat", worker_id)
-    set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
-    worker_sha = str(payload.get("worker_git_sha") or "").strip()
-    if worker_sha:
-        set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
-    worker_parser = str(payload.get("worker_parser_version") or "").strip()
-    if worker_parser:
-        set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
+    _record_remote_worker_ping(worker_id, payload, note="remote worker heartbeat")
     conn = db_connect()
     try:
         result = remote_worker_api.heartbeat_remote_worker_job(

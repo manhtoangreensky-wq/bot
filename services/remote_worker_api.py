@@ -108,6 +108,93 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, separators=(",", ":"))
 
 
+def normalize_worker_sha_payload(payload: dict | None = None) -> dict:
+    data = payload if isinstance(payload, dict) else {}
+    git_head = str(data.get("worker_git_head_sha") or "").strip()[:80]
+    worker_sha = str(data.get("worker_sha") or "").strip()[:80]
+    legacy_git_sha = str(data.get("worker_git_sha") or "").strip()[:80]
+    source = str(data.get("worker_sha_source") or "").strip()[:80]
+    if not git_head and source != "unknown":
+        git_head = legacy_git_sha or worker_sha
+    effective = git_head or worker_sha or legacy_git_sha
+    if not source:
+        source = "git_rev_parse_head" if effective else "unknown"
+    if source == "unknown":
+        effective = ""
+        git_head = ""
+        worker_sha = ""
+        legacy_git_sha = ""
+    return {
+        "worker_sha": effective[:80],
+        "worker_git_sha": (legacy_git_sha or effective)[:80],
+        "worker_git_head_sha": git_head[:80],
+        "worker_sha_source": source,
+        "worker_cwd": str(data.get("worker_cwd") or "")[:500],
+        "worker_service_mode": str(data.get("service_mode") or data.get("worker_service_mode") or "")[:120],
+        "worker_parser_version": str(data.get("worker_parser_version") or "")[:80],
+    }
+
+
+def _parse_worker_heartbeat_time(value: Any) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return datetime.min
+    candidates = [raw]
+    if raw.endswith("Z"):
+        candidates.append(raw[:-1] + "+00:00")
+    if "T" in raw:
+        candidates.append(raw.replace("T", " ").replace("Z", ""))
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is not None:
+                parsed = parsed.replace(tzinfo=None)
+            return parsed
+        except Exception:
+            continue
+    return datetime.min
+
+
+def select_latest_worker_heartbeat(
+    records: list[dict] | tuple[dict, ...],
+    *,
+    service_mode: str = "owner_product_video",
+) -> tuple[dict, str]:
+    candidates = [dict(record) for record in records if isinstance(record, dict)]
+    if not candidates:
+        return {}, "none"
+    mode = str(service_mode or "").strip()
+    if mode:
+        mode_matches = [
+            record
+            for record in candidates
+            if str(record.get("remote_worker:worker_service_mode") or record.get("worker_service_mode") or record.get("service_mode") or "").strip()
+            == mode
+        ]
+        if mode_matches:
+            candidates = mode_matches
+            selected_by = f"latest_updated_at_{mode}"
+        else:
+            selected_by = "latest_updated_at_any_worker"
+    else:
+        selected_by = "latest_updated_at_any_worker"
+
+    def _record_time(record: dict) -> datetime:
+        return _parse_worker_heartbeat_time(
+            record.get("remote_worker:heartbeat_updated_at")
+            or record.get("heartbeat_updated_at")
+            or record.get("remote_worker:last_heartbeat")
+            or record.get("last_heartbeat")
+            or record.get("updated_at")
+            or ""
+        )
+
+    selected = max(candidates, key=_record_time)
+    if len(records) == 1:
+        selected_by = "latest_system_setting_heartbeat_updated_at"
+    return selected, selected_by
+
+
 def remote_worker_production_guard_config(environ: dict[str, str] | None = None) -> dict:
     env = environ or os.environ
     max_active = _safe_int(env.get(REMOTE_WORKER_MAX_ADMIN_CANARY_ACTIVE_ENV), 1)

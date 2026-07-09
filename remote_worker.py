@@ -83,25 +83,63 @@ WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).
 FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 
 
+def worker_git_head_info(cwd: str | None = None) -> dict:
+    process_cwd_raw = str(cwd or os.getcwd())
+    process_cwd = (
+        process_cwd_raw
+        if os.path.isabs(process_cwd_raw) or process_cwd_raw.startswith("/")
+        else os.path.abspath(process_cwd_raw)
+    )
+    candidates: list[str] = []
+    for candidate in (process_cwd, SCRIPT_DIR):
+        candidate = candidate if str(candidate).startswith("/") else os.path.abspath(candidate)
+        if candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in candidates:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=candidate,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if result.returncode == 0:
+                sha = str(result.stdout or "").strip()[:40]
+                if sha:
+                    return {
+                        "worker_sha": sha,
+                        "worker_git_sha": sha,
+                        "worker_git_head_sha": sha,
+                        "worker_sha_source": "git_rev_parse_head",
+                        "worker_cwd": process_cwd_raw,
+                    }
+        except Exception:
+            continue
+    return {
+        "worker_sha": "",
+        "worker_git_sha": "",
+        "worker_git_head_sha": "",
+        "worker_sha_source": "unknown",
+        "worker_cwd": process_cwd_raw,
+    }
+
+
 def worker_git_sha() -> str:
-    for name in ("RAILWAY_GIT_COMMIT_SHA", "GIT_COMMIT_SHA", "SOURCE_VERSION", "APP_BUILD_SHA"):
-        value = str(os.environ.get(name) or "").strip()
-        if value:
-            return value[:40]
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=SCRIPT_DIR,
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        if result.returncode == 0:
-            return str(result.stdout or "").strip()[:40]
-    except Exception:
-        return ""
-    return ""
+    return str(worker_git_head_info().get("worker_git_head_sha") or "")[:40]
+
+
+def worker_identity_payload(*, service_mode: str = "") -> dict:
+    info = worker_git_head_info()
+    return {
+        **info,
+        "worker_id": WORKER_ID,
+        "service_mode": str(service_mode or "")[:80],
+        "worker_service_mode": str(service_mode or "")[:80],
+        "heartbeat_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "worker_parser_version": WORKER_PARSER_VERSION,
+    }
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
 LAST_CLAIM_RESPONSE: dict = {}
 LAST_IDLE_REASON = ""
@@ -202,6 +240,13 @@ def claim_job(
 ) -> dict | None:
     global LAST_CLAIM_RESPONSE, LAST_CLAIMED_JOB
     LAST_CLAIMED_JOB = {}
+    service_mode = claim_mode_label(
+        canary_only=canary_only,
+        admin_canary_only=admin_canary_only,
+        admin_video_only=admin_video_only,
+        product_video_only=product_video_only,
+        owner_product_video_only=owner_product_video_only,
+    )
     if product_video_only or owner_product_video_only:
         capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
     elif admin_video_only:
@@ -216,6 +261,7 @@ def claim_job(
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
         "max_jobs": 1,
+        **worker_identity_payload(service_mode=service_mode),
     }
     if canary_only:
         payload["canary_only"] = True
@@ -236,13 +282,6 @@ def claim_job(
     LAST_CLAIM_RESPONSE = data if isinstance(data, dict) else {}
     job = data.get("job") if isinstance(data, dict) and data.get("ok") else None
     if isinstance(job, dict) and job:
-        service_mode = claim_mode_label(
-            canary_only=canary_only,
-            admin_canary_only=admin_canary_only,
-            admin_video_only=admin_video_only,
-            product_video_only=product_video_only,
-            owner_product_video_only=owner_product_video_only,
-        )
         trace = worker_process_trace(job, service_mode=service_mode, claim_status="claimed")
         job.update(trace)
         LAST_CLAIMED_JOB = dict(job)
@@ -329,8 +368,15 @@ def ping_server(
     payload = {
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
-        "worker_git_sha": worker_git_sha(),
-        "worker_parser_version": WORKER_PARSER_VERSION,
+        **worker_identity_payload(
+            service_mode=claim_mode_label(
+                canary_only=canary,
+                admin_canary_only=admin_canary,
+                admin_video_only=admin_video,
+                product_video_only=product_video,
+                owner_product_video_only=owner_product_video,
+            )
+        ),
         "dry_run": True,
     }
     if canary:
@@ -347,13 +393,13 @@ def ping_server(
 
 
 def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") -> None:
+    service_mode = str((LAST_CLAIMED_JOB or {}).get("claimed_by_service_mode") or (LAST_CLAIMED_JOB or {}).get("worker_service_mode") or "")
     payload = {
         "worker_id": WORKER_ID,
         "job_id": str(job_id),
         "progress_percent": int(progress_percent or 0),
         "message": str(message or "")[:500],
-        "worker_git_sha": worker_git_sha(),
-        "worker_parser_version": WORKER_PARSER_VERSION,
+        **worker_identity_payload(service_mode=service_mode),
     }
     http_json("POST", "/api/v1/worker/heartbeat", payload, timeout=20)
 
@@ -400,6 +446,7 @@ def first_line(text: str) -> str:
 def worker_process_trace(job: dict | None = None, *, service_mode: str = "", claim_status: str = "") -> dict:
     data = dict(job or {})
     mode = str(service_mode or data.get("worker_service_mode") or data.get("claimed_by_service_mode") or "unknown").strip()
+    identity = worker_identity_payload(service_mode=mode)
     try:
         hostname = socket.gethostname()
     except Exception:
@@ -414,7 +461,11 @@ def worker_process_trace(job: dict | None = None, *, service_mode: str = "", cla
         "worker_claim_reason": str(data.get("worker_claim_reason") or "")[:300],
         "process_hostname": str(hostname or "")[:160],
         "process_pid": int(os.getpid() or 0),
-        "worker_git_sha": worker_git_sha(),
+        "worker_sha": str(identity.get("worker_sha") or "")[:40],
+        "worker_git_sha": str(identity.get("worker_git_sha") or "")[:40],
+        "worker_git_head_sha": str(identity.get("worker_git_head_sha") or "")[:40],
+        "worker_sha_source": str(identity.get("worker_sha_source") or "unknown")[:80],
+        "worker_cwd": str(identity.get("worker_cwd") or "")[:300],
         "worker_parser_version": WORKER_PARSER_VERSION,
         "worker_started_at": WORKER_STARTED_AT,
         "worker_code_matches_runtime": str(data.get("worker_code_matches_runtime") or "unknown")[:40],
