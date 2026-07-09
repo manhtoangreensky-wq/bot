@@ -797,6 +797,27 @@ def _scene_task_status(item: dict | None = None) -> str:
     return _normalize_scene_task_status(raw, item)
 
 
+def _scene_task_has_raw_not_start(item: dict | None = None) -> bool:
+    item = dict(item or {})
+    for key in (
+        "provider_status_raw",
+        "nonterminal_provider_status",
+        "normalized_provider_status",
+        "provider_status",
+        "status",
+        "blocker",
+    ):
+        value = item.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if text in {"not_start", "not_started", "provider_not_start", "media_generation_status_not_start"}:
+            return True
+        if _normalize_scene_task_status(text, item) == "provider_not_start":
+            return True
+    return False
+
+
 def _normalize_scene_task_status(status: Any = "", item: dict | None = None) -> str:
     text = str(status or "").strip().lower().replace("-", "_")
     item = dict(item or {})
@@ -877,26 +898,31 @@ def _scene_task_progress_number(item: dict | None = None) -> float:
 def _scene_task_elapsed_seconds(item: dict | None = None, job: dict | None = None) -> int:
     item = dict(item or {})
     job = dict(job or {})
+    values: list[int] = []
     for key in (
         "scene_not_start_elapsed",
         "provider_wait_elapsed_seconds",
         "provider_elapsed_seconds",
         "elapsed_wall_clock_seconds",
+        "previous_elapsed_seconds",
     ):
         value = _safe_int(item.get(key), 0)
         if value > 0:
-            return value
+            values.append(value)
     for key in (
         "scene_not_start_elapsed",
         "provider_wait_elapsed_seconds",
         "provider_elapsed_seconds",
         "elapsed_wall_clock_seconds",
+        "previous_elapsed_seconds",
     ):
         value = _safe_int(job.get(key), 0)
         if value > 0:
-            return value
+            values.append(value)
     now = time.time()
     for key in (
+        "scene_submitted_at_epoch",
+        "scene_first_not_start_seen_at_epoch",
         "provider_started_at_epoch",
         "provider_wait_started_epoch",
         "started_at_epoch",
@@ -905,17 +931,17 @@ def _scene_task_elapsed_seconds(item: dict | None = None, job: dict | None = Non
         try:
             epoch = float(item.get(key) or 0)
             if epoch > 0:
-                return max(0, int(now - epoch))
+                values.append(max(0, int(now - epoch)))
         except Exception:
             pass
-    for key in ("provider_started_at_epoch", "provider_wait_started_epoch", "started_at_epoch"):
+    for key in ("scene_submitted_at_epoch", "scene_first_not_start_seen_at_epoch", "provider_started_at_epoch", "provider_wait_started_epoch", "started_at_epoch"):
         try:
             epoch = float(job.get(key) or 0)
             if epoch > 0:
-                return max(0, int(now - epoch))
+                values.append(max(0, int(now - epoch)))
         except Exception:
             pass
-    return 0
+    return max(values) if values else 0
 
 
 def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, scene_index: int = 1) -> dict[str, Any]:
@@ -943,7 +969,8 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         _env_int("PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS", DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS),
     )
     result_url_valid = bool(scene_task.get("result_url_valid") or scene_task.get("download_url_present") or scene_task.get("provider_result_url_present"))
-    is_not_start = status == "provider_not_start" or str(scene_task.get("provider_status_raw") or "").strip().lower() == "not_start"
+    is_not_start = bool(status == "provider_not_start" or _scene_task_has_raw_not_start(scene_task))
+    current_scene_status = PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START if is_not_start and elapsed >= not_start_threshold and progress <= 0 and not result_url_valid else ("provider_not_start" if is_not_start else status)
     not_start_stalled = bool(is_not_start and progress <= 0 and not result_url_valid and elapsed >= not_start_threshold)
     running_stalled = bool(status == "provider_running" and not result_url_valid and elapsed >= running_threshold)
     timed_out = bool(_scene_task_has_provider_id(scene_task) and not result_url_valid and elapsed >= total_threshold)
@@ -1009,8 +1036,13 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     threshold = not_start_threshold if is_not_start else (running_threshold if running_stalled else total_threshold)
     return {
         "scene_index": max(1, _safe_int(scene_index, 1)),
+        "current_scene_status": current_scene_status,
+        "provider_not_start": bool(is_not_start),
         "scene_not_start_elapsed": elapsed,
+        "provider_elapsed_seconds": elapsed,
+        "provider_wait_elapsed_seconds": elapsed,
         "stall_threshold": threshold,
+        "not_start_threshold_seconds": not_start_threshold,
         "provider_stalled_not_start": bool(not_start_stalled),
         "provider_scene_stalled": stalled,
         "scene_running_without_result_stalled": bool(running_stalled),
@@ -1073,9 +1105,17 @@ def product_video_scene_tasks_debug(
             "fallback_count": 0,
             "provider_progress_raw": "",
             "provider_progress_normalized": 0,
+            "selected_model": "",
+            "selected_provider": "",
+            "selected_family": "",
+            "selected_payload_adapter": "",
             "provider_wait_elapsed_seconds": 0,
+            "provider_elapsed_seconds": 0,
             "scene_not_start_elapsed": 0,
+            "scene_submitted_at": "",
+            "scene_first_not_start_seen_at": "",
             "stall_threshold": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+            "not_start_threshold_seconds": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
             "provider_stalled_not_start": False,
             "fallback_allowed": False,
             "fallback_block_reason": "scene_not_stalled",
@@ -1101,8 +1141,15 @@ def product_video_scene_tasks_debug(
                 "fallback_count": _safe_int(item.get("fallback_count"), 0),
                 "provider_progress_raw": item.get("provider_progress_raw") or item.get("shopaikey_data_progress_raw") or item.get("data_progress_raw") or item.get("progress") or "",
                 "provider_progress_normalized": _safe_int(item.get("provider_progress_normalized") or item.get("provider_progress_percent") or item.get("progress"), 0),
+                "selected_model": str(item.get("selected_model") or item.get("model") or ""),
+                "selected_provider": str(item.get("selected_provider") or item.get("provider") or ""),
+                "selected_family": str(item.get("selected_family") or ""),
+                "selected_payload_adapter": str(item.get("selected_payload_adapter") or ""),
                 "provider_wait_elapsed_seconds": _safe_int(item.get("provider_wait_elapsed_seconds") or item.get("provider_elapsed_seconds") or item.get("elapsed_wall_clock_seconds"), 0),
+                "provider_elapsed_seconds": _safe_int(item.get("provider_elapsed_seconds") or item.get("provider_wait_elapsed_seconds") or item.get("elapsed_wall_clock_seconds"), 0),
                 "provider_status_raw": str(item.get("provider_status_raw") or item.get("nonterminal_provider_status") or item.get("provider_status") or ""),
+                "scene_submitted_at": str(item.get("scene_submitted_at") or item.get("submitted_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
+                "scene_first_not_start_seen_at": str(item.get("scene_first_not_start_seen_at") or item.get("first_not_start_seen_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
         }
         merged["status"] = _normalize_scene_task_status(item.get("status") or merged.get("provider_status_raw"), {**item, **merged})
         by_scene[idx].update(merged)
@@ -1141,7 +1188,12 @@ def product_video_scene_tasks_debug(
                 "fallback_count": _safe_int(debug.get("fallback_count") or source.get("fallback_count"), _safe_int(by_scene[idx].get("fallback_count"), 0)),
                 "provider_progress_raw": debug.get("provider_progress_raw") or debug.get("shopaikey_data_progress_raw") or source.get("provider_progress_raw") or by_scene[idx].get("provider_progress_raw") or "",
                 "provider_progress_normalized": _safe_int(debug.get("provider_progress_normalized") or debug.get("provider_progress_percent") or source.get("provider_progress_normalized"), _safe_int(by_scene[idx].get("provider_progress_normalized"), 0)),
+                "selected_model": str(debug.get("selected_model") or debug.get("model_used_in_payload") or debug.get("provider_payload_model") or source.get("selected_model") or source.get("model") or by_scene[idx].get("selected_model") or ""),
+                "selected_provider": str(debug.get("selected_provider") or source.get("selected_provider") or by_scene[idx].get("selected_provider") or ""),
+                "selected_family": str(debug.get("selected_family") or source.get("selected_family") or by_scene[idx].get("selected_family") or ""),
+                "selected_payload_adapter": str(debug.get("selected_payload_adapter") or source.get("selected_payload_adapter") or by_scene[idx].get("selected_payload_adapter") or ""),
                 "provider_wait_elapsed_seconds": _safe_int(debug.get("provider_wait_elapsed_seconds") or debug.get("provider_elapsed_seconds") or debug.get("elapsed_wall_clock_seconds") or source.get("provider_wait_elapsed_seconds"), _safe_int(by_scene[idx].get("provider_wait_elapsed_seconds"), 0)),
+                "provider_elapsed_seconds": _safe_int(debug.get("provider_elapsed_seconds") or debug.get("provider_wait_elapsed_seconds") or debug.get("elapsed_wall_clock_seconds") or source.get("provider_elapsed_seconds"), _safe_int(by_scene[idx].get("provider_elapsed_seconds") or by_scene[idx].get("provider_wait_elapsed_seconds"), 0)),
                 "provider_status_raw": str(debug.get("provider_status_raw") or debug.get("nonterminal_provider_status") or source.get("provider_status_raw") or status or ""),
                 "provider_stalled_not_start": bool(debug.get("provider_stalled_not_start") or source.get("provider_stalled_not_start")),
                 "fallback_allowed": bool(debug.get("fallback_allowed") or source.get("fallback_allowed") or False),
@@ -1151,6 +1203,8 @@ def product_video_scene_tasks_debug(
                 "fallback_eligibility_reason": str(debug.get("fallback_eligibility_reason") or source.get("fallback_eligibility_reason") or by_scene[idx].get("fallback_eligibility_reason") or ""),
                 "fallback_provider_order": debug.get("fallback_provider_order") or source.get("fallback_provider_order") or by_scene[idx].get("fallback_provider_order") or [],
                 "source_of_truth": str(debug.get("source_of_truth") or source.get("source_of_truth") or by_scene[idx].get("source_of_truth") or ""),
+                "scene_submitted_at": str(debug.get("scene_submitted_at") or source.get("scene_submitted_at") or by_scene[idx].get("scene_submitted_at") or ""),
+                "scene_first_not_start_seen_at": str(debug.get("scene_first_not_start_seen_at") or source.get("scene_first_not_start_seen_at") or by_scene[idx].get("scene_first_not_start_seen_at") or ""),
         }
         merged["status"] = _normalize_scene_task_status(status or by_scene[idx].get("status"), {**source, **debug, **merged})
         by_scene[idx].update(merged)
@@ -1171,8 +1225,12 @@ def product_video_scene_tasks_debug(
         fallback_allowed = bool(policy["fallback_allowed"] if policy["provider_scene_stalled"] else (by_scene[idx].get("fallback_allowed") or policy["fallback_allowed"]))
         by_scene[idx].update(
             {
+                "status": policy["current_scene_status"] if policy.get("provider_not_start") else by_scene[idx].get("status"),
                 "scene_not_start_elapsed": policy["scene_not_start_elapsed"],
+                "provider_elapsed_seconds": max(_safe_int(by_scene[idx].get("provider_elapsed_seconds"), 0), _safe_int(policy.get("provider_elapsed_seconds"), 0)),
+                "provider_wait_elapsed_seconds": max(_safe_int(by_scene[idx].get("provider_wait_elapsed_seconds"), 0), _safe_int(policy.get("provider_wait_elapsed_seconds"), 0)),
                 "stall_threshold": policy["stall_threshold"],
+                "not_start_threshold_seconds": policy["not_start_threshold_seconds"],
                 "provider_stalled_not_start": bool(by_scene[idx].get("provider_stalled_not_start") or policy["provider_stalled_not_start"]),
                 "fallback_allowed": fallback_allowed,
                 "fallback_block_reason": current_block_reason,
@@ -2135,6 +2193,26 @@ def _run_per_scene_provider_orchestrator(
         for item in scene_tasks
         if _safe_int(item.get("scene_index"), 0)
     }
+    scene_status_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): str(item.get("status") or "")
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
+    fallback_eligible_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): bool(item.get("fallback_allowed"))
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
+    fallback_reason_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): str(item.get("fallback_block_reason") or item.get("fallback_eligibility_reason") or "")
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
+    selected_model_by_scene = {
+        str(_safe_int(item.get("scene_index"), 0)): str(item.get("selected_model") or item.get("model") or "")
+        for item in scene_tasks
+        if _safe_int(item.get("scene_index"), 0)
+    }
     active_scene = next(
         (
             item
@@ -2173,6 +2251,18 @@ def _run_per_scene_provider_orchestrator(
         "scenes_stalled_count": scenes_stalled_count,
         "scene_success_count": counts["scene_tasks_completed"],
         "fallback_count_by_scene": fallback_count_by_scene,
+        "scene_status_by_scene": scene_status_by_scene,
+        "fallback_eligible_by_scene": fallback_eligible_by_scene,
+        "fallback_reason_by_scene": fallback_reason_by_scene,
+        "selected_model_by_scene": selected_model_by_scene,
+        "next_provider_or_model_candidate": next(
+            (
+                str((item.get("fallback_provider_order") or [""])[0])
+                for item in scene_tasks
+                if isinstance(item.get("fallback_provider_order"), list) and item.get("fallback_provider_order")
+            ),
+            "",
+        ),
         "current_scene_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_scene": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_clip_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
@@ -2805,6 +2895,26 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             for item in scene_tasks
             if _safe_int(item.get("scene_index"), 0)
         }
+        data["scene_status_by_scene"] = {
+            str(_safe_int(item.get("scene_index"), 0)): str(item.get("status") or "")
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index"), 0)
+        }
+        data["fallback_eligible_by_scene"] = {
+            str(_safe_int(item.get("scene_index"), 0)): bool(item.get("fallback_allowed"))
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index"), 0)
+        }
+        data["fallback_reason_by_scene"] = {
+            str(_safe_int(item.get("scene_index"), 0)): str(item.get("fallback_block_reason") or item.get("fallback_eligibility_reason") or "")
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index"), 0)
+        }
+        data["selected_model_by_scene"] = {
+            str(_safe_int(item.get("scene_index"), 0)): str(item.get("selected_model") or item.get("model") or "")
+            for item in scene_tasks
+            if _safe_int(item.get("scene_index"), 0)
+        }
         data["scene_tasks_completed"] = completed_scenes
         data["scene_tasks_submitted"] = sum(1 for item in scene_tasks if item.get("provider_task_id_masked") or item.get("provider_video_id_masked"))
         data["scene_tasks_submitted_count"] = data["scene_tasks_submitted"]
@@ -2826,6 +2936,17 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
                 if item.get("fallback_allowed") and isinstance(item.get("fallback_provider_order"), list) and item.get("fallback_provider_order")
             ),
             "",
+        )
+        data["next_provider_or_model_candidate"] = str(
+            data.get("fallback_provider")
+            or next(
+                (
+                    str((item.get("fallback_provider_order") or [""])[0])
+                    for item in scene_tasks
+                    if isinstance(item.get("fallback_provider_order"), list) and item.get("fallback_provider_order")
+                ),
+                "",
+            )
         )
         data["fallback_submit_source"] = str(data.get("fallback_submit_source") or (PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE if data.get("fallback_allowed") else ""))
         data["source_of_truth"] = str(data.get("source_of_truth") or active_scene.get("source_of_truth") or ("scene_stalled_not_start" if data["scenes_stalled"] else "scene_orchestrator"))
