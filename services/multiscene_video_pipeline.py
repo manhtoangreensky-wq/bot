@@ -140,6 +140,9 @@ def probe_duration(path: str) -> float:
         raise RuntimeError("ffprobe_duration_invalid") from exc
 
 
+MAX_MULTISCENE_SCENES = 20
+
+
 def plan_multiscene_video(
     user_prompt: str,
     *,
@@ -149,7 +152,7 @@ def plan_multiscene_video(
     style: str | None = None,
     llm_func: Callable[..., Any] | None = None,
 ) -> list[SceneSpec]:
-    count = max(1, min(3, int(max_scenes or 3)))
+    count = max(1, min(MAX_MULTISCENE_SCENES, int(max_scenes or 3)))
     duration = max(1.0, min(8.0, float(default_scene_duration or 6.0)))
     prompt = re.sub(r"\s+", " ", str(user_prompt or "").strip())
     if not prompt:

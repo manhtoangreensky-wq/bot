@@ -54,6 +54,7 @@ PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
 PRODUCT_VIDEO_SCENE_SECONDS = 8
 PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S = "per_scene_8s"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK = "single_task_legacy"
+PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT = "historical_multi_clip_concat"
 PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS = 0.7
 PRODUCT_VIDEO_LOGO_DEFAULT_WIDTH_RATIO = 0.12
 PRODUCT_VIDEO_LOGO_MAX_WIDTH_RATIO = 0.18
@@ -708,6 +709,8 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
         "scene": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         "scene_orchestrator": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         "per_scene_8s": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "multi_clip_concat": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "historical_multi_clip_concat": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         "single_task": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
         "legacy": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
         "legacy_single_task": PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
@@ -730,6 +733,11 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
     if task_present and not _product_video_pending_request_is_scene(job):
         return PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK
     if _product_video_pending_request_is_scene(job):
+        return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+    if (
+        str(job.get("source") or "").strip() == "product_video"
+        or bool(job.get("product_video"))
+    ) and _scene_count(job) > 1:
         return PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
     return PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK
 
@@ -1822,8 +1830,14 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "scene_index": scene_index,
             "scene_count": _scene_count(job),
             "scene_duration_seconds": scene_duration_seconds,
+            "clip_index": scene_index,
+            "clip_count": _scene_count(job),
+            "clip_duration_seconds": scene_duration_seconds,
             "orchestration_mode": orchestration_mode,
             "provider_orchestration_mode": orchestration_mode,
+            "render_pipeline_mode": PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT
+            if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S
+            else PRODUCT_VIDEO_ORCHESTRATION_MODE_LEGACY_SINGLE_TASK,
             "expected_duration_seconds": product_video_expected_duration_seconds(job),
             "provider_scene_request_id": request_job_id,
             "raw_output_path": raw_path,
@@ -2092,6 +2106,10 @@ def _run_per_scene_provider_orchestrator(
         "status": "processing" if pending_seen and not hard_failures else "failed",
         "orchestration_mode": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         "provider_orchestration_mode": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        "render_pipeline_mode": PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT,
+        "target_duration_seconds": product_video_expected_duration_seconds(job),
+        "clip_duration_seconds": product_video_scene_duration_seconds(job),
+        "clip_count": _scene_count(job),
         "scene_duration_seconds": product_video_scene_duration_seconds(job),
         "expected_duration_seconds": product_video_expected_duration_seconds(job),
         "scene_count": _scene_count(job),
@@ -2101,6 +2119,10 @@ def _run_per_scene_provider_orchestrator(
         "scene_tasks_submitted": counts["scene_tasks_submitted"],
         "scene_tasks_submitted_count": counts["scene_tasks_submitted_count"],
         "scene_tasks_completed": counts["scene_tasks_completed"],
+        "clips_created_count": counts["scene_tasks_created_count"],
+        "clips_submitted_count": counts["scene_tasks_submitted_count"],
+        "clips_done_count": counts["scene_tasks_completed"],
+        "clips_failed_count": sum(1 for item in scene_tasks if str(item.get("status") or "").strip().lower() in {"failed", "error"}),
         "scenes_total": counts["scenes_total"],
         "scenes_done": counts["scenes_done"],
         "scenes_pending": counts["scenes_pending"],
@@ -2111,6 +2133,7 @@ def _run_per_scene_provider_orchestrator(
         "fallback_count_by_scene": fallback_count_by_scene,
         "current_scene_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_scene": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
+        "current_clip_index": _safe_int(active_scene.get("scene_index"), counts["scenes_done"] + 1) if scene_tasks else 0,
         "current_scene_status": str(active_scene.get("status") or ""),
         "scene_not_start_elapsed": _safe_int(active_scene.get("scene_not_start_elapsed"), 0),
         "stall_threshold": _safe_int(active_scene.get("stall_threshold"), DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS),
@@ -2136,7 +2159,9 @@ def _run_per_scene_provider_orchestrator(
         "provider_models": [item.get("model") for item in provider_events if item.get("model")],
         "provider_modes": [item.get("mode") for item in provider_events if item.get("mode")],
         "downloaded_clip_paths": [scene_outputs[index] for index in sorted(scene_outputs)],
+        "local_clip_path_count": len(scene_outputs),
         "final_concat_required": bool(_scene_count(job) > 1),
+        "concat_status": "ready_to_concat" if len(scene_outputs) >= _scene_count(job) else "waiting_for_clips",
         "concat_ready": bool(len(scene_outputs) >= _scene_count(job)),
         "provider_router_called": True,
         "provider_submit_called": any(bool(item.get("provider_submit_called")) for item in debug_results if isinstance(item, dict)),
@@ -2200,6 +2225,9 @@ def _run_per_scene_provider_orchestrator(
     final_result["no_charge"] = bool(job.get("no_charge"))
     final_result["final_decision"] = "final_mp4_ready"
     final_result["source_of_truth"] = "final_mp4_validated"
+    final_result["concat_status"] = "completed"
+    final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
+    final_result["final_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
     return final_result
 
 

@@ -126,7 +126,7 @@ def _hydrated_job(*, scene_count=2, persisted_result=None, orchestration_mode=""
     }
 
 
-def test_public_confirm_defaults_to_raw_delivery_not_scene_orchestrator(tmp_path):
+def test_public_confirm_defaults_to_historical_multiclip_concat_for_multiscene(tmp_path):
     conn = _conn(tmp_path)
     project = _product_project(conn, scene_count=2)
 
@@ -134,31 +134,36 @@ def test_public_confirm_defaults_to_raw_delivery_not_scene_orchestrator(tmp_path
 
     assert result["ok"] is True
     payload = _payload(result["job"])
-    assert payload["orchestration_mode"] == "single_task_legacy"
-    assert payload["provider_orchestration_mode"] == "single_task_legacy"
-    assert payload["raw_render_delivery_baseline"] is True
+    assert payload["orchestration_mode"] == "per_scene_8s"
+    assert payload["provider_orchestration_mode"] == "per_scene_8s"
+    assert payload["render_pipeline_mode"] == "historical_multi_clip_concat"
+    assert payload["raw_render_delivery_baseline"] is False
     assert payload["scene_count"] == 2
     assert payload["duration_seconds"] == 16
-    assert payload["scene_tasks"] == []
-    assert payload["provider_scene_tasks"] == []
-    assert payload["scene_tasks_created_count"] == 0
-    assert payload["final_concat_required"] is False
+    assert len(payload["scene_tasks"]) == 2
+    assert len(payload["provider_scene_tasks"]) == 2
+    assert payload["scene_tasks_created_count"] == 2
+    assert payload["clip_count"] == 2
+    assert payload["clip_duration_seconds"] == 8
+    assert payload["final_concat_required"] is True
     assert payload["provider_submit_called"] is False
     assert payload["charge"] == 0
 
 
-def test_worker_payload_defaults_to_raw_delivery_not_scene_tasks():
+def test_worker_payload_defaults_to_historical_multiclip_concat_for_multiscene():
     payload = remote_worker_api.build_worker_job_payload(_hydrated_job(scene_count=2))
 
     assert payload["source"] == "product_video"
-    assert payload["orchestration_mode"] == "single_task_legacy"
-    assert payload["provider_orchestration_mode"] == "single_task_legacy"
-    assert payload["raw_render_delivery_baseline"] is True
+    assert payload["orchestration_mode"] == "per_scene_8s"
+    assert payload["provider_orchestration_mode"] == "per_scene_8s"
+    assert payload["render_pipeline_mode"] == "historical_multi_clip_concat"
+    assert payload["raw_render_delivery_baseline"] is False
     assert payload["scene_count"] == 2
     assert payload["duration_seconds"] == 16
-    assert payload["provider_scene_tasks"] == []
-    assert payload["scene_tasks_created_count"] == 0
-    assert payload["final_concat_required"] is False
+    assert len(payload["provider_scene_tasks"]) == 2
+    assert payload["scene_tasks_created_count"] == 2
+    assert payload["clip_count"] == 2
+    assert payload["final_concat_required"] is True
 
 
 def test_explicit_per_scene_opt_in_still_creates_scene_records(tmp_path):
@@ -176,8 +181,19 @@ def test_explicit_per_scene_opt_in_still_creates_scene_records(tmp_path):
     assert len(worker_payload["provider_scene_tasks"]) == 2
 
 
-def test_connector_default_raw_but_existing_scene_state_remains_per_scene():
-    assert connector.product_video_orchestration_mode({"source": "product_video", "scene_count": 2}) == "single_task_legacy"
+def test_connector_default_multiscene_but_existing_legacy_task_remains_single_task():
+    assert connector.product_video_orchestration_mode({"source": "product_video", "scene_count": 2}) == "per_scene_8s"
+    assert (
+        connector.product_video_orchestration_mode(
+            {
+                "source": "product_video",
+                "scene_count": 2,
+                "provider_pending_task_id": "single-task",
+                "provider_pending_request_job_id": "180",
+            }
+        )
+        == "single_task_legacy"
+    )
     assert (
         connector.product_video_orchestration_mode(
             {

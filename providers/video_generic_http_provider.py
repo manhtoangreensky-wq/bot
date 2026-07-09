@@ -347,6 +347,9 @@ def _payload_debug(payload: dict[str, Any]) -> dict[str, Any]:
         "ratio": payload.get("ratio") or payload.get("aspect_ratio") or payload.get("aspectRatio") or "",
         "quality": str(payload.get("quality") or ""),
         "scenes_count": len(payload.get("scenes") or []),
+        "payload_has_storyboard": bool(payload.get("storyboard")),
+        "payload_has_image_paths": bool(payload.get("image_paths")),
+        "payload_contract": str((payload.get("metadata") or {}).get("payload_contract") or ""),
     }
 
 
@@ -414,6 +417,21 @@ def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | o
     }
 
 
+def _shopaikey_uses_historical_small_clip_contract(request: VideoGenerationRequest) -> bool:
+    metadata = dict(request.metadata or {})
+    mode = str(metadata.get("orchestration_mode") or metadata.get("provider_orchestration_mode") or "").strip().lower()
+    pipeline = str(metadata.get("render_pipeline_mode") or "").strip().lower()
+    return bool(
+        metadata.get("product_video")
+        and (
+            mode in {"per_scene_8s", "per_scene", "scene", "scene_orchestrator", "multi_clip_concat", "historical_multi_clip_concat"}
+            or pipeline in {"multi_clip_concat", "historical_multi_clip_concat"}
+            or metadata.get("clip_index")
+            or metadata.get("scene_index")
+        )
+    )
+
+
 def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
     data = _base_video_payload(request, env)
     model = str((env or os.environ).get("KEY4U_VIDEO_MODEL") or (env or os.environ).get("VIDEO_PROVIDER_MODEL") or "").strip()
@@ -427,6 +445,28 @@ def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str
     model = str((env or os.environ).get("SHOPAIKEY_VIDEO_MODEL") or (env or os.environ).get("VIDEO_PROVIDER_MODEL") or "").strip()
     if model:
         data["model"] = model
+    if _shopaikey_uses_historical_small_clip_contract(request):
+        try:
+            small_clip_seconds = int(float((env or os.environ).get("SHOPAIKEY_VIDEO_SMALL_CLIP_SECONDS") or 8))
+        except Exception:
+            small_clip_seconds = 8
+        small_clip_seconds = max(1, min(8, small_clip_seconds))
+        data["duration"] = small_clip_seconds
+        data["duration_seconds"] = small_clip_seconds
+        data.pop("scenes", None)
+        data.pop("storyboard", None)
+        data.pop("image_paths", None)
+        data.pop("source_video_path", None)
+        metadata = dict(data.get("metadata") or {})
+        metadata.update(
+            {
+                "payload_contract": "shopaikey_known_good_small_clip",
+                "render_pipeline_mode": "historical_multi_clip_concat",
+                "clip_duration_seconds": small_clip_seconds,
+                "unsupported_multiscene_fields_removed": True,
+            }
+        )
+        data["metadata"] = metadata
     return data
 
 
