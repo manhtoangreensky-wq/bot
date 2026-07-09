@@ -76366,13 +76366,18 @@ def menu_nav_keyboard_i18n(section: str = "main", is_admin: bool = False, lang: 
 
 PUBLIC_COMMAND_FUNCTIONS = {
     "film": "cmd_film",
+    "bot": "cmd_bot",
+    "cskh": "cmd_cskh",
+    "support": "cmd_support",
     "profile": "cmd_profile",
     "pricing": "cmd_pricing",
     "naptien": "cmd_naptien",
+    "thucong": "cmd_thanhtoan_thucong",
     "gift": "cmd_gift",
     "referral": "cmd_ref",
     "birthday": "cmd_birthday",
     "legal": "cmd_legal",
+    "image": "cmd_image",
     "image_tools": "cmd_image_tools",
     "image_studio": "cmd_image_studio",
     "image_prompt": "cmd_image_prompt",
@@ -76383,7 +76388,11 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "image_to_story_pack": "cmd_image_story",
     "image_variations": "cmd_image_studio",
     "image_to_video_pack": "cmd_image_to_video_pack",
+    "caption": "cmd_caption",
     "creative_flow": "cmd_creative_flow",
+    "video": "cmd_video",
+    "product_video": "cmd_product_video",
+    "subdub": "cmd_subdub",
     "music": "cmd_music_tools",
     "music_tools": "cmd_music_tools",
     "music_prompt": "cmd_music_prompt",
@@ -76436,6 +76445,12 @@ PUBLIC_COMMAND_FUNCTIONS = {
     "ko_vi": "cmd_ko_vi",
     "ai_image": "cmd_ai_image",
     "ai_image_edit": "cmd_ai_image_edit",
+    "remove_bg": "cmd_remove_bg_help",
+    "trial_status": "cmd_trial_status",
+    "promo": "cmd_promo",
+    "khuyenmai": "cmd_promo_guide",
+    "ref": "cmd_ref",
+    "gopy": "cmd_gopy",
 }
 
 def public_command_exists(command: str) -> bool:
@@ -84054,6 +84069,73 @@ async def cmd_quick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_quick_keyboard(lang),
     )
 
+async def reply_public_menu_alias(update: Update, action: str):
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
+    text, keyboard = localized_menu_content(action, is_admin_user(uid), lang, uid)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+async def cmd_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await reply_public_menu_alias(update, "main_ai")
+
+async def cmd_cskh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_support(update, context)
+
+async def cmd_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await reply_public_menu_alias(update, "main_video")
+
+async def cmd_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await reply_public_menu_alias(update, "main_image")
+
+async def cmd_subdub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await reply_public_menu_alias(update, "translation_video_factory")
+
+async def cmd_product_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
+    product_id = "video_ai_real"
+    parent_callback = str(VIDEO_PRODUCT_REGISTRY[product_id].get("parent_menu_callback") or "menu|main_video")
+    current_session = get_video_session(uid)
+    if str(current_session.get("product_id") or "") != product_id:
+        clear_video_session(uid)
+    first_step = video_flow_first_step(product_id)
+    route_fields = video_route_session_fields(product_id, first_step)
+    session = task3d_session_step(
+        uid,
+        "intro",
+        product_id=product_id,
+        return_to=parent_callback,
+        provider_called=False,
+        xu_charged=0,
+        **route_fields,
+    )
+    session = go_video_screen(uid, f"{product_id}:{first_step}", product_id, **route_fields)
+    session.update(route_fields)
+    session["product_id"] = product_id
+    session["return_to"] = parent_callback
+    save_video_session(uid, session)
+    await update.message.reply_text(
+        task3d_product_intro_text(product_id, lang),
+        parse_mode="HTML",
+        reply_markup=task3d_product_intro_keyboard(product_id, lang),
+    )
+
+async def cmd_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    topic = " ".join(context.args or []).strip()
+    example_topic = topic or "caption bán hàng cho máy xay mini, giọng gần gũi"
+    await update.message.reply_text(
+        "📝 <b>Caption / Script / Hashtag</b>\n\n"
+        "Mở nhóm nội dung để chuẩn bị caption, hook, CTA, hashtag và prompt.\n\n"
+        "Cú pháp:\n"
+        "• <code>/caption chủ đề cần viết</code>\n"
+        "• <code>/film chủ đề cần viết</code>\n\n"
+        f"Chủ đề gợi ý: <code>{html.escape(example_topic[:240])}</code>\n\n"
+        "Lệnh này chỉ mở hướng dẫn/nhóm nội dung. Khi cần tạo bản đầy đủ, dùng <code>/film &lt;chủ đề&gt;</code>; "
+        "bot sẽ báo giá và trạng thái trước khi xử lý.",
+        parse_mode="HTML",
+        reply_markup=main_ai_keyboard(get_user_language(update.effective_user.id if update.effective_user else 0) or "vi"),
+    )
+
 def help_text_for_user(user_id) -> str:
     is_admin = is_admin_user(user_id)
     text = (
@@ -84063,6 +84145,15 @@ def help_text_for_user(user_id) -> str:
         "• Gõ <code>/huongdan</code> để mở mục hướng dẫn.\n"
         "• Chọn đúng nút bạn cần: tạo ảnh, tạo video, âm thanh, phụ đề/dịch/lồng tiếng hoặc Xu/bảng giá.\n"
         "• Bước có phí luôn hiển thị giá và cần bạn xác nhận trước khi xử lý.\n\n"
+        "<b>Lệnh nhanh theo nhóm</b>\n"
+        "• <b>Tài khoản & nạp Xu:</b> <code>/profile</code>, <code>/pricing</code>, <code>/naptien</code>, <code>/thucong</code>, <code>/trial_status</code>, <code>/khuyenmai</code>, <code>/promo</code>, <code>/ref</code>\n"
+        "• <b>Bot AI/CSKH:</b> <code>/bot</code>, <code>/cskh</code>, <code>/support</code>, <code>/gopy</code>\n"
+        "• <b>Nội dung/caption:</b> <code>/caption</code>, <code>/film</code>\n"
+        "• <b>Ảnh AI:</b> <code>/image</code>, <code>/image_tools</code>, <code>/ai_image</code>, <code>/remove_bg</code>, <code>/image_to_video_pack</code>\n"
+        "• <b>Video AI/Product Video:</b> <code>/video</code>, <code>/product_video</code>\n"
+        "• <b>Phụ đề/Lồng tiếng:</b> <code>/subdub</code>\n"
+        "• <b>Dịch ngôn ngữ/audio:</b> <code>/translate</code>, <code>/translate_voice</code>\n"
+        "• <b>Nhạc/media:</b> <code>/music</code>, <code>/music_library</code>\n\n"
         "<b>2. Ảnh AI</b>\n"
         "• Gửi mô tả ảnh: chủ thể, phong cách, nền, ánh sáng, tỉ lệ ảnh và chi tiết cần có.\n"
         "• Chọn gói ảnh rồi xem giá trước khi xác nhận.\n"
@@ -84118,19 +84209,34 @@ def help_text_for_user_i18n(user_id) -> str:
         "• <code>/profile</code> — balance, tier and referral\n"
         "• <code>/pricing</code> — pricing\n"
         "• <code>/naptien</code> — top up Xu\n"
-        "• <code>/trial_status</code> — trial status\n\n"
-        "<b>AI tools</b>\n"
+        "• <code>/thucong</code> — manual top-up fallback\n"
+        "• <code>/trial_status</code> — trial status\n"
+        "• <code>/khuyenmai</code>, <code>/promo</code>, <code>/ref</code> — promo and referral\n\n"
+        "<b>Bot AI / Customer support</b>\n"
+        "• <code>/bot</code> — AI assistant menu\n"
+        "• <code>/cskh</code> or <code>/support</code> — customer support and tickets\n"
+        "• <code>/gopy</code> — feedback or bug report\n\n"
+        "<b>Content / caption</b>\n"
         "• Send normal text to ask AI when auto-translate is OFF.\n"
-        "• <code>/film &lt;topic&gt;</code> — create a script/prompt/caption content pack\n"
-        "• <code>/doc_tools</code> — PDF/Word/image document tools\n"
-        "• <code>/image_tools</code> — image tools and prompt packs\n"
+        "• <code>/caption &lt;topic&gt;</code> or <code>/film &lt;topic&gt;</code> — create a script/prompt/caption content pack\n\n"
+        "<b>AI image</b>\n"
+        "• <code>/image</code> or <code>/image_tools</code> — image tools and prompt packs\n"
+        "• <code>/ai_image</code>, <code>/remove_bg</code>, <code>/image_to_video_pack</code>\n\n"
+        "<b>AI video / Product video</b>\n"
+        "• <code>/video</code> — video menu\n"
+        "• <code>/product_video</code> — product video entry\n"
         "• <code>/media_factory</code> — video/media content workflow\n"
+        "• <code>/subdub</code> — subtitle and dubbing menu\n\n"
+        "<b>Translation / audio</b>\n"
+        "• <code>/translate</code> — translation menu or one-time translation\n"
+        "• <code>/translate_voice</code> — translate voice/audio when enabled\n\n"
+        "<b>Music / media</b>\n"
         "• <code>/music</code> or <code>/music_tools</code> — music/SFX center\n"
         "• <code>/music_library keyword</code>, <code>/sfx_library keyword</code>, <code>/media_library keyword</code> — find music, SFX and public media\n"
         "• <code>/play_music 1</code>, <code>/play_sfx 1</code>, <code>/select_music 1</code>, <code>/select_sfx 1</code> — preview/select search results\n"
         "• <code>/music_policy</code> — music/media license policy\n"
+        "• <code>/doc_tools</code> — PDF/Word/image document tools\n"
         "• <code>/memory</code> — memory and reminders\n"
-        "• <code>/translate en text</code> — one-time translation\n\n"
         "<b>Auto-translate</b>\n"
         "Auto-translate is OFF by default. Turn it on only with <code>/translate_mode_on &lt;lang&gt;</code> or <code>/translate_mode</code>. "
         "Turn it off with <code>/translate_mode_off</code>.\n\n"
@@ -188051,6 +188157,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ping",        cmd_ping))
     tg_app.add_handler(CommandHandler("status",      cmd_status))
     tg_app.add_handler(CommandHandler("support",     cmd_support))
+    tg_app.add_handler(CommandHandler("cskh",        cmd_cskh))
     tg_app.add_handler(CommandHandler("tickets",     cmd_tickets))
     tg_app.add_handler(CommandHandler("ticket_status", cmd_tickets))
     tg_app.add_handler(CommandHandler("support_status", cmd_support_status))
@@ -188082,6 +188189,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("quick",       cmd_quick))
     tg_app.add_handler(CommandHandler("quickstart",  cmd_quick))
     tg_app.add_handler(CommandHandler("truycapnhanh", cmd_quick))
+    tg_app.add_handler(CommandHandler("bot",         cmd_bot))
     tg_app.add_handler(CommandHandler("help",        cmd_help))
     tg_app.add_handler(CommandHandler("commands",    cmd_help))
     tg_app.add_handler(CommandHandler("huongdan",    cmd_huongdan))
@@ -188599,6 +188707,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("translate_file", cmd_translate_file))
     tg_app.add_handler(CommandHandler("translate_voice", cmd_translate_voice))
     tg_app.add_handler(CommandHandler("translate_audio", cmd_translate_voice))
+    tg_app.add_handler(CommandHandler("subdub", cmd_subdub))
     tg_app.add_handler(CommandHandler("transcribe", cmd_transcribe))
     tg_app.add_handler(CommandHandler("vi_en", cmd_vi_en))
     tg_app.add_handler(CommandHandler("en_vi", cmd_en_vi))
@@ -188824,6 +188933,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_patterns", admin_internal_command(cmd_video_patterns)))
     tg_app.add_handler(CommandHandler("film", cmd_film))
     tg_app.add_handler(CommandHandler("video_script", cmd_film))
+    tg_app.add_handler(CommandHandler("caption", cmd_caption))
     tg_app.add_handler(CommandHandler("trend_ai", cmd_trend_ai))
     tg_app.add_handler(CommandHandler("trend", cmd_trend_ai))
     tg_app.add_handler(CommandHandler("trend_live", cmd_trend_live))
@@ -188840,6 +188950,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("clear_frame_video_error", cmd_clear_frame_video_error))
     tg_app.add_handler(CommandHandler("tool_test_frame_video", cmd_tool_test_frame_video))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
+    tg_app.add_handler(CommandHandler("image", cmd_image))
     tg_app.add_handler(CommandHandler("image_studio", cmd_image_studio))
     tg_app.add_handler(CommandHandler("image_prompt", cmd_image_prompt))
     tg_app.add_handler(CommandHandler("image_pack", cmd_image_pack))
@@ -188858,6 +188969,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("remove_bg", cmd_remove_bg_help))
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
+    tg_app.add_handler(CommandHandler("video", cmd_video))
+    tg_app.add_handler(CommandHandler("product_video", cmd_product_video))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
     tg_app.add_handler(CommandHandler("video_provider_audit", cmd_video_provider_audit))
     tg_app.add_handler(CommandHandler("video_provider_env_audit", cmd_video_provider_env_audit))
