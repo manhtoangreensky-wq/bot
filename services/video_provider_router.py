@@ -68,6 +68,20 @@ PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY = (
 )
 
 
+def _provider_status_is_not_start(*values: Any) -> bool:
+    for value in values:
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if text in {
+            "not_start",
+            "not_started",
+            "notstart",
+            "media_generation_status_not_start",
+            "media_generation_status_not_started",
+        }:
+            return True
+    return False
+
+
 def _result_url_validation(result_url: str) -> dict[str, Any]:
     raw_url = str(result_url or "").strip()
     if not raw_url:
@@ -2596,10 +2610,25 @@ def run_provider_generation(
                 or ""
             ).strip()
             normalized_status = normalize_provider_status(poll_result.status or raw_status, has_result_url=False)
-            if normalized_status not in {"queued", "running"}:
+            canonical_status_before_not_start_override = normalized_status
+            not_start_override_applied = _provider_status_is_not_start(
+                raw_status,
+                poll_result.status,
+                normalized_status,
+                (getattr(poll_result, "raw", {}) or {}).get("provider_status_raw"),
+                (getattr(poll_result, "raw", {}) or {}).get("shopaikey_raw_status"),
+            )
+            if not_start_override_applied:
+                normalized_status = "not_start"
+            elif normalized_status not in {"queued", "running"}:
                 normalized_status = "running"
             result_url_present = bool(poll_result.result_url or poll_result.file_url)
-            fallback_blocked_reason = "primary_provider_in_progress" if attempt_index == 0 else "selected_provider_in_progress"
+            pending_blocker = "provider_not_start" if not_start_override_applied else "provider_in_progress"
+            fallback_blocked_reason = (
+                "not_start_under_threshold"
+                if not_start_override_applied
+                else ("primary_provider_in_progress" if attempt_index == 0 else "selected_provider_in_progress")
+            )
             wait_max = max(60, _env_int(env, "PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS", DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS))
             telemetry = _provider_pending_telemetry(
                 request,
@@ -2627,13 +2656,16 @@ def run_provider_generation(
                 "poll_skipped_reason": "",
                 "provider_result_url_present": result_url_present,
                 "provider_pending_result_url_present": result_url_present,
-                "provider_error": "provider_in_progress",
-                "blocker": "provider_in_progress",
-                "provider_poll_blocker": poll_blocker or "provider_in_progress",
+                "provider_error": pending_blocker,
+                "blocker": pending_blocker,
+                "provider_poll_blocker": poll_blocker or pending_blocker,
                 "continue_polling": True,
                 "normalized_provider_status": normalized_status,
                 "provider_status": normalized_status,
                 "provider_status_raw": raw_status,
+                "raw_provider_status": raw_status,
+                "canonical_status_before_not_start_override": canonical_status_before_not_start_override,
+                "not_start_override_applied": bool(not_start_override_applied),
                 "nonterminal_provider_status": raw_status or normalized_status,
                 "provider_task_ids": provider_task_ids,
                 "provider_video_ids": provider_video_ids,
@@ -2648,20 +2680,22 @@ def run_provider_generation(
                 "provider_pending_deferred": True,
                 "fallback_allowed": False,
                 "fallback_blocked_reason": fallback_blocked_reason,
+                "fallback_block_reason": fallback_blocked_reason,
                 "primary_provider_continue_polling": True,
                 "primary_provider_task_id_present": bool(provider_task_ids),
                 "primary_provider_task_alive": attempt_index == 0,
                 "key4u_submit_suppressed": attempt_index == 0,
+                "key4u_submit_suppressed_reason": fallback_blocked_reason if attempt_index == 0 else "",
                 "next_poll_scheduled": True,
                 "terminal_state": "final_rendering",
-                "progress_message": "provider_in_progress",
+                "progress_message": pending_blocker,
                 "provider_readiness": status,
                 "no_charge": True,
             }
             _mark_trace(
                 "poll",
                 continue_polling=True,
-                blocker="provider_in_progress",
+                blocker=pending_blocker,
                 normalized_status=normalized_status,
                 fallback_allowed=False,
                 fallback_blocked_reason=fallback_blocked_reason,

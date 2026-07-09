@@ -47751,16 +47751,23 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• timeout at: <code>{_video_debug_safe_value(result.get('timeout_at'), 80)}</code>",
         f"• provider poll count: <code>{safe_int(result.get('provider_poll_count'), 0)}</code>",
         f"• provider poll count source: <code>{_video_debug_safe_value(result.get('provider_poll_count_source'), 60)}</code>",
+        f"• raw provider status: <code>{_video_debug_safe_value(result.get('raw_provider_status') or result.get('provider_status_raw'), 80)}</code>",
+        f"• canonical status before NOT_START override: <code>{_video_debug_safe_value(result.get('canonical_status_before_not_start_override'), 80)}</code>",
+        f"• NOT_START override applied: <code>{'yes' if result.get('not_start_override_applied') else 'no'}</code>",
+        f"• scene NOT_START elapsed/threshold: <code>{safe_int(result.get('scene_not_start_elapsed'), 0)}/{safe_int(result.get('not_start_threshold_seconds') or result.get('stall_threshold'), 0)}</code>",
+        f"• provider stalled NOT_START: <code>{'yes' if result.get('provider_stalled_not_start') else 'no'}</code>",
         f"• progress_monotonic_applied: <code>{'yes' if result.get('progress_monotonic_applied') else 'no'}</code>",
         f"• summary fields from primary alive task: <code>{'yes' if result.get('summary_fields_from_primary_alive_task') else 'no'}</code>",
         f"• provider fallback attempted: <code>{'yes' if result.get('provider_fallback_attempted') else 'no'}</code>",
         f"• provider fallback reason: <code>{_video_debug_safe_value(result.get('provider_fallback_reason') or result.get('fallback_reason'), 120)}</code>",
         f"• fallback allowed: <code>{'yes' if result.get('fallback_allowed') is not False else 'no'}</code>",
-        f"• fallback blocked reason: <code>{_video_debug_safe_value(result.get('fallback_blocked_reason'), 120)}</code>",
+        f"• fallback blocked reason: <code>{_video_debug_safe_value(result.get('fallback_blocked_reason') or result.get('fallback_block_reason'), 120)}</code>",
+        f"• fallback provider candidate: <code>{_video_debug_safe_value(result.get('fallback_provider_candidate') or result.get('next_provider_or_model_candidate'), 80)}</code>",
         f"• primary provider continue polling: <code>{'yes' if result.get('primary_provider_continue_polling') else 'no'}</code>",
         f"• primary provider task alive: <code>{'yes' if result.get('primary_provider_task_alive') else 'no'}</code>",
         f"• primary provider task id present: <code>{'yes' if result.get('primary_provider_task_id_present') else 'no'}</code>",
         f"• key4u submit suppressed: <code>{'yes' if result.get('key4u_submit_suppressed') else 'no'}</code>",
+        f"• key4u submit suppressed reason: <code>{_video_debug_safe_value(result.get('key4u_submit_suppressed_reason'), 120)}</code>",
         f"• next poll scheduled: <code>{'yes' if result.get('next_poll_scheduled') else 'no'}</code>",
         f"• provider wait: <code>{safe_int(result.get('provider_wait_elapsed_seconds'), 0)}/{safe_int(result.get('provider_wait_max_seconds'), 0)}</code>",
         f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') or task_ids or video_ids else 'no'}</code>",
@@ -48384,7 +48391,9 @@ def _video_provider_status_class(value: str, *, result_url: str = "") -> str:
         result_url_valid and normalized not in {"failed", "failure", "cancelled", "canceled", "error"}
     ):
         return "succeeded"
-    if normalized in {"running", "processing", "in_progress", "pending", "queued", "submitted", "created", "not_start"}:
+    if normalized in {"not_start", "not_started", "provider_not_start", "media_generation_status_not_start"}:
+        return "not_start"
+    if normalized in {"running", "processing", "in_progress", "pending", "queued", "submitted", "created"}:
         return "running"
     if normalized in {"failed", "failure", "cancelled", "canceled", "error"}:
         return "failed"

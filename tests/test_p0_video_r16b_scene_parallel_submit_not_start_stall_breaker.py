@@ -136,7 +136,7 @@ def test_not_start_under_threshold_waits_no_fallback_no_charge():
 
     assert policy["provider_stalled_not_start"] is False
     assert policy["fallback_allowed"] is False
-    assert policy["fallback_block_reason"] == "scene_not_stalled"
+    assert policy["fallback_block_reason"] == "not_start_under_threshold"
 
 
 def test_not_start_over_threshold_marks_stalled_and_allows_public_fallback_once():
