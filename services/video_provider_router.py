@@ -1299,6 +1299,179 @@ def configured_provider_chain(environ: dict[str, str] | None = None) -> list[str
     return split_provider_chain(env.get("VIDEO_PROVIDER_CHAIN") or DEFAULT_VIDEO_PROVIDER_CHAIN)
 
 
+PRODUCT_VIDEO_PUBLIC_DEGRADED_PROVIDER_BLOCKER = "provider_degraded_for_product_video_public"
+
+
+def _product_video_attempt_status_text(attempt: dict[str, Any]) -> str:
+    return str(
+        attempt.get("provider_status_raw")
+        or attempt.get("provider_status")
+        or attempt.get("normalized_provider_status")
+        or attempt.get("status")
+        or attempt.get("raw_status")
+        or ""
+    ).strip().upper()
+
+
+def _product_video_attempt_provider(attempt: dict[str, Any]) -> str:
+    return str(
+        attempt.get("provider")
+        or attempt.get("selected_provider")
+        or attempt.get("selected_provider_before_submit")
+        or attempt.get("provider_pending_provider")
+        or attempt.get("submit_provider_key")
+        or ""
+    ).strip().lower()
+
+
+def _product_video_attempt_result_url_present(attempt: dict[str, Any]) -> bool:
+    if any(bool(attempt.get(key)) for key in ("result_url_present", "provider_result_url_present", "download_url_present", "result_url_valid")):
+        return True
+    for key in ("result_url", "download_url", "provider_result_url", "output_url", "final_url"):
+        if str(attempt.get(key) or "").strip():
+            return True
+    return False
+
+
+def _product_video_attempt_artifact_size(attempt: dict[str, Any]) -> int:
+    for key in ("artifact_size", "artifact_bytes", "output_bytes", "file_size", "downloaded_bytes", "raw_video_bytes"):
+        try:
+            value = int(float(attempt.get(key) or 0))
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+
+def product_video_provider_public_degradation(
+    provider: str,
+    attempts: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
+    *,
+    environ: dict[str, str] | None = None,
+    not_start_threshold: int | None = None,
+) -> dict[str, Any]:
+    """Classify a provider as unsafe for new public Product Video submits.
+
+    This is intentionally evidence based and does not call providers.
+    """
+    env = dict(environ or os.environ)
+    normalized_provider = str(provider or "").strip().lower()
+    threshold = max(1, int(not_start_threshold or env.get("PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_THRESHOLD") or 2))
+    env_flag = str(env.get(f"PRODUCT_VIDEO_{normalized_provider.upper()}_PUBLIC_DEGRADED") or "").strip().lower()
+    env_degraded = env_flag in {"1", "true", "yes", "on", "degraded", "blocked"}
+    rows = [dict(item) for item in (attempts or []) if isinstance(item, dict)]
+    not_start_count = 0
+    result_url_empty_count = 0
+    artifact_zero_count = 0
+    delivered_count = 0
+    for attempt in rows:
+        attempt_provider = _product_video_attempt_provider(attempt)
+        if attempt_provider != normalized_provider:
+            continue
+        status_text = _product_video_attempt_status_text(attempt)
+        if status_text in {"NOT_START", "NOTSTART", "NOT_STARTED", "NOT START"}:
+            not_start_count += 1
+        if not _product_video_attempt_result_url_present(attempt):
+            result_url_empty_count += 1
+        if _product_video_attempt_artifact_size(attempt) <= 0:
+            artifact_zero_count += 1
+        if bool(attempt.get("delivered") or attempt.get("final_delivered") or attempt.get("telegram_delivery_success")):
+            delivered_count += 1
+    degraded = bool(
+        env_degraded
+        or (
+            not_start_count >= threshold
+            and result_url_empty_count >= threshold
+            and artifact_zero_count >= threshold
+            and delivered_count == 0
+        )
+    )
+    reasons: list[str] = []
+    if env_degraded:
+        reasons.append("manual_env_degraded")
+    if not_start_count >= threshold:
+        reasons.append("not_start_repeated")
+    if result_url_empty_count >= threshold:
+        reasons.append("result_url_empty_repeated")
+    if artifact_zero_count >= threshold:
+        reasons.append("artifact_size_zero_repeated")
+    if delivered_count > 0:
+        reasons.append("provider_delivered_recently")
+    return {
+        "provider": normalized_provider,
+        "provider_degraded_for_product_video_public": degraded,
+        "degraded_for_product_video_public": degraded,
+        "degrade_reason": ",".join(reasons) if degraded else "",
+        "last_not_start_count": not_start_count,
+        "last_result_url_empty_count": result_url_empty_count,
+        "last_artifact_size_zero_count": artifact_zero_count,
+        "last_delivered_count": delivered_count,
+        "degrade_threshold": threshold,
+    }
+
+
+def product_video_public_provider_route_decision(
+    *,
+    status: dict[str, Any] | None = None,
+    chain: list[str] | tuple[str, ...] | str | None = None,
+    degraded_providers: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload = dict(status or {})
+    if isinstance(chain, str):
+        configured_chain = split_provider_chain(chain)
+    elif chain is None:
+        configured_chain = [str(item) for item in (payload.get("effective_provider_chain") or payload.get("provider_chain") or []) if str(item)]
+    else:
+        configured_chain = [str(item) for item in chain if str(item)]
+    provider_items = {
+        str(item.get("provider") or "").strip(): dict(item)
+        for item in (payload.get("providers") or [])
+        if isinstance(item, dict)
+    }
+    degraded = {str(key).strip(): dict(value or {}) for key, value in (degraded_providers or {}).items()}
+    skipped: list[dict[str, Any]] = []
+    eligible: list[str] = []
+    degraded_skipped = False
+    for provider in configured_chain:
+        item = provider_items.get(provider, {})
+        degrade_state = degraded.get(provider) or {}
+        if degrade_state.get("provider_degraded_for_product_video_public") or degrade_state.get("degraded_for_product_video_public"):
+            degraded_skipped = True
+            skipped.append(
+                {
+                    "provider": provider,
+                    "reason": PRODUCT_VIDEO_PUBLIC_DEGRADED_PROVIDER_BLOCKER,
+                    "degrade_reason": str(degrade_state.get("degrade_reason") or ""),
+                    "last_not_start_count": int(degrade_state.get("last_not_start_count") or 0),
+                    "last_result_url_empty_count": int(degrade_state.get("last_result_url_empty_count") or 0),
+                }
+            )
+            continue
+        configured = bool(item.get("configured", True if not provider_items else False))
+        credit_ok = bool(item.get("credit_ok", True))
+        if not configured:
+            skipped.append({"provider": provider, "reason": "provider_not_configured"})
+            continue
+        if not credit_ok:
+            skipped.append({"provider": provider, "reason": f"credit_{item.get('credit_status') or 'unavailable'}"})
+            continue
+        eligible.append(provider)
+    selected = eligible[0] if eligible else ""
+    return {
+        "ok": bool(selected),
+        "selected_provider": selected,
+        "provider_chain": configured_chain,
+        "effective_provider_chain": eligible,
+        "ready_provider_order": eligible,
+        "provider_degraded_for_product_video_public": degraded_skipped,
+        "degraded_providers": degraded,
+        "skipped_providers": skipped,
+        "blocker": "" if selected else "product_video_no_public_mp4_provider",
+        "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY if not selected else "",
+    }
+
+
 def load_video_provider_adapters(environ: dict[str, str] | None = None) -> list[VideoProviderAdapter]:
     env = dict(environ or os.environ)
     adapters: list[VideoProviderAdapter] = []

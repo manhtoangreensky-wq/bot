@@ -1396,7 +1396,6 @@ PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES = {"per_scene_8s", "per_scene", "s
 
 
 def _split_product_video_provider_chain(value: Any) -> list[str]:
-    raw = str(value or "").replace(">", ",").replace("|", ",")
     aliases = {
         "shopaikey": "shopaikey_video",
         "shopai": "shopaikey_video",
@@ -1405,8 +1404,12 @@ def _split_product_video_provider_chain(value: Any) -> list[str]:
         "toanaas": "toanaas_video",
         "generic": "generic_http",
     }
+    if isinstance(value, (list, tuple)):
+        raw_items = [str(item or "") for item in value]
+    else:
+        raw_items = str(value or "").replace(">", ",").replace("|", ",").split(",")
     result: list[str] = []
-    for item in raw.split(","):
+    for item in raw_items:
         token = aliases.get(item.strip().lower(), item.strip().lower())
         if token and token not in result:
             result.append(token)
@@ -1514,7 +1517,19 @@ def build_product_video_confirm_kickoff_payload(
         if per_scene_orchestration
         else []
     )
-    chain = list(provider_chain if provider_chain is not None else resolve_product_video_provider_chain())
+    if provider_chain is not None:
+        chain = list(provider_chain)
+    elif os.environ.get("VIDEO_PROVIDER_CHAIN") is not None:
+        chain = resolve_product_video_provider_chain()
+    else:
+        source_chain = (
+            asset_pack.get("provider_chain")
+            or asset_pack.get("provider_order")
+            or invoice.get("provider_chain")
+            or invoice.get("provider_order")
+            or ""
+        )
+        chain = _split_product_video_provider_chain(source_chain) or resolve_product_video_provider_chain()
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
     provider_chain_resolved = bool(chain)
     dispatch_blocker = "" if provider_chain_resolved else "provider_chain_missing_no_charge"
