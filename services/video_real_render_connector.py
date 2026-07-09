@@ -34,6 +34,7 @@ from services.video_provider_router import (
     provider_status_payload,
     run_provider_generation,
 )
+from services.video_provider_catalog import model_metadata_from_resolution, resolve_product_video_model
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -1783,6 +1784,41 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         or public_user_confirmed
     )
     charge_policy = str(_meta_value("charge_policy") or "after_valid_mp4_delivery").strip()
+    model_context: dict[str, Any] = {}
+    for source in (pending_scene_task, job or {}, asset_pack, invoice):
+        if not isinstance(source, dict):
+            continue
+        for key in (
+            "model_routing_ok",
+            "product_video_tier",
+            "selected_provider",
+            "selected_model",
+            "selected_family",
+            "selected_model_source",
+            "selected_quality",
+            "selected_capabilities",
+            "selected_clip_seconds",
+            "selected_payload_adapter",
+            "provider_model_map",
+            "provider_catalog_model_found",
+            "supports_concat",
+            "contract_validation_status",
+            "rejected_models",
+            "required_capability_original",
+            "normalized_capability_candidates",
+            "model_routing_blocker",
+        ):
+            if key not in model_context and source.get(key) not in (None, "", [], {}):
+                model_context[key] = source.get(key)
+    if not model_context.get("selected_model"):
+        model_resolution = resolve_product_video_model(
+            tier=_meta_value("tier", "tier_key", "package_xu", "quality_tier") or "basic",
+            provider_chain=provider_order,
+            scene_count=_scene_count(job),
+            required_capability=required_capability,
+            requires_concat=orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
+        )
+        model_context.update(model_metadata_from_resolution(model_resolution))
     if pending_matches_request and scene_provider_stalled and not scene_fallback_allowed:
         raise RealVideoRenderError(
             PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START,
@@ -1871,6 +1907,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "provider_started_at_epoch": (job or {}).get("provider_started_at_epoch") if pending_matches_request else "",
             "provider_wait_started_at": str((job or {}).get("provider_started_at") or (job or {}).get("provider_wait_started_at") or "") if pending_matches_request else "",
             "provider_wait_started_epoch": (job or {}).get("provider_started_at_epoch") or (job or {}).get("provider_wait_started_epoch") if pending_matches_request else "",
+            **model_context,
         },
         required_capability=required_capability,
     )
@@ -1880,6 +1917,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(provider_order)
     if scene_fallback_allowed and scene_fallback_order:
         provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(scene_fallback_order)
+    provider_model_map = model_context.get("provider_model_map") if isinstance(model_context.get("provider_model_map"), dict) else {}
+    if provider_model_map.get("shopaikey_video"):
+        provider_env["SHOPAIKEY_VIDEO_MODEL"] = str(provider_model_map.get("shopaikey_video") or "")
+    if provider_model_map.get("key4u_video"):
+        provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
     result = run_provider_generation(request, output_dir=output_dir, environ=provider_env)
     result.setdefault("scene_index", scene_index)
     result.setdefault("scene_id", scene_index)

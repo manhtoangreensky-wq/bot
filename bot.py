@@ -96,7 +96,7 @@ from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
-from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_router, worker_auth
+from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
 from services.video_provider_base import VideoPollResult, mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -47479,6 +47479,14 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• provider: <code>{html.escape(provider)}</code>",
+        f"• selected model: <code>{html.escape(str(result.get('selected_model') or result.get('provider_payload_model') or '-'))}</code>",
+        f"• selected family: <code>{html.escape(str(result.get('selected_family') or '-'))}</code>",
+        f"• selected model source: <code>{html.escape(str(result.get('selected_model_source') or '-'))}</code>",
+        f"• selected payload adapter: <code>{html.escape(str(result.get('selected_payload_adapter') or result.get('payload_adapter') or '-'))}</code>",
+        f"• model used in payload: <code>{html.escape(str(result.get('model_used_in_payload') or result.get('provider_payload_model') or '-'))}</code>",
+        f"• provider catalog model found: <code>{'yes' if result.get('provider_catalog_model_found') else 'no'}</code>",
+        f"• supports concat: <code>{'yes' if result.get('supports_concat') else 'no'}</code>",
+        f"• model contract: <code>{html.escape(str(result.get('contract_validation_status') or '-'))}</code>",
         f"• configured provider chain: <code>{html.escape(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-')}</code>",
         f"• initial selected provider: <code>{html.escape(str(result.get('initial_selected_provider') or '-'))}</code>",
         f"• selected provider before submit: <code>{html.escape(str(result.get('selected_provider_before_submit') or '-'))}</code>",
@@ -89459,6 +89467,7 @@ def video_public_status_payload() -> dict:
     hidden_video_freeze = bool(freeze.get("frozen"))
     public_video_maintenance = product_video_public_maintenance_enabled()
     public_live_provider_allowed = bool(product_video_submit_enabled and not public_video_maintenance)
+    model_catalog = video_provider_catalog.catalog_status_payload()
     worker = local_worker_status_payload()
     remote_worker = video_remote_worker_runtime_status()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
@@ -89529,6 +89538,7 @@ def video_public_status_payload() -> dict:
                 else ("public_maintenance_block" if public_video_maintenance else "")
             ),
         },
+        "product_video_model_catalog": model_catalog,
         "conclusion": {
             "planning_video": "PUBLIC" if planning_public else "OFF",
             "trend_content": "PUBLIC" if VIDEO_TREND_CONTENT_PUBLIC_ENABLED else "OFF",
@@ -89567,6 +89577,7 @@ def video_public_status_text() -> str:
     freeze = payload["freeze"]
     conclusion = payload["conclusion"]
     product_submit = payload.get("product_video_provider_submit") or {}
+    model_catalog = payload.get("product_video_model_catalog") or {}
     remote_worker = payload.get("remote_worker") or {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
@@ -89608,6 +89619,10 @@ def video_public_status_text() -> str:
         f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
         f"• Product Video provider submit: <code>{html.escape(str(product_submit.get('state') or 'LOCKED'))}</code>",
         f"• Product Video live note: <code>{html.escape(str(product_submit.get('live_policy_note') or 'normal'))}</code>",
+        f"• Product Video model catalog: <code>{'loaded' if model_catalog.get('catalog_loaded') else 'missing'}</code>",
+        f"• Product Video routing enabled: <code>{'yes' if model_catalog.get('routing_enabled') else 'no'}</code>",
+        f"• Product Video catalog models: <code>{safe_int(model_catalog.get('model_count'), 0)}</code>",
+        f"• Product Video routing warning: <code>{html.escape(str(model_catalog.get('warning') or '-'))}</code>",
         "",
         "<b>Local Worker</b>",
         f"• connected: <code>{video_public_bool_label(frame.get('local_worker_connected'))}</code>",
@@ -148995,7 +149010,18 @@ async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     args = _diagnostic_message_args(update, context)
     provider = str(args[0] if args else "").strip().lower()
-    capability = str(args[1] if len(args) > 1 else "text_to_video").strip() or "text_to_video"
+    requested_model = ""
+    if provider in {"key4u", "k4u"}:
+        catalog_provider = "key4u_video"
+    elif provider in {"shopai", "shopaikey"}:
+        catalog_provider = "shopaikey_video"
+    else:
+        catalog_provider = provider
+    if len(args) > 1 and video_provider_catalog.provider_model_config(catalog_provider, str(args[1]).strip()):
+        requested_model = str(args[1]).strip()
+        capability = str(args[2] if len(args) > 2 and str(args[2]).strip().lower() != "small_8s" else "text_to_video").strip() or "text_to_video"
+    else:
+        capability = str(args[1] if len(args) > 1 else "text_to_video").strip() or "text_to_video"
     if provider in {"key4u", "k4u"}:
         provider = "key4u_video"
     elif provider in {"shopai", "shopaikey"}:
@@ -149011,15 +149037,27 @@ async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT
     output_dir = tempfile.mkdtemp(prefix=f"toanaas_video_provider_smoke_{provider}_")
     env = dict(os.environ)
     env["VIDEO_PROVIDER_CHAIN"] = provider
+    small_8s = any(str(item).strip().lower() == "small_8s" for item in args)
+    metadata = {"admin_smoke": True, "no_wallet_charge": True}
+    if requested_model:
+        if provider == "shopaikey_video":
+            env["SHOPAIKEY_VIDEO_MODEL"] = requested_model
+        elif provider == "key4u_video":
+            env["KEY4U_VIDEO_MODEL"] = requested_model
+        metadata = video_provider_catalog.enrich_metadata_with_model_contract(
+            metadata,
+            provider,
+            requested_model,
+        )
     request = VideoGenerationRequest(
         job_id=f"smoke-{provider}-{int(time.time())}",
         product_type="video_ai_prompt",
         video_flow_type="video_ai_prompt",
         prompt=VIDEO_PROVIDER_SMOKE_PROMPT,
         ratio="9:16",
-        duration_seconds=4.0,
+        duration_seconds=8.0 if small_8s else 4.0,
         add_ons={},
-        metadata={"admin_smoke": True, "no_wallet_charge": True},
+        metadata=metadata,
         required_capability=capability,
     )
     try:
