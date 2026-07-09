@@ -90159,10 +90159,18 @@ def video_public_status_text() -> str:
     freeze = payload.get("freeze") if isinstance(payload.get("freeze"), dict) else {}
     conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
     product_submit = payload.get("product_video_provider_submit") if isinstance(payload.get("product_video_provider_submit"), dict) else {}
-    provider_health = payload.get("product_video_provider_health") if isinstance(payload.get("product_video_provider_health"), dict) else {}
-    health_summary = provider_health.get("provider_health_summary") if isinstance(provider_health.get("provider_health_summary"), dict) else {}
-    shopaikey_health = health_summary.get("shopaikey_video") if isinstance(health_summary.get("shopaikey_video"), dict) else {}
-    key4u_health = health_summary.get("key4u_video") if isinstance(health_summary.get("key4u_video"), dict) else {}
+    health_render_error = ""
+    try:
+        provider_health = payload.get("product_video_provider_health") if isinstance(payload.get("product_video_provider_health"), dict) else {}
+        health_summary = provider_health.get("provider_health_summary") if isinstance(provider_health.get("provider_health_summary"), dict) else {}
+        shopaikey_health = health_summary.get("shopaikey_video") if isinstance(health_summary.get("shopaikey_video"), dict) else {}
+        key4u_health = health_summary.get("key4u_video") if isinstance(health_summary.get("key4u_video"), dict) else {}
+    except Exception as exc:
+        provider_health = {}
+        health_summary = {}
+        shopaikey_health = {}
+        key4u_health = {}
+        health_render_error = f"{type(exc).__name__}"
     model_catalog = payload.get("product_video_model_catalog") if isinstance(payload.get("product_video_model_catalog"), dict) else {}
     remote_worker = payload.get("remote_worker") if isinstance(payload.get("remote_worker"), dict) else {}
     lines = [
@@ -90205,6 +90213,7 @@ def video_public_status_text() -> str:
         f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
         f"• Product Video provider submit: <code>{html.escape(str(product_submit.get('state') or 'LOCKED'))}</code>",
         f"• Product Video live note: <code>{html.escape(str(product_submit.get('live_policy_note') or 'normal'))}</code>",
+        f"• video_public_status_health_render_error: <code>{html.escape(health_render_error or '-')}</code>",
         f"• Product Video provider health: <code>{html.escape(str(provider_health.get('provider_preflight_result') or '-'))}</code>",
         f"• Product Video effective primary: <code>{html.escape(str(provider_health.get('effective_primary_for_low_basic') or provider_health.get('selected_provider') or '-'))}</code>",
         f"• ShopAIKey health: <code>{html.escape(str(shopaikey_health.get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str(shopaikey_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(shopaikey_health.get('degraded_until') or '-'))}</code>",

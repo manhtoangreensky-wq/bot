@@ -404,6 +404,7 @@ def _provider_final_output_ready(payload: dict[str, Any]) -> bool:
         payload.get(key)
         for key in (
             "final_mp4_validated",
+            "final_mp4_valid",
             "final_video_validated",
             "delivery_succeeded",
             "video_delivered",
@@ -435,7 +436,39 @@ def _provider_status_value_is_not_start(*values: Any) -> bool:
     return False
 
 
+def _provider_status_value_is_running(*values: Any) -> bool:
+    for value in values:
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if text in {
+            "running",
+            "processing",
+            "in_progress",
+            "provider_running",
+            "provider_in_progress",
+            "media_generation_status_pending",
+            "media_generation_status_in_progress",
+        }:
+            return True
+    return False
+
+
+def _actual_provider_payload_status(payload: dict[str, Any]) -> tuple[str, str, bool]:
+    source = str(payload.get("provider_status_payload_source") or "").strip()
+    status = ""
+    if source.startswith("shopaikey.data."):
+        status = str(payload.get("shopaikey_data_status") or payload.get("shopaikey_raw_status") or "").strip()
+    authoritative = bool(source.startswith("shopaikey.data.") and status)
+    return status, source, authoritative
+
+
 def _provider_status_for_progress(payload: dict[str, Any], alive: bool) -> str:
+    actual_status, _actual_source, actual_authoritative = _actual_provider_payload_status(payload)
+    if actual_authoritative:
+        if _provider_status_value_is_not_start(actual_status):
+            return "not_start"
+        if _provider_status_value_is_running(actual_status):
+            return "in_progress"
+        return str(actual_status or "").strip().lower()
     if _provider_status_value_is_not_start(
         payload.get("shopaikey_data_status"),
         payload.get("shopaikey_raw_status"),
@@ -507,9 +540,14 @@ def _render_subprogress(
         alive=alive,
     )
     if effective > 0 and trusted and provider_progress_trusted:
-        progress = effective
-        source = "provider_raw"
-        estimated = False
+        elapsed_progress = 0
+        if alive and not result_url_present:
+            wait_window = max(60, int(wait_max or 0))
+            elapsed_seconds = max(0, int(elapsed or 0))
+            elapsed_progress = int(min(85, max(0, round((elapsed_seconds / wait_window) * 85))))
+        progress = max(effective, elapsed_progress)
+        source = "provider_raw_elapsed_max" if elapsed_progress > effective else "provider_raw"
+        estimated = bool(elapsed_progress > effective)
     else:
         wait_window = max(60, int(wait_max or 0))
         elapsed_seconds = max(0, int(elapsed or 0))
@@ -559,6 +597,23 @@ def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]
 def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
     payload = dict(payload or {})
     terminal = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower()
+    task_present = bool(
+        payload.get("provider_task_id_saved")
+        or payload.get("primary_provider_task_id_present")
+        or payload.get("provider_task_ids")
+        or payload.get("provider_video_ids")
+        or payload.get("provider_pending_task_id")
+        or payload.get("provider_pending_video_id")
+    )
+    actual_status, _actual_source, actual_authoritative = _actual_provider_payload_status(payload)
+    actual_running = bool(
+        actual_authoritative
+        and _provider_status_value_is_running(actual_status)
+        and not _provider_status_value_is_not_start(actual_status)
+    )
+    final_ready = _provider_final_output_ready(payload) or _provider_result_url_present(payload)
+    if actual_running and task_present and not final_ready:
+        return True
     not_start_under_threshold = bool(
         _provider_status_value_is_not_start(
             payload.get("shopaikey_raw_status"),
@@ -596,14 +651,6 @@ def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
             "terminal_state",
         )
         if str(payload.get(key) or "").strip()
-    )
-    task_present = bool(
-        payload.get("provider_task_id_saved")
-        or payload.get("primary_provider_task_id_present")
-        or payload.get("provider_task_ids")
-        or payload.get("provider_video_ids")
-        or payload.get("provider_pending_task_id")
-        or payload.get("provider_pending_video_id")
     )
     return bool(
         payload.get("continue_polling")
@@ -676,6 +723,23 @@ def reconcile_provider_progress_telemetry(
         or payload.get("video_delivery_message_id")
     )
     provider_status = _provider_status_for_progress(payload, alive)
+    actual_provider_status, actual_provider_source, actual_provider_authoritative = _actual_provider_payload_status(payload)
+    actual_provider_running = bool(
+        actual_provider_authoritative
+        and _provider_status_value_is_running(actual_provider_status)
+        and not _provider_status_value_is_not_start(actual_provider_status)
+    )
+    stale_not_start_blocker_ignored = bool(
+        actual_provider_running
+        and _provider_status_value_is_not_start(
+            payload.get("raw_provider_status"),
+            payload.get("provider_status_raw"),
+            payload.get("provider_error"),
+            payload.get("blocker"),
+            payload.get("fallback_block_reason"),
+            payload.get("fallback_blocked_reason"),
+        )
+    )
     provider_not_start = _provider_status_value_is_not_start(
         payload.get("shopaikey_raw_status"),
         payload.get("shopaikey_data_status"),
@@ -685,10 +749,14 @@ def reconcile_provider_progress_telemetry(
         payload.get("provider_status"),
         provider_status,
     )
+    if actual_provider_running:
+        provider_not_start = False
     scene_not_start_elapsed = max(
         _as_int(payload.get("scene_not_start_elapsed"), 0),
         elapsed if provider_not_start else 0,
     )
+    if actual_provider_running:
+        scene_not_start_elapsed = 0
     not_start_threshold = max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 60))
     provider_stalled_not_start = bool(provider_not_start and scene_not_start_elapsed >= not_start_threshold and not result_url_present and not final_output_ready)
     if alive and provider_not_start and not provider_stalled_not_start:
@@ -701,6 +769,8 @@ def reconcile_provider_progress_telemetry(
     )
     if not actual_provider_status_raw:
         actual_provider_status_raw = payload.get("provider_status_raw") or payload.get("nonterminal_provider_status") or payload.get("provider_status") or ""
+    if actual_provider_running:
+        actual_provider_status_raw = actual_provider_status
     provider_progress_effective, provider_progress_trusted, provider_progress_cap_reason, provider_progress_cap_applied = _provider_progress_effective(
         normalized_progress,
         raw_progress_number=raw_progress_number,
@@ -778,6 +848,10 @@ def reconcile_provider_progress_telemetry(
     final_status = "failed" if terminal_failure else ("processing" if alive else (persisted_status or "queued"))
     if terminal_failure:
         final_progress = min(85, max(20, final_progress))
+    if final_output_ready and not final_delivered and not terminal_failure:
+        final_status = "processing"
+        final_progress = max(85, min(95, max(final_progress, 95 if result_url_present else 85)))
+        progress_source = "final_mp4_waiting_delivery"
     if final_delivered:
         final_status = "completed"
         final_progress = 100
@@ -832,7 +906,17 @@ def reconcile_provider_progress_telemetry(
         "not_start_threshold_seconds": not_start_threshold,
         "stall_threshold": not_start_threshold if provider_not_start else _as_int(payload.get("stall_threshold"), 0),
         "provider_stalled_not_start": provider_stalled_not_start,
-        "fallback_block_reason": "not_start_under_threshold" if provider_not_start and not provider_stalled_not_start else str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or ""),
+        "fallback_block_reason": (
+            "not_start_under_threshold"
+            if provider_not_start and not provider_stalled_not_start
+            else (
+                "primary_provider_in_progress"
+                if actual_provider_running
+                and str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or "")
+                in {"", "not_start_under_threshold", "provider_not_start", "provider_stalled_not_start"}
+                else str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or "")
+            )
+        ),
         "provider_wait_max_seconds": wait_max,
         "timeout_at": _format_epoch(started_epoch + wait_max) if started_epoch > 0 else "",
         "provider_elapsed_estimated": bool(estimated_started),
@@ -846,6 +930,22 @@ def reconcile_provider_progress_telemetry(
         "panel_refresh_interval_seconds": _as_int(payload.get("panel_refresh_interval_seconds"), 25),
         "provider_status_raw": actual_provider_status_raw,
         "provider_status_normalized": provider_status or payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
+        "actual_provider_payload_status": actual_provider_status,
+        "state_authority_source": actual_provider_source,
+        "stale_not_start_blocker_ignored": bool(stale_not_start_blocker_ignored),
+        "not_start_decision_source": (
+            "actual_provider_payload_in_progress"
+            if actual_provider_running
+            else (
+                "actual_provider_payload_not_start"
+                if provider_not_start and actual_provider_authoritative
+                else ("stale_or_derived_not_start" if provider_not_start else "")
+            )
+        ),
+        "provider_progress_authoritative": bool(actual_provider_running or actual_provider_authoritative),
+        "elapsed_estimate_progress": render_progress if render_source in {"elapsed_provider_wait", "provider_raw_elapsed_max"} else 0,
+        "provider_progress_capped_reason": provider_progress_cap_reason or ("capped_before_result_url" if alive and not result_url_present and render_progress >= 85 else ""),
+        "no_fake_success_guard": bool(not final_delivered and final_progress < 100),
         "result_url_present": bool(result_url_present),
         "provider_result_url_present": bool(result_url_present),
         "http_200_not_used_as_progress": bool(parser_fields.get("http_200_not_used_as_progress") or payload.get("http_200_not_used_as_progress")),
