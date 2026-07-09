@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import time
 
 import bot
@@ -101,6 +102,42 @@ def test_pr321_subtitle_translate_video_does_not_auto_send_srt_fallback():
     assert sent["srt_auto_send_suppressed"] is True
     assert len(message.videos) == 1
     assert message.documents == []
+
+
+def test_pr321_video_modes_do_not_auto_send_srt_partial_without_mp4():
+    message = _Message()
+
+    sent = asyncio.run(
+        bot.send_public_subtitle_dub_final_outputs(
+            message,
+            mode=bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+            active_flow="subtitle_translate",
+            subtitle_items=[
+                {
+                    "output_type": "srt",
+                    "filename": "toan_aas_subtitle_translate.srt",
+                    "bytes": VALID_SRT.encode("utf-8"),
+                }
+            ],
+            srt_text=VALID_SRT,
+            video_bytes=b"",
+            lang="vi",
+        )
+    )
+
+    assert sent["srt_auto_send_suppressed"] is True
+    assert sent["srt_suppress_reason"] == "video_mode_no_auto_srt_fallback"
+    assert sent["explicit_srt_download_available"] is True
+    assert message.documents == []
+
+
+def test_pr321_outer_subdub_runtime_error_has_active_job_public_fail_guard():
+    source = inspect.getsource(bot.on_telegram_error)
+
+    assert "subdub_should_suppress_generic_fail_for_active_job" in source
+    assert "generic_fail_suppressed_while_active_or_delivered" in source
+    guarded = source.split("subdub_error_reason == \"subdub_runtime_failure\"", 1)[1]
+    assert "return" in guarded.split("await context.bot.send_message", 1)[0]
 
 
 def test_pr321_dub_fail_prefers_active_job_over_same_key_failed_job(monkeypatch):

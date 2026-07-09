@@ -86451,6 +86451,21 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         elif subdub_error_reason == "subdub_runtime_failure" and isinstance(update, Update) and update.effective_chat:
             try:
                 job_key = str((subdub_error_job or {}).get("job_key") or "").strip()
+                if subdub_error_job and subdub_should_suppress_generic_fail_for_active_job(
+                    subdub_error_job,
+                    {"detail": error_name},
+                ):
+                    if job_key:
+                        update_subtitle_dub_pipeline_job(
+                            job_key,
+                            late_public_error_suppressed=True,
+                            late_fail_suppressed=True,
+                            generic_fail_suppressed_while_active_or_delivered=True,
+                            public_error_sent=False,
+                            public_failure_sent=False,
+                            last_ignored_error_reason=sanitize_log_text(error_name)[:180],
+                        )
+                    return
                 if job_key:
                     update_subtitle_dub_pipeline_job(
                         job_key,
@@ -180474,11 +180489,11 @@ async def send_public_subtitle_dub_final_outputs(
         sent["srt_suppress_reason"] = "video_delivered"
         sent["partial_copy_suppressed"] = True
         wanted_types = ()
-    elif video_product_subtitle_mode and sent.get("final_mp4_delivered"):
+    elif video_product_subtitle_mode:
         sent["srt_fallback_suppressed"] = True
         sent["auto_srt_after_video_prevented"] = bool(sent.get("final_mp4_delivered") or video_bytes)
         sent["srt_auto_send_suppressed"] = True
-        sent["srt_suppress_reason"] = "video_delivered"
+        sent["srt_suppress_reason"] = "video_mode_no_auto_srt_fallback"
         sent["partial_copy_suppressed"] = True
         sent["explicit_srt_download_available"] = bool(subtitle_items or str(srt_text or "").strip())
         wanted_types = ()
