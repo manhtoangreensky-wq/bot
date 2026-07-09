@@ -175830,12 +175830,19 @@ def subdub_input_save_failure_detected(job: dict | None = None) -> bool:
 
 SUBDUB_DUB_GENERIC_PUBLIC_FAIL_SUPPRESS_REASONS = {
     "video_render_failed",
+    "video_delivery_unavailable",
+    "output_delivery_failed",
     "final_video_not_created",
     "final_video_invalid",
     "no_output_bytes",
     "dub_audio_not_generated",
     "generated_tts_audio_missing",
     "final_video_missing",
+    "delivery_locked",
+    "delivery_failed",
+    "render_failed",
+    "mux_failed",
+    "subdub_failed",
 }
 
 
@@ -175855,6 +175862,26 @@ def subdub_should_suppress_dub_generic_public_fail(mode: str = "", reason: str =
         }
     ):
         return False
+    current = dict(job or {})
+    if subdub_should_suppress_generic_fail_for_active_job(current, {"detail": reason_text}):
+        return True
+    stage = subdub_canonical_lifecycle_state(
+        current.get("lifecycle_state")
+        or current.get("current_stage")
+        or current.get("progress_stage")
+        or current.get("stage")
+        or ""
+    )
+    progress = _safe_int(current.get("progress_percent") or current.get("panel_final_percent"), 0)
+    output_stages = {
+        "generating_voice",
+        "muxing_video",
+        "validating_output",
+        "delivering",
+        "delivered",
+    }
+    if current and (stage in output_stages or progress >= 60):
+        return True
     return any(token in reason_text for token in SUBDUB_DUB_GENERIC_PUBLIC_FAIL_SUPPRESS_REASONS)
 
 def subdub_normalize_input_save_failed_terminal(job: dict | None = None) -> dict:
@@ -178812,7 +178839,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["subtitle_pos_override_removed"] = True
         style["m4live1_style_renderer_only"] = True
         style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
-        style["subtitle_margin_v_after"] = max(1, min(3, int(round(style["play_res_y"] * 0.0015))))
+        style["subtitle_margin_v_after"] = max(6, min(14, int(round(style["play_res_y"] * 0.008))))
         side_margin = int(round(style["play_res_x"] * ((1.0 - float(style["subtitle_max_width_ratio"])) / 2.0)))
         side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
         style["subtitle_margin_l_after"] = side_margin
@@ -178992,14 +179019,14 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
             if style.get("subtitle_margin_v_after") is not None:
                 margin_v = int(style.get("subtitle_margin_v_after") or 0)
             else:
-                margin_v = max(1, min(3, int(round(play_res_y * 0.0015))))
+                margin_v = max(6, min(14, int(round(play_res_y * 0.008))))
         else:
             margin_v = max(58, min(118, int(play_res_y * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
     if style.get("m4live1_style_renderer_only"):
         if style.get("subtitle_margin_v_after") is not None:
             margin_v = int(style.get("subtitle_margin_v_after") or 0)
         else:
-            margin_v = max(1, min(3, int(round(play_res_y * 0.0015))))
+            margin_v = max(6, min(14, int(round(play_res_y * 0.008))))
     if style.get("m4live1_style_renderer_only"):
         margin_l = int(style.get("subtitle_margin_l_after") or max(32, int(play_res_x * 0.07)))
         margin_r = int(style.get("subtitle_margin_r_after") or max(32, int(play_res_x * 0.07)))
@@ -180722,6 +180749,30 @@ async def synthesize_dub_segment_chunks(
                 str(speed),
             )
         duration = await video_dubbing_audio_duration_seconds(audio_bytes)
+        if duration and duration < slot_seconds * 0.85 and speed > 0.7:
+            target_duration = max(0.4, slot_seconds * 0.94)
+            retry_speed = max(0.7, min(speed - 0.01, speed * duration / target_duration))
+            if retry_speed < speed - 0.005:
+                try:
+                    retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
+                        text,
+                        voice_style,
+                        voice_id,
+                        f"{retry_speed:.3f}",
+                        allow_admin=allow_admin,
+                    )
+                except TypeError:
+                    retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
+                        text,
+                        voice_style,
+                        voice_id,
+                        f"{retry_speed:.3f}",
+                    )
+                retry_duration = await video_dubbing_audio_duration_seconds(retry_audio)
+                if retry_audio and retry_duration and retry_duration > duration:
+                    provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
+                    duration = retry_duration
+                    speed = retry_speed
         if duration > slot_seconds * 1.05 and speed < safe_max_speed:
             retry_speed = min(safe_max_speed, max(speed + 0.05, speed * duration / slot_seconds))
             try:

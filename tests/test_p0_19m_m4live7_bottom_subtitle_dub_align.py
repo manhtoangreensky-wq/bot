@@ -35,7 +35,7 @@ def test_m4live7_subtitle_bottom_position_lower_than_previous_safe_gap():
 
     assert 'style["subtitle_alignment"] = "bottom_center"' in normalize_source
     assert 'style["subtitle_max_lines"] = 2' in normalize_source
-    assert 'style["subtitle_margin_v_after"] = max(1, min(3' in normalize_source
+    assert 'style["subtitle_margin_v_after"] = max(6, min(14' in normalize_source
     assert "if style.get(\"m4live1_style_renderer_only\"):" in ass_source
     assert 'margin_v = int(style.get("subtitle_margin_v_after") or 0)' in ass_source
     assert "subtitle_margin_v_effective" in ass_source
