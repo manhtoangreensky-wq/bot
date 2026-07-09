@@ -47944,12 +47944,17 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         or merged.get("file_url")
         or ""
     )
+    result_url_task_matches_canonical = bool(merged.get("result_url_task_matches_canonical"))
+    stale_result_url_ignored = bool(merged.get("stale_result_url_ignored"))
     result_url_present = bool(
-        result_url_check.get("result_url_valid")
-        or (
-            (merged.get("provider_result_url_present") or merged.get("result_url_present") or merged.get("shopaikey_result_url_from_data"))
-            and not merged.get("result_url_invalid_reason")
+        result_url_task_matches_canonical
+        and (
+            result_url_check.get("result_url_valid")
+            or merged.get("provider_result_url_present")
+            or merged.get("result_url_present")
+            or merged.get("shopaikey_result_url_from_data")
         )
+        and not stale_result_url_ignored
     )
     charge_gate = product_video_r9_charge_allowed(result, project)
     scene_tasks = [item for item in (merged.get("scene_tasks") or merged.get("provider_scene_tasks") or []) if isinstance(item, dict)]
@@ -48022,6 +48027,12 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• charge tx ids: <code>{html.escape(masked_tx)}</code>",
         f"• refund ids: <code>{html.escape(masked_refund)}</code>",
         f"• provider status: <code>{html.escape(provider_status[:120])}</code>",
+        f"• canonical scene index: <code>{safe_int(merged.get('canonical_scene_index'), 0)}</code>",
+        f"• canonical task: <code>{html.escape(str(merged.get('canonical_task_id_masked') or '-'))}</code>",
+        f"• finance result task: <code>{html.escape(str(merged.get('finance_result_task_id') or '-'))}</code>",
+        f"• result_url task matches canonical: <code>{'yes' if result_url_task_matches_canonical else 'no'}</code>",
+        f"• stale result_url ignored: <code>{'yes' if stale_result_url_ignored else 'no'}</code>",
+        f"• final artifact source: <code>{html.escape(str(merged.get('final_artifact_source') or '-'))}</code>",
         f"• provider state source: <code>{html.escape(provider_state_source[:120])}</code>",
         f"• scene success count: <code>{scene_success_count}</code>",
         f"• scenes stalled count: <code>{scenes_stalled_count}</code>",
@@ -48030,7 +48041,7 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• final delivered: <code>{'yes' if final_delivered else 'no'}</code>",
         f"• charge after final delivery: <code>{'yes' if final_mp4_valid and final_delivered else 'no'}</code>",
         f"• result_url present: <code>{'yes' if result_url_present else 'no'}</code>",
-        f"• result_url valid: <code>{'yes' if result_url_check.get('result_url_valid') or merged.get('result_url_valid') else 'no'}</code>",
+        f"• result_url valid: <code>{'yes' if result_url_present and (result_url_check.get('result_url_valid') or merged.get('result_url_valid')) else 'no'}</code>",
         f"• result_url invalid reason: <code>{html.escape(str(merged.get('result_url_invalid_reason') or result_url_check.get('result_url_invalid_reason') or '-'))}</code>",
         f"• artifact valid for charge: <code>{'yes' if charge_gate.get('ok') else 'no'}</code>",
         f"• charge gate blocker: <code>{html.escape(str(charge_gate.get('blocker') or '-'))}</code>",
@@ -48201,6 +48212,15 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
         if not task_id or task_id == "-":
             return
         order += 1
+        mapping_direct_task_id = str(
+            mapping.get("provider_task_id")
+            or mapping.get("task_id")
+            or mapping.get("id_base")
+            or mapping.get("provider_video_id")
+            or mapping.get("video_id")
+            or mapping.get("videoId")
+            or ""
+        ).strip()
         status = str(
             mapping.get("shopaikey_raw_status")
             or mapping.get("provider_status_raw")
@@ -48220,10 +48240,13 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
             or mapping.get("output_url")
             or ""
         ).strip()
+        if task_value and mapping_direct_task_id and mapping_direct_task_id != task_id:
+            result_url = ""
         candidates.append(
             {
                 "provider": provider or "shopaikey_video",
                 "task_id": task_id,
+                "scene_index": safe_int(mapping.get("scene_index") or mapping.get("scene_id") or payload.get("canonical_scene_index"), 0),
                 "source": source,
                 "status": status,
                 "result_url": result_url,
@@ -48293,6 +48316,8 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
             existing["result_url"] = candidate["result_url"]
         if candidate.get("timestamp"):
             existing["timestamp"] = candidate["timestamp"]
+        if candidate.get("scene_index") and not existing.get("scene_index"):
+            existing["scene_index"] = candidate["scene_index"]
         sources = [item for item in str(existing.get("source") or "").split(",") if item]
         if candidate["source"] not in sources:
             sources.append(candidate["source"])
@@ -48596,10 +48621,18 @@ def resolve_canonical_video_provider_task(
             if item.get("status_class") == "succeeded" and bool(item.get("result_url_valid"))
         ]
         active = [item for item in candidates if item.get("status_class") == "running"]
+        not_started = [item for item in candidates if item.get("status_class") == "not_start"]
+        primary_not_started = [item for item in not_started if item.get("primary")]
         failed = [item for item in candidates if item.get("status_class") == "failed"]
         selected = None
         selected_reason = "provider_task_id_missing"
-        if successful:
+        if primary_not_started:
+            selected = max(
+                primary_not_started,
+                key=lambda item: (1 if item.get("primary") else 0, str(item.get("timestamp") or ""), safe_int(item.get("order"), 0)),
+            )
+            selected_reason = "primary_not_start_task"
+        elif successful:
             selected = max(successful, key=lambda item: (str(item.get("timestamp") or ""), safe_int(item.get("order"), 0)))
             selected_reason = "success_result_url_wins"
         elif active:
@@ -48637,6 +48670,7 @@ def resolve_canonical_video_provider_task(
                     "task_id_masked": mask_provider_task_id(item.get("task_id")),
                     "source": str(item.get("source") or ""),
                     "status": str(item.get("status_class") or "unknown"),
+                    "scene_index": safe_int(item.get("scene_index"), 0),
                     "result_url_present": bool(item.get("result_url_valid")),
                     "result_url_present_raw": bool(item.get("result_url_present_raw")),
                     "result_url_valid": bool(item.get("result_url_valid")),
@@ -48659,6 +48693,20 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
     provider = str(canonical.get("canonical_provider") or "").strip()
     result_url = str(canonical.get("canonical_result_url") or "").strip()
     url_check = video_b14_result_url_validation(result_url)
+    canonical_status = str(canonical.get("canonical_status") or "").strip().lower()
+    candidate_summaries = list(canonical.get("candidate_summaries") or [])
+    selected_masked = str(canonical.get("canonical_task_id_masked") or "").strip()
+    stale_result_url_ignored = bool(
+        canonical
+        and canonical_status != "succeeded"
+        and any(
+            isinstance(item, dict)
+            and bool(item.get("result_url_valid") or item.get("result_url_present"))
+            and str(item.get("task_id_masked") or "").strip() != selected_masked
+            for item in candidate_summaries
+        )
+    )
+    result_url_task_matches_canonical = bool(canonical_status == "succeeded" and url_check.get("result_url_valid"))
     parser_keys = {
         "shopaikey_status_endpoint_exact",
         "shopaikey_status_http_code",
@@ -48698,9 +48746,13 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
                 "canonical_task_count": safe_int(canonical.get("task_count"), 0),
                 "canonical_all_task_ids_masked": list(canonical.get("all_task_ids_masked") or []),
                 "canonical_task_ambiguity": bool(canonical.get("canonical_task_ambiguity")),
-                "canonical_candidate_summaries": list(canonical.get("candidate_summaries") or []),
+                "canonical_candidate_summaries": candidate_summaries,
                 "canonical_status": canonical.get("canonical_status") or "-",
-                "canonical_result_url_present": bool(url_check.get("result_url_valid")),
+                "canonical_result_url_present": bool(result_url_task_matches_canonical),
+                "finance_result_task_id": selected_masked if result_url_task_matches_canonical else "-",
+                "result_url_task_matches_canonical": bool(result_url_task_matches_canonical),
+                "stale_result_url_ignored": bool(stale_result_url_ignored),
+                "final_artifact_source": "canonical_result_url" if result_url_task_matches_canonical else "",
                 **url_check,
             }
         )
@@ -48714,12 +48766,20 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
     if provider:
         current["provider_pending_provider"] = provider
         current.setdefault("selected_provider", provider)
-    if bool(url_check.get("result_url_valid")):
+    if bool(result_url_task_matches_canonical):
         current["provider_result_url_present"] = True
         current["result_url_present"] = True
         current["result_url_found"] = True
         current["result_url"] = result_url
         current["provider_result_blocker"] = ""
+    elif stale_result_url_ignored:
+        current["provider_result_url_present"] = False
+        current["result_url_present"] = False
+        current["result_url_found"] = False
+        current["canonical_result_url_present"] = False
+        current["result_url_valid"] = False
+        current["result_url"] = ""
+        current["provider_result_blocker"] = "stale_result_url_ignored"
     elif bool(url_check.get("result_url_present_raw")):
         current["provider_result_url_present"] = False
         current["result_url_present"] = False
@@ -48749,12 +48809,19 @@ def _video_provider_merge_canonical_task_debug(data: dict, canonical: dict | Non
             current["provider_progress_raw"] = ""
         if current.get("provider_progress_raw_number") in (200, "200"):
             current["provider_progress_raw_number"] = ""
-    if canonical.get("canonical_status") == "succeeded":
+    if canonical_status == "succeeded":
         current["provider_poll_called"] = True
         current["continue_polling"] = False
         current["normalized_provider_status"] = "succeeded"
         current["provider_status"] = "succeeded"
-    elif canonical.get("canonical_status") == "running":
+    elif canonical_status == "not_start":
+        current["provider_poll_called"] = True
+        current["continue_polling"] = True
+        current["normalized_provider_status"] = "not_start"
+        current["provider_status"] = "not_start"
+        current["provider_error"] = "provider_not_start"
+        current["blocker"] = "provider_not_start"
+    elif canonical_status == "running":
         current["provider_poll_called"] = True
         current["continue_polling"] = True
         current["normalized_provider_status"] = "running"
