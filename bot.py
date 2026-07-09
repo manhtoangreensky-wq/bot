@@ -86571,42 +86571,24 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         elif subdub_error_reason == "subdub_runtime_failure" and isinstance(update, Update) and update.effective_chat:
             try:
                 job_key = str((subdub_error_job or {}).get("job_key") or "").strip()
-                if subdub_error_job and subdub_should_suppress_generic_fail_for_active_job(
-                    subdub_error_job,
-                    {"detail": error_name},
-                ):
-                    if job_key:
-                        update_subtitle_dub_pipeline_job(
-                            job_key,
-                            late_public_error_suppressed=True,
-                            late_fail_suppressed=True,
-                            generic_fail_suppressed_while_active_or_delivered=True,
-                            public_error_sent=False,
-                            public_failure_sent=False,
-                            last_ignored_error_reason=sanitize_log_text(error_name)[:180],
-                        )
-                    return
                 if job_key:
                     update_subtitle_dub_pipeline_job(
                         job_key,
-                        status="failed",
-                        terminal_state="failed_no_charge",
-                        public_error_sent=True,
-                        terminal_public_outcome_sent=True,
-                        terminal_public_outcome_type="failure",
-                        public_error_sent_count=max(1, _safe_int((subdub_error_job or {}).get("public_error_sent_count"), 0)),
-                        success_sent_count=0,
-                        pipeline_blocker=sanitize_log_text(error_name)[:180],
-                        charge_status="not_charged",
-                        no_charge_reason=sanitize_log_text(error_name)[:180],
+                        late_public_error_suppressed=True,
+                        late_fail_suppressed=True,
+                        generic_fail_suppressed_while_active_or_delivered=True,
+                        public_error_sent=False,
+                        public_failure_sent=False,
+                        last_ignored_error_reason=sanitize_log_text(error_name)[:180],
                     )
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=subdub_clean_failure_text(get_user_language(subdub_update_user_id(update)) or "vi"),
-                    parse_mode=None,
+                logger.warning(
+                    "suppressed SubDub runtime public failure | callback=%s | command=%s | error=%s",
+                    sanitize_log_text(callback_data)[:120],
+                    sanitize_log_text(message_text)[:120],
+                    sanitize_log_text(error_name)[:180],
                 )
             except Exception:
-                logger.exception("Failed to send SubDub clean runtime failure")
+                logger.exception("Failed to suppress SubDub clean runtime failure")
         return
 
     if shopaikey_image_error_already_notified:
