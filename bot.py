@@ -38843,23 +38843,35 @@ def normalize_translate_target(value: str) -> str:
         "english": "en",
         "eng": "en",
         "jp": "ja",
+        "日本語": "ja",
+        "日本": "ja",
+        "japanese": "ja",
         "tiếng nhật": "ja",
         "tieng nhat": "ja",
-        "japanese": "ja",
         "kr": "ko",
+        "한국어": "ko",
+        "한국말": "ko",
+        "조선말": "ko",
         "tiếng hàn": "ko",
         "tieng han": "ko",
         "korean": "ko",
         "cn": "zh",
         "china": "zh",
+        "中文": "zh",
+        "汉语": "zh",
+        "漢語": "zh",
         "tiếng trung": "zh",
         "tieng trung": "zh",
         "chinese": "zh",
         "zh_cn": "zh_cn",
         "zh_tw": "zh_tw",
+        "简体中文": "zh_cn",
+        "簡體中文": "zh_cn",
         "trung giản thể": "zh_cn",
         "trung gian the": "zh_cn",
         "chinese simplified": "zh_cn",
+        "繁體中文": "zh_tw",
+        "繁体中文": "zh_tw",
         "trung phồn thể": "zh_tw",
         "trung phon the": "zh_tw",
         "chinese traditional": "zh_tw",
@@ -172058,18 +172070,32 @@ def get_video_dubbing_artifact(user_id, ref_or_kind: str) -> str:
     return str(payload.get("value") or "")
 
 def normalize_video_translate_mode(value: str) -> str:
+    raw_value = str(value or "").strip()
+    raw_lower = raw_value.lower()
     aliases = {
         "subtitle": VIDEO_SUBTITLE_MODE_CREATE,
+        "auto_subtitle": VIDEO_SUBTITLE_MODE_CREATE,
+        "auto_subtitle_video": VIDEO_SUBTITLE_MODE_CREATE,
         "translate_subtitle": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "subtitle_translate_video": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "translated_subtitle_video": VIDEO_SUBTITLE_MODE_TRANSLATE,
         "voice": VIDEO_SUBTITLE_MODE_DUB,
+        "video_dub": VIDEO_SUBTITLE_MODE_DUB,
+        "dub_video": VIDEO_SUBTITLE_MODE_DUB,
+        "dub_only": VIDEO_SUBTITLE_MODE_DUB,
+        "video_dubbing": VIDEO_SUBTITLE_MODE_DUB,
         "translate_voice": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "translate_dub": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "full_video": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "subtitle_dub": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "subtitle_dub_video": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "subtitle_plus_dub_video": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "translated_subtitle_plus_dub": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE: VIDEO_SUBTITLE_MODE_TRANSLATE,
         VIDEO_DUBBING_FLOW_TRANSCRIPT: VIDEO_SUBTITLE_MODE_CREATE,
         "transcript": VIDEO_SUBTITLE_MODE_CREATE,
     }
-    mode = aliases.get(str(value or "").strip(), str(value or "").strip())
+    mode = aliases.get(raw_value, aliases.get(raw_lower, raw_value))
     return mode if mode in VIDEO_TRANSLATE_MODES else ""
 
 def video_dubbing_is_video_only_mode(mode: str) -> bool:
@@ -180200,6 +180226,25 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
             })
     return qc_segments
 
+def subdub_retime_translated_segments_to_source(source_segments: list[dict], translated_segments: list[dict]) -> list[dict]:
+    source = [dict(item or {}) for item in (source_segments or []) if str((item or {}).get("text") or "").strip()]
+    translated = [dict(item or {}) for item in (translated_segments or []) if str((item or {}).get("text") or "").strip()]
+    if not source or not translated or len(source) != len(translated):
+        return translated
+    retimed = []
+    for index, (src, dst) in enumerate(zip(source, translated), start=1):
+        start = float(src.get("start") or 0)
+        end = float(src.get("end") or 0)
+        if end <= start:
+            end = start + 1
+        retimed.append({
+            **dst,
+            "index": int(dst.get("index") or src.get("index") or index),
+            "start": round(start, 3),
+            "end": round(end, 3),
+        })
+    return retimed
+
 def video_dubbing_srt_from_segments(segments: list[dict]) -> str:
     blocks = []
     for idx, item in enumerate(segments or [], start=1):
@@ -180285,6 +180330,7 @@ async def translate_subtitle_segments(
         })
     if not translated_segments:
         raise RuntimeError("translation_empty")
+    translated_segments = subdub_retime_translated_segments_to_source(segments, translated_segments)
     translated_segments = video_dubbing_qc_segments(translated_segments, preserve_timestamps=True)
     return {
         "segments": translated_segments,
@@ -180867,7 +180913,17 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     candidates = []
     openai_tts_candidates = []
     speed_value = float(parse_video_dubbing_voice_speed(voice_speed or "1.0"))
-    openai_voice = "onyx" if "male" in str(voice_id or voice_style or "").lower() or "nam" in str(voice_id or voice_style or "").lower() else "alloy"
+    voice_hint_source = str(voice_id or voice_style or "")
+    requested_gender = subdub_voice_id_gender_hint(voice_id) or subdub_voice_gender_from_state({
+        "voice_id": voice_id,
+        "voice_style": voice_style,
+    })
+    openai_voice = (
+        "shimmer"
+        if requested_gender == "female"
+        else ("onyx" if requested_gender == "male" or "male" in voice_hint_source.lower() or "nam" in voice_hint_source.lower() else "alloy")
+    )
+    minimax_voice_requested = bool(str(voice_id or "").strip() and minimax_voice_adapter.validate_provider_voice_id(voice_id))
     key4u_ready = key4u_minimax_tts_configured(require_public=not allow_admin) if allow_admin else key4u_minimax_tts_public_ready()
     shopaikey_ready = shopaikey_minimax_tts_configured() if allow_admin else shopaikey_minimax_tts_public_ready()
     direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
@@ -180904,7 +180960,7 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
                 speed=speed_value,
             ),
         ))
-    candidates = openai_tts_candidates + candidates
+    candidates = (candidates + openai_tts_candidates) if minimax_voice_requested else (openai_tts_candidates + candidates)
     if provider in {"auto", "shopaikey", "shopai"} and shopaikey_fallback_ready:
         candidates.append(("ShopAIKey", lambda value: shopaikey_tts_bytes(value, endpoint_override=SHOPAIKEY_DUBBING_TTS_ENDPOINT)))
     if provider in {"auto", "elevenlabs"}:
@@ -181335,6 +181391,10 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             state = set_video_dubbing_pending(user_id, state.get("step") or "processing", **sync_fields, translated_subtitle_ref=translated_ref)
         else:
             output_segments = video_dubbing_segments_from_subtitle(output_subtitle) or output_segments
+            retimed_segments = subdub_retime_translated_segments_to_source(source_segments, output_segments)
+            if retimed_segments:
+                output_segments = retimed_segments
+                output_subtitle = video_dubbing_srt_from_segments(output_segments) or output_subtitle
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
