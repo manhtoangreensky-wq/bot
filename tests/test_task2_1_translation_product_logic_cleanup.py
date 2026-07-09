@@ -65,8 +65,6 @@ def test_video_translation_menu_labels_auto():
         "🌐 Dịch phụ đề video",
         "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "📄 Dịch file",
-        "🎧 Dịch audio",
         "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]

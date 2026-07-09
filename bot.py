@@ -39366,6 +39366,19 @@ async def show_translation_picker(update: Update, source_type: str, edit: bool =
         return await safe_edit_query_message(update.callback_query, text, reply_markup=keyboard)
     return await reply_translation_surface(update, text, parse_mode="HTML", reply_markup=keyboard)
 
+async def show_translation_language_hub_from_command(update: Update):
+    uid = update.effective_user.id if update.effective_user else None
+    lang = get_user_language(uid) if uid is not None else "vi"
+    lang = lang or "vi"
+    if uid is not None:
+        enter_product_context(uid, PRODUCT_CONTEXT_SHOWROOM, origin_screen="command|translate", product_area="translation")
+    return await reply_translation_surface(
+        update,
+        translation_language_hub_text(lang),
+        parse_mode="HTML",
+        reply_markup=translation_language_hub_keyboard(lang, uid),
+    )
+
 def set_user_translate_mode(user_id, target_lang: str, username="", note="") -> tuple[bool, dict]:
     target = normalize_translate_target(target_lang)
     if target and target not in TRANSLATE_LANGUAGE_OPTIONS:
@@ -76152,14 +76165,15 @@ def translation_auto_translate_enabled(user_id=None) -> bool:
 def translation_language_hub_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     buttons = [
-        ("🔁 Dịch 2 chiều" if is_vi else "🔁 Two-way", "menu|translation_two_way"),
-        ("💬 Hội thoại" if is_vi else "💬 Conversation", "menu|translation_live_conversation"),
         ("📝 Văn bản" if is_vi else "📝 Text", "menu|translation_text"),
-        ("⚙️ Ngôn ngữ" if is_vi else "⚙️ Languages", "menu|translation_language"),
+        ("📄 Dịch file" if is_vi else "📄 Translate file", "menu|translation_media_file"),
+        ("🎧 Dịch audio" if is_vi else "🎧 Translate audio", "menu|translation_media_audio"),
+        ("💬 Hội thoại" if is_vi else "💬 Conversation", "menu|translation_live_conversation"),
+        ("🔁 Dịch 2 chiều" if is_vi else "🔁 Two-way", "menu|translation_two_way"),
         ("🌐 Dịch tự động" if is_vi else "🌐 Auto translate", "menu|translation_auto_target"),
+        ("⚙️ Ngôn ngữ" if is_vi else "⚙️ Languages", "menu|translation_language"),
+        ("⏹ Tắt dịch tự động" if is_vi else "⏹ Stop auto translate", "menu|translation_stop_session"),
     ]
-    if translation_auto_translate_enabled(user_id):
-        buttons.append(("⏹ Tắt dịch tự động" if is_vi else "⏹ Stop auto translate", "menu|translation_stop_session"))
     return build_2col_keyboard(
         buttons,
         nav_back=("⬅️ Trung tâm" if is_vi else "⬅️ Translation center", "menu|translate"),
@@ -83829,12 +83843,12 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
             if normalize_user_language(lang) == "vi" else
             "📄 <b>Translate file</b>\n\nSend the file to translate. This flow is for files only, not video or audio.\n\nTOAN AAS has not processed or charged Xu yet."
         )
-        return text, translation_input_keyboard(lang, parent="media")
+        return text, translation_input_keyboard(lang, parent="language")
     if action == "translation_media_audio":
         if user_id is not None:
             clear_video_dubbing_pending(user_id)
             set_translation_menu_pending(user_id, "media_audio", translation_context="translate_audio")
-        return translation_voice_menu_text(lang), translation_voice_menu_keyboard(lang, parent="media")
+        return translation_voice_menu_text(lang), translation_voice_menu_keyboard(lang, parent="language")
     if action == "translation_subtitle_file":
         state = {
             "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -83919,10 +83933,10 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
             "📄 <b>Dịch file</b>\n\n"
             "Anh/chị gửi file cần dịch. Luồng này chỉ dùng cho file, không dùng cho video hoặc audio.\n\n"
             "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.",
-            translation_input_keyboard("vi", parent="media"),
+            translation_input_keyboard("vi", parent="language"),
         )
     if action == "translation_media_audio":
-        return translation_voice_menu_text("vi"), translation_voice_menu_keyboard("vi", parent="media")
+        return translation_voice_menu_text("vi"), translation_voice_menu_keyboard("vi", parent="language")
     if action == "translation_subtitle_file":
         state = {
             "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -103282,7 +103296,7 @@ async def cmd_translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
     if not args:
-        return await show_translation_picker(update, "text")
+        return await show_translation_language_hub_from_command(update)
     target = normalize_translate_target(args[0])
     if target:
         if len(args) < 2:
@@ -172949,10 +172963,6 @@ def video_dubbing_menu_keyboard(lang: str = "vi", origin: str = "video") -> Inli
         [
             InlineKeyboardButton("🎙 Lồng tiếng video" if is_vi else "🎙 Video dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_DUB}"),
             InlineKeyboardButton("🎞 Phụ đề + Lồng tiếng" if is_vi else "🎞 Subtitles + dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
-        ],
-        [
-            InlineKeyboardButton("📄 Dịch file" if is_vi else "📄 Translate file", callback_data="menu|translation_media_file"),
-            InlineKeyboardButton("🎧 Dịch audio" if is_vi else "🎧 Translate audio", callback_data="menu|translation_media_audio"),
         ],
         [
             InlineKeyboardButton(back_label, callback_data=back_callback),

@@ -39,15 +39,17 @@ def test_language_translation_menu_preserves_existing_tools():
 def test_no_language_translation_tools_deleted():
     callbacks = set(_callbacks(bot.translation_language_hub_keyboard("vi")))
     assert {
+        "menu|translation_media_file",
+        "menu|translation_media_audio",
         "menu|translation_two_way",
         "menu|translation_live_conversation",
         "menu|translation_text",
         "menu|translation_language",
         "menu|translation_auto_target",
+        "menu|translation_stop_session",
     }.issubset(callbacks)
     assert "menu|translation_document" not in callbacks
     assert "menu|translation_voice" not in callbacks
-    assert "menu|translation_stop_session" not in callbacks
 
 
 def test_video_translation_menu_labels_auto():
@@ -57,11 +59,11 @@ def test_video_translation_menu_labels_auto():
         "🌐 Dịch phụ đề video",
         "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "📄 Dịch file",
-        "🎧 Dịch audio",
         "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]
+    assert "📄 Dịch file" not in labels
+    assert "🎧 Dịch audio" not in labels
     assert "🔗 Tải video từ link" not in labels
     assert "📂 Media" not in labels
     assert "📝 Chỉnh phụ đề" not in labels
