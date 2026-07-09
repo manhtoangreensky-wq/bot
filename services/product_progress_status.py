@@ -939,6 +939,157 @@ def job_has_final_artifact(job: dict[str, Any] | None = None) -> bool:
     return False
 
 
+def _video_human_elapsed(seconds: Any) -> str:
+    total = max(0, _as_int(seconds, 0))
+    minutes, secs = divmod(total, 60)
+    if minutes:
+        return f"{minutes} phút {secs:02d} giây"
+    return f"{secs} giây"
+
+
+def _video_scene_status_label(status: Any, clip_ready: bool = False) -> str:
+    raw = str(status or "").strip().lower().replace("-", "_")
+    if clip_ready or raw in {"done", "complete", "completed", "success", "clip_ready", "downloaded", "validated"}:
+        return "đã có clip"
+    if raw in {"provider_not_start", "not_start", "queued", "waiting", "pending"}:
+        return "đang chờ bắt đầu"
+    if raw in {"provider_running", "running", "in_progress", "processing", "final_rendering", "rendering"}:
+        return "đang dựng"
+    if raw in {"provider_stalled_not_start", "stalled", "fallback_pending", "retrying"}:
+        return "đang chuyển hướng xử lý"
+    if raw in {"failed", "failed_no_charge", "error", "provider_failed"}:
+        return "chưa dựng được"
+    return "đang xử lý"
+
+
+def _video_scene_provider_label(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw == "shopaikey_video":
+        return "ShopAIKey"
+    if raw == "key4u_video":
+        return "Key4U"
+    if raw in {"", "-", "none", "unknown"}:
+        return "hệ thống"
+    cleaned = raw.replace("_video", "").replace("_", " ").strip()
+    return cleaned.title() if cleaned else "hệ thống"
+
+
+def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[str, Any]:
+    current = dict(job or {})
+    scene_count = max(
+        0,
+        _as_int(
+            current.get("scene_count")
+            or current.get("scenes_total")
+            or current.get("scene_tasks_total")
+            or current.get("total_scenes"),
+            0,
+        ),
+    )
+    tasks_raw = current.get("scene_tasks") or current.get("provider_scene_tasks") or []
+    tasks: list[dict[str, Any]] = []
+    if isinstance(tasks_raw, dict):
+        for key, value in sorted(tasks_raw.items(), key=lambda item: _as_int(item[0], 0)):
+            item = dict(value or {}) if isinstance(value, dict) else {"status": value}
+            item.setdefault("scene_index", key)
+            tasks.append(item)
+    elif isinstance(tasks_raw, (list, tuple)):
+        tasks = [dict(item or {}) for item in tasks_raw if isinstance(item, dict)]
+    status_by_scene = current.get("scene_status_by_scene") or {}
+    if scene_count <= 0 and tasks:
+        scene_count = max(_as_int(item.get("scene_index") or item.get("index"), idx + 1) for idx, item in enumerate(tasks))
+    if scene_count <= 1 and not tasks:
+        return {
+            "visible": False,
+            "scene_count": scene_count,
+            "lines": [],
+            "concat_waiting_for_scene_coverage": False,
+        }
+    by_index: dict[int, dict[str, Any]] = {}
+    for offset, item in enumerate(tasks, start=1):
+        idx = _as_int(item.get("scene_index") or item.get("index") or item.get("scene"), offset)
+        by_index[max(1, idx)] = item
+    for key, value in (status_by_scene.items() if isinstance(status_by_scene, dict) else []):
+        idx = _as_int(key, 0)
+        if idx <= 0:
+            continue
+        item = by_index.setdefault(idx, {"scene_index": idx})
+        if not item.get("status"):
+            item["status"] = value
+    coverage_count = _as_int(current.get("scene_coverage_count") or current.get("scene_clip_count") or current.get("scenes_done"), 0)
+    lines: list[str] = []
+    statuses: list[dict[str, Any]] = []
+    for idx in range(1, max(scene_count, len(by_index)) + 1):
+        item = by_index.get(idx, {"scene_index": idx})
+        result_url = str(item.get("result_url") or item.get("clip_result_url") or item.get("video_url") or "").strip()
+        clip_ready = bool(result_url) or _as_bool(item.get("clip_valid") or item.get("clip_ready") or item.get("downloaded"))
+        status = item.get("status") or item.get("current_scene_status") or current.get("current_scene_status")
+        label = _video_scene_status_label(status, clip_ready)
+        provider = _video_scene_provider_label(item.get("provider") or item.get("selected_provider") or current.get("selected_provider"))
+        raw_progress = _as_int(
+            item.get("provider_progress")
+            or item.get("provider_progress_raw")
+            or item.get("raw_provider_progress")
+            or item.get("progress"),
+            0,
+        )
+        elapsed = _as_int(
+            item.get("provider_elapsed_seconds")
+            or item.get("elapsed_seconds")
+            or item.get("scene_not_start_elapsed")
+            or current.get("provider_elapsed_seconds"),
+            0,
+        )
+        clip_text = "đã có MP4" if clip_ready else "chưa có MP4"
+        progress_text = f" · {max(0, min(100, raw_progress))}%" if raw_progress > 0 else ""
+        elapsed_text = f" · {_video_human_elapsed(elapsed)}" if elapsed > 0 else ""
+        provider_text = "" if provider == "hệ thống" else f" · {html.escape(provider)}"
+        lines.append(
+            f"• Cảnh {idx}/{max(scene_count, idx)}: {html.escape(label)}{provider_text}{elapsed_text}{progress_text} · {clip_text}"
+        )
+        statuses.append(
+            {
+                "scene_index": idx,
+                "status": label,
+                "provider": provider,
+                "elapsed_seconds": elapsed,
+                "provider_progress": raw_progress,
+                "clip_ready": clip_ready,
+            }
+        )
+    concat_attempted = _as_bool(current.get("concat_attempted") or current.get("stitch_attempted"))
+    concat_waiting = bool(scene_count > 1 and coverage_count < scene_count)
+    if scene_count > 1:
+        if concat_waiting:
+            lines.append(f"• Ghép video: chờ đủ {coverage_count}/{scene_count} cảnh.")
+        elif concat_attempted:
+            lines.append("• Ghép video: hệ thống đang ghép video cuối.")
+        else:
+            lines.append("• Ghép video: sẵn sàng khi đủ clip.")
+    if _as_bool(current.get("final_delivered") or current.get("delivery_succeeded")):
+        lines.append("• Gửi kết quả: đã gửi video hoàn chỉnh.")
+    elif job_has_final_artifact(current):
+        lines.append("• Gửi kết quả: đang kiểm tra file cuối.")
+    else:
+        lines.append("• Gửi kết quả: chờ video hoàn chỉnh.")
+    return {
+        "visible": bool(lines),
+        "scene_count": scene_count,
+        "lines": lines,
+        "scene_statuses": statuses,
+        "concat_waiting_for_scene_coverage": concat_waiting,
+        "concat_attempted": bool(concat_attempted and not concat_waiting),
+        "scene_coverage_count": coverage_count,
+    }
+
+
+def video_per_scene_progress_board_text(job: dict[str, Any] | None = None) -> str:
+    board = video_per_scene_progress_board(job)
+    if not board.get("visible"):
+        return ""
+    return "\n".join(["<b>Theo từng cảnh:</b>", *[str(line) for line in board.get("lines") or []]])
+
+
 def render_product_progress_panel(
     product_type: str = "",
     job_id: str = "",
@@ -1410,6 +1561,17 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "scene_submitted_at",
             "scene_first_not_start_seen_at",
             "provider_elapsed_seconds",
+            "elapsed_estimate_progress",
+            "public_progress_source",
+            "public_progress_cap",
+            "persisted_progress_updated",
+            "no_fake_success_guard",
+            "in_progress_stall_elapsed",
+            "in_progress_stall_threshold",
+            "provider_progress_last_changed_at",
+            "provider_progress_stuck",
+            "in_progress_stall_decision",
+            "fallback_due_to_in_progress_stall",
             "stall_threshold",
             "not_start_threshold_seconds",
             "not_start_threshold_source",

@@ -49042,6 +49042,43 @@ def _video_provider_update_job_result(conn, job_id: int, updates: dict) -> dict:
     return current
 
 
+def video_b14_persist_auto_refresh_metadata(job_id: int | str, updates: dict | None = None, conn=None) -> dict:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {}
+    payload = dict(updates or {})
+    if not payload:
+        return {}
+    owns_conn = conn is None
+    if conn is None:
+        conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        if not job:
+            return {}
+        progress = safe_int(
+            payload.get("final_progress_after_reconcile")
+            or payload.get("final_progress")
+            or payload.get("progress_percent"),
+            0,
+        )
+        current_progress = safe_int((job or {}).get("progress_percent"), 0)
+        merged = _video_provider_update_job_result(conn, jid, payload)
+        if progress > current_progress:
+            conn.execute(
+                "UPDATE video_jobs SET progress_percent=?, updated_at=? WHERE id=?",
+                (min(100, max(0, progress)), now_text_safe(), jid),
+            )
+            conn.commit()
+            merged["persisted_progress_updated"] = True
+        else:
+            merged["persisted_progress_updated"] = False
+        return merged
+    finally:
+        if owns_conn:
+            conn.close()
+
+
 def video_b14_autonomous_db_poll_metadata(
     job_id: int | str,
     *,
@@ -49111,6 +49148,16 @@ def video_b14_autonomous_db_poll_metadata(
         "next_poll_scheduled": bool(candidate or telemetry.get("next_poll_scheduled")),
         "next_poll_scheduled_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
         "next_refresh_expected_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
+        "auto_refresh_enabled": bool(candidate or provider_alive),
+        "auto_refresh_recovered_from_db": bool(jid and not registry_present),
+        "auto_refresh_next_tick_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
+        "auto_refresh_last_update_at": now_text_safe(),
+        "auto_refresh_skip_reason": "" if candidate or provider_alive else "not_processing",
+        "status_panel_message_id_source": "result_json" if payload.get("status_panel_message_id") or payload.get("latest_status_message_id") else "missing",
+        "status_panel_message_id": safe_int(payload.get("status_panel_message_id") or payload.get("latest_status_message_id") or payload.get("progress_message_id"), 0),
+        "latest_status_message_id": safe_int(payload.get("latest_status_message_id") or payload.get("status_panel_message_id") or payload.get("progress_message_id"), 0),
+        "job_id": jid,
+        "project_id": safe_int(current_job.get("project_id") or current_project.get("project_id") or current_project.get("id"), 0),
         "poll_interval_seconds": interval,
         "terminal_before_reconcile": terminal_before,
         "terminal_after_reconcile": "final_rendering" if provider_alive else terminal_before,
@@ -49138,18 +49185,22 @@ def video_b14_autonomous_db_poll_metadata(
         "status_source_priority_used",
         "provider_state_overrode_registry",
         "provider_state_overrode_persisted_status",
-        "persisted_status_before_reconcile",
-        "persisted_progress_before_reconcile",
-    ) if telemetry.get(key) not in (None, "")})
+            "persisted_status_before_reconcile",
+            "persisted_progress_before_reconcile",
+            "elapsed_estimate_progress",
+            "public_progress_source",
+            "public_progress_cap",
+            "persisted_progress_updated",
+            "no_fake_success_guard",
+            "in_progress_stall_elapsed",
+            "in_progress_stall_threshold",
+            "provider_progress_last_changed_at",
+            "provider_progress_stuck",
+            "in_progress_stall_decision",
+            "fallback_due_to_in_progress_stall",
+        ) if telemetry.get(key) not in (None, "")})
     if persist and jid and (candidate or provider_alive or result_url_present):
-        owns_conn = conn is None
-        if conn is None:
-            conn = db_connect()
-        try:
-            _video_provider_update_job_result(conn, jid, metadata)
-        finally:
-            if owns_conn:
-                conn.close()
+        video_b14_persist_auto_refresh_metadata(jid, metadata, conn=conn)
     return metadata
 
 
@@ -70853,6 +70904,16 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             "provider_chain_resolved",
             "configured_provider_chain",
             "next_poll_scheduled",
+            "elapsed_estimate_progress",
+            "public_progress_source",
+            "public_progress_cap",
+            "persisted_progress_updated",
+            "in_progress_stall_elapsed",
+            "in_progress_stall_threshold",
+            "provider_progress_last_changed_at",
+            "provider_progress_stuck",
+            "in_progress_stall_decision",
+            "fallback_due_to_in_progress_stall",
         ):
             if key in job_result and key not in provider_telemetry:
                 provider_telemetry[key] = job_result.get(key)
@@ -70980,6 +71041,19 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         ),
         "",
     ])
+    scene_board_text = product_progress_status.video_per_scene_progress_board_text(
+        {
+            **job_result,
+            **provider_telemetry,
+            "scene_count": scene_count,
+            "scene_tasks": provider_telemetry.get("scene_tasks") or job_result.get("scene_tasks"),
+            "scene_coverage_count": provider_telemetry.get("scene_coverage_count") or job_result.get("scene_coverage_count"),
+            "concat_attempted": provider_telemetry.get("concat_attempted") if "concat_attempted" in provider_telemetry else job_result.get("concat_attempted"),
+            "delivery_succeeded": delivery_done,
+        }
+    )
+    if scene_board_text and scene_count > 1:
+        lines.extend([scene_board_text, ""])
 
     if visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
         lines.extend(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE.splitlines())
@@ -71321,6 +71395,12 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         "registry_required_for_poll": bool(autonomous.get("registry_required_for_poll")),
         "registry_missing_is_blocker": bool(autonomous.get("registry_missing_is_blocker")),
         "next_poll_at": str(autonomous.get("next_poll_at") or ""),
+        "status_panel_message_id_source": str(autonomous.get("status_panel_message_id_source") or ""),
+        "auto_refresh_enabled": bool(autonomous.get("auto_refresh_enabled")),
+        "auto_refresh_recovered_from_db": bool(autonomous.get("auto_refresh_recovered_from_db")),
+        "auto_refresh_next_tick_at": str(autonomous.get("auto_refresh_next_tick_at") or ""),
+        "auto_refresh_last_update_at": str(autonomous.get("auto_refresh_last_update_at") or ""),
+        "auto_refresh_skip_reason": str(autonomous.get("auto_refresh_skip_reason") or ""),
     }
 
 
@@ -71431,10 +71511,39 @@ def video_b14_auto_refresh_register(
         "blocker": str(snapshot.get("blocker") or current.get("blocker") or ""),
         "last_render_hash": str(snapshot.get("render_hash") or ""),
         "last_update_at": current.get("last_update_at") or now_text(),
+        "latest_status_message_id": message_id,
+        "status_panel_message_id": message_id,
+        "status_panel_message_id_source": "telegram_send_or_edit",
+        "auto_refresh_enabled": True,
+        "auto_refresh_recovered_from_db": False,
+        "auto_refresh_next_tick_at": (datetime.now() + timedelta(seconds=int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS))).isoformat(timespec="seconds"),
+        "auto_refresh_last_update_at": now_text_safe(),
+        "auto_refresh_skip_reason": "",
         "stopped": bool(snapshot.get("terminal_state")) and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
         "stopped_reason": str(snapshot.get("terminal_state") or "") if snapshot.get("terminal_state") else "",
     }
     VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
+    video_b14_persist_auto_refresh_metadata(
+        jid,
+        {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "job_id": jid,
+            "project_id": record.get("project_id"),
+            "latest_status_message_id": message_id,
+            "status_panel_message_id": message_id,
+            "progress_message_id": message_id,
+            "current_stage": record.get("current_stage"),
+            "final_progress_after_reconcile": record.get("percent"),
+            "next_refresh_expected_at": record.get("auto_refresh_next_tick_at"),
+            "auto_refresh_enabled": True,
+            "auto_refresh_recovered_from_db": False,
+            "auto_refresh_next_tick_at": record.get("auto_refresh_next_tick_at"),
+            "auto_refresh_last_update_at": record.get("auto_refresh_last_update_at"),
+            "auto_refresh_skip_reason": "",
+            "status_panel_message_id_source": "telegram_send_or_edit",
+        },
+    )
     if start_task and not record.get("stopped"):
         started = video_b14_auto_refresh_start_task(context, key)
         record = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(key) or record)
@@ -71613,6 +71722,12 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             f"• registry_required_for_poll: <code>{'true' if autonomous.get('registry_required_for_poll') else 'false'}</code>\n"
             f"• registry_missing_is_blocker: <code>{'true' if autonomous.get('registry_missing_is_blocker') else 'false'}</code>\n"
             f"• next_poll_at: <code>{html.escape(str(autonomous.get('next_poll_at') or snapshot.get('next_poll_at') or '-'))}</code>\n"
+            f"• status_panel_message_id_source: <code>{html.escape(str(autonomous.get('status_panel_message_id_source') or snapshot.get('status_panel_message_id_source') or '-'))}</code>\n"
+            f"• auto_refresh_enabled: <code>{'true' if autonomous.get('auto_refresh_enabled') or snapshot.get('auto_refresh_enabled') else 'false'}</code>\n"
+            f"• auto_refresh_recovered_from_db: <code>{'true' if autonomous.get('auto_refresh_recovered_from_db') or snapshot.get('auto_refresh_recovered_from_db') else 'false'}</code>\n"
+            f"• auto_refresh_next_tick_at: <code>{html.escape(str(autonomous.get('auto_refresh_next_tick_at') or snapshot.get('auto_refresh_next_tick_at') or '-'))}</code>\n"
+            f"• auto_refresh_last_update_at: <code>{html.escape(str(autonomous.get('auto_refresh_last_update_at') or snapshot.get('auto_refresh_last_update_at') or '-'))}</code>\n"
+            f"• auto_refresh_skip_reason: <code>{html.escape(str(autonomous.get('auto_refresh_skip_reason') or snapshot.get('auto_refresh_skip_reason') or '-'))}</code>\n"
             f"• current_stage: <code>{html.escape(str(snapshot.get('stage') or '-'))}</code>\n"
             f"• percent: <code>{int(snapshot.get('percent') or 0)}%</code>\n"
             f"• terminal_state: <code>{html.escape(str(snapshot.get('terminal_state') or '-'))}</code>\n"
@@ -71627,6 +71742,11 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             f"• job_id: <code>{html.escape(str(record.get('job_id') or '-'))}</code>",
             f"• chat_id: <code>{html.escape(str(record.get('chat_id') or '-'))}</code>",
             f"• message_id: <code>{html.escape(str(record.get('message_id') or '-'))}</code>",
+            f"• status_panel_message_id_source: <code>{html.escape(str(record.get('status_panel_message_id_source') or '-'))}</code>",
+            f"• auto_refresh_enabled: <code>{'true' if record.get('auto_refresh_enabled') else 'false'}</code>",
+            f"• auto_refresh_next_tick_at: <code>{html.escape(str(record.get('auto_refresh_next_tick_at') or '-'))}</code>",
+            f"• auto_refresh_last_update_at: <code>{html.escape(str(record.get('auto_refresh_last_update_at') or '-'))}</code>",
+            f"• auto_refresh_skip_reason: <code>{html.escape(str(record.get('auto_refresh_skip_reason') or '-'))}</code>",
             f"• registry_saved: <code>{'true' if record.get('registry_saved') else 'false'}</code>",
             f"• task_started: <code>{'true' if record.get('task_started') else 'false'}</code>",
             f"• task_alive: <code>{'true' if record.get('task_alive') else 'false'}</code>",
