@@ -45,16 +45,9 @@ def _state_for_mode(uid, mode):
     )
 
 
-def test_dub_only_keeps_pr340_translation_gate_when_translate_flag_is_stale(monkeypatch):
+def test_dub_only_tts_uses_translated_text_even_when_translate_flag_is_stale(monkeypatch):
     uid = 190091
-    called = False
-
-    async def forbidden_translate(*_args, **_kwargs):
-        nonlocal called
-        called = True
-        raise AssertionError("dub-only PR340 path must not force translation from target_language alone")
-
-    monkeypatch.setattr(bot, "translate_subtitle_segments", forbidden_translate)
+    monkeypatch.setattr(bot, "translate_subtitle_segments", _fake_translate_subtitle_segments)
 
     prepared = asyncio.run(
         bot.video_dubbing_prepare_subtitles(
@@ -64,9 +57,9 @@ def test_dub_only_keeps_pr340_translation_gate_when_translate_flag_is_stale(monk
         )
     )
 
-    assert called is False
-    assert prepared["translation_provider"] == ""
-    assert prepared["output_segments"][0]["text"] == "女主的选角米妮阿尔科克"
+    assert prepared["translation_provider"] == "unit"
+    assert prepared["output_segments"][0]["text"] == "Diễn viên nữ chính là Milly Alcock"
+    assert "女主" not in prepared["output_script"]
 
 
 def test_combo_tts_uses_translated_text_even_when_translate_flag_is_stale(monkeypatch):
