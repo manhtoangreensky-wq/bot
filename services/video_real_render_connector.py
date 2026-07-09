@@ -107,7 +107,7 @@ PROVIDER_PENDING_STATUS_MARKERS = {
     "media_generation_status_running",
 }
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
-DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 90
+DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 120
 DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS = 300
 DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS = 600
 PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START = "provider_stalled_not_start"
@@ -167,6 +167,172 @@ def _actual_status_payload_value(payload: dict[str, Any] | None = None) -> tuple
     if source.startswith("shopaikey.data.") and shopaikey_raw:
         return shopaikey_raw, source, _first_nonempty(data.get("raw_provider_status_before_source_fix"), data.get("raw_provider_status"), data.get("provider_status_raw"))
     return _first_nonempty(data.get("raw_provider_status"), data.get("provider_status_raw"), data.get("nonterminal_provider_status"), data.get("provider_status"), data.get("status")), source, _first_nonempty(data.get("raw_provider_status_before_source_fix"))
+
+
+def _provider_attempts_indicate_not_start(data: dict[str, Any] | None = None) -> bool:
+    data = dict(data or {})
+    for key in ("provider_attempts", "provider_pending_attempts", "provider_events"):
+        for item in _as_list(data.get(key)):
+            if not isinstance(item, dict):
+                continue
+            debug = item.get("debug") if isinstance(item.get("debug"), dict) else {}
+            merged = {**item, **debug}
+            if _text_indicates_not_start(
+                merged.get("shopaikey_data_status"),
+                merged.get("shopaikey_raw_status"),
+                merged.get("raw_provider_status"),
+                merged.get("provider_status_raw"),
+                merged.get("provider_status"),
+                merged.get("normalized_provider_status"),
+                merged.get("blocker"),
+                merged.get("provider_error"),
+            ):
+                return True
+    return False
+
+
+def _provider_result_or_artifact_present(data: dict[str, Any] | None = None) -> bool:
+    data = dict(data or {})
+    if any(
+        bool(data.get(key))
+        for key in (
+            "provider_result_url_present",
+            "result_url_present",
+            "download_url_present",
+            "result_url_found",
+            "final_mp4_valid",
+            "final_mp4_validated",
+            "final_video_validated",
+            "delivery_succeeded",
+            "delivered",
+            "final_delivered",
+        )
+    ):
+        return True
+    for key in (
+        "artifact_size",
+        "artifact_bytes",
+        "output_bytes",
+        "final_video_bytes",
+        "raw_provider_video_bytes",
+        "downloaded_bytes",
+    ):
+        if _safe_int(data.get(key), 0) > 0:
+            return True
+    return False
+
+
+def _not_start_elapsed_seconds(data: dict[str, Any] | None = None, job: dict | None = None) -> int:
+    data = dict(data or {})
+    job = dict(job or {})
+    values = [
+        _safe_int(data.get("scene_not_start_elapsed"), 0),
+        _safe_int(data.get("provider_elapsed_seconds"), 0),
+        _safe_int(data.get("provider_wait_elapsed_seconds"), 0),
+        _safe_int(data.get("elapsed_wall_clock_seconds"), 0),
+        _safe_int(data.get("previous_elapsed_seconds"), 0),
+        _safe_int(job.get("scene_not_start_elapsed"), 0),
+        _safe_int(job.get("provider_elapsed_seconds"), 0),
+        _safe_int(job.get("provider_wait_elapsed_seconds"), 0),
+        _safe_int(job.get("elapsed_wall_clock_seconds"), 0),
+        _safe_int(job.get("previous_elapsed_seconds"), 0),
+    ]
+    return max(values or [0])
+
+
+def _enforce_shopaikey_not_start_final_invariant(data: dict[str, Any] | None = None, *, job: dict | None = None) -> dict[str, Any]:
+    current = dict(data or {})
+    job = dict(job or {})
+    source = _first_nonempty(current.get("provider_status_payload_source"), job.get("provider_status_payload_source"))
+    shopaikey_status = _first_nonempty(
+        current.get("shopaikey_data_status"),
+        current.get("shopaikey_raw_status"),
+        job.get("shopaikey_data_status"),
+        job.get("shopaikey_raw_status"),
+    )
+    provider = _first_nonempty(
+        current.get("selected_provider"),
+        current.get("provider"),
+        current.get("provider_pending_provider"),
+        current.get("selected_provider_before_submit"),
+        job.get("selected_provider"),
+        job.get("provider"),
+        job.get("provider_pending_provider"),
+    )
+    source_not_start = bool(source.startswith("shopaikey.data.") and _text_indicates_not_start(shopaikey_status))
+    attempt_not_start = _provider_attempts_indicate_not_start(current)
+    if not (source_not_start or attempt_not_start):
+        return current
+    if provider and provider != "shopaikey_video" and source_not_start is False:
+        return current
+    if _provider_result_or_artifact_present(current):
+        return current
+
+    elapsed = _not_start_elapsed_seconds(current, job)
+    threshold, threshold_source = _product_video_not_start_threshold()
+    stalled = bool(elapsed >= threshold)
+    existing_fallback_allowed = bool(current.get("fallback_allowed"))
+    fallback_order = current.get("fallback_provider_order")
+    if not isinstance(fallback_order, list):
+        fallback_order = []
+    if not fallback_order:
+        fallback_order = [item for item in _provider_order(job) if item and item != (provider or "shopaikey_video")]
+    fallback_candidate = _first_nonempty(
+        current.get("fallback_provider"),
+        current.get("fallback_provider_candidate"),
+        current.get("next_provider_or_model_candidate"),
+        *(fallback_order[:1]),
+    )
+    fallback_allowed = bool(existing_fallback_allowed or (stalled and fallback_candidate))
+    fallback_block_reason = str(current.get("fallback_block_reason") or current.get("fallback_blocked_reason") or "")
+    if not stalled:
+        fallback_block_reason = "not_start_under_threshold"
+    elif fallback_allowed:
+        fallback_block_reason = ""
+    elif fallback_block_reason in {"", "scene_not_stalled", "primary_provider_in_progress", "selected_provider_in_progress", "provider_in_progress", "not_start_under_threshold"}:
+        fallback_block_reason = "no_fallback_provider"
+
+    raw_before = _first_nonempty(
+        current.get("raw_provider_status_before_source_fix"),
+        current.get("raw_provider_status"),
+        current.get("provider_status_raw"),
+        "IN_PROGRESS" if source_not_start else "",
+    )
+    current.update(
+        {
+            "provider_status_payload_source": source or "shopaikey.data.status",
+            "shopaikey_data_status": shopaikey_status or "NOT_START",
+            "shopaikey_raw_status": _first_nonempty(current.get("shopaikey_raw_status"), shopaikey_status, "NOT_START"),
+            "raw_provider_status_before_source_fix": raw_before,
+            "raw_provider_status": "NOT_START",
+            "provider_status_raw": "NOT_START",
+            "provider_status": "not_start",
+            "normalized_provider_status": "not_start",
+            "provider_task_status": "not_start",
+            "provider_status_for_progress": "not_start",
+            "current_scene_status": PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START if stalled and not fallback_allowed else "provider_not_start",
+            "canonical_status_before_not_start_override": str(current.get("canonical_status_before_not_start_override") or "running"),
+            "not_start_override_applied": True,
+            "provider_error": "provider_not_start",
+            "blocker": "provider_not_start",
+            "scene_not_start_elapsed": elapsed,
+            "provider_elapsed_seconds": max(_safe_int(current.get("provider_elapsed_seconds"), 0), elapsed),
+            "provider_wait_elapsed_seconds": max(_safe_int(current.get("provider_wait_elapsed_seconds"), 0), elapsed),
+            "not_start_threshold_seconds": threshold,
+            "not_start_threshold_source": threshold_source,
+            "stall_threshold": threshold,
+            "provider_stalled_not_start": bool(stalled),
+            "fallback_allowed": fallback_allowed,
+            "fallback_block_reason": fallback_block_reason,
+            "fallback_blocked_reason": fallback_block_reason,
+            "fallback_eligibility_reason": "eligible" if fallback_allowed else fallback_block_reason,
+            "key4u_submit_suppressed": not fallback_allowed,
+            "key4u_submit_suppressed_reason": "" if fallback_allowed else fallback_block_reason,
+        }
+    )
+    if stalled and not fallback_allowed:
+        return _enforce_product_video_terminal_consistency(current, reason=PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START)
+    return current
 
 
 def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -340,7 +506,7 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
         return _enforce_product_video_terminal_consistency({**dict(data or {}), **dict(job or {})})
     pending = _pending_attempt_from_payload(data)
     if not pending:
-        return data
+        return _enforce_shopaikey_not_start_final_invariant(data, job=job)
     provider = str(pending.get("provider") or data.get("selected_provider") or "shopaikey_video")
     task_id = str(pending.get("task_id") or "")
     video_id = str(pending.get("video_id") or "")
@@ -505,7 +671,7 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
         data["provider_request_job_id"] = request_job_id
         data["request_job_id"] = request_job_id
     data["provider_pending_provider"] = provider
-    return data
+    return _enforce_shopaikey_not_start_final_invariant(data, job=job)
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -3253,6 +3419,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         if bgm_audio_path:
             data["bgm_audio_path"] = bgm_audio_path
         data = _apply_pending_provider_dominance(data, job=job)
+        data = _enforce_shopaikey_not_start_final_invariant(data, job=job)
         if _product_video_terminal_failure_should_dominate(data):
             data = _enforce_product_video_terminal_consistency(data)
         return _record_render_diagnostics(data)
