@@ -1416,6 +1416,8 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "fallback_scene_index",
             "fallback_allowed",
             "fallback_block_reason",
+            "final_user_visible_state",
+            "final_status_after_reconcile",
             "public_confirm_kickoff_attempted",
             "public_confirm_kickoff_success",
             "worker_dispatch_attempted",

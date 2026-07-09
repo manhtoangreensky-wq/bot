@@ -559,6 +559,21 @@ def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]
 def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
     payload = dict(payload or {})
     terminal = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower()
+    not_start_under_threshold = bool(
+        _provider_status_value_is_not_start(
+            payload.get("shopaikey_raw_status"),
+            payload.get("shopaikey_data_status"),
+            payload.get("raw_provider_status"),
+            payload.get("provider_status_raw"),
+            payload.get("normalized_provider_status"),
+            payload.get("provider_status"),
+            payload.get("provider_error"),
+            payload.get("blocker"),
+        )
+        and (payload.get("continue_polling") or payload.get("primary_provider_continue_polling") or payload.get("provider_pending_deferred"))
+        and _as_int(payload.get("scene_not_start_elapsed") or payload.get("provider_elapsed_seconds"), 0)
+        < max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 120))
+    )
     stalled_without_fallback = bool(
         payload.get("provider_stalled_not_start")
         and not payload.get("fallback_allowed")
@@ -566,7 +581,7 @@ def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
         and str(payload.get("fallback_submit_source") or payload.get("submit_source") or "").strip()
         not in {"public_confirmed_fallback_once", "public_confirmed_scene_fallback_once"}
     )
-    if terminal in {"failed", "failed_no_charge", "failed_refunded", "needs_admin_review"} or stalled_without_fallback:
+    if (terminal in {"failed", "failed_no_charge", "failed_refunded", "needs_admin_review"} and not not_start_under_threshold) or stalled_without_fallback:
         return False
     status_text = " ".join(
         str(payload.get(key) or "").strip().lower()
@@ -653,6 +668,23 @@ def reconcile_provider_progress_telemetry(
     result_url_present = _provider_result_url_present(payload)
     final_output_ready = _provider_final_output_ready(payload)
     provider_status = _provider_status_for_progress(payload, alive)
+    provider_not_start = _provider_status_value_is_not_start(
+        payload.get("shopaikey_raw_status"),
+        payload.get("shopaikey_data_status"),
+        payload.get("raw_provider_status"),
+        payload.get("provider_status_raw"),
+        payload.get("normalized_provider_status"),
+        payload.get("provider_status"),
+        provider_status,
+    )
+    scene_not_start_elapsed = max(
+        _as_int(payload.get("scene_not_start_elapsed"), 0),
+        elapsed if provider_not_start else 0,
+    )
+    not_start_threshold = max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 120))
+    provider_stalled_not_start = bool(provider_not_start and scene_not_start_elapsed >= not_start_threshold and not result_url_present and not final_output_ready)
+    if alive and provider_not_start and not provider_stalled_not_start:
+        terminal_failure = False
     actual_provider_status_raw = (
         payload.get("shopaikey_raw_status")
         or payload.get("shopaikey_data_status")
@@ -784,6 +816,11 @@ def reconcile_provider_progress_telemetry(
         "provider_started_at_source": started_source,
         "provider_elapsed_seconds": elapsed,
         "provider_wait_elapsed_seconds": elapsed,
+        "scene_not_start_elapsed": scene_not_start_elapsed,
+        "not_start_threshold_seconds": not_start_threshold,
+        "stall_threshold": not_start_threshold if provider_not_start else _as_int(payload.get("stall_threshold"), 0),
+        "provider_stalled_not_start": provider_stalled_not_start,
+        "fallback_block_reason": "not_start_under_threshold" if provider_not_start and not provider_stalled_not_start else str(payload.get("fallback_block_reason") or payload.get("fallback_blocked_reason") or ""),
         "provider_wait_max_seconds": wait_max,
         "timeout_at": _format_epoch(started_epoch + wait_max) if started_epoch > 0 else "",
         "provider_elapsed_estimated": bool(estimated_started),
@@ -823,6 +860,8 @@ def reconcile_provider_progress_telemetry(
         "persisted_status_before_reconcile": persisted_status,
         "persisted_progress_before_reconcile": persisted_progress,
         "final_status_after_reconcile": final_status,
+        "terminal_state": "final_rendering" if alive and not terminal_failure else str(payload.get("terminal_state") or ""),
+        "final_user_visible_state": "final_rendering" if alive and not terminal_failure else ("failed_no_charge" if terminal_failure else final_status),
         "final_progress_after_reconcile": final_progress,
     }
 
