@@ -71,6 +71,17 @@ STATUS_PATHS = (
     "result.state",
     "output.status",
 )
+SHOPAIKEY_STATUS_PATHS = (
+    "data.status",
+    "data.state",
+    "data.task_status",
+    "status",
+    "state",
+    "task_status",
+    "result.status",
+    "result.state",
+    "output.status",
+)
 RESULT_URL_PATHS = (
     "data.result_url",
     "download_url",
@@ -598,8 +609,13 @@ def parse_submit_task_ids(body: Any) -> tuple[str, str, str, str]:
     return task_id, task_path, video_id, video_path
 
 
-def parse_provider_status(body: Any, *, has_result_url: bool = False) -> tuple[str, str, str]:
-    raw, path = _first_value_with_path(body, STATUS_PATHS)
+def parse_provider_status(
+    body: Any,
+    *,
+    has_result_url: bool = False,
+    status_paths: tuple[str, ...] = STATUS_PATHS,
+) -> tuple[str, str, str]:
+    raw, path = _first_value_with_path(body, status_paths)
     return normalize_provider_status(raw, has_result_url=has_result_url), raw, path
 
 
@@ -995,7 +1011,12 @@ class GenericHttpVideoProvider:
             or ("data.result_url" if self.provider_name == "shopaikey_video" else "result_url")
         )
         result_url, result_url_path = parse_result_url(body, result_field)
-        status, raw_status, status_path = parse_provider_status(body, has_result_url=bool(result_url))
+        legacy_status, legacy_raw_status, legacy_status_path = parse_provider_status(body, has_result_url=bool(result_url))
+        status, raw_status, status_path = (
+            parse_provider_status(body, has_result_url=bool(result_url), status_paths=SHOPAIKEY_STATUS_PATHS)
+            if self.provider_name == "shopaikey_video"
+            else (legacy_status, legacy_raw_status, legacy_status_path)
+        )
         progress = _first_value(body, ("data.progress", "data.progress_percent", "progress", "progress_percent"))
         progress_value = _parse_progress_value(progress)
         fail_reason = _first_value(body, ("data.fail_reason", "data.error", "data.message", "fail_reason", "error", "message"))
@@ -1006,6 +1027,11 @@ class GenericHttpVideoProvider:
             "poll_response_shape": result.get("response_shape") or _response_shape(body),
             "provider_status_raw": raw_status,
             "provider_status_path": status_path,
+            "provider_status_payload_source": (
+                f"shopaikey.{status_path}" if is_shopaikey_status and status_path.startswith("data.") else status_path
+            ),
+            "raw_provider_status_before_source_fix": legacy_raw_status if is_shopaikey_status else "",
+            "provider_status_path_before_source_fix": legacy_status_path if is_shopaikey_status else "",
             "result_url_present": bool(result_url),
             "result_field_path": result_url_path,
             "result_url_primary_path_checked": True,
@@ -1024,6 +1050,7 @@ class GenericHttpVideoProvider:
                     "shopaikey_status_http_code": int(result.get("status_code") or 0),
                     "shopaikey_raw_status": raw_status,
                     "shopaikey_normalized_status": status,
+                    "shopaikey_data_status": raw_status if status_path == "data.status" else "",
                     "shopaikey_data_progress_raw": progress if progress not in (None, "") else "",
                     "shopaikey_progress_source": "data.progress" if progress not in (None, "") else "none",
                     "shopaikey_result_url_from_data": result_url_path == "data.result_url",
@@ -1049,7 +1076,7 @@ class GenericHttpVideoProvider:
             status = "failed"
             error_code = "provider_poll_response_invalid_shape"
             raw_debug["provider_poll_blocker"] = error_code
-        elif raw_status and status not in {"queued", "running", "succeeded", "failed", "cancelled"}:
+        elif raw_status and status not in {"queued", "running", "not_start", "succeeded", "failed", "cancelled"}:
             ok = False
             status = "failed"
             error_code = "provider_status_unknown"

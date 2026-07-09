@@ -82,6 +82,21 @@ def _provider_status_is_not_start(*values: Any) -> bool:
     return False
 
 
+def _actual_poll_raw_status(poll_result: VideoPollResult) -> tuple[str, str, str]:
+    raw = dict(getattr(poll_result, "raw", {}) or {})
+    payload_source = str(raw.get("provider_status_payload_source") or "").strip()
+    shopaikey_raw = str(raw.get("shopaikey_raw_status") or raw.get("shopaikey_data_status") or "").strip()
+    if payload_source.startswith("shopaikey.data.") and shopaikey_raw:
+        return shopaikey_raw, payload_source, str(raw.get("raw_provider_status_before_source_fix") or "").strip()
+    raw_status = str(
+        poll_result.raw_status
+        or raw.get("provider_status_raw")
+        or poll_result.status
+        or ""
+    ).strip()
+    return raw_status, payload_source or str(raw.get("provider_status_path") or "").strip(), str(raw.get("raw_provider_status_before_source_fix") or "").strip()
+
+
 def _result_url_validation(result_url: str) -> dict[str, Any]:
     raw_url = str(result_url or "").strip()
     if not raw_url:
@@ -1831,6 +1846,9 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "provider_task_id_masked",
         "poll_response_shape",
         "provider_status_raw",
+        "provider_status_payload_source",
+        "raw_provider_status_before_source_fix",
+        "provider_status_path_before_source_fix",
         "result_field_path",
         "task_id_field_path",
         "video_id_field_path",
@@ -1913,6 +1931,7 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "shopaikey_status_endpoint_exact",
         "shopaikey_status_http_code",
         "shopaikey_raw_status",
+        "shopaikey_data_status",
         "shopaikey_normalized_status",
         "shopaikey_data_progress_raw",
         "shopaikey_progress_source",
@@ -2639,13 +2658,8 @@ def run_provider_generation(
             provider_task_key = str(submit.provider_task_id or submit.provider_video_id or poll_result.provider_task_id or poll_result.provider_video_id or "").strip()
             provider_task_ids = [provider_task_key] if provider_task_key else []
             provider_video_ids = [submit.provider_video_id or poll_result.provider_video_id] if (submit.provider_video_id or poll_result.provider_video_id) else []
-            raw_status = str(
-                poll_result.raw_status
-                or (getattr(poll_result, "raw", {}) or {}).get("provider_status_raw")
-                or poll_result.status
-                or ""
-            ).strip()
-            normalized_status = normalize_provider_status(poll_result.status or raw_status, has_result_url=False)
+            raw_status, status_payload_source, raw_status_before_source_fix = _actual_poll_raw_status(poll_result)
+            normalized_status = normalize_provider_status(raw_status or poll_result.status, has_result_url=False)
             canonical_status_before_not_start_override = normalized_status
             not_start_override_applied = _provider_status_is_not_start(
                 raw_status,
@@ -2700,6 +2714,8 @@ def run_provider_generation(
                 "provider_status": normalized_status,
                 "provider_status_raw": raw_status,
                 "raw_provider_status": raw_status,
+                "provider_status_payload_source": status_payload_source,
+                "raw_provider_status_before_source_fix": raw_status_before_source_fix,
                 "canonical_status_before_not_start_override": canonical_status_before_not_start_override,
                 "not_start_override_applied": bool(not_start_override_applied),
                 "nonterminal_provider_status": raw_status or normalized_status,

@@ -160,6 +160,15 @@ def _text_indicates_not_start(*values: Any) -> bool:
     return False
 
 
+def _actual_status_payload_value(payload: dict[str, Any] | None = None) -> tuple[str, str, str]:
+    data = dict(payload or {})
+    source = str(data.get("provider_status_payload_source") or "").strip()
+    shopaikey_raw = _first_nonempty(data.get("shopaikey_raw_status"), data.get("shopaikey_data_status"))
+    if source.startswith("shopaikey.data.") and shopaikey_raw:
+        return shopaikey_raw, source, _first_nonempty(data.get("raw_provider_status_before_source_fix"), data.get("raw_provider_status"), data.get("provider_status_raw"))
+    return _first_nonempty(data.get("raw_provider_status"), data.get("provider_status_raw"), data.get("nonterminal_provider_status"), data.get("provider_status"), data.get("status")), source, _first_nonempty(data.get("raw_provider_status_before_source_fix"))
+
+
 def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(payload or {})
     candidates: list[dict[str, Any]] = []
@@ -204,9 +213,13 @@ def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict
             or task_id
             or video_id
         )
+        actual_status, actual_status_source, raw_status_before_fix = _actual_status_payload_value(item)
         status_text = " ".join(
             str(value or "").strip().lower()
             for value in (
+                actual_status,
+                item.get("shopaikey_raw_status"),
+                item.get("shopaikey_data_status"),
                 item.get("normalized_provider_status"),
                 item.get("provider_status"),
                 item.get("status"),
@@ -239,6 +252,9 @@ def _pending_attempt_from_payload(payload: dict[str, Any] | None = None) -> dict
                 "task_id": task_id,
                 "video_id": video_id,
                 "status": "not_start" if raw_not_start else (status_text or "running"),
+                "raw_status": actual_status,
+                "status_source": actual_status_source,
+                "raw_status_before_source_fix": raw_status_before_fix,
                 "request_job_id": _first_nonempty(
                     item.get("provider_pending_request_job_id"),
                     item.get("provider_request_job_id"),
@@ -331,13 +347,23 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
     started_at = str(data.get("provider_started_at") or (job or {}).get("provider_started_at") or "").strip()
     started_epoch = data.get("provider_started_at_epoch") or (job or {}).get("provider_started_at_epoch") or ""
     pending_raw_not_start = _text_indicates_not_start(
+        pending.get("raw_status"),
         pending.get("status"),
+        data.get("shopaikey_raw_status"),
+        data.get("shopaikey_data_status"),
         data.get("provider_status_raw"),
         data.get("raw_provider_status"),
         data.get("nonterminal_provider_status"),
         data.get("normalized_provider_status"),
         data.get("provider_status"),
     )
+    raw_provider_status_before_fix = _first_nonempty(pending.get("raw_status_before_source_fix"), data.get("raw_provider_status_before_source_fix"))
+    actual_raw_provider_status = (
+        _first_nonempty(pending.get("raw_status"), data.get("shopaikey_raw_status"), data.get("shopaikey_data_status"), pending.get("status"))
+        if pending_raw_not_start
+        else _first_nonempty(data.get("raw_provider_status"), data.get("provider_status_raw"), pending.get("raw_status"), pending.get("status"))
+    )
+    status_payload_source = _first_nonempty(pending.get("status_source"), data.get("provider_status_payload_source"))
     provider_status_value = "not_start" if pending_raw_not_start else "running"
     provider_error_value = "provider_not_start" if pending_raw_not_start else "provider_in_progress"
     default_fallback_blocked = "not_start_under_threshold" if pending_raw_not_start else ("primary_provider_in_progress" if not data.get("fallback_used") else "")
@@ -358,7 +384,10 @@ def _apply_pending_provider_dominance(data: dict[str, Any], *, job: dict | None 
             "blocker": provider_error_value,
             "provider_status": provider_status_value,
             "normalized_provider_status": provider_status_value,
-            "raw_provider_status": str(data.get("raw_provider_status") or data.get("provider_status_raw") or pending.get("status") or ""),
+            "raw_provider_status": actual_raw_provider_status,
+            "provider_status_raw": actual_raw_provider_status,
+            "provider_status_payload_source": status_payload_source,
+            "raw_provider_status_before_source_fix": raw_provider_status_before_fix,
             "canonical_status_before_not_start_override": str(data.get("canonical_status_before_not_start_override") or ("running" if pending_raw_not_start else provider_status_value)),
             "not_start_override_applied": bool(pending_raw_not_start or data.get("not_start_override_applied")),
             "nonterminal_provider_status": str(pending.get("status") or "running"),
@@ -476,6 +505,17 @@ def _env_int(name: str, default: int) -> int:
         return int(str(os.environ.get(name, str(default)) or str(default)).strip())
     except Exception:
         return int(default)
+
+
+def _product_video_not_start_threshold() -> tuple[int, str]:
+    for name in ("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "PRODUCT_VIDEO_NOT_START_GRACE_SECONDS"):
+        raw = os.environ.get(name)
+        if raw not in (None, ""):
+            try:
+                return max(1, int(str(raw).strip())), f"env:{name}"
+            except Exception:
+                continue
+    return DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS, "default:product_video_not_start_grace"
 
 
 def _json_loads(value: Any, fallback: Any = None) -> Any:
@@ -833,8 +873,10 @@ def product_video_scene_task_for_index(job: dict | None = None, scene_index: int
 
 def _scene_task_status(item: dict | None = None) -> str:
     item = dict(item or {})
+    actual_status, _, _ = _actual_status_payload_value(item)
     raw = str(
-        item.get("status")
+        actual_status
+        or item.get("status")
         or item.get("normalized_provider_status")
         or item.get("provider_status")
         or item.get("provider_status_raw")
@@ -848,6 +890,9 @@ def _scene_task_status(item: dict | None = None) -> str:
 def _scene_task_has_raw_not_start(item: dict | None = None) -> bool:
     item = dict(item or {})
     for key in (
+        "shopaikey_raw_status",
+        "shopaikey_data_status",
+        "raw_provider_status",
         "provider_status_raw",
         "nonterminal_provider_status",
         "normalized_provider_status",
@@ -998,13 +1043,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
     status = _normalize_scene_task_status(_scene_task_status(scene_task), scene_task)
     progress = _scene_task_progress_number(scene_task)
     elapsed = _scene_task_elapsed_seconds(scene_task, job)
-    not_start_threshold = max(
-        1,
-        _env_int(
-            "PRODUCT_VIDEO_NOT_START_GRACE_SECONDS",
-            DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
-        ),
-    )
+    not_start_threshold, not_start_threshold_source = _product_video_not_start_threshold()
     running_threshold = max(
         not_start_threshold,
         _env_int(
@@ -1091,6 +1130,7 @@ def product_video_scene_stall_policy(job: dict | None, scene_task: dict | None, 
         "provider_wait_elapsed_seconds": elapsed,
         "stall_threshold": threshold,
         "not_start_threshold_seconds": not_start_threshold,
+        "not_start_threshold_source": not_start_threshold_source,
         "provider_stalled_not_start": bool(not_start_stalled),
         "provider_scene_stalled": stalled,
         "scene_running_without_result_stalled": bool(running_stalled),
@@ -1164,6 +1204,7 @@ def product_video_scene_tasks_debug(
             "scene_first_not_start_seen_at": "",
             "stall_threshold": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
             "not_start_threshold_seconds": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+            "not_start_threshold_source": "default:product_video_not_start_grace",
             "provider_stalled_not_start": False,
             "fallback_allowed": False,
             "fallback_block_reason": "scene_not_stalled",
@@ -1179,6 +1220,7 @@ def product_video_scene_tasks_debug(
             continue
         task_id = str(item.get("provider_task_id") or item.get("task_id") or "").strip()
         video_id = str(item.get("provider_video_id") or item.get("video_id") or "").strip()
+        actual_status, actual_status_source, raw_status_before_fix = _actual_status_payload_value(item)
         merged = {
                 "provider": str(item.get("provider") or by_scene[idx].get("provider") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
@@ -1195,7 +1237,9 @@ def product_video_scene_tasks_debug(
                 "selected_payload_adapter": str(item.get("selected_payload_adapter") or ""),
                 "provider_wait_elapsed_seconds": _safe_int(item.get("provider_wait_elapsed_seconds") or item.get("provider_elapsed_seconds") or item.get("elapsed_wall_clock_seconds"), 0),
                 "provider_elapsed_seconds": _safe_int(item.get("provider_elapsed_seconds") or item.get("provider_wait_elapsed_seconds") or item.get("elapsed_wall_clock_seconds"), 0),
-                "provider_status_raw": str(item.get("provider_status_raw") or item.get("nonterminal_provider_status") or item.get("provider_status") or ""),
+                "provider_status_raw": actual_status or str(item.get("provider_status_raw") or item.get("nonterminal_provider_status") or item.get("provider_status") or ""),
+                "raw_provider_status_before_source_fix": raw_status_before_fix,
+                "provider_status_payload_source": actual_status_source,
                 "scene_submitted_at": str(item.get("scene_submitted_at") or item.get("submitted_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
                 "scene_first_not_start_seen_at": str(item.get("scene_first_not_start_seen_at") or item.get("first_not_start_seen_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
         }
@@ -1212,8 +1256,10 @@ def product_video_scene_tasks_debug(
         debug_video_ids = debug.get("provider_video_ids") if isinstance(debug.get("provider_video_ids"), list) else []
         task_id = str(source.get("task_id") or (debug_task_ids[0] if debug_task_ids else "") or debug.get("provider_task_id") or "").strip()
         video_id = str(source.get("video_id") or (debug_video_ids[0] if debug_video_ids else "") or debug.get("provider_video_id") or "").strip()
+        actual_status, actual_status_source, raw_status_before_fix = _actual_status_payload_value({**source, **debug})
         status = str(
-            source.get("status")
+            actual_status
+            or source.get("status")
             or debug.get("normalized_provider_status")
             or debug.get("nonterminal_provider_status")
             or debug.get("provider_status_raw")
@@ -1242,7 +1288,9 @@ def product_video_scene_tasks_debug(
                 "selected_payload_adapter": str(debug.get("selected_payload_adapter") or source.get("selected_payload_adapter") or by_scene[idx].get("selected_payload_adapter") or ""),
                 "provider_wait_elapsed_seconds": _safe_int(debug.get("provider_wait_elapsed_seconds") or debug.get("provider_elapsed_seconds") or debug.get("elapsed_wall_clock_seconds") or source.get("provider_wait_elapsed_seconds"), _safe_int(by_scene[idx].get("provider_wait_elapsed_seconds"), 0)),
                 "provider_elapsed_seconds": _safe_int(debug.get("provider_elapsed_seconds") or debug.get("provider_wait_elapsed_seconds") or debug.get("elapsed_wall_clock_seconds") or source.get("provider_elapsed_seconds"), _safe_int(by_scene[idx].get("provider_elapsed_seconds") or by_scene[idx].get("provider_wait_elapsed_seconds"), 0)),
-                "provider_status_raw": str(debug.get("provider_status_raw") or debug.get("nonterminal_provider_status") or source.get("provider_status_raw") or status or ""),
+                "provider_status_raw": actual_status or str(debug.get("provider_status_raw") or debug.get("nonterminal_provider_status") or source.get("provider_status_raw") or status or ""),
+                "raw_provider_status_before_source_fix": raw_status_before_fix,
+                "provider_status_payload_source": actual_status_source,
                 "provider_stalled_not_start": bool(debug.get("provider_stalled_not_start") or source.get("provider_stalled_not_start")),
                 "fallback_allowed": bool(debug.get("fallback_allowed") or source.get("fallback_allowed") or False),
                 "fallback_block_reason": str(debug.get("fallback_block_reason") or debug.get("fallback_blocked_reason") or source.get("fallback_block_reason") or by_scene[idx].get("fallback_block_reason") or ""),
@@ -1279,6 +1327,7 @@ def product_video_scene_tasks_debug(
                 "provider_wait_elapsed_seconds": max(_safe_int(by_scene[idx].get("provider_wait_elapsed_seconds"), 0), _safe_int(policy.get("provider_wait_elapsed_seconds"), 0)),
                 "stall_threshold": policy["stall_threshold"],
                 "not_start_threshold_seconds": policy["not_start_threshold_seconds"],
+                "not_start_threshold_source": policy["not_start_threshold_source"],
                 "provider_stalled_not_start": bool(by_scene[idx].get("provider_stalled_not_start") or policy["provider_stalled_not_start"]),
                 "fallback_allowed": fallback_allowed,
                 "fallback_block_reason": current_block_reason,
