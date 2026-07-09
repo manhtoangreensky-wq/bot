@@ -8,6 +8,7 @@ without a downloaded MP4 for every rendered scene.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -107,7 +108,7 @@ PROVIDER_PENDING_STATUS_MARKERS = {
     "media_generation_status_running",
 }
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
-DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 120
+DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS = 60
 DEFAULT_PRODUCT_VIDEO_SCENE_RUNNING_WITHOUT_RESULT_GRACE_SECONDS = 300
 DEFAULT_PRODUCT_VIDEO_TOTAL_SCENE_TIMEOUT_SECONDS = 600
 PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START = "provider_stalled_not_start"
@@ -2123,6 +2124,10 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     scene_fallback_allowed = bool(pending_policy.get("fallback_allowed"))
     scene_stalled_not_start = bool(pending_policy.get("provider_stalled_not_start"))
     scene_provider_stalled = bool(pending_policy.get("provider_scene_stalled"))
+    fallback_execution_tick_called = bool(pending_matches_request and scene_provider_stalled)
+    fallback_idempotency_key = hashlib.sha256(
+        f"{request_job_id}|{pending_task_id or pending_video_id}|product_video_scene_fallback_once".encode("utf-8")
+    ).hexdigest()[:24]
     if pending_matches_request and scene_provider_stalled and scene_fallback_allowed:
         pending_matches_request = False
         pending_task_id = ""
@@ -2247,6 +2252,9 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 "stall_threshold": pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
                 "fallback_scene_index": scene_index,
                 "fallback_allowed": False,
+                "fallback_execution_tick_called": fallback_execution_tick_called,
+                "fallback_submit_attempted": False,
+                "fallback_idempotency_key": fallback_idempotency_key,
                 "fallback_block_reason": pending_policy.get("fallback_block_reason") or "no_fallback_provider",
                 "no_charge": True,
             },
@@ -2299,6 +2307,14 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "provider_stalled_not_start": scene_stalled_not_start,
             "scene_not_start_elapsed": pending_policy.get("scene_not_start_elapsed") or 0,
             "stall_threshold": pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+            "not_start_threshold_seconds": pending_policy.get("not_start_threshold_seconds") or pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
+            "not_start_threshold_source": str(pending_policy.get("not_start_threshold_source") or ""),
+            "fallback_execution_tick_called": fallback_execution_tick_called,
+            "fallback_submit_attempted": bool(scene_fallback_allowed),
+            "fallback_idempotency_key": fallback_idempotency_key,
+            "provider_health_at_submit": _meta_value("provider_health_at_submit", "provider_health_summary") or {},
+            "primary_selected_due_to_health": _meta_value("primary_selected_due_to_health") or "",
+            "provider_degraded_reason": _meta_value("provider_degraded_reason", "degraded_reason") or "",
             "charge_policy": charge_policy,
             "allow_provider_pending": True,
             "claim_payload_provider_key": str((job or {}).get("selected_provider") or (job or {}).get("submit_provider_key") or ""),
@@ -2336,6 +2352,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     result.setdefault("provider_stalled_not_start", scene_stalled_not_start)
     result.setdefault("scene_not_start_elapsed", pending_policy.get("scene_not_start_elapsed") or 0)
     result.setdefault("stall_threshold", pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS)
+    result.setdefault("not_start_threshold_seconds", pending_policy.get("not_start_threshold_seconds") or pending_policy.get("stall_threshold") or DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS)
+    result.setdefault("not_start_threshold_source", pending_policy.get("not_start_threshold_source") or "")
+    result.setdefault("fallback_execution_tick_called", fallback_execution_tick_called)
+    result.setdefault("fallback_submit_attempted", bool(scene_fallback_allowed))
+    result.setdefault("fallback_idempotency_key", fallback_idempotency_key)
     result.setdefault("fallback_scene_index", scene_index if scene_fallback_allowed else 0)
     result.setdefault("fallback_allowed", scene_fallback_allowed)
     result.setdefault("fallback_block_reason", pending_policy.get("fallback_block_reason") or "")

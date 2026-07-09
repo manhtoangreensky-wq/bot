@@ -572,7 +572,7 @@ def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
         )
         and (payload.get("continue_polling") or payload.get("primary_provider_continue_polling") or payload.get("provider_pending_deferred"))
         and _as_int(payload.get("scene_not_start_elapsed") or payload.get("provider_elapsed_seconds"), 0)
-        < max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 120))
+        < max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 60))
     )
     stalled_without_fallback = bool(
         payload.get("provider_stalled_not_start")
@@ -681,7 +681,7 @@ def reconcile_provider_progress_telemetry(
         _as_int(payload.get("scene_not_start_elapsed"), 0),
         elapsed if provider_not_start else 0,
     )
-    not_start_threshold = max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 120))
+    not_start_threshold = max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 60))
     provider_stalled_not_start = bool(provider_not_start and scene_not_start_elapsed >= not_start_threshold and not result_url_present and not final_output_ready)
     if alive and provider_not_start and not provider_stalled_not_start:
         terminal_failure = False
@@ -1788,6 +1788,13 @@ def build_product_video_confirm_kickoff_payload(
     elif not quote_state.get("quote_consistent"):
         provider_chain_resolved = False
         dispatch_blocker = "product_video_quote_mismatch_no_charge"
+    provider_health_at_submit = (
+        asset_pack.get("provider_health_at_submit")
+        or invoice.get("provider_health_at_submit")
+        or asset_pack.get("provider_health_summary")
+        or invoice.get("provider_health_summary")
+        or {}
+    )
     return {
         "source": "product_video",
         "product_video": True,
@@ -1844,6 +1851,10 @@ def build_product_video_confirm_kickoff_payload(
         "provider_chain": chain,
         "provider_order": chain,
         "provider_chain_resolved": provider_chain_resolved,
+        "provider_health_at_submit": provider_health_at_submit,
+        "primary_selected_due_to_health": str(asset_pack.get("primary_selected_due_to_health") or invoice.get("primary_selected_due_to_health") or ""),
+        "provider_degraded_reason": str(asset_pack.get("provider_degraded_reason") or invoice.get("provider_degraded_reason") or ""),
+        "effective_primary_for_low_basic": str(asset_pack.get("effective_primary_for_low_basic") or invoice.get("effective_primary_for_low_basic") or (chain[0] if chain else "")),
         **model_metadata,
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,

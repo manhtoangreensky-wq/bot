@@ -1336,6 +1336,9 @@ def configured_provider_chain(environ: dict[str, str] | None = None) -> list[str
 
 
 PRODUCT_VIDEO_PUBLIC_DEGRADED_PROVIDER_BLOCKER = "provider_degraded_for_product_video_public"
+PRODUCT_VIDEO_PROVIDER_HEALTH_WINDOW_JOBS_DEFAULT = 5
+PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_THRESHOLD_DEFAULT = 3
+PRODUCT_VIDEO_PROVIDER_DEGRADED_DURATION_SECONDS_DEFAULT = 30 * 60
 
 
 def _product_video_attempt_status_text(attempt: dict[str, Any]) -> str:
@@ -1393,27 +1396,65 @@ def product_video_provider_public_degradation(
     """
     env = dict(environ or os.environ)
     normalized_provider = str(provider or "").strip().lower()
-    threshold = max(1, int(not_start_threshold or env.get("PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_THRESHOLD") or 2))
+    threshold = max(
+        1,
+        int(
+            not_start_threshold
+            or env.get("PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_THRESHOLD")
+            or PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_THRESHOLD_DEFAULT
+        ),
+    )
+    window_jobs = max(
+        1,
+        int(env.get("PRODUCT_VIDEO_PROVIDER_HEALTH_WINDOW_JOBS") or PRODUCT_VIDEO_PROVIDER_HEALTH_WINDOW_JOBS_DEFAULT),
+    )
+    duration_seconds = max(
+        60,
+        int(
+            env.get("PRODUCT_VIDEO_PROVIDER_DEGRADED_DURATION_SECONDS")
+            or PRODUCT_VIDEO_PROVIDER_DEGRADED_DURATION_SECONDS_DEFAULT
+        ),
+    )
     env_flag = str(env.get(f"PRODUCT_VIDEO_{normalized_provider.upper()}_PUBLIC_DEGRADED") or "").strip().lower()
     env_degraded = env_flag in {"1", "true", "yes", "on", "degraded", "blocked"}
     rows = [dict(item) for item in (attempts or []) if isinstance(item, dict)]
-    not_start_count = 0
-    result_url_empty_count = 0
-    artifact_zero_count = 0
-    delivered_count = 0
-    for attempt in rows:
+    evidence_by_job: dict[str, dict[str, Any]] = {}
+    for index, attempt in enumerate(rows):
         attempt_provider = _product_video_attempt_provider(attempt)
         if attempt_provider != normalized_provider:
             continue
+        job_key = str(
+            attempt.get("job_id")
+            or attempt.get("provider_job_id")
+            or attempt.get("project_id")
+            or attempt.get("provider_pending_request_job_id")
+            or attempt.get("request_job_id")
+            or f"attempt:{index}"
+        ).strip()
+        if job_key not in evidence_by_job and len(evidence_by_job) >= window_jobs:
+            continue
+        state = evidence_by_job.setdefault(
+            job_key,
+            {
+                "not_start": False,
+                "result_url_present": False,
+                "artifact_size": 0,
+                "delivered": False,
+            },
+        )
         status_text = _product_video_attempt_status_text(attempt)
-        if status_text in {"NOT_START", "NOTSTART", "NOT_STARTED", "NOT START"}:
-            not_start_count += 1
-        if not _product_video_attempt_result_url_present(attempt):
-            result_url_empty_count += 1
-        if _product_video_attempt_artifact_size(attempt) <= 0:
-            artifact_zero_count += 1
+        if status_text in {"NOT_START", "NOTSTART", "NOT_STARTED", "NOT START", "PROVIDER_NOT_START"}:
+            state["not_start"] = True
+        if _product_video_attempt_result_url_present(attempt):
+            state["result_url_present"] = True
+        state["artifact_size"] = max(int(state.get("artifact_size") or 0), _product_video_attempt_artifact_size(attempt))
         if bool(attempt.get("delivered") or attempt.get("final_delivered") or attempt.get("telegram_delivery_success")):
-            delivered_count += 1
+            state["delivered"] = True
+    evidence = list(evidence_by_job.values())
+    not_start_count = sum(1 for item in evidence if item.get("not_start"))
+    result_url_empty_count = sum(1 for item in evidence if not item.get("result_url_present"))
+    artifact_zero_count = sum(1 for item in evidence if int(item.get("artifact_size") or 0) <= 0)
+    delivered_count = sum(1 for item in evidence if item.get("delivered"))
     degraded = bool(
         env_degraded
         or (
@@ -1434,16 +1475,24 @@ def product_video_provider_public_degradation(
         reasons.append("artifact_size_zero_repeated")
     if delivered_count > 0:
         reasons.append("provider_delivered_recently")
+    degraded_until_epoch = int(time.time()) + duration_seconds if degraded else 0
     return {
         "provider": normalized_provider,
+        "health_status": "degraded" if degraded else "healthy",
         "provider_degraded_for_product_video_public": degraded,
         "degraded_for_product_video_public": degraded,
         "degrade_reason": ",".join(reasons) if degraded else "",
+        "degraded_reason": ",".join(reasons) if degraded else "",
+        "degraded_until_epoch": degraded_until_epoch,
+        "degraded_until": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(degraded_until_epoch)) if degraded_until_epoch else "",
+        "degrade_duration_seconds": duration_seconds,
+        "health_window_jobs": window_jobs,
         "last_not_start_count": not_start_count,
         "last_result_url_empty_count": result_url_empty_count,
         "last_artifact_size_zero_count": artifact_zero_count,
         "last_delivered_count": delivered_count,
         "degrade_threshold": threshold,
+        "not_start_degrade_threshold": threshold,
     }
 
 
@@ -1479,6 +1528,7 @@ def product_video_public_provider_route_decision(
                     "provider": provider,
                     "reason": PRODUCT_VIDEO_PUBLIC_DEGRADED_PROVIDER_BLOCKER,
                     "degrade_reason": str(degrade_state.get("degrade_reason") or ""),
+                    "degraded_until": str(degrade_state.get("degraded_until") or ""),
                     "last_not_start_count": int(degrade_state.get("last_not_start_count") or 0),
                     "last_result_url_empty_count": int(degrade_state.get("last_result_url_empty_count") or 0),
                 }
@@ -1501,10 +1551,13 @@ def product_video_public_provider_route_decision(
         "effective_provider_chain": eligible,
         "ready_provider_order": eligible,
         "provider_degraded_for_product_video_public": degraded_skipped,
+        "provider_health_summary": degraded,
         "degraded_providers": degraded,
         "skipped_providers": skipped,
-        "blocker": "" if selected else "product_video_no_public_mp4_provider",
+        "blocker": "" if selected else ("no_healthy_video_provider_no_charge" if degraded_skipped else "product_video_no_public_mp4_provider"),
         "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY if not selected else "",
+        "effective_primary_for_low_basic": selected,
+        "primary_selected_due_to_health": "health_aware_degraded_provider_skipped" if degraded_skipped and selected else "default_order",
     }
 
 
@@ -2130,6 +2183,12 @@ def run_provider_generation(
             "Creating a Product Video job may spend external provider credits even if no MP4 is produced."
         ),
         **cooldown_state,
+        "provider_health_at_submit": metadata.get("provider_health_at_submit") or {},
+        "primary_selected_due_to_health": str(metadata.get("primary_selected_due_to_health") or ""),
+        "provider_degraded_reason": str(metadata.get("provider_degraded_reason") or ""),
+        "fallback_execution_tick_called": bool(metadata.get("fallback_execution_tick_called")),
+        "fallback_submit_attempted": bool(metadata.get("fallback_submit_attempted")),
+        "fallback_idempotency_key": str(metadata.get("fallback_idempotency_key") or ""),
         "required_capability_original": required_capability_original,
         "normalized_capability_candidates": list(normalized_capability_candidates),
         "provider_candidates_count": len([item for item in provider_candidates if item]),

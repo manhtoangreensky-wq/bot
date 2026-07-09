@@ -95,7 +95,7 @@ def test_job_111_final_invariant_forces_not_start_under_threshold(monkeypatch):
     assert result["fallback_block_reason"] == "not_start_under_threshold"
     assert result["key4u_submit_suppressed"] is True
     assert result["key4u_submit_suppressed_reason"] == "not_start_under_threshold"
-    assert result["not_start_threshold_seconds"] == 120
+    assert result["not_start_threshold_seconds"] == 60
     assert result["not_start_threshold_source"] == "default:product_video_not_start_grace"
 
 
@@ -190,7 +190,7 @@ def test_threshold_default_and_env_override(monkeypatch):
     monkeypatch.delenv("PRODUCT_VIDEO_NOT_START_GRACE_SECONDS", raising=False)
 
     default_threshold, default_source = connector._product_video_not_start_threshold()
-    assert default_threshold == 120
+    assert default_threshold == 60
     assert default_source == "default:product_video_not_start_grace"
 
     monkeypatch.setenv("VIDEO_PROVIDER_NOT_START_STALL_SECONDS", "33")
