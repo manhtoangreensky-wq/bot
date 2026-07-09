@@ -49,17 +49,19 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
     assert "Dịch ngôn ngữ" in language_text
     assert {
         "menu|translation_text",
+        "menu|translation_media_file",
+        "menu|translation_media_audio",
         "menu|translation_two_way",
         "menu|translation_live_conversation",
         "menu|translation_language",
         "menu|translation_auto_target",
+        "menu|translation_stop_session",
         "menu|main",
         "menu|translate",
     }.issubset(language_callbacks)
     assert "menu|translation_voice" not in language_callbacks
     assert "menu|translation_document" not in language_callbacks
     assert "menu|translation_transcript" not in language_callbacks
-    assert "menu|translation_stop_session" not in language_callbacks
 
 
 def test_translation_child_callbacks_have_handlers_or_existing_routes():

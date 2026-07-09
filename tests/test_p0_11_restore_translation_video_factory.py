@@ -24,11 +24,26 @@ def test_translation_gateway_has_language_and_video_factory():
 
 def test_language_translation_menu_restored():
     labels = _labels(bot.translation_language_hub_keyboard("vi"))
+    assert labels == [
+        "📝 Văn bản",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "💬 Hội thoại",
+        "🔁 Dịch 2 chiều",
+        "🌐 Dịch tự động",
+        "⚙️ Ngôn ngữ",
+        "⏹ Tắt dịch tự động",
+        "⬅️ Trung tâm",
+        "🏠 Menu chính",
+    ]
     assert "🔁 Dịch 2 chiều" in labels
     assert "💬 Hội thoại" in labels
     assert "📝 Văn bản" in labels
+    assert "📄 Dịch file" in labels
+    assert "🎧 Dịch audio" in labels
     assert "⚙️ Ngôn ngữ" in labels
     assert "🌐 Dịch tự động" in labels
+    assert "⏹ Tắt dịch tự động" in labels
     assert "📄 Tài liệu" not in labels
     assert "🎧 Audio" not in labels
     assert "⬅️ Trung tâm" in labels
@@ -41,10 +56,10 @@ def test_video_factory_menu_from_gateway():
         "🌐 Dịch phụ đề video",
         "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "📄 Dịch file",
-        "🎧 Dịch audio",
     ):
         assert label in labels
+    assert "📄 Dịch file" not in labels
+    assert "🎧 Dịch audio" not in labels
     assert "📄 Dịch file phụ đề" not in labels
     assert "🧾 Bóc lời thoại" not in labels
     assert "🔗 Tải video từ link" not in labels
