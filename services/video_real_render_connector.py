@@ -1862,6 +1862,8 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     )
     output_dir = os.path.dirname(os.path.abspath(raw_path))
     provider_env = dict(os.environ)
+    if provider_order:
+        provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(provider_order)
     if scene_fallback_allowed and scene_fallback_order:
         provider_env["VIDEO_PROVIDER_CHAIN"] = ",".join(scene_fallback_order)
     result = run_provider_generation(request, output_dir=output_dir, environ=provider_env)

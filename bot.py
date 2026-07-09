@@ -71295,8 +71295,7 @@ def video_b14_public_render_guard(user_id=0) -> tuple[bool, str]:
 
 
 PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI = (
-    "TOAN AAS chưa thể tạo video lúc này vì hệ thống tạo video đang bận. "
-    "Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+    "Hệ thống tạo video đang bận, TOAN AAS chưa trừ Xu. Anh/chị thử lại sau."
 )
 try:
     VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS = max(30, int(os.getenv("VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS", "900") or 900))
@@ -71410,6 +71409,142 @@ def _video_provider_preflight_recent_failure(conn, *, ttl_seconds: int = VIDEO_P
     }
 
 
+def _product_video_json_dict(value) -> dict:
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(value or "{}")
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _product_video_provider_attempt_like(value: dict) -> bool:
+    keys = {
+        "provider",
+        "selected_provider",
+        "selected_provider_before_submit",
+        "provider_pending_provider",
+        "submit_provider_key",
+        "provider_status",
+        "provider_status_raw",
+        "normalized_provider_status",
+        "raw_status",
+        "result_url",
+        "provider_result_url",
+        "download_url",
+        "artifact_size",
+        "artifact_bytes",
+        "raw_video_bytes",
+    }
+    return bool(keys.intersection(value.keys()))
+
+
+def _product_video_collect_provider_attempts_from_payload(payload: dict) -> list[dict]:
+    attempts: list[dict] = []
+
+    def visit(item):
+        if isinstance(item, dict):
+            if _product_video_provider_attempt_like(item):
+                attempts.append(dict(item))
+            for child in item.values():
+                if isinstance(child, (dict, list, tuple)):
+                    visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(dict(payload or {}))
+    return attempts
+
+
+def _product_video_recent_provider_attempt_evidence(conn, *, limit: int = 24) -> list[dict]:
+    attempts: list[dict] = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT j.id, j.project_id, j.status, j.progress_percent, j.result_json, j.updated_at,
+                   p.asset_pack_json, p.invoice_json
+              FROM video_jobs j
+              LEFT JOIN video_projects p ON p.project_id = j.project_id
+             WHERE j.job_type='video_render'
+             ORDER BY COALESCE(j.updated_at, j.created_at) DESC, j.id DESC
+             LIMIT ?
+            """,
+            (max(1, int(limit or 24)),),
+        ).fetchall()
+    except Exception:
+        return attempts
+    for row in rows:
+        job_id, project_id, status, progress, result_json, updated_at, asset_json, invoice_json = row
+        result_payload = _product_video_json_dict(result_json)
+        asset_pack = _product_video_json_dict(asset_json)
+        invoice = _product_video_json_dict(invoice_json)
+        product_source = str(
+            result_payload.get("source")
+            or asset_pack.get("source")
+            or invoice.get("source")
+            or ""
+        ).strip()
+        if product_source and product_source != "product_video":
+            continue
+        root = {
+            **result_payload,
+            "job_id": safe_int(job_id, 0),
+            "project_id": safe_int(project_id, 0),
+            "job_status": str(status or ""),
+            "progress_percent": safe_int(progress, 0),
+            "updated_at": str(updated_at or ""),
+        }
+        attempts.extend(_product_video_collect_provider_attempts_from_payload(root))
+    return attempts
+
+
+def _product_video_provider_status_for_preflight() -> dict:
+    try:
+        return video_provider_router.provider_status_payload()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "providers": [],
+            "provider_chain": [],
+            "effective_provider_chain": [],
+            "blocker": f"provider_status_unavailable:{type(exc).__name__}",
+        }
+
+
+def product_video_provider_public_route_preflight(conn=None) -> dict:
+    attempts = _product_video_recent_provider_attempt_evidence(conn)
+    status = _product_video_provider_status_for_preflight()
+    chain = status.get("effective_provider_chain") or status.get("provider_chain") or []
+    shopaikey_degradation = video_provider_router.product_video_provider_public_degradation(
+        "shopaikey_video",
+        attempts,
+    )
+    decision = video_provider_router.product_video_public_provider_route_decision(
+        status=status,
+        chain=chain,
+        degraded_providers={"shopaikey_video": shopaikey_degradation},
+    )
+    selected_chain = list(decision.get("effective_provider_chain") or [])
+    result = {
+        **decision,
+        "provider_preflight_checked": True,
+        "provider_preflight_source": "provider_status_and_recent_jobs",
+        "provider_preflight_result": "provider_route_ready" if decision.get("ok") else "no_real_mp4_provider_available",
+        "provider_status_checked": True,
+        "shopaikey_public_degradation": shopaikey_degradation,
+        "configured_provider_chain": list(decision.get("provider_chain") or chain or []),
+        "effective_provider_chain": selected_chain,
+        "selected_provider": str(decision.get("selected_provider") or ""),
+        "job_creation_blocked_by_provider_availability": not bool(decision.get("ok")),
+        "no_charge_reason": "" if decision.get("ok") else "product_video_no_public_mp4_provider",
+        "preflight_ttl_seconds": max(30, safe_int(os.getenv("PRODUCT_VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS"), 900)),
+        "public_message": "" if decision.get("ok") else PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+    }
+    return result
+
+
 def product_video_provider_availability_preflight(conn=None) -> dict:
     owned = conn is None
     db = conn or db_connect()
@@ -71417,10 +71552,42 @@ def product_video_provider_availability_preflight(conn=None) -> dict:
         result = _video_provider_preflight_recent_failure(db)
         if not result.get("ok"):
             return result
-        return result
+        route_result = product_video_provider_public_route_preflight(db)
+        if not route_result.get("ok"):
+            return route_result
+        return {
+            **result,
+            **route_result,
+            "provider_preflight_result": route_result.get("provider_preflight_result") or result.get("provider_preflight_result"),
+            "job_creation_blocked_by_provider_availability": False,
+        }
     finally:
         if owned:
             db.close()
+
+
+def product_video_apply_provider_preflight_to_session(user_id, session: dict, preflight: dict) -> dict:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    draft["b14_provider_preflight"] = dict(preflight or {})
+    chain = [
+        str(item or "").strip()
+        for item in (preflight or {}).get("effective_provider_chain", [])
+        if str(item or "").strip()
+    ]
+    if chain:
+        draft["b14_provider_chain"] = chain
+        draft["provider_chain"] = chain
+        draft["provider_order"] = ",".join(chain)
+        asset_pack = dict(draft.get("asset_pack") or {})
+        asset_pack["provider_chain"] = chain
+        asset_pack["provider_order"] = ",".join(chain)
+        asset_pack["selected_provider"] = chain[0]
+        asset_pack["provider_preflight_result"] = str(preflight.get("provider_preflight_result") or "")
+        asset_pack["provider_degraded_for_product_video_public"] = bool(preflight.get("provider_degraded_for_product_video_public"))
+        draft["asset_pack"] = asset_pack
+    session["draft"] = draft
+    return save_video_session(user_id, session)
 
 
 def video_engine_product_type_for_session(session: dict | None = None) -> str:
@@ -71476,10 +71643,26 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         asset_pack_payload.pop("logo_material", None)
     original_user_prompt = str((session or {}).get("original_user_prompt") or topic or draft.get("topic") or "").strip()
     cleaned_user_prompt = re.sub(r"\s+", " ", original_user_prompt).strip()
+    raw_provider_chain = (
+        draft.get("b14_provider_chain")
+        or draft.get("provider_chain")
+        or asset_pack_payload.get("provider_chain")
+        or asset_pack_payload.get("provider_order")
+        or draft.get("provider_order")
+    )
+    if isinstance(raw_provider_chain, str):
+        provider_chain = [item.strip() for item in raw_provider_chain.replace("|", ",").replace(">", ",").split(",") if item.strip()]
+    else:
+        try:
+            provider_chain = [str(item or "").strip() for item in raw_provider_chain if str(item or "").strip()]
+        except Exception:
+            provider_chain = []
+    provider_order_csv = ",".join(provider_chain) if provider_chain else (asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u")
     asset_pack_payload.update({
         "original_user_prompt": original_user_prompt,
         "cleaned_user_prompt": cleaned_user_prompt,
-        "provider_order": asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u",
+        "provider_order": provider_order_csv,
+        "provider_chain": provider_chain or [item.strip() for item in str(provider_order_csv or "").split(",") if item.strip()],
         "product_type": product_type,
         "engine_adapter": route.get("adapter") or "",
         "engine_family": route.get("engine_family") or "",
@@ -71495,6 +71678,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
+        "selected_provider": (provider_chain[0] if provider_chain else ""),
         "submit_source": str(draft.get("submit_source") or draft.get("provider_submit_source") or "public_user_final_confirm"),
         "provider_submit_source": str(draft.get("provider_submit_source") or draft.get("submit_source") or "public_user_final_confirm"),
         "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
@@ -71512,6 +71696,9 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
+        "provider_order": provider_order_csv,
+        "provider_chain": provider_chain or [item.strip() for item in str(provider_order_csv or "").split(",") if item.strip()],
+        "selected_provider": (provider_chain[0] if provider_chain else ""),
         "submit_source": str(draft.get("submit_source") or draft.get("provider_submit_source") or "public_user_final_confirm"),
         "provider_submit_source": str(draft.get("provider_submit_source") or draft.get("submit_source") or "public_user_final_confirm"),
         "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
@@ -74504,6 +74691,25 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("b14_quality_xu"):
             session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
+        if not video_b14_is_admin_or_owner(uid):
+            provider_preflight = product_video_provider_availability_preflight()
+            if not provider_preflight.get("ok"):
+                draft = dict((session.get("draft") or {}))
+                draft["b14_provider_preflight"] = provider_preflight
+                draft["provider_called"] = False
+                draft["xu_charged"] = 0
+                session["draft"] = draft
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    provider_preflight.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                    parse_mode=None,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen")],
+                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                    ]),
+                )
+            session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
@@ -74530,6 +74736,26 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
                 )
+        is_internal = video_b14_is_admin_or_owner(uid)
+        if not is_internal:
+            provider_preflight = product_video_provider_availability_preflight()
+            if not provider_preflight.get("ok"):
+                draft["b14_provider_preflight"] = provider_preflight
+                draft["provider_called"] = False
+                draft["xu_charged"] = 0
+                session["draft"] = draft
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    provider_preflight.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                    parse_mode=None,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
+                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                    ]),
+                )
+            session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+            draft = dict(session.get("draft") or {})
         draft.update({
             "submit_source": "public_user_final_confirm",
             "provider_submit_source": "public_user_final_confirm",
@@ -74541,24 +74767,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         save_video_session(uid, session)
         project = video_b14_prepare_project_for_invoice(uid, session)
         project_id = safe_int(project.get("project_id"), project_id)
-        is_internal = video_b14_is_admin_or_owner(uid)
         credits, _, _ = get_user(uid)
-        provider_preflight = product_video_provider_availability_preflight()
-        if not provider_preflight.get("ok"):
-            draft["b14_provider_preflight"] = provider_preflight
-            draft["provider_called"] = False
-            draft["xu_charged"] = 0
-            session["draft"] = draft
-            save_video_session(uid, session)
-            return await safe_edit_or_send(
-                query,
-                PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                ]),
-            )
         result = confirm_video_project_invoice(
             project_id,
             uid,
@@ -75146,6 +75355,25 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             if not ok:
                 await update.message.reply_text(guard_message, parse_mode="HTML")
                 return True
+            if not video_b14_is_admin_or_owner(uid):
+                provider_preflight = product_video_provider_availability_preflight()
+                if not provider_preflight.get("ok"):
+                    draft = dict(session.get("draft") or {})
+                    draft["b14_provider_preflight"] = provider_preflight
+                    draft["provider_called"] = False
+                    draft["xu_charged"] = 0
+                    session["draft"] = draft
+                    save_video_session(uid, session)
+                    await update.message.reply_text(
+                        provider_preflight.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                        parse_mode=None,
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen")],
+                            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                        ]),
+                    )
+                    return True
+                session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
             video_b14_prepare_project_for_invoice(uid, session)
             session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
             prefix = ""
@@ -148798,6 +149026,12 @@ async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT
         result = video_provider_router.run_provider_generation(request, output_dir=output_dir, environ=env)
     except Exception as exc:
         result = video_provider_router.provider_exception_result(exc, provider=provider, stage="submit_request", status={})
+        save_tool_test_result(
+            "video_provider_canary",
+            "FAIL",
+            f"provider={provider}; capability={capability}; degraded=yes; exception={type(exc).__name__}; charge=no",
+            uid,
+        )
         return await update.message.reply_text(video_provider_smoke_debug_text(provider, capability, result), parse_mode="HTML")
     output_path = str(result.get("output_path") or result.get("local_path") or "")
     validation = video_final_output.validate_final_video_output(
@@ -148810,7 +149044,35 @@ async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT
         },
     )
     if not result.get("ok") or not validation.get("ok"):
+        save_tool_test_result(
+            "video_provider_canary",
+            "FAIL",
+            (
+                f"provider={provider}; capability={capability}; "
+                f"submit_accepted={'yes' if result.get('provider_submit_accepted') or result.get('submit_accepted') else 'no'}; "
+                f"task_id={'yes' if result.get('provider_task_id') or result.get('task_id') or result.get('provider_task_ids') else 'no'}; "
+                f"result_url_present={'yes' if result.get('result_url_present') or result.get('download_url_present') else 'no'}; "
+                f"artifact_bytes={safe_int(result.get('artifact_size') or result.get('artifact_bytes') or result.get('output_bytes'), 0)}; "
+                f"mp4_validated={'yes' if validation.get('ok') else 'no'}; "
+                "degraded=yes; charge=no"
+            ),
+            uid,
+        )
         return await update.message.reply_text(video_provider_smoke_debug_text(provider, capability, result, validation=validation), parse_mode="HTML")
+    verified_at = now_text_safe()
+    result["provider_live_verified_at"] = verified_at
+    save_tool_test_result(
+        "video_provider_canary",
+        "PASS",
+        (
+            f"provider={provider}; capability={capability}; "
+            f"provider_live_verified_at={verified_at}; "
+            f"result_url_present={'yes' if result.get('result_url_present') or result.get('download_url_present') else 'no'}; "
+            f"artifact_bytes={safe_int(result.get('artifact_size') or result.get('artifact_bytes') or result.get('output_bytes'), 0)}; "
+            "mp4_validated=yes; charge=no"
+        ),
+        uid,
+    )
     caption = (
         "✅ Provider smoke tạo MP4 hợp lệ.\n"
         f"provider={provider}; capability={capability}; charge=no"
@@ -188303,6 +188565,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_provider_env_audit", cmd_video_provider_env_audit))
     tg_app.add_handler(CommandHandler("video_provider_setup", cmd_video_provider_setup))
     tg_app.add_handler(CommandHandler("video_provider_smoke", cmd_video_provider_smoke))
+    tg_app.add_handler(CommandHandler("video_provider_canary", cmd_video_provider_smoke))
     tg_app.add_handler(CommandHandler("video_provider_curl", cmd_video_provider_curl))
     tg_app.add_handler(CommandHandler("prompt_vault_status", cmd_prompt_vault_status))
     tg_app.add_handler(CommandHandler("prompt_vault_refresh", cmd_prompt_vault_refresh))
