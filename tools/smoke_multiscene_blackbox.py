@@ -16,6 +16,7 @@ from services.multiscene_video_pipeline import (  # noqa: E402
     SceneSpec,
     create_multiscene_workspace,
     ensure_video_output,
+    probe_duration,
     process_multiscene_video_pipeline,
     safe_run_ffmpeg,
 )
@@ -28,7 +29,7 @@ def ffmpeg_path() -> str:
     return shutil.which("ffmpeg") or ""
 
 
-def fake_scene_renderer(duration: float):
+def fake_scene_renderer(duration: float, *, frame_size: str = "540x960"):
     colors = ["0x1E88E5", "0x43A047", "0xF4511E", "0x8E24AA", "0xFDD835"]
 
     def _render(scene: SceneSpec, output_path: str) -> str:
@@ -42,7 +43,7 @@ def fake_scene_renderer(duration: float):
             "-f",
             "lavfi",
             "-i",
-            f"color=c={color}:s=540x960:r=30:d={float(duration):.3f}",
+            f"color=c={color}:s={frame_size}:r=30:d={float(duration):.3f}",
             "-c:v",
             "libx264",
             "-preset",
@@ -70,6 +71,7 @@ def main() -> int:
     parser.add_argument("--fake-renderer", action="store_true")
     parser.add_argument("--no-charge", action="store_true")
     parser.add_argument("--output-dir", default="")
+    parser.add_argument("--matrix-r18s4", action="store_true", help="Run the offline 2x8, 4x8, and 8x8 matrix.")
     args = parser.parse_args()
 
     if not args.fake_renderer:
@@ -78,38 +80,45 @@ def main() -> int:
     if not args.no_charge:
         print("FAIL --no-charge is required")
         return 2
-    if args.scenes != 3 or abs(float(args.duration) - 6.0) > 0.001:
+    if not args.matrix_r18s4 and (args.scenes != 3 or abs(float(args.duration) - 6.0) > 0.001):
         print("FAIL first smoke target must be 3 scenes x 6s")
         return 2
 
     if args.output_dir:
         os.environ["MULTISCENE_VIDEO_TEMP_ROOT"] = os.path.abspath(args.output_dir)
-    job_id = f"smoke-{uuid.uuid4().hex[:10]}"
-    workspace = create_multiscene_workspace(job_id)
-    result = process_multiscene_video_pipeline(
-        user_id="smoke",
-        job_id=job_id,
-        user_prompt="Scene one opens with a product reveal. Scene two shows the benefit. Scene three ends with a clean brand moment.",
-        workspace_dir=workspace,
-        render_video_func=fake_scene_renderer(float(args.duration)),
-        max_scenes=int(args.scenes),
-        aspect_ratio="9:16",
-        enable_voice=False,
-        enable_subtitle=True,
-        enable_logo=False,
-    )
-    final_path = str(result.get("final_video_path") or "")
-    if not result.get("ok") or not final_path:
-        print(f"FAIL {result.get('error') or result.get('status')}")
-        print(f"manifest={result.get('manifest_path')}")
-        return 1
-    ensure_video_output(final_path)
-    print("PASS multiscene blackbox fake renderer")
-    print(f"workspace={workspace}")
-    print(f"final_video_path={final_path}")
-    print(f"scene_count={result.get('scene_count')}")
-    print(f"duration_sec={result.get('duration_sec')}")
-    print(f"manifest_path={result.get('manifest_path')}")
+    matrix = [(2, 8.0), (4, 8.0), (8, 8.0)] if args.matrix_r18s4 else [(int(args.scenes), float(args.duration))]
+    for scene_count, scene_duration in matrix:
+        job_id = f"smoke-{scene_count}x{int(scene_duration)}-{uuid.uuid4().hex[:10]}"
+        workspace = create_multiscene_workspace(job_id)
+        result = process_multiscene_video_pipeline(
+            user_id="smoke",
+            job_id=job_id,
+            user_prompt="Scene one opens with a product reveal. Scene two shows the benefit. Scene three proves the value. Scene four closes cleanly.",
+            workspace_dir=workspace,
+            render_video_func=fake_scene_renderer(0.16 if args.matrix_r18s4 else scene_duration, frame_size="96x160" if args.matrix_r18s4 else "540x960"),
+            max_scenes=scene_count,
+            default_scene_duration=scene_duration,
+            aspect_ratio="9:16",
+            enable_voice=False,
+            enable_subtitle=not args.matrix_r18s4,
+            enable_logo=False,
+        )
+        final_path = str(result.get("final_video_path") or "")
+        if not result.get("ok") or not final_path:
+            print(f"FAIL {scene_count}x{scene_duration:g} {result.get('error') or result.get('status')}")
+            print(f"manifest={result.get('manifest_path')}")
+            return 1
+        ensure_video_output(final_path)
+        actual_duration = probe_duration(final_path)
+        target_duration = scene_count * scene_duration
+        if abs(actual_duration - target_duration) > max(1.0, scene_count * 0.2):
+            print(f"FAIL {scene_count}x{scene_duration:g} duration={actual_duration:.3f} target={target_duration:.3f}")
+            return 1
+        print(f"PASS multiscene blackbox {scene_count}x{scene_duration:g}")
+        print(f"workspace={workspace}")
+        print(f"final_video_path={final_path}")
+        print(f"duration_sec={actual_duration:.3f}")
+        print(f"manifest_path={result.get('manifest_path')}")
     return 0
 
 

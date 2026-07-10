@@ -298,15 +298,15 @@ def test_full_scene_coverage_invokes_concat_exactly_once(monkeypatch, tmp_path):
             "result_url": f"https://fixture.invalid/scene-{scene.scene_id}.mp4",
         }
 
-    def fake_concat(_job, workspace, **_kwargs):
+    def fake_concat(**kwargs):
         concat_calls.append(1)
-        final_path = Path(workspace) / "final.mp4"
+        final_path = Path(kwargs["workspace_dir"]) / "final.mp4"
         final_path.parent.mkdir(parents=True, exist_ok=True)
         final_path.write_bytes(b"joined-scenes")
-        return {"final_video_path": str(final_path), "duration_sec": 16.0}
+        return {"ok": True, "final_video_path": str(final_path), "duration_sec": 16.0, "scene_order": [1, 2]}
 
     monkeypatch.setattr(connector, "_render_scene_async", fake_render)
-    monkeypatch.setattr(connector, "_run_multiscene_render", fake_concat)
+    monkeypatch.setattr(connector, "finalize_multiscene_scene_clips", fake_concat)
 
     result = connector._run_per_scene_provider_orchestrator(
         {
