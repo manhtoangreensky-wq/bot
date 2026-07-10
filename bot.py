@@ -93,7 +93,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_combo_blackbox, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -183166,7 +183166,10 @@ async def _execute_video_dubbing_pipeline_core(
         render_debug.update(speech_config)
     render_debug["run_subdub_pipeline_called"] = True
     # Compatibility: run_subdub_pipeline delegates to subtitle_dub_product_pipeline.process_subtitle_dub_job.
-    product_result = await subtitle_dub_product_pipeline.run_subdub_pipeline(
+    render_debug["subdub_blackbox_lane"] = subdub_blackboxes.subdub_lane_name(mode)
+    product_result = await subdub_blackboxes.run_subdub_lane_blackbox(
+        lane_mode=mode,
+        runner=subtitle_dub_product_pipeline.run_subdub_pipeline,
         job_id=str(state.get("_pipeline_job_id") or ""),
         mode=mode,
         state=state,
