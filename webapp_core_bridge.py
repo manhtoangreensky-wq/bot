@@ -49,6 +49,11 @@ _UPLOAD_MIME_TYPES = frozenset({
 _rate_windows: dict[str, deque[float]] = defaultdict(deque)
 _request_nonces: dict[str, float] = {}
 
+_FEATURE_TEXT_KEYS = (
+    "request", "prompt", "brief", "script", "text", "topic", "description",
+    "instructions", "notes",
+)
+
 
 class BridgeRoute(APIRoute):
     """Keep every private bridge response in the public envelope contract."""
@@ -119,6 +124,15 @@ def _validated_upload_name(value: Any) -> tuple[str, str]:
     if extension not in _UPLOAD_EXTENSIONS:
         raise HTTPException(status_code=415, detail="unsupported upload file type")
     return name, extension
+
+
+def _feature_input_text(input_data: dict) -> str:
+    """Extract the user's principal text without guessing a provider schema."""
+    for key in _FEATURE_TEXT_KEYS:
+        value = input_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:4000]
+    return ""
 
 
 def _validate_upload_content(name: str, extension: str, content_type: Any, content: bytes) -> str:
@@ -531,6 +545,145 @@ class BotCoreBridge:
                 })
             return result
         return {"available": True, "combos": entries("combos"), "monthly": entries("monthly")}
+
+    def feature_draft_payload(self, feature: str, input_data: dict) -> dict:
+        """Build provider-free drafts with the same pure helpers used by bot.py.
+
+        These adapters are intentionally limited to deterministic planning
+        helpers.  They never invoke an AI/provider function, create a job or
+        charge Xu.  Features without a verified pure helper remain a validated
+        input draft instead of receiving invented output.
+        """
+        feature = str(feature or "").strip()
+        input_data = dict(input_data or {})
+        text = _feature_input_text(input_data)
+        if not text:
+            return {
+                "available": False,
+                "feature": feature,
+                "source": "validated_input_only",
+                "reason": "text_input_required_for_canonical_draft",
+            }
+
+        helper_name = ""
+        helper_args: tuple[Any, ...] = (text,)
+        if feature == "prompt_studio":
+            helper_name = "free_hub_meta_prompt_pack"
+        elif feature in {"caption", "hashtag"}:
+            helper_name = "free_hub_caption_pack"
+        elif feature in {"hook", "script"}:
+            helper_name = "hook_script_pack"
+        elif feature in {"image_create", "image_transform"}:
+            helper_name = "free_hub_image_video_prompt_pack"
+        elif feature == "storyboard":
+            helper_name = "storyboard_pack_build_payload"
+            helper_args = ({
+                "selected_topic": text,
+                "reference_template": str(input_data.get("template") or "product_ad")[:80],
+                "platform": str(input_data.get("platform") or "")[:80],
+                "preferred_aspect_ratio": str(input_data.get("format") or input_data.get("ratio") or "")[:20],
+                "duration": str(input_data.get("duration") or "")[:20],
+                "selected_style": str(input_data.get("style") or "")[:100],
+                "goal": str(input_data.get("goal") or "")[:100],
+                "note": str(input_data.get("notes") or input_data.get("instructions") or "")[:500],
+                "selected_suggestion_index": 1,
+            }, "vi")
+        elif feature == "content_pack":
+            helpers = {
+                "ideas": self.fn("free_hub_content_ideas_pack"),
+                "captions": self.fn("free_hub_caption_pack"),
+                "prompts": self.fn("free_hub_image_video_prompt_pack"),
+            }
+            if not all(helpers.values()):
+                return {"available": False, "feature": feature, "source": "canonical_bot", "reason": "content_pack_helpers_unavailable"}
+            try:
+                content = {name: helper(text) for name, helper in helpers.items() if helper}
+            except Exception:
+                return {"available": False, "feature": feature, "source": "canonical_bot", "reason": "content_pack_helper_failed"}
+            return {
+                "available": True,
+                "feature": feature,
+                "source": "bot.free_hub_content_pack",
+                "provider_called": False,
+                "charged_xu": 0,
+                "content": _sanitize_data(content),
+            }
+        else:
+            return {
+                "available": False,
+                "feature": feature,
+                "source": "validated_input_only",
+                "reason": "canonical_draft_helper_not_mapped",
+            }
+
+        helper = self.fn(helper_name)
+        if not helper:
+            return {"available": False, "feature": feature, "source": f"bot.{helper_name}", "reason": "canonical_draft_helper_unavailable"}
+        try:
+            content = helper(*helper_args)
+        except Exception:
+            return {"available": False, "feature": feature, "source": f"bot.{helper_name}", "reason": "canonical_draft_helper_failed"}
+        return {
+            "available": True,
+            "feature": feature,
+            "source": f"bot.{helper_name}",
+            "provider_called": False,
+            "charged_xu": 0,
+            "content": _sanitize_data(content),
+        }
+
+    def feature_estimate_payload(self, feature: str, input_data: dict) -> dict:
+        """Quote only values returned by canonical bot pricing helpers."""
+        feature = str(feature or "").strip()
+        input_data = dict(input_data or {})
+        text = _feature_input_text(input_data)
+        base = {
+            "feature": feature,
+            "source": "canonical_bot",
+            "currency": "Xu",
+            "provider_called": False,
+            "charged_xu": 0,
+            "requires_confirm": True,
+        }
+        if feature in {"prompt_studio", "caption", "hashtag", "hook"}:
+            return {**base, "available": True, "estimated_xu": 0, "pricing_rule": "provider_free_bot_helper"}
+        if feature == "chat":
+            calculator = self.fn("calculate_chat_cost")
+            if not calculator or not text:
+                return {**base, "available": False, "reason": "chat_cost_helper_or_input_unavailable"}
+            try:
+                return {**base, "available": True, "estimated_xu": max(0, int(calculator(len(text)) or 0)), "pricing_rule": "bot.calculate_chat_cost"}
+            except Exception:
+                return {**base, "available": False, "reason": "chat_cost_helper_failed"}
+        cost_helpers = {
+            "script": "workflow_script_storyboard_cost_xu",
+            "storyboard": "workflow_script_storyboard_cost_xu",
+            "content_pack": "workflow_content_cost_xu",
+        }
+        if feature in cost_helpers:
+            helper_name = cost_helpers[feature]
+            helper = self.fn(helper_name)
+            if not helper:
+                return {**base, "available": False, "reason": f"{helper_name}_unavailable"}
+            try:
+                return {**base, "available": True, "estimated_xu": max(0, int(helper() or 0)), "pricing_rule": f"bot.{helper_name}"}
+            except Exception:
+                return {**base, "available": False, "reason": f"{helper_name}_failed"}
+        if feature.startswith("image_"):
+            pricing = self.pricing_catalog()
+            choices = list(pricing.get("image_tiers") or []) if pricing.get("available") else []
+            requested_tier = str(input_data.get("tier") or "").strip()
+            selected = next((item for item in choices if str(item.get("code")) == requested_tier), None)
+            return {
+                **base,
+                "available": bool(choices),
+                "estimated_xu": int(selected.get("cost_xu") or 0) if selected else None,
+                "selected_tier": selected or {},
+                "tier_required": selected is None,
+                "choices": choices,
+                "pricing_rule": "bot.media_workflow_pricing_payload.image_tiers",
+            }
+        return {**base, "available": False, "reason": "canonical_estimate_not_mapped"}
 
     def wallet_history(self, user_id: str, limit: int = 50) -> list[dict]:
         conn = self.db()
@@ -953,16 +1106,26 @@ def _feature_draft_or_estimate(bridge: BotCoreBridge, feature: str, user_id: str
     uploads, missing_uploads = bridge.uploads_for_ids(user_id, input_data.get("upload_ids"))
     if missing_uploads:
         return response(False, "failed", "Tệp đính kèm không hợp lệ hoặc không thuộc tài khoản này.", error_code="UPLOAD_NOT_FOUND")
-    # Draft/estimate deliberately remain open for guarded public features. They never call a provider.
-    message = "Bản nháp đã sẵn sàng để xem xét." if action == "draft" else "Ước tính sẽ được xác nhận bởi core trước khi chạy."
+    # Draft/estimate deliberately remain open for guarded public features. The
+    # payload below comes only from pure bot.py planning/pricing helpers and
+    # never invokes a provider or ledger writer.
+    canonical = bridge.feature_draft_payload(feature, input_data) if action == "draft" else bridge.feature_estimate_payload(feature, input_data)
+    if action == "draft" and canonical.get("available"):
+        message = "Bản nháp canonical từ bot đã sẵn sàng để xem xét."
+    elif action == "estimate" and canonical.get("available"):
+        message = "Ước tính canonical đã sẵn sàng; chưa trừ Xu và vẫn cần xác nhận."
+    else:
+        message = "Yêu cầu đã được kiểm tra nhưng adapter canonical chi tiết vẫn đang được bảo vệ."
     status_name = "draft" if action == "draft" else "awaiting_confirm"
     return response(True, status_name, message, data={
         "feature": feature,
         "readiness": readiness,
         "input_accepted": bool(input_data),
         "uploads": uploads,
+        action: canonical,
         "requires_confirm": True,
         "provider_called": False,
+        "charged_xu": 0,
     })
 
 

@@ -52,6 +52,15 @@ def make_app(tmp_path, monkeypatch):
             "monthly": {"starter_monthly": {"label": "Starter", "items": {"image_standard": 10}, "default_days": 30}},
         },
         "package_purchase_price_vnd": lambda package_type, code: 199000 if package_type == "combo" else 299000,
+        "free_hub_meta_prompt_pack": lambda text: {"title": f"Prompt {text}", "meta_prompts": [{"label": "Ngắn", "text": text}]},
+        "free_hub_caption_pack": lambda text: {"title": f"Caption {text}", "captions": [{"hook": text, "hashtags": ["#TOANAAS"]}]},
+        "free_hub_content_ideas_pack": lambda text: {"title": f"Ý tưởng {text}", "video_ideas": [text]},
+        "free_hub_image_video_prompt_pack": lambda text: {"title": f"Media {text}", "image_video_prompts": {"image_9x16": text}},
+        "hook_script_pack": lambda text: {"hooks": [text], "script_15s": f"15s {text}"},
+        "storyboard_pack_build_payload": lambda state, lang="vi": {"topic": state.get("selected_topic"), "shot_count": 1, "shots": [{"shot": 1, "image_prompt": state.get("selected_topic")}]},
+        "calculate_chat_cost": lambda length: max(1, int(length)),
+        "workflow_script_storyboard_cost_xu": lambda: 20,
+        "workflow_content_cost_xu": lambda: 35,
     }
     monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
     monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
@@ -171,6 +180,42 @@ def test_pricing_and_packages_are_read_from_bot_helpers_only(tmp_path, monkeypat
         packages = client.get("/internal/v1/packages?user_id=u-1", headers=signed_headers("GET", "/internal/v1/packages"))
         assert packages.status_code == 200
         assert packages.json()["data"]["monthly"][0]["price_vnd"] == 299000
+
+
+def test_content_image_and_storyboard_drafts_use_provider_free_bot_helpers(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        caption_payload = {"user_id": "u-1", "input": {"request": "cà phê sạch"}}
+        caption_body = json.dumps(caption_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        caption = client.post(
+            "/internal/v1/features/caption/draft",
+            content=caption_body,
+            headers=signed_headers("POST", "/internal/v1/features/caption/draft", caption_body),
+        )
+        assert caption.json()["status"] == "draft"
+        assert caption.json()["data"]["draft"]["source"] == "bot.free_hub_caption_pack"
+        assert caption.json()["data"]["draft"]["content"]["captions"][0]["hook"] == "cà phê sạch"
+        assert caption.json()["data"]["provider_called"] is False
+        assert caption.json()["data"]["charged_xu"] == 0
+
+        storyboard_payload = {"user_id": "u-1", "input": {"request": "nước hoa nam", "format": "9:16", "duration": "15s"}}
+        storyboard_body = json.dumps(storyboard_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        storyboard = client.post(
+            "/internal/v1/features/storyboard/draft",
+            content=storyboard_body,
+            headers=signed_headers("POST", "/internal/v1/features/storyboard/draft", storyboard_body),
+        )
+        assert storyboard.json()["data"]["draft"]["content"]["shots"][0]["image_prompt"] == "nước hoa nam"
+
+        estimate_payload = {"user_id": "u-1", "input": {"prompt": "ảnh sản phẩm", "tier": "low"}}
+        estimate_body = json.dumps(estimate_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        estimate = client.post(
+            "/internal/v1/features/image_create/estimate",
+            content=estimate_body,
+            headers=signed_headers("POST", "/internal/v1/features/image_create/estimate", estimate_body),
+        )
+        assert estimate.json()["status"] == "awaiting_confirm"
+        assert estimate.json()["data"]["estimate"]["estimated_xu"] == 50
+        assert estimate.json()["data"]["estimate"]["pricing_rule"] == "bot.media_workflow_pricing_payload.image_tiers"
 
 
 def test_admin_module_adapter_is_canonical_read_only_and_role_protected(tmp_path, monkeypatch):
