@@ -623,6 +623,8 @@ def _provider_poll_count_with_source(payload: dict[str, Any]) -> tuple[int, str]
 
 def provider_task_alive(payload: dict[str, Any] | None = None) -> bool:
     payload = dict(payload or {})
+    if payload.get("zero_task_progress_guard") or _as_int(payload.get("valid_provider_task_count"), 1) == 0:
+        return False
     terminal = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower()
     task_present = bool(
         payload.get("provider_task_id_saved")
@@ -712,24 +714,31 @@ def reconcile_provider_progress_telemetry(
         else {}
     )
     alive = provider_task_alive(payload)
-    terminal_failure = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower() in {
+    terminal_failure_requested = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower() in {
         "failed",
         "failed_no_charge",
         "failed_refunded",
         "needs_admin_review",
     }
+    explicit_terminal_failure = bool(
+        terminal_failure_requested
+        and payload.get("continue_polling") is False
+    )
+    terminal_failure = terminal_failure_requested
+    ledger_terminal_failure = False
     if multiscene_ledger:
-        terminal_failure = multiscene_ledger.get("aggregate_job_status") == "failed_no_charge"
-        alive = bool(multiscene_ledger.get("unresolved_scene_count") and not terminal_failure)
+        ledger_terminal_failure = multiscene_ledger.get("aggregate_job_status") == "failed_no_charge"
+        terminal_failure = bool(explicit_terminal_failure or ledger_terminal_failure)
+        alive = bool(multiscene_ledger.get("provider_task_alive") and not terminal_failure)
     processing_truth = bool(
         multiscene_ledger.get("processing_truth_applied")
         or multiscene_ledger.get("active_scene_indexes")
         or multiscene_ledger.get("dispatchable_scene_indexes")
         or multiscene_ledger.get("fallback_candidate_indexes")
     ) if multiscene_ledger else False
-    if processing_truth:
-        terminal_failure = False
-        alive = True
+    if processing_truth and not terminal_failure:
+        if not multiscene_ledger.get("zero_task_progress_guard"):
+            alive = True
     wait_max = max(60, _as_int(payload.get("provider_wait_max_seconds"), 20 * 60))
     started_source = "payload"
     started_epoch = _parse_time_epoch(payload.get("provider_started_at_epoch") or payload.get("provider_started_at"))
@@ -815,7 +824,13 @@ def reconcile_provider_progress_telemetry(
         scene_not_start_elapsed = 0
     not_start_threshold = max(1, _as_int(payload.get("not_start_threshold_seconds") or payload.get("stall_threshold"), 60))
     provider_stalled_not_start = bool(provider_not_start and scene_not_start_elapsed >= not_start_threshold and not result_url_present and not final_output_ready)
-    if alive and provider_not_start and not provider_stalled_not_start:
+    if (
+        alive
+        and provider_not_start
+        and not provider_stalled_not_start
+        and not explicit_terminal_failure
+        and not ledger_terminal_failure
+    ):
         terminal_failure = False
     actual_provider_status_raw = (
         payload.get("shopaikey_raw_status")
@@ -1194,6 +1209,35 @@ def reconcile_provider_progress_telemetry(
                 "processing_truth_applied": bool(processing_truth),
                 "refresh_terminal_suppressed": bool(processing_truth),
                 "refresh_state_source": "scene_ledger" if processing_truth else refresh_source,
+            }
+        )
+    if multiscene_ledger.get("zero_task_progress_guard"):
+        zero_terminal = bool(multiscene_ledger.get("aggregate_job_status") == "failed_no_charge")
+        zero_progress = max(0, min(20, _as_int(multiscene_ledger.get("public_effective_progress"), 10)))
+        telemetry.update(
+            {
+                "provider_task_alive": False,
+                "valid_provider_task_count": 0,
+                "zero_task_progress_guard": True,
+                "progress_suppressed_without_task": True,
+                "render_video_progress_percent": 0,
+                "provider_render_progress_percent": 0,
+                "render_video_progress_percent_public": "0",
+                "provider_progress_percent": 0,
+                "provider_progress_effective": 0,
+                "render_progress_source": "zero_task_waiting_for_dispatch",
+                "progress_source": "zero_task_waiting_for_dispatch",
+                "public_progress_source": "zero_task_waiting_for_dispatch",
+                "public_stage": "failed_no_charge" if zero_terminal else "preparing",
+                "final_status_after_reconcile": "failed" if zero_terminal else "processing",
+                "final_user_visible_state": "failed_no_charge" if zero_terminal else "preparing",
+                "final_progress": zero_progress,
+                "final_progress_after_reconcile": zero_progress,
+                "public_effective_progress": zero_progress,
+                "next_poll_scheduled": bool(multiscene_ledger.get("continue_polling") and not zero_terminal),
+                "terminal_state": "failed_no_charge" if zero_terminal else "final_rendering",
+                "no_fake_success_guard": True,
+                "external_provider_spend_possible": False,
             }
         )
     return telemetry
@@ -1920,6 +1964,7 @@ PRODUCT_VIDEO_DEFAULT_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_vide
 PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY = "single_task_legacy"
 PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE = "per_scene_8s"
 PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT = "historical_multi_clip_concat"
+VIDEO_SCENE_DISPATCH_GRACE_SECONDS_DEFAULT = 30
 PRODUCT_VIDEO_PER_SCENE_ORCHESTRATION_ALIASES = {
     "per_scene_8s",
     "per_scene",
@@ -2012,8 +2057,9 @@ def product_video_initial_scene_tasks(
             "fallback_task_ids": [],
             "active_task_id": "",
             "winning_task_id": "",
-            "status": "pending_submit",
-            "clip_status": "pending_submit",
+            "status": "queued_waiting_for_dispatch",
+            "clip_status": "queued_waiting_for_dispatch",
+            "dispatch_state": "queued_waiting_for_dispatch",
             "download_url_present": False,
             "result_url_valid": False,
             "raw_clip_duration": 0,
@@ -2074,6 +2120,13 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    eligibility_snapshot = (
+        asset_pack.get("provider_eligibility_snapshot")
+        or invoice.get("provider_eligibility_snapshot")
+        or {}
+    )
+    if not isinstance(eligibility_snapshot, dict):
+        eligibility_snapshot = {}
     orchestration_mode = _product_video_orchestration_mode_from_sources(dict(job or {}), asset_pack, invoice, dict(project or {}))
     per_scene_orchestration = orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE
     render_pipeline_mode = (
@@ -2088,6 +2141,12 @@ def build_product_video_confirm_kickoff_payload(
     )
     if provider_chain is not None:
         chain = list(provider_chain)
+    elif eligibility_snapshot.get("eligible_provider_keys") or asset_pack.get("preconfirm_candidate_keys") or invoice.get("preconfirm_candidate_keys"):
+        chain = _split_product_video_provider_chain(
+            eligibility_snapshot.get("eligible_provider_keys")
+            or asset_pack.get("preconfirm_candidate_keys")
+            or invoice.get("preconfirm_candidate_keys")
+        )
     elif os.environ.get("VIDEO_PROVIDER_CHAIN") is not None:
         chain = resolve_product_video_provider_chain()
     else:
@@ -2130,7 +2189,16 @@ def build_product_video_confirm_kickoff_payload(
                 }
             )
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
-    provider_chain_resolved = bool(chain and model_resolution.get("ok"))
+    preconfirm_candidate_keys = [
+        str(item or "").strip()
+        for item in (
+            eligibility_snapshot.get("eligible_provider_keys")
+            or asset_pack.get("preconfirm_candidate_keys")
+            or chain
+        )
+        if str(item or "").strip()
+    ]
+    provider_chain_resolved = bool(chain and preconfirm_candidate_keys and model_resolution.get("ok"))
     dispatch_blocker = ""
     if not chain:
         dispatch_blocker = "provider_chain_missing_no_charge"
@@ -2198,7 +2266,7 @@ def build_product_video_confirm_kickoff_payload(
         "current_scene": 1 if per_scene_orchestration and scene_count else 0,
         "current_scene_index": 1 if per_scene_orchestration and scene_count else 0,
         "current_clip_index": 1 if per_scene_orchestration and scene_count else 0,
-        "current_scene_status": "pending_submit" if per_scene_orchestration else "",
+        "current_scene_status": "queued_waiting_for_dispatch" if per_scene_orchestration else "",
         "final_concat_required": bool(per_scene_orchestration and scene_count > 1),
         "concat_status": "waiting_for_clips" if per_scene_orchestration and scene_count > 1 else "",
         "concat_ready": False,
@@ -2207,6 +2275,13 @@ def build_product_video_confirm_kickoff_payload(
         "provider_chain": chain,
         "provider_order": chain,
         "provider_chain_resolved": provider_chain_resolved,
+        "provider_eligibility_snapshot": eligibility_snapshot,
+        "provider_eligibility_snapshot_id": str(eligibility_snapshot.get("provider_eligibility_snapshot_id") or asset_pack.get("provider_eligibility_snapshot_id") or ""),
+        "preconfirm_candidate_keys": preconfirm_candidate_keys,
+        "runtime_candidate_keys": preconfirm_candidate_keys,
+        "candidate_set_consistent": True,
+        "candidate_rejection_reason_by_provider": dict(eligibility_snapshot.get("candidate_rejection_reason_by_provider") or {}),
+        "final_eligible_provider_count": len(preconfirm_candidate_keys),
         "provider_health_at_submit": provider_health_at_submit,
         "provider_route_ready_chain": list(asset_pack.get("provider_route_ready_chain") or invoice.get("provider_route_ready_chain") or []),
         "provider_live_healthy_chain": list(asset_pack.get("provider_live_healthy_chain") or invoice.get("provider_live_healthy_chain") or []),
@@ -2242,6 +2317,318 @@ def build_product_video_confirm_kickoff_payload(
         "provider_task_id_saved": False,
         "no_new_paid_submit": True,
     }
+
+
+def _product_video_scene_task_identity(item: dict[str, Any] | None) -> str:
+    item = dict(item or {})
+    return str(
+        item.get("winning_task_id")
+        or item.get("active_task_id")
+        or item.get("provider_task_id")
+        or item.get("task_id")
+        or item.get("provider_video_id")
+        or item.get("video_id")
+        or ""
+    ).strip()
+
+
+def product_video_zero_task_watchdog_state(
+    job: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+    dispatch_grace_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Classify confirmed Product Video jobs that have not created any task."""
+    job = dict(job or {})
+    result = dict(result or {})
+    current_dt = now or datetime.now()
+    scene_count = max(
+        1,
+        min(
+            20,
+            _as_int(
+                result.get("scene_count")
+                or result.get("scenes_total")
+                or result.get("scene_tasks_total")
+                or job.get("scene_count"),
+                1,
+            ),
+        ),
+    )
+    scene_rows: list[dict[str, Any]] = []
+    for key in ("scene_tasks", "provider_scene_tasks", "product_video_scene_tasks", "scene_ledger"):
+        value = result.get(key)
+        if isinstance(value, list):
+            scene_rows.extend(dict(item) for item in value if isinstance(item, dict))
+        elif isinstance(value, dict):
+            for index, item in value.items():
+                row = dict(item or {}) if isinstance(item, dict) else {}
+                row.setdefault("scene_index", index)
+                scene_rows.append(row)
+    task_ids = {
+        _product_video_scene_task_identity(item)
+        for item in scene_rows
+        if _product_video_scene_task_identity(item)
+    }
+    for key in ("provider_task_ids", "provider_video_ids"):
+        values = result.get(key)
+        if isinstance(values, (list, tuple)):
+            task_ids.update(str(item or "").strip() for item in values if str(item or "").strip())
+    for key in ("provider_pending_task_id", "provider_pending_video_id", "canonical_task_selected"):
+        value = str(result.get(key) or "").strip()
+        if value:
+            task_ids.add(value)
+    valid_provider_task_count = len(task_ids)
+    valid_scene_clip_indexes = {
+        _product_video_scene_task_index(item)
+        for item in scene_rows
+        if _product_video_scene_task_index(item) > 0
+        and _product_video_scene_task_is_valid_clip(item)
+        and bool(
+            item.get("clip_valid")
+            or item.get("validation_passed")
+            or item.get("output_validated")
+            or _as_int(item.get("clip_bytes") or item.get("artifact_size") or item.get("output_bytes"), 0) > 0
+        )
+    }
+    valid_scene_clip_count = len(valid_scene_clip_indexes)
+    grace_seconds = max(
+        1,
+        _as_int(
+            dispatch_grace_seconds
+            if dispatch_grace_seconds is not None
+            else result.get("dispatch_grace_seconds")
+            or os.getenv("VIDEO_SCENE_DISPATCH_GRACE_SECONDS"),
+            VIDEO_SCENE_DISPATCH_GRACE_SECONDS_DEFAULT,
+        ),
+    )
+    started_epoch = _parse_time_epoch(
+        result.get("public_confirmed_at")
+        or result.get("confirmed_at")
+        or job.get("created_at")
+        or job.get("updated_at")
+    )
+    elapsed_from_clock = int(max(0, current_dt.timestamp() - started_epoch)) if started_epoch > 0 else 0
+    grace_elapsed = max(
+        elapsed_from_clock,
+        _as_int(
+            result.get("dispatch_grace_elapsed")
+            or result.get("provider_elapsed_seconds")
+            or result.get("provider_wait_elapsed_seconds"),
+            0,
+        ),
+    )
+    runtime_candidates_explicit = bool(
+        "runtime_candidate_keys" in result
+        or "provider_candidates_count" in result
+        or result.get("provider_router_called")
+    )
+    if "runtime_candidate_keys" in result:
+        runtime_candidates = [str(item or "").strip() for item in (result.get("runtime_candidate_keys") or []) if str(item or "").strip()]
+    elif runtime_candidates_explicit and _as_int(result.get("provider_candidates_count"), 0) <= 0:
+        runtime_candidates = []
+    else:
+        snapshot = result.get("provider_eligibility_snapshot") if isinstance(result.get("provider_eligibility_snapshot"), dict) else {}
+        runtime_candidates = [
+            str(item or "").strip()
+            for item in (
+                snapshot.get("eligible_provider_keys")
+                or result.get("preconfirm_candidate_keys")
+                or result.get("effective_provider_chain")
+                or []
+            )
+            if str(item or "").strip()
+        ]
+    preconfirm_candidates = [
+        str(item or "").strip()
+        for item in (
+            result.get("preconfirm_candidate_keys")
+            or (result.get("provider_eligibility_snapshot") or {}).get("eligible_provider_keys")
+            or []
+        )
+        if str(item or "").strip()
+    ]
+    zero_tasks = valid_provider_task_count == 0 and valid_scene_clip_count == 0
+    terminal_scene_states = {"failed", "error", "exhausted", "terminal_failed", "failed_no_charge"}
+    explicit_terminal_scene_failure = bool(scene_rows) and all(
+        str(item.get("dispatch_state") or item.get("status") or item.get("clip_status") or "").strip().lower()
+        in terminal_scene_states
+        or bool(item.get("exhausted"))
+        for item in scene_rows
+    )
+    existing_terminal_no_charge = bool(
+        str(result.get("terminal_state") or result.get("aggregate_status") or result.get("final_decision") or "").strip().lower()
+        == "failed_no_charge"
+        and explicit_terminal_scene_failure
+    )
+    watchdog_triggered = bool(zero_tasks and grace_elapsed >= grace_seconds)
+    no_eligible_provider = bool(watchdog_triggered and runtime_candidates_explicit and not runtime_candidates)
+    terminal_reason = (
+        str(result.get("aggregate_reason") or result.get("provider_error") or "required_scene_exhausted_no_charge")
+        if existing_terminal_no_charge
+        else ("no_eligible_provider_before_scene_dispatch" if no_eligible_provider else "")
+    )
+    failed_no_charge = bool(existing_terminal_no_charge or no_eligible_provider)
+    if failed_no_charge:
+        scene_state = "terminal_failed"
+    elif watchdog_triggered and runtime_candidates:
+        scene_state = "queued_waiting_for_dispatch"
+    elif zero_tasks:
+        scene_state = "queued_waiting_for_dispatch"
+    else:
+        scene_state = "task_submitted"
+    attempts = [
+        dict(item)
+        for item in (result.get("provider_attempts") or result.get("provider_pending_attempts") or [])
+        if isinstance(item, dict)
+    ]
+    actual_submit_attempts = [
+        item
+        for item in attempts
+        if bool(item.get("provider_http_request_sent"))
+        or _as_int(item.get("provider_http_status") or item.get("submit_http_status"), 0) > 0
+    ]
+    return {
+        "zero_task_watchdog_triggered": watchdog_triggered,
+        "dispatch_grace_seconds": grace_seconds,
+        "dispatch_grace_elapsed": grace_elapsed,
+        "valid_provider_task_count": valid_provider_task_count,
+        "valid_scene_clip_count": valid_scene_clip_count,
+        "zero_task_progress_guard": zero_tasks,
+        "progress_suppressed_without_task": zero_tasks,
+        "public_stage": "preparing" if zero_tasks and not failed_no_charge else ("failed_no_charge" if failed_no_charge else "rendering"),
+        "undispatched_scene_indexes": list(range(1, scene_count + 1)) if zero_tasks else [],
+        "dispatch_recovery_attempted": bool(watchdog_triggered and runtime_candidates),
+        "dispatch_recovery_result": "eligible_for_scene_claim" if watchdog_triggered and runtime_candidates else (terminal_reason or "waiting_for_dispatch_grace"),
+        "zero_task_terminal_reason": terminal_reason,
+        "runtime_candidates_evaluated": runtime_candidates_explicit,
+        "preconfirm_candidate_keys": preconfirm_candidates,
+        "runtime_candidate_keys": runtime_candidates,
+        "candidate_set_consistent": runtime_candidates == preconfirm_candidates if runtime_candidates_explicit else True,
+        "final_eligible_provider_count": len(runtime_candidates),
+        "scene_dispatch_state_by_index": {str(index): scene_state for index in range(1, scene_count + 1)},
+        "candidate_evaluated_count": _as_int(result.get("candidate_evaluated_count"), len(runtime_candidates)),
+        "candidate_preflight_rejected_count": _as_int(result.get("candidate_preflight_rejected_count"), 0),
+        "submit_invoked_count": len([item for item in attempts if item.get("submit_called")]),
+        "submit_accepted_count": len([item for item in attempts if item.get("submit_accepted")]),
+        "task_created_count": valid_provider_task_count,
+        "provider_http_request_sent": bool(actual_submit_attempts),
+        "provider_http_status": max(
+            [_as_int(item.get("provider_http_status") or item.get("submit_http_status"), 0) for item in actual_submit_attempts]
+            or [0]
+        ),
+        "fallback_count_effective": len(actual_submit_attempts[1:]),
+        "failed_no_charge": failed_no_charge,
+        "continue_polling": bool(zero_tasks and not failed_no_charge),
+        "charge": 0,
+        "charged_xu": 0,
+    }
+
+
+def product_video_processing_scene_claim_state(
+    job: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+    worker_id: str = "",
+    lease_seconds: int = 600,
+) -> dict[str, Any]:
+    job = dict(job or {})
+    result = dict(result or {})
+    current_dt = now or datetime.now()
+    watchdog = product_video_zero_task_watchdog_state(job, result, now=current_dt)
+    scene_count = max(
+        1,
+        _as_int(
+            result.get("scene_count")
+            or result.get("scenes_total")
+            or result.get("scene_tasks_total")
+            or job.get("scene_count"),
+            1,
+        ),
+    )
+    leases = result.get("scene_dispatch_lease_by_index") if isinstance(result.get("scene_dispatch_lease_by_index"), dict) else {}
+    tasks = result.get("scene_tasks") if isinstance(result.get("scene_tasks"), list) else []
+    task_by_index = {_as_int(item.get("scene_index"), 0): dict(item) for item in tasks if isinstance(item, dict)}
+    claimable_by_index: dict[str, bool] = {}
+    block_reason_by_index: dict[str, str] = {}
+    stale_recovered = False
+    now_epoch = current_dt.timestamp()
+    for index in range(1, scene_count + 1):
+        item = task_by_index.get(index, {})
+        lease = dict(leases.get(str(index)) or {}) if isinstance(leases.get(str(index)), dict) else {}
+        lease_expiry = _parse_time_epoch(lease.get("lease_expires_at"))
+        lease_active = bool(lease.get("lease_owner") and lease_expiry > now_epoch)
+        if lease.get("lease_owner") and lease_expiry and lease_expiry <= now_epoch:
+            stale_recovered = True
+        if _product_video_scene_task_identity(item):
+            claimable = False
+            reason = "scene_task_already_exists"
+        elif item.get("winning_task_id") or item.get("clip_valid"):
+            claimable = False
+            reason = "scene_winning_clip_exists"
+        elif watchdog.get("failed_no_charge"):
+            claimable = False
+            reason = str(watchdog.get("zero_task_terminal_reason") or "scene_terminal")
+        elif lease_active:
+            claimable = False
+            reason = "scene_dispatch_lease_active"
+        else:
+            claimable = True
+            reason = ""
+        claimable_by_index[str(index)] = claimable
+        block_reason_by_index[str(index)] = reason
+    return {
+        **watchdog,
+        "processing_job_scene_claimable": any(claimable_by_index.values()),
+        "scene_claimable_by_index": claimable_by_index,
+        "scene_dispatch_lease_by_index": leases,
+        "stale_dispatch_lease_recovered": stale_recovered,
+        "claim_block_reason_by_scene": block_reason_by_index,
+        "lease_seconds": max(30, int(lease_seconds or 600)),
+    }
+
+
+def acquire_product_video_scene_dispatch_leases(
+    job: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    worker_id: str,
+    now: datetime | None = None,
+    lease_seconds: int = 600,
+) -> dict[str, Any]:
+    current_dt = now or datetime.now()
+    state = product_video_processing_scene_claim_state(
+        job,
+        result,
+        now=current_dt,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+    )
+    updated = dict(result or {})
+    leases = dict(state.get("scene_dispatch_lease_by_index") or {})
+    candidates = list(state.get("runtime_candidate_keys") or state.get("preconfirm_candidate_keys") or [])
+    provider_key = str(candidates[0] if candidates else "")
+    expires_at = now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
+    job_id = _as_int(job.get("id") or job.get("job_id"), 0)
+    for index_text, claimable in (state.get("scene_claimable_by_index") or {}).items():
+        if not claimable:
+            continue
+        index = _as_int(index_text, 0)
+        leases[str(index)] = {
+            "job_id": job_id,
+            "scene_index": index,
+            "provider_key": provider_key,
+            "lease_owner": str(worker_id or "")[:120],
+            "lease_acquired_at": now_text(current_dt),
+            "lease_expires_at": expires_at,
+            "idempotency_key": f"product-video:{job_id}:scene:{index}:provider:{provider_key or 'unassigned'}",
+        }
+    updated.update(state)
+    updated["scene_dispatch_lease_by_index"] = leases
+    updated["processing_job_scene_claimable"] = bool(state.get("processing_job_scene_claimable"))
+    return updated
 
 
 def kickoff_product_video_job_after_confirm(
@@ -2432,6 +2819,7 @@ def product_video_scene_ledger_state(
     )
     expected = list(range(1, scene_count + 1))
     now_dt = now or datetime.now()
+    zero_task_watchdog = product_video_zero_task_watchdog_state(job, result, now=now_dt)
     explicit_scene_plan = any(
         bool(container.get(key))
         for container in (project, job, result)
@@ -2527,7 +2915,7 @@ def product_video_scene_ledger_state(
         raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
         if raw in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated", "success", "succeeded", "completed", "done"}:
             return "succeeded"
-        if raw in {"failed", "failure", "error", "failed_no_charge", "cancelled", "canceled", "provider_failed"}:
+        if raw in {"failed", "failure", "error", "failed_no_charge", "cancelled", "canceled", "provider_failed", "terminal_failed"}:
             return "failed"
         if "not_start" in raw or raw in {
             "queued",
@@ -2540,6 +2928,9 @@ def product_video_scene_ledger_state(
             "submit_in_progress",
             "queued_waiting_for_slot",
             "scheduled_after_scene_1_progress",
+            "queued_waiting_for_dispatch",
+            "dispatch_lease_acquired",
+            "submit_in_progress",
         }:
             return "not_start" if "not_start" in raw else "pending"
         if raw in {"submit_blocked_with_reason", "exhausted", "dispatch_exhausted"}:
@@ -2732,7 +3123,18 @@ def product_video_scene_ledger_state(
             or clip_bytes > 0
             or (normalized_status_raw in {"clip_downloaded", "downloaded", "validated", "scene_clip_validated"} and result_present)
         )
-        if not result_mapping_verified and not task_ids:
+        durable_clip_without_task_identity = bool(
+            (
+                merged.get("clip_valid")
+                and normalized_status_raw
+                in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated"}
+            )
+            or merged.get("validation_passed")
+            or merged.get("output_validated")
+            or merged.get("mp4_validator_result") == "valid_mp4"
+            or clip_bytes > 0
+        )
+        if not result_mapping_verified and not task_ids and not durable_clip_without_task_identity:
             clip_valid = False
         submitted_at = _text_value(merged, "submitted_at", "scene_submitted_at", "provider_started_at", "provider_wait_started_at")
         started_at = _text_value(merged, "started_at", "scene_started_at", "provider_started_at", "provider_wait_started_at")
@@ -2899,7 +3301,16 @@ def product_video_scene_ledger_state(
         if completed_at:
             record["completed_at"] = completed_at
         record["failure_reason"] = _text_value(merged, "failure_reason", "provider_error", "blocker") or record["failure_reason"]
-        record["fallback_count"] = max(record["fallback_count"], _as_int(merged.get("fallback_count") or merged.get("provider_fallback_count"), 0))
+        actual_outbound_submit = bool(
+            merged.get("provider_http_request_sent")
+            or _as_int(merged.get("provider_http_status") or merged.get("submit_http_status") or merged.get("provider_submit_http_status"), 0) > 0
+            or task_ids
+        )
+        if actual_outbound_submit:
+            record["fallback_count"] = max(
+                record["fallback_count"],
+                _as_int(merged.get("fallback_count") or merged.get("provider_fallback_count"), 0),
+            )
         record["fallback_allowed"] = bool(record["fallback_allowed"] or merged.get("fallback_allowed"))
         fallback_order = merged.get("fallback_provider_order")
         if isinstance(fallback_order, (list, tuple)) and fallback_order:
@@ -3038,7 +3449,11 @@ def product_video_scene_ledger_state(
             record["result_task_id"] = ""
             record["result_url_source"] = ""
             record["task_scene_mapping_verified"] = False
-            if not record["scene_validation_verified"]:
+            durable_clip_without_task = bool(
+                record["clip_valid"]
+                and _status_class(record.get("status")) == "succeeded"
+            )
+            if not record["scene_validation_verified"] and not durable_clip_without_task:
                 record["clip_valid"] = False
             record["result_processing_action"] = ""
             record["phantom_result_prevented"] = True
@@ -3052,7 +3467,11 @@ def product_video_scene_ledger_state(
             record["result_task_id"] = ""
             record["result_url_source"] = ""
             record["task_scene_mapping_verified"] = False
-            if not record["scene_validation_verified"]:
+            durable_clip_without_task = bool(
+                record["clip_valid"]
+                and _status_class(record.get("status")) == "succeeded"
+            )
+            if not record["scene_validation_verified"] and not durable_clip_without_task:
                 record["clip_valid"] = False
             record["result_processing_action"] = ""
 
@@ -3068,6 +3487,26 @@ def product_video_scene_ledger_state(
         records[1]["status"] = "scene_clip_validated"
         records[1]["progress"] = 100
         records[1]["clip_path"] = str(result.get("final_video_path") or result.get("final_mp4_path") or records[1]["clip_path"] or "")
+
+    if zero_task_watchdog.get("zero_task_progress_guard"):
+        watchdog_states = dict(zero_task_watchdog.get("scene_dispatch_state_by_index") or {})
+        for index in expected:
+            record = records[index]
+            if record["active_task_id"] or record["task_candidates"] or record["clip_valid"]:
+                continue
+            watchdog_state = str(watchdog_states.get(str(index)) or "queued_waiting_for_dispatch")
+            record["dispatch_state"] = watchdog_state
+            if watchdog_state == "terminal_failed":
+                record["status"] = "terminal_failed"
+                record["failure_reason"] = str(zero_task_watchdog.get("zero_task_terminal_reason") or "no_eligible_provider_before_scene_dispatch")
+                record["dispatch_block_reason"] = record["failure_reason"]
+                record["dispatchable"] = False
+                record["exhausted"] = True
+                record["fallback_count"] = int(zero_task_watchdog.get("fallback_count_effective") or 0)
+            else:
+                record["status"] = "queued_waiting_for_dispatch"
+                record["dispatchable"] = True
+                record["exhausted"] = False
 
     # A scene that lacks a task is still actionable. Keep that truth durable
     # across worker restarts instead of letting a generic pending state turn
@@ -3223,7 +3662,7 @@ def product_video_scene_ledger_state(
         aggregate_reason = "final_video_delivered"
     elif terminal_no_charge:
         aggregate_status = "failed_no_charge"
-        aggregate_reason = "required_scene_exhausted_no_charge"
+        aggregate_reason = str(zero_task_watchdog.get("zero_task_terminal_reason") or "required_scene_exhausted_no_charge")
     elif final_assembly_valid:
         aggregate_status = "ready_for_delivery"
         aggregate_reason = "final_concat_validated"
@@ -3240,7 +3679,9 @@ def product_video_scene_ledger_state(
         aggregate_status = "processing_scenes"
         aggregate_reason = "waiting_for_scene_clips"
 
-    if final_delivered:
+    if zero_task_watchdog.get("zero_task_progress_guard"):
+        progress_cap = 20
+    elif final_delivered:
         progress_cap = 100
     elif final_assembly_valid:
         progress_cap = 95
@@ -3254,8 +3695,15 @@ def product_video_scene_ledger_state(
         _as_int(job.get("progress_percent"), 0),
         _as_int(result.get("final_progress_after_reconcile") or result.get("progress_percent"), 0),
     )
-    progress_floor = 100 if final_delivered else (90 if final_assembly_valid else (80 if coverage_complete else (55 if coverage_count else 20)))
-    effective_progress = min(progress_cap, max(progress_floor, raw_progress))
+    progress_floor = (
+        10
+        if zero_task_watchdog.get("zero_task_progress_guard")
+        else (100 if final_delivered else (90 if final_assembly_valid else (80 if coverage_complete else (55 if coverage_count else 20))))
+    )
+    effective_progress = min(
+        progress_cap,
+        max(progress_floor, 0 if zero_task_watchdog.get("zero_task_progress_guard") else raw_progress),
+    )
     progress_cap_correction = bool(raw_progress > progress_cap)
     scene_task_map = {
         str(index): [entry.get("task_id") for entry in records[index]["task_candidates"] if entry.get("task_id")]
@@ -3394,8 +3842,12 @@ def product_video_scene_ledger_state(
         "aggregate_status_reason": aggregate_reason,
         "provider_status": "succeeded" if final_assembly_valid else ("failed_no_charge" if terminal_no_charge else "processing"),
         "normalized_provider_status": "succeeded" if final_assembly_valid else ("failed_no_charge" if terminal_no_charge else "processing"),
-        "continue_polling": bool(unresolved_indexes and not terminal_no_charge),
-        "provider_task_alive": bool(unresolved_indexes and not terminal_no_charge),
+        "continue_polling": (
+            bool(zero_task_watchdog.get("continue_polling"))
+            if zero_task_watchdog.get("zero_task_progress_guard")
+            else bool(unresolved_indexes and not terminal_no_charge)
+        ),
+        "provider_task_alive": bool(active_indexes and not terminal_no_charge),
         "terminal_state": "completed" if final_delivered else ("failed_no_charge" if terminal_no_charge else "final_rendering"),
         "final_decision": "delivered" if final_delivered else ("failed_no_charge" if terminal_no_charge else "continue_polling"),
         "concat_ready": bool(coverage_complete and scene_count > 1),
@@ -3442,6 +3894,23 @@ def product_video_scene_ledger_state(
         ),
         "final_artifact_source": "final_concat_validated" if final_assembly_valid else ("scene_clip_validated" if coverage_count else ""),
         "public_progress_source": "scene_ledger_coverage",
+        "zero_task_watchdog_triggered": bool(zero_task_watchdog.get("zero_task_watchdog_triggered")),
+        "dispatch_grace_seconds": _as_int(zero_task_watchdog.get("dispatch_grace_seconds"), VIDEO_SCENE_DISPATCH_GRACE_SECONDS_DEFAULT),
+        "dispatch_grace_elapsed": _as_int(zero_task_watchdog.get("dispatch_grace_elapsed"), 0),
+        "valid_provider_task_count": _as_int(zero_task_watchdog.get("valid_provider_task_count"), 0),
+        "zero_task_progress_guard": bool(zero_task_watchdog.get("zero_task_progress_guard")),
+        "progress_suppressed_without_task": bool(zero_task_watchdog.get("progress_suppressed_without_task")),
+        "public_stage": str(zero_task_watchdog.get("public_stage") or ""),
+        "dispatch_recovery_attempted": bool(zero_task_watchdog.get("dispatch_recovery_attempted")),
+        "dispatch_recovery_result": str(zero_task_watchdog.get("dispatch_recovery_result") or ""),
+        "zero_task_terminal_reason": str(zero_task_watchdog.get("zero_task_terminal_reason") or ""),
+        "runtime_candidate_keys": list(zero_task_watchdog.get("runtime_candidate_keys") or []),
+        "preconfirm_candidate_keys": list(zero_task_watchdog.get("preconfirm_candidate_keys") or []),
+        "candidate_set_consistent": bool(zero_task_watchdog.get("candidate_set_consistent", True)),
+        "final_eligible_provider_count": _as_int(zero_task_watchdog.get("final_eligible_provider_count"), 0),
+        "fallback_count_effective": _as_int(zero_task_watchdog.get("fallback_count_effective"), 0),
+        "provider_http_request_sent": bool(zero_task_watchdog.get("provider_http_request_sent")),
+        "provider_http_status": _as_int(zero_task_watchdog.get("provider_http_status"), 0),
         "canonical_scope": "job_summary" if scene_count > 1 else "scene",
         "canonical_scene_index": _as_int(result.get("canonical_scene_index"), 0),
         "canonical_does_not_imply_job_success": bool(scene_count > 1),

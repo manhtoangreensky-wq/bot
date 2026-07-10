@@ -70759,6 +70759,19 @@ def video_b14_render_bar(percent: int) -> str:
 
 def video_b14_provider_rendering_block(telemetry: dict | None = None) -> str:
     telemetry = dict(telemetry or {})
+    if telemetry.get("zero_task_progress_guard"):
+        scene_total = max(1, safe_int(telemetry.get("scene_tasks_total") or telemetry.get("required_scene_count"), 1))
+        if telemetry.get("zero_task_terminal_reason"):
+            return (
+                "<b>Chuẩn bị video:</b>\n"
+                f"{video_b14_render_bar(0)} <b>0%</b>\n"
+                "Hệ thống chưa thể bắt đầu tạo video lúc này. TOAN AAS chưa trừ Xu."
+            )
+        return (
+            "<b>Chuẩn bị video:</b>\n"
+            f"{video_b14_render_bar(0)} <b>0%</b>\n"
+            f"Đang chờ bắt đầu tạo <b>{scene_total}</b> cảnh."
+        )
     public_mode = str(telemetry.get("render_progress_public_mode") or "percent").strip().lower()
     public_progress = telemetry.get("render_video_progress_percent_public")
     progress = max(0, min(100, safe_int(
@@ -71133,7 +71146,11 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or provider_telemetry.get("dispatchable_scene_indexes")
         or provider_telemetry.get("fallback_candidate_indexes")
     )
-    provider_task_alive = bool(provider_telemetry.get("provider_task_alive") or processing_truth)
+    zero_task_progress_guard = bool(provider_telemetry.get("zero_task_progress_guard"))
+    provider_task_alive = bool(
+        provider_telemetry.get("provider_task_alive")
+        or (processing_truth and not zero_task_progress_guard)
+    )
     fallback_running = bool(
         provider_telemetry.get("fallback_used")
         or provider_telemetry.get("provider_fallback_attempted")
@@ -71144,6 +71161,9 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     )
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
+    if zero_task_progress_guard and status not in {"failed", "error", "completed", "success"}:
+        status = "queued_for_worker"
+        progress = max(0, min(20, safe_int(provider_telemetry.get("public_effective_progress"), 10)))
     if provider_task_alive and status not in {"completed", "success"}:
         status = "processing"
         if provider_telemetry.get("scene_ledger") and safe_int(provider_telemetry.get("required_scene_count"), 0) > 1:
@@ -71157,7 +71177,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     stage = "chưa bắt đầu xử lý"
     if status in {"queued", "queued_for_worker"}:
         status_label = "Đang chuẩn bị"
-        stage = "hệ thống đang xếp lịch dựng video"
+        stage = "hệ thống đang chờ bắt đầu tạo các cảnh" if zero_task_progress_guard else "hệ thống đang xếp lịch dựng video"
         if safe_int(provider_telemetry.get("scene_tasks_created_count") or job_result.get("scene_tasks_created_count"), 0) > 0:
             scene_total = safe_int(provider_telemetry.get("scene_tasks_total") or provider_telemetry.get("scenes_total") or job_result.get("scene_count"), 0)
             stage = f"hệ thống đang chuẩn bị dựng {scene_total} cảnh" if scene_total else "hệ thống đang chờ worker nhận job"
@@ -72141,6 +72161,9 @@ def video_b14_public_render_guard(user_id=0) -> tuple[bool, str]:
 PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI = (
     "Hệ thống tạo video đang bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau."
 )
+PRODUCT_VIDEO_MULTI_SCENE_PROVIDER_BUSY_COPY_VI = (
+    "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+)
 try:
     VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS = max(30, int(os.getenv("VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS", "900") or 900))
 except Exception:
@@ -72441,10 +72464,17 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         chain=chain,
         degraded_providers=degraded_providers,
     )
-    decision_chain = list(decision.get("effective_provider_chain") or [])
-    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(decision_chain, scene_count=1)
-    selected_chain = [provider for provider in decision_chain if provider in contract_valid_chain]
-    final_ok = bool(decision.get("ok") and selected_chain)
+    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(chain, scene_count=1)
+    eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
+        status=status,
+        chain=chain,
+        provider_health=degraded_providers,
+        contract_valid_provider_chain=contract_valid_chain,
+        scene_count=1,
+        require_live_health=True,
+    )
+    selected_chain = list(eligibility_snapshot.get("eligible_provider_keys") or [])
+    final_ok = bool(selected_chain)
     final_selected_provider = selected_chain[0] if selected_chain else ""
     if not final_ok and contract_invalid_providers:
         decision = {
@@ -72456,6 +72486,7 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         }
     result = {
         **decision,
+        **eligibility_snapshot,
         "provider_preflight_checked": True,
         "provider_preflight_source": "provider_status_and_recent_jobs",
         "provider_preflight_result": "provider_route_ready" if final_ok else "no_real_mp4_provider_available",
@@ -72464,6 +72495,8 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         "key4u_public_degradation": key4u_degradation,
         "provider_health_summary": degraded_providers,
         "provider_health_at_submit": degraded_providers,
+        "provider_status_snapshot": status,
+        "provider_eligibility_snapshot": eligibility_snapshot,
         "provider_degraded_reason": ";".join(
             str(item.get("degrade_reason") or "")
             for item in degraded_providers.values()
@@ -72492,25 +72525,37 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
 def product_video_multi_scene_health_gate(scene_count: int, preflight: dict | None = None) -> dict:
     preflight = dict(preflight or {})
     count = max(1, safe_int(scene_count, 1))
-    effective = [
+    configured = [
         str(item or "").strip()
-        for item in (preflight.get("effective_provider_chain") or [])
+        for item in (preflight.get("configured_provider_chain") or preflight.get("effective_provider_chain") or [])
         if str(item or "").strip()
     ]
     contract_valid, contract_invalid = _product_video_contract_valid_provider_chain(
-        effective,
+        configured,
         scene_count=count,
     )
+    eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
+        status=preflight.get("provider_status_snapshot") if isinstance(preflight.get("provider_status_snapshot"), dict) else {},
+        chain=configured,
+        provider_health=preflight.get("provider_health_summary") if isinstance(preflight.get("provider_health_summary"), dict) else {},
+        contract_valid_provider_chain=contract_valid,
+        scene_count=count,
+        require_live_health=True,
+    )
+    effective = list(eligibility_snapshot.get("eligible_provider_keys") or [])
     result = video_provider_router.product_video_multi_scene_public_gate(
         count,
         preflight.get("provider_health_summary") if isinstance(preflight.get("provider_health_summary"), dict) else {},
         effective_provider_chain=effective,
         contract_valid_provider_chain=contract_valid,
+        eligibility_snapshot=eligibility_snapshot,
     )
     return {
         **result,
+        **eligibility_snapshot,
+        "provider_eligibility_snapshot": eligibility_snapshot,
         "contract_invalid_providers": contract_invalid,
-        "public_message": "" if result.get("ok") else PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+        "public_message": "" if result.get("ok") else PRODUCT_VIDEO_MULTI_SCENE_PROVIDER_BUSY_COPY_VI,
     }
 
 
@@ -72539,11 +72584,24 @@ def product_video_apply_provider_preflight_to_session(user_id, session: dict, pr
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
     draft["b14_provider_preflight"] = dict(preflight or {})
+    multi_scene_gate = preflight.get("multi_scene_health_gate") if isinstance(preflight.get("multi_scene_health_gate"), dict) else {}
+    eligibility_snapshot = (
+        multi_scene_gate.get("provider_eligibility_snapshot")
+        if isinstance(multi_scene_gate.get("provider_eligibility_snapshot"), dict)
+        else preflight.get("provider_eligibility_snapshot")
+    )
+    eligibility_snapshot = dict(eligibility_snapshot or {})
     chain = [
         str(item or "").strip()
-        for item in (preflight or {}).get("effective_provider_chain", [])
+        for item in (
+            eligibility_snapshot.get("eligible_provider_keys")
+            or (preflight or {}).get("effective_provider_chain", [])
+        )
         if str(item or "").strip()
     ]
+    draft["provider_eligibility_snapshot"] = eligibility_snapshot
+    draft["provider_eligibility_snapshot_id"] = str(eligibility_snapshot.get("provider_eligibility_snapshot_id") or "")
+    draft["preconfirm_candidate_keys"] = list(eligibility_snapshot.get("eligible_provider_keys") or [])
     if chain:
         draft["b14_provider_chain"] = chain
         draft["provider_chain"] = chain
@@ -72561,6 +72619,11 @@ def product_video_apply_provider_preflight_to_session(user_id, session: dict, pr
         asset_pack["primary_selected_due_to_health"] = str(preflight.get("primary_selected_due_to_health") or "")
         asset_pack["provider_degraded_reason"] = str(preflight.get("provider_degraded_reason") or "")
         asset_pack["effective_primary_for_low_basic"] = str(preflight.get("effective_primary_for_low_basic") or chain[0])
+        asset_pack["provider_eligibility_snapshot"] = eligibility_snapshot
+        asset_pack["provider_eligibility_snapshot_id"] = str(eligibility_snapshot.get("provider_eligibility_snapshot_id") or "")
+        asset_pack["preconfirm_candidate_keys"] = list(eligibility_snapshot.get("eligible_provider_keys") or [])
+        asset_pack["candidate_rejection_reason_by_provider"] = dict(eligibility_snapshot.get("candidate_rejection_reason_by_provider") or {})
+        asset_pack["final_eligible_provider_count"] = safe_int(eligibility_snapshot.get("final_eligible_provider_count"), 0)
         draft["asset_pack"] = asset_pack
     session["draft"] = draft
     return save_video_session(user_id, session)
