@@ -97,7 +97,7 @@ def test_not_start_over_threshold_without_fallback_provider_fails_no_charge():
     assert result["ok"] is False
     assert result["terminal_state"] == "failed_no_charge"
     assert result["continue_polling"] is False
-    assert result["provider_error"] == "provider_stalled_not_start"
+    assert result["provider_error"] == "all_scene_providers_exhausted_no_charge"
     assert result["fallback_allowed"] is False
     assert result["fallback_block_reason"] == "no_fallback_provider"
     assert result["no_charge"] is True

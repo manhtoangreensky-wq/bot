@@ -1338,12 +1338,19 @@ def configured_provider_chain(environ: dict[str, str] | None = None) -> list[str
 PRODUCT_VIDEO_PUBLIC_DEGRADED_PROVIDER_BLOCKER = "provider_degraded_for_product_video_public"
 PRODUCT_VIDEO_PROVIDER_HEALTH_WINDOW_JOBS_DEFAULT = 5
 PRODUCT_VIDEO_PROVIDER_NOT_START_DEGRADE_THRESHOLD_DEFAULT = 3
+PRODUCT_VIDEO_PROVIDER_IN_PROGRESS_STALL_DEGRADE_THRESHOLD_DEFAULT = 2
+PRODUCT_VIDEO_PROVIDER_NO_OUTPUT_DEGRADE_THRESHOLD_DEFAULT = 2
+PRODUCT_VIDEO_PROVIDER_TERMINAL_FAILURE_DEGRADE_THRESHOLD_DEFAULT = 2
 PRODUCT_VIDEO_PROVIDER_DEGRADED_DURATION_SECONDS_DEFAULT = 30 * 60
+PRODUCT_VIDEO_PROVIDER_LIVE_HEALTH_MAX_AGE_SECONDS_DEFAULT = 24 * 60 * 60
 
 
 def _product_video_attempt_status_text(attempt: dict[str, Any]) -> str:
     return str(
-        attempt.get("provider_status_raw")
+        attempt.get("shopaikey_data_status")
+        or attempt.get("actual_provider_payload_status")
+        or attempt.get("provider_status_payload_data_status")
+        or attempt.get("provider_status_raw")
         or attempt.get("provider_status")
         or attempt.get("normalized_provider_status")
         or attempt.get("status")
@@ -1383,12 +1390,130 @@ def _product_video_attempt_artifact_size(attempt: dict[str, Any]) -> int:
     return 0
 
 
+def _product_video_attempt_epoch(attempt: dict[str, Any]) -> float:
+    for key in (
+        "completed_at_epoch",
+        "result_received_at_epoch",
+        "provider_progress_last_changed_at_epoch",
+        "updated_at_epoch",
+        "created_at_epoch",
+        "provider_started_at_epoch",
+    ):
+        try:
+            value = float(attempt.get(key) or 0)
+        except Exception:
+            value = 0.0
+        if value > 0:
+            return value
+    for key in (
+        "completed_at",
+        "result_received_at",
+        "provider_progress_last_changed_at",
+        "updated_at",
+        "created_at",
+        "provider_started_at",
+    ):
+        text = str(attempt.get(key) or "").strip()
+        if not text:
+            continue
+        normalized = text.replace("T", " ").replace("Z", "").split("+")[0].strip()
+        normalized_without_fraction = normalized.split(".")[0]
+        for candidate, fmt in ((normalized_without_fraction, "%Y-%m-%d %H:%M:%S"), (normalized_without_fraction, "%Y-%m-%d")):
+            try:
+                return float(time.mktime(time.strptime(candidate, fmt)))
+            except Exception:
+                continue
+    return 0.0
+
+
+def _product_video_attempt_scene_index(attempt: dict[str, Any]) -> int:
+    for key in ("scene_index", "scene_id", "clip_index", "index"):
+        try:
+            value = int(attempt.get(key) or 0)
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+
+def _product_video_attempt_task_identity(attempt: dict[str, Any]) -> str:
+    task_ids = attempt.get("provider_task_ids") if isinstance(attempt.get("provider_task_ids"), list) else []
+    video_ids = attempt.get("provider_video_ids") if isinstance(attempt.get("provider_video_ids"), list) else []
+    return str(
+        attempt.get("provider_task_id")
+        or attempt.get("task_id")
+        or (task_ids[0] if task_ids else "")
+        or attempt.get("provider_video_id")
+        or attempt.get("video_id")
+        or (video_ids[0] if video_ids else "")
+        or attempt.get("provider_pending_task_id")
+        or attempt.get("provider_pending_video_id")
+        or ""
+    ).strip()
+
+
+def _product_video_attempt_progress_last_changed_elapsed(attempt: dict[str, Any], now_epoch: float) -> int:
+    for key in ("provider_progress_last_changed_elapsed_seconds", "progress_last_changed_elapsed_seconds"):
+        try:
+            value = int(float(attempt.get(key) or 0))
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    changed_epoch = 0.0
+    for key in ("provider_progress_last_changed_at_epoch", "progress_last_changed_at_epoch"):
+        try:
+            changed_epoch = max(changed_epoch, float(attempt.get(key) or 0))
+        except Exception:
+            pass
+    if changed_epoch <= 0:
+        changed_epoch = _product_video_attempt_epoch(
+            {
+                "provider_progress_last_changed_at": attempt.get("provider_progress_last_changed_at")
+                or attempt.get("progress_last_changed_at")
+            }
+        )
+    if changed_epoch > 0:
+        return max(0, int(now_epoch - changed_epoch))
+    for key in ("provider_elapsed_seconds", "provider_wait_elapsed_seconds", "elapsed_wall_clock_seconds"):
+        try:
+            value = int(float(attempt.get(key) or 0))
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+
+def _product_video_attempt_clip_valid(attempt: dict[str, Any]) -> bool:
+    artifact_size = _product_video_attempt_artifact_size(attempt)
+    explicit_valid = bool(
+        attempt.get("clip_valid")
+        or attempt.get("artifact_valid")
+        or attempt.get("output_validated")
+        or attempt.get("final_mp4_valid")
+    )
+    delivered = bool(
+        attempt.get("delivered")
+        or attempt.get("final_delivered")
+        or attempt.get("telegram_delivery_success")
+    )
+    return bool(
+        explicit_valid
+        or delivered
+        or (_product_video_attempt_result_url_present(attempt) and artifact_size > 0)
+    )
+
+
 def product_video_provider_public_degradation(
     provider: str,
     attempts: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
     *,
     environ: dict[str, str] | None = None,
     not_start_threshold: int | None = None,
+    route_ready: bool | None = None,
+    now_epoch: float | None = None,
 ) -> dict[str, Any]:
     """Classify a provider as unsafe for new public Product Video submits.
 
@@ -1396,6 +1521,7 @@ def product_video_provider_public_degradation(
     """
     env = dict(environ or os.environ)
     normalized_provider = str(provider or "").strip().lower()
+    now = float(now_epoch or time.time())
     threshold = max(
         1,
         int(
@@ -1415,10 +1541,40 @@ def product_video_provider_public_degradation(
             or PRODUCT_VIDEO_PROVIDER_DEGRADED_DURATION_SECONDS_DEFAULT
         ),
     )
+    in_progress_threshold = max(
+        1,
+        int(
+            env.get("PRODUCT_VIDEO_PROVIDER_IN_PROGRESS_STALL_DEGRADE_THRESHOLD")
+            or PRODUCT_VIDEO_PROVIDER_IN_PROGRESS_STALL_DEGRADE_THRESHOLD_DEFAULT
+        ),
+    )
+    no_output_threshold = max(
+        1,
+        int(
+            env.get("PRODUCT_VIDEO_PROVIDER_NO_OUTPUT_DEGRADE_THRESHOLD")
+            or PRODUCT_VIDEO_PROVIDER_NO_OUTPUT_DEGRADE_THRESHOLD_DEFAULT
+        ),
+    )
+    terminal_failure_threshold = max(
+        1,
+        int(
+            env.get("PRODUCT_VIDEO_PROVIDER_TERMINAL_FAILURE_DEGRADE_THRESHOLD")
+            or PRODUCT_VIDEO_PROVIDER_TERMINAL_FAILURE_DEGRADE_THRESHOLD_DEFAULT
+        ),
+    )
+    in_progress_stall_seconds = max(60, int(env.get("VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS") or 300))
+    not_start_stall_seconds = max(1, int(env.get("VIDEO_PROVIDER_NOT_START_STALL_SECONDS") or 60))
+    live_health_max_age = max(
+        60,
+        int(
+            env.get("PRODUCT_VIDEO_PROVIDER_LIVE_HEALTH_MAX_AGE_SECONDS")
+            or PRODUCT_VIDEO_PROVIDER_LIVE_HEALTH_MAX_AGE_SECONDS_DEFAULT
+        ),
+    )
     env_flag = str(env.get(f"PRODUCT_VIDEO_{normalized_provider.upper()}_PUBLIC_DEGRADED") or "").strip().lower()
     env_degraded = env_flag in {"1", "true", "yes", "on", "degraded", "blocked"}
     rows = [dict(item) for item in (attempts or []) if isinstance(item, dict)]
-    evidence_by_job: dict[str, dict[str, Any]] = {}
+    evidence_by_scene: dict[str, dict[str, Any]] = {}
     for index, attempt in enumerate(rows):
         attempt_provider = _product_video_attempt_provider(attempt)
         if attempt_provider != normalized_provider:
@@ -1431,54 +1587,184 @@ def product_video_provider_public_degradation(
             or attempt.get("request_job_id")
             or f"attempt:{index}"
         ).strip()
-        if job_key not in evidence_by_job and len(evidence_by_job) >= window_jobs:
-            continue
-        state = evidence_by_job.setdefault(
-            job_key,
+        scene_index = _product_video_attempt_scene_index(attempt)
+        task_identity = _product_video_attempt_task_identity(attempt)
+        scene_key = f"{job_key}:{scene_index or 0}:{task_identity or 'summary'}"
+        state = evidence_by_scene.setdefault(
+            scene_key,
             {
+                "job_key": job_key,
+                "scene_index": scene_index,
+                "task_identity": task_identity,
                 "not_start": False,
+                "not_start_stalled": False,
+                "in_progress": False,
+                "in_progress_stalled": False,
+                "terminal_failure": False,
                 "result_url_present": False,
                 "artifact_size": 0,
                 "delivered": False,
+                "valid_scene": False,
+                "event_epoch": 0.0,
             },
         )
         status_text = _product_video_attempt_status_text(attempt)
         if status_text in {"NOT_START", "NOTSTART", "NOT_STARTED", "NOT START", "PROVIDER_NOT_START"}:
             state["not_start"] = True
+        if status_text in {
+            "IN_PROGRESS",
+            "RUNNING",
+            "PROCESSING",
+            "PENDING",
+            "PROVIDER_RUNNING",
+            "MEDIA_GENERATION_STATUS_IN_PROGRESS",
+            "MEDIA_GENERATION_STATUS_PENDING",
+        }:
+            state["in_progress"] = True
         if _product_video_attempt_result_url_present(attempt):
             state["result_url_present"] = True
         state["artifact_size"] = max(int(state.get("artifact_size") or 0), _product_video_attempt_artifact_size(attempt))
         if bool(attempt.get("delivered") or attempt.get("final_delivered") or attempt.get("telegram_delivery_success")):
             state["delivered"] = True
-    evidence = list(evidence_by_job.values())
+        state["valid_scene"] = bool(state.get("valid_scene") or _product_video_attempt_clip_valid(attempt))
+        state["terminal_failure"] = bool(
+            state.get("terminal_failure")
+            or status_text in {"FAILED", "FAILURE", "ERROR", "FAILED_NO_CHARGE", "TIMEOUT"}
+            or str(attempt.get("terminal_state") or "").strip().lower() in {"failed", "failed_no_charge"}
+        )
+        event_epoch = _product_video_attempt_epoch(attempt) or now
+        state["event_epoch"] = max(float(state.get("event_epoch") or 0), event_epoch)
+        progress_stall_elapsed = _product_video_attempt_progress_last_changed_elapsed(attempt, now)
+        state["progress_last_changed_elapsed"] = max(
+            int(state.get("progress_last_changed_elapsed") or 0),
+            progress_stall_elapsed,
+        )
+        state["in_progress_stalled"] = bool(
+            state.get("in_progress_stalled")
+            or (
+                state.get("in_progress")
+                and not state.get("valid_scene")
+                and not state.get("result_url_present")
+                and int(state.get("artifact_size") or 0) <= 0
+                and progress_stall_elapsed >= in_progress_stall_seconds
+            )
+        )
+        state["not_start_stalled"] = bool(
+            state.get("not_start_stalled")
+            or bool(attempt.get("provider_stalled_not_start"))
+            or (
+                state.get("not_start")
+                and not state.get("valid_scene")
+                and not state.get("result_url_present")
+                and int(state.get("artifact_size") or 0) <= 0
+                and progress_stall_elapsed >= not_start_stall_seconds
+            )
+        )
+    all_evidence = sorted(evidence_by_scene.values(), key=lambda item: float(item.get("event_epoch") or 0), reverse=True)
+    selected_jobs: list[str] = []
+    evidence: list[dict[str, Any]] = []
+    for item in all_evidence:
+        job_key = str(item.get("job_key") or "")
+        if job_key not in selected_jobs:
+            if len(selected_jobs) >= window_jobs:
+                continue
+            selected_jobs.append(job_key)
+        evidence.append(item)
     not_start_count = sum(1 for item in evidence if item.get("not_start"))
     result_url_empty_count = sum(1 for item in evidence if not item.get("result_url_present"))
     artifact_zero_count = sum(1 for item in evidence if int(item.get("artifact_size") or 0) <= 0)
     delivered_count = sum(1 for item in evidence if item.get("delivered"))
-    degraded = bool(
-        env_degraded
-        or (
-            not_start_count >= threshold
-            and result_url_empty_count >= threshold
-            and artifact_zero_count >= threshold
-            and delivered_count == 0
-        )
+    valid_scenes = [item for item in evidence if item.get("valid_scene")]
+    last_valid_epoch = max((float(item.get("event_epoch") or 0) for item in valid_scenes), default=0.0)
+    last_failure_epoch = max(
+        (
+            float(item.get("event_epoch") or 0)
+            for item in evidence
+            if item.get("not_start") or item.get("in_progress_stalled") or item.get("terminal_failure")
+        ),
+        default=0.0,
     )
+    not_start_streak = 0
+    in_progress_stall_streak = 0
+    no_output_streak = 0
+    terminal_failure_streak = 0
+    for item in evidence:
+        if item.get("valid_scene"):
+            break
+        not_start_streak += int(bool(item.get("not_start")))
+        in_progress_stall_streak += int(bool(item.get("in_progress_stalled")))
+        no_output_streak += int(
+            not item.get("result_url_present")
+            and int(item.get("artifact_size") or 0) <= 0
+            and bool(
+                item.get("not_start_stalled")
+                or item.get("in_progress_stalled")
+                or item.get("terminal_failure")
+            )
+        )
+        terminal_failure_streak += int(bool(item.get("terminal_failure")))
+    stalled_jobs: list[str] = []
+    stalled_scenes_by_job: dict[str, int] = {}
+    for item in evidence:
+        if not item.get("in_progress_stalled") and not item.get("not_start_stalled"):
+            continue
+        job_key = str(item.get("job_key") or "")
+        stalled_scenes_by_job[job_key] = stalled_scenes_by_job.get(job_key, 0) + 1
+    for job_key, count in stalled_scenes_by_job.items():
+        if count > 0:
+            stalled_jobs.append(job_key)
+    same_job_multi_scene_stall = any(count >= 2 for count in stalled_scenes_by_job.values())
+    automatic_degraded = bool(
+        same_job_multi_scene_stall
+        or not_start_streak >= threshold
+        or in_progress_stall_streak >= in_progress_threshold
+        or no_output_streak >= no_output_threshold
+        or terminal_failure_streak >= terminal_failure_threshold
+    )
+    if last_valid_epoch and last_valid_epoch >= last_failure_epoch:
+        automatic_degraded = False
+        not_start_streak = 0
+        in_progress_stall_streak = 0
+        no_output_streak = 0
+        terminal_failure_streak = 0
+    degradation_anchor = last_failure_epoch or now
+    degraded_until_epoch = int(degradation_anchor + duration_seconds) if automatic_degraded else 0
+    degraded = bool(env_degraded or (automatic_degraded and degraded_until_epoch > now))
+    if env_degraded:
+        degraded_until_epoch = int(now + duration_seconds)
     reasons: list[str] = []
     if env_degraded:
         reasons.append("manual_env_degraded")
-    if not_start_count >= threshold:
+    if not_start_streak >= threshold:
         reasons.append("not_start_repeated")
-    if result_url_empty_count >= threshold:
+    if in_progress_stall_streak >= in_progress_threshold:
+        reasons.append("in_progress_stall_repeated")
+    if same_job_multi_scene_stall:
+        reasons.append("multi_scene_same_job_stalled")
+    if no_output_streak >= no_output_threshold:
         reasons.append("result_url_empty_repeated")
-    if artifact_zero_count >= threshold:
+    if no_output_streak >= no_output_threshold:
         reasons.append("artifact_size_zero_repeated")
+    if terminal_failure_streak >= terminal_failure_threshold:
+        reasons.append("terminal_failure_repeated")
     if delivered_count > 0:
         reasons.append("provider_delivered_recently")
-    degraded_until_epoch = int(time.time()) + duration_seconds if degraded else 0
+    route_ready_value = True if route_ready is None else bool(route_ready)
+    recent_valid_output = bool(last_valid_epoch and max(0, now - last_valid_epoch) <= live_health_max_age)
+    live_healthy = bool(route_ready_value and recent_valid_output and not degraded)
+    if degraded:
+        health_status = "degraded"
+    elif not route_ready_value:
+        health_status = "route_unavailable"
+    elif live_healthy:
+        health_status = "healthy"
+    else:
+        health_status = "unknown"
     return {
         "provider": normalized_provider,
-        "health_status": "degraded" if degraded else "healthy",
+        "route_ready": route_ready_value,
+        "live_healthy": live_healthy,
+        "health_status": health_status,
         "provider_degraded_for_product_video_public": degraded,
         "degraded_for_product_video_public": degraded,
         "degrade_reason": ",".join(reasons) if degraded else "",
@@ -1487,12 +1773,27 @@ def product_video_provider_public_degradation(
         "degraded_until": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(degraded_until_epoch)) if degraded_until_epoch else "",
         "degrade_duration_seconds": duration_seconds,
         "health_window_jobs": window_jobs,
+        "live_health_max_age_seconds": live_health_max_age,
+        "recent_jobs_checked": len(selected_jobs),
+        "recent_valid_output": recent_valid_output,
+        "last_valid_scene_at": _epoch_text(last_valid_epoch),
+        "last_success_job_at": _epoch_text(last_valid_epoch),
+        "last_failure_at": _epoch_text(last_failure_epoch),
+        "not_start_streak": not_start_streak,
+        "in_progress_stall_streak": in_progress_stall_streak,
+        "no_output_streak": no_output_streak,
+        "terminal_failure_streak": terminal_failure_streak,
+        "recent_stalled_jobs": stalled_jobs,
         "last_not_start_count": not_start_count,
         "last_result_url_empty_count": result_url_empty_count,
         "last_artifact_size_zero_count": artifact_zero_count,
         "last_delivered_count": delivered_count,
         "degrade_threshold": threshold,
         "not_start_degrade_threshold": threshold,
+        "in_progress_stall_degrade_threshold": in_progress_threshold,
+        "not_start_stall_seconds": not_start_stall_seconds,
+        "no_output_degrade_threshold": no_output_threshold,
+        "terminal_failure_degrade_threshold": terminal_failure_threshold,
     }
 
 
@@ -1517,12 +1818,30 @@ def product_video_public_provider_route_decision(
     degraded = {str(key).strip(): dict(value or {}) for key, value in (degraded_providers or {}).items()}
     skipped: list[dict[str, Any]] = []
     eligible: list[str] = []
+    route_ready_order: list[str] = []
+    live_healthy_order: list[str] = []
     degraded_skipped = False
+    health_skipped = False
     for provider in configured_chain:
         item = provider_items.get(provider, {})
         degrade_state = degraded.get(provider) or {}
+        configured = bool(item.get("configured", True if not provider_items else False))
+        credit_ok = bool(item.get("credit_ok", True))
+        route_ready = bool(configured and credit_ok and degrade_state.get("route_ready", True))
+        if route_ready:
+            route_ready_order.append(provider)
+        if not configured:
+            skipped.append({"provider": provider, "reason": "provider_not_configured"})
+            continue
+        if not credit_ok:
+            skipped.append({"provider": provider, "reason": f"credit_{item.get('credit_status') or 'unavailable'}"})
+            continue
+        if not route_ready:
+            skipped.append({"provider": provider, "reason": "provider_route_not_ready"})
+            continue
         if degrade_state.get("provider_degraded_for_product_video_public") or degrade_state.get("degraded_for_product_video_public"):
             degraded_skipped = True
+            health_skipped = True
             skipped.append(
                 {
                     "provider": provider,
@@ -1534,15 +1853,23 @@ def product_video_public_provider_route_decision(
                 }
             )
             continue
-        configured = bool(item.get("configured", True if not provider_items else False))
-        credit_ok = bool(item.get("credit_ok", True))
-        if not configured:
-            skipped.append({"provider": provider, "reason": "provider_not_configured"})
-            continue
-        if not credit_ok:
-            skipped.append({"provider": provider, "reason": f"credit_{item.get('credit_status') or 'unavailable'}"})
+        if "live_healthy" in degrade_state and not bool(degrade_state.get("live_healthy")):
+            health_skipped = True
+            health_status = str(degrade_state.get("health_status") or "unknown").strip().lower()
+            reason = "provider_live_health_unknown" if health_status in {"", "unknown"} else "provider_live_health_unhealthy"
+            skipped.append(
+                {
+                    "provider": provider,
+                    "reason": reason,
+                    "health_status": health_status or "unknown",
+                    "last_valid_scene_at": str(degrade_state.get("last_valid_scene_at") or ""),
+                    "recent_stalled_jobs": list(degrade_state.get("recent_stalled_jobs") or []),
+                }
+            )
             continue
         eligible.append(provider)
+        if bool(degrade_state.get("live_healthy")):
+            live_healthy_order.append(provider)
     selected = eligible[0] if eligible else ""
     return {
         "ok": bool(selected),
@@ -1550,14 +1877,79 @@ def product_video_public_provider_route_decision(
         "provider_chain": configured_chain,
         "effective_provider_chain": eligible,
         "ready_provider_order": eligible,
+        "route_ready_provider_order": route_ready_order,
+        "live_healthy_provider_order": live_healthy_order,
         "provider_degraded_for_product_video_public": degraded_skipped,
         "provider_health_summary": degraded,
         "degraded_providers": degraded,
         "skipped_providers": skipped,
-        "blocker": "" if selected else ("no_healthy_video_provider_no_charge" if degraded_skipped else "product_video_no_public_mp4_provider"),
+        "blocker": "" if selected else ("no_healthy_video_provider_no_charge" if degraded_skipped or health_skipped else "product_video_no_public_mp4_provider"),
         "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY if not selected else "",
         "effective_primary_for_low_basic": selected,
-        "primary_selected_due_to_health": "health_aware_degraded_provider_skipped" if degraded_skipped and selected else "default_order",
+        "primary_selected_due_to_health": "health_aware_degraded_provider_skipped" if (degraded_skipped or health_skipped) and selected else "default_order",
+        "provider_submit_count": 0,
+    }
+
+
+def product_video_multi_scene_public_gate(
+    scene_count: int,
+    provider_health: dict[str, dict[str, Any]] | None = None,
+    *,
+    effective_provider_chain: list[str] | tuple[str, ...] | None = None,
+    contract_valid_provider_chain: list[str] | tuple[str, ...] | None = None,
+    environ: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    env = dict(environ or os.environ)
+    count = max(1, int(scene_count or 1))
+    raw_flag = str(env.get("PRODUCT_VIDEO_MULTI_SCENE_PUBLIC_ENABLED") or "").strip().lower()
+    explicitly_disabled = raw_flag in {"0", "false", "no", "off", "disabled", "locked"}
+    explicitly_enabled = raw_flag in {"1", "true", "yes", "on", "enabled"}
+    health = {
+        str(provider or "").strip(): dict(state or {})
+        for provider, state in (provider_health or {}).items()
+        if str(provider or "").strip()
+    }
+    effective = [str(item or "").strip() for item in (effective_provider_chain or []) if str(item or "").strip()]
+    contract_valid = {
+        str(item or "").strip()
+        for item in (contract_valid_provider_chain or effective)
+        if str(item or "").strip()
+    }
+    healthy = [
+        provider
+        for provider in effective
+        if provider in contract_valid
+        and bool(health.get(provider, {}).get("route_ready"))
+        and bool(health.get(provider, {}).get("live_healthy"))
+        and bool(health.get(provider, {}).get("recent_valid_output"))
+        and not bool(health.get(provider, {}).get("provider_degraded_for_product_video_public"))
+    ]
+    live_health_gate_pass = bool(healthy)
+    if not live_health_gate_pass:
+        blocker = "no_healthy_provider_no_charge"
+    elif count > 1 and explicitly_disabled:
+        blocker = "product_video_multi_scene_public_disabled"
+    else:
+        blocker = ""
+    ok = bool(live_health_gate_pass and not (count > 1 and explicitly_disabled))
+    return {
+        "ok": ok,
+        "scene_count": count,
+        "single_scene_allowed": bool(count == 1 and live_health_gate_pass),
+        "multi_scene_requested": bool(count > 1),
+        "multi_scene_public_enabled": bool(count <= 1 or (not explicitly_disabled and live_health_gate_pass)),
+        "multi_scene_public_enabled_raw": raw_flag,
+        "multi_scene_public_enabled_source": "env" if raw_flag else "live_health_gate",
+        "multi_scene_env_explicitly_enabled": explicitly_enabled,
+        "multi_scene_env_explicitly_disabled": explicitly_disabled,
+        "multi_scene_health_gate_pass": live_health_gate_pass,
+        "healthy_contract_provider_order": healthy,
+        "effective_provider_chain": effective,
+        "contract_valid_provider_chain": sorted(contract_valid),
+        "blocker": blocker,
+        "no_charge_reason": blocker,
+        "provider_submit_count": 0,
+        "charge": 0,
     }
 
 
@@ -2141,7 +2533,7 @@ def run_provider_generation(
     )
     fallback_context = product_video_public_confirm_context(metadata)
     cooldown_state = provider_failure_cooldown_state(metadata, env)
-    submit_idempotency_key = hashlib.sha256(
+    submit_idempotency_key = str(metadata.get("fallback_idempotency_key") or "").strip() or hashlib.sha256(
         f"{request.job_id}|{request.product_type}|{request.video_flow_type}|{request.required_capability}".encode("utf-8")
     ).hexdigest()[:24]
     base_debug = {
