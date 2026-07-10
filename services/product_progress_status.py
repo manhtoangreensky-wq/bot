@@ -972,7 +972,7 @@ def _video_epoch_from_value(value: Any) -> float:
 
 def _video_scene_status_label(status: Any, clip_ready: bool = False) -> str:
     raw = str(status or "").strip().lower().replace("-", "_")
-    if clip_ready or raw in {"done", "complete", "completed", "success", "clip_ready", "downloaded", "validated"}:
+    if clip_ready or raw in {"done", "complete", "completed", "success", "clip_ready", "downloaded", "validated", "scene_clip_validated", "clip_downloaded"}:
         return "Đã xong"
     if raw in {"provider_not_start", "not_start", "queued", "waiting", "pending"}:
         return "Đang chờ bắt đầu"
@@ -1028,7 +1028,7 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
             0,
         ),
     )
-    tasks_raw = current.get("scene_tasks") or current.get("provider_scene_tasks") or []
+    tasks_raw = current.get("scene_ledger") or current.get("scene_tasks") or current.get("provider_scene_tasks") or []
     tasks: list[dict[str, Any]] = []
     if isinstance(tasks_raw, dict):
         for key, value in sorted(tasks_raw.items(), key=lambda item: _as_int(item[0], 0)):
@@ -1058,7 +1058,14 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
         item = by_index.setdefault(idx, {"scene_index": idx})
         if not item.get("status"):
             item["status"] = value
-    coverage_count = _as_int(current.get("scene_coverage_count") or current.get("scene_clip_count") or current.get("scenes_done"), 0)
+    coverage_count = _as_int(
+        current.get("completed_scene_count")
+        or current.get("panel_completed_scene_count")
+        or current.get("scene_coverage_count")
+        or current.get("scene_clip_count")
+        or current.get("scenes_done"),
+        0,
+    )
     lines: list[str] = []
     statuses: list[dict[str, Any]] = []
     elapsed_by_scene: dict[str, int] = {}
@@ -1066,8 +1073,11 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
     raw_progress_values: list[int] = []
     for idx in range(1, max(scene_count, len(by_index)) + 1):
         item = by_index.get(idx, {"scene_index": idx})
-        result_url = str(item.get("result_url") or item.get("clip_result_url") or item.get("video_url") or "").strip()
-        clip_ready = bool(result_url) or _as_bool(item.get("clip_valid") or item.get("clip_ready") or item.get("downloaded"))
+        clip_ready = bool(
+            _as_bool(item.get("clip_valid") or item.get("clip_ready") or item.get("downloaded"))
+            or _as_int(item.get("clip_bytes") or item.get("artifact_size"), 0) > 0
+            or str(item.get("status") or "").strip().lower() in {"scene_clip_validated", "clip_downloaded", "validated"}
+        )
         status = item.get("status") or item.get("current_scene_status") or current.get("current_scene_status")
         label = _video_scene_status_label(status, clip_ready)
         raw_progress = _as_int(
@@ -1108,6 +1118,12 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
     concat_waiting = bool(scene_count > 1 and coverage_count < scene_count)
     final_delivered = _as_bool(current.get("final_delivered") or current.get("delivery_succeeded"))
     final_artifact = job_has_final_artifact(current)
+    if scene_count > 1:
+        final_artifact = bool(
+            coverage_count >= scene_count
+            and current.get("concat_output_valid")
+            and current.get("final_mp4_valid")
+        )
     lines.append(f"• Hoàn tất: {coverage_count}/{max(scene_count, 1)} cảnh")
     if scene_count > 1:
         if final_delivered:
@@ -1156,6 +1172,9 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
         "concat_waiting_for_scene_coverage": concat_waiting,
         "concat_attempted": bool(concat_attempted and not concat_waiting),
         "scene_coverage_count": coverage_count,
+        "panel_scene_ledger_source": str(current.get("panel_scene_ledger_source") or current.get("scene_ledger_source") or "scene_tasks"),
+        "panel_completed_scene_count": coverage_count,
+        "panel_unresolved_scene_count": max(0, scene_count - coverage_count),
         "public_progress_mode": public_progress_mode,
         "public_progress_percent_visible": bool(public_progress_mode != "scene_and_elapsed" or final_delivered),
         "public_technical_terms_hidden": True,

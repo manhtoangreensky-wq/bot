@@ -23,6 +23,7 @@ import httpx
 
 from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
 from services import video_final_output
+from services import video_project_queue as video_project_queue_service
 from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
     PUBLIC_NO_VIDEO_PROVIDER_COPY,
@@ -1143,7 +1144,17 @@ def product_video_scene_task_for_index(job: dict | None = None, scene_index: int
     wanted = max(1, _safe_int(scene_index, 1))
     for item in _existing_scene_tasks(job):
         if _scene_task_index(item) == wanted and (
-            str(item.get("provider_task_id") or item.get("task_id") or item.get("provider_video_id") or item.get("video_id") or "").strip()
+            str(
+                item.get("active_task_id")
+                or item.get("provider_task_id")
+                or item.get("task_id")
+                or item.get("provider_video_id")
+                or item.get("video_id")
+                or item.get("winning_task_id")
+                or item.get("scene_winner_task")
+                or item.get("canonical_task_selected")
+                or ""
+            ).strip()
         ):
             return dict(item)
     return {}
@@ -1201,6 +1212,10 @@ def _normalize_scene_task_status(status: Any = "", item: dict | None = None) -> 
             or item.get("task_id")
             or item.get("provider_video_id")
             or item.get("video_id")
+            or item.get("active_task_id")
+            or item.get("winning_task_id")
+            or item.get("scene_winner_task")
+            or item.get("canonical_task_selected")
             or item.get("provider_task_id_masked")
             or item.get("task_id_masked")
             or item.get("provider_video_id_masked")
@@ -1208,7 +1223,7 @@ def _normalize_scene_task_status(status: Any = "", item: dict | None = None) -> 
         ).strip()
     )
     has_result = bool(item.get("result_url_valid") or item.get("download_url_present") or item.get("provider_result_url_present"))
-    if has_result or text in {"downloaded", "success", "completed", "succeeded", "clip_downloaded"}:
+    if item.get("clip_valid") or has_result or text in {"downloaded", "success", "completed", "succeeded", "clip_downloaded", "scene_clip_validated"}:
         return "clip_downloaded"
     if text in {"not_start", "not_started", "provider_not_start", "media_generation_status_not_start"}:
         return "provider_not_start"
@@ -1240,6 +1255,10 @@ def _scene_task_has_provider_id(item: dict | None = None) -> bool:
             or item.get("task_id")
             or item.get("provider_video_id")
             or item.get("video_id")
+            or item.get("active_task_id")
+            or item.get("winning_task_id")
+            or item.get("scene_winner_task")
+            or item.get("canonical_task_selected")
             or item.get("provider_task_id_masked")
             or item.get("task_id_masked")
             or item.get("provider_video_id_masked")
@@ -1706,6 +1725,13 @@ def product_video_scene_tasks_debug(
                 or debug.get("provider_result_url_present")
                 or debug.get("result_url_present")
             ),
+            "result_url": str(
+                source.get("result_url")
+                or source.get("download_url")
+                or debug.get("result_url")
+                or debug.get("provider_result_url")
+                or ""
+            ),
             "clip_valid": bool(source.get("clip_valid") or debug.get("clip_valid") or debug.get("validation_passed")),
             "artifact_size": _safe_int(
                 source.get("artifact_size")
@@ -1734,6 +1760,7 @@ def product_video_scene_tasks_debug(
     for idx in range(1, total + 1):
         by_scene[idx] = {
             "scene_index": idx,
+            "required": True,
             "canonical_scene_index": idx,
             "canonical_task_selected": "",
             "canonical_task_candidates_by_scene": {},
@@ -1749,15 +1776,30 @@ def product_video_scene_tasks_debug(
             "scene_duration_seconds": product_video_scene_duration_seconds(job),
             "request_job_id": product_video_scene_request_id(job, idx),
             "provider": "",
+            "provider_key": "",
+            "provider_task_id": "",
+            "task_id": "",
+            "provider_video_id": "",
+            "video_id": "",
+            "primary_task_id": "",
+            "fallback_task_ids": [],
+            "active_task_id": "",
+            "winning_task_id": "",
             "provider_task_id_masked": "",
             "task_id_masked": "",
             "provider_video_id_masked": "",
             "status": "pending_submit",
             "result_url_valid": False,
+            "result_url": "",
+            "clip_path": "",
+            "clip_bytes": 0,
+            "clip_valid": False,
             "raw_clip_duration": 0,
             "fallback_count": 0,
             "provider_progress_raw": "",
             "provider_progress_normalized": 0,
+            "progress": 0,
+            "progress_last_changed_at": "",
             "selected_model": "",
             "selected_provider": "",
             "selected_family": "",
@@ -1766,7 +1808,11 @@ def product_video_scene_tasks_debug(
             "provider_elapsed_seconds": 0,
             "scene_not_start_elapsed": 0,
             "scene_submitted_at": "",
+            "submitted_at": "",
+            "started_at": "",
             "scene_first_not_start_seen_at": "",
+            "completed_at": "",
+            "failure_reason": "",
             "stall_threshold": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
             "not_start_threshold_seconds": DEFAULT_PRODUCT_VIDEO_FIRST_SCENE_NOT_START_GRACE_SECONDS,
             "not_start_threshold_source": "default:product_video_not_start_grace",
@@ -1791,14 +1837,28 @@ def product_video_scene_tasks_debug(
                 "canonical_scene_index": idx,
                 "canonical_task_selected": task_id or video_id,
                 "provider": str(item.get("provider") or by_scene[idx].get("provider") or ""),
+                "provider_key": str(item.get("provider_key") or item.get("provider") or by_scene[idx].get("provider_key") or ""),
+                "provider_task_id": task_id,
+                "task_id": task_id,
+                "provider_video_id": video_id,
+                "video_id": video_id,
+                "primary_task_id": str(item.get("primary_task_id") or task_id or video_id or by_scene[idx].get("primary_task_id") or ""),
+                "fallback_task_ids": list(item.get("fallback_task_ids") or by_scene[idx].get("fallback_task_ids") or []),
+                "active_task_id": str(item.get("active_task_id") or task_id or video_id or by_scene[idx].get("active_task_id") or ""),
+                "winning_task_id": str(item.get("winning_task_id") or item.get("scene_winner_task") or by_scene[idx].get("winning_task_id") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
                 "task_id_masked": _task_id_masked(task_id),
                 "provider_video_id_masked": _task_id_masked(video_id),
                 "result_url_valid": bool(item.get("result_url_valid") or item.get("download_url_present") or item.get("provider_result_url_present")),
+                "result_url": str(item.get("result_url") or item.get("provider_result_url") or item.get("download_url") or by_scene[idx].get("result_url") or ""),
+                "clip_path": str(item.get("clip_path") or item.get("output_path") or item.get("local_path") or by_scene[idx].get("clip_path") or ""),
+                "clip_bytes": _safe_int(item.get("clip_bytes") or item.get("artifact_size") or item.get("artifact_bytes") or item.get("output_bytes"), _safe_int(by_scene[idx].get("clip_bytes"), 0)),
+                "clip_valid": bool(item.get("clip_valid") or item.get("validation_passed") or by_scene[idx].get("clip_valid")),
                 "raw_clip_duration": item.get("raw_clip_duration") or item.get("duration") or item.get("output_duration") or 0,
                 "fallback_count": _safe_int(item.get("fallback_count"), 0),
                 "provider_progress_raw": item.get("provider_progress_raw") or item.get("shopaikey_data_progress_raw") or item.get("data_progress_raw") or item.get("progress") or "",
                 "provider_progress_normalized": _safe_int(item.get("provider_progress_normalized") or item.get("provider_progress_percent") or item.get("progress"), 0),
+                "progress": _safe_int(item.get("progress") or item.get("provider_progress_normalized") or item.get("provider_progress_percent"), 0),
                 "selected_model": str(item.get("selected_model") or item.get("model") or ""),
                 "selected_provider": str(item.get("selected_provider") or item.get("provider") or ""),
                 "selected_family": str(item.get("selected_family") or ""),
@@ -1809,7 +1869,11 @@ def product_video_scene_tasks_debug(
                 "raw_provider_status_before_source_fix": raw_status_before_fix,
                 "provider_status_payload_source": actual_status_source,
                 "scene_submitted_at": str(item.get("scene_submitted_at") or item.get("submitted_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
+                "submitted_at": str(item.get("submitted_at") or item.get("scene_submitted_at") or item.get("provider_started_at") or ""),
+                "started_at": str(item.get("started_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
                 "scene_first_not_start_seen_at": str(item.get("scene_first_not_start_seen_at") or item.get("first_not_start_seen_at") or item.get("provider_started_at") or item.get("provider_wait_started_at") or ""),
+                "completed_at": str(item.get("completed_at") or item.get("result_received_at") or item.get("winner_selected_at") or ""),
+                "failure_reason": str(item.get("failure_reason") or item.get("provider_error") or item.get("blocker") or ""),
                 "scene_winner_task": str(item.get("scene_winner_task") or ""),
                 "scene_winner_provider": str(item.get("scene_winner_provider") or ""),
                 "winner_selected_at": str(item.get("winner_selected_at") or ""),
@@ -1848,6 +1912,15 @@ def product_video_scene_tasks_debug(
                 "canonical_scene_index": idx,
                 "canonical_task_selected": task_id or video_id or str(by_scene[idx].get("canonical_task_selected") or ""),
                 "provider": str(source.get("provider") or debug.get("selected_provider") or debug.get("provider") or by_scene[idx].get("provider") or ""),
+                "provider_key": str(source.get("provider_key") or source.get("provider") or debug.get("selected_provider") or debug.get("provider") or by_scene[idx].get("provider_key") or ""),
+                "provider_task_id": task_id or str(by_scene[idx].get("provider_task_id") or ""),
+                "task_id": task_id or str(by_scene[idx].get("task_id") or ""),
+                "provider_video_id": video_id or str(by_scene[idx].get("provider_video_id") or ""),
+                "video_id": video_id or str(by_scene[idx].get("video_id") or ""),
+                "primary_task_id": str(by_scene[idx].get("primary_task_id") or task_id or video_id or ""),
+                "fallback_task_ids": list(by_scene[idx].get("fallback_task_ids") or []),
+                "active_task_id": task_id or video_id or str(by_scene[idx].get("active_task_id") or ""),
+                "winning_task_id": str(debug.get("winning_task_id") or debug.get("scene_winner_task") or source.get("winning_task_id") or source.get("scene_winner_task") or by_scene[idx].get("winning_task_id") or ""),
                 "provider_task_id_masked": _task_id_masked(task_id),
                 "task_id_masked": _task_id_masked(task_id),
                 "provider_video_id_masked": _task_id_masked(video_id),
@@ -1857,10 +1930,15 @@ def product_video_scene_tasks_debug(
                     or debug.get("result_url_present")
                     or by_scene[idx].get("result_url_valid")
                 ),
+                "result_url": str(debug.get("result_url") or debug.get("provider_result_url") or source.get("result_url") or source.get("download_url") or by_scene[idx].get("result_url") or ""),
+                "clip_path": str(debug.get("clip_path") or debug.get("output_path") or debug.get("local_path") or source.get("clip_path") or source.get("output_path") or by_scene[idx].get("clip_path") or ""),
+                "clip_bytes": _safe_int(debug.get("clip_bytes") or debug.get("artifact_size") or debug.get("artifact_bytes") or debug.get("output_bytes") or debug.get("downloaded_file_size") or source.get("clip_bytes"), _safe_int(by_scene[idx].get("clip_bytes"), 0)),
+                "clip_valid": bool(debug.get("clip_valid") or debug.get("validation_passed") or source.get("clip_valid") or by_scene[idx].get("clip_valid")),
                 "raw_clip_duration": source.get("duration") or debug.get("output_duration") or by_scene[idx].get("raw_clip_duration") or 0,
                 "fallback_count": _safe_int(debug.get("fallback_count") or source.get("fallback_count"), _safe_int(by_scene[idx].get("fallback_count"), 0)),
                 "provider_progress_raw": debug.get("provider_progress_raw") or debug.get("shopaikey_data_progress_raw") or source.get("provider_progress_raw") or by_scene[idx].get("provider_progress_raw") or "",
                 "provider_progress_normalized": _safe_int(debug.get("provider_progress_normalized") or debug.get("provider_progress_percent") or source.get("provider_progress_normalized"), _safe_int(by_scene[idx].get("provider_progress_normalized"), 0)),
+                "progress": _safe_int(debug.get("progress") or debug.get("provider_progress_normalized") or debug.get("provider_progress_percent") or source.get("progress"), _safe_int(by_scene[idx].get("progress"), 0)),
                 "selected_model": str(debug.get("selected_model") or debug.get("model_used_in_payload") or debug.get("provider_payload_model") or source.get("selected_model") or source.get("model") or by_scene[idx].get("selected_model") or ""),
                 "selected_provider": str(debug.get("selected_provider") or source.get("selected_provider") or by_scene[idx].get("selected_provider") or ""),
                 "selected_family": str(debug.get("selected_family") or source.get("selected_family") or by_scene[idx].get("selected_family") or ""),
@@ -1879,7 +1957,11 @@ def product_video_scene_tasks_debug(
                 "fallback_provider_order": debug.get("fallback_provider_order") or source.get("fallback_provider_order") or by_scene[idx].get("fallback_provider_order") or [],
                 "source_of_truth": str(debug.get("source_of_truth") or source.get("source_of_truth") or by_scene[idx].get("source_of_truth") or ""),
                 "scene_submitted_at": str(debug.get("scene_submitted_at") or source.get("scene_submitted_at") or by_scene[idx].get("scene_submitted_at") or ""),
+                "submitted_at": str(debug.get("submitted_at") or debug.get("scene_submitted_at") or source.get("submitted_at") or source.get("scene_submitted_at") or by_scene[idx].get("submitted_at") or ""),
+                "started_at": str(debug.get("started_at") or debug.get("provider_started_at") or source.get("started_at") or source.get("provider_started_at") or by_scene[idx].get("started_at") or ""),
                 "scene_first_not_start_seen_at": str(debug.get("scene_first_not_start_seen_at") or source.get("scene_first_not_start_seen_at") or by_scene[idx].get("scene_first_not_start_seen_at") or ""),
+                "completed_at": str(debug.get("completed_at") or debug.get("result_received_at") or source.get("completed_at") or source.get("result_received_at") or by_scene[idx].get("completed_at") or ""),
+                "failure_reason": str(debug.get("failure_reason") or debug.get("provider_error") or debug.get("blocker") or source.get("failure_reason") or source.get("provider_error") or source.get("blocker") or by_scene[idx].get("failure_reason") or ""),
                 "scene_winner_task": str(debug.get("scene_winner_task") or source.get("scene_winner_task") or by_scene[idx].get("scene_winner_task") or ""),
                 "scene_winner_provider": str(debug.get("scene_winner_provider") or source.get("scene_winner_provider") or by_scene[idx].get("scene_winner_provider") or ""),
                 "winner_selected_at": str(debug.get("winner_selected_at") or source.get("winner_selected_at") or by_scene[idx].get("winner_selected_at") or ""),
@@ -1915,6 +1997,13 @@ def product_video_scene_tasks_debug(
             own_candidates,
             persisted_winner_task=str(by_scene[idx].get("scene_winner_task") or ""),
         )
+        candidate_task_ids = [
+            str(item.get("task_id") or "").strip()
+            for item in own_candidates
+            if str(item.get("task_id") or "").strip()
+        ]
+        primary_task_id = str(by_scene[idx].get("primary_task_id") or (candidate_task_ids[0] if candidate_task_ids else ""))
+        fallback_task_ids = [task_id for task_id in candidate_task_ids if task_id != primary_task_id]
         if winner.get("winner_valid"):
             canonical_selected = str(winner.get("scene_winner_task") or canonical_selected)
         by_scene[idx].update(
@@ -1923,6 +2012,10 @@ def product_video_scene_tasks_debug(
                 "canonical_task_selected": canonical_selected,
                 "canonical_task_candidates_by_scene": canonical_task_candidates_by_scene,
                 "canonical_task_reject_reasons": canonical_task_reject_reasons,
+                "primary_task_id": primary_task_id,
+                "fallback_task_ids": fallback_task_ids,
+                "active_task_id": str(winner.get("scene_winner_task") or by_scene[idx].get("active_task_id") or canonical_selected or ""),
+                "winning_task_id": str(winner.get("scene_winner_task") or by_scene[idx].get("winning_task_id") or ""),
                 "status": policy["current_scene_status"] if (policy.get("provider_not_start") or policy_actual_running) else by_scene[idx].get("status"),
                 "scene_not_start_elapsed": policy["scene_not_start_elapsed"],
                 "provider_elapsed_seconds": max(_safe_int(by_scene[idx].get("provider_elapsed_seconds"), 0), _safe_int(policy.get("provider_elapsed_seconds"), 0)),
@@ -1958,6 +2051,19 @@ def product_video_scene_tasks_debug(
                 **winner,
             }
         )
+        if winner.get("winner_valid"):
+            winning_candidate = next(
+                (item for item in own_candidates if str(item.get("task_id") or "") == str(winner.get("scene_winner_task") or "")),
+                {},
+            )
+            by_scene[idx]["clip_valid"] = True
+            by_scene[idx]["clip_bytes"] = max(
+                _safe_int(by_scene[idx].get("clip_bytes"), 0),
+                _safe_int(winning_candidate.get("artifact_size"), 0),
+            )
+            by_scene[idx]["clip_path"] = str(winning_candidate.get("output_path") or by_scene[idx].get("clip_path") or "")
+            by_scene[idx]["status"] = "scene_clip_validated"
+            by_scene[idx]["progress"] = 100
         if by_scene[idx]["provider_stalled_not_start"]:
             by_scene[idx]["status"] = PRODUCT_VIDEO_PROVIDER_STALLED_NOT_START
     return [by_scene[idx] for idx in sorted(by_scene)]
@@ -2580,8 +2686,12 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         or ""
     ).strip()
     pending_task_id = str(
-        pending_scene_task.get("provider_task_id")
+        pending_scene_task.get("active_task_id")
+        or pending_scene_task.get("provider_task_id")
         or pending_scene_task.get("task_id")
+        or pending_scene_task.get("winning_task_id")
+        or pending_scene_task.get("scene_winner_task")
+        or pending_scene_task.get("canonical_task_selected")
         or ((job or {}).get("provider_pending_task_id") if not pending_scene_task else "")
         or ""
     ).strip()
@@ -2961,6 +3071,10 @@ def _provider_event_from_payload(job: dict | None, scene_index: int, payload: di
         "mode": str(payload.get("selected_capability") or payload.get("mode") or "")[:80],
         "duration": payload.get("output_duration") or payload.get("duration") or 0,
         "download_url_present": bool(payload.get("provider_result_url_present") or payload.get("result_url_present")),
+        "result_url": str(payload.get("result_url") or payload.get("provider_result_url") or payload.get("download_url") or ""),
+        "clip_path": str(payload.get("clip_path") or payload.get("output_path") or payload.get("local_path") or ""),
+        "clip_bytes": _safe_int(payload.get("clip_bytes") or payload.get("artifact_size") or payload.get("artifact_bytes") or payload.get("output_bytes") or payload.get("downloaded_file_size"), 0),
+        "clip_valid": bool(payload.get("clip_valid") or payload.get("validation_passed") or payload.get("output_validated") or _scene_output_from_payload(payload)),
         "provider_progress_raw": payload.get("provider_progress_raw") or payload.get("shopaikey_data_progress_raw") or "",
         "provider_progress_normalized": payload.get("provider_progress_normalized") or payload.get("provider_progress_percent") or 0,
         "provider_progress_last_changed_at": str(payload.get("provider_progress_last_changed_at") or payload.get("progress_last_changed_at") or ""),
@@ -3019,6 +3133,14 @@ def _run_per_scene_provider_orchestrator(
         scene = SimpleNamespace(**scene_payload)
         setattr(scene, "_toan_aas_job", dict(job or {}))
         raw_path = os.path.join(workspace, f"provider_scene_{scene_index:03d}.mp4")
+        persisted_scene = product_video_scene_task_for_index(job, scene_index)
+        persisted_clip = _scene_output_from_payload(persisted_scene)
+        if persisted_clip and bool(persisted_scene.get("clip_valid") or persisted_scene.get("validation_passed")):
+            scene_outputs[scene_index] = persisted_clip
+            retained = {**persisted_scene, "scene_index": scene_index, "status": "scene_clip_validated", "clip_valid": True}
+            debug_results.append(retained)
+            provider_events.append(_provider_event_from_payload(job, scene_index, retained))
+            continue
         try:
             result = asyncio.run(_render_scene_async(scene, raw_path, provider_order))
         except RealVideoRenderError as exc:
@@ -3257,6 +3379,9 @@ def _run_per_scene_provider_orchestrator(
         "base_video_source": PROVIDER_VIDEO_SOURCE,
         "no_charge": True,
     }
+    scene_ledger = video_project_queue_service.product_video_scene_ledger_state({}, job, base)
+    base.update(scene_ledger)
+    base["scene_coverage_valid"] = _safe_int(base.get("completed_scene_count"), 0)
     if hard_failures:
         failure = dict(hard_failures[0])
         base.update(failure)
@@ -3303,7 +3428,18 @@ def _run_per_scene_provider_orchestrator(
         base["final_decision"] = "continue_polling"
         base["key4u_submit_suppressed"] = not bool(base.get("fallback_allowed"))
         base["key4u_submit_suppressed_reason"] = str(base.get("fallback_block_reason") or ("not_start_under_threshold" if active_is_not_start else "primary_provider_in_progress"))
-        base["source_of_truth"] = str(active_scene.get("source_of_truth") or "scene_provider_task_alive")
+        partial_ledger = video_project_queue_service.product_video_scene_ledger_state({}, job, base)
+        base.update(partial_ledger)
+        base["scene_coverage_valid"] = _safe_int(base.get("completed_scene_count"), 0)
+        base["source_of_truth"] = "partial_scene_coverage" if base.get("completed_scene_count") else str(active_scene.get("source_of_truth") or "waiting_for_remaining_scenes")
+        base["visual_source"] = "scene_clip_validated" if base.get("completed_scene_count") else "provider_pending"
+        base["concat_attempted"] = False
+        base["concat_status"] = "waiting_for_clips"
+        base["concat_duration_seconds"] = 0
+        base["final_duration_coverage_reason"] = "waiting_for_required_scenes"
+        base["final_mp4_valid"] = False
+        base["final_mp4_validated"] = False
+        base["final_delivered"] = False
         return base
 
     def _cached_scene_renderer(scene, raw_path: str):
@@ -3334,6 +3470,8 @@ def _run_per_scene_provider_orchestrator(
     final_result["source_of_truth"] = "final_mp4_validated"
     final_result["concat_status"] = "completed"
     final_result["concat_attempted"] = True
+    final_result["concat_attempt_count"] = max(1, _safe_int(job.get("concat_attempt_count"), 0) + 1)
+    final_result["concat_idempotency_key"] = f"product_video_concat:{job.get('job_id') or job.get('id') or 'job'}:{_scene_count(job)}"
     final_result["concat_output_valid"] = bool(final_result.get("final_video_path"))
     final_result["concat_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
     final_result["final_mp4_valid"] = bool(final_result.get("final_video_path"))
@@ -3346,6 +3484,8 @@ def _run_per_scene_provider_orchestrator(
     final_result["invalid_delivery_attempt_prevented"] = False
     final_result["artifact_valid_for_charge_after_coverage"] = bool(final_result["scene_coverage_valid_bool"])
     final_result["missing_scene_action"] = "complete"
+    final_result.update(video_project_queue_service.product_video_scene_ledger_state({}, job, final_result))
+    final_result["scene_coverage_valid"] = _safe_int(final_result.get("completed_scene_count"), 0)
     return final_result
 
 
