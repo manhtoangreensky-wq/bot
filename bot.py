@@ -177528,6 +177528,57 @@ def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
         or current.get("subdub_success_message_id")
     )
 
+
+def subdub_restore_delivered_combo_result(
+    mode: str,
+    result: dict | None = None,
+    job: dict | None = None,
+    state: dict | None = None,
+) -> dict:
+    """Recover combo completion only when Telegram video delivery is evidenced."""
+    current_result = dict(result or {})
+    current_job = dict(job or {})
+    if normalize_video_translate_mode(mode) != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return current_result
+    if current_result.get("ok"):
+        return current_result
+    message_id = str(
+        current_job.get("video_delivery_message_id")
+        or current_job.get("final_video_message_id")
+        or current_job.get("subdub_final_video_message_id")
+        or ""
+    ).strip()
+    if not message_id or not subdub_job_video_delivery_succeeded(current_job):
+        return current_result
+    restored_state = {
+        **dict(state or {}),
+        **dict(current_result.get("state") or {}),
+        "terminal_state": "delivered",
+        "status_panel_terminalized": True,
+        "panel_finalized": True,
+        "panel_final_percent": 100,
+    }
+    return {
+        **current_job,
+        **current_result,
+        "ok": True,
+        "status": "completed",
+        "has_video": True,
+        "video_delivered": True,
+        "final_mp4_delivered": True,
+        "delivery_success": True,
+        "delivery_succeeded": True,
+        "terminal_state": "delivered",
+        "terminal_public_outcome_type": "success",
+        "terminal_public_outcome_sent": True,
+        "telegram_message_id": message_id,
+        "video_delivery_message_id": message_id,
+        "public_error_sent": False,
+        "public_failure_sent": False,
+        "late_fail_suppressed": True,
+        "state": restored_state,
+    }
+
 def subdub_job_in_final_video_delivery_path(job: dict | None = None) -> bool:
     current = dict(job or {})
     terminal = str(current.get("terminal_state") or "").strip().lower()
@@ -187040,6 +187091,38 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
             return None
+        if not result.get("ok") and mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            delivered_combo_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
+            if not str(delivered_combo_job.get("video_delivery_message_id") or "").strip():
+                fallback_combo_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
+                if fallback_combo_job:
+                    delivered_combo_job = dict(fallback_combo_job)
+            result = subdub_restore_delivered_combo_result(mode, result, delivered_combo_job, state)
+            if result.get("ok"):
+                delivered_combo_key = str(delivered_combo_job.get("job_key") or pipeline_job_key)
+                update_subtitle_dub_pipeline_job(
+                    delivered_combo_key,
+                    status="completed",
+                    terminal_state="delivered",
+                    lifecycle_state="delivered",
+                    current_stage="delivered",
+                    progress_stage="delivered",
+                    progress_percent=100,
+                    completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+                    panel_finalized=True,
+                    panel_final_percent=100,
+                    status_panel_terminalized=True,
+                    refresh_stopped_after_terminal=True,
+                    terminal_public_outcome_type="success",
+                    terminal_public_outcome_sent=True,
+                    public_error_sent=False,
+                    public_failure_sent=False,
+                    late_fail_suppressed=True,
+                    delivery_success=True,
+                    delivery_succeeded=True,
+                    final_mp4_delivered=True,
+                    video_delivery_message_id=str(result.get("video_delivery_message_id") or ""),
+                )
         if not result.get("ok"):
             if result.get("in_progress"):
                 set_video_dubbing_pending(uid, "processing", processing="1")
