@@ -5677,7 +5677,13 @@ PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL = env_flag("PROGRESS_AUTO_REFRESH_STOP_ON
 PROGRESS_AUTO_REFRESH_EDIT_ONLY = env_flag("PROGRESS_AUTO_REFRESH_EDIT_ONLY", "true")
 PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT = max(0, env_int("PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT", 5))
 VIDEO_STATUS_AUTO_REFRESH_ENABLED = env_flag("VIDEO_STATUS_AUTO_REFRESH_ENABLED", "true")
-VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS = max(10, min(20, env_int("VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS", 15)))
+VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS = max(
+    5,
+    min(
+        30,
+        env_int("VIDEO_PUBLIC_STATUS_REFRESH_SECONDS", env_int("VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS", 10)),
+    ),
+)
 VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES = max(1, env_int("VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES", 30))
 MUSIC_AUTO_DELIVERY_ENABLED = env_flag("MUSIC_AUTO_DELIVERY_ENABLED", "true")
 MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS = max(5, env_int("MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS", 20))
@@ -44201,10 +44207,10 @@ def product_video_charge_after_final_delivery(
 
 def product_video_provider_pending_public_copy(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "en":
-        return "The video system is still processing. TOAN AAS has not charged Xu and charges only after a valid MP4 is ready."
+        return "The video system is still processing. TOAN AAS has not charged Xu and charges only after the final video is delivered."
     if normalize_user_language(lang) == "zh":
-        return "视频系统仍在处理。TOAN AAS 尚未扣除 Xu，只有在有效 MP4 准备好后才扣除。"
-    return "Hệ thống đang dựng video. TOAN AAS chưa trừ Xu và chỉ trừ Xu khi có MP4 hợp lệ."
+        return "视频系统仍在处理。TOAN AAS 尚未扣除 Xu，只有在最终视频发送后才扣除。"
+    return "Hệ thống đang dựng video. TOAN AAS chưa trừ Xu và chỉ trừ Xu khi video cuối đã gửi thành công."
 
 
 def calculate_video_quote(session: dict | None = None) -> dict:
@@ -49149,8 +49155,10 @@ def video_b14_autonomous_db_poll_metadata(
         "next_poll_scheduled_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
         "next_refresh_expected_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
         "auto_refresh_enabled": bool(candidate or provider_alive),
+        "auto_refresh_interval_seconds": interval,
         "auto_refresh_recovered_from_db": bool(jid and not registry_present),
         "auto_refresh_next_tick_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
+        "auto_refresh_next_update_at": next_poll_at if candidate else str(telemetry.get("next_poll_scheduled_at") or ""),
         "auto_refresh_last_update_at": now_text_safe(),
         "auto_refresh_skip_reason": "" if candidate or provider_alive else "not_processing",
         "status_panel_message_id_source": "result_json" if payload.get("status_panel_message_id") or payload.get("latest_status_message_id") else "missing",
@@ -49189,8 +49197,13 @@ def video_b14_autonomous_db_poll_metadata(
             "persisted_progress_before_reconcile",
             "elapsed_estimate_progress",
             "public_progress_source",
+            "public_progress_mode",
+            "public_progress_percent_visible",
             "public_progress_cap",
             "persisted_progress_updated",
+            "elapsed_live_tick_enabled",
+            "elapsed_source",
+            "panel_rendered_at",
             "no_fake_success_guard",
             "in_progress_stall_elapsed",
             "in_progress_stall_threshold",
@@ -70906,8 +70919,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             "next_poll_scheduled",
             "elapsed_estimate_progress",
             "public_progress_source",
+            "public_progress_mode",
+            "public_progress_percent_visible",
             "public_progress_cap",
             "persisted_progress_updated",
+            "auto_refresh_interval_seconds",
+            "elapsed_live_tick_enabled",
+            "elapsed_source",
+            "panel_rendered_at",
             "in_progress_stall_elapsed",
             "in_progress_stall_threshold",
             "provider_progress_last_changed_at",
@@ -71009,6 +71028,25 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
     postproduction_label = video_b14_compact_postproduction_label(addon_plan)
     logo_material_line = product_video_logo_material_invoice_line(session, lang)
+    scene_board_payload = {
+        **job_result,
+        **provider_telemetry,
+        "scene_count": scene_count,
+        "scene_tasks": provider_telemetry.get("scene_tasks") or job_result.get("scene_tasks"),
+        "scene_coverage_count": provider_telemetry.get("scene_coverage_count") or job_result.get("scene_coverage_count"),
+        "concat_attempted": provider_telemetry.get("concat_attempted") if "concat_attempted" in provider_telemetry else job_result.get("concat_attempted"),
+        "delivery_succeeded": delivery_done,
+        "auto_refresh_interval_seconds": VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS,
+    }
+    scene_board = product_progress_status.video_per_scene_progress_board(scene_board_payload)
+    scene_board_text = product_progress_status.video_per_scene_progress_board_text(scene_board_payload)
+    public_progress_mode = str(scene_board.get("public_progress_mode") or provider_telemetry.get("public_progress_mode") or "").strip()
+    if delivery_done:
+        progress_line = "Tiến độ: <b>100%</b>"
+    elif public_progress_mode == "scene_and_elapsed":
+        progress_line = "Tiến độ: <b>Theo từng cảnh</b>"
+    else:
+        progress_line = f"Tiến độ: <b>{max(0, min(100, progress))}%</b>"
     lines = [
         "🎬 <b>Trạng thái tạo video</b>",
         "",
@@ -71016,7 +71054,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         "",
         f"Mã xử lý: <b>#{job_id or project_id or '-'}</b>",
         f"Gói: <b>{html.escape(package_label)}</b>",
-        f"Tiến độ: <b>{max(0, min(100, progress))}%</b>",
+        progress_line,
         f"Trạng thái: <b>{html.escape(status_label)}</b>",
         "",
         "<b>Thông tin video:</b>",
@@ -71041,17 +71079,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         ),
         "",
     ])
-    scene_board_text = product_progress_status.video_per_scene_progress_board_text(
-        {
-            **job_result,
-            **provider_telemetry,
-            "scene_count": scene_count,
-            "scene_tasks": provider_telemetry.get("scene_tasks") or job_result.get("scene_tasks"),
-            "scene_coverage_count": provider_telemetry.get("scene_coverage_count") or job_result.get("scene_coverage_count"),
-            "concat_attempted": provider_telemetry.get("concat_attempted") if "concat_attempted" in provider_telemetry else job_result.get("concat_attempted"),
-            "delivery_succeeded": delivery_done,
-        }
-    )
     if scene_board_text and scene_count > 1:
         lines.extend([scene_board_text, ""])
 
@@ -71065,12 +71092,15 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     elif status in {"completed", "success"} and has_final_artifact:
         lines.append("TOAN AAS đang gửi file kết quả cuối.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
-    elif provider_task_alive:
+    elif provider_task_alive and public_progress_mode != "scene_and_elapsed":
         lines.extend(video_b14_provider_rendering_block(provider_telemetry).splitlines())
+    elif provider_task_alive:
+        lines.append("Hệ thống đang tạo video. TOAN AAS sẽ tự cập nhật khi có kết quả.")
+        lines.append("TOAN AAS chưa trừ Xu và chỉ trừ Xu khi video cuối đã gửi thành công.")
     else:
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
-    lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+    lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối.")
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
@@ -71397,8 +71427,10 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         "next_poll_at": str(autonomous.get("next_poll_at") or ""),
         "status_panel_message_id_source": str(autonomous.get("status_panel_message_id_source") or ""),
         "auto_refresh_enabled": bool(autonomous.get("auto_refresh_enabled")),
+        "auto_refresh_interval_seconds": safe_int(autonomous.get("auto_refresh_interval_seconds"), VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS),
         "auto_refresh_recovered_from_db": bool(autonomous.get("auto_refresh_recovered_from_db")),
         "auto_refresh_next_tick_at": str(autonomous.get("auto_refresh_next_tick_at") or ""),
+        "auto_refresh_next_update_at": str(autonomous.get("auto_refresh_next_update_at") or autonomous.get("auto_refresh_next_tick_at") or ""),
         "auto_refresh_last_update_at": str(autonomous.get("auto_refresh_last_update_at") or ""),
         "auto_refresh_skip_reason": str(autonomous.get("auto_refresh_skip_reason") or ""),
     }
@@ -71517,6 +71549,8 @@ def video_b14_auto_refresh_register(
         "auto_refresh_enabled": True,
         "auto_refresh_recovered_from_db": False,
         "auto_refresh_next_tick_at": (datetime.now() + timedelta(seconds=int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS))).isoformat(timespec="seconds"),
+        "auto_refresh_next_update_at": (datetime.now() + timedelta(seconds=int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS))).isoformat(timespec="seconds"),
+        "auto_refresh_interval_seconds": int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS),
         "auto_refresh_last_update_at": now_text_safe(),
         "auto_refresh_skip_reason": "",
         "stopped": bool(snapshot.get("terminal_state")) and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
@@ -71539,6 +71573,8 @@ def video_b14_auto_refresh_register(
             "auto_refresh_enabled": True,
             "auto_refresh_recovered_from_db": False,
             "auto_refresh_next_tick_at": record.get("auto_refresh_next_tick_at"),
+            "auto_refresh_next_update_at": record.get("auto_refresh_next_update_at") or record.get("auto_refresh_next_tick_at"),
+            "auto_refresh_interval_seconds": int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS),
             "auto_refresh_last_update_at": record.get("auto_refresh_last_update_at"),
             "auto_refresh_skip_reason": "",
             "status_panel_message_id_source": "telegram_send_or_edit",
@@ -71611,6 +71647,18 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         return {"status": "missing"}
     if record.get("stopped"):
         return {"status": "stopped", "reason": record.get("stopped_reason") or ""}
+    lease_until = float(record.get("auto_refresh_lease_until_epoch") or 0)
+    current_epoch = time.time()
+    if lease_until > current_epoch:
+        record.update({
+            "auto_refresh_skip_reason": "lease_active",
+            "task_alive": True,
+        })
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {"status": "skipped", "reason": "lease_active", "record": dict(record)}
+    interval_seconds = int(record.get("interval_seconds") or VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS)
+    record["auto_refresh_lease_until_epoch"] = current_epoch + max(5, min(30, interval_seconds))
+    record["auto_refresh_lease_owner"] = "local_process"
     if int(record.get("update_count") or 0) >= int(record.get("max_updates") or VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES):
         record.update({"stopped": True, "task_alive": False, "stopped_reason": "max_updates"})
         VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
@@ -71652,14 +71700,55 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
             record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
             record["last_edit_at"] = now_text()
             record["last_update_at"] = record["last_edit_at"]
+            record["auto_refresh_edit_success"] = True
+            record["auto_refresh_skip_reason"] = ""
         except Exception as exc:
             record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
             record["last_error"] = sanitize_log_text(str(exc))[:180]
+            record["auto_refresh_edit_success"] = False
             lower = str(exc or "").lower()
             if any(fragment in lower for fragment in ("message to edit not found", "message not found", "message_id_invalid", "chat not found")):
-                record.update({"stopped": True, "task_alive": False, "stopped_reason": "message_missing"})
+                if not record.get("auto_refresh_rebind_attempted"):
+                    try:
+                        new_message = await context.bot.send_message(
+                            chat_id=record.get("chat_id"),
+                            text=str(snapshot.get("text") or ""),
+                            parse_mode="HTML",
+                            reply_markup=video_b14_queue_status_keyboard(record.get("lang") or "vi", job_id=record.get("job_id") or ""),
+                        )
+                        new_message_id = getattr(new_message, "message_id", None)
+                        if new_message_id:
+                            record.update({
+                                "message_id": new_message_id,
+                                "latest_status_message_id": new_message_id,
+                                "status_panel_message_id": new_message_id,
+                                "status_panel_message_id_source": "rebind_after_edit_failed",
+                                "auto_refresh_rebind_attempted": True,
+                                "auto_refresh_rebind_success": True,
+                                "auto_refresh_skip_reason": "",
+                                "last_edit_at": now_text(),
+                                "last_update_at": now_text(),
+                                "stopped": False,
+                                "task_alive": True,
+                                "stopped_reason": "",
+                            })
+                        else:
+                            record.update({"stopped": True, "task_alive": False, "stopped_reason": "message_missing"})
+                    except Exception as send_exc:
+                        record.update({
+                            "stopped": True,
+                            "task_alive": False,
+                            "stopped_reason": "message_missing",
+                            "auto_refresh_rebind_attempted": True,
+                            "auto_refresh_rebind_success": False,
+                            "last_error": sanitize_log_text(str(send_exc))[:180],
+                        })
+                else:
+                    record.update({"stopped": True, "task_alive": False, "stopped_reason": "message_missing"})
     else:
         record["last_checked_at"] = now_text()
+        record["auto_refresh_edit_success"] = False
+        record["auto_refresh_skip_reason"] = "render_unchanged"
     record.update({
         "current_stage": str(snapshot.get("stage") or record.get("current_stage") or ""),
         "percent": int(snapshot.get("percent") or record.get("percent") or 0),
@@ -71668,7 +71757,28 @@ async def video_b14_auto_refresh_tick(context, key: str) -> dict:
         "final_artifact_valid": bool(snapshot.get("final_artifact_valid")),
         "blocker": str(snapshot.get("blocker") or ""),
         "last_render_hash": str(snapshot.get("render_hash") or record.get("last_render_hash") or ""),
+        "auto_refresh_interval_seconds": interval_seconds,
+        "auto_refresh_last_update_at": now_text_safe(),
+        "auto_refresh_next_update_at": (datetime.now() + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds"),
+        "auto_refresh_next_tick_at": (datetime.now() + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds"),
     })
+    if safe_int(record.get("job_id"), 0):
+        video_b14_persist_auto_refresh_metadata(
+            record.get("job_id"),
+            {
+                "latest_status_message_id": record.get("message_id"),
+                "status_panel_message_id": record.get("message_id"),
+                "status_panel_message_id_source": record.get("status_panel_message_id_source") or "registry",
+                "auto_refresh_enabled": True,
+                "auto_refresh_interval_seconds": interval_seconds,
+                "auto_refresh_last_update_at": record.get("auto_refresh_last_update_at"),
+                "auto_refresh_next_update_at": record.get("auto_refresh_next_update_at"),
+                "auto_refresh_next_tick_at": record.get("auto_refresh_next_tick_at"),
+                "auto_refresh_edit_success": bool(record.get("auto_refresh_edit_success")),
+                "auto_refresh_skip_reason": str(record.get("auto_refresh_skip_reason") or ""),
+                "final_progress_after_reconcile": record.get("percent"),
+            },
+        )
     if terminal and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL):
         record.update({"stopped": True, "task_alive": False, "stopped_reason": terminal})
     VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
@@ -71724,8 +71834,10 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             f"• next_poll_at: <code>{html.escape(str(autonomous.get('next_poll_at') or snapshot.get('next_poll_at') or '-'))}</code>\n"
             f"• status_panel_message_id_source: <code>{html.escape(str(autonomous.get('status_panel_message_id_source') or snapshot.get('status_panel_message_id_source') or '-'))}</code>\n"
             f"• auto_refresh_enabled: <code>{'true' if autonomous.get('auto_refresh_enabled') or snapshot.get('auto_refresh_enabled') else 'false'}</code>\n"
+            f"• auto_refresh_interval_seconds: <code>{safe_int(autonomous.get('auto_refresh_interval_seconds') or snapshot.get('auto_refresh_interval_seconds'), VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS)}</code>\n"
             f"• auto_refresh_recovered_from_db: <code>{'true' if autonomous.get('auto_refresh_recovered_from_db') or snapshot.get('auto_refresh_recovered_from_db') else 'false'}</code>\n"
             f"• auto_refresh_next_tick_at: <code>{html.escape(str(autonomous.get('auto_refresh_next_tick_at') or snapshot.get('auto_refresh_next_tick_at') or '-'))}</code>\n"
+            f"• auto_refresh_next_update_at: <code>{html.escape(str(autonomous.get('auto_refresh_next_update_at') or snapshot.get('auto_refresh_next_update_at') or '-'))}</code>\n"
             f"• auto_refresh_last_update_at: <code>{html.escape(str(autonomous.get('auto_refresh_last_update_at') or snapshot.get('auto_refresh_last_update_at') or '-'))}</code>\n"
             f"• auto_refresh_skip_reason: <code>{html.escape(str(autonomous.get('auto_refresh_skip_reason') or snapshot.get('auto_refresh_skip_reason') or '-'))}</code>\n"
             f"• current_stage: <code>{html.escape(str(snapshot.get('stage') or '-'))}</code>\n"
@@ -71744,7 +71856,9 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
             f"• message_id: <code>{html.escape(str(record.get('message_id') or '-'))}</code>",
             f"• status_panel_message_id_source: <code>{html.escape(str(record.get('status_panel_message_id_source') or '-'))}</code>",
             f"• auto_refresh_enabled: <code>{'true' if record.get('auto_refresh_enabled') else 'false'}</code>",
+            f"• auto_refresh_interval_seconds: <code>{safe_int(record.get('auto_refresh_interval_seconds'), VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS)}</code>",
             f"• auto_refresh_next_tick_at: <code>{html.escape(str(record.get('auto_refresh_next_tick_at') or '-'))}</code>",
+            f"• auto_refresh_next_update_at: <code>{html.escape(str(record.get('auto_refresh_next_update_at') or '-'))}</code>",
             f"• auto_refresh_last_update_at: <code>{html.escape(str(record.get('auto_refresh_last_update_at') or '-'))}</code>",
             f"• auto_refresh_skip_reason: <code>{html.escape(str(record.get('auto_refresh_skip_reason') or '-'))}</code>",
             f"• registry_saved: <code>{'true' if record.get('registry_saved') else 'false'}</code>",

@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import html
 import re
+import time
+from datetime import datetime
 from typing import Any
 
 
@@ -947,35 +949,75 @@ def _video_human_elapsed(seconds: Any) -> str:
     return f"{secs} giây"
 
 
+def _video_epoch_from_value(value: Any) -> float:
+    if value in (None, ""):
+        return 0.0
+    try:
+        numeric = float(value)
+        if numeric > 0:
+            return numeric
+    except Exception:
+        pass
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            return parsed.timestamp()
+        return parsed.timestamp()
+    except Exception:
+        return 0.0
+
+
 def _video_scene_status_label(status: Any, clip_ready: bool = False) -> str:
     raw = str(status or "").strip().lower().replace("-", "_")
     if clip_ready or raw in {"done", "complete", "completed", "success", "clip_ready", "downloaded", "validated"}:
-        return "đã có clip"
+        return "Đã xong"
     if raw in {"provider_not_start", "not_start", "queued", "waiting", "pending"}:
-        return "đang chờ bắt đầu"
+        return "Đang chờ bắt đầu"
     if raw in {"provider_running", "running", "in_progress", "processing", "final_rendering", "rendering"}:
-        return "đang dựng"
+        return "Đang tạo"
     if raw in {"provider_stalled_not_start", "stalled", "fallback_pending", "retrying"}:
-        return "đang chuyển hướng xử lý"
+        return "Đang chuyển hướng xử lý"
     if raw in {"failed", "failed_no_charge", "error", "provider_failed"}:
-        return "chưa dựng được"
-    return "đang xử lý"
+        return "Chưa tạo được"
+    return "Đang xử lý"
 
 
-def _video_scene_provider_label(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if raw == "shopaikey_video":
-        return "ShopAIKey"
-    if raw == "key4u_video":
-        return "Key4U"
-    if raw in {"", "-", "none", "unknown"}:
-        return "hệ thống"
-    cleaned = raw.replace("_video", "").replace("_", " ").strip()
-    return cleaned.title() if cleaned else "hệ thống"
+def _video_scene_started_epoch(item: dict[str, Any], current: dict[str, Any]) -> tuple[float, str]:
+    for source, data in (("scene", item), ("job", current)):
+        for key in (
+            "started_at",
+            "scene_started_at",
+            "scene_submitted_at",
+            "submitted_at",
+            "provider_started_at",
+            "provider_wait_started_at",
+            "first_seen_at",
+            "created_at",
+        ):
+            epoch = _video_epoch_from_value(data.get(key))
+            if epoch > 0:
+                return epoch, f"persisted_{key}"
+        for key in (
+            "started_at_epoch",
+            "scene_started_at_epoch",
+            "scene_submitted_at_epoch",
+            "submitted_at_epoch",
+            "provider_started_at_epoch",
+            "provider_wait_started_at_epoch",
+            "first_seen_at_epoch",
+        ):
+            epoch = _video_epoch_from_value(data.get(key))
+            if epoch > 0:
+                return epoch, f"persisted_{key}"
+    return 0.0, "elapsed_field"
 
 
 def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[str, Any]:
     current = dict(job or {})
+    now_epoch = _video_epoch_from_value(current.get("_panel_now_epoch") or current.get("panel_rendered_at_epoch")) or time.time()
     scene_count = max(
         0,
         _as_int(
@@ -1019,13 +1061,15 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
     coverage_count = _as_int(current.get("scene_coverage_count") or current.get("scene_clip_count") or current.get("scenes_done"), 0)
     lines: list[str] = []
     statuses: list[dict[str, Any]] = []
+    elapsed_by_scene: dict[str, int] = {}
+    elapsed_sources: dict[str, str] = {}
+    raw_progress_values: list[int] = []
     for idx in range(1, max(scene_count, len(by_index)) + 1):
         item = by_index.get(idx, {"scene_index": idx})
         result_url = str(item.get("result_url") or item.get("clip_result_url") or item.get("video_url") or "").strip()
         clip_ready = bool(result_url) or _as_bool(item.get("clip_valid") or item.get("clip_ready") or item.get("downloaded"))
         status = item.get("status") or item.get("current_scene_status") or current.get("current_scene_status")
         label = _video_scene_status_label(status, clip_ready)
-        provider = _video_scene_provider_label(item.get("provider") or item.get("selected_provider") or current.get("selected_provider"))
         raw_progress = _as_int(
             item.get("provider_progress")
             or item.get("provider_progress_raw")
@@ -1033,53 +1077,88 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
             or item.get("progress"),
             0,
         )
-        elapsed = _as_int(
+        raw_progress_values.append(max(0, min(100, raw_progress)))
+        started_epoch, elapsed_source = _video_scene_started_epoch(item, current)
+        elapsed = int(max(0, now_epoch - started_epoch)) if started_epoch > 0 else _as_int(
             item.get("provider_elapsed_seconds")
             or item.get("elapsed_seconds")
             or item.get("scene_not_start_elapsed")
             or current.get("provider_elapsed_seconds"),
             0,
         )
-        clip_text = "đã có MP4" if clip_ready else "chưa có MP4"
-        progress_text = f" · {max(0, min(100, raw_progress))}%" if raw_progress > 0 else ""
-        elapsed_text = f" · {_video_human_elapsed(elapsed)}" if elapsed > 0 else ""
-        provider_text = "" if provider == "hệ thống" else f" · {html.escape(provider)}"
-        lines.append(
-            f"• Cảnh {idx}/{max(scene_count, idx)}: {html.escape(label)}{provider_text}{elapsed_text}{progress_text} · {clip_text}"
-        )
+        elapsed_by_scene[str(idx)] = elapsed
+        elapsed_sources[str(idx)] = elapsed_source
+        if clip_ready:
+            lines.append(f"• Cảnh {idx}/{max(scene_count, idx)}: {html.escape(label)}")
+        elif elapsed > 0:
+            lines.append(f"• Cảnh {idx}/{max(scene_count, idx)}: {html.escape(label)} — đã chờ {_video_human_elapsed(elapsed)}")
+        else:
+            lines.append(f"• Cảnh {idx}/{max(scene_count, idx)}: {html.escape(label)}")
         statuses.append(
             {
                 "scene_index": idx,
                 "status": label,
-                "provider": provider,
                 "elapsed_seconds": elapsed,
                 "provider_progress": raw_progress,
                 "clip_ready": clip_ready,
+                "elapsed_source": elapsed_source,
             }
         )
     concat_attempted = _as_bool(current.get("concat_attempted") or current.get("stitch_attempted"))
     concat_waiting = bool(scene_count > 1 and coverage_count < scene_count)
+    final_delivered = _as_bool(current.get("final_delivered") or current.get("delivery_succeeded"))
+    final_artifact = job_has_final_artifact(current)
+    lines.append(f"• Hoàn tất: {coverage_count}/{max(scene_count, 1)} cảnh")
     if scene_count > 1:
-        if concat_waiting:
-            lines.append(f"• Ghép video: chờ đủ {coverage_count}/{scene_count} cảnh.")
-        elif concat_attempted:
-            lines.append("• Ghép video: hệ thống đang ghép video cuối.")
+        if final_delivered:
+            lines.append("• Ghép video: Đã xong")
+        elif concat_waiting and coverage_count > 0:
+            lines.append("• Ghép video: Chờ cảnh còn lại")
+        elif concat_waiting:
+            lines.append("• Ghép video: Chưa bắt đầu")
+        elif concat_attempted or coverage_count >= scene_count:
+            lines.append("• Ghép video: Đang thực hiện")
         else:
-            lines.append("• Ghép video: sẵn sàng khi đủ clip.")
-    if _as_bool(current.get("final_delivered") or current.get("delivery_succeeded")):
-        lines.append("• Gửi kết quả: đã gửi video hoàn chỉnh.")
-    elif job_has_final_artifact(current):
-        lines.append("• Gửi kết quả: đang kiểm tra file cuối.")
+            lines.append("• Ghép video: Chưa bắt đầu")
+    if final_delivered:
+        lines.append("• Video đã hoàn tất")
+        lines.append("• Đã gửi kết quả")
+    elif final_artifact:
+        lines.append("• Gửi kết quả: Đang kiểm tra")
     else:
-        lines.append("• Gửi kết quả: chờ video hoàn chỉnh.")
+        lines.append("• Gửi kết quả: Chưa bắt đầu")
+    refresh_seconds = max(5, min(30, _as_int(current.get("auto_refresh_interval_seconds") or current.get("panel_refresh_interval_seconds"), 10)))
+    if not final_delivered:
+        lines.append(f"• Hệ thống sẽ tự kiểm tra lại sau {refresh_seconds} giây")
+        threshold = _as_int(current.get("in_progress_stall_threshold") or current.get("not_start_threshold_seconds"), 0)
+        stall_elapsed = _as_int(current.get("in_progress_stall_elapsed") or current.get("provider_elapsed_seconds"), 0)
+        if threshold > 0 and stall_elapsed < threshold:
+            lines.append(f"• Nếu chưa có kết quả sau {_video_human_elapsed(threshold - stall_elapsed)}, hệ thống sẽ tự chuyển hướng xử lý.")
+        elif threshold > 0:
+            lines.append("• Hệ thống đang tiếp tục kiểm tra và sẽ tự xử lý nếu chờ quá lâu.")
+    unique_raw = {value for value in raw_progress_values if value > 0}
+    progress_source = str(current.get("public_progress_source") or current.get("render_progress_source") or "").strip().lower()
+    untrusted_progress = bool(
+        current.get("provider_progress_public_suppressed")
+        or progress_source in {"provider_elapsed_in_progress", "elapsed_provider_wait", "scene_and_elapsed"}
+        or (len(unique_raw) == 1 and coverage_count == 0 and not final_artifact)
+    )
+    public_progress_mode = "scene_and_elapsed" if scene_count > 1 and untrusted_progress and not final_delivered else "percent"
     return {
         "visible": bool(lines),
         "scene_count": scene_count,
         "lines": lines,
         "scene_statuses": statuses,
+        "elapsed_live_tick_enabled": True,
+        "elapsed_source": "persisted_started_at" if any(source.startswith("persisted_") for source in elapsed_sources.values()) else "elapsed_field",
+        "elapsed_seconds_by_scene": elapsed_by_scene,
+        "panel_rendered_at_epoch": now_epoch,
         "concat_waiting_for_scene_coverage": concat_waiting,
         "concat_attempted": bool(concat_attempted and not concat_waiting),
         "scene_coverage_count": coverage_count,
+        "public_progress_mode": public_progress_mode,
+        "public_progress_percent_visible": bool(public_progress_mode != "scene_and_elapsed" or final_delivered),
+        "public_technical_terms_hidden": True,
     }
 
 
@@ -1563,8 +1642,14 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "provider_elapsed_seconds",
             "elapsed_estimate_progress",
             "public_progress_source",
+            "public_progress_mode",
+            "public_progress_percent_visible",
             "public_progress_cap",
             "persisted_progress_updated",
+            "elapsed_live_tick_enabled",
+            "elapsed_source",
+            "panel_rendered_at",
+            "elapsed_seconds_by_scene",
             "no_fake_success_guard",
             "in_progress_stall_elapsed",
             "in_progress_stall_threshold",

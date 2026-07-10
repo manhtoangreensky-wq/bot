@@ -816,6 +816,27 @@ def reconcile_provider_progress_telemetry(
             in_progress_stall_decision = "progress_changed_recently_continue_polling"
         else:
             in_progress_stall_decision = "under_threshold_continue_polling"
+    scene_count_for_public = max(
+        _as_int(payload.get("scene_count") or payload.get("scenes_total") or payload.get("scene_tasks_total"), 0),
+        len(payload.get("scene_tasks") or []) if isinstance(payload.get("scene_tasks"), list) else 0,
+    )
+    scene_done_for_public = _as_int(
+        payload.get("scene_coverage_count")
+        or payload.get("scene_clip_count")
+        or payload.get("scene_tasks_completed")
+        or payload.get("scenes_done"),
+        0,
+    )
+    raw_progress_fixed_without_scene = bool(
+        actual_provider_running
+        and scene_count_for_public > 1
+        and scene_done_for_public <= 0
+        and raw_progress_number not in (None, "")
+        and not result_url_present
+        and not final_output_ready
+        and progress_last_changed_elapsed >= 60
+    )
+    public_progress_mode = "scene_and_elapsed" if raw_progress_fixed_without_scene else "percent"
     provider_progress_effective, provider_progress_trusted, provider_progress_cap_reason, provider_progress_cap_applied = _provider_progress_effective(
         normalized_progress,
         raw_progress_number=raw_progress_number,
@@ -942,6 +963,8 @@ def reconcile_provider_progress_telemetry(
         "render_progress_source": render_source,
         "elapsed_estimate_progress": elapsed_estimate_progress,
         "public_progress_source": public_progress_source,
+        "public_progress_mode": public_progress_mode,
+        "public_progress_percent_visible": bool(public_progress_mode != "scene_and_elapsed" or final_delivered),
         "public_progress_cap": public_progress_cap,
         "persisted_progress_updated": bool(final_progress > persisted_progress),
         "in_progress_stall_elapsed": progress_last_changed_elapsed if actual_provider_running else 0,
@@ -1003,6 +1026,15 @@ def reconcile_provider_progress_telemetry(
         "elapsed_monotonic_applied": bool(elapsed_monotonic_applied),
         "elapsed_display_text": _human_elapsed(elapsed),
         "panel_refresh_interval_seconds": _as_int(payload.get("panel_refresh_interval_seconds"), 25),
+        "auto_refresh_interval_seconds": _as_int(
+            payload.get("auto_refresh_interval_seconds")
+            or payload.get("panel_refresh_interval_seconds")
+            or os.getenv("VIDEO_PUBLIC_STATUS_REFRESH_SECONDS"),
+            10,
+        ),
+        "elapsed_live_tick_enabled": True,
+        "elapsed_source": "persisted_started_at" if started_source != "now" else "elapsed_field",
+        "panel_rendered_at": now_text(current_dt),
         "provider_status_raw": actual_provider_status_raw,
         "provider_status_normalized": provider_status or payload.get("normalized_provider_status") or payload.get("provider_status") or ("running" if alive else ""),
         "actual_provider_payload_status": actual_provider_status,
