@@ -5276,7 +5276,17 @@ def save_video_project_storyboard(project_id: int, storyboard, *, conn=None) -> 
         if owned:
             db.close()
 
-def confirm_video_project_invoice(project_id: int, user_id, *, balance_xu=None, use_wallet: bool = True, deduct_func=None, conn=None) -> dict:
+def confirm_video_project_invoice(
+    project_id: int,
+    user_id,
+    *,
+    balance_xu=None,
+    use_wallet: bool = True,
+    deduct_func=None,
+    provider_admission: dict | None = None,
+    require_provider_admission: bool = False,
+    conn=None,
+) -> dict:
     owned = conn is None
     db = conn or db_connect()
     try:
@@ -5293,12 +5303,47 @@ def confirm_video_project_invoice(project_id: int, user_id, *, balance_xu=None, 
                 apply_member_discount_flag=False,
             )
 
+        final_admission = dict(provider_admission or {})
+        if require_provider_admission:
+            current_project = video_project_queue.get_video_project(db, int(project_id))
+            scene_count = max(1, safe_int((current_project or {}).get("scene_count"), 1))
+            preflight = product_video_provider_availability_preflight(db)
+            if preflight.get("ok"):
+                scene_gate = product_video_multi_scene_health_gate(scene_count, preflight)
+                final_admission = {
+                    **preflight,
+                    **scene_gate,
+                    "provider_eligibility_snapshot": scene_gate.get("provider_eligibility_snapshot") or scene_gate,
+                    "admission_snapshot_id": str(
+                        scene_gate.get("provider_eligibility_snapshot_id")
+                        or preflight.get("provider_eligibility_snapshot_id")
+                        or ""
+                    ),
+                    "admission_candidate_keys": list(scene_gate.get("eligible_provider_keys") or []),
+                    "admission_candidate_count": safe_int(scene_gate.get("final_eligible_provider_count"), 0),
+                    "admission_result": "allowed" if scene_gate.get("ok") else "blocked",
+                    "admission_block_reason": "" if scene_gate.get("ok") else str(
+                        scene_gate.get("blocker") or "no_eligible_product_video_provider"
+                    ),
+                }
+            else:
+                final_admission = {
+                    **preflight,
+                    "admission_candidate_keys": [],
+                    "admission_candidate_count": 0,
+                    "admission_result": "blocked",
+                    "admission_block_reason": str(
+                        preflight.get("blocker") or preflight.get("no_charge_reason") or "no_eligible_product_video_provider"
+                    ),
+                }
         return video_project_queue.confirm_video_project_invoice(
             db,
             project_id=int(project_id),
             user_id=int(user_id),
             balance_xu=balance_xu,
             deduct_func=_deduct,
+            provider_admission=final_admission,
+            require_provider_admission=bool(require_provider_admission),
         )
     finally:
         if owned:
@@ -75848,6 +75893,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             uid,
             balance_xu=None if is_internal else int(credits or 0),
             use_wallet=False,
+            require_provider_admission=not is_internal,
         )
         if not result.get("ok"):
             reason = str(result.get("reason") or "confirm_failed")
@@ -75858,6 +75904,30 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     video_b14_insufficient_balance_text(int(credits or 0), required, lang),
                     parse_mode="HTML",
                     reply_markup=video_b14_insufficient_balance_keyboard(uid, lang),
+                )
+            if reason in {
+                "no_eligible_product_video_provider",
+                "no_eligible_provider_before_scene_dispatch",
+                "no_healthy_video_provider_no_charge",
+            }:
+                return await safe_edit_or_send(
+                    query,
+                    result.get("public_message") or "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
+                    parse_mode=None,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
+                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                    ]),
+                )
+            if result.get("public_message"):
+                return await safe_edit_or_send(
+                    query,
+                    str(result.get("public_message") or ""),
+                    parse_mode=None,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
+                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                    ]),
                 )
             return await safe_edit_or_send(query, f"⚠️ Chưa thể xác nhận video: {html.escape(reason)}. TOAN AAS chưa xử lý thêm.", parse_mode="HTML")
         session = get_video_session(uid)
