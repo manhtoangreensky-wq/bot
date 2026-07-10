@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from services.subdub_tts_language_routing import (
+    resolve_subdub_tts_language_route,
+    subdub_tts_language_state_fields,
+)
+
 
 VIDEO_SUBTITLE_MODE_CREATE = "subtitle_create"
 VIDEO_SUBTITLE_MODE_TRANSLATE = "subtitle_translate"
@@ -165,9 +170,32 @@ async def process_subtitle_dub_job(
     route_attempts = {
         "shared_core": subdub_mode_uses_shared_core(mode),
         "subtitle_prepare": False,
+        "tts_language_preflight": False,
         "tts": False,
         "render": False,
     }
+    tts_language_route: dict[str, Any] = {}
+    if _mode_needs_dub(mode):
+        route_attempts["tts_language_preflight"] = True
+        tts_language_route = resolve_subdub_tts_language_route(state)
+        language_fields = subdub_tts_language_state_fields(tts_language_route)
+        state.update(language_fields)
+        if not tts_language_route.get("ok"):
+            return {
+                "ok": False,
+                "status": "UNSUPPORTED_LANGUAGE_FOR_TTS",
+                "error_code": "unsupported_language_for_tts",
+                "admin_debug_summary": "unsupported_language_for_tts",
+                "public_safe_error": "Ngôn ngữ lồng tiếng này chưa được hỗ trợ. Hệ thống chưa xử lý file và chưa trừ Xu.",
+                "provider_called": False,
+                "tts_provider_called": False,
+                "charged": False,
+                "created_files": [],
+                "state": state,
+                "product_type": _product_type_for_mode(mode),
+                "route_attempts": route_attempts,
+                **language_fields,
+            }
     try:
         route_attempts["subtitle_prepare"] = True
         prepared = await _maybe_await(prepare_subtitles(state))
@@ -184,6 +212,10 @@ async def process_subtitle_dub_job(
         }
     prepared = dict(prepared or {})
     pipeline_state = dict(prepared.get("state") or state)
+    if tts_language_route:
+        language_fields = subdub_tts_language_state_fields(tts_language_route)
+        pipeline_state.update(language_fields)
+        prepared["tts_language_route"] = dict(tts_language_route)
     source_bytes = bytes(prepared.get("source_bytes") or b"")
     content_type = str(prepared.get("content_type") or "")
     output_subtitle = str(prepared.get("output_subtitle") or "").strip()
@@ -268,6 +300,18 @@ async def process_subtitle_dub_job(
                 "voice_resolution": dict(pipeline_state.get("_subdub_voice_resolution") or {}),
                 "route_attempts": route_attempts,
             }
+        voice_resolution = dict(pipeline_state.get("_subdub_voice_resolution") or {})
+        pipeline_state["resolved_voice_id_masked"] = (
+            f"{selected_tts_voice_id[:4]}...{selected_tts_voice_id[-3:]}"
+            if len(selected_tts_voice_id) > 9
+            else selected_tts_voice_id
+        )
+        pipeline_state["resolved_voice_name"] = str(
+            voice_resolution.get("selected_voice_label")
+            or pipeline_state.get("voice_style")
+            or pipeline_state.get("voice_kind")
+            or "selected_subdub_voice"
+        )[:120]
         speed = float(parse_voice_speed(str(pipeline_state.get("voice_speed") or "1.0")))
         route_attempts["tts"] = True
         segment_tts = await _maybe_await(
@@ -277,6 +321,9 @@ async def process_subtitle_dub_job(
                 voice_id=selected_tts_voice_id,
                 base_speed=speed,
                 max_speed=min(1.0, max(0.7, speed)),
+                tts_language_code=pipeline_state.get("resolved_tts_language_code") or "auto",
+                tts_language_boost=pipeline_state.get("tts_language_boost") or "auto",
+                edge_voice_id=pipeline_state.get("resolved_edge_voice_id") or "",
             )
         )
         segment_tts = dict(segment_tts or {})
@@ -384,6 +431,12 @@ async def process_subtitle_dub_job(
         "video_output": video_output,
         "normalization_detail": normalization_detail,
         "selected_tts_voice_id": selected_tts_voice_id,
+        "requested_target_language": str(pipeline_state.get("requested_target_language") or ""),
+        "resolved_tts_language_code": str(pipeline_state.get("resolved_tts_language_code") or ""),
+        "resolved_voice_id_masked": str(pipeline_state.get("resolved_voice_id_masked") or ""),
+        "resolved_voice_name": str(pipeline_state.get("resolved_voice_name") or ""),
+        "voice_source": str(pipeline_state.get("voice_source") or ""),
+        "unsupported_reason": str(pipeline_state.get("unsupported_reason") or ""),
         "output_type": output_type,
         "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider") or tts_provider),
         "charged": False,

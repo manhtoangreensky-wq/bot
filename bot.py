@@ -59142,7 +59142,7 @@ async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
             return audio_bytes, encoding
     return b"", "empty_demo_audio"
 
-async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False) -> tuple[str, bytes, str, int]:
+async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False, tts_language_code: str = "auto", tts_language_boost: str = "auto") -> tuple[str, bytes, str, int]:
     if not key4u_minimax_tts_configured(require_public=not allow_admin):
         return "MISSING", b"", "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing", 0
     provider = key4u_provider_instance()
@@ -59164,6 +59164,11 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
         downloaded, detail, download_http = await _download_audio_url_bytes(fallback_url)
         if downloaded:
             return "PASS", downloaded, f"http={fallback_http}; {detail}; route=key4u_voice_fallback", int(download_http or fallback_http)
+    language_code = str(tts_language_code or "auto").strip().lower()
+    language_boost = str(tts_language_boost or "auto").strip().lower()
+    if language_code not in {"", "auto", "vi", "vi-vn"} and language_boost not in {"", "auto", "vietnamese"}:
+        fallback_detail = sanitize_provider_error(fallback.get("error_message_safe") or fallback_status)[:160]
+        return "UNSUPPORTED_LANGUAGE_ROUTE", b"", ("multilingual_route_unavailable" + (" | voice_fallback=" + fallback_detail if fallback_detail else ""))[:240], fallback_http
     result = await provider.tts(
         str(text or "")[:3500],
         model=KEY4U_TTS_MODEL,
@@ -59262,9 +59267,9 @@ async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: s
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
 
-async def call_key4u_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False) -> tuple[str, bytes, str, int]:
+async def call_key4u_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False, tts_language_code: str = "auto", tts_language_boost: str = "auto") -> tuple[str, bytes, str, int]:
     try:
-        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)
+        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin, tts_language_code=tts_language_code, tts_language_boost=tts_language_boost)
     except TypeError:
         return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=allow_admin)
 
@@ -182750,7 +182755,7 @@ async def execute_video_dubbing_preview(
         )
     return {"ok": True, "preview_seconds": preview_seconds, "preview_text": preview_text[:700]}
 
-async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: str = "", voice_speed: str = "1.0", allow_admin: bool = False) -> tuple[str, bytes, str]:
+async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: str = "", voice_speed: str = "1.0", allow_admin: bool = False, tts_language_code: str = "auto", tts_language_boost: str = "auto", edge_voice_id: str = "") -> tuple[str, bytes, str]:
     provider = str(TTS_PROVIDER or "auto").lower()
     candidates = []
     openai_tts_candidates = []
@@ -182766,15 +182771,17 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
         else ("onyx" if requested_gender == "male" or "male" in voice_hint_source.lower() or "nam" in voice_hint_source.lower() else "alloy")
     )
     minimax_voice_requested = bool(str(voice_id or "").strip() and minimax_voice_adapter.validate_provider_voice_id(voice_id))
+    language_code = str(tts_language_code or "auto").strip().lower()
+    international_route = language_code not in {"", "auto", "vi", "vi-vn"}
     key4u_ready = key4u_minimax_tts_configured(require_public=not allow_admin) if allow_admin else key4u_minimax_tts_public_ready()
     shopaikey_ready = shopaikey_minimax_tts_configured() if allow_admin else shopaikey_minimax_tts_public_ready()
     direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
     shopaikey_fallback_ready = bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_DUBBING_TTS_ENDPOINT) if allow_admin else shopaikey_tts_fallback_public_ready()
     if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready:
-        candidates.append(("Key4U MiniMax", lambda value: call_key4u_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)))
+        candidates.append(("Key4U MiniMax", lambda value: call_key4u_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin, tts_language_code=tts_language_code, tts_language_boost=tts_language_boost)))
     if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_ready:
         candidates.append(("ShopAIKey MiniMax", lambda value: call_shopaikey_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
-    if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_ready:
+    if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_ready and not international_route:
         candidates.append(("MiniMax", lambda value: call_direct_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
     if provider in {"auto", "key4u", "openai", "openai_compatible"} and KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_AUDIO_SPEECH_ENDPOINT and (allow_admin or KEY4U_PUBLIC_ENABLED):
         openai_tts_candidates.append((
@@ -182803,13 +182810,13 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
             ),
         ))
     candidates = (candidates + openai_tts_candidates) if minimax_voice_requested else (openai_tts_candidates + candidates)
-    if provider in {"auto", "shopaikey", "shopai"} and shopaikey_fallback_ready:
+    if provider in {"auto", "shopaikey", "shopai"} and shopaikey_fallback_ready and not international_route:
         candidates.append(("ShopAIKey", lambda value: shopaikey_tts_bytes(value, endpoint_override=SHOPAIKEY_DUBBING_TTS_ENDPOINT)))
     if provider in {"auto", "elevenlabs"}:
         candidates.append(("ElevenLabs", tts_elevenlabs_bytes))
     if provider in {"auto", "fish", "fish_audio"}:
         candidates.append(("Fish Audio", tts_fish_audio_bytes))
-    if provider in {"auto", "voxcpm2", "voxcpm2_local", "local"} and voice_tts_backend_choice() != "paid_provider":
+    if provider in {"auto", "voxcpm2", "voxcpm2_local", "local"} and voice_tts_backend_choice() != "paid_provider" and not international_route:
         candidates.append((
             "VoxCPM2 Local",
             lambda value: call_voxcpm2_tts_bytes(
@@ -182822,7 +182829,7 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
             ),
         ))
     if provider in {"auto", "edge", "edge_tts"}:
-        candidates.append(("Edge TTS", lambda value: call_edge_tts_with_speed(value, voice_id=voice_id, voice_speed=voice_speed)))
+        candidates.append(("Edge TTS", lambda value: call_edge_tts_with_speed(value, voice_id=edge_voice_id or voice_id, voice_speed=voice_speed)))
     errors = []
     for label, func in candidates:
         status, audio_bytes, detail, _http_status = await func(text[:3500])
@@ -182878,6 +182885,9 @@ async def synthesize_dub_segment_chunks(
     base_speed: float = 1.0,
     max_speed: float = 1.0,
     allow_admin: bool = False,
+    tts_language_code: str = "auto",
+    tts_language_boost: str = "auto",
+    edge_voice_id: str = "",
 ) -> dict:
     chunks = []
     providers = []
@@ -182900,6 +182910,9 @@ async def synthesize_dub_segment_chunks(
                 voice_id,
                 str(speed),
                 allow_admin=allow_admin,
+                tts_language_code=tts_language_code,
+                tts_language_boost=tts_language_boost,
+                edge_voice_id=edge_voice_id,
             )
         except TypeError:
             provider, audio_bytes, detail = await video_dubbing_tts_bytes(
@@ -182920,6 +182933,9 @@ async def synthesize_dub_segment_chunks(
                         voice_id,
                         f"{retry_speed:.3f}",
                         allow_admin=allow_admin,
+                        tts_language_code=tts_language_code,
+                        tts_language_boost=tts_language_boost,
+                        edge_voice_id=edge_voice_id,
                     )
                 except TypeError:
                     retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
@@ -183830,6 +183846,13 @@ async def _execute_video_dubbing_pipeline_core(
                 voice_state["_subdub_voice_resolution"] = voice_resolution
             state.update(voice_state)
             return _failed_product_result("VOICE_NOT_READY", subdub_voice_not_ready_text(lang), detail or str(voice_resolution.get("reason") or "voice_not_ready"), stage="voice")
+        if status == "UNSUPPORTED_LANGUAGE_FOR_TTS":
+            target_language = str((product_result.get("state") or {}).get("requested_target_language") or state.get("target_language") or "").strip()
+            unsupported_text = (
+                "TOAN AAS chưa hỗ trợ lồng tiếng cho ngôn ngữ đã chọn. Hệ thống chưa xử lý file và chưa trừ Xu."
+                + (f" Anh/chị hãy chọn ngôn ngữ khác thay cho {target_language}." if target_language else "")
+            )
+            return _failed_product_result("UNSUPPORTED_LANGUAGE_FOR_TTS", unsupported_text, detail or "unsupported_language_for_tts", stage="voice")
         if status == "VIDEO_RENDER_FAILED":
             return _failed_product_result("VIDEO_RENDER_FAILED", subdub_mode_fail_text(mode, lang), detail, stage="video")
         fail_text = (
