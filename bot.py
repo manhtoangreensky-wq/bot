@@ -93,7 +93,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -1858,11 +1858,17 @@ VIDEO_LARGE_FILE_WARNING_MB = max(1, env_int("VIDEO_LARGE_FILE_WARNING_MB", 80))
 VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", 150))
 PIPELINE_MAX_INPUT_MB_ADMIN = max(1, env_int("PIPELINE_MAX_INPUT_MB_ADMIN", 100))
 PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50))
+SUBDUB_MAX_INPUT_MB = max(1, min(50, env_int("SUBDUB_MAX_INPUT_MB", 50)))
 PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 300))
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 300))
 SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
 SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
 SUBDUB_LONG_CHUNK_SECONDS = max(10, min(30, env_int("SUBDUB_LONG_CHUNK_SECONDS", 30)))
+SUBDUB_LONG_PROJECT_MAX_PARTS = max(1, min(48, env_int("SUBDUB_LONG_PROJECT_MAX_PARTS", 12)))
+SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS = max(
+    SUBDUB_MAX_DURATION_SECONDS,
+    env_int("SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 3600),
+)
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
 TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
 TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_MAX_TELEGRAM_OUTPUT_MB))
@@ -93851,10 +93857,12 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• no charge reason: <code>{esc(job.get('no_charge_reason'))}</code>",
         f"• duration: <code>{intval(job.get('duration_seconds'))}</code>",
         f"• input duration: <code>{intval(job.get('input_duration') or job.get('duration_seconds'))}</code>",
+        f"• input duration seconds: <code>{intval(job.get('input_duration_seconds') or job.get('input_duration') or job.get('duration_seconds'))}</code>",
         f"• detected duration source: <code>{esc(job.get('detected_duration_source'))}</code>",
         f"• telegram duration: <code>{intval(job.get('telegram_duration'))}</code>",
         f"• ffprobe duration: <code>{intval(job.get('ffprobe_duration'))}</code>",
         f"• duration limit: <code>{intval(job.get('duration_limit') or job.get('duration_limit_seconds') or subdub_full_duration_limit_seconds(False))}</code>",
+        f"• duration limit source: <code>{esc(job.get('duration_limit_source'))}</code>",
         f"• duration gate result: <code>{esc(job.get('duration_gate_result'))}</code>",
         f"• duration guard stage: <code>{esc(job.get('duration_guard_stage'))}</code>",
         f"• is long media: <code>{yes_no(job.get('is_long_media'))}</code>",
@@ -93872,6 +93880,12 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• status panel message id: <code>{esc(job.get('status_panel_message_id'))}</code>",
         f"• chunking enabled: <code>{yes_no(job.get('chunking_enabled'))}</code>",
         f"• chunk count: <code>{intval(job.get('chunk_count'))}</code>",
+        f"• chunk strategy: <code>{esc(job.get('chunk_strategy'))}</code>",
+        f"• project split required: <code>{yes_no(job.get('project_split_required'))}</code>",
+        f"• project parts delivered: <code>{intval(job.get('project_parts_delivered'))}/{intval(job.get('project_part_count'))}</code>",
+        f"• project max duration: <code>{intval(job.get('project_max_duration_seconds'))}</code>",
+        f"• final mux duration: <code>{intval(job.get('final_mux_duration') or job.get('final_mp4_duration'))}</code>",
+        f"• delivery status: <code>{esc(job.get('delivery_status'))}</code>",
         f"• gate product route allowed: <code>{yes_no(matrix.get('product_route_allowed'))}</code>",
         f"• gate blackbox enabled: <code>{yes_no(matrix.get('blackbox_enabled'))}</code>",
         f"• gate ASR enabled: <code>{yes_no(matrix.get('asr_enabled'))}</code>",
@@ -174512,7 +174526,7 @@ def subtitle_plus_dub_is_active(state: dict | None = None) -> bool:
 
 def subtitle_plus_dub_exceeds_limits(state: dict | None = None, *, admin: bool = False) -> bool:
     state = dict(state or {})
-    max_bytes = pipeline_input_limit_mb(admin) * 1024 * 1024
+    max_bytes = subdub_input_limit_mb(admin) * 1024 * 1024
     max_duration = pipeline_duration_limit_seconds(admin)
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
     duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
@@ -175610,6 +175624,20 @@ def video_dubbing_pricing_keyboard(lang: str = "vi", origin: str = "video") -> I
         [InlineKeyboardButton("⬅️ Quay lại bảng giá" if is_vi else "⬅️ Back to pricing", callback_data="pricing|video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
+def subdub_media_limits_notice(lang: str = "vi") -> str:
+    max_parts = int(SUBDUB_LONG_PROJECT_MAX_PARTS)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"File limit: {SUBDUB_MAX_INPUT_MB} MB. Each result video is up to "
+            f"{SUBDUB_MAX_DURATION_SECONDS} seconds. Longer videos are split into up to "
+            f"{max_parts} parts and sent in order."
+        )
+    return (
+        f"Lưu ý: File tối đa {SUBDUB_MAX_INPUT_MB} MB. Mỗi video kết quả tối đa "
+        f"{SUBDUB_MAX_DURATION_SECONDS} giây. Video dài hơn sẽ được chia tối đa "
+        f"{max_parts} phần và gửi lần lượt."
+    )
+
 def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     mode = normalize_video_translate_mode(
@@ -175619,17 +175647,20 @@ def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> st
     flow_type = str(state.get("flow_type") or "")
     combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
     process_label = video_dubbing_process_label(mode, lang)
+    limits_notice = subdub_media_limits_notice(lang)
     if normalize_user_language(lang) != "vi":
         if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath:
             if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
                 return (
                     "📎 <b>Send a video without subtitles</b>\n\n"
                     "TOAN AAS will create original subtitles first, then let you choose the translation language and dubbing voice.\n\n"
+                    f"{limits_notice}\n\n"
                     "No processing and no Xu charged at this step."
                 )
             return (
                 "📎 <b>Send a video without subtitles</b>\n\n"
                 "TOAN AAS will listen to the speech, translate it and create a dubbed video. Visible subtitles are not required.\n\n"
+                f"{limits_notice}\n\n"
                 "No processing and no Xu charged at this step."
             )
         if flow_type == VIDEO_DUBBING_FLOW_HAS_SUBTITLE or active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
@@ -175638,6 +175669,7 @@ def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> st
             input_label = "video"
         return (
             f"📎 <b>Send the {input_label}</b>\n\nSelected processing: <b>{html.escape(process_label)}</b>.\n"
+            f"{limits_notice}\n\n"
             "No processing and no Xu charged."
         )
     intro = {
@@ -175670,6 +175702,7 @@ def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> st
         f"📎 <b>{html.escape(process_label)}</b>\n\n"
         + source_line
         + f"{html.escape(intro)}\n\n"
+        + f"{limits_notice}\n\n"
         + "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này."
     )
 
@@ -177933,6 +177966,8 @@ def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, sta
         return {"ok": False, "blocker": "input_missing", "duration": duration, "size": size}
     if size <= 0:
         return {"ok": False, "blocker": "input_missing", "duration": duration, "size": size}
+    if size > subdub_input_limit_mb(bool(state.get("_pipeline_is_admin"))) * 1024 * 1024:
+        return {"ok": False, "blocker": "video_too_large", "duration": duration, "size": size}
     source_bytes = current.get("source_bytes")
     has_source_bytes = isinstance(source_bytes, (bytes, bytearray)) and len(source_bytes) > 0
     if content_type.startswith("video/") and duration <= 0 and not (has_source_bytes or isinstance(state.get("_pipeline_source_bytes_override"), (bytes, bytearray))):
@@ -178614,6 +178649,10 @@ def video_dubbing_job_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pipeline_input_limit_mb(is_admin: bool = False) -> int:
     return PIPELINE_MAX_INPUT_MB_ADMIN if is_admin else PIPELINE_MAX_INPUT_MB_PUBLIC
 
+def subdub_input_limit_mb(is_admin: bool = False) -> int:
+    del is_admin
+    return int(SUBDUB_MAX_INPUT_MB)
+
 def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
 
@@ -178687,12 +178726,14 @@ def subdub_duration_gate_payload(
     chunk_plan = subdub_long_video_chunk_plan(input_duration) if over_30_supported else subdub_long_video_chunk_plan(0)
     return {
         "input_duration": int(input_duration or 0),
+        "input_duration_seconds": int(input_duration or 0),
         "duration_seconds": int(input_duration or 0),
         "detected_duration_source": duration_source,
         "telegram_duration": int(telegram_duration or 0),
         "ffprobe_duration": int(ffprobe_seconds or 0),
         "duration_limit": int(limit),
         "duration_limit_seconds": int(limit),
+        "duration_limit_source": "SUBDUB_MAX_DURATION_SECONDS",
         "duration_gate_result": gate_result,
         "duration_guard_stage": "after_input_save",
         "is_long_media": is_long,
@@ -178705,6 +178746,7 @@ def subdub_duration_gate_payload(
         "chunk_count": int(chunk_plan.get("chunk_count") or 0),
         "chunk_seconds": int(chunk_plan.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
         "chunk_ranges": list(chunk_plan.get("chunk_ranges") or []),
+        "chunk_strategy": "asr_audio_chunks" if chunk_plan.get("chunking_enabled") else "single_pass",
         "concat_required": bool(chunk_plan.get("concat_required")),
         "global_timing_preserved": bool(chunk_plan.get("global_timing_preserved")),
     }
@@ -179695,7 +179737,7 @@ async def video_dubbing_save_input_for_pipeline(
         ).strip()
         if source_path_override and os.path.exists(source_path_override) and os.path.isfile(source_path_override):
             source_size = os.path.getsize(source_path_override)
-            max_input_mb = pipeline_input_limit_mb(bool(state.get("_pipeline_is_admin")))
+            max_input_mb = subdub_input_limit_mb(bool(state.get("_pipeline_is_admin")))
             if source_size > max_input_mb * 1024 * 1024:
                 result.update({
                     "error": "RuntimeError",
@@ -180041,11 +180083,13 @@ def subtitle_dub_debug_job_payload(
         "progress_stage": subdub_canonical_lifecycle_state(state.get("progress_stage") or stage),
         "progress_percent": subdub_progress_percent_for_lifecycle(state.get("progress_stage") or stage, state.get("_subdub_terminal_state") or ""),
         "input_duration": int(state.get("input_duration") or input_save.get("input_duration") or input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "input_duration_seconds": int(state.get("input_duration_seconds") or state.get("input_duration") or input_save.get("duration") or 0),
         "detected_duration_source": str(state.get("detected_duration_source") or input_save.get("detected_duration_source") or ""),
         "telegram_duration": int(state.get("telegram_duration") or input_save.get("telegram_duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "ffprobe_duration": int(state.get("ffprobe_duration") or input_save.get("ffprobe_duration") or 0),
         "duration_limit": int(state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(user_id)))),
         "duration_limit_seconds": int(state.get("duration_limit_seconds") or state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(user_id)))),
+        "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
         "duration_gate_result": str(state.get("duration_gate_result") or "unknown"),
         "duration_guard_stage": str(state.get("duration_guard_stage") or stage or ""),
         "is_long_media": bool(state.get("is_long_media")),
@@ -180063,8 +180107,17 @@ def subtitle_dub_debug_job_payload(
         "chunk_count": int(state.get("chunk_count") or 0),
         "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
         "chunk_ranges": list(state.get("chunk_ranges") or []),
+        "chunk_strategy": str(state.get("chunk_strategy") or ("asr_audio_chunks" if state.get("chunking_enabled") else "single_pass")),
         "concat_required": bool(state.get("concat_required")),
         "global_timing_preserved": bool(state.get("global_timing_preserved")),
+        "project_split_required": bool(state.get("project_split_required")),
+        "project_supported": bool(state.get("project_supported")),
+        "project_part_seconds": int(state.get("project_part_seconds") or 0),
+        "project_part_count": int(state.get("project_part_count") or 0),
+        "project_parts_delivered": int(state.get("long_project_parts_delivered") or state.get("project_parts_delivered") or 0),
+        "project_max_parts": int(state.get("project_max_parts") or SUBDUB_LONG_PROJECT_MAX_PARTS),
+        "project_max_duration_seconds": int(state.get("project_max_duration_seconds") or SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS),
+        "project_blocker": str(state.get("project_blocker") or ""),
         "pipeline_attempted": bool(pipeline_attempted),
         "input_file_id": str(input_save.get("file_id") or state.get("source_file_id") or state.get("video_file_id") or ""),
         "input_file_path": source_path,
@@ -180104,6 +180157,7 @@ def subtitle_dub_debug_job_payload(
         "final_mp4_validated": bool(state.get("final_mp4_validated") or dict(state.get("_subdub_output_validation") or {}).get("ok")),
         "final_mp4_delivered": bool(state.get("final_mp4_delivered") or state.get("video_delivery_message_id")),
         "final_mp4_duration": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "final_mux_duration": int(state.get("final_mux_duration") or input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "subtitle_style_preset": str(style.get("preset") or ""),
         "subtitle_style_profile": str(style.get("subtitle_style_profile") or ""),
         "cover_original_subtitle": bool(style.get("cover_original")),
@@ -180123,6 +180177,7 @@ def subtitle_dub_debug_job_payload(
         "output_validation": dict(state.get("_subdub_output_validation") or {}),
         "output_validated": bool(final_path and os.path.exists(final_path) and os.path.getsize(final_path) > 0),
         "delivery_attempted": bool(state.get("delivery_attempted") or state.get("_subdub_delivery_method")),
+        "delivery_status": str(state.get("delivery_status") or state.get("terminal_state") or state.get("status") or "not_started"),
         "delivery_message_id": str(state.get("delivery_message_id") or state.get("video_delivery_message_id") or state.get("audio_delivery_message_id") or state.get("srt_delivery_message_id") or ""),
         "video_delivery_message_id": str(state.get("video_delivery_message_id") or ""),
         "audio_delivery_message_id": str(state.get("audio_delivery_message_id") or ""),
@@ -181934,7 +181989,7 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
     if not file_id:
         raise RuntimeError("missing_video_file_id")
-    max_input_mb = pipeline_input_limit_mb(bool(state.get("_pipeline_is_admin")))
+    max_input_mb = subdub_input_limit_mb(bool(state.get("_pipeline_is_admin")))
     max_bytes = max_input_mb * 1024 * 1024
     max_duration = pipeline_duration_limit_seconds(bool(state.get("_pipeline_is_admin")))
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
@@ -182058,6 +182113,202 @@ async def video_dubbing_extract_audio(source_bytes: bytes, content_type: str = "
             raise RuntimeError("audio_extract_failed:" + sanitize_log_text(str(detail or "unknown"))[:120])
         with open(audio_path, "rb") as handle:
             return handle.read(), "audio/mpeg", "ffmpeg_audio_extract"
+
+async def video_dubbing_extract_audio_chunk(
+    source_bytes: bytes,
+    content_type: str,
+    start_seconds: float,
+    duration_seconds: float,
+) -> tuple[bytes, str, str]:
+    del content_type
+    return await subdub_long_media.extract_audio_chunk(
+        source_bytes,
+        ffmpeg_path=frame_video_ffmpeg_path(),
+        run_command=run_ffmpeg_command,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+    )
+
+def subdub_long_project_plan(duration_seconds: float | int = 0, *, is_admin: bool = False) -> dict:
+    return subdub_long_media.build_long_project_plan(
+        duration_seconds,
+        part_seconds=subdub_full_duration_limit_seconds(is_admin),
+        max_parts=SUBDUB_LONG_PROJECT_MAX_PARTS,
+        max_duration_seconds=SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS,
+    )
+
+def subdub_long_project_over_limit_text(lang: str = "vi") -> str:
+    max_minutes = max(1, int(SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS // 60))
+    max_parts = int(SUBDUB_LONG_PROJECT_MAX_PARTS)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"This video exceeds the current limit of {max_minutes} minutes ({max_parts} parts). "
+            "TOAN AAS has not charged Xu. Please send a shorter or smaller video."
+        )
+    return (
+        f"Video này dài hơn giới hạn {max_minutes} phút ({max_parts} phần) hiện tại. "
+        "TOAN AAS chưa trừ Xu. Anh/chị vui lòng gửi video ngắn hoặc nhẹ hơn."
+    )
+
+async def video_dubbing_extract_video_part(
+    source_bytes: bytes,
+    start_seconds: float,
+    duration_seconds: float,
+) -> bytes:
+    return await subdub_long_media.extract_video_part(
+        source_bytes,
+        ffmpeg_path=frame_video_ffmpeg_path(),
+        run_command=run_ffmpeg_command,
+        probe_video=subdub_probe_video_bytes,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+        min_output_bytes=SUBDUB_MIN_VIDEO_OUTPUT_BYTES,
+    )
+
+def subdub_long_project_child_state(state: dict, part: dict, part_bytes: bytes) -> dict:
+    return subdub_long_media.build_project_child_state(state, part, part_bytes)
+
+async def execute_subdub_long_project_parts(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    input_save: dict,
+    project_plan: dict,
+    lang: str,
+    *,
+    admin_interactive_confirm: bool = False,
+) -> dict:
+    source_bytes = bytes(input_save.get("source_bytes") or b"")
+
+    async def _split_part(part: dict) -> bytes:
+        return await video_dubbing_extract_video_part(
+            source_bytes,
+            float(part.get("start") or 0),
+            float(part.get("duration") or 0),
+        )
+
+    async def _process_part(part_bytes: bytes, part: dict) -> dict:
+        child_state = subdub_long_project_child_state(state, part, part_bytes)
+        user_id = getattr(getattr(query, "from_user", None), "id", 0)
+        if user_id:
+            part_start = float(part.get("start") or 0)
+            part_end = float(part.get("end") or part_start)
+            source_ref = str(state.get("subtitle_ref") or state.get("source_subtitle_ref") or "").strip()
+            translated_ref = str(state.get("translated_subtitle_ref") or "").strip()
+            for artifact_kind, artifact_ref in (("source_subtitle", source_ref), ("translated_subtitle", translated_ref)):
+                if not artifact_ref:
+                    continue
+                subtitle_text = get_video_dubbing_artifact(user_id, artifact_ref)
+                part_segments = subdub_long_media.slice_segments_for_project_part(
+                    video_dubbing_segments_from_subtitle(subtitle_text),
+                    part_start=part_start,
+                    part_end=part_end,
+                )
+                part_subtitle = video_dubbing_srt_from_segments(part_segments)
+                if not part_subtitle:
+                    continue
+                part_ref = set_video_dubbing_artifact(user_id, artifact_kind, part_subtitle)
+                if artifact_kind == "source_subtitle":
+                    child_state["subtitle_ref"] = part_ref
+                    child_state["source_subtitle_ref"] = part_ref
+                else:
+                    child_state["translated_subtitle_ref"] = part_ref
+        return await execute_video_dubbing_pipeline(
+            query,
+            context,
+            child_state,
+            lang,
+            admin_interactive_confirm=admin_interactive_confirm,
+        )
+
+    project_result = await subdub_long_media.process_long_project_parts(
+        project_plan,
+        split_part=_split_part,
+        process_part=_process_part,
+    )
+    part_results = list(project_result.get("part_results") or [])
+    delivered_results = [item for item in part_results if item.get("video_delivered") or item.get("final_mp4_delivered") or item.get("video_delivery_message_id")]
+    last_delivered = dict(delivered_results[-1] if delivered_results else {})
+    total_charged = sum(int(item.get("charged") or 0) for item in delivered_results)
+    delivered_count = int(project_result.get("project_parts_delivered") or 0)
+    total_parts = int(project_result.get("project_part_count") or len(project_plan.get("project_part_ranges") or []))
+    project_state = {
+        **dict(state or {}),
+        **dict(project_plan or {}),
+        "duration_gate_result": "pass_project_split" if project_result.get("ok") else "project_part_failed",
+        "long_project_parts_delivered": delivered_count,
+        "delivery_status": "delivered_parts" if project_result.get("ok") else "partial_project_failed",
+        "charge_status": "charged_delivered_parts" if total_charged else "not_charged",
+        "_subdub_terminal_state": "delivered" if project_result.get("ok") else "failed_no_charge",
+        "lifecycle_state": "delivered" if project_result.get("ok") else "failed_no_charge",
+        "current_stage": "delivered" if project_result.get("ok") else "failed_no_charge",
+        "progress_stage": "delivered" if project_result.get("ok") else "failed_no_charge",
+        "progress_percent": 100 if project_result.get("ok") else 0,
+        "completed_steps": subdub_completed_steps_for_lifecycle(
+            "delivered" if project_result.get("ok") else "failed_no_charge",
+            "delivered" if project_result.get("ok") else "failed_no_charge",
+        ),
+        "panel_finalized": bool(project_result.get("ok")),
+        "panel_final_percent": 100 if project_result.get("ok") else 0,
+        "status_panel_terminalized": bool(project_result.get("ok")),
+        "refresh_stopped_after_terminal": bool(project_result.get("ok")),
+        "terminal_public_outcome_type": "success" if project_result.get("ok") else "failure",
+        "terminal_public_outcome_sent": bool(project_result.get("ok")),
+        "delivery_success": bool(project_result.get("ok")),
+        "delivery_succeeded": bool(project_result.get("ok")),
+        "final_mp4_delivered": bool(project_result.get("ok")),
+    }
+    if not project_result.get("ok"):
+        failed_index = int(project_result.get("failed_part_index") or delivered_count + 1)
+        safe_text = (
+            f"TOAN AAS đã gửi {delivered_count}/{total_parts} phần video. Phần {failed_index} chưa hoàn tất và chưa bị trừ Xu."
+            if delivered_count
+            else "TOAN AAS chưa xử lý được các phần video dài và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+        )
+        return {
+            "ok": False,
+            "status": str(project_result.get("status") or "LONG_PROJECT_PART_FAILED"),
+            "text": safe_text,
+            "detail": str(project_result.get("project_blocker") or "long_project_part_failed"),
+            "terminal_state": "failed_no_charge",
+            "charge_status": "partial_parts_charged" if total_charged else "not_charged",
+            "charged": total_charged,
+            "project_part_count": total_parts,
+            "project_parts_delivered": delivered_count,
+            "failed_part_index": failed_index,
+            "pipeline_attempted": True,
+            "state": project_state,
+            "workspace_artifacts": {"source": str(input_save.get("path") or "")},
+            "input_save": input_save,
+            "part_results": part_results,
+        }
+    return {
+        "ok": True,
+        "mode": normalize_video_translate_mode(state.get("video_processing_mode") or state.get("mode") or state.get("process_type")),
+        "charged": total_charged,
+        "has_video": True,
+        "video_delivered": True,
+        "final_mp4_exists": True,
+        "final_mp4_validated": True,
+        "final_mp4_delivered": True,
+        "sent_video": sum(int(item.get("sent_video") or 0) for item in delivered_results),
+        "sent_video_document": sum(int(item.get("sent_video_document") or 0) for item in delivered_results),
+        "delivery_method": "project_parts",
+        "delivery_status": "delivered_parts",
+        "telegram_message_id": str(last_delivered.get("telegram_message_id") or last_delivered.get("video_delivery_message_id") or ""),
+        "video_delivery_message_id": str(last_delivered.get("video_delivery_message_id") or last_delivered.get("telegram_message_id") or ""),
+        "terminal_artifact_type": "video_project_parts",
+        "terminal_state": "delivered",
+        "charge_status": "charged_delivered_parts" if total_charged else "not_charged",
+        "project_part_count": total_parts,
+        "project_parts_delivered": delivered_count,
+        "pipeline_attempted": True,
+        "state": project_state,
+        "workspace_artifacts": {"source": str(input_save.get("path") or "")},
+        "input_save": input_save,
+        "part_results": part_results,
+        "output_validation": {"ok": True, "artifact_type": "video_project_parts", "part_count": total_parts},
+    }
 
 def subdub_normalize_language_code(value: str = "") -> str:
     text = str(value or "").strip().lower().replace("_", "-")
@@ -182388,6 +182639,95 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": "",
         }
+    long_plan = subdub_long_video_chunk_plan(duration_seconds)
+    if int(max_seconds or 0) <= 0 and long_plan.get("chunking_enabled"):
+        async def _extract_long_chunk(source, media_type, chunk_start, chunk_duration):
+            return await video_dubbing_extract_audio_chunk(
+                source,
+                media_type,
+                chunk_start,
+                chunk_duration,
+            )
+
+        async def _transcribe_long_chunk(chunk_audio, chunk_content_type):
+            if getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes":
+                try:
+                    provider, transcript, detail = await video_dubbing_transcribe_bytes(
+                        chunk_audio,
+                        context,
+                        chunk_content_type,
+                        allow_admin=allow_admin,
+                        updated_by=updated_by,
+                    )
+                except TypeError:
+                    provider, transcript, detail = await video_dubbing_transcribe_bytes(
+                        chunk_audio,
+                        context,
+                        chunk_content_type,
+                    )
+                return {
+                    "ok": bool(str(transcript or "").strip()),
+                    "status": "PASS" if str(transcript or "").strip() else "empty_transcript",
+                    "provider": str(provider or ""),
+                    "text": str(transcript or ""),
+                    "segments": [],
+                    "detail": str(detail or ""),
+                }
+            return await asr_transcribe_audio(
+                chunk_audio,
+                chunk_content_type,
+                language=source_language,
+                allow_admin=allow_admin,
+                updated_by=updated_by,
+                context=context,
+            )
+
+        chunk_result = await subdub_long_media.transcribe_long_media_chunks(
+            source_bytes,
+            content_type,
+            long_plan.get("chunk_ranges") or [],
+            extract_chunk=_extract_long_chunk,
+            transcribe_chunk=_transcribe_long_chunk,
+            input_duration_seconds=duration_seconds,
+        )
+        if not chunk_result.get("ok"):
+            return {
+                "output_valid": False,
+                "status": str(chunk_result.get("status") or "long_media_asr_failed"),
+                "detail": sanitize_log_text(str(chunk_result.get("detail") or ""))[:180],
+                "transcript_text": "",
+                "segments": [],
+                "detected_language": "",
+                "duration_seconds": int(duration_seconds or 0),
+                "confidence": 0.0,
+                "provider": str(chunk_result.get("provider") or ""),
+                "chunk_count": int(chunk_result.get("chunk_count") or long_plan.get("chunk_count") or 0),
+                "chunk_strategy": str(chunk_result.get("chunk_strategy") or "asr_audio_chunks"),
+                "global_timing_preserved": False,
+            }
+        transcript = str(chunk_result.get("text") or "").strip()
+        segments = video_dubbing_qc_segments(
+            list(chunk_result.get("segments") or []),
+            preserve_timestamps=True,
+        )
+        detected_language = subdub_detect_language_from_text(
+            transcript,
+            chunk_result.get("language") or source_language,
+        )
+        return {
+            "output_valid": bool(transcript and segments),
+            "status": "PASS" if transcript and segments else "segment_generation_failed",
+            "transcript_text": transcript,
+            "segments": segments,
+            "detected_language": detected_language,
+            "duration_seconds": int(duration_seconds or chunk_result.get("duration_seconds") or 0),
+            "confidence": 0.0,
+            "provider": str(chunk_result.get("provider") or ""),
+            "detail": str(chunk_result.get("detail") or ""),
+            "chunk_count": int(chunk_result.get("chunk_count") or long_plan.get("chunk_count") or 0),
+            "chunk_strategy": str(chunk_result.get("chunk_strategy") or "asr_audio_chunks"),
+            "global_timing_preserved": bool(chunk_result.get("global_timing_preserved")),
+        }
     audio_bytes = source_bytes
     audio_content_type = content_type
     extract_detail = "audio_direct"
@@ -182497,6 +182837,9 @@ async def transcribe_media_to_segments(
         "confidence": 0.0,
         "provider": str(provider or ""),
         "detail": f"{extract_detail}; {detail}",
+        "chunk_count": 1,
+        "chunk_strategy": "single_pass",
+        "global_timing_preserved": True,
     }
 
 async def video_dubbing_resolve_source_script(
@@ -182552,6 +182895,9 @@ async def video_dubbing_resolve_source_script(
         "segments": result.get("segments") or [],
         "detected_language": result.get("detected_language") or "",
         "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
+        "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
+        "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
+        "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
     }
 
 async def video_dubbing_render_video(
@@ -183281,6 +183627,12 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
     if not isinstance(source_bytes_override, bytes):
         source_bytes_override = b""
     override_content_type = str(state.get("_pipeline_source_content_type_override") or state.get("source_mime_type") or "video/mp4")
+    duration_hint = _safe_int(
+        state.get("input_duration")
+        or state.get("video_duration")
+        or state.get("source_duration"),
+        0,
+    )
     explicit_subtitle_ref = str(state.get("subtitle_ref") or state.get("source_subtitle_ref") or "").strip()
     source_subtitle = get_video_dubbing_artifact(user_id, explicit_subtitle_ref) if explicit_subtitle_ref else ""
     if source_subtitle:
@@ -183332,7 +183684,7 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                 source_bytes,
                 content_type,
                 context,
-                duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
+                duration_seconds=duration_hint,
                 allow_admin=allow_admin,
                 updated_by=user_id,
                 file_name=str(state.get("source_file_name") or ""),
@@ -183351,7 +183703,7 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
     source_script = video_dubbing_plain_script(source_subtitle)
     source_segments = list(source_info.get("segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
     if not source_segments and source_script:
-        source_segments = video_dubbing_segments_from_text(source_script, _safe_int(state.get("video_duration") or state.get("source_duration"), 0))
+        source_segments = video_dubbing_segments_from_text(source_script, duration_hint)
     if not source_segments:
         raise RuntimeError("subtitle_segments_empty")
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
@@ -183405,7 +183757,10 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         "target_language": str(state.get("target_language") or ""),
         "source_segment_count": len(source_segments),
         "translated_segment_count": len(output_segments) if needs_translation else 0,
-        "duration_seconds": int(source_info.get("duration_seconds") or state.get("video_duration") or state.get("source_duration") or 0),
+        "duration_seconds": int(source_info.get("duration_seconds") or duration_hint or 0),
+        "chunk_count": int(source_info.get("chunk_count") or state.get("chunk_count") or (1 if duration_hint else 0)),
+        "chunk_strategy": str(source_info.get("chunk_strategy") or state.get("chunk_strategy") or "single_pass"),
+        "global_timing_preserved": bool(source_info.get("global_timing_preserved", state.get("global_timing_preserved", True))),
     }
 
 async def _execute_video_dubbing_pipeline_core(
@@ -183465,6 +183820,11 @@ async def _execute_video_dubbing_pipeline_core(
         "detected_duration_source": str(duration_gate.get("detected_duration_source") or ""),
     }
     state = {**state, **duration_gate}
+    project_plan = subdub_long_project_plan(
+        duration_gate.get("input_duration") or input_save.get("duration") or 0,
+        is_admin=bool(is_admin_user(uid)),
+    )
+    state = {**state, **project_plan}
     if str(state.get("_pipeline_job_key") or ""):
         update_subtitle_dub_pipeline_job(
             str(state.get("_pipeline_job_key") or ""),
@@ -183474,7 +183834,45 @@ async def _execute_video_dubbing_pipeline_core(
             charge_status="not_charged",
         )
     if str(duration_gate.get("duration_gate_result") or "") == "fail_over_limit":
-        safe_text = subdub_duration_over_limit_text(lang)
+        project_source_is_video = bool(
+            str(input_save.get("content_type") or "").lower().startswith("video/")
+            or str(state.get("source_media_type") or state.get("media_kind") or "").lower() == "video"
+            or str(state.get("source_file_name") or "").lower().endswith((".mp4", ".mov", ".mkv", ".webm"))
+        )
+        project_can_run = bool(
+            project_plan.get("project_split_required")
+            and project_plan.get("project_supported")
+            and not state.get("_subdub_long_project_child")
+            and input_save.get("ok")
+            and input_save.get("source_bytes")
+            and project_source_is_video
+        )
+        if project_can_run:
+            if str(state.get("_pipeline_job_key") or ""):
+                update_subtitle_dub_pipeline_job(
+                    str(state.get("_pipeline_job_key") or ""),
+                    **project_plan,
+                    duration_gate_result="pass_project_split",
+                    lifecycle_state="extracting_audio",
+                    current_stage="extracting_audio",
+                    progress_stage="extracting_audio",
+                    progress_percent=subdub_progress_percent_for_lifecycle("extracting_audio"),
+                    charge_status="not_charged",
+                )
+            return await execute_subdub_long_project_parts(
+                query,
+                context,
+                state,
+                input_save,
+                project_plan,
+                lang,
+                admin_interactive_confirm=admin_interactive_confirm,
+            )
+        safe_text = (
+            subdub_long_project_over_limit_text(lang)
+            if project_plan.get("project_split_required")
+            else subdub_duration_over_limit_text(lang)
+        )
         debug_state = {
             **state,
             "_subdub_terminal_state": "failed_no_charge",
@@ -183704,6 +184102,13 @@ async def _execute_video_dubbing_pipeline_core(
             allow_admin=is_admin_user(uid),
         )
         prepared_dict = dict(prepared or {})
+        prepared_state = dict(prepared_dict.get("state") or service_state or {})
+        prepared_state.update({
+            "chunk_count": int(prepared_dict.get("chunk_count") or prepared_state.get("chunk_count") or 0),
+            "chunk_strategy": str(prepared_dict.get("chunk_strategy") or prepared_state.get("chunk_strategy") or "single_pass"),
+            "global_timing_preserved": bool(prepared_dict.get("global_timing_preserved", prepared_state.get("global_timing_preserved", True))),
+        })
+        prepared_dict["state"] = prepared_state
         route_attempts["asr"] = bool(prepared_dict.get("asr_provider"))
         route_attempts["translation"] = bool(prepared_dict.get("translation_provider"))
         route_attempts["transcript_length"] = len(str(prepared_dict.get("output_script") or prepared_dict.get("output_text") or ""))
@@ -183711,7 +184116,7 @@ async def _execute_video_dubbing_pipeline_core(
             await _progress("translating_subtitle" if mode == VIDEO_SUBTITLE_MODE_TRANSLATE else "translating")
         elif mode == VIDEO_SUBTITLE_MODE_CREATE:
             await _progress("auto_subtitle_ready")
-        return prepared
+        return prepared_dict
 
     async def _synthesize_dub_segments_for_blackbox(*args, **kwargs):
         route_attempts["tts"] = True
@@ -184440,10 +184845,12 @@ async def _execute_video_dubbing_pipeline_core(
             "input_file_size": len(video_bytes or b""),
             "duration_seconds": duration_seconds,
             "input_duration": int(state.get("input_duration") or duration_seconds or 0),
+            "input_duration_seconds": int(state.get("input_duration_seconds") or state.get("input_duration") or duration_seconds or 0),
             "detected_duration_source": str(state.get("detected_duration_source") or ""),
             "telegram_duration": int(state.get("telegram_duration") or 0),
             "ffprobe_duration": int(state.get("ffprobe_duration") or 0),
             "duration_limit": int(state.get("duration_limit") or subdub_full_duration_limit_seconds(bool(is_admin_user(uid)))),
+            "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
             "duration_gate_result": str(state.get("duration_gate_result") or ""),
             "duration_guard_stage": str(state.get("duration_guard_stage") or ""),
             "is_long_media": bool(state.get("is_long_media")),
@@ -184482,6 +184889,7 @@ async def _execute_video_dubbing_pipeline_core(
             "final_mp4_exists": bool(dub_video_path and os.path.exists(dub_video_path)),
             "final_mp4_size": len(video_output or b""),
             "final_mp4_duration": duration_seconds,
+            "final_mux_duration": duration_seconds,
             **subdub_voice_style_state_fields(
                 mode=mode,
                 state=state,
@@ -184499,6 +184907,7 @@ async def _execute_video_dubbing_pipeline_core(
             "output_audio_source": output_audio_source,
             "original_audio_mode": str(state.get("original_audio_mode") or ""),
             "delivery_method": str(delivery.get("delivery_method") or ""),
+            "delivery_status": "delivered" if delivered_video else result_terminal_state,
             "delivery_attempted": True,
             "delivery_message_id": str(delivery.get("telegram_message_id") or ""),
             "output_validated": bool(delivered_video or (partial_audio_delivered and SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED) or (srt_bytes and not video_output and not audio_bytes and not subdub_video_requires_final_mp4(mode, subdub_product_type_from_mode(mode, state)))),
@@ -184531,6 +184940,7 @@ async def _execute_video_dubbing_pipeline_core(
             "chunk_count": int(state.get("chunk_count") or 0),
             "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
             "chunk_ranges": list(state.get("chunk_ranges") or []),
+            "chunk_strategy": str(state.get("chunk_strategy") or ("asr_audio_chunks" if state.get("chunking_enabled") else "single_pass")),
             "concat_required": bool(state.get("concat_required")),
             "global_timing_preserved": bool(state.get("global_timing_preserved")),
             "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
@@ -184626,8 +185036,13 @@ async def _execute_video_dubbing_pipeline_core(
         "chunk_count": int(state.get("chunk_count") or 0),
         "chunk_seconds": int(state.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
         "chunk_ranges": list(state.get("chunk_ranges") or []),
+        "chunk_strategy": str(state.get("chunk_strategy") or ("asr_audio_chunks" if state.get("chunking_enabled") else "single_pass")),
         "concat_required": bool(state.get("concat_required")),
         "global_timing_preserved": bool(state.get("global_timing_preserved")),
+        "input_duration_seconds": int(state.get("input_duration_seconds") or state.get("input_duration") or duration_seconds or 0),
+        "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
+        "final_mux_duration": duration_seconds,
+        "delivery_status": "delivered" if delivered_video else result_terminal_state,
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,
         "input_save": {key: value for key, value in dict(input_save or {}).items() if key != "source_bytes"},
@@ -184789,6 +185204,14 @@ async def execute_video_dubbing_pipeline(
             "chunk_ranges": list(result_state.get("chunk_ranges") or debug_job.get("chunk_ranges") or []),
             "concat_required": bool(result_state.get("concat_required") or debug_job.get("concat_required")),
             "global_timing_preserved": bool(result_state.get("global_timing_preserved") or debug_job.get("global_timing_preserved")),
+            "project_split_required": bool(result_state.get("project_split_required") or debug_job.get("project_split_required")),
+            "project_supported": bool(result_state.get("project_supported") or debug_job.get("project_supported")),
+            "project_part_seconds": int(result_state.get("project_part_seconds") or debug_job.get("project_part_seconds") or 0),
+            "project_part_count": int(result_state.get("project_part_count") or result.get("project_part_count") or debug_job.get("project_part_count") or 0),
+            "project_parts_delivered": int(result_state.get("long_project_parts_delivered") or result.get("project_parts_delivered") or debug_job.get("project_parts_delivered") or 0),
+            "project_max_parts": int(result_state.get("project_max_parts") or debug_job.get("project_max_parts") or SUBDUB_LONG_PROJECT_MAX_PARTS),
+            "project_max_duration_seconds": int(result_state.get("project_max_duration_seconds") or debug_job.get("project_max_duration_seconds") or SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS),
+            "project_blocker": str(result_state.get("project_blocker") or debug_job.get("project_blocker") or ""),
             "worker_claim_required": bool(result_state.get("worker_claim_required") or debug_job.get("worker_claim_required")),
             "worker_claimed": bool(result_state.get("worker_claimed") or debug_job.get("worker_claimed")),
             "registry_job_id": str(result_state.get("_pipeline_job_id") or debug_job.get("registry_job_id") or runtime_job.get("registry_job_id") or job.get("job_id") or ""),
