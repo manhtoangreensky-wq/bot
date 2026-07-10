@@ -23,10 +23,6 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
-def _truthy(value: Any) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
-
-
 async def _maybe_await(value: Any) -> Any:
     if asyncio.iscoroutine(value) or hasattr(value, "__await__"):
         return await value
@@ -87,56 +83,6 @@ def _video_output_requested(mode: str, output_type: str, content_type: str) -> b
         VIDEO_SUBTITLE_MODE_DUB,
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }
-
-
-def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, Any]:
-    """Choose exactly one TTS text source and an explicit original-audio policy."""
-    current = dict(state or {})
-    prepared = dict(prepared or {})
-    source_segments = list(prepared.get("source_segments") or [])
-    output_segments = list(prepared.get("output_segments") or [])
-    requested_source = str(
-        current.get("dub_text_source")
-        or current.get("voice_text_source")
-        or current.get("dub_language_mode")
-        or ""
-    ).strip().lower()
-    target_language = str(current.get("target_language") or "").strip().lower()
-    source_aliases = {
-        "source", "original", "same", "nguyen ban", "nguyên bản",
-        "giu nguyen ngon ngu goc", "giữ nguyên ngôn ngữ gốc",
-    }
-    translated_aliases = {"translated", "translation", "target", "target_language"}
-    translated_requested = (
-        requested_source in translated_aliases
-        or _truthy(current.get("translate_requested"))
-        or (bool(target_language) and target_language not in {"auto", *source_aliases})
-    )
-    source_requested = requested_source in source_aliases or target_language in source_aliases
-
-    if source_requested or not translated_requested:
-        dub_text_source = "source"
-        tts_segments = source_segments or output_segments
-    else:
-        dub_text_source = "translated"
-        # A missing translated cue stays silent; it must not create a second/source TTS track.
-        tts_segments = [
-            dict(item or {})
-            for item in output_segments
-            if str((item or {}).get("text") or "").strip()
-            and not _truthy((item or {}).get("translate_missing"))
-        ]
-
-    keep_original_audio = _truthy(current.get("keep_original_audio"))
-    policy_fields = {
-        "dub_text_source": dub_text_source,
-        "original_audio_policy": "kept_low_volume" if keep_original_audio else "muted",
-        "tts_tracks_count": 1 if tts_segments else 0,
-        "source_tts_rendered": dub_text_source == "source" and bool(tts_segments),
-        "target_tts_rendered": dub_text_source == "translated" and bool(tts_segments),
-        "keep_original_audio": keep_original_audio,
-    }
-    return {**policy_fields, "tts_segments": tts_segments}
 
 
 async def process_subtitle_dub_job(
@@ -233,26 +179,7 @@ async def process_subtitle_dub_job(
     normalization_detail = "not_requested"
     tts_chunks: list[dict] = []
     selected_tts_voice_id = ""
-    dub_audio_policy: dict[str, Any] = {}
     if _mode_needs_dub(mode):
-        dub_audio_policy = resolve_subdub_dub_audio_policy(pipeline_state, prepared)
-        tts_segments = list(dub_audio_policy.pop("tts_segments", []) or [])
-        pipeline_state.update(dub_audio_policy)
-        prepared["dub_audio_policy"] = dict(dub_audio_policy)
-        if not tts_segments:
-            return {
-                "ok": False,
-                "status": "TRANSLATED_TEXT_UNAVAILABLE" if dub_audio_policy.get("dub_text_source") == "translated" else "DIALOGUE_UNAVAILABLE",
-                "error_code": "translated_tts_segments_missing" if dub_audio_policy.get("dub_text_source") == "translated" else "source_tts_segments_missing",
-                "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider")),
-                "charged": False,
-                "created_files": [],
-                "state": pipeline_state,
-                "prepared": prepared,
-                "product_type": _product_type_for_mode(mode),
-                "route_attempts": route_attempts,
-                **dub_audio_policy,
-            }
         selected_tts_voice_id = str(resolve_voice_id(user_id, pipeline_state) or "")
         if not selected_tts_voice_id:
             return {
@@ -272,7 +199,7 @@ async def process_subtitle_dub_job(
         route_attempts["tts"] = True
         segment_tts = await _maybe_await(
             synthesize_segments(
-                tts_segments,
+                output_segments,
                 voice_style=pipeline_state.get("voice_style") or "",
                 voice_id=selected_tts_voice_id,
                 base_speed=speed,
@@ -284,7 +211,7 @@ async def process_subtitle_dub_job(
         tts_provider = str(segment_tts.get("provider") or "")
         timeline_duration = max(
             _safe_int(pipeline_state.get("video_duration") or pipeline_state.get("source_duration"), 0),
-            int(max((float(item.get("end") or 0) for item in tts_segments), default=0)),
+            int(max((float(item.get("end") or 0) for item in output_segments), default=0)),
         )
         raw_audio_bytes, _timeline_detail = await _maybe_await(build_timeline_audio(tts_chunks, timeline_duration))
         if not raw_audio_bytes:
@@ -323,7 +250,7 @@ async def process_subtitle_dub_job(
                         source_bytes,
                         dubbed_audio=audio_bytes,
                         subtitle_bytes=srt_bytes if wants_subtitle_video else b"",
-                        keep_original_audio=bool(dub_audio_policy.get("keep_original_audio")),
+                        keep_original_audio=False,
                     )
                 )
             except Exception as exc:
@@ -393,7 +320,6 @@ async def process_subtitle_dub_job(
         "admin_debug_summary": "",
         "route_attempts": route_attempts,
         "shared_core_used": True,
-        **dub_audio_policy,
     }
 
 
