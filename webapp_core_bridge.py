@@ -162,6 +162,110 @@ def _voice_clone_contract_error(input_data: dict, uploads: list[dict]) -> str | 
     return None
 
 
+_SUBTITLE_FEATURES = frozenset({"subtitle_asr", "subtitle_create", "asr", "subtitle_translate", "video_dub"})
+_DOCUMENT_FEATURES = frozenset({"documents", "documents_pdf", "documents_ocr", "documents_merge", "documents_split", "documents_compress", "documents_translate"})
+_AUDIO_VIDEO_EXTENSIONS = frozenset({".mp3", ".wav", ".m4a", ".ogg", ".mp4", ".mov", ".webm"})
+_TEXT_SUBTITLE_EXTENSIONS = frozenset({".srt", ".vtt", ".txt"})
+_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+
+
+def _upload_extension(item: dict) -> str:
+    name = str((item or {}).get("file_name") or "").lower()
+    return "." + name.rsplit(".", 1)[-1] if "." in name else ""
+
+
+def _document_action_for_feature(feature: str, input_data: dict) -> str:
+    fixed = {
+        "documents_ocr": "ocr_pdf" if str(input_data.get("operation") or "").strip().lower() == "ocr_pdf" else "ocr_image",
+        "documents_merge": "merge_pdf",
+        "documents_split": "split_pdf",
+        "documents_compress": "compress_pdf",
+        "documents_translate": "translate_document",
+    }
+    if feature in fixed:
+        return fixed[feature]
+    requested = str(input_data.get("operation") or "pdf_to_word").strip().lower()
+    aliases = {
+        "pdf_to_word": "pdf_to_word_text",
+        "pdf_to_word_text": "pdf_to_word_text",
+        "pdf_to_images": "pdf_to_images",
+        "image_to_pdf": "image_to_pdf",
+        "compress": "compress_pdf",
+        "compress_pdf": "compress_pdf",
+        "split": "split_pdf",
+        "split_pdf": "split_pdf",
+        "merge": "merge_pdf",
+        "merge_pdf": "merge_pdf",
+        "ocr": "ocr_image",
+        "ocr_image": "ocr_image",
+        "ocr_pdf": "ocr_pdf",
+    }
+    return aliases.get(requested, "")
+
+
+def _subtitle_mode_for_feature(feature: str, input_data: dict) -> str:
+    fixed = {
+        "subtitle_asr": "subtitle",
+        "subtitle_create": "subtitle",
+        "asr": "subtitle",
+        "subtitle_translate": "subtitle_translate",
+        "video_dub": "dub",
+    }
+    requested = str(input_data.get("mode") or fixed.get(feature) or "").strip()
+    # Only permit the current video-flow modes.  The bot normalizer is called
+    # later to derive the canonical spelling and pricing.
+    aliases = {
+        "subtitle": "subtitle", "subtitle_create": "subtitle_create",
+        "translate": "subtitle_translate", "subtitle_translate": "subtitle_translate", "translate_subtitle": "subtitle_translate",
+        "dubbing": "dub", "dub": "dub",
+        "subtitle_plus_dubbing": "subtitle_plus_dub", "subtitle_plus_dub": "subtitle_plus_dub",
+    }
+    return aliases.get(requested.lower(), "")
+
+
+def _feature_intake_contract_error(feature: str, input_data: dict, uploads: list[dict]) -> str | None:
+    """Reject impossible Web inputs before a draft/quote claims readiness."""
+    if feature in _SUBTITLE_FEATURES:
+        if not uploads:
+            return "subtitle_media_required"
+        extensions = {_upload_extension(item) for item in uploads}
+        if feature == "subtitle_translate":
+            allowed = _AUDIO_VIDEO_EXTENSIONS | _TEXT_SUBTITLE_EXTENSIONS
+        else:
+            allowed = _AUDIO_VIDEO_EXTENSIONS
+        if not extensions.intersection(allowed):
+            return "subtitle_source_type_not_supported"
+        if feature in {"subtitle_translate", "video_dub"} and not str(input_data.get("target_language") or "").strip():
+            return "target_language_required"
+        if not _subtitle_mode_for_feature(feature, input_data):
+            return "subtitle_mode_invalid"
+    if feature in _DOCUMENT_FEATURES:
+        action = _document_action_for_feature(feature, input_data)
+        if not action:
+            return "document_operation_invalid"
+        if not uploads:
+            return "document_upload_required"
+        extensions = {_upload_extension(item) for item in uploads}
+        if action == "image_to_pdf" and not extensions.issubset(_IMAGE_EXTENSIONS):
+            return "document_image_required"
+        if action in {"pdf_to_word_text", "pdf_to_images", "compress_pdf", "split_pdf", "merge_pdf", "ocr_pdf"} and not extensions.issubset({".pdf"}):
+            return "document_pdf_required"
+        if action == "ocr_image" and not extensions.intersection(_IMAGE_EXTENSIONS):
+            return "document_image_required"
+        if action == "merge_pdf" and len(uploads) < 2:
+            return "document_merge_requires_two_files"
+        if action == "translate_document" and not str(input_data.get("target_language") or "").strip():
+            return "document_target_language_required"
+        if action == "split_pdf":
+            page_range = str(input_data.get("page_range") or "").strip()
+            # The bot helper supports a single page or contiguous N-M range;
+            # do not promise comma-separated ranges the canonical helper does
+            # not actually parse.
+            if not re.fullmatch(r"\d+(?:-\d+)?", page_range):
+                return "document_page_range_invalid"
+    return None
+
+
 def _validate_upload_content(name: str, extension: str, content_type: Any, content: bytes) -> str:
     media_type = str(content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
     if media_type not in _UPLOAD_MIME_TYPES:
@@ -640,6 +744,176 @@ class BotCoreBridge:
                     "next_step": "Ước tính theo chính sách Voice Vault canonical trước khi xác nhận.",
                 },
             }
+        if feature == "music_upload":
+            if not input_data.get("upload_ids"):
+                return {
+                    "available": False,
+                    "feature": feature,
+                    "source": "bot.music_upload_intake_contract",
+                    "reason": "music_upload_required",
+                }
+            return {
+                "available": True,
+                "feature": feature,
+                "source": "bot.music_upload_intake_contract",
+                "provider_called": False,
+                "charged_xu": 0,
+                "content": {
+                    "audio_staged": True,
+                    "next_step": "Tệp âm thanh đã vào staging canonical; chưa có thao tác ghép/render hoặc output.",
+                },
+            }
+        if feature in {"music_background", "music_song", "music_sfx"}:
+            if not text:
+                return {
+                    "available": False,
+                    "feature": feature,
+                    "source": "validated_music_input",
+                    "reason": "music_brief_required",
+                }
+            blocker = self.fn("music_copyright_block_reason")
+            try:
+                blocked_reason = _safe_text(blocker(text), 100) if blocker else ""
+            except Exception:
+                blocked_reason = ""
+            if blocked_reason:
+                return {
+                    "available": False,
+                    "feature": feature,
+                    "source": "bot.music_copyright_block_reason",
+                    "reason": "music_copyright_request_blocked",
+                    "blocked_marker": blocked_reason,
+                }
+            if feature == "music_sfx":
+                # Provider-backed library search intentionally stays off. This
+                # draft only records the validated query/policy for a later
+                # canonical search or generation adapter.
+                return {
+                    "available": True,
+                    "feature": feature,
+                    "source": "bot.music_copyright_block_reason",
+                    "provider_called": False,
+                    "charged_xu": 0,
+                    "content": {
+                        "query": _safe_text(text, 500),
+                        "search_ready": False,
+                        "provider_search_required": True,
+                        "next_step": "Thư viện SFX chỉ được truy vấn khi adapter canonical và policy license sẵn sàng.",
+                    },
+                }
+            mode_fn = self.fn("music_prompt_mode")
+            suggestions_fn = self.fn("music_prompt_suggestions")
+            prompt_fn = self.fn("music_prompt_from_suggestion")
+            if not (mode_fn and suggestions_fn and prompt_fn):
+                return {"available": False, "feature": feature, "source": "canonical_bot", "reason": "music_prompt_helpers_unavailable"}
+            requested_mode = str(input_data.get("mode") or ("lyrics" if feature == "music_song" else "background"))[:40]
+            try:
+                mode = _safe_text(mode_fn(text, requested_mode), 40)
+                raw_suggestions = list(suggestions_fn(text, 0, "vi", mode) or [])[:3]
+                suggestions = []
+                for raw in raw_suggestions:
+                    item = dict(raw or {})
+                    suggestions.append({
+                        "name": _safe_text(item.get("name"), 140),
+                        "mood": _safe_text(item.get("mood"), 180),
+                        "tempo": _safe_text(item.get("tempo"), 80),
+                        "instrument": _safe_text(item.get("instrument"), 220),
+                        "duration": _safe_text(item.get("duration"), 80),
+                        "vocal": _safe_text(item.get("vocal"), 180),
+                        "use_case": _safe_text(item.get("use_case"), 220),
+                        "prompt": _safe_text(prompt_fn(item), 1200),
+                    })
+            except Exception:
+                return {"available": False, "feature": feature, "source": "canonical_bot", "reason": "music_prompt_helper_failed"}
+            return {
+                "available": True,
+                "feature": feature,
+                "source": "bot.music_prompt_suggestions",
+                "provider_called": False,
+                "charged_xu": 0,
+                "content": {"mode": mode, "suggestions": suggestions, "copyright_safe_request": True},
+            }
+        if feature in _SUBTITLE_FEATURES:
+            normalizer = self.fn("normalize_video_translate_mode")
+            capability_fn = self.fn("video_dubbing_capability")
+            if not normalizer:
+                return {"available": False, "feature": feature, "source": "canonical_bot", "reason": "subtitle_mode_helper_unavailable"}
+            requested_mode = _subtitle_mode_for_feature(feature, input_data)
+            try:
+                mode = _safe_text(normalizer(requested_mode), 60)
+            except Exception:
+                mode = ""
+            if not mode:
+                return {"available": False, "feature": feature, "source": "bot.normalize_video_translate_mode", "reason": "subtitle_mode_invalid"}
+            target = _safe_text(input_data.get("target_language"), 120)
+            state = {
+                "mode": mode,
+                "target_language": target,
+                "translate_requested": "1" if mode in {"translate_subtitle", "subtitle_translate", "subtitle_plus_dubbing", "subtitle_plus_dub"} else "",
+                "voice_speed": _safe_text(input_data.get("speed") or "normal", 20),
+                "output_format": _safe_text(input_data.get("output_format") or "srt", 20),
+            }
+            try:
+                raw_capability = dict(capability_fn(mode, state, public=True) or {}) if capability_fn else {}
+            except Exception:
+                raw_capability = {}
+            capability = {
+                "ready": bool(raw_capability.get("ok")),
+                "reason": _safe_text(raw_capability.get("reason"), 120),
+                "missing": [_safe_text(item, 80) for item in list(raw_capability.get("missing") or [])[:10]],
+                "mux": _safe_text(raw_capability.get("mux"), 60),
+            }
+            return {
+                "available": True,
+                "feature": feature,
+                "source": "bot.video_dubbing_capability",
+                "provider_called": False,
+                "charged_xu": 0,
+                "content": {
+                    "mode": mode,
+                    "target_language": target,
+                    "voice": _safe_text(input_data.get("voice") or input_data.get("voice_profile_id"), 120),
+                    "speed": state["voice_speed"],
+                    "output_format": state["output_format"],
+                    "capability": capability,
+                    "next_step": "Chỉ có canonical job + validated asset mới có thể tạo phụ đề, dịch hoặc lồng tiếng.",
+                },
+            }
+        if feature in _DOCUMENT_FEATURES:
+            action = _document_action_for_feature(feature, input_data)
+            status_fn = self.fn("doc_tools_status_payload")
+            target_normalizer = self.fn("normalize_translate_target")
+            if not action:
+                return {"available": False, "feature": feature, "source": "canonical_bot", "reason": "document_operation_invalid"}
+            try:
+                raw_status = dict(status_fn() or {}) if status_fn else {}
+            except Exception:
+                raw_status = {}
+            safe_status = {
+                key: bool(raw_status.get(key))
+                for key in ("ready_basic", "image_to_pdf", "pdf_to_word", "pdf_to_images", "compress_pdf", "split_pdf", "merge_pdf", "ocr_local")
+            }
+            target = _safe_text(input_data.get("target_language"), 120)
+            if action == "translate_document" and target_normalizer:
+                try:
+                    target = _safe_text(target_normalizer(target), 120)
+                except Exception:
+                    return {"available": False, "feature": feature, "source": "bot.normalize_translate_target", "reason": "document_target_language_invalid"}
+            return {
+                "available": True,
+                "feature": feature,
+                "source": "bot.doc_tools_status_payload" if action != "translate_document" else "bot.normalize_translate_target",
+                "provider_called": False,
+                "charged_xu": 0,
+                "content": {
+                    "action": action,
+                    "target_language": target,
+                    "local_tool_status": safe_status,
+                    "requires_multiple_files": action == "merge_pdf",
+                    "page_range": _safe_text(input_data.get("page_range"), 40) if action == "split_pdf" else "",
+                    "next_step": "Web chưa chạy local tool trực tiếp; cần canonical job, output validation và private asset delivery.",
+                },
+            }
         if not text:
             return {
                 "available": False,
@@ -785,6 +1059,135 @@ class BotCoreBridge:
                 "consent_required": True,
                 "sample_required": True,
                 "pricing_rule": "bot.voice_profile_storage_price_xu",
+            }
+        if feature in {"music_background", "music_song"}:
+            if not text:
+                return {**base, "available": False, "reason": "music_brief_required"}
+            blocker = self.fn("music_copyright_block_reason")
+            try:
+                blocked_reason = _safe_text(blocker(text), 100) if blocker else ""
+            except Exception:
+                blocked_reason = ""
+            if blocked_reason:
+                return {**base, "available": False, "reason": "music_copyright_request_blocked", "blocked_marker": blocked_reason}
+            duration_fn = self.fn("music_result_duration_seconds")
+            kind_fn = self.fn("music_result_product_kind")
+            price_fn = self.fn("music_result_price_xu")
+            if not (duration_fn and kind_fn and price_fn):
+                return {**base, "available": False, "reason": "music_price_helpers_unavailable"}
+            selection = {
+                "guided_duration_seconds": input_data.get("duration_seconds") or input_data.get("duration") or 30,
+                "song_length_mode": str(input_data.get("song_length_mode") or input_data.get("length_mode") or "")[:20],
+            }
+            if feature == "music_song":
+                selection["song_product"] = "seconds"
+            try:
+                duration = max(0, int(duration_fn(selection) or 0))
+                product_kind = _safe_text(kind_fn(selection), 40)
+                price = max(0, int(price_fn(selection) or 0))
+            except Exception:
+                return {**base, "available": False, "reason": "music_price_helper_failed"}
+            return {
+                **base,
+                "available": True,
+                "estimated_xu": price,
+                "duration_seconds": duration,
+                "product_kind": product_kind,
+                "pricing_rule": "bot.music_result_price_xu",
+            }
+        if feature in {"music_sfx", "music_library", "music_upload"}:
+            price_fn = self.fn("calculate_music_price")
+            if not price_fn:
+                return {**base, "available": False, "reason": "music_library_price_helper_unavailable"}
+            option = {
+                "music_sfx": "sfx_library",
+                "music_library": "library",
+                "music_upload": "user_upload",
+            }[feature]
+            try:
+                quote = dict(price_fn({
+                    "duration_seconds": input_data.get("duration_seconds") or input_data.get("duration") or 30,
+                    "music_option": option,
+                    "sfx_count": input_data.get("item_count") or 1,
+                }) or {})
+            except Exception:
+                return {**base, "available": False, "reason": "music_library_price_helper_failed"}
+            return {
+                **base,
+                "available": True,
+                "estimated_xu": max(0, int(quote.get("music_xu") or 0)),
+                "quote": _sanitize_data(quote),
+                "pricing_rule": "bot.calculate_music_price",
+            }
+        if feature in _SUBTITLE_FEATURES:
+            normalizer = self.fn("normalize_video_translate_mode")
+            price_fn = self.fn("calculate_video_translate_price")
+            tts_fn = self.fn("video_dubbing_tts_price_estimate")
+            invoice_fn = self.fn("video_dubbing_invoice_breakdown")
+            if not (normalizer and price_fn and tts_fn and invoice_fn):
+                return {**base, "available": False, "reason": "subtitle_price_helpers_unavailable"}
+            requested_mode = _subtitle_mode_for_feature(feature, input_data)
+            try:
+                mode = _safe_text(normalizer(requested_mode), 60)
+            except Exception:
+                mode = ""
+            if not mode:
+                return {**base, "available": False, "reason": "subtitle_mode_invalid"}
+            try:
+                duration = max(0, int(float(input_data.get("duration_seconds") or input_data.get("duration") or 0)))
+            except (TypeError, ValueError):
+                return {**base, "available": False, "reason": "subtitle_duration_invalid"}
+            target = _safe_text(input_data.get("target_language"), 120)
+            state = {
+                "mode": mode,
+                "video_duration": duration,
+                "target_language": target,
+                "translate_requested": "1" if mode in {"translate_subtitle", "subtitle_translate", "subtitle_plus_dubbing", "subtitle_plus_dub"} else "",
+                "voice_speed": _safe_text(input_data.get("speed") or "normal", 20),
+            }
+            try:
+                processing = dict(price_fn(mode, duration, bool(target)) or {})
+                tts = dict(tts_fn(mode, duration, _safe_text(input_data.get("script") or "", 4000)) or {})
+                invoice = dict(invoice_fn(state) or {})
+            except Exception:
+                return {**base, "available": False, "reason": "subtitle_price_helper_failed"}
+            return {
+                **base,
+                "available": True,
+                "estimated_xu": max(0, int(invoice.get("total_xu") or 0)),
+                "processing_quote": _sanitize_data(processing),
+                "tts_quote": _sanitize_data(tts),
+                "invoice": _sanitize_data(invoice),
+                "pricing_rule": "bot.video_dubbing_invoice_breakdown",
+            }
+        if feature in _DOCUMENT_FEATURES:
+            action = _document_action_for_feature(feature, input_data)
+            if action == "translate_document":
+                # bot.py has no durable, standalone document-translation
+                # price/delivery contract. Do not invent a 0-Xu quote.
+                return {**base, "available": False, "reason": "document_translation_quote_not_mapped"}
+            cost_fn = self.fn("doc_cost")
+            status_fn = self.fn("doc_tools_status_payload")
+            if not action or not cost_fn:
+                return {**base, "available": False, "reason": "document_cost_helper_unavailable"}
+            try:
+                pages = max(1, int(float(input_data.get("page_count") or 1)))
+                price = max(0, int(cost_fn(action, pages) or 0))
+                raw_status = dict(status_fn() or {}) if status_fn else {}
+            except Exception:
+                return {**base, "available": False, "reason": "document_cost_helper_failed"}
+            safe_status = {
+                key: bool(raw_status.get(key))
+                for key in ("ready_basic", "image_to_pdf", "pdf_to_word", "pdf_to_images", "compress_pdf", "split_pdf", "merge_pdf", "ocr_local")
+            }
+            return {
+                **base,
+                "available": True,
+                "estimated_xu": price,
+                "action": action,
+                "page_count": pages,
+                "local_tool_status": safe_status,
+                "pricing_rule": "bot.doc_cost",
             }
         cost_helpers = {
             "script": "workflow_script_storyboard_cost_xu",
@@ -1279,18 +1682,24 @@ def _feature_draft_or_estimate(bridge: BotCoreBridge, feature: str, user_id: str
     # Draft/estimate deliberately remain open for guarded public features. The
     # payload below comes only from pure bot.py planning/pricing helpers and
     # never invokes a provider or ledger writer.
-    contract_error = _voice_clone_contract_error(input_data, uploads) if feature == "voice_clone" else None
+    contract_error = _voice_clone_contract_error(input_data, uploads) if feature == "voice_clone" else _feature_intake_contract_error(feature, input_data, uploads)
     if contract_error:
+        source = (
+            "bot.voice_vault_intake_contract" if feature == "voice_clone"
+            else "bot.video_dubbing_intake_contract" if feature in _SUBTITLE_FEATURES
+            else "bot.docflow_intake_contract" if feature in _DOCUMENT_FEATURES
+            else "bot.feature_intake_contract"
+        )
         canonical = {
             "available": False,
             "feature": feature,
-            "source": "bot.voice_vault_intake_contract",
+            "source": source,
             "reason": contract_error,
-            "sample_required": True,
-            "consent_required": True,
             "provider_called": False,
             "charged_xu": 0,
         }
+        if feature == "voice_clone":
+            canonical.update({"sample_required": True, "consent_required": True})
     else:
         canonical = bridge.feature_draft_payload(feature, input_data) if action == "draft" else bridge.feature_estimate_payload(feature, input_data, user_id=user_id)
     if action == "draft" and canonical.get("available"):
@@ -1329,6 +1738,13 @@ async def _feature_confirm(bridge: BotCoreBridge, feature: str, user_id: str, pa
         contract_error = _voice_clone_contract_error(input_data, uploads)
         if contract_error:
             result = response(False, "guarded", "Voice Clone cần mẫu audio thuộc tài khoản và xác nhận quyền sử dụng trước khi có thể chạy.", data={"feature": feature, "reason": contract_error}, error_code="VOICE_CLONE_CONTRACT_REQUIRED")
+            bridge.idempotency_put(scope, key, result)
+            bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="guarded", note=contract_error)
+            return result
+    else:
+        contract_error = _feature_intake_contract_error(feature, input_data, uploads)
+        if contract_error:
+            result = response(False, "guarded", "Input chưa đáp ứng điều kiện canonical của bot; hệ thống chưa gọi engine và chưa trừ Xu.", data={"feature": feature, "reason": contract_error}, error_code="FEATURE_INTAKE_CONTRACT_REQUIRED")
             bridge.idempotency_put(scope, key, result)
             bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="guarded", note=contract_error)
             return result
