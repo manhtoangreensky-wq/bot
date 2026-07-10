@@ -971,7 +971,19 @@ class GenericHttpVideoProvider:
             raw_debug["provider_submit_blocker"] = blocker
             raw_debug["provider_submit_http_5xx"] = bool(is_5xx)
             raw_debug["provider_submit_retriable"] = bool(retriable)
-            return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status or "failed", error_code=blocker, raw=raw_debug)
+            # Some gateways report a transport error after accepting a task.
+            # Preserve a parsed task id so the orchestration layer can poll it
+            # exactly once instead of paying for a duplicate submission.
+            raw_debug["task_pollable"] = bool((task_id or video_id) and caps.get("poll_url_configured"))
+            return VideoSubmitResult(
+                ok=False,
+                provider_name=self.provider_name,
+                provider_task_id=task_id,
+                provider_video_id=video_id,
+                provider_status=status or "failed",
+                error_code=blocker,
+                raw=raw_debug,
+            )
         if not isinstance(body, dict):
             raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_shape"
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status="failed", error_code="provider_submit_response_invalid_shape", raw=raw_debug)

@@ -54,6 +54,10 @@ PROVIDER_NONTERMINAL_STATUSES = {"not_start", "queued", "running", "processing",
 PROVIDER_PENDING_BLOCKERS = {"provider_in_progress", "provider_pending", "provider_status_unknown"}
 DEFAULT_PRODUCT_VIDEO_PROVIDER_MAX_WAIT_SECONDS = 20 * 60
 PRODUCT_VIDEO_CONTROLLED_FALLBACK_BLOCKERS = {
+    "provider_submit_failed",
+    "provider_submit_http_error",
+    "provider_submit_http_5xx",
+    "provider_temporarily_unavailable",
     "provider_failed_result_url_invalid",
     "provider_result_url_missing",
     "provider_download_failed",
@@ -449,6 +453,39 @@ def _int_metadata(value: Any, default: int = 0) -> int:
         return default
 
 
+def product_video_submit_response_truth(
+    *,
+    provider_accepted: Any = False,
+    provider_task_id: Any = "",
+    provider_video_id: Any = "",
+    transport_http: Any = 0,
+    task_pollable: Any = None,
+) -> dict[str, Any]:
+    """Reconcile transport and provider acceptance without losing a paid task."""
+    task_id_present = bool(str(provider_task_id or provider_video_id or "").strip())
+    if task_pollable is None:
+        task_pollable_value = task_id_present
+    else:
+        task_pollable_value = bool(_truthy_metadata(task_pollable) and task_id_present)
+    http_status = _int_metadata(transport_http, 0)
+    provider_accepted_raw = bool(_truthy_metadata(provider_accepted))
+    effective_accepted = bool(provider_accepted_raw or task_pollable_value)
+    transport_anomaly = bool(http_status >= 400 or (http_status and not 200 <= http_status < 300))
+    ignored = bool(transport_anomaly and task_pollable_value)
+    return {
+        "transport_http": http_status,
+        "provider_accepted": provider_accepted_raw,
+        "provider_accepted_raw": provider_accepted_raw,
+        "task_id_present": task_id_present,
+        "task_pollable": task_pollable_value,
+        "effective_submit_outcome": "accepted" if effective_accepted else "submit_failed_no_task",
+        "effective_submit_accepted": effective_accepted,
+        "transport_anomaly": transport_anomaly,
+        "transport_anomaly_ignored_due_to_valid_task": ignored,
+        "duplicate_submit_prevented": bool(effective_accepted and task_pollable_value),
+    }
+
+
 def product_video_public_confirm_context(metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return persisted Product Video confirmation context for paid fallback decisions."""
     metadata = dict(metadata or {})
@@ -542,12 +579,74 @@ def product_video_public_confirm_context(metadata: dict[str, Any] | None = None)
         )
     )
     fallback_count = _int_metadata(metadata.get("fallback_count") or metadata.get("provider_fallback_count"), 0)
+    user_visible_price_xu = _int_metadata(
+        metadata.get("user_visible_price_xu")
+        or metadata.get("package_xu")
+        or metadata.get("package_price_xu"),
+        0,
+    )
+    persisted_quoted_price_xu = _int_metadata(
+        metadata.get("persisted_quoted_price_xu")
+        or metadata.get("quoted_price_xu")
+        or user_visible_price_xu,
+        user_visible_price_xu,
+    )
+    customer_charge_planned_xu = _int_metadata(
+        metadata.get("customer_charge_planned_xu")
+        or metadata.get("wallet_charge_amount_xu")
+        or persisted_quoted_price_xu,
+        persisted_quoted_price_xu,
+    )
+    provider_budget_xu = _int_metadata(
+        metadata.get("provider_budget_xu")
+        or metadata.get("provider_cost_cap_xu")
+        or metadata.get("provider_budget"),
+        0,
+    )
+    fallback_provider_cost_xu = _int_metadata(
+        metadata.get("fallback_provider_cost_xu")
+        or metadata.get("fallback_cost_xu")
+        or metadata.get("selected_fallback_cost_xu"),
+        0,
+    )
+    quote_fields_present = bool(user_visible_price_xu and persisted_quoted_price_xu and customer_charge_planned_xu)
+    quote_consistent = bool(
+        quote_fields_present
+        and user_visible_price_xu == persisted_quoted_price_xu == customer_charge_planned_xu
+        and not (
+            metadata.get("quote_consistent") not in (None, "")
+            and not _truthy_metadata(metadata.get("quote_consistent"))
+        )
+    )
     current_hidden = current_source in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES
     original_public = original_source in {
         PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
         PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
     }
     fallback_eligibility_source = original_source or current_source or "missing"
+    original_confirmation_valid_for_fallback = bool(
+        original_public
+        and public_user_confirmed
+        and invoice_confirmed
+        and quote_consistent
+    )
+    fallback_candidate_prevalidated = bool(
+        _truthy_metadata(metadata.get("fallback_candidate_prevalidated"))
+        or _truthy_metadata(metadata.get("fallback_contract_valid"))
+    )
+    fallback_within_persisted_budget = bool(
+        original_confirmation_valid_for_fallback
+        and provider_budget_xu > 0
+        and (
+            (fallback_provider_cost_xu > 0 and fallback_provider_cost_xu <= provider_budget_xu)
+            or (fallback_provider_cost_xu <= 0 and fallback_candidate_prevalidated)
+        )
+    )
+    fallback_requires_new_price = bool(
+        fallback_provider_cost_xu > 0
+        and provider_budget_xu > 0
+        and fallback_provider_cost_xu > provider_budget_xu
+    )
     return {
         "current_source": current_source or "missing",
         "original_submit_source": original_source or "",
@@ -561,6 +660,16 @@ def product_video_public_confirm_context(metadata: dict[str, Any] | None = None)
         "current_source_hidden": current_hidden,
         "original_source_public": original_public,
         "fallback_eligibility_source": fallback_eligibility_source,
+        "user_visible_price_xu": user_visible_price_xu,
+        "persisted_quoted_price_xu": persisted_quoted_price_xu,
+        "customer_charge_planned_xu": customer_charge_planned_xu,
+        "provider_budget_xu": provider_budget_xu,
+        "fallback_provider_cost_xu": fallback_provider_cost_xu,
+        "quote_consistent": quote_consistent,
+        "original_job_confirmation_valid_for_fallback": original_confirmation_valid_for_fallback,
+        "fallback_candidate_prevalidated": fallback_candidate_prevalidated,
+        "fallback_within_persisted_budget": fallback_within_persisted_budget,
+        "fallback_requires_new_price": fallback_requires_new_price,
     }
 
 
@@ -585,7 +694,13 @@ def product_video_controlled_fallback_policy(
     elif not context["invoice_confirmed"]:
         allowed = False
         reason = "invoice_confirm_missing"
-    elif not context["provider_submit_accepted_before"]:
+    elif context["fallback_requires_new_price"]:
+        allowed = False
+        reason = "fallback_exceeds_persisted_budget"
+    elif not context["provider_submit_accepted_before"] and not (
+        context["original_job_confirmation_valid_for_fallback"]
+        and context["fallback_within_persisted_budget"]
+    ):
         allowed = False
         reason = "provider_submit_not_accepted_before"
     elif context["delivered"]:
@@ -603,8 +718,10 @@ def product_video_controlled_fallback_policy(
     return {
         **context,
         "fallback_allowed": bool(allowed),
+        "fallback_submit_allowed": bool(allowed),
         "fallback_block_reason": reason,
         "fallback_blocked_reason": reason,
+        "fallback_budget_block_reason": reason if reason in {"fallback_exceeds_persisted_budget", "provider_submit_not_accepted_before"} else "",
         "fallback_reason": clean_blocker if allowed else "",
         "fallback_submit_source": PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE if allowed else "",
     }
@@ -622,6 +739,10 @@ def _product_video_paid_fallback_blocked(
     env: dict[str, str] | None,
     metadata: dict[str, Any] | None,
 ) -> bool:
+    # A confirmed customer quote never authorizes a more expensive fallback,
+    # regardless of whether the legacy retry-confirmation switch is enabled.
+    if product_video_public_confirm_context(metadata).get("fallback_requires_new_price"):
+        return True
     if not paid_retry_requires_confirmation(env) or product_video_retry_confirmed(metadata):
         return False
     # Missing submit config is a local setup check, not a provider credit spend.
@@ -2518,6 +2639,11 @@ def run_provider_generation(
         provider_candidates = [item.provider_name for item in candidate_adapters]
         initial_primary_provider = adapter.provider_name if adapter else ""
         initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
+    if is_product_video and len(candidate_adapters) > 1:
+        # Candidate adapters have already passed readiness, capability and
+        # contract filtering. This lets the persisted job quote authorize one
+        # in-budget fallback without asking the customer to confirm twice.
+        metadata.setdefault("fallback_candidate_prevalidated", True)
     existing_provider, existing_task_id, existing_video_id = _metadata_existing_provider_task(metadata)
     pending_provider = str(metadata.get("provider_pending_provider") or existing_provider or "").strip()
     pending_task_id = str(metadata.get("provider_pending_task_id") or existing_task_id or "").strip()
@@ -2533,13 +2659,22 @@ def run_provider_generation(
     )
     fallback_context = product_video_public_confirm_context(metadata)
     cooldown_state = provider_failure_cooldown_state(metadata, env)
-    submit_idempotency_key = str(metadata.get("fallback_idempotency_key") or "").strip() or hashlib.sha256(
+    submit_idempotency_key = str(
+        metadata.get("scene_dispatch_idempotency_key")
+        or metadata.get("fallback_idempotency_key")
+        or ""
+    ).strip() or hashlib.sha256(
         f"{request.job_id}|{request.product_type}|{request.video_flow_type}|{request.required_capability}".encode("utf-8")
     ).hexdigest()[:24]
     base_debug = {
         "provider_router_called": True,
         "provider_request_job_id": str(request.job_id or ""),
         "provider_submit_idempotency_key": submit_idempotency_key,
+        "scene_dispatch_idempotency_key": str(metadata.get("scene_dispatch_idempotency_key") or submit_idempotency_key),
+        "scene_dispatch_state": str(metadata.get("scene_dispatch_state") or ""),
+        "scene_dispatch_attempted": bool(metadata.get("scene_dispatch_attempted")),
+        "scene_dispatch_block_reason": str(metadata.get("scene_dispatch_block_reason") or ""),
+        "missing_scene_dispatch_recovered": bool(metadata.get("missing_scene_dispatch_recovered")),
         "product_video_provider_submit_enabled": bool(submit_enabled),
         "product_video_provider_submit_enabled_raw": str(submit_switch.get("raw") or ""),
         "product_video_provider_submit_enabled_resolved": bool(submit_enabled),
@@ -2551,6 +2686,11 @@ def run_provider_generation(
         "public_user_confirmed": bool(submit_source_policy.get("public_user_confirmed")),
         "invoice_confirmed": bool(fallback_context.get("invoice_confirmed")),
         "provider_submit_accepted_before": bool(fallback_context.get("provider_submit_accepted_before")),
+        "original_job_confirmation_valid_for_fallback": bool(fallback_context.get("original_job_confirmation_valid_for_fallback")),
+        "fallback_within_persisted_budget": bool(fallback_context.get("fallback_within_persisted_budget")),
+        "fallback_requires_new_price": bool(fallback_context.get("fallback_requires_new_price")),
+        "fallback_submit_allowed": False,
+        "fallback_budget_block_reason": "",
         "provider_submit_allowed": bool(submit_source_policy.get("provider_submit_allowed")),
         "provider_submit_block_reason": str(submit_source_policy.get("provider_submit_block_reason") or ""),
         "poll_existing_task_allowed": bool(submit_source_policy.get("poll_existing_task_allowed")),
@@ -2948,6 +3088,15 @@ def run_provider_generation(
                 "public_user_confirmed": bool(fallback_context.get("public_user_confirmed") or submit_source_policy.get("public_user_confirmed")),
                 "invoice_confirmed": bool(fallback_context.get("invoice_confirmed")),
                 "provider_submit_accepted_before": bool(fallback_context.get("provider_submit_accepted_before")),
+                "original_job_confirmation_valid_for_fallback": bool(fallback_context.get("original_job_confirmation_valid_for_fallback")),
+                "fallback_within_persisted_budget": bool(fallback_context.get("fallback_within_persisted_budget")),
+                "fallback_requires_new_price": bool(fallback_context.get("fallback_requires_new_price")),
+                "fallback_submit_allowed": bool(fallback_used),
+                "fallback_budget_block_reason": "",
+                "user_visible_price_xu": _int_metadata(metadata.get("user_visible_price_xu"), 0),
+                "persisted_quoted_price_xu": _int_metadata(metadata.get("persisted_quoted_price_xu"), 0),
+                "customer_charge_planned_xu": _int_metadata(metadata.get("customer_charge_planned_xu"), 0),
+                "provider_budget_xu": _int_metadata(metadata.get("provider_budget_xu") or metadata.get("provider_cost_cap_xu"), 0),
                 "provider_submit_allowed": bool(True if fallback_used else submit_source_policy.get("provider_submit_allowed") and not poll_existing_task),
                 "provider_submit_block_reason": (
                     ""
@@ -3062,7 +3211,13 @@ def run_provider_generation(
 
         def _paid_fallback_requires_confirmation_payload(reason: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
             raw = dict(raw or {})
-            blocker = str(reason or "paid_fallback_requires_confirmation").strip() or "paid_fallback_requires_confirmation"
+            fallback_policy = product_video_controlled_fallback_policy(reason, metadata)
+            policy_reason = str(fallback_policy.get("fallback_block_reason") or "")
+            blocker = (
+                policy_reason
+                if policy_reason == "fallback_exceeds_persisted_budget"
+                else (str(reason or "paid_fallback_requires_confirmation").strip() or "paid_fallback_requires_confirmation")
+            )
             submit_status = _submit_http_status(raw)
             return {
                 "ok": False,
@@ -3081,9 +3236,14 @@ def run_provider_generation(
                 "fallback_used": False,
                 "fallback_reason": "",
                 "fallback_allowed": False,
-                "fallback_blocked_reason": "paid_fallback_requires_confirmation",
+                "fallback_submit_allowed": False,
+                "fallback_blocked_reason": policy_reason or "paid_fallback_requires_confirmation",
+                "fallback_budget_block_reason": policy_reason if policy_reason == "fallback_exceeds_persisted_budget" else "",
+                "original_job_confirmation_valid_for_fallback": bool(fallback_policy.get("original_job_confirmation_valid_for_fallback")),
+                "fallback_within_persisted_budget": bool(fallback_policy.get("fallback_within_persisted_budget")),
+                "fallback_requires_new_price": bool(fallback_policy.get("fallback_requires_new_price")),
                 "provider_error": blocker,
-                "blocker": "paid_fallback_requires_confirmation",
+                "blocker": blocker if policy_reason == "fallback_exceeds_persisted_budget" else "paid_fallback_requires_confirmation",
                 "provider_status": "failed_no_charge",
                 "terminal_state": "failed_no_charge",
                 "status": "failed_no_charge",
@@ -3141,6 +3301,13 @@ def run_provider_generation(
                 "ok": False,
                 **_attempt_base(),
                 **telemetry,
+                **product_video_submit_response_truth(
+                    provider_accepted=submit.ok,
+                    provider_task_id=submit.provider_task_id,
+                    provider_video_id=submit.provider_video_id,
+                    transport_http=submit_http_status,
+                    task_pollable=(submit.raw or {}).get("task_pollable"),
+                ),
                 "fallback_used": attempt_index > 0,
                 "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                 "provider_fallback_attempted": bool(attempt_index > 0),
@@ -3150,6 +3317,8 @@ def run_provider_generation(
                 "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
                 "provider_submit_called": submit_called_flag,
                 "provider_submit_http_status": submit_http_status,
+                "provider_submit_http_5xx": False,
+                "provider_submit_retriable": False,
                 "provider_task_id_saved": bool(provider_task_ids),
                 "submit_accepted": True,
                 "provider_poll_called": True,
@@ -3257,18 +3426,30 @@ def run_provider_generation(
                 exc_payload["provider_fallback_reason"] = first_fallback_reason
                 return exc_payload
         submit_http_status = _submit_http_status(submit.raw)
+        submit_truth = product_video_submit_response_truth(
+            provider_accepted=submit.ok,
+            provider_task_id=submit.provider_task_id,
+            provider_video_id=submit.provider_video_id,
+            transport_http=submit_http_status,
+            task_pollable=(submit.raw or {}).get("task_pollable"),
+        )
         _mark_trace(
             "poll" if poll_existing_task else "submit",
             raw=submit.raw,
             submit_called=submit_called_flag,
             submit_http_status=submit_http_status,
-            submit_accepted=bool(submit.ok),
-            task_id_present=bool(submit.provider_task_id or submit.provider_video_id),
+            submit_accepted=bool(submit_truth["effective_submit_accepted"]),
+            provider_accepted_raw=bool(submit_truth["provider_accepted_raw"]),
+            task_id_present=bool(submit_truth["task_id_present"]),
+            task_pollable=bool(submit_truth["task_pollable"]),
+            effective_submit_outcome=str(submit_truth["effective_submit_outcome"]),
+            transport_anomaly=bool(submit_truth["transport_anomaly"]),
+            transport_anomaly_ignored_due_to_valid_task=bool(submit_truth["transport_anomaly_ignored_due_to_valid_task"]),
             task_id_source=str((submit.raw or {}).get("task_id_field_path") or (submit.raw or {}).get("video_id_field_path") or ""),
             normalized_status=normalize_provider_status(submit.provider_status, has_result_url=bool(submit.result_url or submit.file_url)),
             result_url_present=bool(submit.result_url or submit.file_url),
         )
-        if not submit.ok:
+        if not submit_truth["effective_submit_accepted"]:
             blocker = submit.error_code or "provider_submit_failed"
             if attempt_index + 1 < len(candidate_adapters):
                 _record_failure(blocker, submit.raw, submit_failure=True)
@@ -3294,6 +3475,7 @@ def run_provider_generation(
                 "provider_submit_retriable": bool((submit.raw or {}).get("provider_submit_retriable") or _is_submit_5xx(submit.raw, blocker, submit_http_status)),
                 "provider_task_id_saved": bool(provider_task_ids),
                 "submit_accepted": False,
+                **submit_truth,
                 "poll_allowed": False,
                 "poll_skipped_reason": "provider_task_id_missing" if blocker == "provider_task_id_missing" else "submit_not_accepted",
                 "provider_error": final_blocker,
@@ -3336,9 +3518,10 @@ def run_provider_generation(
                     "fallback_provider_attempts": list(attempt_failures),
                     "selected_provider_after_fallback": current_adapter.provider_name if attempt_index > 0 else "",
                     "provider_submit_called": submit_called_flag,
-                    "provider_submit_http_status": submit_http_status,
-                    "provider_task_id_saved": False,
-                    "submit_accepted": False,
+                "provider_submit_http_status": submit_http_status,
+                "provider_task_id_saved": False,
+                "submit_accepted": False,
+                **submit_truth,
                     "provider_poll_called": False,
                     "poll_allowed": False,
                     "poll_skipped_reason": "provider_task_id_missing",

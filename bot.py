@@ -48209,7 +48209,19 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
     refund_ids.extend(str(item or "") for item in (merged.get("refund_tx_ids") or merged.get("refund_ids") or []) if str(item or "").strip())
     masked_tx = ", ".join(mask_provider_task_id(item) for item in tx_ids if item.strip()) or "-"
     masked_refund = ", ".join(mask_provider_task_id(item) for item in refund_ids if item.strip()) or "-"
-    terminal = str(project.get("video_terminal_state") or result.get("terminal_state") or job.get("status") or "-")
+    processing_truth = bool(
+        merged.get("processing_truth_applied")
+        or merged.get("active_scene_indexes")
+        or merged.get("dispatchable_scene_indexes")
+        or merged.get("fallback_candidate_indexes")
+    )
+    terminal = "processing" if processing_truth else str(
+        merged.get("final_user_visible_state")
+        or project.get("video_terminal_state")
+        or result.get("terminal_state")
+        or job.get("status")
+        or "-"
+    )
     user_masked = provider_spend_mask(job.get("user_id") or project.get("user_id") or result.get("user_id"), 2, 2)
     lines = [
         "💳 <b>Video Job Finance Debug</b>",
@@ -48267,6 +48279,9 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         f"• artifact valid for charge: <code>{'yes' if charge_gate.get('ok') else 'no'}</code>",
         f"• charge gate blocker: <code>{html.escape(str(charge_gate.get('blocker') or '-'))}</code>",
         f"• final user-visible state: <code>{html.escape(terminal[:120])}</code>",
+        f"• processing truth applied: <code>{'yes' if processing_truth else 'no'}</code>",
+        f"• dispatchable scenes: <code>{html.escape(str(merged.get('dispatchable_scene_indexes') or [])[:120])}</code>",
+        f"• active scenes: <code>{html.escape(str(merged.get('active_scene_indexes') or [])[:120])}</code>",
         f"• wallet truth: <code>{'charge tx present' if charged > 0 else 'no wallet charge recorded'}</code>",
         f"• manual check hint: <code>{'refund/manual review if charged without valid MP4' if charged > 0 and not charge_gate.get('ok') else 'ok/no-charge until valid MP4'}</code>",
     ]
@@ -71053,7 +71068,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
     job_result = video_b14_job_result_payload(job)
     reconciled_job_result = video_b14_reconciled_provider_debug(job, project, job_result, refresh_source="public_panel")
-    if reconciled_job_result.get("shopaikey_status_endpoint_exact") or reconciled_job_result.get("canonical_result_url_present"):
+    if (
+        reconciled_job_result.get("shopaikey_status_endpoint_exact")
+        or reconciled_job_result.get("canonical_result_url_present")
+        or reconciled_job_result.get("scene_ledger")
+        or reconciled_job_result.get("processing_truth_applied")
+    ):
         job_result = reconciled_job_result
         provider_telemetry = reconciled_job_result
     else:
@@ -71102,7 +71122,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         ):
             if key in job_result and key not in provider_telemetry:
                 provider_telemetry[key] = job_result.get(key)
-    provider_task_alive = bool(provider_telemetry.get("provider_task_alive"))
+    processing_truth = bool(
+        provider_telemetry.get("processing_truth_applied")
+        or provider_telemetry.get("active_scene_indexes")
+        or provider_telemetry.get("dispatchable_scene_indexes")
+        or provider_telemetry.get("fallback_candidate_indexes")
+    )
+    provider_task_alive = bool(provider_telemetry.get("provider_task_alive") or processing_truth)
     fallback_running = bool(
         provider_telemetry.get("fallback_used")
         or provider_telemetry.get("provider_fallback_attempted")
@@ -71113,7 +71139,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     )
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
-    if provider_task_alive and status not in {"completed", "success", "failed", "error"}:
+    if provider_task_alive and status not in {"completed", "success"}:
         status = "processing"
         if provider_telemetry.get("scene_ledger") and safe_int(provider_telemetry.get("required_scene_count"), 0) > 1:
             progress = safe_int(
@@ -71171,7 +71197,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or job.get("final_video_file_id")
         or legacy_artifact_only_status
     )
-    if provider_task_alive and not has_final_artifact and status not in {"failed", "error"}:
+    if provider_task_alive and not has_final_artifact:
         status = "processing"
         if provider_telemetry.get("scene_ledger") and safe_int(provider_telemetry.get("required_scene_count"), 0) > 1:
             progress = safe_int(
@@ -71482,7 +71508,13 @@ def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict
         telemetry = video_b14_reconciled_provider_debug(job, project, payload, refresh_source="auto_refresh_terminal")
     except Exception:
         telemetry = payload
-    if telemetry.get("provider_task_alive") or telemetry.get("continue_polling") or telemetry.get("primary_provider_task_alive"):
+    if (
+        telemetry.get("provider_task_alive")
+        or telemetry.get("continue_polling")
+        or telemetry.get("primary_provider_task_alive")
+        or telemetry.get("processing_truth_applied")
+        or telemetry.get("dispatchable_scene_indexes")
+    ):
         return ""
     status = str(job.get("status") or project.get("status") or "").strip().lower()
     terminal = str(project.get("video_terminal_state") or "").strip().lower()
