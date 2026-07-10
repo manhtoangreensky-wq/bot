@@ -2013,6 +2013,11 @@ def build_product_video_confirm_kickoff_payload(
         or invoice.get("provider_health_summary")
         or {}
     )
+    multi_scene_health_gate = (
+        asset_pack.get("multi_scene_health_gate")
+        or invoice.get("multi_scene_health_gate")
+        or {}
+    )
     return {
         "source": "product_video",
         "product_video": True,
@@ -2070,6 +2075,9 @@ def build_product_video_confirm_kickoff_payload(
         "provider_order": chain,
         "provider_chain_resolved": provider_chain_resolved,
         "provider_health_at_submit": provider_health_at_submit,
+        "provider_route_ready_chain": list(asset_pack.get("provider_route_ready_chain") or invoice.get("provider_route_ready_chain") or []),
+        "provider_live_healthy_chain": list(asset_pack.get("provider_live_healthy_chain") or invoice.get("provider_live_healthy_chain") or []),
+        "multi_scene_health_gate": dict(multi_scene_health_gate) if isinstance(multi_scene_health_gate, dict) else {},
         "primary_selected_due_to_health": str(asset_pack.get("primary_selected_due_to_health") or invoice.get("primary_selected_due_to_health") or ""),
         "provider_degraded_reason": str(asset_pack.get("provider_degraded_reason") or invoice.get("provider_degraded_reason") or ""),
         "effective_primary_for_low_basic": str(asset_pack.get("effective_primary_for_low_basic") or invoice.get("effective_primary_for_low_basic") or (chain[0] if chain else "")),

@@ -47745,6 +47745,14 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• scene tasks: <code>{safe_int(result.get('scene_tasks_submitted'), 0)}/{safe_int(result.get('scene_tasks_total'), 0)}</code>",
         f"• scene tasks created: <code>{safe_int(result.get('scene_tasks_created_count') or result.get('scene_tasks_total'), 0)}</code>",
         f"• scene tasks completed: <code>{safe_int(result.get('scene_tasks_completed'), 0)}</code>",
+        f"• scene forensic root cause: <code>{html.escape(str(result.get('scene_forensic_root_cause') or '-'))}</code>",
+        f"• scene forensic terminal reason: <code>{html.escape(str(result.get('scene_forensic_terminal_reason') or '-'))}</code>",
+        f"• fallback evaluated/allowed scenes: <code>{safe_int(result.get('fallback_evaluated_count'), 0)}/{safe_int(result.get('fallback_allowed_count'), 0)}</code>",
+        f"• scene execution audit: <code>{html.escape(str(result.get('scene_execution_audit') or {})[:1200])}</code>",
+        f"• scene winner task: <code>{html.escape(str(result.get('scene_winner_task_masked') or '-'))}</code>",
+        f"• scene winner provider: <code>{html.escape(str(result.get('scene_winner_provider') or '-'))}</code>",
+        f"• late result ignored: <code>{html.escape(str(result.get('late_result_ignored_masked') or []))}</code>",
+        f"• duplicate scene result prevented: <code>{'yes' if result.get('duplicate_scene_result_prevented') else 'no'}</code>",
         f"• scenes total/done/running/stalled: <code>{safe_int(result.get('scenes_total') or result.get('scene_tasks_total'), 0)}/{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_running'), 0)}/{safe_int(result.get('scenes_stalled') or result.get('scenes_stalled_count'), 0)}</code>",
         f"• scenes done/pending/running: <code>{safe_int(result.get('scenes_done') or result.get('scene_tasks_completed'), 0)}/{safe_int(result.get('scenes_pending'), 0)}/{safe_int(result.get('scenes_running'), 0)}</code>",
         f"• current scene index: <code>{safe_int(result.get('current_scene_index'), 0)}</code>",
@@ -71922,7 +71930,7 @@ def video_b14_public_render_guard(user_id=0) -> tuple[bool, str]:
 
 
 PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI = (
-    "Hệ thống tạo video đang bận, TOAN AAS chưa trừ Xu. Anh/chị thử lại sau."
+    "Hệ thống tạo video đang bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau."
 )
 try:
     VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS = max(30, int(os.getenv("VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS", "900") or 900))
@@ -72094,7 +72102,7 @@ def _product_video_collect_provider_attempts_from_payload(payload: dict) -> list
     return attempts
 
 
-def _product_video_recent_provider_attempt_evidence(conn, *, limit: int = 5) -> list[dict]:
+def _product_video_recent_provider_attempt_evidence(conn, *, limit: int = 24) -> list[dict]:
     attempts: list[dict] = []
     try:
         rows = conn.execute(
@@ -72149,7 +72157,11 @@ def _product_video_provider_status_for_preflight() -> dict:
         }
 
 
-def _product_video_contract_valid_provider_chain(chain: list[str] | tuple[str, ...]) -> tuple[list[str], list[dict]]:
+def _product_video_contract_valid_provider_chain(
+    chain: list[str] | tuple[str, ...],
+    *,
+    scene_count: int = 1,
+) -> tuple[list[str], list[dict]]:
     valid: list[str] = []
     invalid: list[dict] = []
     for provider in [str(item or "").strip() for item in (chain or []) if str(item or "").strip()]:
@@ -72157,7 +72169,7 @@ def _product_video_contract_valid_provider_chain(chain: list[str] | tuple[str, .
             resolution = video_provider_catalog.resolve_product_video_model(
                 tier=300,
                 provider_chain=[provider],
-                scene_count=2,
+                scene_count=max(1, safe_int(scene_count, 1)),
                 required_capability="text_to_video_or_scene_video",
                 requires_concat=True,
             )
@@ -72182,11 +72194,30 @@ def _product_video_contract_valid_provider_chain(chain: list[str] | tuple[str, .
 
 
 def product_video_provider_public_route_preflight(conn=None) -> dict:
+    owned_conn = None
+    if conn is None:
+        try:
+            owned_conn = db_connect()
+            conn = owned_conn
+        except Exception:
+            conn = None
     attempts = _product_video_recent_provider_attempt_evidence(conn)
     status = _product_video_provider_status_for_preflight()
     chain = status.get("effective_provider_chain") or status.get("provider_chain") or []
+    provider_items = {
+        str(item.get("provider") or "").strip(): dict(item)
+        for item in (status.get("providers") or [])
+        if isinstance(item, dict) and str(item.get("provider") or "").strip()
+    }
     degraded_providers = {
-        str(provider): video_provider_router.product_video_provider_public_degradation(str(provider), attempts)
+        str(provider): video_provider_router.product_video_provider_public_degradation(
+            str(provider),
+            attempts,
+            route_ready=bool(
+                provider_items.get(str(provider), {}).get("configured")
+                and provider_items.get(str(provider), {}).get("credit_ok", True)
+            ),
+        )
         for provider in chain
         if str(provider or "").strip()
     }
@@ -72202,7 +72233,7 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         degraded_providers=degraded_providers,
     )
     decision_chain = list(decision.get("effective_provider_chain") or [])
-    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(decision_chain)
+    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(decision_chain, scene_count=1)
     selected_chain = [provider for provider in decision_chain if provider in contract_valid_chain]
     final_ok = bool(decision.get("ok") and selected_chain)
     final_selected_provider = selected_chain[0] if selected_chain else ""
@@ -72235,6 +72266,8 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         "contract_valid_provider_chain": contract_valid_chain,
         "contract_invalid_providers": contract_invalid_providers,
         "effective_provider_chain": selected_chain,
+        "route_ready_provider_chain": list(decision.get("route_ready_provider_order") or []),
+        "live_healthy_provider_chain": list(decision.get("live_healthy_provider_order") or []),
         "selected_provider": final_selected_provider,
         "job_creation_blocked_by_provider_availability": not final_ok,
         "no_charge_reason": "" if final_ok else "no_healthy_video_provider_no_charge",
@@ -72242,7 +72275,34 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         "preflight_ttl_seconds": max(30, safe_int(os.getenv("PRODUCT_VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS"), 900)),
         "public_message": "" if final_ok else PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
     }
+    if owned_conn is not None:
+        owned_conn.close()
     return result
+
+
+def product_video_multi_scene_health_gate(scene_count: int, preflight: dict | None = None) -> dict:
+    preflight = dict(preflight or {})
+    count = max(1, safe_int(scene_count, 1))
+    effective = [
+        str(item or "").strip()
+        for item in (preflight.get("effective_provider_chain") or [])
+        if str(item or "").strip()
+    ]
+    contract_valid, contract_invalid = _product_video_contract_valid_provider_chain(
+        effective,
+        scene_count=count,
+    )
+    result = video_provider_router.product_video_multi_scene_public_gate(
+        count,
+        preflight.get("provider_health_summary") if isinstance(preflight.get("provider_health_summary"), dict) else {},
+        effective_provider_chain=effective,
+        contract_valid_provider_chain=contract_valid,
+    )
+    return {
+        **result,
+        "contract_invalid_providers": contract_invalid,
+        "public_message": "" if result.get("ok") else PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+    }
 
 
 def product_video_provider_availability_preflight(conn=None) -> dict:
@@ -72286,6 +72346,9 @@ def product_video_apply_provider_preflight_to_session(user_id, session: dict, pr
         asset_pack["provider_preflight_result"] = str(preflight.get("provider_preflight_result") or "")
         asset_pack["provider_degraded_for_product_video_public"] = bool(preflight.get("provider_degraded_for_product_video_public"))
         asset_pack["provider_health_at_submit"] = dict(preflight.get("provider_health_summary") or preflight.get("provider_health_at_submit") or {})
+        asset_pack["provider_route_ready_chain"] = list(preflight.get("route_ready_provider_chain") or [])
+        asset_pack["provider_live_healthy_chain"] = list(preflight.get("live_healthy_provider_chain") or [])
+        asset_pack["multi_scene_health_gate"] = dict(preflight.get("multi_scene_health_gate") or {})
         asset_pack["primary_selected_due_to_health"] = str(preflight.get("primary_selected_due_to_health") or "")
         asset_pack["provider_degraded_reason"] = str(preflight.get("provider_degraded_reason") or "")
         asset_pack["effective_primary_for_low_basic"] = str(preflight.get("effective_primary_for_low_basic") or chain[0])
@@ -75413,6 +75476,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
                     ]),
                 )
+            scene_health_gate = product_video_multi_scene_health_gate(count, provider_preflight)
+            if not scene_health_gate.get("ok"):
+                draft = dict((session.get("draft") or {}))
+                draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+                draft["provider_called"] = False
+                draft["xu_charged"] = 0
+                session["draft"] = draft
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    scene_health_gate.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                    parse_mode=None,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
+                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                    ]),
+                )
+            provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
             session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
@@ -75458,6 +75539,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
                     ]),
                 )
+            confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
+            scene_health_gate = product_video_multi_scene_health_gate(confirm_scene_count, provider_preflight)
+            if not scene_health_gate.get("ok"):
+                draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+                draft["provider_called"] = False
+                draft["xu_charged"] = 0
+                session["draft"] = draft
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    scene_health_gate.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                    parse_mode=None,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
+                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                    ]),
+                )
+            provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
             session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
             draft = dict(session.get("draft") or {})
         draft.update({
@@ -76077,6 +76176,24 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                         ]),
                     )
                     return True
+                scene_health_gate = product_video_multi_scene_health_gate(count, provider_preflight)
+                if not scene_health_gate.get("ok"):
+                    draft = dict(session.get("draft") or {})
+                    draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+                    draft["provider_called"] = False
+                    draft["xu_charged"] = 0
+                    session["draft"] = draft
+                    save_video_session(uid, session)
+                    await update.message.reply_text(
+                        scene_health_gate.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+                        parse_mode=None,
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
+                            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                        ]),
+                    )
+                    return True
+                provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
                 session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
             video_b14_prepare_project_for_invoice(uid, session)
             session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
@@ -90274,6 +90391,15 @@ def video_public_status_payload() -> dict:
             "effective_provider_chain": [],
             "selected_provider": "",
         }
+    try:
+        product_video_multi_scene_gate = product_video_multi_scene_health_gate(2, product_video_provider_health)
+    except Exception as exc:
+        product_video_multi_scene_gate = {
+            "ok": False,
+            "blocker": f"multi_scene_health_gate_unavailable:{type(exc).__name__}",
+            "provider_submit_count": 0,
+            "charge": 0,
+        }
     freeze = provider_freeze_display("shopaikey_video")
     hidden_video_freeze = bool(freeze.get("frozen"))
     public_video_maintenance = product_video_public_maintenance_enabled()
@@ -90363,6 +90489,7 @@ def video_public_status_payload() -> dict:
             ),
         },
         "product_video_provider_health": product_video_provider_health,
+        "product_video_multi_scene_health_gate": product_video_multi_scene_gate,
         "product_video_model_catalog": model_catalog,
         "video_public_status_section_errors": section_errors,
         "conclusion": {
@@ -90405,6 +90532,7 @@ def video_public_status_text() -> str:
     freeze = payload.get("freeze") if isinstance(payload.get("freeze"), dict) else {}
     conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
     product_submit = payload.get("product_video_provider_submit") if isinstance(payload.get("product_video_provider_submit"), dict) else {}
+    multi_scene_health_gate = payload.get("product_video_multi_scene_health_gate") if isinstance(payload.get("product_video_multi_scene_health_gate"), dict) else {}
     health_render_error = ""
     try:
         provider_health = payload.get("product_video_provider_health") if isinstance(payload.get("product_video_provider_health"), dict) else {}
@@ -90464,8 +90592,14 @@ def video_public_status_text() -> str:
         f"• video_public_status_health_render_error: <code>{html.escape(health_render_error or '-')}</code>",
         f"• Product Video provider health: <code>{html.escape(str(provider_health.get('provider_preflight_result') or '-'))}</code>",
         f"• Product Video effective primary: <code>{html.escape(str(provider_health.get('effective_primary_for_low_basic') or provider_health.get('selected_provider') or '-'))}</code>",
-        f"• ShopAIKey health: <code>{html.escape(str(shopaikey_health.get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str(shopaikey_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(shopaikey_health.get('degraded_until') or '-'))}</code>",
-        f"• Key4U health: <code>{html.escape(str(key4u_health.get('health_status') or 'unknown'))}</code> reason=<code>{html.escape(str(key4u_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(key4u_health.get('degraded_until') or '-'))}</code>",
+        f"• Product Video route-ready chain: <code>{html.escape(','.join(provider_health.get('route_ready_provider_chain') or []) or '-')}</code>",
+        f"• Product Video live-healthy chain: <code>{html.escape(','.join(provider_health.get('live_healthy_provider_chain') or []) or '-')}</code>",
+        f"• Product Video multi-scene health gate: <code>{'PASS' if multi_scene_health_gate.get('ok') else 'BLOCKED'}</code> reason=<code>{html.escape(str(multi_scene_health_gate.get('blocker') or '-'))}</code>",
+        f"• ShopAIKey route/live health: <code>{'ready' if shopaikey_health.get('route_ready') else 'not_ready'}/{'healthy' if shopaikey_health.get('live_healthy') else 'not_healthy'}</code>",
+        f"• ShopAIKey health: <code>{html.escape(str(shopaikey_health.get('health_status') or 'unknown'))}</code> last_valid=<code>{html.escape(str(shopaikey_health.get('last_valid_scene_at') or '-'))}</code> stalled_jobs=<code>{html.escape(str(shopaikey_health.get('recent_stalled_jobs') or []))}</code> reason=<code>{html.escape(str(shopaikey_health.get('degraded_reason') or shopaikey_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(shopaikey_health.get('degraded_until') or '-'))}</code>",
+        f"• ShopAIKey streaks not_start/in_progress/no_output/terminal: <code>{safe_int(shopaikey_health.get('not_start_streak'), 0)}/{safe_int(shopaikey_health.get('in_progress_stall_streak'), 0)}/{safe_int(shopaikey_health.get('no_output_streak'), 0)}/{safe_int(shopaikey_health.get('terminal_failure_streak'), 0)}</code>",
+        f"• Key4U route/live health: <code>{'ready' if key4u_health.get('route_ready') else 'not_ready'}/{'healthy' if key4u_health.get('live_healthy') else 'not_healthy'}</code>",
+        f"• Key4U health: <code>{html.escape(str(key4u_health.get('health_status') or 'unknown'))}</code> last_valid=<code>{html.escape(str(key4u_health.get('last_valid_scene_at') or '-'))}</code> stalled_jobs=<code>{html.escape(str(key4u_health.get('recent_stalled_jobs') or []))}</code> reason=<code>{html.escape(str(key4u_health.get('degraded_reason') or key4u_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(key4u_health.get('degraded_until') or '-'))}</code>",
         f"• Product Video model catalog: <code>{'loaded' if model_catalog.get('catalog_loaded') else 'missing'}</code>",
         f"• Product Video routing enabled: <code>{'yes' if model_catalog.get('routing_enabled') else 'no'}</code>",
         f"• Product Video catalog models: <code>{safe_int(model_catalog.get('model_count'), 0)}</code>",
