@@ -93,7 +93,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_combo_blackbox, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -184878,6 +184878,7 @@ async def execute_subtitle_plus_dub_voice_preview(query, context: ContextTypes.D
     return {"ok": True, "preview_seconds": 15, "segments": len(shifted)}
 
 async def execute_subtitle_plus_dub_full_from_callback(query, context: ContextTypes.DEFAULT_TYPE, state: dict, lang: str = "vi") -> dict:
+    state = subdub_combo_blackbox.normalize_combo_state(state)
     uid = query.from_user.id
     feature = video_dubbing_product_area_for_mode(VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
     try:
