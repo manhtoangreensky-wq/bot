@@ -57,10 +57,13 @@ def make_app(tmp_path, monkeypatch):
         "free_hub_content_ideas_pack": lambda text: {"title": f"Ý tưởng {text}", "video_ideas": [text]},
         "free_hub_image_video_prompt_pack": lambda text: {"title": f"Media {text}", "image_video_prompts": {"image_9x16": text}},
         "hook_script_pack": lambda text: {"hooks": [text], "script_15s": f"15s {text}"},
+        "generate_contextual_prompt": lambda text, context=None: {"title": f"Video {text}", "prompt": text, "context": context or {}},
         "storyboard_pack_build_payload": lambda state, lang="vi": {"topic": state.get("selected_topic"), "shot_count": 1, "shots": [{"shot": 1, "image_prompt": state.get("selected_topic")}]},
         "calculate_chat_cost": lambda length: max(1, int(length)),
         "workflow_script_storyboard_cost_xu": lambda: 20,
         "workflow_content_cost_xu": lambda: 35,
+        "calculate_scene_video_price": lambda base, scenes: int(base) * int(scenes) * (90 if int(scenes) > 1 else 100) // 100,
+        "video_scene_discount_percent": lambda scenes: 90 if int(scenes) > 1 else 100,
     }
     monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
     monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
@@ -216,6 +219,32 @@ def test_content_image_and_storyboard_drafts_use_provider_free_bot_helpers(tmp_p
         assert estimate.json()["status"] == "awaiting_confirm"
         assert estimate.json()["data"]["estimate"]["estimated_xu"] == 50
         assert estimate.json()["data"]["estimate"]["pricing_rule"] == "bot.media_workflow_pricing_payload.image_tiers"
+
+
+def test_video_draft_and_multiscene_estimate_use_bot_planning_and_pricing_helpers(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        draft_payload = {"user_id": "u-1", "input": {"brief": "serum dưỡng da", "format": "9:16", "duration": "8s"}}
+        draft_body = json.dumps(draft_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        draft = client.post(
+            "/internal/v1/features/video_product/draft",
+            content=draft_body,
+            headers=signed_headers("POST", "/internal/v1/features/video_product/draft", draft_body),
+        )
+        assert draft.json()["status"] == "draft"
+        assert draft.json()["data"]["draft"]["source"] == "bot.generate_contextual_prompt"
+        assert draft.json()["data"]["draft"]["content"]["prompt"] == "serum dưỡng da"
+
+        estimate_payload = {"user_id": "u-1", "input": {"brief": "serum dưỡng da", "tier": "basic", "scene_count": "3"}}
+        estimate_body = json.dumps(estimate_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        estimate = client.post(
+            "/internal/v1/features/video_multiscene/estimate",
+            content=estimate_body,
+            headers=signed_headers("POST", "/internal/v1/features/video_multiscene/estimate", estimate_body),
+        )
+        assert estimate.json()["status"] == "awaiting_confirm"
+        assert estimate.json()["data"]["estimate"]["estimated_xu"] == 810
+        assert estimate.json()["data"]["estimate"]["scene_discount_percent"] == 90
+        assert estimate.json()["data"]["estimate"]["pricing_rule"] == "bot.calculate_scene_video_price"
 
 
 def test_admin_module_adapter_is_canonical_read_only_and_role_protected(tmp_path, monkeypatch):

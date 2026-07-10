@@ -575,7 +575,15 @@ class BotCoreBridge:
             helper_name = "hook_script_pack"
         elif feature in {"image_create", "image_transform"}:
             helper_name = "free_hub_image_video_prompt_pack"
-        elif feature == "storyboard":
+        elif feature in {"video_single", "video_product", "video_trend", "video_text_to_video", "video_quick", "video_image_to_video"}:
+            helper_name = "generate_contextual_prompt"
+            helper_args = (text, {
+                "platform": str(input_data.get("platform") or "")[:80],
+                "aspect_ratio": str(input_data.get("format") or input_data.get("ratio") or "")[:20],
+                "duration_seconds": str(input_data.get("duration_seconds") or input_data.get("duration") or "")[:40],
+                "goal": str(input_data.get("goal") or "")[:100],
+            })
+        elif feature in {"storyboard", "video_multiscene", "video_long"}:
             helper_name = "storyboard_pack_build_payload"
             helper_args = ({
                 "selected_topic": text,
@@ -682,6 +690,45 @@ class BotCoreBridge:
                 "tier_required": selected is None,
                 "choices": choices,
                 "pricing_rule": "bot.media_workflow_pricing_payload.image_tiers",
+            }
+        video_features = {
+            "video_single", "video_product", "video_trend", "video_text_to_video", "video_quick",
+            "video_image_to_video", "video_multiscene", "video_long",
+        }
+        if feature in video_features:
+            pricing = self.pricing_catalog()
+            choices = list(pricing.get("video_tiers") or []) if pricing.get("available") else []
+            requested_tier = str(input_data.get("tier") or input_data.get("video_tier") or "").strip()
+            selected = next((item for item in choices if str(item.get("code")) == requested_tier), None)
+            raw_scenes = str(input_data.get("scene_count") or input_data.get("scenes") or "").strip()
+            scene_match = re.search(r"\d+", raw_scenes)
+            scene_count = int(scene_match.group(0)) if scene_match else 0
+            if selected and scene_count:
+                scene_price = self.fn("calculate_scene_video_price")
+                discount = self.fn("video_scene_discount_percent")
+                if scene_price and discount:
+                    try:
+                        total = max(0, int(scene_price(int(selected.get("cost_xu") or 0), scene_count) or 0))
+                        return {
+                            **base,
+                            "available": True,
+                            "estimated_xu": total,
+                            "tier": selected,
+                            "scene_count": max(1, min(20, scene_count)),
+                            "scene_discount_percent": max(0, min(100, int(discount(scene_count) or 0))),
+                            "pricing_rule": "bot.calculate_scene_video_price",
+                        }
+                    except Exception:
+                        pass
+            return {
+                **base,
+                "available": bool(choices),
+                "estimated_xu": None,
+                "tier": selected or {},
+                "tier_required": selected is None,
+                "scene_count_required": not bool(scene_count),
+                "choices": choices,
+                "pricing_rule": "bot.media_workflow_pricing_payload.video_tiers",
             }
         return {**base, "available": False, "reason": "canonical_estimate_not_mapped"}
 
