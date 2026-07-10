@@ -400,6 +400,33 @@ def _provider_result_url_present(payload: dict[str, Any]) -> bool:
 
 
 def _provider_final_output_ready(payload: dict[str, Any]) -> bool:
+    scene_count = max(
+        _as_int(payload.get("scene_count") or payload.get("scenes_total") or payload.get("scene_tasks_total"), 0),
+        len(payload.get("scene_tasks") or []) if isinstance(payload.get("scene_tasks"), list) else 0,
+    )
+    if scene_count > 1:
+        coverage_count = _as_int(
+            payload.get("scene_coverage_count")
+            or payload.get("completed_scene_count")
+            or payload.get("scene_tasks_completed")
+            or payload.get("scenes_done"),
+            0,
+        )
+        concat_valid = bool(
+            payload.get("concat_output_valid")
+            or payload.get("stitch_output_valid")
+            or str(payload.get("concat_status") or "").strip().lower() == "completed"
+        )
+        final_flag = bool(
+            payload.get("final_mp4_validated")
+            or payload.get("final_mp4_valid")
+            or payload.get("final_video_validated")
+            or payload.get("delivery_succeeded")
+            or payload.get("video_delivered")
+            or payload.get("final_delivered")
+        )
+        # A downloaded scene clip is not the final artifact for a multi-scene job.
+        return bool(coverage_count >= scene_count and concat_valid and final_flag)
     if any(
         payload.get(key)
         for key in (
@@ -675,6 +702,15 @@ def reconcile_provider_progress_telemetry(
     current_epoch = current_dt.timestamp()
     persisted_status = str(job.get("status") or "").strip().lower()
     persisted_progress = max(_as_int(job.get("progress_percent"), 0), _as_int(payload.get("progress_percent"), 0))
+    scene_count = max(
+        _as_int(payload.get("scene_count") or payload.get("scenes_total") or payload.get("scene_tasks_total"), 0),
+        len(payload.get("scene_tasks") or []) if isinstance(payload.get("scene_tasks"), list) else 0,
+    )
+    multiscene_ledger = (
+        product_video_scene_ledger_state({}, job, payload, now=current_dt)
+        if scene_count > 1
+        else {}
+    )
     alive = provider_task_alive(payload)
     terminal_failure = str(payload.get("terminal_state") or payload.get("final_decision") or "").strip().lower() in {
         "failed",
@@ -682,6 +718,9 @@ def reconcile_provider_progress_telemetry(
         "failed_refunded",
         "needs_admin_review",
     }
+    if multiscene_ledger:
+        terminal_failure = multiscene_ledger.get("aggregate_job_status") == "failed_no_charge"
+        alive = bool(multiscene_ledger.get("unresolved_scene_count") and not terminal_failure)
     wait_max = max(60, _as_int(payload.get("provider_wait_max_seconds"), 20 * 60))
     started_source = "payload"
     started_epoch = _parse_time_epoch(payload.get("provider_started_at_epoch") or payload.get("provider_started_at"))
@@ -722,7 +761,15 @@ def reconcile_provider_progress_telemetry(
         or payload.get("video_delivered_at")
         or payload.get("video_delivery_message_id")
     )
+    if multiscene_ledger:
+        # Canonical task output is scene evidence only until every scene is
+        # valid and the final concat artifact has passed validation.
+        result_url_present = bool(multiscene_ledger.get("final_mp4_valid"))
+        final_output_ready = bool(multiscene_ledger.get("final_mp4_valid"))
+        final_delivered = bool(multiscene_ledger.get("final_delivered"))
     provider_status = _provider_status_for_progress(payload, alive)
+    if multiscene_ledger and alive:
+        provider_status = "processing"
     actual_provider_status, actual_provider_source, actual_provider_authoritative = _actual_provider_payload_status(payload)
     actual_provider_running = bool(
         actual_provider_authoritative
@@ -934,7 +981,31 @@ def reconcile_provider_progress_telemetry(
         final_status = "completed"
         final_progress = 100
         progress_source = "final_delivered"
-    return {
+    if multiscene_ledger:
+        ledger_progress_cap = _as_int(multiscene_ledger.get("public_progress_cap"), 70)
+        final_progress = min(
+            ledger_progress_cap,
+            max(
+                final_progress,
+                _as_int(multiscene_ledger.get("public_effective_progress"), 0),
+            ),
+        )
+        render_progress = min(
+            ledger_progress_cap,
+            final_progress,
+        )
+        render_progress_public_percent = str(render_progress)
+        render_source = str(multiscene_ledger.get("render_progress_source") or "scene_ledger_coverage")
+        progress_source = "scene_ledger_coverage"
+        public_progress_source = (
+            "scene_ledger_coverage"
+            if _as_int(multiscene_ledger.get("completed_scene_count"), 0) > 0
+            else public_progress_source
+        )
+        public_progress_mode = "scene_and_elapsed" if not final_delivered else "percent"
+        public_progress_cap = _as_int(multiscene_ledger.get("public_progress_cap"), 70)
+        final_status = "failed" if terminal_failure else ("completed" if final_delivered else "processing")
+    telemetry = {
         "provider_task_alive": bool(alive),
         "progress_monotonic_applied": bool(final_progress > requested or final_progress > persisted_progress),
         "previous_progress": persisted_progress,
@@ -1082,6 +1153,35 @@ def reconcile_provider_progress_telemetry(
         "final_user_visible_state": "delivered" if final_delivered else ("final_rendering" if alive and not terminal_failure else ("failed_no_charge" if terminal_failure else final_status)),
         "final_progress_after_reconcile": final_progress,
     }
+    if multiscene_ledger:
+        telemetry.update(multiscene_ledger)
+        telemetry.update(
+            {
+                "provider_task_alive": bool(alive),
+                "final_status_after_reconcile": final_status,
+                "final_progress": final_progress,
+                "final_progress_after_reconcile": final_progress,
+                "public_effective_progress": final_progress,
+                "progress_source": "scene_ledger_coverage",
+                "public_progress_source": public_progress_source,
+                "public_progress_mode": public_progress_mode,
+                "public_progress_percent_visible": False if not final_delivered else True,
+                "render_video_progress_percent": render_progress,
+                "provider_render_progress_percent": render_progress,
+                "render_video_progress_percent_public": str(render_progress),
+                "render_progress_source": render_source,
+                "result_url_present": bool(multiscene_ledger.get("final_mp4_valid")),
+                "provider_result_url_present": bool(multiscene_ledger.get("final_mp4_valid")),
+                "result_url_found": bool(multiscene_ledger.get("final_mp4_valid")),
+                "next_poll_scheduled": bool(alive and not terminal_failure),
+                "status_source_priority_used": "scene_ledger_authority",
+                "provider_state_overrode_registry": bool(alive),
+                "provider_state_overrode_persisted_status": bool(alive and persisted_status in {"", "queued", "queued_for_worker", "draft"}),
+                "final_user_visible_state": "delivered" if final_delivered else ("failed_no_charge" if terminal_failure else "final_rendering"),
+                "no_fake_success_guard": bool(not final_delivered),
+            }
+        )
+    return telemetry
 
 
 def _columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
@@ -1886,18 +1986,35 @@ def product_video_initial_scene_tasks(
             "scene_index": index,
             "scene_id": index,
             "clip_index": index,
+            "required": True,
             "request_job_id": f"{safe_job_id}-{index}",
             "scene_duration_seconds": safe_duration,
             "clip_duration_seconds": safe_duration,
             "provider": "",
             "provider_task_id": "",
             "provider_video_id": "",
+            "primary_task_id": "",
+            "fallback_task_ids": [],
+            "active_task_id": "",
+            "winning_task_id": "",
             "status": "pending_submit",
             "clip_status": "pending_submit",
             "download_url_present": False,
             "result_url_valid": False,
             "raw_clip_duration": 0,
             "fallback_count": 0,
+            "submitted_at": "",
+            "submitted_at_epoch": 0,
+            "started_at": "",
+            "started_at_epoch": 0,
+            "progress": 0,
+            "progress_last_changed_at": "",
+            "result_url": "",
+            "clip_path": "",
+            "clip_bytes": 0,
+            "clip_valid": False,
+            "completed_at": "",
+            "failure_reason": "",
             "provider_wait_elapsed_seconds": 0,
             "provider_started_at_epoch": "",
         }
@@ -2264,6 +2381,601 @@ def _product_video_scene_task_is_valid_clip(item: dict[str, Any]) -> bool:
     )
 
 
+def product_video_scene_ledger_state(
+    project: dict | None = None,
+    job: dict | None = None,
+    result: dict | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build the durable per-scene truth used by worker, status and delivery gates.
+
+    Every task is accepted only with an explicit scene index. A successful task
+    may complete its own scene, but it cannot complete a multi-scene job.
+    """
+    project = dict(project or {})
+    job = dict(job or {})
+    result = dict(result or {})
+    invoice = _json_loads(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    scene_count = max(
+        1,
+        min(
+            20,
+            _as_int(
+                project.get("scene_count")
+                or job.get("scene_count")
+                or result.get("scene_count")
+                or result.get("scenes_total")
+                or result.get("scene_tasks_total")
+                or invoice.get("scene_count"),
+                1,
+            ),
+        ),
+    )
+    expected = list(range(1, scene_count + 1))
+    now_dt = now or datetime.now()
+
+    records: dict[int, dict[str, Any]] = {
+        index: {
+            "scene_index": index,
+            "required": True,
+            "provider_key": "",
+            "primary_task_id": "",
+            "fallback_task_ids": [],
+            "active_task_id": "",
+            "winning_task_id": "",
+            "status": "pending_submit",
+            "submitted_at": "",
+            "submitted_at_epoch": 0,
+            "started_at": "",
+            "started_at_epoch": 0,
+            "progress": 0,
+            "progress_last_changed_at": "",
+            "result_url": "",
+            "result_url_present": False,
+            "clip_path": "",
+            "clip_bytes": 0,
+            "clip_valid": False,
+            "completed_at": "",
+            "failure_reason": "",
+            "fallback_count": 0,
+            "provider_elapsed_seconds": 0,
+            "scene_not_start_elapsed": 0,
+            "next_poll_at": "",
+            "task_candidates": [],
+        }
+        for index in expected
+    }
+    unknown_scene_task_ignored = False
+    sources_used: list[str] = []
+
+    def _items(value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, str):
+            value = _json_loads(value, [])
+        if isinstance(value, dict):
+            rows: list[dict[str, Any]] = []
+            for key, raw in value.items():
+                item = dict(raw or {}) if isinstance(raw, dict) else {"status": raw}
+                item.setdefault("scene_index", key)
+                rows.append(item)
+            return rows
+        if isinstance(value, (list, tuple)):
+            return [dict(item or {}) for item in value if isinstance(item, dict)]
+        return []
+
+    def _text_value(item: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = item.get(key)
+            if value not in (None, "", [], {}):
+                return str(value).strip()
+        return ""
+
+    def _status_class(value: Any) -> str:
+        raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if raw in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated", "success", "succeeded", "completed", "done"}:
+            return "succeeded"
+        if raw in {"failed", "failure", "error", "failed_no_charge", "cancelled", "canceled", "provider_failed"}:
+            return "failed"
+        if "not_start" in raw or raw in {"queued", "pending", "waiting", "pending_submit"}:
+            return "not_start" if "not_start" in raw else "pending"
+        if raw in {"running", "provider_running", "processing", "in_progress", "provider_in_progress", "rendering", "final_rendering"}:
+            return "running"
+        return raw or "pending"
+
+    def _candidate_ids(item: dict[str, Any]) -> list[str]:
+        values: list[str] = []
+        for key in (
+            "provider_task_id",
+            "task_id",
+            "provider_video_id",
+            "video_id",
+            "active_task_id",
+            "canonical_task_selected",
+            "winning_task_id",
+            "scene_winner_task",
+        ):
+            value = str(item.get(key) or "").strip()
+            if value and value not in values:
+                values.append(value)
+        for key in ("fallback_task_ids", "provider_task_ids", "provider_video_ids"):
+            raw = item.get(key)
+            if not isinstance(raw, (list, tuple, set)):
+                continue
+            for value in raw:
+                text = str(value or "").strip()
+                if text and text not in values:
+                    values.append(text)
+        return values
+
+    def _merge_item(item: dict[str, Any], source_name: str) -> None:
+        nonlocal unknown_scene_task_ignored
+        debug = dict(item.get("debug") or {}) if isinstance(item.get("debug"), dict) else {}
+        merged = {**debug, **item}
+        index = _product_video_scene_task_index(merged)
+        task_ids = _candidate_ids(merged)
+        if index not in records:
+            if task_ids:
+                unknown_scene_task_ignored = True
+            return
+        if source_name not in sources_used:
+            sources_used.append(source_name)
+        record = records[index]
+        provider = _text_value(merged, "provider_key", "provider", "selected_provider", "provider_pending_provider")
+        status_raw = _text_value(
+            merged,
+            "actual_provider_payload_status",
+            "shopaikey_data_status",
+            "shopaikey_raw_status",
+            "provider_status_raw",
+            "normalized_provider_status",
+            "provider_status",
+            "status",
+            "clip_status",
+            "blocker",
+        )
+        result_url = _text_value(merged, "result_url", "provider_result_url", "download_url", "file_url", "video_url", "output_url")
+        clip_path = _text_value(merged, "clip_path", "output_path", "local_path", "raw_provider_video_path")
+        clip_bytes = _as_int(
+            merged.get("clip_bytes")
+            or merged.get("artifact_size")
+            or merged.get("artifact_bytes")
+            or merged.get("downloaded_file_size")
+            or merged.get("output_bytes"),
+            0,
+        )
+        if clip_path and clip_bytes <= 0:
+            try:
+                clip_bytes = os.path.getsize(clip_path) if os.path.isfile(clip_path) else 0
+            except OSError:
+                clip_bytes = 0
+        result_present = bool(
+            result_url
+            or merged.get("result_url_valid")
+            or merged.get("download_url_present")
+            or merged.get("provider_result_url_present")
+        )
+        normalized_status_raw = status_raw.strip().lower().replace("-", "_").replace(" ", "_")
+        clip_valid = bool(
+            merged.get("clip_valid")
+            or merged.get("validation_passed")
+            or merged.get("output_validated")
+            or merged.get("mp4_validator_result") == "valid_mp4"
+            or clip_bytes > 0
+            or (normalized_status_raw in {"clip_downloaded", "downloaded", "validated", "scene_clip_validated"} and result_present)
+        )
+        submitted_at = _text_value(merged, "submitted_at", "scene_submitted_at", "provider_started_at", "provider_wait_started_at")
+        started_at = _text_value(merged, "started_at", "scene_started_at", "provider_started_at", "provider_wait_started_at")
+        completed_at = _text_value(merged, "completed_at", "result_received_at", "winner_selected_at")
+        progress = _as_int(
+            merged.get("progress")
+            or merged.get("provider_progress_normalized")
+            or merged.get("provider_progress_percent")
+            or merged.get("provider_progress_raw"),
+            0,
+        )
+        candidate_status = "succeeded" if clip_valid else _status_class(status_raw)
+        for offset, task_id in enumerate(task_ids):
+            candidate = {
+                "task_id": task_id,
+                "provider": provider,
+                "status": candidate_status,
+                "result_url": result_url,
+                "result_url_present": result_present,
+                "clip_path": clip_path,
+                "clip_bytes": clip_bytes,
+                "clip_valid": clip_valid,
+                "submitted_at": submitted_at,
+                "completed_at": completed_at,
+                "progress": max(0, min(100, progress)),
+                "source": source_name,
+            }
+            existing = next((entry for entry in record["task_candidates"] if entry.get("task_id") == task_id), None)
+            if existing:
+                for key, value in candidate.items():
+                    if value not in (None, "", False, 0, [], {}):
+                        existing[key] = value
+            else:
+                record["task_candidates"].append(candidate)
+            if not record["primary_task_id"] and offset == 0:
+                record["primary_task_id"] = task_id
+            elif task_id != record["primary_task_id"] and task_id not in record["fallback_task_ids"]:
+                record["fallback_task_ids"].append(task_id)
+        persisted_winner = _text_value(merged, "winning_task_id", "scene_winner_task")
+        if persisted_winner:
+            record["winning_task_id"] = persisted_winner
+        active_task = _text_value(merged, "active_task_id", "provider_task_id", "task_id", "provider_video_id", "video_id", "canonical_task_selected")
+        if active_task:
+            record["active_task_id"] = active_task
+        if provider:
+            record["provider_key"] = provider
+        if status_raw:
+            record["status"] = candidate_status
+        if submitted_at:
+            record["submitted_at"] = submitted_at
+        record["submitted_at_epoch"] = max(
+            record["submitted_at_epoch"],
+            _as_int(merged.get("submitted_at_epoch") or merged.get("scene_submitted_at_epoch") or merged.get("provider_started_at_epoch"), 0),
+        )
+        if started_at:
+            record["started_at"] = started_at
+        record["started_at_epoch"] = max(
+            record["started_at_epoch"],
+            _as_int(merged.get("started_at_epoch") or merged.get("scene_started_at_epoch") or merged.get("provider_started_at_epoch"), 0),
+        )
+        record["progress"] = max(record["progress"], max(0, min(100, progress)))
+        changed_at = _text_value(merged, "progress_last_changed_at", "provider_progress_last_changed_at")
+        if changed_at:
+            record["progress_last_changed_at"] = changed_at
+        if result_url:
+            record["result_url"] = result_url
+        record["result_url_present"] = bool(record["result_url_present"] or result_present)
+        if clip_path:
+            record["clip_path"] = clip_path
+        record["clip_bytes"] = max(record["clip_bytes"], clip_bytes)
+        record["clip_valid"] = bool(record["clip_valid"] or clip_valid)
+        if completed_at:
+            record["completed_at"] = completed_at
+        record["failure_reason"] = _text_value(merged, "failure_reason", "provider_error", "blocker") or record["failure_reason"]
+        record["fallback_count"] = max(record["fallback_count"], _as_int(merged.get("fallback_count") or merged.get("provider_fallback_count"), 0))
+        record["provider_elapsed_seconds"] = max(
+            record["provider_elapsed_seconds"],
+            _as_int(merged.get("provider_elapsed_seconds") or merged.get("provider_wait_elapsed_seconds"), 0),
+        )
+        record["scene_not_start_elapsed"] = max(record["scene_not_start_elapsed"], _as_int(merged.get("scene_not_start_elapsed"), 0))
+        next_poll_at = _text_value(merged, "next_scene_poll_at", "next_poll_scheduled_at", "next_poll_at")
+        if next_poll_at:
+            record["next_poll_at"] = next_poll_at
+
+    for container_name, container in (("project", project), ("job", job), ("result", result)):
+        for key in ("scene_ledger", "scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
+            for item in _items(container.get(key)):
+                _merge_item(item, f"{container_name}.{key}")
+    for key in ("provider_events", "provider_attempts", "provider_pending_attempts", "provider_fallback_attempts"):
+        for item in _items(result.get(key)):
+            _merge_item(item, f"result.{key}")
+    for item in _items(result.get("canonical_candidate_summaries")):
+        _merge_item(item, "result.canonical_candidate_summaries")
+
+    canonical_index = _as_int(result.get("canonical_scene_index"), 0)
+    if canonical_index in records:
+        canonical_item = {
+            "scene_index": canonical_index,
+            "provider": result.get("canonical_provider") or result.get("selected_provider"),
+            "provider_task_id": result.get("canonical_task_id") or result.get("canonical_task_selected"),
+            "status": result.get("canonical_status") or result.get("provider_status"),
+            "result_url": result.get("canonical_result_url") or result.get("result_url"),
+            "result_url_valid": result.get("canonical_result_url_present") or result.get("result_url_valid"),
+            "clip_valid": result.get("scene_clip_validated"),
+            "artifact_size": result.get("artifact_size") or result.get("output_bytes") or result.get("bytes"),
+            "provider_progress_raw": result.get("provider_progress_raw"),
+        }
+        _merge_item(canonical_item, "result.canonical_summary")
+    elif scene_count > 1 and (
+        result.get("provider_task_ids")
+        or result.get("provider_video_ids")
+        or result.get("result_url_present")
+        or result.get("provider_result_url_present")
+        or result.get("final_video_path")
+    ):
+        unknown_scene_task_ignored = True
+
+    validations = _product_video_index_map(result.get("scene_clip_validation_by_index"))
+    result_urls = _product_video_index_map(result.get("scene_result_urls_by_index"))
+    statuses = _product_video_index_map(result.get("scene_status_by_index") or result.get("scene_status_by_scene"))
+    for index in expected:
+        record = records[index]
+        validation = validations.get(str(index))
+        if isinstance(validation, dict):
+            record["clip_valid"] = bool(record["clip_valid"] or validation.get("ok") or validation.get("valid"))
+            record["clip_bytes"] = max(record["clip_bytes"], _as_int(validation.get("bytes") or validation.get("size"), 0))
+            path = str(validation.get("path") or validation.get("clip_path") or "").strip()
+            if path:
+                record["clip_path"] = path
+        result_value = result_urls.get(str(index))
+        if str(result_value or "").strip().lower() in {"yes", "true", "1", "valid"}:
+            record["result_url_present"] = True
+        if statuses.get(str(index)) not in (None, "") and not record["clip_valid"]:
+            record["status"] = _status_class(statuses.get(str(index)))
+        valid_candidates = [entry for entry in record["task_candidates"] if entry.get("clip_valid")]
+        persisted_winner = record["winning_task_id"]
+        winner = next((entry for entry in valid_candidates if entry.get("task_id") == persisted_winner), None)
+        if winner is None and valid_candidates:
+            winner = min(
+                valid_candidates,
+                key=lambda entry: (
+                    _parse_time_epoch(entry.get("completed_at")) or float("inf"),
+                    str(entry.get("task_id") or ""),
+                ),
+            )
+        if winner:
+            record["winning_task_id"] = str(winner.get("task_id") or record["winning_task_id"])
+            record["active_task_id"] = record["winning_task_id"]
+            record["provider_key"] = str(winner.get("provider") or record["provider_key"])
+            record["result_url"] = str(winner.get("result_url") or record["result_url"])
+            record["result_url_present"] = bool(winner.get("result_url_present") or record["result_url_present"])
+            record["clip_path"] = str(winner.get("clip_path") or record["clip_path"])
+            record["clip_bytes"] = max(record["clip_bytes"], _as_int(winner.get("clip_bytes"), 0))
+            record["clip_valid"] = True
+            record["completed_at"] = str(winner.get("completed_at") or record["completed_at"])
+            record["status"] = "scene_clip_validated"
+            record["progress"] = 100
+        elif record["clip_valid"]:
+            record["status"] = "scene_clip_validated"
+            record["progress"] = 100
+        else:
+            active = next(
+                (
+                    entry
+                    for entry in reversed(record["task_candidates"])
+                    if entry.get("status") in {"running", "not_start", "pending"}
+                ),
+                None,
+            )
+            if active:
+                record["active_task_id"] = str(active.get("task_id") or record["active_task_id"])
+                record["provider_key"] = str(active.get("provider") or record["provider_key"])
+                record["status"] = "provider_not_start" if active.get("status") in {"not_start", "pending"} else "provider_running"
+            elif record["status"] == "failed":
+                record["status"] = "failed"
+            elif record["active_task_id"]:
+                record["status"] = "provider_running"
+
+    if scene_count == 1 and (
+        result.get("final_mp4_valid")
+        or result.get("final_mp4_validated")
+        or result.get("final_video_validated")
+        or result.get("final_video_path")
+        or result.get("result_url_present")
+        or result.get("provider_result_url_present")
+    ):
+        records[1]["clip_valid"] = True
+        records[1]["status"] = "scene_clip_validated"
+        records[1]["progress"] = 100
+        records[1]["clip_path"] = str(result.get("final_video_path") or result.get("final_mp4_path") or records[1]["clip_path"] or "")
+
+    completed_indexes = [index for index in expected if records[index]["clip_valid"]]
+    unresolved_indexes = [index for index in expected if index not in completed_indexes]
+    failed_indexes = [
+        index
+        for index in unresolved_indexes
+        if records[index]["status"] == "failed"
+        and records[index]["fallback_count"] > 0
+        and not any(entry.get("status") in {"running", "not_start", "pending"} for entry in records[index]["task_candidates"])
+    ]
+    coverage_count = len(completed_indexes)
+    coverage_complete = coverage_count >= scene_count
+    raw_concat_attempted = bool(result.get("concat_attempted") or result.get("stitch_attempted"))
+    final_delivered_raw = bool(
+        result.get("final_delivered")
+        or result.get("final_mp4_delivered")
+        or result.get("delivery_succeeded")
+        or result.get("video_delivered")
+        or project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+    )
+    concat_attempted = bool(raw_concat_attempted and coverage_complete)
+    concat_output_valid = bool(
+        coverage_complete
+        and (
+            result.get("concat_output_valid")
+            or result.get("stitch_output_valid")
+            or str(result.get("concat_status") or "").strip().lower() == "completed"
+            or final_delivered_raw
+        )
+    )
+    explicit_final_valid = bool(
+        result.get("final_mp4_valid")
+        or result.get("final_mp4_validated")
+        or result.get("final_video_validated")
+        or result.get("output_validated")
+        or final_delivered_raw
+    )
+    final_assembly_valid = bool(
+        (scene_count == 1 and coverage_complete and explicit_final_valid)
+        or (
+            scene_count > 1
+            and coverage_complete
+            and concat_output_valid
+            and explicit_final_valid
+            and (concat_attempted or final_delivered_raw)
+        )
+    )
+    final_delivered = bool(final_assembly_valid and final_delivered_raw)
+    terminal_no_charge = bool(
+        str(result.get("terminal_state") or result.get("final_decision") or "").strip().lower() == "failed_no_charge"
+        or failed_indexes
+    )
+    if final_delivered:
+        aggregate_status = "completed"
+        aggregate_reason = "final_video_delivered"
+    elif terminal_no_charge:
+        aggregate_status = "failed_no_charge"
+        aggregate_reason = "required_scene_exhausted_no_charge"
+    elif final_assembly_valid:
+        aggregate_status = "ready_for_delivery"
+        aggregate_reason = "final_concat_validated"
+    elif concat_attempted:
+        aggregate_status = "concatenating"
+        aggregate_reason = "full_scene_coverage_concat_running"
+    elif coverage_complete:
+        aggregate_status = "ready_for_concat"
+        aggregate_reason = "all_required_scene_clips_valid"
+    elif coverage_count > 0:
+        aggregate_status = "processing_partial_scene_success"
+        aggregate_reason = "waiting_for_remaining_scenes"
+    else:
+        aggregate_status = "processing_scenes"
+        aggregate_reason = "waiting_for_scene_clips"
+
+    if final_delivered:
+        progress_cap = 100
+    elif final_assembly_valid:
+        progress_cap = 95
+    elif coverage_complete:
+        progress_cap = 85
+    elif coverage_count > 0:
+        progress_cap = 70
+    else:
+        progress_cap = 60
+    raw_progress = max(
+        _as_int(job.get("progress_percent"), 0),
+        _as_int(result.get("final_progress_after_reconcile") or result.get("progress_percent"), 0),
+    )
+    progress_floor = 100 if final_delivered else (90 if final_assembly_valid else (80 if coverage_complete else (55 if coverage_count else 20)))
+    effective_progress = min(progress_cap, max(progress_floor, raw_progress))
+    progress_cap_correction = bool(raw_progress > progress_cap)
+    scene_task_map = {
+        str(index): [entry.get("task_id") for entry in records[index]["task_candidates"] if entry.get("task_id")]
+        for index in expected
+    }
+    scene_status_by_index = {str(index): str(records[index]["status"] or "pending_submit") for index in expected}
+    scene_active_task_by_index = {str(index): str(records[index]["active_task_id"] or "") for index in expected}
+    scene_winner_task_by_index = {str(index): str(records[index]["winning_task_id"] or "") for index in expected}
+    scene_provider_progress_by_index = {str(index): _as_int(records[index]["progress"], 0) for index in expected}
+    scene_result_available_by_index = {str(index): bool(records[index]["result_url_present"]) for index in expected}
+    scene_clip_valid_by_index = {str(index): bool(records[index]["clip_valid"]) for index in expected}
+    submitted_scene_count = sum(1 for index in expected if records[index]["task_candidates"] or records[index]["active_task_id"])
+    current_scene_index = unresolved_indexes[0] if unresolved_indexes else (expected[-1] if expected else 0)
+    next_poll_candidates = [str(records[index]["next_poll_at"] or "") for index in unresolved_indexes if records[index]["next_poll_at"]]
+    next_scene_poll_at = min(next_poll_candidates) if next_poll_candidates else str(result.get("next_poll_scheduled_at") or "")
+    panel_source = ",".join(sources_used) or "initial_scene_plan"
+    concat_waiting = bool(scene_count > 1 and not coverage_complete)
+    return {
+        "scene_ledger": [records[index] for index in expected],
+        "scene_ledger_source": panel_source,
+        "panel_scene_ledger_source": panel_source,
+        "scene_task_map": scene_task_map,
+        "task_scene_index_map": {
+            task_id: index
+            for index in expected
+            for task_id in scene_task_map[str(index)]
+        },
+        "scene_status_by_index": scene_status_by_index,
+        "scene_status_by_scene": scene_status_by_index,
+        "scene_active_task_by_index": scene_active_task_by_index,
+        "scene_winner_task_by_index": scene_winner_task_by_index,
+        "scene_provider_progress_by_index": scene_provider_progress_by_index,
+        "scene_result_available_by_index": scene_result_available_by_index,
+        "scene_clip_valid_by_index": scene_clip_valid_by_index,
+        "scene_result_urls_by_index": {key: "yes" if value else "no" for key, value in scene_result_available_by_index.items()},
+        "scene_clip_validation_by_index": {
+            str(index): {
+                "ok": bool(records[index]["clip_valid"]),
+                "path_present": bool(records[index]["clip_path"]),
+                "bytes": _as_int(records[index]["clip_bytes"], 0),
+            }
+            for index in expected
+        },
+        "unresolved_scene_indexes": unresolved_indexes,
+        "missing_scene_indexes": unresolved_indexes,
+        "next_scene_poll_at": next_scene_poll_at,
+        "required_scene_count": scene_count,
+        "completed_scene_count": coverage_count,
+        "unresolved_scene_count": len(unresolved_indexes),
+        "failed_scene_count": len(failed_indexes),
+        "scene_tasks_total": scene_count,
+        "scene_tasks_created_count": scene_count,
+        "scene_tasks_submitted": submitted_scene_count,
+        "scene_tasks_submitted_count": submitted_scene_count,
+        "scene_tasks_completed": coverage_count,
+        "scene_success_count": coverage_count,
+        "scenes_total": scene_count,
+        "scenes_done": coverage_count,
+        "scenes_pending": sum(1 for index in unresolved_indexes if records[index]["status"] == "pending_submit"),
+        "scenes_running": sum(1 for index in unresolved_indexes if records[index]["status"] in {"provider_running", "provider_not_start"}),
+        "current_scene_index": current_scene_index,
+        "current_scene": current_scene_index,
+        "current_scene_status": str(records[current_scene_index]["status"] if current_scene_index in records else ""),
+        "scene_coverage_expected": scene_count,
+        "scene_coverage_count": coverage_count,
+        "scene_clip_coverage_complete": bool(coverage_complete),
+        "scene_coverage_valid": bool(final_assembly_valid),
+        "scene_coverage_valid_bool": bool(final_assembly_valid),
+        "aggregate_job_status": aggregate_status,
+        "aggregate_status_reason": aggregate_reason,
+        "provider_status": "succeeded" if final_assembly_valid else ("failed_no_charge" if terminal_no_charge else "processing"),
+        "normalized_provider_status": "succeeded" if final_assembly_valid else ("failed_no_charge" if terminal_no_charge else "processing"),
+        "continue_polling": bool(unresolved_indexes and not terminal_no_charge),
+        "provider_task_alive": bool(unresolved_indexes and not terminal_no_charge),
+        "terminal_state": "completed" if final_delivered else ("failed_no_charge" if terminal_no_charge else "final_rendering"),
+        "final_decision": "delivered" if final_delivered else ("failed_no_charge" if terminal_no_charge else "continue_polling"),
+        "concat_ready": bool(coverage_complete and scene_count > 1),
+        "concat_attempted": bool(concat_attempted),
+        "concat_attempted_raw": bool(raw_concat_attempted),
+        "concat_attempt_count_raw": _as_int(result.get("concat_attempt_count"), 0),
+        "concat_attempt_count": _as_int(result.get("concat_attempt_count"), 0) if concat_attempted else 0,
+        "concat_waiting_for_scene_coverage": concat_waiting,
+        "concat_output_valid": bool(concat_output_valid),
+        "concat_status": "completed" if concat_output_valid else ("ready_to_concat" if coverage_complete else "waiting_for_required_scenes"),
+        "concat_duration_seconds": (
+            result.get("concat_duration_seconds") or result.get("final_duration_seconds") or 0
+        ) if concat_attempted else 0,
+        "final_duration_coverage_reason": "" if final_assembly_valid else ("waiting_for_required_scenes" if unresolved_indexes else "waiting_for_final_concat"),
+        "final_mp4_valid": bool(final_assembly_valid),
+        "final_mp4_validated": bool(final_assembly_valid),
+        "job_final_result_url_present": bool(final_assembly_valid),
+        "result_url_present": bool(final_assembly_valid),
+        "provider_result_url_present": bool(final_assembly_valid),
+        "result_url_found": bool(final_assembly_valid),
+        "result_url_valid": bool(final_assembly_valid),
+        "result_url": str(result.get("result_url") or result.get("provider_result_url") or "") if final_assembly_valid else "",
+        "provider_result_url": str(result.get("provider_result_url") or result.get("result_url") or "") if final_assembly_valid else "",
+        "final_delivered": bool(final_delivered),
+        "delivery_succeeded": bool(final_delivered),
+        "delivery_blocked_by_scene_coverage": bool(scene_count > 1 and not final_assembly_valid),
+        "invalid_delivery_attempt_prevented": bool(scene_count > 1 and not final_assembly_valid),
+        "artifact_valid_for_charge_after_coverage": bool(final_assembly_valid),
+        "public_progress_cap": progress_cap,
+        "public_effective_progress": effective_progress,
+        "final_progress_after_reconcile": effective_progress,
+        "progress_cap_correction": progress_cap_correction,
+        "progress_cap_correction_from": raw_progress if progress_cap_correction else 0,
+        "progress_cap_correction_to": progress_cap if progress_cap_correction else 0,
+        "render_progress_source": (
+            "final_concat_validated"
+            if final_assembly_valid
+            else ("partial_scene_coverage" if coverage_count else "waiting_for_remaining_scenes")
+        ),
+        "source_of_truth": (
+            "final_concat_validated"
+            if final_assembly_valid
+            else ("partial_scene_coverage" if coverage_count else "waiting_for_remaining_scenes")
+        ),
+        "final_artifact_source": "final_concat_validated" if final_assembly_valid else ("scene_clip_validated" if coverage_count else ""),
+        "public_progress_source": "scene_ledger_coverage",
+        "canonical_scope": "job_summary" if scene_count > 1 else "scene",
+        "canonical_scene_index": _as_int(result.get("canonical_scene_index"), 0),
+        "canonical_does_not_imply_job_success": bool(scene_count > 1),
+        "unresolved_scenes_preserved": bool(unresolved_indexes),
+        "unknown_scene_task_ignored_for_coverage": bool(unknown_scene_task_ignored),
+        "panel_completed_scene_count": coverage_count,
+        "panel_unresolved_scene_count": len(unresolved_indexes),
+        "scene_ledger_rendered_at": now_text(now_dt),
+    }
+
+
 def product_video_scene_coverage_state(
     project: dict | None = None,
     job: dict | None = None,
@@ -2281,122 +2993,37 @@ def product_video_scene_coverage_state(
     project = dict(project or {})
     job = dict(job or {})
     result = dict(result or {})
-    invoice = _json_loads(project.get("invoice_json") or result.get("invoice_json") or result.get("invoice"), {})
-    if not isinstance(invoice, dict):
-        invoice = {}
-    scene_count = max(
-        1,
-        min(
-            20,
-            _as_int(
-                project.get("scene_count")
-                or job.get("scene_count")
-                or result.get("scene_count")
-                or result.get("scenes_total")
-                or invoice.get("scene_count"),
-                1,
-            ),
-        ),
-    )
-    expected = list(range(1, scene_count + 1))
-    tasks_source = "result.scene_tasks"
-    scene_tasks = result.get("scene_tasks") if isinstance(result.get("scene_tasks"), list) else []
-    if not scene_tasks and isinstance(job.get("scene_tasks"), list):
-        tasks_source = "job.scene_tasks"
-        scene_tasks = list(job.get("scene_tasks") or [])
-    if not scene_tasks:
-        tasks_source = "recovered_initial_scene_plan"
-        scene_tasks = product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count)
-    result_urls = _product_video_index_map(result.get("scene_result_urls_by_index"))
-    validations = _product_video_index_map(result.get("scene_clip_validation_by_index"))
-    task_scene_index_map: dict[str, int] = {}
-    valid_indexes: set[int] = set()
-    unknown_scene_task_ignored = False
-    for raw in scene_tasks:
-        if not isinstance(raw, dict):
-            continue
-        index = _product_video_scene_task_index(raw)
-        task_id = str(raw.get("provider_task_id") or raw.get("task_id") or raw.get("provider_video_id") or raw.get("video_id") or "").strip()
-        if task_id and index:
-            task_scene_index_map[task_id[-8:] if len(task_id) > 8 else task_id] = index
-        if task_id and not index and scene_count > 1:
-            unknown_scene_task_ignored = True
-        if index in expected and _product_video_scene_task_is_valid_clip(raw):
-            valid_indexes.add(index)
-    for key, value in validations.items():
-        index = _as_int(key, 0)
-        if index in expected and isinstance(value, dict) and bool(value.get("ok")):
-            valid_indexes.add(index)
-        elif scene_count > 1 and index <= 0 and value:
-            unknown_scene_task_ignored = True
-    for key, value in result_urls.items():
-        index = _as_int(key, 0)
-        if index in expected and str(value).strip().lower() in {"yes", "true", "1", "valid"}:
-            valid_indexes.add(index)
-        elif scene_count > 1 and index <= 0 and value:
-            unknown_scene_task_ignored = True
-    # A bare final/result URL without scene index is allowed for one-scene jobs
-    # only. For multi-scene jobs it is diagnostic evidence, not coverage.
-    if scene_count == 1 and bool(result.get("result_url_present") or result.get("provider_result_url_present") or result.get("final_mp4_valid")):
-        valid_indexes.add(1)
-    elif scene_count > 1 and bool(result.get("result_url_present") or result.get("provider_result_url_present")) and not valid_indexes:
-        unknown_scene_task_ignored = True
-    coverage_count = len(valid_indexes)
-    raw_concat_attempted = bool(result.get("concat_attempted") or result.get("stitch_attempted"))
-    concat_output_valid = bool(
-        result.get("concat_output_valid")
-        or result.get("stitch_output_valid")
-        or (str(result.get("concat_status") or "").strip().lower() == "completed" and result.get("final_mp4_valid"))
-    )
-    concat_waiting_for_scene_coverage = bool(scene_count > 1 and coverage_count < scene_count)
-    concat_attempted = bool(raw_concat_attempted and not concat_waiting_for_scene_coverage)
-    scene_coverage_valid = bool(scene_count == 1 and coverage_count >= 1) or bool(scene_count > 1 and coverage_count >= scene_count and concat_attempted and concat_output_valid)
-    artifact_valid_for_charge = bool(
-        result.get("final_mp4_valid")
-        and (
-            scene_count == 1
-            or (scene_count > 1 and scene_coverage_valid and concat_output_valid)
-        )
-    )
-    missing = [index for index in expected if index not in valid_indexes]
+    ledger = product_video_scene_ledger_state(project, job, result, now=now)
+    missing = list(ledger.get("unresolved_scene_indexes") or [])
     now_dt = now or datetime.now()
-    created_epoch = _parse_time_epoch(result.get("provider_started_at") or job.get("started_at") or job.get("updated_at") or job.get("created_at"))
+    created_epoch = _parse_time_epoch(
+        result.get("provider_started_at")
+        or job.get("started_at")
+        or job.get("updated_at")
+        or job.get("created_at")
+    )
     elapsed = max(
         _as_int(result.get("scene_coverage_elapsed_seconds") or result.get("provider_wait_elapsed_seconds") or result.get("provider_elapsed_seconds"), 0),
         int(max(0, now_dt.timestamp() - created_epoch)) if created_epoch > 0 else 0,
     )
     timeout_seconds = max(60, _as_int(result.get("missing_scene_timeout_seconds") or result.get("scene_coverage_timeout_seconds") or result.get("provider_wait_max_seconds"), 20 * 60))
     timeout = bool(missing and elapsed >= timeout_seconds)
+    scene_count = _as_int(ledger.get("required_scene_count"), 1)
     if not missing:
-        action = "concat" if scene_count > 1 and not concat_output_valid else "complete"
+        action = "concat" if scene_count > 1 and not ledger.get("concat_output_valid") else "complete"
     elif timeout:
         action = "timeout"
-    elif any(_product_video_scene_task_is_valid_clip(item) is False for item in scene_tasks if isinstance(item, dict)):
-        action = "poll"
     else:
-        action = "wait"
+        action = "poll"
     return {
-        "scene_plan_recovered": bool(tasks_source != "result.scene_tasks"),
-        "scene_plan_source": tasks_source,
-        "expected_scene_indexes": expected,
-        "task_scene_index_map": task_scene_index_map,
-        "unknown_scene_task_ignored_for_coverage": bool(unknown_scene_task_ignored),
-        "scene_coverage_expected": scene_count,
-        "scene_coverage_valid": bool(scene_coverage_valid),
-        "scene_coverage_count": coverage_count,
-        "missing_scene_indexes": missing,
+        **ledger,
+        "scene_plan_recovered": bool(str(ledger.get("scene_ledger_source") or "").startswith("initial_")),
+        "scene_plan_source": str(ledger.get("scene_ledger_source") or "initial_scene_plan"),
+        "expected_scene_indexes": list(range(1, scene_count + 1)),
         "missing_scene_action": action,
         "missing_scene_timeout_seconds": timeout_seconds,
         "missing_scene_elapsed_seconds": elapsed,
         "missing_scene_coverage_timeout": bool(timeout),
-        "delivery_blocked_by_scene_coverage": bool(scene_count > 1 and not scene_coverage_valid),
-        "invalid_delivery_attempt_prevented": bool(scene_count > 1 and not scene_coverage_valid),
-        "artifact_valid_for_charge_after_coverage": bool(artifact_valid_for_charge),
-        "concat_attempted": bool(concat_attempted),
-        "concat_waiting_for_scene_coverage": bool(concat_waiting_for_scene_coverage),
-        "concat_attempted_raw": bool(raw_concat_attempted),
-        "concat_output_valid": bool(concat_output_valid),
-        "concat_status": str(result.get("concat_status") or ("completed" if concat_output_valid else ("waiting_for_clips" if scene_count > 1 else ""))),
     }
 
 

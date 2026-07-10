@@ -9127,7 +9127,7 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     persisted_job_progress = safe_int((job or {}).get("persisted_job_progress") or (job or {}).get("progress_percent"), 0)
     video_provider_debug_text = ""
     if normalized_progress_type in product_progress_status.VIDEO_PROGRESS_TYPES:
-        video_provider_debug_text = (
+        video_provider_debug_text = "\n".join(_video_scene_ledger_debug_lines(job)) + "\n" + (
             f"• status_source_priority_used: <code>{html.escape(str((job or {}).get('status_source_priority_used') or '-'))}</code>\n"
             f"• provider_state_overrode_registry: <code>{'yes' if (job or {}).get('provider_state_overrode_registry') else 'no'}</code>\n"
             f"• provider_state_overrode_persisted_status: <code>{'yes' if (job or {}).get('provider_state_overrode_persisted_status') else 'no'}</code>\n"
@@ -47151,6 +47151,33 @@ def _video_debug_compact_attempt_lines(result: dict | None = None, *, limit: int
     return lines
 
 
+def _video_scene_ledger_debug_lines(result: dict | None = None) -> list[str]:
+    current = dict(result or {})
+    task_map = current.get("scene_task_map") if isinstance(current.get("scene_task_map"), dict) else {}
+    masked_task_map = {
+        str(index): [mask_provider_task_id(task_id) for task_id in (task_ids if isinstance(task_ids, list) else [task_ids]) if str(task_id or "").strip()]
+        for index, task_ids in task_map.items()
+    }
+    active_map = current.get("scene_active_task_by_index") if isinstance(current.get("scene_active_task_by_index"), dict) else {}
+    winner_map = current.get("scene_winner_task_by_index") if isinstance(current.get("scene_winner_task_by_index"), dict) else {}
+    return [
+        "Scene ledger:",
+        f"• aggregate status: <code>{_video_debug_safe_value(current.get('aggregate_job_status'), 100)}</code> reason=<code>{_video_debug_safe_value(current.get('aggregate_status_reason'), 140)}</code>",
+        f"• required/completed/unresolved/failed: <code>{safe_int(current.get('required_scene_count'), 0)}/{safe_int(current.get('completed_scene_count'), 0)}/{safe_int(current.get('unresolved_scene_count'), 0)}/{safe_int(current.get('failed_scene_count'), 0)}</code>",
+        f"• scene task map: <code>{_video_debug_safe_value(masked_task_map, 320)}</code>",
+        f"• scene status by index: <code>{_video_debug_safe_value(current.get('scene_status_by_index') or current.get('scene_status_by_scene'), 260)}</code>",
+        f"• scene active task by index: <code>{_video_debug_safe_value({key: mask_provider_task_id(value) for key, value in active_map.items()}, 260)}</code>",
+        f"• scene winner task by index: <code>{_video_debug_safe_value({key: mask_provider_task_id(value) for key, value in winner_map.items()}, 260)}</code>",
+        f"• scene provider progress: <code>{_video_debug_safe_value(current.get('scene_provider_progress_by_index'), 220)}</code>",
+        f"• scene result available: <code>{_video_debug_safe_value(current.get('scene_result_available_by_index'), 220)}</code>",
+        f"• scene clip valid: <code>{_video_debug_safe_value(current.get('scene_clip_valid_by_index'), 220)}</code>",
+        f"• unresolved scene indexes: <code>{_video_debug_safe_value(current.get('unresolved_scene_indexes'), 160)}</code>",
+        f"• next scene poll at: <code>{_video_debug_safe_value(current.get('next_scene_poll_at'), 100)}</code>",
+        f"• canonical scope: <code>{_video_debug_safe_value(current.get('canonical_scope'), 80)}</code> does_not_imply_job_success=<code>{'yes' if current.get('canonical_does_not_imply_job_success') else 'no'}</code>",
+        f"• progress cap correction: <code>{'yes' if current.get('progress_cap_correction') else 'no'}</code> <code>{safe_int(current.get('progress_cap_correction_from'), 0)}→{safe_int(current.get('progress_cap_correction_to'), 0)}</code>",
+    ]
+
+
 def _video_debug_plain_compact_text(text: str, *, reason: str = "message_too_long") -> str:
     raw = str(text or "")
     raw = re.sub(r"</?(?:b|code)>", "", raw)
@@ -47209,6 +47236,7 @@ def video_render_debug_compact_text(
         f"• fallback scene: <code>{safe_int((result or {}).get('fallback_scene_index'), 0)}</code>",
         f"• fallback allowed: <code>{'yes' if (result or {}).get('fallback_allowed') else 'no'}</code>",
         f"• fallback block reason: <code>{_video_debug_safe_value((result or {}).get('fallback_block_reason') or (result or {}).get('fallback_blocked_reason'), 120)}</code>",
+        *_video_scene_ledger_debug_lines(result),
         f"• scene duration: <code>{safe_int((result or {}).get('scene_duration_seconds'), 0)}s</code>",
         f"• public confirm kickoff: <code>{'yes' if (result or {}).get('public_confirm_kickoff_attempted') else 'no'}/{'yes' if (result or {}).get('public_confirm_kickoff_success') else 'no'}</code>",
         f"• worker dispatch: <code>{'yes' if (result or {}).get('worker_dispatch_attempted') else 'no'}/{'yes' if (result or {}).get('worker_dispatch_success') else 'no'}</code>",
@@ -47355,6 +47383,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• canonical source: <code>{html.escape(str(result.get('canonical_task_source') or '-'))}</code>",
         f"• canonical selected reason: <code>{html.escape(str(result.get('canonical_task_selected_reason') or '-'))}</code>",
         f"• canonical all task ids: <code>{html.escape(','.join(str(item) for item in (result.get('canonical_all_task_ids_masked') or [])) or '-')}</code>",
+        *_video_scene_ledger_debug_lines(result),
         f"• provider progress percent: <code>{safe_int(result.get('provider_progress_percent'), 0)}%</code>",
         f"• provider progress trusted: <code>{'yes' if result.get('provider_progress_trusted') else 'no'}</code>",
         f"• provider progress cap reason: <code>{html.escape(str(result.get('provider_progress_cap_reason') or '-'))}</code>",
@@ -47643,6 +47672,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         "",
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        *_video_scene_ledger_debug_lines(result),
         f"• provider: <code>{html.escape(provider)}</code>",
         f"• selected model: <code>{html.escape(str(result.get('selected_model') or result.get('provider_payload_model') or '-'))}</code>",
         f"• selected family: <code>{html.escape(str(result.get('selected_family') or '-'))}</code>",
@@ -47868,6 +47898,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
         f"• provider: <code>{_video_debug_safe_value(provider, 80)}</code>",
+        *_video_scene_ledger_debug_lines(result),
         f"• configured provider chain: <code>{_video_debug_safe_value(','.join(str(item) for item in (result.get('configured_provider_chain') or [])) or '-', 180)}</code>",
         f"• selected provider before submit: <code>{_video_debug_safe_value(result.get('selected_provider_before_submit'), 80)}</code>",
         f"• selected provider after fallback: <code>{_video_debug_safe_value(result.get('selected_provider_after_fallback'), 80)}</code>",
@@ -48110,6 +48141,8 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         )
         and not stale_result_url_ignored
     )
+    if scene_count > 1 and merged.get("scene_ledger"):
+        result_url_present = bool(merged.get("job_final_result_url_present"))
     charge_gate = product_video_r9_charge_allowed(result, project)
     scene_tasks = [item for item in (merged.get("scene_tasks") or merged.get("provider_scene_tasks") or []) if isinstance(item, dict)]
     scene_success_count = safe_int(
@@ -48161,7 +48194,7 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
     )
     scene_clip_validation_by_index = merged.get("scene_clip_validation_by_index") if isinstance(merged.get("scene_clip_validation_by_index"), dict) else {}
     scene_result_urls_by_index = merged.get("scene_result_urls_by_index") if isinstance(merged.get("scene_result_urls_by_index"), dict) else {}
-    concat_attempted = bool(merged.get("concat_attempted") or merged.get("stitch_attempted") or merged.get("final_concat_required"))
+    concat_attempted = bool(merged.get("concat_attempted") or merged.get("stitch_attempted"))
     concat_output_valid = bool(merged.get("concat_output_valid") or (merged.get("concat_status") == "completed" and final_mp4_valid))
     concat_duration_seconds = merged.get("concat_duration_seconds") or merged.get("final_duration_seconds") or merged.get("output_duration") or 0
     final_duration_coverage_reason = str((merged.get("final_duration_contract") or {}).get("reason") if isinstance(merged.get("final_duration_contract"), dict) else merged.get("finalizer_error") or "-")
@@ -48182,6 +48215,7 @@ def video_job_finance_debug_text(job_id: int, *, conn=None) -> str:
         "💳 <b>Video Job Finance Debug</b>",
         "",
         f"• job id: <code>{jid}</code>",
+        *_video_scene_ledger_debug_lines(merged),
         f"• user: <code>{html.escape(user_masked)}</code>",
         f"• selected tier: <code>{html.escape(str(selected_tier or '-'))}</code>",
         f"• user visible price: <code>{xu_number(user_visible_price)} Xu</code>",
@@ -48433,7 +48467,8 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
             {
                 "provider": provider or "shopaikey_video",
                 "task_id": task_id,
-                "scene_index": safe_int(mapping.get("scene_index") or mapping.get("scene_id") or payload.get("canonical_scene_index"), 0),
+                "scene_index": safe_int(mapping.get("scene_index") or mapping.get("scene_id") or mapping.get("clip_index") or payload.get("canonical_scene_index"), 0),
+                "scene_index_explicit": bool(mapping.get("scene_index") or mapping.get("scene_id") or mapping.get("clip_index")),
                 "source": source,
                 "status": status,
                 "result_url": result_url,
@@ -48476,6 +48511,35 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
         for item in payload.get(group_name) or []:
             if isinstance(item, dict):
                 add(item, group_name, provider_hint=provider_hint)
+    for group_name in ("scene_ledger", "scene_tasks", "provider_scene_tasks", "product_video_scene_tasks"):
+        values = payload.get(group_name) or []
+        if isinstance(values, dict):
+            values = [
+                ({**dict(item or {}), "scene_index": dict(item or {}).get("scene_index") or key} if isinstance(item, dict) else {"scene_index": key, "status": item})
+                for key, item in values.items()
+            ]
+        scene_values = values if isinstance(values, (list, tuple)) else []
+        for item in scene_values:
+            if not isinstance(item, dict):
+                continue
+            direct_ids = [
+                item.get("active_task_id"),
+                item.get("provider_task_id"),
+                item.get("task_id"),
+                item.get("provider_video_id"),
+                item.get("video_id"),
+                item.get("winning_task_id"),
+                item.get("scene_winner_task"),
+                item.get("canonical_task_selected"),
+            ]
+            direct_ids.extend(item.get("fallback_task_ids") or [])
+            seen_scene_ids: set[str] = set()
+            for task_value in direct_ids:
+                task_text = str(task_value or "").strip()
+                if not task_text or task_text in seen_scene_ids:
+                    continue
+                seen_scene_ids.add(task_text)
+                add(item, group_name, provider_hint=provider_hint, task_value=task_text)
 
     project = dict(project or {})
     for field_name in ("asset_pack_json", "story_bible_json", "addon_plan_json", "invoice_json"):
@@ -48503,8 +48567,12 @@ def _video_provider_task_candidates(result: dict, project: dict | None = None) -
             existing["result_url"] = candidate["result_url"]
         if candidate.get("timestamp"):
             existing["timestamp"] = candidate["timestamp"]
-        if candidate.get("scene_index") and not existing.get("scene_index"):
+        if candidate.get("scene_index") and (
+            not existing.get("scene_index")
+            or (candidate.get("scene_index_explicit") and not existing.get("scene_index_explicit"))
+        ):
             existing["scene_index"] = candidate["scene_index"]
+        existing["scene_index_explicit"] = bool(existing.get("scene_index_explicit") or candidate.get("scene_index_explicit"))
         sources = [item for item in str(existing.get("source") or "").split(",") if item]
         if candidate["source"] not in sources:
             sources.append(candidate["source"])
@@ -48858,6 +48926,7 @@ def resolve_canonical_video_provider_task(
                     "source": str(item.get("source") or ""),
                     "status": str(item.get("status_class") or "unknown"),
                     "scene_index": safe_int(item.get("scene_index"), 0),
+                    "scene_index_explicit": bool(item.get("scene_index_explicit")),
                     "result_url_present": bool(item.get("result_url_valid")),
                     "result_url_present_raw": bool(item.get("result_url_present_raw")),
                     "result_url_valid": bool(item.get("result_url_valid")),
@@ -49701,8 +49770,80 @@ def video_provider_recover_text(payload: dict) -> str:
 
 
 def video_provider_raw_status_text(job_id: int) -> str:
-    payload = video_provider_recover_existing_task(job_id, download=False)
-    return video_provider_recover_text(payload)
+    jid = safe_int(job_id, 0)
+    conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        if not job:
+            return "⚠️ Không tìm thấy video job."
+        project = video_project_queue.get_video_project(conn, safe_int(job.get("project_id"), 0))
+        result = _video_debug_json(job.get("result_json"), {})
+        scene_count = max(
+            safe_int(result.get("scene_count") or result.get("scenes_total") or project.get("scene_count"), 0),
+            len(result.get("scene_tasks") or []) if isinstance(result.get("scene_tasks"), list) else 0,
+        )
+        if scene_count <= 1:
+            payload = video_provider_recover_existing_task(jid, download=False, conn=conn)
+            return video_provider_recover_text(payload)
+        canonical = resolve_canonical_video_provider_task(
+            jid,
+            conn=conn,
+            job=job,
+            project=project,
+            result=result,
+            poll_candidates=True,
+        )
+        candidate_summaries = list(canonical.get("candidate_summaries") or [])
+        ledger = video_project_queue.product_video_scene_ledger_state(
+            project,
+            job,
+            {**result, "canonical_candidate_summaries": candidate_summaries},
+        )
+    finally:
+        conn.close()
+    lines = [
+        "🧾 <b>Video Provider Raw Status — Per Scene</b>",
+        "",
+        f"• job id: <code>{jid}</code>",
+        f"• canonical scope: <code>{html.escape(str(ledger.get('canonical_scope') or 'job_summary'))}</code>",
+        f"• canonical does not imply job success: <code>{'yes' if ledger.get('canonical_does_not_imply_job_success') else 'no'}</code>",
+        f"• aggregate status: <code>{html.escape(str(ledger.get('aggregate_job_status') or '-'))}</code>",
+        f"• scene coverage: <code>{safe_int(ledger.get('completed_scene_count'), 0)}/{safe_int(ledger.get('required_scene_count'), scene_count)}</code>",
+        f"• unresolved scenes: <code>{html.escape(str(ledger.get('unresolved_scene_indexes') or []))}</code>",
+        "",
+        "Per-scene tasks:",
+    ]
+    summaries_by_scene: dict[int, list[dict]] = {}
+    for item in candidate_summaries:
+        if not isinstance(item, dict):
+            continue
+        summaries_by_scene.setdefault(safe_int(item.get("scene_index"), 0), []).append(item)
+    for scene in ledger.get("scene_ledger") or []:
+        if not isinstance(scene, dict):
+            continue
+        index = safe_int(scene.get("scene_index"), 0)
+        lines.append(
+            f"• scene {index}: status=<code>{html.escape(str(scene.get('status') or '-'))}</code> "
+            f"clip_valid=<code>{'yes' if scene.get('clip_valid') else 'no'}</code> "
+            f"progress=<code>{safe_int(scene.get('progress'), 0)}</code>"
+        )
+        for task in summaries_by_scene.get(index, []):
+            lines.append(
+                f"  - task=<code>{html.escape(str(task.get('task_id_masked') or '-'))}</code> "
+                f"provider=<code>{html.escape(str(task.get('provider') or '-'))}</code> "
+                f"status=<code>{html.escape(str(task.get('status') or '-'))}</code> "
+                f"result=<code>{'yes' if task.get('result_url_valid') else 'no'}</code>"
+            )
+    lines.extend(
+        [
+            "",
+            "• all unresolved tasks polled: <code>yes</code>",
+            "• new submit: <code>no</code>",
+            "• download: <code>no</code>",
+            "• charge: <code>0</code>",
+        ]
+    )
+    return "\n".join(lines)
 
 
 async def cmd_video_provider_raw_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -70715,10 +70856,27 @@ def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict |
             data = _video_provider_merge_canonical_task_debug(data, canonical)
     except Exception as exc:
         data["canonical_task_resolver_error"] = type(exc).__name__
+    scene_count = max(
+        safe_int(data.get("scene_count") or data.get("scenes_total") or (project or {}).get("scene_count"), 0),
+        len(data.get("scene_tasks") or []) if isinstance(data.get("scene_tasks"), list) else 0,
+    )
+    multiscene_ledger: dict = {}
+    if scene_count > 1:
+        multiscene_ledger = video_project_queue.product_video_scene_ledger_state(
+            dict(project or {}),
+            dict(job or {}),
+            data,
+        )
+        data.update(multiscene_ledger)
     telemetry = video_b14_provider_telemetry(job, data, refresh_source=refresh_source)
     data.update(telemetry)
-    if canonical_fields:
+    if canonical_fields and not multiscene_ledger:
         data.update(canonical_fields)
+    elif multiscene_ledger:
+        data.update(multiscene_ledger)
+        data["canonical_scope"] = "job_summary"
+        data["canonical_does_not_imply_job_success"] = True
+        data["unresolved_scenes_preserved"] = bool(data.get("unresolved_scene_indexes"))
     if telemetry.get("provider_task_alive"):
         primary = video_b14_primary_alive_attempt(data)
         for key in (
@@ -70957,7 +71115,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     progress = safe_int(job.get("progress_percent"), 0)
     if provider_task_alive and status not in {"completed", "success", "failed", "error"}:
         status = "processing"
-        progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
+        if provider_telemetry.get("scene_ledger") and safe_int(provider_telemetry.get("required_scene_count"), 0) > 1:
+            progress = safe_int(
+                provider_telemetry.get("public_effective_progress")
+                or provider_telemetry.get("final_progress_after_reconcile"),
+                20,
+            )
+        else:
+            progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
     stage = "chưa bắt đầu xử lý"
     if status in {"queued", "queued_for_worker"}:
         status_label = "Đang chuẩn bị"
@@ -71008,7 +71173,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     )
     if provider_task_alive and not has_final_artifact and status not in {"failed", "error"}:
         status = "processing"
-        progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
+        if provider_telemetry.get("scene_ledger") and safe_int(provider_telemetry.get("required_scene_count"), 0) > 1:
+            progress = safe_int(
+                provider_telemetry.get("public_effective_progress")
+                or provider_telemetry.get("final_progress_after_reconcile"),
+                20,
+            )
+        else:
+            progress = max(progress, safe_int(provider_telemetry.get("final_progress_after_reconcile") or provider_telemetry.get("final_progress"), 20))
         status_label = "Đang dựng bằng hệ thống dự phòng" if fallback_running else "Đang dựng video"
         stage = "hệ thống đang chuyển sang kênh dựng dự phòng" if fallback_running else "hệ thống đang dựng video"
     if not has_final_artifact and progress >= 95:
