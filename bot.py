@@ -180308,6 +180308,48 @@ SUBDUB_SUBTITLE_FONT_CANDIDATES = (
     },
 )
 
+SUBDUB_SUBTITLE_FONT_FALLBACKS = {
+    "japanese": (
+        {"family": "Noto Sans CJK JP", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf", "C:\\Windows\\Fonts\\YuGothR.ttc", "C:\\Windows\\Fonts\\meiryo.ttc"), "vietnamese": True, "cjk": True},
+        {"family": "Yu Gothic", "paths": ("C:\\Windows\\Fonts\\YuGothR.ttc",), "vietnamese": False, "cjk": True},
+    ),
+    "chinese": (
+        {"family": "Noto Sans CJK SC", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "C:\\Windows\\Fonts\\msyh.ttc"), "vietnamese": True, "cjk": True},
+        {"family": "Microsoft YaHei", "paths": ("C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyh.ttf"), "vietnamese": True, "cjk": True},
+    ),
+    "korean": (
+        {"family": "Noto Sans CJK KR", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf", "C:\\Windows\\Fonts\\malgun.ttf"), "vietnamese": True, "cjk": True},
+        {"family": "Malgun Gothic", "paths": ("C:\\Windows\\Fonts\\malgun.ttf",), "vietnamese": False, "cjk": True},
+    ),
+    "thai": (
+        {"family": "Noto Sans Thai", "paths": ("/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSansThai-Regular.otf"), "vietnamese": False, "cjk": False},
+        {"family": "Leelawadee UI", "paths": ("C:\\Windows\\Fonts\\LeelUIsl.ttf",), "vietnamese": False, "cjk": False},
+    ),
+    "arabic": (
+        {"family": "Noto Sans Arabic", "paths": ("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.otf"), "vietnamese": False, "cjk": False},
+        {"family": "Segoe UI", "paths": ("C:\\Windows\\Fonts\\segoeui.ttf",), "vietnamese": True, "cjk": False},
+    ),
+    "devanagari": (
+        {"family": "Noto Sans Devanagari", "paths": ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf", "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.otf"), "vietnamese": False, "cjk": False},
+        {"family": "Nirmala UI", "paths": ("C:\\Windows\\Fonts\\Nirmala.ttf",), "vietnamese": False, "cjk": False},
+    ),
+    "cyrillic": (
+        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",), "vietnamese": True, "cjk": False},
+    ),
+    "latin": (),
+}
+SUBDUB_SUBTITLE_SCRIPT_CHARSET = {
+    "japanese": "3042",
+    "chinese": "4e2d",
+    "korean": "ac00",
+    "thai": "0e01",
+    "arabic": "0627",
+    "devanagari": "0915",
+    "cyrillic": "0416",
+    "latin": "1ea1",
+}
+
 SUBDUB_BROKEN_GLYPH_CHARS = {
     "\ufffd", "□", "▯", "■", "�", "▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩",
 }
@@ -180335,9 +180377,48 @@ def subdub_normalize_subtitle_text(text) -> str:
 def subdub_font_path_available(path: str = "") -> bool:
     return bool(path and os.path.exists(os.path.expandvars(os.path.expanduser(str(path)))))
 
-def _subdub_font_candidates_for_request(requested_family: str = "", candidates=None) -> list[dict]:
+def subdub_detect_subtitle_script(text: str = "", language: str = "") -> str:
+    lang_text = str(language or "").strip().lower()
+    lang_code = re.split(r"[^a-z]+", lang_text, 1)[0]
+    payload = str(text or "")
+    if lang_code in {"ja", "jp"} or "japanese" in lang_text or re.search(r"[\u3040-\u30ff]", payload):
+        return "japanese"
+    if lang_code in {"zh", "zho", "chi"} or "chinese" in lang_text or re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", payload):
+        return "chinese"
+    if lang_code == "ko" or "korean" in lang_text or re.search(r"[\uac00-\ud7af]", payload):
+        return "korean"
+    if lang_code == "th" or "thai" in lang_text or re.search(r"[\u0e00-\u0e7f]", payload):
+        return "thai"
+    if lang_code in {"ar", "fa", "ur"} or any(item in lang_text for item in ("arabic", "persian", "urdu")) or re.search(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]", payload):
+        return "arabic"
+    if lang_code in {"hi", "mr", "ne"} or any(item in lang_text for item in ("hindi", "devanagari")) or re.search(r"[\u0900-\u097f]", payload):
+        return "devanagari"
+    if lang_code in {"ru", "uk", "bg"} or any(item in lang_text for item in ("russian", "cyrillic")) or re.search(r"[\u0400-\u04ff]", payload):
+        return "cyrillic"
+    return "latin"
+
+def _subdub_dedupe_font_candidates(items) -> list[dict]:
+    seen: set[str] = set()
+    result: list[dict] = []
+    for item in items or ():
+        family = str((item or {}).get("family") or "").strip().lower()
+        if not family or family in seen:
+            continue
+        seen.add(family)
+        result.append(dict(item))
+    return result
+
+def _subdub_font_candidates_for_script(script: str = "") -> list[dict]:
+    return _subdub_dedupe_font_candidates(
+        list(SUBDUB_SUBTITLE_FONT_FALLBACKS.get(str(script or "latin"), ()))
+        + list(SUBDUB_SUBTITLE_FONT_CANDIDATES)
+    )
+
+def _subdub_font_candidates_for_request(requested_family: str = "", candidates=None, script: str = "latin") -> list[dict]:
     requested = re.sub(r"[^A-Za-z0-9 _.-]", "", str(requested_family or "")).strip()
-    base = list(candidates if candidates is not None else SUBDUB_SUBTITLE_FONT_CANDIDATES)
+    if script != "latin" and requested.lower() in {"arial", "segoe ui", "dejavu sans"}:
+        requested = ""
+    base = list(candidates if candidates is not None else _subdub_font_candidates_for_script(script))
     if not requested:
         return base
     matches = [dict(item) for item in base if str(item.get("family") or "").lower() == requested.lower()]
@@ -180347,6 +180428,19 @@ def _subdub_font_candidates_for_request(requested_family: str = "", candidates=N
 
 def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=None) -> dict:
     state = dict(style_or_state or {})
+    sample_text = subdub_visible_subtitle_text(
+        state.get("subtitle_text")
+        or state.get("srt_text")
+        or state.get("sample_text")
+        or state.get("text")
+        or ""
+    )
+    language = " ".join(
+        str(state.get(key) or "")
+        for key in ("target_language", "language", "detected_language", "source_language")
+        if state.get(key)
+    )
+    script = subdub_detect_subtitle_script(sample_text, language)
     requested = (
         os.getenv("SUBDUB_SUBTITLE_FONT")
         or state.get("subtitle_font")
@@ -180354,10 +180448,10 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
         or state.get("font")
         or ""
     )
-    cache_key = str(requested or "__default__").strip().lower()
+    cache_key = f"{script}:{str(requested or '__default__').strip().lower()}"
     if candidates is None and cache_key in SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE:
         return dict(SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key])
-    for candidate in _subdub_font_candidates_for_request(str(requested or ""), candidates):
+    for candidate in _subdub_font_candidates_for_request(str(requested or ""), candidates, script):
         family = re.sub(r"[^A-Za-z0-9 _.-]", "", str(candidate.get("family") or "")).strip()
         if not family:
             continue
@@ -180370,6 +180464,9 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
                     "source": "path",
                     "supports_vietnamese": bool(candidate.get("vietnamese", True)),
                     "supports_cjk": bool(candidate.get("cjk", False)),
+                    "script": script,
+                    "font_selected": family,
+                    "font_fallback_reason": "script_path_match",
                     "blocker": "",
                 }
                 if candidates is None:
@@ -180378,8 +180475,10 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
         fc_match = shutil.which("fc-match")
         if fc_match:
             try:
+                charset = SUBDUB_SUBTITLE_SCRIPT_CHARSET.get(script, "")
+                pattern = f"{family}:charset={charset}" if charset else family
                 proc = subprocess.run(
-                    [fc_match, "-f", "%{family}|%{file}", family],
+                    [fc_match, "-f", "%{family}|%{file}", pattern],
                     capture_output=True,
                     text=True,
                     timeout=3,
@@ -180395,6 +180494,9 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
                         "source": "fontconfig",
                         "supports_vietnamese": bool(candidate.get("vietnamese", True)),
                         "supports_cjk": bool(candidate.get("cjk", False)),
+                        "script": script,
+                        "font_selected": (matched_family.split(",", 1)[0] or family).strip(),
+                        "font_fallback_reason": "fontconfig_script_match",
                         "blocker": "",
                     }
                     if candidates is None:
@@ -180409,6 +180511,9 @@ def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=
         "source": "",
         "supports_vietnamese": False,
         "supports_cjk": False,
+        "script": script,
+        "font_selected": "",
+        "font_fallback_reason": "no_font_with_required_script",
         "blocker": "subtitle_font_missing",
     }
     if candidates is None:
@@ -180748,13 +180853,15 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["text_margin_bottom_ratio"] = state.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO
         style["subtitle_style_profile"] = style.get("subtitle_style_profile") or subdub_style_profile_for_state(state)
     style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
-    font_resolution = resolve_subdub_subtitle_font(style)
+    font_resolution = resolve_subdub_subtitle_font({**state, **style})
     if font_resolution.get("ok"):
         style["font"] = str(font_resolution.get("family") or style["font"]).strip()[:80] or style["font"]
     style["subtitle_font_resolution_ok"] = bool(font_resolution.get("ok"))
     style["subtitle_font_family"] = str(font_resolution.get("family") or "")[:80]
     style["subtitle_font_path"] = str(font_resolution.get("path") or "")[:260]
     style["subtitle_font_blocker"] = str(font_resolution.get("blocker") or "")[:80]
+    style["subtitle_font_script"] = str(font_resolution.get("script") or "")[:40]
+    style["subtitle_font_fallback_reason"] = str(font_resolution.get("font_fallback_reason") or "")[:80]
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["subtitle_font_multiplier"] = max(1.0, min(1.25, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     style["subtitle_font_size_before"] = int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
@@ -180973,7 +181080,12 @@ def subdub_ass_text_chunks(text: str, style: dict, max_lines: int = 2) -> list[s
     return ["\n".join(lines[index:index + line_limit]) for index in range(0, len(lines), line_limit)]
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
-    style = subdub_normalize_style(style_or_state)
+    style = subdub_normalize_style(
+        {
+            **dict(style_or_state or {}),
+            "subtitle_text": subdub_visible_subtitle_text(srt_text),
+        }
+    )
     readability = subdub_validate_subtitle_text_for_delivery(srt_text)
     if not readability.get("ok"):
         return ""
@@ -181017,6 +181129,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         f"; subtitle_margin_v_effective: {margin_v}",
         "; subtitle_pos_override_removed: yes",
         f"; subtitle_max_lines: {int(style.get('max_lines') or 2)}",
+        f"; subtitle_font_script: {style.get('subtitle_font_script') or 'latin'}",
+        f"; subtitle_font_fallback_reason: {style.get('subtitle_font_fallback_reason') or 'none'}",
         "WrapStyle: 2",
         "ScaledBorderAndShadow: yes",
         f"PlayResX: {play_res_x}",
