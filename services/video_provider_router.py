@@ -1464,6 +1464,7 @@ PRODUCT_VIDEO_PROVIDER_NO_OUTPUT_DEGRADE_THRESHOLD_DEFAULT = 2
 PRODUCT_VIDEO_PROVIDER_TERMINAL_FAILURE_DEGRADE_THRESHOLD_DEFAULT = 2
 PRODUCT_VIDEO_PROVIDER_DEGRADED_DURATION_SECONDS_DEFAULT = 30 * 60
 PRODUCT_VIDEO_PROVIDER_LIVE_HEALTH_MAX_AGE_SECONDS_DEFAULT = 24 * 60 * 60
+PRODUCT_VIDEO_PROVIDER_HEALTH_SUCCESS_TTL_SECONDS_DEFAULT = 30 * 60
 
 
 def _product_video_attempt_status_text(attempt: dict[str, Any]) -> str:
@@ -1685,13 +1686,15 @@ def product_video_provider_public_degradation(
     )
     in_progress_stall_seconds = max(60, int(env.get("VIDEO_PROVIDER_IN_PROGRESS_STALL_SECONDS") or 300))
     not_start_stall_seconds = max(1, int(env.get("VIDEO_PROVIDER_NOT_START_STALL_SECONDS") or 60))
-    live_health_max_age = max(
+    success_ttl_seconds = max(
         60,
         int(
-            env.get("PRODUCT_VIDEO_PROVIDER_LIVE_HEALTH_MAX_AGE_SECONDS")
-            or PRODUCT_VIDEO_PROVIDER_LIVE_HEALTH_MAX_AGE_SECONDS_DEFAULT
+            env.get("VIDEO_PROVIDER_HEALTH_SUCCESS_TTL_SECONDS")
+            or env.get("PRODUCT_VIDEO_PROVIDER_HEALTH_SUCCESS_TTL_SECONDS")
+            or PRODUCT_VIDEO_PROVIDER_HEALTH_SUCCESS_TTL_SECONDS_DEFAULT
         ),
     )
+    live_health_max_age = success_ttl_seconds
     env_flag = str(env.get(f"PRODUCT_VIDEO_{normalized_provider.upper()}_PUBLIC_DEGRADED") or "").strip().lower()
     env_degraded = env_flag in {"1", "true", "yes", "on", "degraded", "blocked"}
     rows = [dict(item) for item in (attempts or []) if isinstance(item, dict)]
@@ -1835,24 +1838,40 @@ def product_video_provider_public_degradation(
         if count > 0:
             stalled_jobs.append(job_key)
     same_job_multi_scene_stall = any(count >= 2 for count in stalled_scenes_by_job.values())
-    automatic_degraded = bool(
+    automatic_degraded_evidence = bool(
         same_job_multi_scene_stall
         or not_start_streak >= threshold
         or in_progress_stall_streak >= in_progress_threshold
         or no_output_streak >= no_output_threshold
         or terminal_failure_streak >= terminal_failure_threshold
     )
-    if last_valid_epoch and last_valid_epoch >= last_failure_epoch:
-        automatic_degraded = False
+    degradation_anchor = last_failure_epoch or now
+    degraded_until_epoch = int(degradation_anchor + duration_seconds) if automatic_degraded_evidence else 0
+    probation_started_at_epoch = (
+        degraded_until_epoch
+        if automatic_degraded_evidence and degraded_until_epoch > 0 and degraded_until_epoch <= now
+        else 0
+    )
+    last_valid_age_seconds = int(max(0, now - last_valid_epoch)) if last_valid_epoch else 0
+    fresh_success = bool(
+        last_valid_epoch
+        and last_valid_age_seconds <= success_ttl_seconds
+        and (not probation_started_at_epoch or last_valid_epoch > probation_started_at_epoch)
+        and (not last_failure_epoch or last_valid_epoch >= last_failure_epoch)
+    )
+    if fresh_success:
+        automatic_degraded_evidence = False
         not_start_streak = 0
         in_progress_stall_streak = 0
         no_output_streak = 0
         terminal_failure_streak = 0
-    degradation_anchor = last_failure_epoch or now
-    degraded_until_epoch = int(degradation_anchor + duration_seconds) if automatic_degraded else 0
-    degraded = bool(env_degraded or (automatic_degraded and degraded_until_epoch > now))
+        degraded_until_epoch = 0
+        probation_started_at_epoch = 0
+    degraded = bool(env_degraded or (automatic_degraded_evidence and degraded_until_epoch > now))
+    probation = bool(automatic_degraded_evidence and not degraded and probation_started_at_epoch > 0)
     if env_degraded:
         degraded_until_epoch = int(now + duration_seconds)
+        probation = False
     reasons: list[str] = []
     if env_degraded:
         reasons.append("manual_env_degraded")
@@ -1871,21 +1890,44 @@ def product_video_provider_public_degradation(
     if delivered_count > 0:
         reasons.append("provider_delivered_recently")
     route_ready_value = True if route_ready is None else bool(route_ready)
-    recent_valid_output = bool(last_valid_epoch and max(0, now - last_valid_epoch) <= live_health_max_age)
-    live_healthy = bool(route_ready_value and recent_valid_output and not degraded)
+    recent_valid_output = bool(fresh_success)
+    live_healthy = bool(
+        route_ready_value
+        and fresh_success
+        and not degraded
+        and not probation
+        and not_start_streak < threshold
+        and in_progress_stall_streak < in_progress_threshold
+        and no_output_streak < no_output_threshold
+        and terminal_failure_streak < terminal_failure_threshold
+    )
     if degraded:
         health_status = "degraded"
+        health_transition_reason = "failure_threshold_cooldown_active"
+    elif probation:
+        health_status = "probation"
+        health_transition_reason = "degraded_cooldown_expired_waiting_for_fresh_validated_clip"
     elif not route_ready_value:
-        health_status = "route_unavailable"
+        health_status = "unavailable"
+        health_transition_reason = "provider_route_unavailable"
     elif live_healthy:
         health_status = "healthy"
+        health_transition_reason = "fresh_validated_clip_within_ttl"
     else:
         health_status = "unknown"
+        health_transition_reason = "fresh_validated_clip_required"
     return {
         "provider": normalized_provider,
         "route_ready": route_ready_value,
         "live_healthy": live_healthy,
         "health_status": health_status,
+        "provider_health_state": health_status,
+        "probation": probation,
+        "probation_started_at_epoch": probation_started_at_epoch,
+        "probation_started_at": _epoch_text(probation_started_at_epoch),
+        "fresh_success": fresh_success,
+        "multi_scene_eligible": bool(live_healthy),
+        "health_transition_reason": health_transition_reason,
         "provider_degraded_for_product_video_public": degraded,
         "degraded_for_product_video_public": degraded,
         "degrade_reason": ",".join(reasons) if degraded else "",
@@ -1895,6 +1937,9 @@ def product_video_provider_public_degradation(
         "degrade_duration_seconds": duration_seconds,
         "health_window_jobs": window_jobs,
         "live_health_max_age_seconds": live_health_max_age,
+        "success_ttl_seconds": success_ttl_seconds,
+        "last_valid_output_at": _epoch_text(last_valid_epoch),
+        "last_valid_age_seconds": last_valid_age_seconds,
         "recent_jobs_checked": len(selected_jobs),
         "recent_valid_output": recent_valid_output,
         "last_valid_scene_at": _epoch_text(last_valid_epoch),
@@ -1991,8 +2036,24 @@ def product_video_public_provider_route_decision(
         eligible.append(provider)
         if bool(degrade_state.get("live_healthy")):
             live_healthy_order.append(provider)
+    eligibility = product_video_provider_eligibility_snapshot(
+        status=payload,
+        chain=configured_chain,
+        provider_health=degraded,
+        contract_valid_provider_chain=configured_chain,
+        scene_count=1,
+        require_live_health=True,
+        allow_legacy_missing_health=True,
+    )
+    eligible = list(eligibility.get("eligible_provider_keys") or [])
     selected = eligible[0] if eligible else ""
+    route_blocker = "" if selected else (
+        "no_healthy_video_provider_no_charge"
+        if degraded_skipped or health_skipped
+        else "product_video_no_public_mp4_provider"
+    )
     return {
+        **eligibility,
         "ok": bool(selected),
         "selected_provider": selected,
         "provider_chain": configured_chain,
@@ -2004,7 +2065,8 @@ def product_video_public_provider_route_decision(
         "provider_health_summary": degraded,
         "degraded_providers": degraded,
         "skipped_providers": skipped,
-        "blocker": "" if selected else ("no_healthy_video_provider_no_charge" if degraded_skipped or health_skipped else "product_video_no_public_mp4_provider"),
+        "blocker": route_blocker,
+        "eligibility_blocker": str(eligibility.get("blocker") or ""),
         "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY if not selected else "",
         "effective_primary_for_low_basic": selected,
         "primary_selected_due_to_health": "health_aware_degraded_provider_skipped" if (degraded_skipped or health_skipped) and selected else "default_order",
@@ -2018,6 +2080,7 @@ def product_video_multi_scene_public_gate(
     *,
     effective_provider_chain: list[str] | tuple[str, ...] | None = None,
     contract_valid_provider_chain: list[str] | tuple[str, ...] | None = None,
+    eligibility_snapshot: dict[str, Any] | None = None,
     environ: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     env = dict(environ or os.environ)
@@ -2036,15 +2099,23 @@ def product_video_multi_scene_public_gate(
         for item in (contract_valid_provider_chain or effective)
         if str(item or "").strip()
     }
-    healthy = [
-        provider
-        for provider in effective
-        if provider in contract_valid
-        and bool(health.get(provider, {}).get("route_ready"))
-        and bool(health.get(provider, {}).get("live_healthy"))
-        and bool(health.get(provider, {}).get("recent_valid_output"))
-        and not bool(health.get(provider, {}).get("provider_degraded_for_product_video_public"))
-    ]
+    snapshot = dict(eligibility_snapshot or {})
+    if snapshot:
+        healthy = [
+            provider
+            for provider in (snapshot.get("eligible_provider_keys") or snapshot.get("runtime_candidate_keys") or [])
+            if provider in effective and provider in contract_valid
+        ]
+    else:
+        healthy = [
+            provider
+            for provider in effective
+            if provider in contract_valid
+            and bool(health.get(provider, {}).get("route_ready"))
+            and bool(health.get(provider, {}).get("live_healthy"))
+            and bool(health.get(provider, {}).get("recent_valid_output"))
+            and not bool(health.get(provider, {}).get("provider_degraded_for_product_video_public"))
+        ]
     live_health_gate_pass = bool(healthy)
     if not live_health_gate_pass:
         blocker = "no_healthy_provider_no_charge"
@@ -2071,6 +2142,9 @@ def product_video_multi_scene_public_gate(
         "no_charge_reason": blocker,
         "provider_submit_count": 0,
         "charge": 0,
+        "provider_eligibility_snapshot_id": str(snapshot.get("provider_eligibility_snapshot_id") or ""),
+        "final_eligible_provider_count": len(healthy),
+        "candidate_rejection_reason_by_provider": dict(snapshot.get("candidate_rejection_reason_by_provider") or {}),
     }
 
 
@@ -2126,6 +2200,146 @@ def provider_supports(adapter: VideoProviderAdapter, required_capability: str) -
         return False
     supported = set(normalize_capability_values(caps.get("capabilities") or []))
     return any(cap in supported for cap in capability_options(required_capability))
+
+
+def product_video_provider_eligibility_snapshot(
+    *,
+    status: dict[str, Any] | None = None,
+    chain: list[str] | tuple[str, ...] | str | None = None,
+    required_capability: str = "text_to_video_or_scene_video",
+    provider_health: dict[str, dict[str, Any]] | None = None,
+    contract_valid_provider_chain: list[str] | tuple[str, ...] | None = None,
+    scene_count: int = 1,
+    require_live_health: bool = True,
+    allow_legacy_missing_health: bool = False,
+    environ: dict[str, str] | None = None,
+    persisted_snapshot_id: str = "",
+) -> dict[str, Any]:
+    """Return the single Product Video admission decision used by UI and runtime.
+
+    The evaluator is side-effect free. It checks only persisted/configured
+    evidence and never probes a provider.
+    """
+    env = dict(environ or os.environ)
+    payload = dict(status or provider_status_payload(env))
+    if isinstance(chain, str):
+        configured_chain = split_provider_chain(chain)
+    elif chain is None:
+        configured_chain = [
+            str(item or "").strip()
+            for item in (payload.get("effective_provider_chain") or payload.get("provider_chain") or [])
+            if str(item or "").strip()
+        ]
+    else:
+        configured_chain = [str(item or "").strip() for item in chain if str(item or "").strip()]
+    health = {
+        str(provider or "").strip(): dict(value or {})
+        for provider, value in (provider_health or {}).items()
+        if str(provider or "").strip()
+    }
+    contract_filter_supplied = contract_valid_provider_chain is not None
+    contract_valid = {
+        str(provider or "").strip()
+        for provider in (contract_valid_provider_chain or [])
+        if str(provider or "").strip()
+    }
+    status_items = {
+        str(item.get("provider") or "").strip(): dict(item)
+        for item in (payload.get("providers") or [])
+        if isinstance(item, dict) and str(item.get("provider") or "").strip()
+    }
+    transport_status_keys = {
+        "submit_url_configured",
+        "poll_url_configured",
+        "endpoint_configured",
+        "auth_configured",
+        "auth_present",
+        "model_present",
+        "provider_model_present",
+        "provider_payload_model",
+    }
+    transport_status_reported = any(
+        any(key in item for key in transport_status_keys)
+        for item in status_items.values()
+    )
+    adapters = {adapter.provider_name: adapter for adapter in load_video_provider_adapters(env)}
+    rejection_by_provider: dict[str, list[str]] = {}
+    eligible: list[str] = []
+    for provider in configured_chain:
+        item = status_items.get(provider, {})
+        adapter = adapters.get(provider)
+        reasons: list[str] = []
+        if item and "enabled" in item and not bool(item.get("enabled")):
+            reasons.append("provider_disabled")
+        if not bool(item.get("configured")):
+            reasons.append(str(item.get("config_blocker") or item.get("selection_blocker") or "provider_not_configured"))
+        if not bool(item.get("credit_ok", True)):
+            reasons.append(f"credit_{item.get('credit_status') or 'unavailable'}")
+        submit_ready = bool(item.get("submit_url_configured") or item.get("endpoint_configured"))
+        poll_ready = bool(item.get("poll_url_configured") or item.get("endpoint_configured"))
+        auth_ready = bool(item.get("auth_configured") or item.get("auth_present"))
+        model_ready = bool(item.get("model_present") or item.get("provider_model_present") or item.get("provider_payload_model"))
+        if transport_status_reported and item.get("configured") and not submit_ready:
+            reasons.append("submit_route_missing")
+        if transport_status_reported and item.get("configured") and not poll_ready:
+            reasons.append("poll_route_missing")
+        if transport_status_reported and item.get("configured") and not auth_ready:
+            reasons.append("provider_credentials_missing")
+        if transport_status_reported and item.get("configured") and not model_ready:
+            reasons.append("provider_model_missing")
+        if transport_status_reported and (adapter is None or not provider_supports(adapter, required_capability)):
+            reasons.append("provider_capability_or_payload_builder_missing")
+        if contract_filter_supplied and provider not in contract_valid:
+            reasons.append("provider_model_interface_contract_invalid")
+        health_state = health.get(provider, {})
+        if require_live_health:
+            if not health_state and allow_legacy_missing_health:
+                health_state = {"live_healthy": True, "multi_scene_eligible": True}
+            state_name = str(
+                health_state.get("provider_health_state")
+                or health_state.get("health_status")
+                or "unknown"
+            ).strip().lower()
+            if health_state.get("provider_degraded_for_product_video_public") or state_name == "degraded":
+                reasons.append("provider_health_degraded")
+            elif health_state.get("probation") or state_name == "probation":
+                reasons.append("provider_health_probation")
+            elif not bool(health_state.get("live_healthy")):
+                reasons.append("provider_fresh_validated_success_required")
+            elif max(1, int(scene_count or 1)) > 1 and not bool(
+                health_state.get("multi_scene_eligible", health_state.get("live_healthy"))
+            ):
+                reasons.append("provider_not_multi_scene_eligible")
+        rejection_by_provider[provider] = list(dict.fromkeys(reason for reason in reasons if reason))
+        if not rejection_by_provider[provider]:
+            eligible.append(provider)
+    fingerprint = repr(
+        (
+            tuple(configured_chain),
+            tuple(eligible),
+            tuple((provider, tuple(rejection_by_provider.get(provider) or [])) for provider in configured_chain),
+            str(required_capability or ""),
+            max(1, int(scene_count or 1)),
+        )
+    )
+    snapshot_id = str(persisted_snapshot_id or "").strip() or hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:20]
+    return {
+        "provider_eligibility_snapshot_id": snapshot_id,
+        "provider_eligibility_snapshot_source": "authoritative_provider_eligibility_evaluator",
+        "configured_provider_keys": configured_chain,
+        "eligible_provider_keys": eligible,
+        "preconfirm_candidate_keys": eligible,
+        "runtime_candidate_keys": eligible,
+        "candidate_set_consistent": True,
+        "candidate_rejection_reason_by_provider": rejection_by_provider,
+        "final_eligible_provider_count": len(eligible),
+        "required_capability": str(required_capability or ""),
+        "scene_count": max(1, int(scene_count or 1)),
+        "health_required": bool(require_live_health),
+        "contract_valid_provider_chain": sorted(contract_valid) if contract_filter_supplied else configured_chain,
+        "ok": bool(eligible),
+        "blocker": "" if eligible else "no_eligible_product_video_provider",
+    }
 
 
 def preferred_provider_capability(adapter: VideoProviderAdapter, required_capability: str) -> str:
@@ -2628,6 +2842,47 @@ def run_provider_generation(
     )
     metadata = dict(request.metadata or {})
     is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or allow_pending_result)
+    persisted_eligibility_snapshot = (
+        metadata.get("provider_eligibility_snapshot")
+        if isinstance(metadata.get("provider_eligibility_snapshot"), dict)
+        else {}
+    )
+    runtime_eligibility_snapshot: dict[str, Any] = {}
+    if is_product_video and persisted_eligibility_snapshot:
+        persisted_preconfirm_candidates = [
+            str(item or "").strip()
+            for item in (
+                persisted_eligibility_snapshot.get("eligible_provider_keys")
+                or metadata.get("preconfirm_candidate_keys")
+                or []
+            )
+            if str(item or "").strip()
+        ]
+        runtime_eligibility_snapshot = product_video_provider_eligibility_snapshot(
+            status=status,
+            chain=persisted_eligibility_snapshot.get("configured_provider_keys")
+            or metadata.get("configured_provider_chain")
+            or status.get("provider_chain")
+            or [],
+            required_capability=request.required_capability,
+            provider_health=metadata.get("provider_health_at_submit")
+            if isinstance(metadata.get("provider_health_at_submit"), dict)
+            else {},
+            contract_valid_provider_chain=persisted_eligibility_snapshot.get("contract_valid_provider_chain") or [],
+            scene_count=int(metadata.get("scene_count") or metadata.get("scenes_total") or 1),
+            require_live_health=True,
+            environ=env,
+            persisted_snapshot_id=str(persisted_eligibility_snapshot.get("provider_eligibility_snapshot_id") or ""),
+        )
+        runtime_candidates = list(runtime_eligibility_snapshot.get("eligible_provider_keys") or [])
+        runtime_eligibility_snapshot["preconfirm_candidate_keys"] = persisted_preconfirm_candidates
+        runtime_eligibility_snapshot["runtime_candidate_keys"] = runtime_candidates
+        runtime_eligibility_snapshot["candidate_set_consistent"] = runtime_candidates == persisted_preconfirm_candidates
+        candidate_adapters = [item for item in candidate_adapters if item.provider_name in runtime_candidates]
+        adapter = candidate_adapters[0] if candidate_adapters else None
+        provider_candidates = [item.provider_name for item in candidate_adapters]
+        initial_primary_provider = adapter.provider_name if adapter else ""
+        initial_fallback_provider = next((name for name in provider_candidates if name and name != initial_primary_provider), "")
     try:
         current_fallback_count = int(metadata.get("fallback_count") or metadata.get("provider_fallback_count") or 0)
     except Exception:
@@ -2724,6 +2979,24 @@ def run_provider_generation(
         "required_capability_original": required_capability_original,
         "normalized_capability_candidates": list(normalized_capability_candidates),
         "provider_candidates_count": len([item for item in provider_candidates if item]),
+        "provider_eligibility_snapshot_id": str(
+            runtime_eligibility_snapshot.get("provider_eligibility_snapshot_id")
+            or persisted_eligibility_snapshot.get("provider_eligibility_snapshot_id")
+            or ""
+        ),
+        "preconfirm_candidate_keys": list(
+            runtime_eligibility_snapshot.get("preconfirm_candidate_keys")
+            or persisted_eligibility_snapshot.get("eligible_provider_keys")
+            or []
+        ),
+        "runtime_candidate_keys": list(runtime_eligibility_snapshot.get("runtime_candidate_keys") or provider_candidates),
+        "candidate_set_consistent": bool(runtime_eligibility_snapshot.get("candidate_set_consistent", True)),
+        "candidate_rejection_reason_by_provider": dict(
+            runtime_eligibility_snapshot.get("candidate_rejection_reason_by_provider")
+            or persisted_eligibility_snapshot.get("candidate_rejection_reason_by_provider")
+            or {}
+        ),
+        "final_eligible_provider_count": len(provider_candidates),
         "selected_provider": adapter.provider_name if adapter else "",
         "initial_selected_provider": adapter.provider_name if adapter else "",
         "selected_capability": preferred_provider_capability(adapter, request.required_capability) if adapter else "",
@@ -2752,6 +3025,27 @@ def run_provider_generation(
         "selected_provider_after_fallback": "",
         "provider_submit_called": False,
         "provider_submit_http_status": 0,
+        "submit_orchestrator_invoked": True,
+        "provider_http_request_sent": False,
+        "provider_http_status": 0,
+        "provider_key_selected": adapter.provider_name if adapter else "",
+        "submit_preflight_passed": bool(adapter),
+        "submit_block_reason": "" if adapter else str(runtime_eligibility_snapshot.get("blocker") or "provider_capability_missing"),
+        "task_id_received": False,
+        "candidate_evaluated_count": len(
+            runtime_eligibility_snapshot.get("configured_provider_keys")
+            or status.get("provider_chain")
+            or []
+        ),
+        "candidate_preflight_rejected_count": max(
+            0,
+            len(runtime_eligibility_snapshot.get("configured_provider_keys") or status.get("provider_chain") or [])
+            - len(provider_candidates),
+        ),
+        "submit_invoked_count": 0,
+        "submit_accepted_count": 0,
+        "task_created_count": 0,
+        "fallback_count_effective": 0,
         "provider_task_id_saved": False,
         "provider_poll_called": False,
         "provider_result_url_present": False,
@@ -2915,6 +3209,10 @@ def run_provider_generation(
             "phase": "selected",
             "capability": capability,
             "submit_called": False,
+            "submit_orchestrator_invoked": True,
+            "provider_http_request_sent": False,
+            "provider_http_status": 0,
+            "submit_preflight_passed": True,
             "submit_http_status": 0,
             "submit_response_shape": {},
             "submit_accepted": False,
@@ -3068,6 +3366,18 @@ def run_provider_generation(
                 "fallback_eligible": bool(fallback_used or (attempt_index + 1 < len(candidate_adapters))),
                 "final_decision": "fallback_provider_once" if fallback_used else "waiting_primary_provider",
                 "provider_attempted": True,
+                "submit_orchestrator_invoked": True,
+                "provider_http_request_sent": bool(current_trace.get("provider_http_request_sent")),
+                "provider_http_status": _int_metadata(current_trace.get("provider_http_status") or current_trace.get("submit_http_status"), 0),
+                "provider_key_selected": current_adapter.provider_name,
+                "submit_preflight_passed": bool(current_trace.get("submit_preflight_passed", True)),
+                "submit_block_reason": str(current_trace.get("blocker") or ""),
+                "task_id_received": bool(current_trace.get("task_id_present")),
+                "candidate_evaluated_count": int(base_debug.get("candidate_evaluated_count") or 0),
+                "candidate_preflight_rejected_count": int(base_debug.get("candidate_preflight_rejected_count") or 0),
+                "submit_invoked_count": sum(1 for item in attempt_traces if item.get("submit_called")),
+                "submit_accepted_count": sum(1 for item in attempt_traces if item.get("submit_accepted")),
+                "task_created_count": sum(1 for item in attempt_traces if item.get("task_id_present")),
                 "provider_submit_already_exists": bool(poll_existing_task),
                 "no_new_submit": bool(poll_existing_task),
                 "poll_existing_task": bool(poll_existing_task),
@@ -3426,6 +3736,11 @@ def run_provider_generation(
                 exc_payload["provider_fallback_reason"] = first_fallback_reason
                 return exc_payload
         submit_http_status = _submit_http_status(submit.raw)
+        provider_http_request_sent = bool(
+            submit_http_status > 0
+            or (submit.raw or {}).get("provider_http_request_sent")
+            or (submit.raw or {}).get("http_request_sent")
+        )
         submit_truth = product_video_submit_response_truth(
             provider_accepted=submit.ok,
             provider_task_id=submit.provider_task_id,
@@ -3438,6 +3753,8 @@ def run_provider_generation(
             raw=submit.raw,
             submit_called=submit_called_flag,
             submit_http_status=submit_http_status,
+            provider_http_request_sent=provider_http_request_sent,
+            provider_http_status=submit_http_status,
             submit_accepted=bool(submit_truth["effective_submit_accepted"]),
             provider_accepted_raw=bool(submit_truth["provider_accepted_raw"]),
             task_id_present=bool(submit_truth["task_id_present"]),

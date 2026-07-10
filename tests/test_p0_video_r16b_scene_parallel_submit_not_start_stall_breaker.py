@@ -116,7 +116,8 @@ def test_scene_count_2_creates_two_scene_task_records_with_pending_scene_2():
     assert len(payload["provider_scene_tasks"]) == 2
     assert payload["provider_scene_tasks"][0]["provider_task_id"] == "scene-task-1"
     assert payload["provider_scene_tasks"][0]["request_job_id"] == "99-1"
-    assert payload["provider_scene_tasks"][1]["status"] == "pending_submit"
+    assert payload["provider_scene_tasks"][1]["status"] == "queued_waiting_for_dispatch"
+    assert payload["provider_scene_tasks"][1]["dispatch_state"] == "queued_waiting_for_dispatch"
     assert payload["provider_scene_tasks"][1]["request_job_id"] == "99-2"
 
 
