@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import json
@@ -10,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from webapp_core_bridge import build_core_bridge_router, confirm_web_link_from_telegram
+from webapp_core_bridge import _web_link_callback_headers, build_core_bridge_router, confirm_web_link_from_telegram
 
 
 def make_app(tmp_path, monkeypatch):
@@ -38,6 +39,19 @@ def make_app(tmp_path, monkeypatch):
         "db_connect": db_connect,
         "is_admin_user": lambda user_id: str(user_id) == "admin-1",
         "engine_readiness_registry": lambda: {"video_single": {"configured": True, "public_ready": True, "reason": "ready", "missing": [], "adapter": "video"}},
+        "media_workflow_pricing_payload": lambda: {
+            "billing_mode": "tiered_media_pricing",
+            "price_table_source": "test",
+            "image_tiers": {"low": {"label": "Ảnh tiết kiệm", "cost": 50, "note": "test"}},
+            "video_tiers": {"basic": {"label": "Video cơ bản", "cost": 300, "note": "test"}},
+            "video_combos": [{"code": "basic_199k", "label": "Combo cơ bản", "price_vnd": 199000, "display_price": "199k", "summary": "test"}],
+            "workflow_content_total_cost": 20,
+        },
+        "package_catalog_payload": lambda: {
+            "combos": {"basic_199k": {"label": "Combo cơ bản", "items": {"video_common": 3}, "note": "test"}},
+            "monthly": {"starter_monthly": {"label": "Starter", "items": {"image_standard": 10}, "default_days": 30}},
+        },
+        "package_purchase_price_vnd": lambda package_type, code: 199000 if package_type == "combo" else 299000,
     }
     monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
     monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
@@ -112,6 +126,70 @@ def test_tickets_are_canonical_and_idempotent(tmp_path, monkeypatch):
         assert tickets.json()["data"]["items"][0]["subject"] == "Need help"
 
 
+def test_upload_staging_validates_ownership_and_feature_references(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        content = b"%PDF-1.4\nprivate-web-upload"
+        upload_payload = {
+            "user_id": "u-1",
+            "file_name": "brief.pdf",
+            "content_type": "application/pdf",
+            "content_base64": base64.b64encode(content).decode("ascii"),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "idempotency_key": "upload-bridge-0001",
+        }
+        body = json.dumps(upload_payload, separators=(",", ":")).encode()
+        uploaded = client.post("/internal/v1/uploads", content=body, headers=signed_headers("POST", "/internal/v1/uploads", body))
+        assert uploaded.status_code == 200
+        assert uploaded.json()["status"] == "completed"
+        metadata = uploaded.json()["data"]
+        assert metadata["file_name"] == "brief.pdf"
+        assert metadata["content_size"] == len(content)
+        assert "content" not in metadata
+        repeated = client.post("/internal/v1/uploads", content=body, headers=signed_headers("POST", "/internal/v1/uploads", body))
+        assert repeated.json()["data"]["id"] == metadata["id"]
+
+        draft_payload = {"user_id": "u-1", "input": {"prompt": "Use attached brief", "upload_ids": [metadata["id"]]}}
+        draft_body = json.dumps(draft_payload, separators=(",", ":")).encode()
+        draft = client.post("/internal/v1/features/video_single/draft", content=draft_body, headers=signed_headers("POST", "/internal/v1/features/video_single/draft", draft_body))
+        assert draft.json()["status"] == "draft"
+        assert draft.json()["data"]["uploads"][0]["id"] == metadata["id"]
+
+        missing_payload = {"user_id": "u-1", "input": {"upload_ids": ["missing-upload-id"]}}
+        missing_body = json.dumps(missing_payload, separators=(",", ":")).encode()
+        missing = client.post("/internal/v1/features/video_single/draft", content=missing_body, headers=signed_headers("POST", "/internal/v1/features/video_single/draft", missing_body))
+        assert missing.json()["status"] == "failed"
+        assert missing.json()["error_code"] == "UPLOAD_NOT_FOUND"
+
+
+def test_pricing_and_packages_are_read_from_bot_helpers_only(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        pricing = client.get("/internal/v1/pricing?user_id=u-1", headers=signed_headers("GET", "/internal/v1/pricing"))
+        assert pricing.status_code == 200
+        assert pricing.json()["data"]["image_tiers"][0]["cost_xu"] == 50
+        assert "provider_cost" not in pricing.text
+
+        packages = client.get("/internal/v1/packages?user_id=u-1", headers=signed_headers("GET", "/internal/v1/packages"))
+        assert packages.status_code == 200
+        assert packages.json()["data"]["monthly"][0]["price_vnd"] == 299000
+
+
+def test_admin_module_adapter_is_canonical_read_only_and_role_protected(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        denied = client.get(
+            "/internal/v1/admin/modules/providers?user_id=u-1",
+            headers=signed_headers("GET", "/internal/v1/admin/modules/providers", actor="u-1"),
+        )
+        assert denied.status_code == 403
+
+        allowed = client.get(
+            "/internal/v1/admin/modules/providers?user_id=admin-1",
+            headers=signed_headers("GET", "/internal/v1/admin/modules/providers", actor="admin-1"),
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["status"] == "read_only"
+        assert allowed.json()["data"]["items"][0]["feature"] == "video_single"
+
+
 @pytest.mark.anyio
 async def test_telegram_web_link_requires_private_callback_configuration(monkeypatch):
     monkeypatch.delenv("WEBAPP_LINK_CALLBACK_URL", raising=False)
@@ -119,6 +197,24 @@ async def test_telegram_web_link_requires_private_callback_configuration(monkeyp
     result = await confirm_web_link_from_telegram({}, "u-1", "LinkCode1234")
     assert result["status"] == "guarded"
     assert result["error_code"] == "TELEGRAM_LINK_CALLBACK_NOT_CONFIGURED"
+
+
+def test_telegram_web_link_callback_signature_binds_body_and_path():
+    callback_url = "https://app.example.invalid/api/v1/auth/internal/telegram-link/confirm?ignored=yes"
+    body = b'{"code":"LinkCode1234","canonical_user_id":"u-1"}'
+    headers = _web_link_callback_headers(
+        callback_url,
+        "callback-token",
+        "callback-secret",
+        body,
+        request_id="link-callback-test-0001",
+        timestamp="1777777777",
+    )
+    digest = hashlib.sha256(body).hexdigest()
+    material = f"1777777777.link-callback-test-0001.POST./api/v1/auth/internal/telegram-link/confirm.{digest}".encode()
+    expected = hmac.new(b"callback-secret", material, hashlib.sha256).hexdigest()
+    assert headers["X-TOAN-AAS-BRIDGE-TOKEN"] == "callback-token"
+    assert headers["X-TOAN-AAS-Signature"] == expected
 
 
 def test_bot_registers_safe_telegram_link_entrypoints():

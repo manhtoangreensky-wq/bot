@@ -9,6 +9,8 @@ server-to-server request from that application.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 import hashlib
@@ -29,9 +31,21 @@ from fastapi.routing import APIRoute
 PUBLIC_GUARD = "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 BRIDGE_TABLE_IDEMPOTENCY = "webapp_core_bridge_idempotency"
 BRIDGE_TABLE_AUDIT = "webapp_core_bridge_audit"
+BRIDGE_TABLE_UPLOADS = "webapp_core_bridge_uploads"
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _JOB_ID_PATTERN = re.compile(r"^([a-z_]+):(\d+)$")
 _WEB_LINK_CODE_PATTERN = re.compile(r"^[A-Za-z0-9]{8,128}$")
+_UPLOAD_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".webm",
+    ".mp3", ".wav", ".m4a", ".ogg", ".pdf", ".txt", ".srt", ".vtt",
+    ".docx",
+})
+_UPLOAD_MIME_TYPES = frozenset({
+    "image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime", "video/webm",
+    "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/ogg", "application/ogg",
+    "application/pdf", "text/plain", "text/vtt", "application/x-subrip", "application/octet-stream",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+})
 _rate_windows: dict[str, deque[float]] = defaultdict(deque)
 _request_nonces: dict[str, float] = {}
 
@@ -82,8 +96,81 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return os.environ.get(name, str(default).lower()).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _upload_max_bytes() -> int:
+    """Bound Web staging uploads without reading any provider configuration."""
+    raw_bytes = os.environ.get("WEBAPP_UPLOAD_MAX_BYTES", "").strip()
+    raw_mb = os.environ.get("WEBAPP_UPLOAD_MAX_MB", "12").strip()
+    try:
+        requested = int(raw_bytes) if raw_bytes else int(raw_mb) * 1024 * 1024
+    except ValueError:
+        requested = 12 * 1024 * 1024
+    return max(1 * 1024 * 1024, min(requested, 50 * 1024 * 1024))
+
+
 def _safe_text(value: Any, limit: int = 300) -> str:
     return str(value or "").replace("\n", " ").replace("\r", " ")[:limit]
+
+
+def _validated_upload_name(value: Any) -> tuple[str, str]:
+    name = str(value or "").strip()
+    if not name or len(name) > 180 or "\x00" in name or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(status_code=422, detail="invalid upload filename")
+    extension = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if extension not in _UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="unsupported upload file type")
+    return name, extension
+
+
+def _validate_upload_content(name: str, extension: str, content_type: Any, content: bytes) -> str:
+    media_type = str(content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
+    if media_type not in _UPLOAD_MIME_TYPES:
+        raise HTTPException(status_code=415, detail="unsupported upload media type")
+    if not content:
+        raise HTTPException(status_code=422, detail="empty upload")
+    if len(content) > _upload_max_bytes():
+        raise HTTPException(status_code=413, detail="upload exceeds configured limit")
+    # Lightweight signatures prevent a browser from relabelling an executable
+    # as the most common binary media/doc types. Other safe text/container
+    # formats are validated by their extension and canonical size/MIME gate.
+    if extension == ".pdf" and not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=422, detail="invalid PDF upload")
+    if extension == ".png" and not content.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(status_code=422, detail="invalid PNG upload")
+    if extension in {".jpg", ".jpeg"} and not content.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(status_code=422, detail="invalid JPEG upload")
+    if extension == ".webp" and not (len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP"):
+        raise HTTPException(status_code=422, detail="invalid WEBP upload")
+    if extension == ".wav" and not (len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WAVE"):
+        raise HTTPException(status_code=422, detail="invalid WAV upload")
+    return media_type
+
+
+def _upload_metadata_from_row(row: Any) -> dict:
+    return {
+        "id": str(row[0]),
+        "file_name": _safe_text(row[1], 180),
+        "content_type": _safe_text(row[2], 120),
+        "content_size": int(row[3] or 0),
+        "sha256": _safe_text(row[4], 80),
+        "created_at": _safe_text(row[5], 80),
+    }
+
+
+def _web_link_callback_headers(callback_url: str, callback_token: str, callback_secret: str, body: bytes, *, request_id: str | None = None, timestamp: str | None = None) -> dict[str, str]:
+    """Sign the bot-to-Web link callback with its own directional secret."""
+    request_id = request_id or str(uuid.uuid4())
+    timestamp = timestamp or str(int(time.time()))
+    callback_path = str(httpx.URL(callback_url).path or "/")
+    digest = hashlib.sha256(body).hexdigest()
+    material = f"{timestamp}.{request_id}.POST.{callback_path}.{digest}".encode("utf-8")
+    signature = hmac.new(callback_secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
+    return {
+        "X-TOAN-AAS-BRIDGE-TOKEN": callback_token,
+        "X-TOAN-AAS-Timestamp": timestamp,
+        "X-TOAN-AAS-Request-ID": request_id,
+        "X-TOAN-AAS-Signature": signature,
+        "Content-Type": "application/json",
+    }
 
 
 def _sanitize_data(value: Any) -> Any:
@@ -153,6 +240,28 @@ class BotCoreBridge:
                     created_at TEXT NOT NULL
                 )"""
             )
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {BRIDGE_TABLE_UPLOADS} (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    content_size INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    content BLOB NOT NULL,
+                    idempotency_key TEXT,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            upload_columns = self.columns(conn, BRIDGE_TABLE_UPLOADS)
+            if "idempotency_key" not in upload_columns:
+                conn.execute(f"ALTER TABLE {BRIDGE_TABLE_UPLOADS} ADD COLUMN idempotency_key TEXT")
+            conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{BRIDGE_TABLE_UPLOADS}_user_created ON {BRIDGE_TABLE_UPLOADS}(user_id, created_at DESC)"
+            )
+            conn.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{BRIDGE_TABLE_UPLOADS}_user_idempotency ON {BRIDGE_TABLE_UPLOADS}(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -189,6 +298,99 @@ class BotCoreBridge:
                 (scope, key, json.dumps(value, ensure_ascii=False, separators=(",", ":")), _now()),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def create_upload(self, user_id: str, payload: dict) -> dict:
+        """Store a validated Web upload in bot-owned staging, never in Web DB."""
+        if self.identity(user_id) is None:
+            return response(False, "failed", "Không tìm thấy tài khoản Telegram canonical.", error_code="USER_NOT_FOUND")
+        key = _validate_idempotency(payload.get("idempotency_key"))
+        scope = f"upload:{user_id}"
+        if existing := self.idempotency_get(scope, key):
+            return existing
+        name, extension = _validated_upload_name(payload.get("file_name"))
+        encoded = str(payload.get("content_base64") or "")
+        max_encoded = ((_upload_max_bytes() + 2) // 3) * 4 + 8
+        if not encoded or len(encoded) > max_encoded:
+            raise HTTPException(status_code=413, detail="upload exceeds configured limit")
+        try:
+            content = base64.b64decode(encoded.encode("ascii"), validate=True)
+        except (UnicodeEncodeError, ValueError, binascii.Error):
+            raise HTTPException(status_code=422, detail="invalid upload encoding")
+        media_type = _validate_upload_content(name, extension, payload.get("content_type"), content)
+        actual_hash = hashlib.sha256(content).hexdigest()
+        supplied_hash = str(payload.get("sha256") or "").strip().lower()
+        if supplied_hash and not hmac.compare_digest(supplied_hash, actual_hash):
+            raise HTTPException(status_code=422, detail="upload checksum mismatch")
+        upload_id = str(uuid.uuid4())
+        created_at = _now()
+        self.ensure_bridge_tables()
+        conn = self.db()
+        try:
+            conn.execute(
+                f"""INSERT INTO {BRIDGE_TABLE_UPLOADS}
+                (id, user_id, file_name, content_type, content_size, sha256, content, idempotency_key, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (upload_id, str(user_id), name, media_type, len(content), actual_hash, content, key, created_at),
+            )
+            conn.commit()
+            metadata = {
+                "id": upload_id,
+                "file_name": name,
+                "content_type": media_type,
+                "content_size": len(content),
+                "sha256": actual_hash,
+                "created_at": created_at,
+            }
+        except Exception as exc:
+            # The unique user/idempotency index is the concurrency boundary
+            # for duplicate browser retries.  Return the first canonical row;
+            # do not create a second blob or silently credit anything.
+            if "UNIQUE constraint failed" not in str(exc):
+                raise
+            row = conn.execute(
+                f"SELECT id, file_name, content_type, content_size, sha256, created_at FROM {BRIDGE_TABLE_UPLOADS} WHERE user_id=? AND idempotency_key=?",
+                (str(user_id), key),
+            ).fetchone()
+            if not row:
+                raise
+            metadata = _upload_metadata_from_row(row)
+        finally:
+            conn.close()
+        result = response(True, "completed", "Tệp đã được lưu tại staging canonical của bot.", data={
+            **metadata,
+        })
+        self.idempotency_put(scope, key, result)
+        return result
+
+    def uploads_for_ids(self, user_id: str, values: Any) -> tuple[list[dict], list[str]]:
+        """Return only metadata for staging files owned by the requesting user."""
+        if values in (None, "", []):
+            return [], []
+        if not isinstance(values, (str, list, tuple)):
+            return [], ["invalid"]
+        raw_values = [values] if isinstance(values, str) else list(values)
+        ids: list[str] = []
+        for item in raw_values:
+            candidate = str(item.get("id") if isinstance(item, dict) else item or "").strip()
+            if not _ID_PATTERN.fullmatch(candidate):
+                return [], [candidate or "invalid"]
+            if candidate not in ids:
+                ids.append(candidate)
+        if len(ids) > 8:
+            return [], ["too_many_uploads"]
+        self.ensure_bridge_tables()
+        conn = self.db()
+        try:
+            placeholders = ",".join("?" for _ in ids)
+            rows = conn.execute(
+                f"SELECT id, file_name, content_type, content_size, sha256, created_at FROM {BRIDGE_TABLE_UPLOADS} WHERE user_id=? AND id IN ({placeholders})",
+                (str(user_id), *ids),
+            ).fetchall()
+            by_id = {str(row[0]): _upload_metadata_from_row(row) for row in rows}
+            missing = [item for item in ids if item not in by_id]
+            return [by_id[item] for item in ids if item in by_id], missing
         finally:
             conn.close()
 
@@ -246,6 +448,89 @@ class BotCoreBridge:
             }
         finally:
             conn.close()
+
+    def pricing_catalog(self) -> dict:
+        """Expose a redacted, read-only view of bot pricing helpers."""
+        payload_fn = self.fn("media_workflow_pricing_payload")
+        if not payload_fn:
+            return {"available": False, "groups": []}
+        try:
+            raw = dict(payload_fn() or {})
+        except Exception:
+            return {"available": False, "groups": []}
+
+        def tiers(kind: str) -> list[dict]:
+            values = raw.get(kind) if isinstance(raw.get(kind), dict) else {}
+            return [
+                {
+                    "code": _safe_text(code, 80),
+                    "label": _safe_text(item.get("label"), 160),
+                    "cost_xu": max(0, int(item.get("cost") or 0)),
+                    "note": _safe_text(item.get("note"), 300),
+                    "retry_warranty_count": max(0, int(item.get("retry_warranty_count") or 0)),
+                }
+                for code, item in values.items() if isinstance(item, dict)
+            ]
+
+        combos = []
+        for item in raw.get("video_combos") or []:
+            if not isinstance(item, dict):
+                continue
+            combos.append({
+                "code": _safe_text(item.get("code"), 80),
+                "label": _safe_text(item.get("label"), 160),
+                "price_vnd": max(0, int(item.get("price_vnd") or 0)),
+                "display_price": _safe_text(item.get("display_price"), 40),
+                "summary": _safe_text(item.get("summary"), 300),
+            })
+        return {
+            "available": True,
+            "billing_mode": _safe_text(raw.get("billing_mode"), 80),
+            "price_table_source": _safe_text(raw.get("price_table_source"), 120),
+            "image_tiers": tiers("image_tiers"),
+            "video_tiers": tiers("video_tiers"),
+            "video_combos": combos,
+            "trend_workflow_content_total_cost_xu": max(0, int(raw.get("workflow_content_total_cost") or 0)),
+        }
+
+    def packages_catalog(self) -> dict:
+        """Read bot package definitions without exposing a payment writer."""
+        catalog_fn = self.fn("package_catalog_payload")
+        price_fn = self.fn("package_purchase_price_vnd")
+        if not catalog_fn:
+            return {"available": False, "combos": [], "monthly": []}
+        try:
+            raw = dict(catalog_fn() or {})
+        except Exception:
+            return {"available": False, "combos": [], "monthly": []}
+
+        def entries(group: str) -> list[dict]:
+            values = raw.get(group) if isinstance(raw.get(group), dict) else {}
+            package_type = "monthly" if group == "monthly" else "combo"
+            result = []
+            for code, item in values.items():
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    price = max(0, int(price_fn(package_type, code) or 0)) if price_fn else 0
+                except Exception:
+                    price = 0
+                safe_items = {
+                    _safe_text(key, 80): max(0, int(value or 0))
+                    for key, value in (item.get("items") or {}).items()
+                }
+                result.append({
+                    "code": _safe_text(code, 80),
+                    "type": package_type,
+                    "label": _safe_text(item.get("label"), 180),
+                    "note": _safe_text(item.get("note"), 300),
+                    "items": safe_items,
+                    "default_days": max(0, int(item.get("default_days") or 0)),
+                    "price_vnd": price,
+                    "manual": bool(item.get("manual")),
+                })
+            return result
+        return {"available": True, "combos": entries("combos"), "monthly": entries("monthly")}
 
     def wallet_history(self, user_id: str, limit: int = 50) -> list[dict]:
         conn = self.db()
@@ -511,6 +796,76 @@ class BotCoreBridge:
         finally:
             conn.close()
 
+    def admin_audit_events(self, limit: int = 100) -> list[dict]:
+        self.ensure_bridge_tables()
+        conn = self.db()
+        try:
+            rows = conn.execute(
+                f"SELECT request_id, actor_id, action, target, outcome, note, created_at FROM {BRIDGE_TABLE_AUDIT} ORDER BY id DESC LIMIT ?",
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+            return [{
+                "id": _safe_text(row[0], 120), "user_id": _safe_text(row[1], 120), "action": _safe_text(row[2], 160),
+                "target": _safe_text(row[3], 160), "status": _safe_text(row[4], 40), "note": _safe_text(row[5], 300),
+                "created_at": _safe_text(row[6], 80),
+            } for row in rows]
+        finally:
+            conn.close()
+
+    def admin_module(self, module: str, *, record_id: str = "") -> dict:
+        """Read-only Admin ERP adapters, mapped deliberately to bot-owned data."""
+        key = str(module or "").strip().lower().replace("_", "-")
+        record = str(record_id or "").strip()
+        if record and not _ID_PATTERN.fullmatch(record):
+            return {"module": key, "items": [], "read_only": True, "message": "ID bản ghi không hợp lệ."}
+        if key in {"overview", "summary"}:
+            return {"module": "overview", "items": [], "counts": self.admin_summary().get("counts") or {}, "read_only": True}
+        if key in {"users", "user", "wallet"}:
+            items = self.admin_users()
+            if record:
+                items = [item for item in items if str(item.get("user_id")) == record]
+            return {"module": key, "items": items, "read_only": True}
+        if key in {"payments", "topups", "revenue", "refunds"}:
+            items = self.admin_payments()
+            if key == "topups":
+                items = [item for item in items if "topup" in str(item.get("type") or "").lower()]
+            elif key == "refunds":
+                items = [item for item in items if "refund" in str(item.get("type") or "").lower() or "refund" in str(item.get("status") or "").lower()]
+            return {"module": key, "items": items, "read_only": True}
+        if key in {"jobs", "failed-jobs", "workers", "runtime"}:
+            items = self.jobs("", admin=True)
+            if key == "failed-jobs":
+                items = [item for item in items if str(item.get("status") or "").lower() in {"failed", "error", "cancelled"}]
+            if key == "workers":
+                items = [item for item in items if "worker" in str(item.get("source") or "").lower() or "worker" in str(item.get("id") or "").lower()]
+            return {"module": key, "items": items, "read_only": True}
+        if key in {"providers", "provider-cost", "features", "freezes", "pricing", "promos"}:
+            items = []
+            for feature, state in self.readiness().items():
+                items.append({
+                    "id": feature,
+                    "feature": feature,
+                    "status": "ready" if state.get("public_ready") else "guarded",
+                    "reason": _safe_text(state.get("reason"), 160),
+                    "updated_at": "",
+                })
+            return {"module": key, "items": items, "read_only": True}
+        if key in {"tickets", "support"}:
+            return {"module": key, "items": self.tickets("", admin=True), "read_only": True}
+        if key in {"audit", "security"}:
+            return {"module": key, "items": self.admin_audit_events(), "read_only": True}
+        if key in {"reports", "system", "backups", "leads"}:
+            # These modules deliberately remain report/read-only surfaces until
+            # a bot-specific exporter or storage adapter is verified. No
+            # browser action is offered as a substitute.
+            return {
+                "module": key,
+                "items": [],
+                "read_only": True,
+                "message": "Module đang chờ adapter canonical read-only của bot; không có thao tác giả lập.",
+            }
+        return {"module": key, "items": [], "read_only": True, "message": "Module admin chưa có adapter canonical."}
+
 
 async def _authorize(request: Request) -> str:
     token = os.environ.get("CORE_BRIDGE_TOKEN", "").strip()
@@ -595,6 +950,9 @@ def _feature_draft_or_estimate(bridge: BotCoreBridge, feature: str, user_id: str
     readiness = _feature_readiness(bridge, feature)
     if bridge.identity(user_id) is None:
         return response(False, "failed", "Không tìm thấy tài khoản Telegram canonical.", error_code="USER_NOT_FOUND")
+    uploads, missing_uploads = bridge.uploads_for_ids(user_id, input_data.get("upload_ids"))
+    if missing_uploads:
+        return response(False, "failed", "Tệp đính kèm không hợp lệ hoặc không thuộc tài khoản này.", error_code="UPLOAD_NOT_FOUND")
     # Draft/estimate deliberately remain open for guarded public features. They never call a provider.
     message = "Bản nháp đã sẵn sàng để xem xét." if action == "draft" else "Ước tính sẽ được xác nhận bởi core trước khi chạy."
     status_name = "draft" if action == "draft" else "awaiting_confirm"
@@ -602,6 +960,7 @@ def _feature_draft_or_estimate(bridge: BotCoreBridge, feature: str, user_id: str
         "feature": feature,
         "readiness": readiness,
         "input_accepted": bool(input_data),
+        "uploads": uploads,
         "requires_confirm": True,
         "provider_called": False,
     })
@@ -613,8 +972,15 @@ async def _feature_confirm(bridge: BotCoreBridge, feature: str, user_id: str, pa
     if existing := bridge.idempotency_get(scope, key):
         return existing
     readiness = _feature_readiness(bridge, feature)
+    input_data = payload.get("input") if isinstance(payload.get("input"), dict) else {}
+    uploads, missing_uploads = bridge.uploads_for_ids(user_id, input_data.get("upload_ids"))
+    if missing_uploads:
+        result = response(False, "failed", "Tệp đính kèm không hợp lệ hoặc không thuộc tài khoản này.", data={"feature": feature}, error_code="UPLOAD_NOT_FOUND")
+        bridge.idempotency_put(scope, key, result)
+        bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="failed", note="invalid upload reference")
+        return result
     if not _bool_env("WEBAPP_PROVIDER_CALLS_ENABLED", False):
-        result = response(False, "guarded", "Tính năng đang ở chế độ an toàn và chưa gọi engine từ Web.", data={"feature": feature, "readiness": readiness}, error_code="WEBAPP_PROVIDER_CALLS_DISABLED")
+        result = response(False, "guarded", "Tính năng đang ở chế độ an toàn và chưa gọi engine từ Web.", data={"feature": feature, "readiness": readiness, "uploads": uploads}, error_code="WEBAPP_PROVIDER_CALLS_DISABLED")
         bridge.idempotency_put(scope, key, result)
         bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="guarded", note="provider calls disabled")
         return result
@@ -629,7 +995,6 @@ async def _feature_confirm(bridge: BotCoreBridge, feature: str, user_id: str, pa
         result = response(False, "guarded", PUBLIC_GUARD, data={"feature": feature, "readiness": readiness}, error_code="ENGINE_EXECUTOR_UNAVAILABLE")
         bridge.idempotency_put(scope, key, result)
         return result
-    input_data = payload.get("input") if isinstance(payload.get("input"), dict) else {}
     # Never accept a callable/runner or privileged context from an HTTP client.
     safe_input = _sanitize_data(input_data)
     context = {
@@ -684,18 +1049,26 @@ async def confirm_web_link_from_telegram(core: dict[str, Any], user_id: str, cod
         return response(False, "failed", "Mã liên kết Web không hợp lệ.", error_code="LINK_CODE_INVALID")
     callback_url = os.environ.get("WEBAPP_LINK_CALLBACK_URL", "").strip()
     callback_token = os.environ.get("WEBAPP_LINK_CALLBACK_TOKEN", "").strip()
-    if not callback_url or not callback_token:
+    callback_secret = os.environ.get("WEBAPP_LINK_CALLBACK_HMAC_SECRET", "").strip()
+    if not callback_url or not callback_token or not callback_secret:
         return response(False, "guarded", "Liên kết Telegram chưa được cấu hình ở private bridge.", error_code="TELEGRAM_LINK_CALLBACK_NOT_CONFIGURED")
     bridge = BotCoreBridge(core)
     identity = bridge.identity(user_id)
     if not identity:
         return response(False, "failed", "Không tìm thấy tài khoản Telegram canonical.", error_code="USER_NOT_FOUND")
+    callback_payload = {
+        "code": code,
+        "canonical_user_id": str(user_id),
+        "role": identity["role"],
+        "display_name": identity["username"],
+    }
+    callback_body = json.dumps(callback_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             result = await client.post(
                 callback_url,
-                headers={"X-TOAN-AAS-BRIDGE-TOKEN": callback_token},
-                json={"code": code, "canonical_user_id": str(user_id), "role": identity["role"], "display_name": identity["username"]},
+                headers=_web_link_callback_headers(callback_url, callback_token, callback_secret, callback_body),
+                content=callback_body,
             )
         if result.status_code >= 300:
             return response(False, "failed", "Không thể xác nhận mã liên kết Web.", error_code="TELEGRAM_LINK_CALLBACK_FAILED")
@@ -729,6 +1102,22 @@ def build_core_bridge_router(core: dict[str, Any]) -> APIRouter:
         if not bridge.identity(user_id):
             return response(False, "failed", "Không tìm thấy tài khoản canonical.", error_code="USER_NOT_FOUND")
         return response(True, "completed", "Lịch sử Xu canonical", data={"items": bridge.wallet_history(user_id)})
+
+    @router.get("/pricing")
+    async def pricing(request: Request):
+        actor = await _authorize(request)
+        user_id = _target_user(request, {}, actor)
+        if not bridge.identity(user_id):
+            return response(False, "failed", "Không tìm thấy tài khoản canonical.", error_code="USER_NOT_FOUND")
+        return response(True, "completed", "Bảng giá canonical", data=bridge.pricing_catalog())
+
+    @router.get("/packages")
+    async def packages(request: Request):
+        actor = await _authorize(request)
+        user_id = _target_user(request, {}, actor)
+        if not bridge.identity(user_id):
+            return response(False, "failed", "Không tìm thấy tài khoản canonical.", error_code="USER_NOT_FOUND")
+        return response(True, "completed", "Danh mục gói canonical", data=bridge.packages_catalog())
 
     @router.post("/payments/create")
     async def payment_create(request: Request):
@@ -782,6 +1171,16 @@ def build_core_bridge_router(core: dict[str, Any]) -> APIRouter:
         user_id = _target_user(request, {}, actor)
         result = bridge.asset_download(user_id, asset_id)
         bridge.audit(user_id, "asset.download.request", getattr(request.state, "bridge_request_id", ""), target=asset_id, outcome=result["status"])
+        return result
+
+    @router.post("/uploads")
+    async def upload_create(request: Request):
+        """Accept a Web-validated file into bot-owned canonical staging."""
+        actor = await _authorize(request)
+        payload = await _payload(request)
+        user_id = _target_user(request, payload, actor)
+        result = bridge.create_upload(user_id, payload)
+        bridge.audit(user_id, "upload.create", getattr(request.state, "bridge_request_id", ""), target=str((result.get("data") or {}).get("id") or ""), outcome=result["status"])
         return result
 
     @router.get("/support/tickets")
@@ -882,6 +1281,19 @@ def build_core_bridge_router(core: dict[str, Any]) -> APIRouter:
         if not bridge.is_admin(actor):
             raise HTTPException(status_code=403, detail="admin role required")
         return response(True, "completed", "Tickets canonical", data={"items": bridge.tickets(actor, admin=True)})
+
+    @router.get("/admin/modules/{module}")
+    async def admin_module(module: str, request: Request):
+        actor = await _authorize(request)
+        _target_user(request, {}, actor)
+        if not bridge.is_admin(actor):
+            raise HTTPException(status_code=403, detail="admin role required")
+        return response(
+            True,
+            "read_only",
+            "Dữ liệu Admin ERP canonical",
+            data=bridge.admin_module(module, record_id=str(request.query_params.get("record_id") or "")),
+        )
 
     @router.post("/admin/jobs/{job_id}/retry")
     async def admin_retry(job_id: str, request: Request):
