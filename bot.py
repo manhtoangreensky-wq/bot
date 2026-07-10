@@ -178610,15 +178610,320 @@ def subdub_job_timestamp(value, default: float = 0.0) -> float:
         except (TypeError, ValueError):
             return float(default or 0.0)
 
+SUBDUB_WORKSPACE_ACTIVE_STATUSES = frozenset({
+    "queued", "accepted", "preparing", "processing", "running", "rendering",
+    "muxing", "delivering", "retrying_delivery", "waiting_retry",
+    "waiting_provider", "waiting_scene", "finalizing",
+})
+SUBDUB_WORKSPACE_TERMINAL_STATUSES = frozenset({
+    "completed", "delivered", "failed", "failed_no_charge", "failed_refunded",
+    "cancelled", "expired", "abandoned",
+})
+
+def normalize_workspace_job_status(value) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+
+def is_workspace_active_status(status) -> bool:
+    return normalize_workspace_job_status(status) in SUBDUB_WORKSPACE_ACTIVE_STATUSES
+
+def _workspace_path_is_descendant(path_value: str, root_value: str) -> bool:
+    try:
+        path_norm = os.path.normcase(os.path.abspath(str(path_value or "")))
+        root_norm = os.path.normcase(os.path.abspath(str(root_value or "")))
+        return bool(path_norm and root_norm and path_norm != root_norm and os.path.commonpath([path_norm, root_norm]) == root_norm)
+    except (OSError, ValueError):
+        return False
+
+def subtitle_dub_workspace_path_safety(workspace: str) -> dict:
+    original_value = str(workspace or "").strip()
+    allowed_root_original = Path(os.path.abspath(PIPELINE_TEMP_ROOT))
+    original_path = Path(os.path.abspath(original_value)) if original_value else Path("")
+    try:
+        allowed_root_resolved = allowed_root_original.resolve(strict=False)
+        resolved_path = original_path.resolve(strict=False) if original_value else Path("")
+    except (OSError, RuntimeError) as exc:
+        return {
+            "allowed": False,
+            "original_path": original_value,
+            "resolved_path": "",
+            "allowed_root": str(allowed_root_original),
+            "blocked_reason": "path_resolution_failed",
+            "error_type": type(exc).__name__,
+            "error_message": sanitize_log_text(str(exc))[:300],
+            "is_symlink": False,
+            "is_junction": False,
+        }
+    result = {
+        "allowed": False,
+        "original_path": str(original_path) if original_value else "",
+        "resolved_path": str(resolved_path) if original_value else "",
+        "allowed_root": str(allowed_root_resolved),
+        "blocked_reason": "",
+        "error_type": "",
+        "error_message": "",
+        "is_symlink": bool(original_value and os.path.islink(str(original_path))),
+        "is_junction": bool(original_value and callable(getattr(os.path, "isjunction", None)) and os.path.isjunction(str(original_path))),
+    }
+    if not original_value:
+        result["blocked_reason"] = "workspace_path_missing"
+        return result
+    filesystem_root = Path(resolved_path.anchor).resolve(strict=False) if resolved_path.anchor else Path(os.path.sep).resolve(strict=False)
+    if os.path.normcase(str(resolved_path)) == os.path.normcase(str(filesystem_root)):
+        result["blocked_reason"] = "filesystem_root_blocked"
+        return result
+    if os.path.normcase(str(original_path)) == os.path.normcase(str(allowed_root_original)) or os.path.normcase(str(resolved_path)) == os.path.normcase(str(allowed_root_resolved)):
+        result["blocked_reason"] = "allowed_root_blocked"
+        return result
+    if not _workspace_path_is_descendant(str(original_path), str(allowed_root_original)):
+        result["blocked_reason"] = "external_or_parent_path_blocked"
+        return result
+    if not _workspace_path_is_descendant(str(resolved_path), str(allowed_root_resolved)):
+        if result["is_symlink"]:
+            result["blocked_reason"] = "symlink_escape_blocked"
+        elif result["is_junction"]:
+            result["blocked_reason"] = "junction_escape_blocked"
+        else:
+            result["blocked_reason"] = "resolved_path_escape_blocked"
+        return result
+    result["allowed"] = True
+    return result
+
+def _workspace_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "active", "pending"}
+
+def _workspace_job_active_lock(job: dict, now_ts: float) -> tuple[bool, str]:
+    for key in ("active_lock", "lock_active", "workspace_lock_active", "delivery_lock_active"):
+        if _workspace_truthy(job.get(key)):
+            return True, key
+    for key in ("lease_until", "lease_expires_at", "lock_until", "lock_expires_at", "workspace_lease_until"):
+        if subdub_job_timestamp(job.get(key), 0) > now_ts:
+            return True, key
+    heartbeat_values = [
+        subdub_job_timestamp(job.get(key), 0)
+        for key in ("heartbeat_at", "last_heartbeat_at", "worker_heartbeat_at")
+        if job.get(key)
+    ]
+    if heartbeat_values and now_ts - max(heartbeat_values) <= PIPELINE_JOB_LOCK_TTL_SECONDS:
+        return True, "recent_heartbeat"
+    return False, ""
+
+def _workspace_active_reference_count(job: dict) -> int:
+    count = 0
+    for key in ("active_reference_count", "delivery_reference_count", "dedupe_reference_count", "retry_reference_count"):
+        count += max(0, _safe_int(job.get(key), 0))
+    for key in ("active_references", "delivery_references", "dedupe_references", "retry_references"):
+        value = job.get(key)
+        if isinstance(value, (list, tuple, set, dict)):
+            count += len(value)
+    for key in ("dedupe_reference_active", "delivery_reference_active", "retry_reference_active"):
+        count += int(_workspace_truthy(job.get(key)))
+    return count
+
+def _workspace_recorded_paths(job: dict) -> list[str]:
+    paths = []
+    for key in (
+        "final_mp4", "final_mp4_path", "final_output_path", "workspace_final_output_path",
+        "canonical_output_path", "canonical_final_output_path", "canonical_mp4_path",
+        "final_asset_path", "dub_video_path", "output_path",
+    ):
+        value = str(job.get(key) or "").strip()
+        if value:
+            paths.append(value)
+    artifacts = job.get("workspace_artifacts") or {}
+    if isinstance(artifacts, dict):
+        for key in ("final_mp4", "final_video", "output"):
+            value = str(artifacts.get(key) or "").strip()
+            if value:
+                paths.append(value)
+    return list(dict.fromkeys(paths))
+
+def can_cleanup_workspace(job_record: dict | None, workspace_path: str, *, now_ts: float | None = None) -> dict:
+    job = dict(job_record or {})
+    current_ts = float(now_ts or time.time())
+    statuses = [
+        normalize_workspace_job_status(job.get(key))
+        for key in ("status", "terminal_state", "lifecycle_state", "current_stage", "progress_stage")
+        if job.get(key)
+    ]
+    effective_status = next((item for item in statuses if item in SUBDUB_WORKSPACE_TERMINAL_STATUSES), statuses[0] if statuses else "")
+    delivery_state = normalize_workspace_job_status(
+        job.get("delivery_state") or job.get("delivery_status") or job.get("current_stage") or effective_status
+    )
+    retry_pending = bool(
+        any(_workspace_truthy(job.get(key)) for key in (
+            "delivery_retry_pending", "retry_pending", "delivery_retry_scheduled",
+            "delivery_pending", "delivery_in_progress", "retry_delivery",
+        ))
+        or any(item in {"delivering", "retrying_delivery", "waiting_retry", "finalizing"} for item in statuses)
+    )
+    active_reference_count = _workspace_active_reference_count(job)
+    result = {
+        "allowed": False,
+        "reason": "",
+        "final_output_location": "none",
+        "delivery_state": delivery_state,
+        "retry_pending": retry_pending,
+        "active_reference_count": active_reference_count,
+        "status": effective_status,
+    }
+    active_status = next((item for item in statuses if is_workspace_active_status(item)), "")
+    if active_status:
+        result["reason"] = "cleanup_skipped_active"
+        result["status"] = active_status
+        return result
+    lock_active, lock_reason = _workspace_job_active_lock(job, current_ts)
+    if lock_active:
+        result["reason"] = "cleanup_skipped_active_lock"
+        result["lock_reason"] = lock_reason
+        return result
+    workspace_resolved = ""
+    if str(workspace_path or "").strip():
+        safety = subtitle_dub_workspace_path_safety(workspace_path)
+        result["path_safety"] = safety
+        if not safety.get("allowed"):
+            result["reason"] = "cleanup_blocked_unsafe_path"
+            return result
+        workspace_resolved = str(safety.get("resolved_path") or "")
+    if retry_pending:
+        result["reason"] = "cleanup_skipped_delivery_pending"
+        return result
+    if active_reference_count > 0:
+        result["reason"] = "cleanup_skipped_active_reference"
+        return result
+    if effective_status not in SUBDUB_WORKSPACE_TERMINAL_STATUSES:
+        result["reason"] = "cleanup_skipped_unknown_status"
+        return result
+    if not str(workspace_path or "").strip():
+        result.update({"allowed": True, "reason": "workspace_missing", "final_output_location": "none"})
+        return result
+    recorded_paths = _workspace_recorded_paths(job)
+    workspace_outputs = []
+    canonical_outputs = []
+    for item in recorded_paths:
+        try:
+            resolved = str(Path(item).resolve(strict=False))
+        except (OSError, RuntimeError):
+            resolved = os.path.abspath(item)
+        if _workspace_path_is_descendant(resolved, workspace_resolved):
+            workspace_outputs.append(resolved)
+        else:
+            canonical_outputs.append(resolved)
+    canonical_existing = [item for item in canonical_outputs if os.path.isfile(item) and os.path.getsize(item) > 0]
+    workspace_existing = [item for item in workspace_outputs if os.path.isfile(item) and os.path.getsize(item) > 0]
+    delivered = bool(
+        normalize_workspace_job_status(job.get("terminal_state")) == "delivered"
+        or _workspace_truthy(job.get("final_mp4_delivered"))
+        or (_workspace_truthy(job.get("output_sent")) and _workspace_truthy(job.get("delivery_succeeded")))
+    )
+    requires_final_mp4 = subdub_video_requires_final_mp4(
+        str(job.get("mode") or job.get("mapped_mode") or ""),
+        str(job.get("product_type") or job.get("mapped_product_type") or ""),
+    )
+    if workspace_existing:
+        result["final_output_location"] = "workspace"
+        if not delivered:
+            result["reason"] = "cleanup_skipped_delivery_pending"
+            return result
+        if not canonical_existing:
+            result["reason"] = "cleanup_skipped_final_output_not_canonical"
+            return result
+    elif canonical_existing:
+        result["final_output_location"] = "canonical"
+    elif recorded_paths:
+        result["final_output_location"] = "missing"
+    if requires_final_mp4 and delivered and not canonical_existing:
+        result["reason"] = "cleanup_skipped_delivered_output_inconsistent"
+        return result
+    result.update({"allowed": True, "reason": "cleanup_allowed"})
+    return result
+
+def _workspace_cleanup_audit_fields(job: dict, cleanup_result: dict, decision: dict, cleanup_status: str) -> dict:
+    error_message = sanitize_log_text(str(cleanup_result.get("error_message") or ""))[:300]
+    return {
+        "cleanup_status": str(cleanup_status or ""),
+        "cleanup_error": error_message,
+        "cleanup_error_type": str(cleanup_result.get("error_type") or "")[:120],
+        "cleanup_last_attempt_at": time.time(),
+        "cleanup_attempt_count": int(job.get("cleanup_attempt_count") or 0) + 1,
+        "cleanup_result": dict(cleanup_result or {}),
+        "cleanup_decision": dict(decision or {}),
+        "cleanup_original_path": str(cleanup_result.get("original_path") or ""),
+        "cleanup_resolved_path": str(cleanup_result.get("resolved_path") or ""),
+        "cleanup_allowed_root": str(cleanup_result.get("allowed_root") or ""),
+        "cleanup_blocked_reason": str(cleanup_result.get("blocked_reason") or decision.get("reason") or ""),
+    }
+
+def _persist_workspace_cleanup_audit(job_key: str, job: dict, cleanup_result: dict, decision: dict, cleanup_status: str) -> dict:
+    current = dict(job or {})
+    current.update(_workspace_cleanup_audit_fields(current, cleanup_result, decision, cleanup_status))
+    SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = current
+    persisted = bool(
+        persist_subtitle_dub_pipeline_job_snapshot(
+            str(job_key or ""),
+            current,
+            reason=str(cleanup_status or "workspace_cleanup"),
+        )
+    )
+    current["cleanup_audit_persisted"] = persisted
+    current["cleanup_record_removal_pending"] = not persisted
+    SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = current
+    return current
+
 def _prune_subtitle_dub_pipeline_jobs(now_ts: float | None = None) -> None:
     now_ts = float(now_ts or time.time())
     for key, job in list(SUBTITLE_DUB_PIPELINE_JOBS.items()):
         age = now_ts - subdub_job_timestamp(job.get("updated_at") or job.get("started_at") or 0)
-        if age > PIPELINE_JOB_LOCK_TTL_SECONDS:
-            workspace = str(job.get("workspace") or "")
-            if workspace:
-                cleanup_subtitle_dub_pipeline_workspace(workspace)
-            SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
+        if age <= PIPELINE_JOB_LOCK_TTL_SECONDS:
+            continue
+        workspace = str(job.get("workspace") or "")
+        decision = can_cleanup_workspace(job, workspace, now_ts=now_ts)
+        if not decision.get("allowed"):
+            status = str(decision.get("reason") or "cleanup_skipped_active")
+            cleanup_result = {
+                "attempted": False,
+                "deleted": False,
+                "already_missing": False,
+                "skipped": True,
+                "blocked": status == "cleanup_blocked_unsafe_path",
+                "error_type": "",
+                "error_message": "",
+                **dict(decision.get("path_safety") or {}),
+            }
+            _persist_workspace_cleanup_audit(key, job, cleanup_result, decision, status)
+            continue
+        cleanup_result = (
+            cleanup_subtitle_dub_pipeline_workspace_result(workspace)
+            if workspace
+            else {
+                "attempted": False,
+                "deleted": False,
+                "already_missing": True,
+                "skipped": False,
+                "blocked": False,
+                "error_type": "",
+                "error_message": "",
+                "original_path": "",
+                "resolved_path": "",
+                "allowed_root": str(Path(PIPELINE_TEMP_ROOT).resolve(strict=False)),
+                "blocked_reason": "",
+            }
+        )
+        succeeded = bool(cleanup_result.get("deleted") or cleanup_result.get("already_missing"))
+        if succeeded:
+            previous_attempts = int(job.get("cleanup_attempt_count") or 0)
+            status = (
+                "workspace_missing_after_previous_attempt"
+                if cleanup_result.get("already_missing") and previous_attempts > 0
+                else ("workspace_missing" if cleanup_result.get("already_missing") else "cleanup_succeeded")
+            )
+            audited = _persist_workspace_cleanup_audit(key, job, cleanup_result, decision, status)
+            if audited.get("cleanup_audit_persisted"):
+                SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
+        else:
+            status = "cleanup_blocked_unsafe_path" if cleanup_result.get("blocked") else "cleanup_failed"
+            _persist_workspace_cleanup_audit(key, job, cleanup_result, decision, status)
     cleanup_stale_subtitle_dub_pipeline_workspaces(now_ts=now_ts)
 
 def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dict]:
@@ -178970,35 +179275,93 @@ def create_subtitle_dub_pipeline_workspace(job_id: str) -> str:
     return workspace
 
 def cleanup_subtitle_dub_pipeline_workspace(workspace: str) -> bool:
-    root = os.path.abspath(PIPELINE_TEMP_ROOT)
-    path = os.path.abspath(str(workspace or ""))
-    if not path.startswith(root + os.sep):
-        return False
-    if os.path.isdir(path):
-        shutil.rmtree(path, ignore_errors=True)
-    return not os.path.exists(path)
+    result = cleanup_subtitle_dub_pipeline_workspace_result(workspace)
+    return bool(result.get("deleted") or result.get("already_missing"))
+
+def cleanup_subtitle_dub_pipeline_workspace_result(workspace: str) -> dict:
+    safety = subtitle_dub_workspace_path_safety(workspace)
+    result = {
+        "attempted": False,
+        "deleted": False,
+        "already_missing": False,
+        "skipped": False,
+        "blocked": not bool(safety.get("allowed")),
+        "error_type": str(safety.get("error_type") or ""),
+        "error_message": str(safety.get("error_message") or ""),
+        "original_path": str(safety.get("original_path") or ""),
+        "resolved_path": str(safety.get("resolved_path") or ""),
+        "allowed_root": str(safety.get("allowed_root") or ""),
+        "blocked_reason": str(safety.get("blocked_reason") or ""),
+    }
+    if not safety.get("allowed"):
+        result["skipped"] = True
+        return result
+    original_path = str(safety.get("original_path") or "")
+    if not os.path.lexists(original_path):
+        result["already_missing"] = True
+        return result
+    result["attempted"] = True
+    try:
+        if safety.get("is_symlink"):
+            os.unlink(original_path)
+        elif safety.get("is_junction"):
+            os.rmdir(original_path)
+        else:
+            shutil.rmtree(original_path)
+    except FileNotFoundError:
+        result["already_missing"] = True
+    except PermissionError as exc:
+        result["error_type"] = "PermissionError"
+        result["error_message"] = sanitize_log_text(str(exc))[:300]
+    except OSError as exc:
+        result["error_type"] = type(exc).__name__
+        result["error_message"] = sanitize_log_text(str(exc))[:300]
+    if not result.get("error_type") and not os.path.lexists(original_path):
+        result["deleted"] = not result.get("already_missing")
+    elif not result.get("error_type") and os.path.lexists(original_path):
+        result["error_type"] = "WorkspaceStillExists"
+        result["error_message"] = "workspace still exists after cleanup attempt"
+    return result
 
 def cleanup_stale_subtitle_dub_pipeline_workspaces(now_ts: float | None = None) -> int:
-    root = os.path.abspath(PIPELINE_TEMP_ROOT)
-    if not os.path.isdir(root):
+    root_safety = Path(PIPELINE_TEMP_ROOT).resolve(strict=False)
+    if not root_safety.is_dir():
         return 0
-    active_workspaces = {
-        os.path.abspath(str(job.get("workspace") or ""))
+    owned_workspaces = {
+        str(Path(str(job.get("workspace") or "")).resolve(strict=False))
         for job in SUBTITLE_DUB_PIPELINE_JOBS.values()
-        if str(job.get("status") or "") == "running" and job.get("workspace")
+        if job.get("workspace")
     }
     current_ts = float(now_ts or time.time())
     cleaned = 0
-    for name in os.listdir(root):
-        path = os.path.abspath(os.path.join(root, name))
-        if not path.startswith(root + os.sep) or path in active_workspaces or not os.path.isdir(path):
+    try:
+        entries = list(root_safety.iterdir())
+    except OSError as exc:
+        logger.warning("subtitle/dub orphan workspace scan failed | %s", sanitize_log_text(str(exc))[:180])
+        return 0
+    for entry in entries:
+        path = str(entry)
+        try:
+            resolved = str(entry.resolve(strict=False))
+        except (OSError, RuntimeError):
+            resolved = path
+        if resolved in owned_workspaces or not (entry.is_dir() or entry.is_symlink()):
             continue
         try:
             stale = current_ts - os.path.getmtime(path) > PIPELINE_JOB_LOCK_TTL_SECONDS
         except OSError:
             continue
-        if stale and cleanup_subtitle_dub_pipeline_workspace(path):
+        if not stale:
+            continue
+        result = cleanup_subtitle_dub_pipeline_workspace_result(path)
+        if result.get("deleted") or result.get("already_missing"):
             cleaned += 1
+        elif result.get("blocked") or result.get("error_type"):
+            logger.warning(
+                "subtitle/dub orphan workspace cleanup blocked | reason=%s | error=%s",
+                sanitize_log_text(str(result.get("blocked_reason") or ""))[:120],
+                sanitize_log_text(str(result.get("error_type") or ""))[:120],
+            )
     return cleaned
 
 def write_subtitle_dub_pipeline_manifest(workspace: str, payload: dict) -> str:

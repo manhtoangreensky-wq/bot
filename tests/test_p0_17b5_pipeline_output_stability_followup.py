@@ -6,10 +6,16 @@ import bot
 def test_stale_pipeline_job_prune_removes_its_workspace(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "PIPELINE_TEMP_ROOT", str(tmp_path / "pipeline"))
     monkeypatch.setattr(bot, "PIPELINE_JOB_LOCK_TTL_SECONDS", 60)
+    monkeypatch.setattr(
+        bot,
+        "persist_subtitle_dub_pipeline_job_snapshot",
+        lambda *_args, **_kwargs: True,
+    )
     bot.SUBTITLE_DUB_PIPELINE_JOBS.clear()
     workspace = bot.create_subtitle_dub_pipeline_workspace("stale-job")
     bot.SUBTITLE_DUB_PIPELINE_JOBS["stale-job"] = {
-        "status": "running",
+        "status": "completed",
+        "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
         "workspace": workspace,
         "started_at": 100.0,
         "updated_at": 100.0,
