@@ -976,7 +976,17 @@ def _video_scene_status_label(status: Any, clip_ready: bool = False) -> str:
         return "Đã xong"
     if raw in {"queued_waiting_for_slot", "scheduled_after_scene_1_progress"}:
         return "Đang chờ lượt"
-    if raw in {"submit_in_progress", "pending_submit", "provider_not_start", "not_start", "queued", "waiting", "pending"}:
+    if raw in {
+        "queued_waiting_for_dispatch",
+        "dispatch_lease_acquired",
+        "submit_in_progress",
+        "pending_submit",
+        "provider_not_start",
+        "not_start",
+        "queued",
+        "waiting",
+        "pending",
+    }:
         return "Đang chờ bắt đầu"
     if raw in {"provider_running", "running", "in_progress", "processing", "final_rendering", "rendering"}:
         return "Đang tạo"
@@ -1150,11 +1160,18 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
     refresh_seconds = max(5, min(30, _as_int(current.get("auto_refresh_interval_seconds") or current.get("panel_refresh_interval_seconds"), 10)))
     if not final_delivered:
         lines.append(f"• Hệ thống sẽ tự kiểm tra lại sau {refresh_seconds} giây")
+        fallback_candidate = str(
+            current.get("fallback_provider_candidate")
+            or current.get("next_provider_or_model_candidate")
+            or current.get("fallback_provider")
+            or ""
+        ).strip()
+        fallback_available = bool(current.get("fallback_allowed") and fallback_candidate)
         threshold = _as_int(current.get("in_progress_stall_threshold") or current.get("not_start_threshold_seconds"), 0)
         stall_elapsed = _as_int(current.get("in_progress_stall_elapsed") or current.get("provider_elapsed_seconds"), 0)
-        if threshold > 0 and stall_elapsed < threshold:
+        if fallback_available and threshold > 0 and stall_elapsed < threshold:
             lines.append(f"• Nếu chưa có kết quả sau {_video_human_elapsed(threshold - stall_elapsed)}, hệ thống sẽ tự chuyển hướng xử lý.")
-        elif threshold > 0:
+        elif fallback_available and threshold > 0:
             lines.append("• Hệ thống đang tiếp tục kiểm tra và sẽ tự xử lý nếu chờ quá lâu.")
     unique_raw = {value for value in raw_progress_values if value > 0}
     progress_source = str(current.get("public_progress_source") or current.get("render_progress_source") or "").strip().lower()
@@ -1352,6 +1369,24 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
                     "last_download_error_category",
                     "error_category",
                 )
+            )
+        )
+    )
+    zero_task_preparing = bool(
+        canonical in VIDEO_PROGRESS_TYPES
+        and not has_final_artifact
+        and (
+            job.get("zero_task_progress_guard")
+            or (
+                _as_int(job.get("scene_count") or job.get("scenes_total"), 0) > 0
+                and _as_int(
+                    job.get("valid_provider_task_count")
+                    or job.get("task_created_count")
+                    or job.get("scene_tasks_submitted_count"),
+                    0,
+                ) == 0
+                and str(job.get("current_scene_status") or "").strip().lower()
+                in {"queued_waiting_for_dispatch", "pending", "waiting"}
             )
         )
     )
@@ -1594,6 +1629,9 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         elif canonical in VIDEO_PROGRESS_TYPES:
             if has_final_artifact and not has_delivery:
                 stage_key = "validating_output"
+            elif zero_task_preparing:
+                stage_key = "preparing_content"
+                progress = min(20, max(5, _as_int(progress, 10)))
             else:
                 stage_key = "generating_video" if status else "received_request"
         else:
@@ -1603,7 +1641,10 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         progress = max(85, min(95, _as_int(progress, 95)))
     if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"} and canonical in {"music_bg", "music_song"}:
         stage_key = "validating_audio"
-    stage = product_progress_stage(canonical, str(job.get("stage") or job.get("current_stage") or stage_key))
+    requested_stage = "preparing_content" if zero_task_preparing and not terminal else str(
+        job.get("stage") or job.get("current_stage") or stage_key
+    )
+    stage = product_progress_stage(canonical, requested_stage)
     return {
         "product_type": canonical,
         "current_stage": str(stage.get("key") or stage_key),
@@ -1714,6 +1755,37 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "provider_chain_resolved",
             "configured_provider_chain",
             "next_poll_scheduled",
+            "admission_snapshot_id",
+            "admission_checked_at",
+            "admission_candidate_keys",
+            "admission_candidate_count",
+            "admission_result",
+            "admission_block_reason",
+            "dispatch_outbox_present",
+            "dispatch_outbox_status",
+            "dispatch_outbox_attempt_count",
+            "dispatch_outbox_lease_owner",
+            "dispatch_outbox_lease_expires_at",
+            "dispatch_outbox_last_error",
+            "dispatch_outbox_acknowledged",
+            "worker_scan_seen_job",
+            "worker_scan_seen_outbox",
+            "worker_claim_attempted",
+            "worker_claim_result",
+            "worker_claim_block_reason",
+            "worker_last_scan_at",
+            "worker_next_scan_at",
+            "zero_task_watchdog_checked_at",
+            "zero_task_watchdog_triggered",
+            "zero_task_elapsed_seconds",
+            "zero_task_candidate_count",
+            "zero_task_recovery_action",
+            "zero_task_terminal_reason",
+            "route_requires_provider",
+            "route_requirement_source",
+            "route_requirement_product_contract",
+            "route_requirement_override",
+            "route_block_reason",
         ):
             payload[key] = job.get(key)
     return payload

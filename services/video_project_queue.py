@@ -41,6 +41,15 @@ PROJECT_DRAFT_STATUSES = tuple(status for status in PROJECT_STATUSES if status.s
 SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed")
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
+PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER = "owner_product_video"
+PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
+    "pending",
+    "leased",
+    "acknowledged",
+    "retry_wait",
+    "completed",
+    "terminal_failed",
+)
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
     "low": 200,
     "trial": 200,
@@ -1336,6 +1345,27 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
             completed_at DATETIME
         )"""
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS video_dispatch_outbox (
+            outbox_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL UNIQUE,
+            project_id INTEGER NOT NULL,
+            scene_indexes_json TEXT NOT NULL DEFAULT '[]',
+            owner TEXT NOT NULL DEFAULT 'owner_product_video',
+            dispatch_status TEXT NOT NULL DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            available_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            attempt_count INTEGER DEFAULT 0,
+            last_attempt_at DATETIME,
+            lease_owner TEXT,
+            lease_expires_at DATETIME,
+            acknowledged_at DATETIME,
+            completed_at DATETIME,
+            last_error TEXT DEFAULT '',
+            terminal_reason TEXT DEFAULT '',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
     for column_name, column_sql in [
         ("project_uuid", "project_uuid TEXT"),
         ("profile_id", "profile_id TEXT"),
@@ -1410,6 +1440,10 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_jobs_status_priority ON video_jobs(status, priority, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_jobs_project ON video_jobs(project_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_jobs_user ON video_jobs(user_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_video_dispatch_outbox_claim ON video_dispatch_outbox(owner,dispatch_status,available_at,created_at)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_video_dispatch_outbox_project ON video_dispatch_outbox(project_id)")
     conn.execute(
         """CREATE UNIQUE INDEX IF NOT EXISTS idx_video_jobs_active_render_project
            ON video_jobs(project_id, job_type)
@@ -1513,6 +1547,44 @@ def _job_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:
     data = {key: row[idx] for idx, key in enumerate(keys) if idx < len(row)}
     data["job_id"] = data.get("id")
     return data
+
+
+def _dispatch_outbox_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:
+    if not row:
+        return {}
+    keys = [
+        "outbox_id",
+        "job_id",
+        "project_id",
+        "scene_indexes_json",
+        "owner",
+        "dispatch_status",
+        "created_at",
+        "available_at",
+        "attempt_count",
+        "last_attempt_at",
+        "lease_owner",
+        "lease_expires_at",
+        "acknowledged_at",
+        "completed_at",
+        "last_error",
+        "terminal_reason",
+        "updated_at",
+    ]
+    payload = {key: row[index] for index, key in enumerate(keys) if index < len(row)}
+    payload["scene_indexes"] = [
+        _as_int(item, 0)
+        for item in _json_loads(str(payload.get("scene_indexes_json") or "[]"), [])
+        if _as_int(item, 0) > 0
+    ]
+    payload["dispatch_outbox_present"] = True
+    payload["dispatch_outbox_status"] = str(payload.get("dispatch_status") or "")
+    payload["dispatch_outbox_attempt_count"] = _as_int(payload.get("attempt_count"), 0)
+    payload["dispatch_outbox_lease_owner"] = str(payload.get("lease_owner") or "")
+    payload["dispatch_outbox_lease_expires_at"] = str(payload.get("lease_expires_at") or "")
+    payload["dispatch_outbox_last_error"] = str(payload.get("last_error") or "")
+    payload["dispatch_outbox_acknowledged"] = bool(payload.get("acknowledged_at"))
+    return payload
 
 
 def get_video_project(conn: sqlite3.Connection, project_id: int | None = None, project_uuid: str = "") -> dict[str, Any]:
@@ -1758,6 +1830,208 @@ def get_video_render_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any
     return _job_from_row(row)
 
 
+def get_product_video_dispatch_outbox(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int = 0,
+    project_id: int = 0,
+) -> dict[str, Any]:
+    ensure_video_project_queue_schema(conn)
+    where = "job_id=?" if int(job_id or 0) > 0 else "project_id=?"
+    value = int(job_id or project_id or 0)
+    if value <= 0:
+        return {}
+    row = conn.execute(
+        f"""SELECT outbox_id,job_id,project_id,scene_indexes_json,owner,dispatch_status,
+                   created_at,available_at,attempt_count,last_attempt_at,lease_owner,lease_expires_at,
+                   acknowledged_at,completed_at,last_error,terminal_reason,updated_at
+              FROM video_dispatch_outbox
+             WHERE {where}
+             ORDER BY outbox_id DESC LIMIT 1""",
+        (value,),
+    ).fetchone()
+    return _dispatch_outbox_from_row(row)
+
+
+def _insert_product_video_dispatch_outbox_record(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    project_id: int,
+    scene_indexes: list[int],
+    available_at: str,
+    owner: str = PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER,
+) -> int:
+    cursor = conn.execute(
+        """INSERT INTO video_dispatch_outbox
+           (job_id,project_id,scene_indexes_json,owner,dispatch_status,created_at,available_at,attempt_count,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            int(job_id),
+            int(project_id),
+            _json_dumps([int(item) for item in scene_indexes if int(item) > 0]),
+            str(owner or PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER),
+            "pending",
+            str(available_at),
+            str(available_at),
+            0,
+            str(available_at),
+        ),
+    )
+    return int(cursor.lastrowid or 0)
+
+
+def ensure_product_video_dispatch_outbox(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    project_id: int,
+    scene_indexes: list[int],
+    now: datetime | None = None,
+    commit: bool = True,
+) -> dict[str, Any]:
+    ensure_video_project_queue_schema(conn)
+    existing = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+    if existing:
+        return {**existing, "dispatch_outbox_created": False}
+    current = now_text(now)
+    try:
+        _insert_product_video_dispatch_outbox_record(
+            conn,
+            job_id=int(job_id),
+            project_id=int(project_id),
+            scene_indexes=scene_indexes,
+            available_at=current,
+        )
+        if commit:
+            conn.commit()
+    except sqlite3.IntegrityError:
+        if commit:
+            conn.rollback()
+    outbox = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+    return {**outbox, "dispatch_outbox_created": bool(outbox and not existing)}
+
+
+def claim_product_video_dispatch_outbox(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    lease_seconds: int = 600,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    ensure_video_project_queue_schema(conn)
+    current_dt = now or datetime.now()
+    current = now_text(current_dt)
+    expires = now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """SELECT o.outbox_id,o.job_id,o.project_id,o.scene_indexes_json,o.owner,o.dispatch_status,
+                      o.created_at,o.available_at,o.attempt_count,o.last_attempt_at,o.lease_owner,o.lease_expires_at,
+                      o.acknowledged_at,o.completed_at,o.last_error,o.terminal_reason,o.updated_at
+                 FROM video_dispatch_outbox o
+                 JOIN video_jobs j ON j.id=o.job_id
+                 JOIN video_projects p ON p.project_id=o.project_id
+                WHERE o.owner=?
+                  AND j.status IN ('queued','processing')
+                  AND COALESCE(p.is_confirmed,0)=1
+                  AND p.status IN ('queued_for_worker','processing')
+                  AND (
+                       (o.dispatch_status IN ('pending','retry_wait') AND COALESCE(o.available_at,'')<=?)
+                       OR (o.dispatch_status='leased' AND COALESCE(o.lease_expires_at,'')<?)
+                  )
+                ORDER BY o.available_at ASC,o.created_at ASC,o.outbox_id ASC
+                LIMIT 1""",
+            (PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER, current, current),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return {}
+        outbox = _dispatch_outbox_from_row(row)
+        stale_recovered = bool(
+            str(outbox.get("dispatch_status") or "") == "leased"
+            and _parse_time_epoch(outbox.get("lease_expires_at")) <= current_dt.timestamp()
+        )
+        cursor = conn.execute(
+            """UPDATE video_dispatch_outbox
+                  SET dispatch_status='leased',attempt_count=COALESCE(attempt_count,0)+1,
+                      last_attempt_at=?,lease_owner=?,lease_expires_at=?,last_error='',updated_at=?
+                WHERE outbox_id=?
+                  AND (
+                       dispatch_status IN ('pending','retry_wait')
+                       OR (dispatch_status='leased' AND COALESCE(lease_expires_at,'')<?)
+                  )""",
+            (current, str(worker_id or "")[:120], expires, current, int(outbox["outbox_id"]), current),
+        )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return {}
+        conn.commit()
+        claimed = get_product_video_dispatch_outbox(conn, job_id=int(outbox["job_id"]))
+        return {
+            **claimed,
+            "worker_scan_seen_outbox": True,
+            "worker_claim_attempted": True,
+            "worker_claim_result": "dispatch_outbox_leased",
+            "worker_claim_block_reason": "",
+            "stale_dispatch_lease_recovered": stale_recovered,
+        }
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+
+
+def acknowledge_product_video_dispatch_outbox(
+    conn: sqlite3.Connection,
+    *,
+    outbox_id: int,
+    worker_id: str,
+    now: datetime | None = None,
+    commit: bool = True,
+) -> bool:
+    current = now_text(now)
+    cursor = conn.execute(
+        """UPDATE video_dispatch_outbox
+              SET dispatch_status='acknowledged',acknowledged_at=COALESCE(acknowledged_at,?),updated_at=?
+            WHERE outbox_id=? AND dispatch_status='leased' AND lease_owner=?""",
+        (current, current, int(outbox_id), str(worker_id or "")[:120]),
+    )
+    if commit:
+        conn.commit()
+    return cursor.rowcount == 1
+
+
+def retry_product_video_dispatch_outbox(
+    conn: sqlite3.Connection,
+    *,
+    outbox_id: int,
+    worker_id: str,
+    error: str,
+    retry_seconds: int = 15,
+    now: datetime | None = None,
+) -> bool:
+    current_dt = now or datetime.now()
+    current = now_text(current_dt)
+    available = now_text(current_dt + timedelta(seconds=max(1, int(retry_seconds or 15))))
+    cursor = conn.execute(
+        """UPDATE video_dispatch_outbox
+              SET dispatch_status='retry_wait',available_at=?,last_error=?,lease_owner='',lease_expires_at=NULL,updated_at=?
+            WHERE outbox_id=? AND dispatch_status='leased' AND lease_owner=?""",
+        (
+            available,
+            str(error or "dispatch_claim_failed")[:500],
+            current,
+            int(outbox_id),
+            str(worker_id or "")[:120],
+        ),
+    )
+    conn.commit()
+    return cursor.rowcount == 1
+
+
 def enqueue_video_render_job(
     conn: sqlite3.Connection,
     *,
@@ -1789,6 +2063,435 @@ def enqueue_video_render_job(
         raise
 
 
+def _product_video_final_admission_state(
+    project: dict[str, Any],
+    admission: dict[str, Any] | None,
+    *,
+    require_provider_admission: bool,
+    checked_at: str,
+) -> dict[str, Any]:
+    project = dict(project or {})
+    admission = dict(admission or {})
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    if not isinstance(invoice, dict):
+        invoice = {}
+    snapshot = admission.get("provider_eligibility_snapshot")
+    if not isinstance(snapshot, dict):
+        snapshot = admission if admission.get("provider_eligibility_snapshot_id") else {}
+    if not snapshot:
+        persisted = asset_pack.get("provider_eligibility_snapshot") or invoice.get("provider_eligibility_snapshot") or {}
+        snapshot = dict(persisted) if isinstance(persisted, dict) else {}
+    candidates = [
+        str(item or "").strip()
+        for item in (
+            admission.get("admission_candidate_keys")
+            or admission.get("runtime_candidate_keys")
+            or admission.get("eligible_provider_keys")
+            or snapshot.get("runtime_candidate_keys")
+            or snapshot.get("eligible_provider_keys")
+            or []
+        )
+        if str(item or "").strip()
+    ]
+    if not require_provider_admission and not candidates:
+        if os.environ.get("VIDEO_PROVIDER_CHAIN") is not None:
+            candidates = resolve_product_video_provider_chain()
+        else:
+            candidates = _split_product_video_provider_chain(
+                asset_pack.get("provider_chain")
+                or asset_pack.get("provider_order")
+                or invoice.get("provider_chain")
+                or invoice.get("provider_order")
+                or ""
+            ) or resolve_product_video_provider_chain()
+    admission_ok = bool(candidates) and (
+        not require_provider_admission
+        or bool(admission.get("ok", True))
+    )
+    snapshot_id = str(
+        admission.get("admission_snapshot_id")
+        or admission.get("provider_eligibility_snapshot_id")
+        or snapshot.get("provider_eligibility_snapshot_id")
+        or (f"legacy-{project.get('project_id')}" if not require_provider_admission else "")
+    )
+    block_reason = "" if admission_ok else str(
+        admission.get("admission_block_reason")
+        or admission.get("blocker")
+        or "no_eligible_product_video_provider"
+    )
+    return {
+        "admission_enforced": bool(require_provider_admission),
+        "admission_snapshot_id": snapshot_id,
+        "admission_checked_at": str(checked_at),
+        "admission_candidate_keys": candidates,
+        "admission_candidate_count": len(candidates),
+        "admission_result": "allowed" if admission_ok else "blocked",
+        "admission_block_reason": block_reason,
+        "provider_eligibility_snapshot": snapshot,
+        "provider_eligibility_snapshot_id": snapshot_id,
+        "preconfirm_candidate_keys": candidates,
+        "runtime_candidate_keys": candidates,
+        "final_eligible_provider_count": len(candidates),
+        "candidate_set_consistent": True,
+    }
+
+
+def _confirm_product_video_invoice_atomic(
+    conn: sqlite3.Connection,
+    *,
+    project: dict[str, Any],
+    user_id: int,
+    admission: dict[str, Any] | None,
+    require_provider_admission: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_dt = now or datetime.now()
+    current = now_text(current_dt)
+    admission_state = _product_video_final_admission_state(
+        project,
+        admission,
+        require_provider_admission=require_provider_admission,
+        checked_at=current,
+    )
+    if admission_state["admission_candidate_count"] <= 0:
+        if not require_provider_admission:
+            legacy_blocker = "provider_chain_missing_no_charge"
+            legacy_payload = {
+                **admission_state,
+                "source": "product_video",
+                "product_video": True,
+                "provider_chain_resolved": False,
+                "public_confirm_kickoff_attempted": True,
+                "public_confirm_kickoff_success": False,
+                "worker_dispatch_attempted": True,
+                "worker_dispatch_success": False,
+                "worker_dispatch_blocker": legacy_blocker,
+                "provider_error": legacy_blocker,
+                "terminal_state": legacy_blocker,
+                "final_decision": "failed_no_charge",
+                "provider_submit_called": False,
+                "provider_task_id_saved": False,
+                "continue_polling": False,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """INSERT INTO video_jobs
+                       (project_id,user_id,job_type,status,priority,attempts,max_attempts,last_error,result_json,
+                        progress_percent,progress_message,created_at,updated_at,completed_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        int(project["project_id"]),
+                        int(user_id),
+                        VIDEO_RENDER_JOB_TYPE,
+                        "failed",
+                        100,
+                        0,
+                        3,
+                        legacy_blocker,
+                        _json_dumps(legacy_payload),
+                        0,
+                        legacy_blocker,
+                        current,
+                        current,
+                        current,
+                    ),
+                )
+                job_id = int(cursor.lastrowid or 0)
+                conn.execute(
+                    """UPDATE video_projects
+                          SET status='failed',is_confirmed=1,confirmed_at=?,job_id=?,
+                              video_terminal_state=?,error_log=?,updated_at=?
+                        WHERE project_id=?""",
+                    (current, job_id, legacy_blocker, legacy_blocker, current, int(project["project_id"])),
+                )
+                conn.commit()
+                return {
+                    "ok": True,
+                    "project": get_video_project(conn, int(project["project_id"])),
+                    "job": get_video_render_job(conn, job_id),
+                    "duplicate_prevented": False,
+                    "job_created": True,
+                    "scene_records_created": False,
+                    "dispatch_outbox_created": False,
+                }
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            locked = conn.execute(
+                "SELECT status,user_id,asset_pack_json,invoice_json FROM video_projects WHERE project_id=?",
+                (int(project["project_id"]),),
+            ).fetchone()
+            if locked and int(locked[1] or 0) == int(user_id):
+                asset_pack = _json_loads(str(locked[2] or ""), {})
+                invoice = _json_loads(str(locked[3] or ""), {})
+                if not isinstance(asset_pack, dict):
+                    asset_pack = {}
+                if not isinstance(invoice, dict):
+                    invoice = {}
+                asset_pack.update(admission_state)
+                invoice.update(admission_state)
+                conn.execute(
+                    """UPDATE video_projects
+                          SET asset_pack_json=?,invoice_json=?,updated_at=?
+                        WHERE project_id=? AND status='draft_invoice'""",
+                    (
+                        _json_dumps(asset_pack),
+                        _json_dumps(invoice),
+                        current,
+                        int(project["project_id"]),
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return {
+            "ok": False,
+            "reason": "no_eligible_product_video_provider",
+            "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
+            "admission": admission_state,
+            "job_created": False,
+            "scene_records_created": False,
+            "dispatch_outbox_created": False,
+            "charge": 0,
+            "charged_xu": 0,
+        }
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        locked = conn.execute(
+            "SELECT status,user_id,job_id,asset_pack_json,invoice_json FROM video_projects WHERE project_id=?",
+            (int(project["project_id"]),),
+        ).fetchone()
+        if not locked:
+            conn.rollback()
+            return {"ok": False, "reason": "project_not_found"}
+        if int(locked[1] or 0) != int(user_id):
+            conn.rollback()
+            return {"ok": False, "reason": "project_user_mismatch"}
+        if str(locked[0] or "") not in {"draft_invoice", "queued_for_worker"}:
+            conn.rollback()
+            return {"ok": False, "reason": "project_not_at_invoice"}
+        active_row = conn.execute(
+            """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
+                      lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at,
+                      progress_percent,progress_message
+                 FROM video_jobs
+                WHERE project_id=? AND job_type=? AND status IN ('queued','processing')
+                ORDER BY id ASC LIMIT 1""",
+            (int(project["project_id"]), VIDEO_RENDER_JOB_TYPE),
+        ).fetchone()
+        if active_row:
+            active = _job_from_row(active_row)
+            active_payload = _json_loads(str(active.get("result_json") or ""), {})
+            if not isinstance(active_payload, dict):
+                active_payload = {}
+            active_payload.update(admission_state)
+            has_task = any(
+                _product_video_scene_task_identity(item)
+                for item in (active_payload.get("scene_tasks") or [])
+                if isinstance(item, dict)
+            )
+            has_clip = any(
+                bool(item.get("winning_task_id") or item.get("clip_valid") or item.get("result_url"))
+                for item in (active_payload.get("scene_tasks") or [])
+                if isinstance(item, dict)
+            )
+            existing_outbox = conn.execute(
+                "SELECT outbox_id FROM video_dispatch_outbox WHERE job_id=? LIMIT 1",
+                (int(active["id"]),),
+            ).fetchone()
+            if not existing_outbox and not has_task and not has_clip:
+                active_scene_count = max(1, _product_video_scene_count(project, active_payload))
+                _insert_product_video_dispatch_outbox_record(
+                    conn,
+                    job_id=int(active["id"]),
+                    project_id=int(project["project_id"]),
+                    scene_indexes=list(range(1, active_scene_count + 1)),
+                    available_at=current,
+                )
+                active_payload.update(
+                    {
+                        "dispatch_outbox_present": True,
+                        "dispatch_outbox_status": "pending",
+                        "dispatch_outbox_attempt_count": 0,
+                    }
+                )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=?,updated_at=? WHERE id=?",
+                (_json_dumps(active_payload), current, int(active["id"])),
+            )
+            conn.commit()
+            active = get_video_render_job(conn, int(active["id"]))
+            return {
+                "ok": True,
+                "project": get_video_project(conn, int(project["project_id"])),
+                "job": active,
+                "duplicate_prevented": True,
+            }
+        asset_pack = _json_loads(str(locked[3] or ""), {})
+        invoice = _json_loads(str(locked[4] or ""), {})
+        if not isinstance(asset_pack, dict):
+            asset_pack = {}
+        if not isinstance(invoice, dict):
+            invoice = {}
+        asset_pack.update(admission_state)
+        invoice.update(admission_state)
+        cursor = conn.execute(
+            """INSERT INTO video_jobs
+               (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,
+                progress_percent,progress_message,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                int(project["project_id"]),
+                int(user_id),
+                VIDEO_RENDER_JOB_TYPE,
+                "queued",
+                100,
+                0,
+                3,
+                _json_dumps(admission_state),
+                10,
+                "dispatch_outbox_pending",
+                current,
+                current,
+            ),
+        )
+        job_id = int(cursor.lastrowid or 0)
+        project_for_payload = {
+            **project,
+            "asset_pack_json": _json_dumps(asset_pack),
+            "invoice_json": _json_dumps(invoice),
+            "is_confirmed": 1,
+            "confirmed_at": current,
+            "job_id": job_id,
+        }
+        job_seed = {
+            "id": job_id,
+            "job_id": job_id,
+            "project_id": int(project["project_id"]),
+            "user_id": int(user_id),
+            "status": "queued",
+            "created_at": current,
+            "updated_at": current,
+        }
+        kickoff = build_product_video_confirm_kickoff_payload(
+            job_seed,
+            project_for_payload,
+            provider_chain=list(admission_state["admission_candidate_keys"]),
+            now=current_dt,
+        )
+        if not kickoff.get("provider_chain_resolved"):
+            conn.rollback()
+            return {
+                "ok": False,
+                "reason": str(kickoff.get("worker_dispatch_blocker") or "no_eligible_product_video_provider"),
+                "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
+                "admission": admission_state,
+                "job_created": False,
+                "dispatch_outbox_created": False,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        scene_count = max(1, _as_int(kickoff.get("scene_count"), 1))
+        scene_indexes = list(range(1, scene_count + 1))
+        for scene_index in scene_indexes:
+            conn.execute(
+                """INSERT OR IGNORE INTO video_scenes
+                   (project_id,scene_index,role,scene_status)
+                   VALUES (?,?,?,?)""",
+                (int(project["project_id"]), int(scene_index), "product_video_scene", "pending"),
+            )
+        outbox_id = _insert_product_video_dispatch_outbox_record(
+            conn,
+            job_id=job_id,
+            project_id=int(project["project_id"]),
+            scene_indexes=scene_indexes,
+            available_at=current,
+        )
+        payload = {
+            **kickoff,
+            **admission_state,
+            "dispatch_outbox_present": True,
+            "dispatch_outbox_id": outbox_id,
+            "dispatch_outbox_status": "pending",
+            "dispatch_outbox_attempt_count": 0,
+            "dispatch_outbox_lease_owner": "",
+            "dispatch_outbox_lease_expires_at": "",
+            "dispatch_outbox_last_error": "",
+            "dispatch_outbox_acknowledged": False,
+            "scene_records_created": True,
+            "scene_record_indexes": scene_indexes,
+            "worker_scan_seen_job": False,
+            "worker_scan_seen_outbox": False,
+            "worker_claim_attempted": False,
+            "worker_claim_result": "",
+            "worker_claim_block_reason": "",
+            "worker_last_scan_at": "",
+            "worker_next_scan_at": "",
+            "terminal_state": "",
+            "final_decision": "continue_polling",
+            "charge": 0,
+            "charged_xu": 0,
+        }
+        conn.execute(
+            "UPDATE video_jobs SET result_json=?,progress_percent=10,progress_message='dispatch_outbox_pending',updated_at=? WHERE id=?",
+            (_json_dumps(payload), current, job_id),
+        )
+        conn.execute(
+            """UPDATE video_projects
+                  SET status='queued_for_worker',is_confirmed=1,confirmed_at=?,job_id=?,
+                      asset_pack_json=?,invoice_json=?,video_terminal_state='',updated_at=?
+                WHERE project_id=?""",
+            (
+                current,
+                job_id,
+                _json_dumps(asset_pack),
+                _json_dumps(invoice),
+                current,
+                int(project["project_id"]),
+            ),
+        )
+        conn.commit()
+        return {
+            "ok": True,
+            "project": get_video_project(conn, int(project["project_id"])),
+            "job": get_video_render_job(conn, job_id),
+            "outbox": get_product_video_dispatch_outbox(conn, job_id=job_id),
+            "duplicate_prevented": False,
+            "job_created": True,
+            "dispatch_outbox_created": True,
+            "scene_records_created": True,
+        }
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "reason": "dispatch_outbox_transaction_failed",
+            "public_message": "Hệ thống chưa thể bắt đầu tạo video lúc này. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
+            "error_class": type(exc).__name__,
+            "job_created": False,
+            "dispatch_outbox_created": False,
+            "charge": 0,
+            "charged_xu": 0,
+        }
+
+
 def confirm_video_project_invoice(
     conn: sqlite3.Connection,
     *,
@@ -1796,6 +2499,8 @@ def confirm_video_project_invoice(
     user_id: int,
     balance_xu: int | None = None,
     deduct_func: Callable[[int, int], Any] | None = None,
+    provider_admission: dict[str, Any] | None = None,
+    require_provider_admission: bool = False,
 ) -> dict[str, Any]:
     ensure_video_project_queue_schema(conn)
     project = get_video_project(conn, int(project_id))
@@ -1806,7 +2511,7 @@ def confirm_video_project_invoice(
     if str(project.get("status") or "") not in {"draft_invoice", "queued_for_worker"}:
         return {"ok": False, "reason": "project_not_at_invoice"}
     active = get_active_video_render_job(conn, int(project_id))
-    if active:
+    if active and not _is_product_video_project(project):
         kickoff = kickoff_product_video_job_after_confirm(conn, job_id=int(active.get("id") or 0))
         if not kickoff.get("skipped"):
             active = kickoff.get("job") or active
@@ -1826,6 +2531,14 @@ def confirm_video_project_invoice(
         total_xu = int(invoice.get("total_xu") or invoice.get("total") or 0)
     if balance_xu is not None and int(balance_xu) < total_xu:
         return {"ok": False, "reason": "insufficient_balance", "required_xu": total_xu}
+    if _is_product_video_project(project):
+        return _confirm_product_video_invoice_atomic(
+            conn,
+            project=project,
+            user_id=int(user_id),
+            admission=provider_admission,
+            require_provider_admission=bool(require_provider_admission),
+        )
     if deduct_func is not None:
         charge = deduct_func(int(user_id), total_xu)
         if isinstance(charge, dict) and not charge.get("ok", True):
@@ -2551,6 +3264,23 @@ def product_video_processing_scene_claim_state(
     leases = result.get("scene_dispatch_lease_by_index") if isinstance(result.get("scene_dispatch_lease_by_index"), dict) else {}
     tasks = result.get("scene_tasks") if isinstance(result.get("scene_tasks"), list) else []
     task_by_index = {_as_int(item.get("scene_index"), 0): dict(item) for item in tasks if isinstance(item, dict)}
+    runtime_candidates_explicit = bool(
+        "runtime_candidate_keys" in result
+        and (
+            result.get("runtime_candidates_evaluated")
+            or result.get("admission_enforced")
+            or result.get("admission_rechecked_before_dispatch")
+        )
+    )
+    eligible_candidates = [
+        str(item or "").strip()
+        for item in (
+            result.get("runtime_candidate_keys")
+            if runtime_candidates_explicit
+            else (result.get("runtime_candidate_keys") or result.get("preconfirm_candidate_keys") or [])
+        )
+        if str(item or "").strip()
+    ]
     claimable_by_index: dict[str, bool] = {}
     block_reason_by_index: dict[str, str] = {}
     stale_recovered = False
@@ -2571,6 +3301,9 @@ def product_video_processing_scene_claim_state(
         elif watchdog.get("failed_no_charge"):
             claimable = False
             reason = str(watchdog.get("zero_task_terminal_reason") or "scene_terminal")
+        elif not eligible_candidates:
+            claimable = False
+            reason = "no_eligible_provider_for_scene_dispatch"
         elif lease_active:
             claimable = False
             reason = "scene_dispatch_lease_active"
@@ -2608,7 +3341,19 @@ def acquire_product_video_scene_dispatch_leases(
     )
     updated = dict(result or {})
     leases = dict(state.get("scene_dispatch_lease_by_index") or {})
-    candidates = list(state.get("runtime_candidate_keys") or state.get("preconfirm_candidate_keys") or [])
+    runtime_candidates_explicit = bool(
+        "runtime_candidate_keys" in updated
+        and (
+            updated.get("runtime_candidates_evaluated")
+            or updated.get("admission_enforced")
+            or updated.get("admission_rechecked_before_dispatch")
+        )
+    )
+    candidates = list(
+        updated.get("runtime_candidate_keys")
+        if runtime_candidates_explicit
+        else (state.get("runtime_candidate_keys") or state.get("preconfirm_candidate_keys") or [])
+    )
     provider_key = str(candidates[0] if candidates else "")
     expires_at = now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
     job_id = _as_int(job.get("id") or job.get("job_id"), 0)
@@ -2629,6 +3374,280 @@ def acquire_product_video_scene_dispatch_leases(
     updated["scene_dispatch_lease_by_index"] = leases
     updated["processing_job_scene_claimable"] = bool(state.get("processing_job_scene_claimable"))
     return updated
+
+
+def sweep_product_video_zero_task_watchdog(
+    conn: sqlite3.Connection,
+    *,
+    now: datetime | None = None,
+    eligibility_evaluator: Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
+    job_id: int = 0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Reconcile zero-task Product Video jobs from durable DB state only."""
+    ensure_video_project_queue_schema(conn)
+    current_dt = now or datetime.now()
+    current = now_text(current_dt)
+    params: list[Any] = [VIDEO_RENDER_JOB_TYPE]
+    wanted = int(job_id or 0)
+    extra = ""
+    if wanted > 0:
+        extra = " AND j.id=?"
+        params.append(wanted)
+    params.append(max(1, int(limit or 50)))
+    rows = conn.execute(
+        f"""SELECT j.id,j.project_id
+              FROM video_jobs j
+              JOIN video_projects p ON p.project_id=j.project_id
+             WHERE j.job_type=? AND j.status IN ('queued','processing')
+               AND COALESCE(p.is_confirmed,0)=1
+               AND p.status IN ('queued_for_worker','processing'){extra}
+             ORDER BY j.created_at ASC,j.id ASC
+             LIMIT ?""",
+        params,
+    ).fetchall()
+    report = {
+        "checked": 0,
+        "triggered": 0,
+        "recovered": 0,
+        "terminal_failed": 0,
+        "kept_by_active_lease": 0,
+        "details": [],
+    }
+    for row in rows:
+        job = get_video_render_job(conn, int(row[0]))
+        project = get_video_project(conn, int(row[1]))
+        if not job or not project or not _is_product_video_project(project):
+            continue
+        result = _json_loads(str(job.get("result_json") or ""), {})
+        if not isinstance(result, dict):
+            result = {}
+        preliminary = product_video_zero_task_watchdog_state(job, result, now=current_dt)
+        if not preliminary.get("zero_task_progress_guard"):
+            continue
+        report["checked"] += 1
+        worker_scan = {
+            "worker_scan_seen_job": True,
+            "worker_scan_seen_outbox": bool(get_product_video_dispatch_outbox(conn, job_id=int(job["id"]))),
+            "worker_claim_attempted": False,
+            "worker_claim_result": "watchdog_scan",
+            "worker_claim_block_reason": "",
+            "worker_last_scan_at": current,
+            "worker_next_scan_at": now_text(current_dt + timedelta(seconds=5)),
+        }
+        if not preliminary.get("zero_task_watchdog_triggered"):
+            result.update(
+                {
+                    **preliminary,
+                    **worker_scan,
+                    "zero_task_watchdog_checked_at": current,
+                    "zero_task_elapsed_seconds": _as_int(preliminary.get("dispatch_grace_elapsed"), 0),
+                    "zero_task_candidate_count": _as_int(preliminary.get("final_eligible_provider_count"), 0),
+                    "zero_task_recovery_action": "wait_dispatch_grace",
+                }
+            )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=?,progress_percent=?,progress_message='queued_waiting_for_dispatch',updated_at=? WHERE id=?",
+                (_json_dumps(result), min(20, max(10, _as_int(job.get("progress_percent"), 10))), current, int(job["id"])),
+            )
+            conn.commit()
+            continue
+        report["triggered"] += 1
+        eligibility: dict[str, Any] = {}
+        if callable(eligibility_evaluator):
+            try:
+                eligibility = dict(eligibility_evaluator(job, result, project) or {})
+            except Exception as exc:
+                eligibility = {
+                    "eligible_provider_keys": [],
+                    "runtime_candidate_keys": [],
+                    "final_eligible_provider_count": 0,
+                    "admission_block_reason": f"eligibility_recheck_failed:{type(exc).__name__}",
+                }
+        if eligibility:
+            candidates = [
+                str(item or "").strip()
+                for item in (
+                    eligibility.get("runtime_candidate_keys")
+                    or eligibility.get("eligible_provider_keys")
+                    or eligibility.get("admission_candidate_keys")
+                    or []
+                )
+                if str(item or "").strip()
+            ]
+            result.update(
+                {
+                    "provider_eligibility_snapshot": eligibility.get("provider_eligibility_snapshot") or eligibility,
+                    "provider_eligibility_snapshot_id": str(
+                        eligibility.get("provider_eligibility_snapshot_id")
+                        or result.get("provider_eligibility_snapshot_id")
+                        or ""
+                    ),
+                    "runtime_candidate_keys": candidates,
+                    "final_eligible_provider_count": len(candidates),
+                    "candidate_rejection_reason_by_provider": dict(
+                        eligibility.get("candidate_rejection_reason_by_provider") or {}
+                    ),
+                }
+            )
+        watchdog = product_video_zero_task_watchdog_state(job, result, now=current_dt)
+        candidates = list(watchdog.get("runtime_candidate_keys") or [])
+        outbox = get_product_video_dispatch_outbox(conn, job_id=int(job["id"]))
+        outbox_lease_active = bool(
+            outbox.get("dispatch_status") == "leased"
+            and _parse_time_epoch(outbox.get("lease_expires_at")) > current_dt.timestamp()
+        )
+        scene_claim = product_video_processing_scene_claim_state(job, result, now=current_dt)
+        scene_leases = dict(scene_claim.get("scene_dispatch_lease_by_index") or {})
+        scene_lease_active = any(
+            str(item.get("lease_owner") or "")
+            and _parse_time_epoch(item.get("lease_expires_at")) > current_dt.timestamp()
+            for item in scene_leases.values()
+            if isinstance(item, dict)
+        )
+        active_lease = bool(outbox_lease_active or scene_lease_active)
+        recovery_action = ""
+        terminal_reason = ""
+        if not candidates:
+            terminal_reason = "no_eligible_provider_before_scene_dispatch"
+            recovery_action = "failed_no_charge"
+            result.update(
+                {
+                    **watchdog,
+                    **worker_scan,
+                    "zero_task_watchdog_checked_at": current,
+                    "zero_task_watchdog_triggered": True,
+                    "zero_task_elapsed_seconds": _as_int(watchdog.get("dispatch_grace_elapsed"), 0),
+                    "zero_task_candidate_count": 0,
+                    "zero_task_recovery_action": recovery_action,
+                    "zero_task_terminal_reason": terminal_reason,
+                    "terminal_state": "failed_no_charge",
+                    "final_decision": "failed_no_charge",
+                    "continue_polling": False,
+                    "next_poll_scheduled": False,
+                    "fallback_allowed": False,
+                    "fallback_provider_candidate": "",
+                    "next_provider_or_model_candidate": "",
+                    "provider_http_request_sent": False,
+                    "provider_http_status": 0,
+                    "fallback_count_effective": 0,
+                    "concat_attempted": False,
+                    "delivery_attempted": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                    "worker_claim_result": "blocked_no_eligible_provider",
+                    "worker_claim_block_reason": terminal_reason,
+                    "dispatch_outbox_present": bool(outbox),
+                    "dispatch_outbox_status": "terminal_failed" if outbox else "",
+                }
+            )
+            conn.execute(
+                """UPDATE video_jobs
+                      SET status='failed',result_json=?,progress_percent=?,progress_message=?,last_error=?,
+                          completed_at=COALESCE(completed_at,?),updated_at=?
+                    WHERE id=?""",
+                (_json_dumps(result), 10, terminal_reason, terminal_reason, current, current, int(job["id"])),
+            )
+            conn.execute(
+                """UPDATE video_projects
+                      SET status='failed',video_terminal_state='failed_no_charge',error_log=?,updated_at=?
+                    WHERE project_id=?""",
+                (terminal_reason, current, int(project["project_id"])),
+            )
+            if outbox:
+                conn.execute(
+                    """UPDATE video_dispatch_outbox
+                          SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
+                              lease_owner='',lease_expires_at=NULL,updated_at=?
+                        WHERE outbox_id=?""",
+                    (terminal_reason, terminal_reason, current, int(outbox["outbox_id"])),
+                )
+            conn.commit()
+            report["terminal_failed"] += 1
+        elif active_lease:
+            recovery_action = "active_dispatch_lease"
+            result.update(
+                {
+                    **watchdog,
+                    **worker_scan,
+                    "zero_task_watchdog_checked_at": current,
+                    "zero_task_watchdog_triggered": True,
+                    "zero_task_elapsed_seconds": _as_int(watchdog.get("dispatch_grace_elapsed"), 0),
+                    "zero_task_candidate_count": len(candidates),
+                    "zero_task_recovery_action": recovery_action,
+                    "zero_task_terminal_reason": "",
+                    "continue_polling": True,
+                    "public_stage": "preparing",
+                    "worker_claim_result": "active_dispatch_lease",
+                    "worker_claim_block_reason": "dispatch_lease_active",
+                }
+            )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=?,progress_percent=?,progress_message='dispatch_lease_active',updated_at=? WHERE id=?",
+                (_json_dumps(result), min(20, max(10, _as_int(job.get("progress_percent"), 10))), current, int(job["id"])),
+            )
+            conn.commit()
+            report["kept_by_active_lease"] += 1
+        else:
+            if not outbox:
+                outbox = ensure_product_video_dispatch_outbox(
+                    conn,
+                    job_id=int(job["id"]),
+                    project_id=int(project["project_id"]),
+                    scene_indexes=list(range(1, max(1, _as_int(result.get("scene_count"), 1)) + 1)),
+                    now=current_dt,
+                )
+                recovery_action = "dispatch_outbox_recreated"
+            elif str(outbox.get("dispatch_status") or "") in {"acknowledged", "leased"}:
+                conn.execute(
+                    """UPDATE video_dispatch_outbox
+                          SET dispatch_status='retry_wait',available_at=?,lease_owner='',lease_expires_at=NULL,
+                              last_error='zero_task_dispatch_recovery',updated_at=?
+                        WHERE outbox_id=?""",
+                    (current, current, int(outbox["outbox_id"])),
+                )
+                conn.commit()
+                outbox = get_product_video_dispatch_outbox(conn, job_id=int(job["id"]))
+                recovery_action = "dispatch_outbox_retry_recovered"
+            else:
+                recovery_action = "dispatch_outbox_pending"
+            result.update(
+                {
+                    **watchdog,
+                    **worker_scan,
+                    "zero_task_watchdog_checked_at": current,
+                    "zero_task_watchdog_triggered": True,
+                    "zero_task_elapsed_seconds": _as_int(watchdog.get("dispatch_grace_elapsed"), 0),
+                    "zero_task_candidate_count": len(candidates),
+                    "zero_task_recovery_action": recovery_action,
+                    "zero_task_terminal_reason": "",
+                    "continue_polling": True,
+                    "public_stage": "preparing",
+                    "dispatch_outbox_present": bool(outbox),
+                    "dispatch_outbox_status": str(outbox.get("dispatch_status") or "pending"),
+                    "dispatch_outbox_attempt_count": _as_int(outbox.get("attempt_count"), 0),
+                    "dispatch_outbox_lease_owner": str(outbox.get("lease_owner") or ""),
+                    "dispatch_outbox_lease_expires_at": str(outbox.get("lease_expires_at") or ""),
+                    "dispatch_outbox_last_error": str(outbox.get("last_error") or ""),
+                    "dispatch_outbox_acknowledged": bool(outbox.get("acknowledged_at")),
+                    "worker_claim_result": recovery_action,
+                }
+            )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=?,progress_percent=?,progress_message='queued_waiting_for_dispatch',updated_at=? WHERE id=?",
+                (_json_dumps(result), min(20, max(10, _as_int(job.get("progress_percent"), 10))), current, int(job["id"])),
+            )
+            conn.commit()
+            report["recovered"] += 1
+        report["details"].append(
+            {
+                "job_id": int(job["id"]),
+                "zero_task_recovery_action": recovery_action,
+                "zero_task_terminal_reason": terminal_reason,
+                "candidate_count": len(candidates),
+            }
+        )
+    return report
 
 
 def kickoff_product_video_job_after_confirm(

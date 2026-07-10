@@ -1586,6 +1586,91 @@ def _requeue_stale_canary_jobs(conn: sqlite3.Connection, *, now: datetime | None
     return int(cursor.rowcount or 0)
 
 
+def _product_video_runtime_eligibility(
+    job: dict[str, Any],
+    result: dict[str, Any],
+    project: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Re-evaluate enforced public admission without submitting a provider job."""
+    del job, project
+    persisted_candidates = [
+        str(item or "").strip()
+        for item in (
+            result.get("admission_candidate_keys")
+            or result.get("runtime_candidate_keys")
+            or result.get("preconfirm_candidate_keys")
+            or []
+        )
+        if str(item or "").strip()
+    ]
+    if not result.get("admission_enforced"):
+        return {
+            "provider_eligibility_snapshot_id": str(result.get("provider_eligibility_snapshot_id") or ""),
+            "eligible_provider_keys": persisted_candidates,
+            "runtime_candidate_keys": persisted_candidates,
+            "final_eligible_provider_count": len(persisted_candidates),
+            "ok": bool(persisted_candidates),
+        }
+    from services import video_provider_router
+
+    status = video_provider_router.provider_status_payload()
+    snapshot = result.get("provider_eligibility_snapshot")
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    health = result.get("provider_health_at_submit")
+    if not isinstance(health, dict):
+        health = {}
+    current_dt = now or datetime.now()
+    current_epoch = current_dt.timestamp()
+    refreshed_health: dict[str, dict[str, Any]] = {}
+    for provider, raw in health.items():
+        item = dict(raw or {}) if isinstance(raw, dict) else {}
+        last_valid_epoch = video_project_queue._parse_time_epoch(item.get("last_valid_output_at"))
+        ttl = max(60, _safe_int(item.get("success_ttl_seconds"), 1800))
+        if last_valid_epoch > 0:
+            age = int(max(0, current_epoch - last_valid_epoch))
+            item["last_valid_age_seconds"] = age
+            if age > ttl:
+                item.update(
+                    {
+                        "fresh_success": False,
+                        "recent_valid_output": False,
+                        "live_healthy": False,
+                        "multi_scene_eligible": False,
+                        "provider_health_state": "unknown",
+                        "health_status": "unknown",
+                        "health_transition_reason": "fresh_validated_clip_required",
+                    }
+                )
+        refreshed_health[str(provider)] = item
+    chain = (
+        snapshot.get("configured_provider_keys")
+        or result.get("configured_provider_chain")
+        or result.get("provider_chain")
+        or persisted_candidates
+    )
+    contract_chain = snapshot.get("contract_valid_provider_chain")
+    if contract_chain is None:
+        contract_chain = persisted_candidates
+    evaluated = video_provider_router.product_video_provider_eligibility_snapshot(
+        status=status,
+        chain=chain,
+        required_capability=str(result.get("required_capability") or "text_to_video_or_scene_video"),
+        provider_health=refreshed_health,
+        contract_valid_provider_chain=contract_chain,
+        scene_count=max(1, _safe_int(result.get("scene_count") or result.get("scenes_total"), 1)),
+        require_live_health=True,
+        persisted_snapshot_id=str(result.get("admission_snapshot_id") or result.get("provider_eligibility_snapshot_id") or ""),
+    )
+    return {
+        **evaluated,
+        "provider_eligibility_snapshot": evaluated,
+        "runtime_candidate_keys": list(evaluated.get("eligible_provider_keys") or []),
+    }
+
+
 def claim_remote_worker_canary_job(
     conn: sqlite3.Connection,
     *,
@@ -1680,15 +1765,37 @@ def _claim_video_render_candidate(
     current_dt = now or datetime.now()
     current = video_project_queue.now_text(current_dt)
     lease_expires = video_project_queue.now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
+    product_lane = bool(product_video_only or owner_product_video_only)
+    dispatch_outbox_claim: dict[str, Any] = {}
+    if product_lane:
+        video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            now=current_dt,
+            eligibility_evaluator=lambda job, result, project: _product_video_runtime_eligibility(
+                job,
+                result,
+                project,
+                now=current_dt,
+            ),
+        )
+        dispatch_outbox_claim = video_project_queue.claim_product_video_dispatch_outbox(
+            conn,
+            worker_id=worker_id,
+            lease_seconds=lease_seconds,
+            now=current_dt,
+        )
     try:
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(
             """SELECT j.id,j.project_id,j.user_id,j.job_type,j.status,j.priority,j.attempts,j.max_attempts,j.locked_by,j.locked_at,
                       j.lease_expires_at,j.last_error,j.result_json,j.created_at,j.updated_at,j.started_at,j.completed_at,
                       j.progress_percent,j.progress_message,
-                      p.asset_pack_json,p.invoice_json,p.total_xu_estimated,p.profile_id,p.topic
+                      p.asset_pack_json,p.invoice_json,p.total_xu_estimated,p.profile_id,p.topic,
+                      o.outbox_id,o.dispatch_status,o.attempt_count,o.lease_owner,o.lease_expires_at,
+                      o.last_error,o.acknowledged_at
                FROM video_jobs j
                JOIN video_projects p ON p.project_id=j.project_id
+               LEFT JOIN video_dispatch_outbox o ON o.job_id=j.id
                WHERE j.job_type=? AND j.status IN ('queued','processing')
                  AND COALESCE(p.is_confirmed,0)=1
                  AND p.status IN ('queued_for_worker','processing')
@@ -1725,6 +1832,15 @@ def _claim_video_render_candidate(
                 "profile_id": row[22],
                 "topic": row[23],
             }
+            dispatch_outbox = {
+                "outbox_id": int(row[24] or 0),
+                "dispatch_status": str(row[25] or ""),
+                "attempt_count": int(row[26] or 0),
+                "lease_owner": str(row[27] or ""),
+                "lease_expires_at": str(row[28] or ""),
+                "last_error": str(row[29] or ""),
+                "acknowledged_at": str(row[30] or ""),
+            }
             if admin_canary_only:
                 if _admin_canary_is_safe(project):
                     chosen = job
@@ -1738,6 +1854,12 @@ def _claim_video_render_candidate(
                     break
                 continue
             if product_video_only or owner_product_video_only:
+                if dispatch_outbox_claim:
+                    if int(job["id"]) != int(dispatch_outbox_claim.get("job_id") or 0):
+                        continue
+                    dispatch_outbox = dict(dispatch_outbox_claim)
+                elif dispatch_outbox.get("dispatch_status") in {"pending", "retry_wait", "leased"}:
+                    continue
                 if _product_video_is_claimable(
                     project,
                     owner_only=bool(owner_product_video_only),
@@ -1746,6 +1868,95 @@ def _claim_video_render_candidate(
                     result_payload = video_project_queue._json_loads(job.get("result_json"), {})
                     if not isinstance(result_payload, dict):
                         result_payload = {}
+                    scene_task_rows = [
+                        dict(item)
+                        for item in (result_payload.get("scene_tasks") or result_payload.get("provider_scene_tasks") or [])
+                        if isinstance(item, dict)
+                    ]
+                    has_existing_provider_task = bool(
+                        str(result_payload.get("provider_task_id") or result_payload.get("provider_video_id") or "").strip()
+                        or any(video_project_queue._product_video_scene_task_identity(item) for item in scene_task_rows)
+                    )
+                    has_existing_scene_clip = any(
+                        bool(item.get("winning_task_id") or item.get("clip_valid") or item.get("result_url"))
+                        for item in scene_task_rows
+                    )
+                    if result_payload.get("admission_enforced"):
+                        runtime_eligibility = _product_video_runtime_eligibility(
+                            job,
+                            result_payload,
+                            project,
+                            now=current_dt,
+                        )
+                        runtime_candidates = [
+                            str(item or "").strip()
+                            for item in (
+                                runtime_eligibility.get("runtime_candidate_keys")
+                                or runtime_eligibility.get("eligible_provider_keys")
+                                or []
+                            )
+                            if str(item or "").strip()
+                        ]
+                        result_payload.update(
+                            {
+                                "provider_eligibility_snapshot": runtime_eligibility.get("provider_eligibility_snapshot")
+                                or runtime_eligibility,
+                                "runtime_candidate_keys": runtime_candidates,
+                                "final_eligible_provider_count": len(runtime_candidates),
+                                "admission_candidate_count_at_dispatch": len(runtime_candidates),
+                                "admission_rechecked_before_dispatch": True,
+                            }
+                        )
+                        if not runtime_candidates and not has_existing_provider_task and not has_existing_scene_clip:
+                            blocker = "no_eligible_provider_before_scene_dispatch"
+                            result_payload.update(
+                                {
+                                    "admission_result": "blocked",
+                                    "admission_block_reason": blocker,
+                                    "terminal_state": "failed_no_charge",
+                                    "final_decision": "failed_no_charge",
+                                    "zero_task_terminal_reason": blocker,
+                                    "continue_polling": False,
+                                    "next_poll_scheduled": False,
+                                    "provider_http_request_sent": False,
+                                    "provider_http_status": 0,
+                                    "fallback_allowed": False,
+                                    "fallback_provider_candidate": "",
+                                    "concat_attempted": False,
+                                    "delivery_attempted": False,
+                                    "charge": 0,
+                                    "charged_xu": 0,
+                                }
+                            )
+                            conn.execute(
+                                """UPDATE video_jobs
+                                      SET status='failed',result_json=?,last_error=?,progress_percent=10,
+                                          progress_message=?,completed_at=COALESCE(completed_at,?),updated_at=?
+                                    WHERE id=?""",
+                                (
+                                    video_project_queue._json_dumps(result_payload),
+                                    blocker,
+                                    blocker,
+                                    current,
+                                    current,
+                                    int(job["id"]),
+                                ),
+                            )
+                            conn.execute(
+                                """UPDATE video_projects
+                                      SET status='failed',video_terminal_state='failed_no_charge',error_log=?,updated_at=?
+                                    WHERE project_id=?""",
+                                (blocker, current, int(job["project_id"])),
+                            )
+                            if dispatch_outbox.get("outbox_id"):
+                                conn.execute(
+                                    """UPDATE video_dispatch_outbox
+                                          SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
+                                              lease_owner='',lease_expires_at=NULL,updated_at=?
+                                        WHERE outbox_id=?""",
+                                    (blocker, blocker, current, int(dispatch_outbox["outbox_id"])),
+                                )
+                            continue
                     claim_state = video_project_queue.product_video_processing_scene_claim_state(
                         job,
                         result_payload,
@@ -1772,10 +1983,23 @@ def _claim_video_render_candidate(
                             "UPDATE video_projects SET status='failed', video_terminal_state='failed_no_charge', error_log=?, updated_at=? WHERE project_id=?",
                             (blocker, current, int(job["project_id"])),
                         )
+                        if dispatch_outbox.get("outbox_id"):
+                            conn.execute(
+                                """UPDATE video_dispatch_outbox
+                                      SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
+                                          lease_owner='',lease_expires_at=NULL,updated_at=?
+                                    WHERE outbox_id=?""",
+                                (blocker, blocker, current, int(dispatch_outbox["outbox_id"])),
+                            )
                         continue
-                    if str(job.get("status") or "") == "processing" and not claim_state.get("processing_job_scene_claimable"):
+                    if (
+                        str(job.get("status") or "") == "processing"
+                        and not claim_state.get("processing_job_scene_claimable")
+                        and not has_existing_provider_task
+                    ):
                         continue
                     job["scene_claim_state"] = claim_state
+                    job["dispatch_outbox"] = dispatch_outbox
                     chosen = job
                     chosen_project = project
                     break
@@ -1788,6 +2012,14 @@ def _claim_video_render_candidate(
                 break
         if not chosen or not chosen_project:
             conn.commit()
+            if dispatch_outbox_claim:
+                video_project_queue.retry_product_video_dispatch_outbox(
+                    conn,
+                    outbox_id=int(dispatch_outbox_claim.get("outbox_id") or 0),
+                    worker_id=worker_id,
+                    error="dispatch_outbox_job_not_claimable",
+                    now=current_dt,
+                )
             return {}
         if admin_canary_only:
             progress_message = "admin canary claimed"
@@ -1801,6 +2033,28 @@ def _claim_video_render_candidate(
         if not isinstance(result_payload, dict):
             result_payload = {}
         if product_video_only or owner_product_video_only:
+            chosen_outbox = dict(chosen.get("dispatch_outbox") or {})
+            result_payload.update(
+                {
+                    "dispatch_outbox_present": bool(chosen_outbox),
+                    "dispatch_outbox_id": int(chosen_outbox.get("outbox_id") or 0),
+                    "dispatch_outbox_status": (
+                        "acknowledged" if dispatch_outbox_claim else str(chosen_outbox.get("dispatch_status") or "")
+                    ),
+                    "dispatch_outbox_attempt_count": int(chosen_outbox.get("attempt_count") or 0),
+                    "dispatch_outbox_lease_owner": str(chosen_outbox.get("lease_owner") or ""),
+                    "dispatch_outbox_lease_expires_at": str(chosen_outbox.get("lease_expires_at") or ""),
+                    "dispatch_outbox_last_error": str(chosen_outbox.get("last_error") or ""),
+                    "dispatch_outbox_acknowledged": bool(dispatch_outbox_claim or chosen_outbox.get("acknowledged_at")),
+                    "worker_scan_seen_job": True,
+                    "worker_scan_seen_outbox": bool(chosen_outbox),
+                    "worker_claim_attempted": True,
+                    "worker_claim_result": "scene_dispatch_claimed",
+                    "worker_claim_block_reason": "",
+                    "worker_last_scan_at": current,
+                    "worker_next_scan_at": video_project_queue.now_text(current_dt + timedelta(seconds=5)),
+                }
+            )
             result_payload = video_project_queue.acquire_product_video_scene_dispatch_leases(
                 chosen,
                 result_payload,
@@ -1856,8 +2110,34 @@ def _claim_video_render_candidate(
         )
         if cursor.rowcount != 1:
             conn.rollback()
+            if dispatch_outbox_claim:
+                video_project_queue.retry_product_video_dispatch_outbox(
+                    conn,
+                    outbox_id=int(dispatch_outbox_claim.get("outbox_id") or 0),
+                    worker_id=worker_id,
+                    error="video_job_claim_conflict",
+                    now=current_dt,
+                )
             return {}
         conn.execute("UPDATE video_projects SET status='processing', updated_at=? WHERE project_id=?", (current, int(chosen["project_id"])))
+        if dispatch_outbox_claim:
+            acknowledged = video_project_queue.acknowledge_product_video_dispatch_outbox(
+                conn,
+                outbox_id=int(dispatch_outbox_claim.get("outbox_id") or 0),
+                worker_id=worker_id,
+                now=current_dt,
+                commit=False,
+            )
+            if not acknowledged:
+                conn.rollback()
+                video_project_queue.retry_product_video_dispatch_outbox(
+                    conn,
+                    outbox_id=int(dispatch_outbox_claim.get("outbox_id") or 0),
+                    worker_id=worker_id,
+                    error="dispatch_outbox_ack_conflict",
+                    now=current_dt,
+                )
+                return {}
         conn.commit()
         return video_project_queue.get_video_render_job(conn, int(chosen["id"]))
     except Exception:
@@ -1865,6 +2145,17 @@ def _claim_video_render_candidate(
             conn.rollback()
         except Exception:
             pass
+        if dispatch_outbox_claim:
+            try:
+                video_project_queue.retry_product_video_dispatch_outbox(
+                    conn,
+                    outbox_id=int(dispatch_outbox_claim.get("outbox_id") or 0),
+                    worker_id=worker_id,
+                    error="dispatch_claim_exception",
+                    now=current_dt,
+                )
+            except Exception:
+                pass
         raise
 
 
