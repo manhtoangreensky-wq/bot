@@ -178615,7 +178615,11 @@ def _prune_subtitle_dub_pipeline_jobs(now_ts: float | None = None) -> None:
     for key, job in list(SUBTITLE_DUB_PIPELINE_JOBS.items()):
         age = now_ts - subdub_job_timestamp(job.get("updated_at") or job.get("started_at") or 0)
         if age > PIPELINE_JOB_LOCK_TTL_SECONDS:
+            workspace = str(job.get("workspace") or "")
+            if workspace:
+                cleanup_subtitle_dub_pipeline_workspace(workspace)
             SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
+    cleanup_stale_subtitle_dub_pipeline_workspaces(now_ts=now_ts)
 
 def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dict]:
     _prune_subtitle_dub_pipeline_jobs()
@@ -178972,7 +178976,30 @@ def cleanup_subtitle_dub_pipeline_workspace(workspace: str) -> bool:
         return False
     if os.path.isdir(path):
         shutil.rmtree(path, ignore_errors=True)
-    return True
+    return not os.path.exists(path)
+
+def cleanup_stale_subtitle_dub_pipeline_workspaces(now_ts: float | None = None) -> int:
+    root = os.path.abspath(PIPELINE_TEMP_ROOT)
+    if not os.path.isdir(root):
+        return 0
+    active_workspaces = {
+        os.path.abspath(str(job.get("workspace") or ""))
+        for job in SUBTITLE_DUB_PIPELINE_JOBS.values()
+        if str(job.get("status") or "") == "running" and job.get("workspace")
+    }
+    current_ts = float(now_ts or time.time())
+    cleaned = 0
+    for name in os.listdir(root):
+        path = os.path.abspath(os.path.join(root, name))
+        if not path.startswith(root + os.sep) or path in active_workspaces or not os.path.isdir(path):
+            continue
+        try:
+            stale = current_ts - os.path.getmtime(path) > PIPELINE_JOB_LOCK_TTL_SECONDS
+        except OSError:
+            continue
+        if stale and cleanup_subtitle_dub_pipeline_workspace(path):
+            cleaned += 1
+    return cleaned
 
 def write_subtitle_dub_pipeline_manifest(workspace: str, payload: dict) -> str:
     path = os.path.abspath(os.path.join(workspace, "manifest.json"))
