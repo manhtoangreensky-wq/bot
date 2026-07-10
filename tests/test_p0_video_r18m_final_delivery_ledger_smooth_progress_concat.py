@@ -218,12 +218,12 @@ def test_job_115_two_scene_outputs_attempt_concat(monkeypatch, tmp_path):
 
     final_path = tmp_path / "final.mp4"
 
-    def fake_concat(job, workspace, *, render_video_func, bgm_audio_path=None):
+    def fake_concat(**_kwargs):
         final_path.write_bytes(b"final-16s")
-        return {"ok": True, "final_video_path": str(final_path), "duration_sec": 16.0, "created_files": [str(final_path)]}
+        return {"ok": True, "final_video_path": str(final_path), "duration_sec": 16.0, "scene_order": [1, 2]}
 
     monkeypatch.setattr(connector, "_render_scene_async", fake_render)
-    monkeypatch.setattr(connector, "_run_multiscene_render", fake_concat)
+    monkeypatch.setattr(connector, "finalize_multiscene_scene_clips", fake_concat)
 
     result = connector._run_per_scene_provider_orchestrator(
         {

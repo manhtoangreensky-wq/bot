@@ -21,7 +21,17 @@ from typing import Any
 
 import httpx
 
-from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
+from services.multiscene_video_pipeline import (
+    SceneSpec,
+    create_multiscene_workspace,
+    ensure_video_output,
+    finalize_multiscene_scene_clips,
+    load_multiscene_manifest,
+    multiscene_manifest_scene_tasks,
+    process_multiscene_video_pipeline,
+    safe_run_ffmpeg,
+    sync_multiscene_manifest,
+)
 from services import video_final_output
 from services import video_project_queue as video_project_queue_service
 from services.video_provider_base import VideoGenerationRequest
@@ -3416,6 +3426,67 @@ def _scene_output_from_payload(payload: dict[str, Any] | None = None) -> str:
     return ""
 
 
+def _canonical_product_video_workspace(job: dict | None = None) -> str:
+    job = dict(job or {})
+    job_id = str(job.get("job_id") or job.get("id") or job.get("project_id") or "product-video")
+    identity_parts = (
+        job_id,
+        str(job.get("project_id") or ((job.get("project") or {}).get("project_id") if isinstance(job.get("project"), dict) else "") or ""),
+        str(job.get("user_id") or ((job.get("project") or {}).get("user_id") if isinstance(job.get("project"), dict) else "") or ""),
+        str(job.get("created_at") or job.get("confirmed_at") or ""),
+        str(_scene_count(job)),
+        str(job.get("scene_dispatch_mode") or "parallel"),
+    )
+    fingerprint = hashlib.sha256("|".join(identity_parts).encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return create_multiscene_workspace(f"product-video-{job_id}-{fingerprint}")
+
+
+def _merge_manifest_scene_tasks(job: dict, recovered: list[dict[str, Any]]) -> dict:
+    """Merge filesystem recovery behind current DB truth, one record per scene."""
+    records: dict[int, dict[str, Any]] = {}
+    for item in list(recovered or []) + _existing_scene_tasks(job):
+        if not isinstance(item, dict):
+            continue
+        index = _scene_task_index(item, 0)
+        if index <= 0:
+            continue
+        current = records.setdefault(index, {"scene_index": index, "scene_id": index})
+        for key, value in item.items():
+            if value not in (None, "", [], {}):
+                current[key] = value
+    merged = [records[index] for index in sorted(records)]
+    return {
+        **dict(job or {}),
+        "scene_tasks": merged,
+        "provider_scene_tasks": merged,
+        "canonical_manifest_recovered": bool(recovered),
+        "canonical_manifest_recovered_scene_indexes": [
+            _scene_task_index(item, 0) for item in recovered if _scene_task_index(item, 0) > 0
+        ],
+    }
+
+
+def _scene_specs_from_plan(plan: dict[str, Any]) -> list[SceneSpec]:
+    specs: list[SceneSpec] = []
+    for index, payload in enumerate(list(plan.get("scenes") or []), start=1):
+        item = dict(payload or {})
+        specs.append(
+            SceneSpec(
+                scene_id=_safe_int(item.get("scene_id"), index),
+                title=str(item.get("title") or f"Scene {index}"),
+                visual_prompt=str(item.get("visual_prompt") or item.get("video_prompt") or ""),
+                video_prompt=str(item.get("video_prompt") or item.get("visual_prompt") or ""),
+                narration_text=item.get("narration_text"),
+                target_duration_sec=float(item.get("target_duration_sec") or PRODUCT_VIDEO_SCENE_SECONDS),
+                aspect_ratio=str(item.get("aspect_ratio") or "9:16"),
+                transition=item.get("transition"),
+                seed_image_path=item.get("seed_image_path"),
+                provider_params=dict(item.get("provider_params") or {}),
+            )
+        )
+    return specs
+
+
 def _run_per_scene_provider_orchestrator(
     job: dict,
     workspace: str,
@@ -3426,6 +3497,21 @@ def _run_per_scene_provider_orchestrator(
     debug_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     plan = real_video_scene_plan(job)
+    workspace = _canonical_product_video_workspace(job)
+    scene_specs = _scene_specs_from_plan(plan)
+    manifest = load_multiscene_manifest(
+        workspace,
+        job_id=str(job.get("job_id") or job.get("id") or ""),
+        user_id=str(job.get("user_id") or ""),
+    )
+    recovered_scene_tasks = multiscene_manifest_scene_tasks(manifest)
+    job = _merge_manifest_scene_tasks(job, recovered_scene_tasks)
+    manifest_path = sync_multiscene_manifest(
+        manifest,
+        scene_specs=[dict(item or {}) for item in list(plan.get("scenes") or [])],
+        scene_tasks=_existing_scene_tasks(job),
+        status="dispatching_or_polling_scenes",
+    )
     scene_outputs: dict[int, str] = {}
     hard_failures: list[dict[str, Any]] = []
     pending_seen = False
@@ -3503,11 +3589,27 @@ def _run_per_scene_provider_orchestrator(
         if output_path:
             scene_outputs[scene_index] = output_path
 
+    manifest_path = sync_multiscene_manifest(
+        manifest,
+        scene_tasks=[
+            dict(item or {})
+            for item in list(provider_events or []) + list(debug_results or [])
+            if isinstance(item, dict)
+        ],
+        scene_clip_paths=scene_outputs,
+        status="ready_to_finalize" if len(scene_outputs) >= _scene_count(job) else "waiting_for_scene_clips",
+    )
     scene_tasks = product_video_scene_tasks_debug(
         job,
         provider_events=provider_events,
         debug_results=debug_results,
         scene_count=_scene_count(job),
+    )
+    manifest_path = sync_multiscene_manifest(
+        manifest,
+        scene_tasks=scene_tasks,
+        scene_clip_paths=scene_outputs,
+        status="ready_to_finalize" if len(scene_outputs) >= _scene_count(job) else "waiting_for_scene_clips",
     )
     scene_execution_audit = product_video_scene_execution_audit(job, scene_tasks)
     counts = product_video_scene_task_counts(scene_tasks)
@@ -3603,6 +3705,12 @@ def _run_per_scene_provider_orchestrator(
         "orchestration_mode": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         "provider_orchestration_mode": PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S,
         "render_pipeline_mode": PRODUCT_VIDEO_RENDER_PIPELINE_HISTORICAL_CONCAT,
+        "canonical_multiscene_engine": "b13_r18c",
+        "canonical_multiscene_workspace": workspace,
+        "canonical_multiscene_manifest_path": manifest_path,
+        "manifest_path": manifest_path,
+        "manifest_recovered": bool(recovered_scene_tasks),
+        "manifest_recovered_scene_indexes": list(job.get("canonical_manifest_recovered_scene_indexes") or []),
         "target_duration_seconds": product_video_expected_duration_seconds(job),
         "clip_duration_seconds": product_video_scene_duration_seconds(job),
         "clip_count": _scene_count(job),
@@ -3829,22 +3937,27 @@ def _run_per_scene_provider_orchestrator(
         base["final_delivered"] = False
         return base
 
-    def _cached_scene_renderer(scene, raw_path: str):
-        scene_index = _safe_int(getattr(scene, "scene_id", 0), 0)
-        source = scene_outputs.get(scene_index)
-        if not source:
-            raise RealVideoRenderError("scene_clip_missing_after_provider_download")
-        if os.path.abspath(source) != os.path.abspath(raw_path):
-            shutil.copyfile(source, raw_path)
-        return {"ok": True, "output_path": raw_path, "duration": product_video_scene_duration_seconds(job)}
-
-    final_result = _run_multiscene_render(
-        job,
-        os.path.join(workspace, "final_concat"),
-        render_video_func=_cached_scene_renderer,
+    addon = _addon_plan(job)
+    subtitle_requested = bool(addon.get("subtitle_enabled", True))
+    final_result = finalize_multiscene_scene_clips(
+        user_id=str(job.get("user_id") or ""),
+        job_id=str(job.get("job_id") or job.get("id") or ""),
+        workspace_dir=workspace,
+        scenes=scene_specs,
+        scene_clip_paths=scene_outputs,
+        manifest=manifest,
         bgm_audio_path=bgm_audio_path,
+        enable_voice=False,
+        enable_subtitle=bool(subtitle_requested and _has_user_facing_subtitle_text(job)),
+        enable_logo=_logo_enabled(addon),
+        logo_text=str(addon.get("logo_text") or ""),
+        logo_position=str(addon.get("logo_position") or "bottom_right"),
     )
     final_result.update(base)
+    final_result["finalizer_invoked"] = True
+    final_result["finalizer_error"] = "" if final_result.get("final_video_path") else str(final_result.get("error") or "canonical_multiscene_finalizer_failed")
+    final_result["canonical_multiscene_engine"] = "b13_r18c"
+    final_result["canonical_multiscene_manifest_path"] = str(final_result.get("manifest_path") or manifest_path)
     final_result["ok"] = bool(final_result.get("final_video_path"))
     final_result["status"] = "completed" if final_result["ok"] else "error"
     final_result["continue_polling"] = False
@@ -3856,8 +3969,12 @@ def _run_per_scene_provider_orchestrator(
     final_result["final_decision"] = "final_mp4_ready"
     final_result["source_of_truth"] = "final_mp4_validated"
     final_result["concat_status"] = "completed"
-    final_result["concat_attempted"] = True
-    final_result["concat_attempt_count"] = max(1, _safe_int(job.get("concat_attempt_count"), 0) + 1)
+    final_result["concat_attempted"] = not bool(final_result.get("final_reused_from_manifest"))
+    final_result["concat_attempt_count"] = max(
+        1,
+        _safe_int(job.get("concat_attempt_count"), 0)
+        + (0 if final_result.get("final_reused_from_manifest") else 1),
+    )
     final_result["concat_idempotency_key"] = f"product_video_concat:{job.get('job_id') or job.get('id') or 'job'}:{_scene_count(job)}"
     final_result["concat_output_valid"] = bool(final_result.get("final_video_path"))
     final_result["concat_duration_seconds"] = final_result.get("duration_sec") or final_result.get("duration_seconds") or 0
