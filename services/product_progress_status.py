@@ -974,13 +974,17 @@ def _video_scene_status_label(status: Any, clip_ready: bool = False) -> str:
     raw = str(status or "").strip().lower().replace("-", "_")
     if clip_ready or raw in {"done", "complete", "completed", "success", "clip_ready", "downloaded", "validated", "scene_clip_validated", "clip_downloaded"}:
         return "Đã xong"
-    if raw in {"provider_not_start", "not_start", "queued", "waiting", "pending"}:
+    if raw in {"queued_waiting_for_slot", "scheduled_after_scene_1_progress"}:
+        return "Đang chờ lượt"
+    if raw in {"submit_in_progress", "pending_submit", "provider_not_start", "not_start", "queued", "waiting", "pending"}:
         return "Đang chờ bắt đầu"
     if raw in {"provider_running", "running", "in_progress", "processing", "final_rendering", "rendering"}:
         return "Đang tạo"
     if raw in {"provider_stalled_not_start", "stalled", "fallback_pending", "retrying"}:
         return "Đang chuyển hướng xử lý"
-    if raw in {"failed", "failed_no_charge", "error", "provider_failed"}:
+    if raw in {"submit_blocked_with_reason"}:
+        return "Chưa thể bắt đầu"
+    if raw in {"failed", "failed_no_charge", "error", "provider_failed", "exhausted"}:
         return "Chưa tạo được"
     return "Đang xử lý"
 

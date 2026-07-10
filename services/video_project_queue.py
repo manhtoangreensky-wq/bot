@@ -721,6 +721,15 @@ def reconcile_provider_progress_telemetry(
     if multiscene_ledger:
         terminal_failure = multiscene_ledger.get("aggregate_job_status") == "failed_no_charge"
         alive = bool(multiscene_ledger.get("unresolved_scene_count") and not terminal_failure)
+    processing_truth = bool(
+        multiscene_ledger.get("processing_truth_applied")
+        or multiscene_ledger.get("active_scene_indexes")
+        or multiscene_ledger.get("dispatchable_scene_indexes")
+        or multiscene_ledger.get("fallback_candidate_indexes")
+    ) if multiscene_ledger else False
+    if processing_truth:
+        terminal_failure = False
+        alive = True
     wait_max = max(60, _as_int(payload.get("provider_wait_max_seconds"), 20 * 60))
     started_source = "payload"
     started_epoch = _parse_time_epoch(payload.get("provider_started_at_epoch") or payload.get("provider_started_at"))
@@ -1145,13 +1154,16 @@ def reconcile_provider_progress_telemetry(
         "stage_monotonic_applied": bool(alive),
         "status_source_priority_used": "terminal_failed_no_charge" if terminal_failure else ("provider_task_alive" if alive else "persisted_status"),
         "provider_state_overrode_registry": bool(alive and not terminal_failure),
-        "provider_state_overrode_persisted_status": bool(alive and not terminal_failure and persisted_status in {"", "queued", "queued_for_worker", "draft"}),
+        "provider_state_overrode_persisted_status": bool(alive and not terminal_failure and persisted_status in {"", "queued", "queued_for_worker", "draft", "failed", "error"}),
         "persisted_status_before_reconcile": persisted_status,
         "persisted_progress_before_reconcile": persisted_progress,
         "final_status_after_reconcile": final_status,
         "terminal_state": "delivered" if final_delivered else ("final_rendering" if alive and not terminal_failure else str(payload.get("terminal_state") or "")),
         "final_user_visible_state": "delivered" if final_delivered else ("final_rendering" if alive and not terminal_failure else ("failed_no_charge" if terminal_failure else final_status)),
         "final_progress_after_reconcile": final_progress,
+        "processing_truth_applied": bool(processing_truth),
+        "refresh_terminal_suppressed": bool(processing_truth),
+        "refresh_state_source": "scene_ledger" if processing_truth else refresh_source,
     }
     if multiscene_ledger:
         telemetry.update(multiscene_ledger)
@@ -1176,9 +1188,12 @@ def reconcile_provider_progress_telemetry(
                 "next_poll_scheduled": bool(alive and not terminal_failure),
                 "status_source_priority_used": "scene_ledger_authority",
                 "provider_state_overrode_registry": bool(alive),
-                "provider_state_overrode_persisted_status": bool(alive and persisted_status in {"", "queued", "queued_for_worker", "draft"}),
+                "provider_state_overrode_persisted_status": bool(alive and persisted_status in {"", "queued", "queued_for_worker", "draft", "failed", "error"}),
                 "final_user_visible_state": "delivered" if final_delivered else ("failed_no_charge" if terminal_failure else "final_rendering"),
                 "no_fake_success_guard": bool(not final_delivered),
+                "processing_truth_applied": bool(processing_truth),
+                "refresh_terminal_suppressed": bool(processing_truth),
+                "refresh_state_source": "scene_ledger" if processing_truth else refresh_source,
             }
         )
     return telemetry
@@ -2013,6 +2028,7 @@ def product_video_initial_scene_tasks(
             "clip_path": "",
             "clip_bytes": 0,
             "clip_valid": False,
+            "scene_validation_verified": False,
             "completed_at": "",
             "failure_reason": "",
             "provider_wait_elapsed_seconds": 0,
@@ -2374,10 +2390,10 @@ def _product_video_scene_task_is_valid_clip(item: dict[str, Any]) -> bool:
     status = str(item.get("status") or item.get("clip_status") or item.get("provider_status") or "").strip().lower()
     return bool(
         item.get("clip_valid")
-        or item.get("result_url_valid")
-        or item.get("download_url_present")
-        or item.get("provider_result_url_present")
-        or status in {"clip_downloaded", "downloaded", "success", "succeeded", "completed", "done"}
+        or item.get("validation_passed")
+        or item.get("output_validated")
+        or _as_int(item.get("clip_bytes") or item.get("artifact_size") or item.get("output_bytes"), 0) > 0
+        or status in {"clip_downloaded", "downloaded", "validated", "clip_validated", "scene_clip_validated"}
     )
 
 
@@ -2416,6 +2432,12 @@ def product_video_scene_ledger_state(
     )
     expected = list(range(1, scene_count + 1))
     now_dt = now or datetime.now()
+    explicit_scene_plan = any(
+        bool(container.get(key))
+        for container in (project, job, result)
+        for key in ("scene_ledger", "scene_tasks", "provider_scene_tasks", "product_video_scene_tasks")
+        if isinstance(container, dict)
+    )
 
     records: dict[int, dict[str, Any]] = {
         index: {
@@ -2427,6 +2449,13 @@ def product_video_scene_ledger_state(
             "active_task_id": "",
             "winning_task_id": "",
             "status": "pending_submit",
+            "dispatch_state": "submit_in_progress",
+            "dispatch_attempted": False,
+            "dispatch_block_reason": "",
+            "dispatch_idempotency_key": "",
+            "dispatch_recovered": False,
+            "dispatchable": bool(explicit_scene_plan),
+            "exhausted": False,
             "submitted_at": "",
             "submitted_at_epoch": 0,
             "started_at": "",
@@ -2435,21 +2464,43 @@ def product_video_scene_ledger_state(
             "progress_last_changed_at": "",
             "result_url": "",
             "result_url_present": False,
+            "result_task_id": "",
+            "result_url_source": "",
+            "task_scene_mapping_verified": False,
+            "phantom_result_prevented": False,
+            "authoritative_status_source": "estimated_internal_state",
+            "historical_status_ignored": False,
+            "success_result_overrode_stale_not_start": False,
+            "provider_status_conflict": False,
+            "provider_status_conflict_resolution": "",
+            "result_processing_action": "",
             "clip_path": "",
             "clip_bytes": 0,
             "clip_valid": False,
+            "scene_validation_verified": False,
             "completed_at": "",
             "failure_reason": "",
             "fallback_count": 0,
+            "fallback_allowed": False,
+            "fallback_provider_order": [],
             "provider_elapsed_seconds": 0,
             "scene_not_start_elapsed": 0,
             "next_poll_at": "",
             "task_candidates": [],
+            "task_id_present": False,
+            "task_pollable": False,
+            "effective_submit_outcome": "",
+            "transport_http": 0,
+            "transport_anomaly": False,
+            "duplicate_submit_prevented": False,
         }
         for index in expected
     }
     unknown_scene_task_ignored = False
+    phantom_result_prevented = False
     sources_used: list[str] = []
+    task_to_scene_index: dict[str, int] = {}
+    task_scene_mapping_conflicts: dict[str, list[int]] = {}
 
     def _items(value: Any) -> list[dict[str, Any]]:
         if isinstance(value, str):
@@ -2478,11 +2529,71 @@ def product_video_scene_ledger_state(
             return "succeeded"
         if raw in {"failed", "failure", "error", "failed_no_charge", "cancelled", "canceled", "provider_failed"}:
             return "failed"
-        if "not_start" in raw or raw in {"queued", "pending", "waiting", "pending_submit"}:
+        if "not_start" in raw or raw in {
+            "queued",
+            "pending",
+            "waiting",
+            "result_pending_validation",
+            "result_pending_download",
+            "download_validation_pending",
+            "pending_submit",
+            "submit_in_progress",
+            "queued_waiting_for_slot",
+            "scheduled_after_scene_1_progress",
+        }:
             return "not_start" if "not_start" in raw else "pending"
+        if raw in {"submit_blocked_with_reason", "exhausted", "dispatch_exhausted"}:
+            return "failed"
         if raw in {"running", "provider_running", "processing", "in_progress", "provider_in_progress", "rendering", "final_rendering"}:
             return "running"
         return raw or "pending"
+
+    def _status_authority_rank(value: Any) -> int:
+        raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if raw in {"scene_clip_validated", "clip_downloaded", "downloaded", "validated", "succeeded"}:
+            return 6
+        if raw in {"result_pending_validation", "result_pending_download", "download_validation_pending"}:
+            return 5
+        if raw in {"failed", "failed_no_charge", "error"}:
+            return 4
+        status_class = _status_class(raw)
+        if status_class == "running":
+            return 3
+        if status_class == "not_start":
+            return 2
+        return 1
+
+    def _register_task_owner(task_id: str, scene_index: int) -> None:
+        task_key = str(task_id or "").strip()
+        if not task_key or scene_index not in records:
+            return
+        existing = task_to_scene_index.get(task_key)
+        if existing is None and task_key not in task_scene_mapping_conflicts:
+            task_to_scene_index[task_key] = scene_index
+            return
+        if existing == scene_index:
+            return
+        indexes = set(task_scene_mapping_conflicts.get(task_key) or [])
+        if existing:
+            indexes.add(existing)
+        indexes.add(scene_index)
+        task_scene_mapping_conflicts[task_key] = sorted(indexes)
+        task_to_scene_index.pop(task_key, None)
+
+    def _task_owner_verified(task_id: str, scene_index: int) -> bool:
+        task_key = str(task_id or "").strip()
+        return bool(
+            task_key
+            and task_key not in task_scene_mapping_conflicts
+            and task_to_scene_index.get(task_key) == scene_index
+        )
+
+    def _first_status_value(item: dict[str, Any], keys: tuple[str, ...]) -> tuple[str, str]:
+        for key in keys:
+            value = str(item.get(key) or "").strip()
+            if value:
+                return value, key
+        return "", ""
 
     def _candidate_ids(item: dict[str, Any]) -> list[str]:
         values: list[str] = []
@@ -2510,7 +2621,7 @@ def product_video_scene_ledger_state(
         return values
 
     def _merge_item(item: dict[str, Any], source_name: str) -> None:
-        nonlocal unknown_scene_task_ignored
+        nonlocal unknown_scene_task_ignored, phantom_result_prevented
         debug = dict(item.get("debug") or {}) if isinstance(item.get("debug"), dict) else {}
         merged = {**debug, **item}
         index = _product_video_scene_task_index(merged)
@@ -2522,18 +2633,50 @@ def product_video_scene_ledger_state(
         if source_name not in sources_used:
             sources_used.append(source_name)
         record = records[index]
+        for task_id in task_ids:
+            _register_task_owner(task_id, index)
         provider = _text_value(merged, "provider_key", "provider", "selected_provider", "provider_pending_provider")
-        status_raw = _text_value(
+        current_status_raw, current_status_source = _first_status_value(
             merged,
-            "actual_provider_payload_status",
-            "shopaikey_data_status",
-            "shopaikey_raw_status",
-            "provider_status_raw",
-            "normalized_provider_status",
-            "provider_status",
-            "status",
-            "clip_status",
-            "blocker",
+            (
+                "actual_provider_payload_status",
+                "provider_status_payload_data_status",
+                "shopaikey_data_status",
+                "shopaikey_raw_status",
+                "poll_raw_status",
+            ),
+        )
+        historical_status_raw, historical_status_source = _first_status_value(
+            merged,
+            (
+                "raw_provider_status_before_source_fix",
+                "raw_provider_status",
+                "provider_status_raw",
+                "normalized_provider_status",
+                "provider_status",
+                "status",
+                "clip_status",
+                "blocker",
+            ),
+        )
+        status_raw = current_status_raw or historical_status_raw
+        dispatch_state = _text_value(
+            merged,
+            "dispatch_state",
+            "scene_dispatch_state",
+            "worker_dispatch_state",
+        )
+        dispatch_block_reason = _text_value(
+            merged,
+            "dispatch_block_reason",
+            "scene_dispatch_block_reason",
+            "provider_submit_block_reason",
+        )
+        dispatch_idempotency_key = _text_value(
+            merged,
+            "dispatch_idempotency_key",
+            "scene_dispatch_idempotency_key",
+            "provider_submit_idempotency_key",
         )
         result_url = _text_value(merged, "result_url", "provider_result_url", "download_url", "file_url", "video_url", "output_url")
         clip_path = _text_value(merged, "clip_path", "output_path", "local_path", "raw_provider_video_path")
@@ -2550,12 +2693,36 @@ def product_video_scene_ledger_state(
                 clip_bytes = os.path.getsize(clip_path) if os.path.isfile(clip_path) else 0
             except OSError:
                 clip_bytes = 0
-        result_present = bool(
+        result_present_raw = bool(
             result_url
             or merged.get("result_url_valid")
             or merged.get("download_url_present")
             or merged.get("provider_result_url_present")
         )
+        explicit_result_task_id = _text_value(
+            merged,
+            "result_task_id",
+            "winning_task_id",
+            "scene_winner_task",
+            "active_task_id",
+            "provider_task_id",
+            "task_id",
+            "provider_video_id",
+            "video_id",
+            "canonical_task_selected",
+        )
+        if not explicit_result_task_id and len(task_ids) == 1:
+            explicit_result_task_id = task_ids[0]
+        result_mapping_verified = bool(
+            result_present_raw
+            and explicit_result_task_id
+            and _task_owner_verified(explicit_result_task_id, index)
+        )
+        result_present = bool(result_present_raw and result_mapping_verified)
+        if result_present_raw and not result_mapping_verified:
+            phantom_result_prevented = True
+            record["phantom_result_prevented"] = True
+            result_url = ""
         normalized_status_raw = status_raw.strip().lower().replace("-", "_").replace(" ", "_")
         clip_valid = bool(
             merged.get("clip_valid")
@@ -2565,6 +2732,8 @@ def product_video_scene_ledger_state(
             or clip_bytes > 0
             or (normalized_status_raw in {"clip_downloaded", "downloaded", "validated", "scene_clip_validated"} and result_present)
         )
+        if not result_mapping_verified and not task_ids:
+            clip_valid = False
         submitted_at = _text_value(merged, "submitted_at", "scene_submitted_at", "provider_started_at", "provider_wait_started_at")
         started_at = _text_value(merged, "started_at", "scene_started_at", "provider_started_at", "provider_wait_started_at")
         completed_at = _text_value(merged, "completed_at", "result_received_at", "winner_selected_at")
@@ -2575,14 +2744,31 @@ def product_video_scene_ledger_state(
             or merged.get("provider_progress_raw"),
             0,
         )
-        candidate_status = "succeeded" if clip_valid else _status_class(status_raw)
+        current_status_class = _status_class(current_status_raw)
+        historical_status_class = _status_class(historical_status_raw)
+        success_with_result = bool(current_status_class == "succeeded" and result_present)
+        provider_status_conflict = bool(success_with_result and historical_status_class == "not_start")
+        if clip_valid:
+            candidate_status = "succeeded"
+            authoritative_status_source = "validated_scene_clip"
+        elif success_with_result:
+            candidate_status = "result_pending_validation"
+            authoritative_status_source = f"current_result_bearing_success:{current_status_source or 'provider_response'}"
+        elif current_status_raw:
+            candidate_status = current_status_class
+            authoritative_status_source = f"current_provider_status:{current_status_source}"
+        else:
+            candidate_status = historical_status_class
+            authoritative_status_source = f"historical_provider_status:{historical_status_source or 'status'}"
         for offset, task_id in enumerate(task_ids):
+            candidate_owns_result = bool(result_present and task_id == explicit_result_task_id)
             candidate = {
                 "task_id": task_id,
                 "provider": provider,
                 "status": candidate_status,
-                "result_url": result_url,
-                "result_url_present": result_present,
+                "result_url": result_url if candidate_owns_result else "",
+                "result_url_present": candidate_owns_result,
+                "result_url_source": source_name if candidate_owns_result else "",
                 "clip_path": clip_path,
                 "clip_bytes": clip_bytes,
                 "clip_valid": clip_valid,
@@ -2594,6 +2780,8 @@ def product_video_scene_ledger_state(
             existing = next((entry for entry in record["task_candidates"] if entry.get("task_id") == task_id), None)
             if existing:
                 for key, value in candidate.items():
+                    if key == "status" and _status_authority_rank(value) < _status_authority_rank(existing.get("status")):
+                        continue
                     if value not in (None, "", False, 0, [], {}):
                         existing[key] = value
             else:
@@ -2610,8 +2798,56 @@ def product_video_scene_ledger_state(
             record["active_task_id"] = active_task
         if provider:
             record["provider_key"] = provider
-        if status_raw:
+        status_applied = False
+        if status_raw and _status_authority_rank(candidate_status) >= _status_authority_rank(record.get("status")):
             record["status"] = candidate_status
+            status_applied = True
+        if task_ids:
+            record["dispatch_state"] = "task_submitted"
+            record["dispatchable"] = False
+            record["task_id_present"] = True
+            record["task_pollable"] = bool(
+                merged.get("task_pollable") is not False
+                and (merged.get("task_pollable") or merged.get("provider_poll_called") or task_ids)
+            )
+            record["effective_submit_outcome"] = "accepted" if record["task_pollable"] else str(
+                merged.get("effective_submit_outcome") or "accepted"
+            )
+            record["transport_http"] = max(
+                record["transport_http"],
+                _as_int(merged.get("transport_http") or merged.get("submit_http_status") or merged.get("provider_submit_http_status"), 0),
+            )
+            record["transport_anomaly"] = bool(
+                record["transport_anomaly"]
+                or merged.get("transport_anomaly")
+                or record["transport_http"] >= 400
+            )
+            record["duplicate_submit_prevented"] = bool(
+                record["duplicate_submit_prevented"]
+                or (record["task_pollable"] and record["transport_anomaly"])
+                or merged.get("duplicate_submit_prevented")
+            )
+        elif dispatch_state:
+            record["dispatch_state"] = dispatch_state
+        record["dispatch_attempted"] = bool(
+            record["dispatch_attempted"]
+            or merged.get("dispatch_attempted")
+            or merged.get("scene_dispatch_attempted")
+            or merged.get("provider_submit_called")
+        )
+        if dispatch_block_reason:
+            record["dispatch_block_reason"] = dispatch_block_reason
+        if dispatch_idempotency_key:
+            record["dispatch_idempotency_key"] = dispatch_idempotency_key
+        record["dispatch_recovered"] = bool(
+            record["dispatch_recovered"]
+            or merged.get("dispatch_recovered")
+            or merged.get("missing_scene_dispatch_recovered")
+        )
+        if merged.get("dispatchable") is not None:
+            record["dispatchable"] = bool(merged.get("dispatchable"))
+        if merged.get("exhausted") is not None:
+            record["exhausted"] = bool(merged.get("exhausted"))
         if submitted_at:
             record["submitted_at"] = submitted_at
         record["submitted_at_epoch"] = max(
@@ -2631,14 +2867,43 @@ def product_video_scene_ledger_state(
         if result_url:
             record["result_url"] = result_url
         record["result_url_present"] = bool(record["result_url_present"] or result_present)
+        if result_present:
+            record["result_task_id"] = explicit_result_task_id
+            record["result_url_source"] = source_name
+            record["task_scene_mapping_verified"] = True
+            if not clip_valid:
+                record["result_processing_action"] = "download_and_validate"
+        if status_applied or clip_valid or provider_status_conflict:
+            record["authoritative_status_source"] = authoritative_status_source
+        record["historical_status_ignored"] = bool(record["historical_status_ignored"] or provider_status_conflict)
+        record["success_result_overrode_stale_not_start"] = bool(
+            record["success_result_overrode_stale_not_start"] or provider_status_conflict
+        )
+        record["provider_status_conflict"] = bool(record["provider_status_conflict"] or provider_status_conflict)
+        if provider_status_conflict:
+            record["provider_status_conflict_resolution"] = "result_bearing_success_pending_validation"
         if clip_path:
             record["clip_path"] = clip_path
         record["clip_bytes"] = max(record["clip_bytes"], clip_bytes)
         record["clip_valid"] = bool(record["clip_valid"] or clip_valid)
+        record["scene_validation_verified"] = bool(
+            record["scene_validation_verified"]
+            or (
+                clip_valid
+                and (
+                    clip_bytes > 0
+                    or bool(merged.get("validation_passed") or merged.get("output_validated"))
+                )
+            )
+        )
         if completed_at:
             record["completed_at"] = completed_at
         record["failure_reason"] = _text_value(merged, "failure_reason", "provider_error", "blocker") or record["failure_reason"]
         record["fallback_count"] = max(record["fallback_count"], _as_int(merged.get("fallback_count") or merged.get("provider_fallback_count"), 0))
+        record["fallback_allowed"] = bool(record["fallback_allowed"] or merged.get("fallback_allowed"))
+        fallback_order = merged.get("fallback_provider_order")
+        if isinstance(fallback_order, (list, tuple)) and fallback_order:
+            record["fallback_provider_order"] = [str(item) for item in fallback_order if str(item or "").strip()]
         record["provider_elapsed_seconds"] = max(
             record["provider_elapsed_seconds"],
             _as_int(merged.get("provider_elapsed_seconds") or merged.get("provider_wait_elapsed_seconds"), 0),
@@ -2660,11 +2925,15 @@ def product_video_scene_ledger_state(
 
     canonical_index = _as_int(result.get("canonical_scene_index"), 0)
     if canonical_index in records:
+        canonical_task_id = str(result.get("canonical_task_id") or result.get("canonical_task_selected") or "").strip()
         canonical_item = {
             "scene_index": canonical_index,
             "provider": result.get("canonical_provider") or result.get("selected_provider"),
-            "provider_task_id": result.get("canonical_task_id") or result.get("canonical_task_selected"),
+            "provider_task_id": canonical_task_id,
+            "result_task_id": canonical_task_id,
             "status": result.get("canonical_status") or result.get("provider_status"),
+            "actual_provider_payload_status": result.get("actual_provider_payload_status") or result.get("shopaikey_data_status"),
+            "raw_provider_status_before_source_fix": result.get("raw_provider_status_before_source_fix") or result.get("provider_status_raw"),
             "result_url": result.get("canonical_result_url") or result.get("result_url"),
             "result_url_valid": result.get("canonical_result_url_present") or result.get("result_url_valid"),
             "clip_valid": result.get("scene_clip_validated"),
@@ -2688,14 +2957,24 @@ def product_video_scene_ledger_state(
         record = records[index]
         validation = validations.get(str(index))
         if isinstance(validation, dict):
-            record["clip_valid"] = bool(record["clip_valid"] or validation.get("ok") or validation.get("valid"))
-            record["clip_bytes"] = max(record["clip_bytes"], _as_int(validation.get("bytes") or validation.get("size"), 0))
+            validation_bytes = _as_int(validation.get("bytes") or validation.get("size"), 0)
+            validation_ok = bool(validation.get("ok") or validation.get("valid"))
+            record["clip_valid"] = bool(record["clip_valid"] or validation_ok)
+            record["clip_bytes"] = max(record["clip_bytes"], validation_bytes)
             path = str(validation.get("path") or validation.get("clip_path") or "").strip()
             if path:
                 record["clip_path"] = path
+            record["scene_validation_verified"] = bool(
+                record["scene_validation_verified"]
+                or (validation_ok and (validation_bytes > 0 or bool(path)))
+            )
         result_value = result_urls.get(str(index))
         if str(result_value or "").strip().lower() in {"yes", "true", "1", "valid"}:
-            record["result_url_present"] = True
+            # This summary contains no task identity. It may confirm an
+            # already assigned result, but it cannot create scene ownership.
+            if not record["result_url_present"]:
+                record["phantom_result_prevented"] = True
+                phantom_result_prevented = True
         if statuses.get(str(index)) not in (None, "") and not record["clip_valid"]:
             record["status"] = _status_class(statuses.get(str(index)))
         valid_candidates = [entry for entry in record["task_candidates"] if entry.get("clip_valid")]
@@ -2729,18 +3008,53 @@ def product_video_scene_ledger_state(
                 (
                     entry
                     for entry in reversed(record["task_candidates"])
-                    if entry.get("status") in {"running", "not_start", "pending"}
+                    if entry.get("status") in {"running", "not_start", "pending", "result_pending_validation"}
                 ),
                 None,
             )
             if active:
                 record["active_task_id"] = str(active.get("task_id") or record["active_task_id"])
                 record["provider_key"] = str(active.get("provider") or record["provider_key"])
-                record["status"] = "provider_not_start" if active.get("status") in {"not_start", "pending"} else "provider_running"
+                if active.get("status") == "result_pending_validation":
+                    record["status"] = "result_pending_validation"
+                    record["result_processing_action"] = "download_and_validate"
+                else:
+                    record["status"] = "provider_not_start" if active.get("status") in {"not_start", "pending"} else "provider_running"
             elif record["status"] == "failed":
                 record["status"] = "failed"
             elif record["active_task_id"]:
                 record["status"] = "provider_running"
+
+        owned_task_ids = {
+            str(record.get("primary_task_id") or "").strip(),
+            str(record.get("active_task_id") or "").strip(),
+            str(record.get("winning_task_id") or "").strip(),
+            *[str(item or "").strip() for item in record.get("fallback_task_ids") or []],
+        }
+        owned_task_ids.discard("")
+        if record["result_task_id"] and not _task_owner_verified(record["result_task_id"], index):
+            record["result_url"] = ""
+            record["result_url_present"] = False
+            record["result_task_id"] = ""
+            record["result_url_source"] = ""
+            record["task_scene_mapping_verified"] = False
+            if not record["scene_validation_verified"]:
+                record["clip_valid"] = False
+            record["result_processing_action"] = ""
+            record["phantom_result_prevented"] = True
+            phantom_result_prevented = True
+        if not owned_task_ids:
+            if record["result_url_present"] or record["result_url"]:
+                record["phantom_result_prevented"] = True
+                phantom_result_prevented = True
+            record["result_url"] = ""
+            record["result_url_present"] = False
+            record["result_task_id"] = ""
+            record["result_url_source"] = ""
+            record["task_scene_mapping_verified"] = False
+            if not record["scene_validation_verified"]:
+                record["clip_valid"] = False
+            record["result_processing_action"] = ""
 
     if scene_count == 1 and (
         result.get("final_mp4_valid")
@@ -2755,15 +3069,94 @@ def product_video_scene_ledger_state(
         records[1]["progress"] = 100
         records[1]["clip_path"] = str(result.get("final_video_path") or result.get("final_mp4_path") or records[1]["clip_path"] or "")
 
+    # A scene that lacks a task is still actionable. Keep that truth durable
+    # across worker restarts instead of letting a generic pending state turn
+    # the whole confirmed job into a terminal failure.
+    for index in expected:
+        record = records[index]
+        status_class = _status_class(record.get("status"))
+        if record["clip_valid"]:
+            record["dispatch_state"] = "task_submitted"
+            record["dispatchable"] = False
+            record["exhausted"] = False
+        elif (
+            record["active_task_id"]
+            or record["task_candidates"]
+        ) and status_class not in {"failed", "succeeded"} and not (
+            (
+                str(record.get("status") or "").strip().lower()
+                in {"provider_stalled_not_start", "provider_scene_stalled"}
+                or str(record.get("failure_reason") or "").strip().lower()
+                in {"provider_stalled_not_start", "provider_scene_stalled"}
+            )
+            and not record["fallback_allowed"]
+            and not record["fallback_provider_order"]
+        ):
+            record["dispatch_state"] = "task_submitted"
+            record["dispatchable"] = False
+            record["exhausted"] = False
+        elif (
+            str(record.get("status") or "").strip().lower()
+            in {"provider_stalled_not_start", "provider_scene_stalled"}
+            or str(record.get("failure_reason") or "").strip().lower()
+            in {"provider_stalled_not_start", "provider_scene_stalled"}
+        ) and (
+            not record["fallback_allowed"]
+            and not record["fallback_provider_order"]
+        ):
+            record["dispatch_state"] = "exhausted"
+            record["dispatchable"] = False
+            record["exhausted"] = True
+        elif status_class == "failed":
+            record["dispatch_state"] = record["dispatch_state"] or "submit_blocked_with_reason"
+            record["dispatchable"] = False
+            record["exhausted"] = True
+        else:
+            record["dispatch_state"] = record["dispatch_state"] or "submit_in_progress"
+            record["dispatchable"] = True
+            record["exhausted"] = False
+
     completed_indexes = [index for index in expected if records[index]["clip_valid"]]
     unresolved_indexes = [index for index in expected if index not in completed_indexes]
-    failed_indexes = [
+    active_indexes = [
         index
         for index in unresolved_indexes
-        if records[index]["status"] == "failed"
-        and records[index]["fallback_count"] > 0
-        and not any(entry.get("status") in {"running", "not_start", "pending"} for entry in records[index]["task_candidates"])
+        if (
+            _status_class(records[index].get("status")) in {"running", "not_start", "pending"}
+            and not records[index]["exhausted"]
+            and (
+                bool(records[index]["active_task_id"])
+                or any(entry.get("status") in {"running", "not_start", "pending"} for entry in records[index]["task_candidates"])
+            )
+        )
     ]
+    dispatchable_indexes = [
+        index
+        for index in unresolved_indexes
+        if bool(records[index]["dispatchable"])
+        and not records[index]["active_task_id"]
+        and not records[index]["clip_valid"]
+    ]
+    fallback_candidate_indexes = [
+        index
+        for index in unresolved_indexes
+        if bool(records[index]["fallback_allowed"] or records[index]["fallback_provider_order"])
+        and not records[index]["clip_valid"]
+    ]
+    unprocessed_result_indexes = [
+        index
+        for index in unresolved_indexes
+        if records[index]["result_url_present"] and not records[index]["clip_valid"]
+    ]
+    exhausted_indexes = [
+        index
+        for index in unresolved_indexes
+        if bool(records[index]["exhausted"])
+        and index not in active_indexes
+        and index not in dispatchable_indexes
+        and index not in fallback_candidate_indexes
+    ]
+    failed_indexes = list(exhausted_indexes)
     coverage_count = len(completed_indexes)
     coverage_complete = coverage_count >= scene_count
     raw_concat_attempted = bool(result.get("concat_attempted") or result.get("stitch_attempted"))
@@ -2803,9 +3196,27 @@ def product_video_scene_ledger_state(
         )
     )
     final_delivered = bool(final_assembly_valid and final_delivered_raw)
+    terminal_requested = str(result.get("terminal_state") or result.get("final_decision") or "").strip().lower() == "failed_no_charge"
+    processing_truth = bool(
+        active_indexes
+        or dispatchable_indexes
+        or fallback_candidate_indexes
+        or unprocessed_result_indexes
+    )
+    explicit_terminal_without_scene_plan = bool(
+        terminal_requested
+        and not explicit_scene_plan
+        and result.get("continue_polling") is False
+    )
+    if explicit_terminal_without_scene_plan:
+        processing_truth = False
     terminal_no_charge = bool(
-        str(result.get("terminal_state") or result.get("final_decision") or "").strip().lower() == "failed_no_charge"
-        or failed_indexes
+        unresolved_indexes
+        and not processing_truth
+        and (
+            len(exhausted_indexes) == len(unresolved_indexes)
+            or (terminal_requested and not explicit_scene_plan)
+        )
     )
     if final_delivered:
         aggregate_status = "completed"
@@ -2850,12 +3261,27 @@ def product_video_scene_ledger_state(
         str(index): [entry.get("task_id") for entry in records[index]["task_candidates"] if entry.get("task_id")]
         for index in expected
     }
+    scene_dispatch_attempt_by_index = {str(index): bool(records[index]["dispatch_attempted"]) for index in expected}
+    scene_dispatch_block_reason_by_index = {str(index): str(records[index]["dispatch_block_reason"] or "") for index in expected}
+    scene_dispatch_idempotency_keys = {str(index): str(records[index]["dispatch_idempotency_key"] or "") for index in expected}
+    scene_dispatch_state_by_index = {str(index): str(records[index]["dispatch_state"] or "submit_in_progress") for index in expected}
     scene_status_by_index = {str(index): str(records[index]["status"] or "pending_submit") for index in expected}
     scene_active_task_by_index = {str(index): str(records[index]["active_task_id"] or "") for index in expected}
     scene_winner_task_by_index = {str(index): str(records[index]["winning_task_id"] or "") for index in expected}
     scene_provider_progress_by_index = {str(index): _as_int(records[index]["progress"], 0) for index in expected}
     scene_result_available_by_index = {str(index): bool(records[index]["result_url_present"]) for index in expected}
     scene_clip_valid_by_index = {str(index): bool(records[index]["clip_valid"]) for index in expected}
+    result_task_id_by_scene = {str(index): str(records[index]["result_task_id"] or "") for index in expected}
+    result_url_source_by_scene = {str(index): str(records[index]["result_url_source"] or "") for index in expected}
+    authoritative_status_source_by_scene = {
+        str(index): str(records[index]["authoritative_status_source"] or "") for index in expected
+    }
+    result_processing_action_by_scene = {
+        str(index): str(records[index]["result_processing_action"] or "") for index in expected
+    }
+    effective_submit_outcome_by_scene = {
+        str(index): str(records[index]["effective_submit_outcome"] or "") for index in expected
+    }
     submitted_scene_count = sum(1 for index in expected if records[index]["task_candidates"] or records[index]["active_task_id"])
     current_scene_index = unresolved_indexes[0] if unresolved_indexes else (expected[-1] if expected else 0)
     next_poll_candidates = [str(records[index]["next_poll_at"] or "") for index in unresolved_indexes if records[index]["next_poll_at"]]
@@ -2867,11 +3293,62 @@ def product_video_scene_ledger_state(
         "scene_ledger_source": panel_source,
         "panel_scene_ledger_source": panel_source,
         "scene_task_map": scene_task_map,
-        "task_scene_index_map": {
-            task_id: index
-            for index in expected
-            for task_id in scene_task_map[str(index)]
-        },
+        "required_scene_indexes": expected,
+        "dispatched_scene_indexes": [index for index in expected if records[index]["active_task_id"] or records[index]["task_candidates"]],
+        "undispatched_scene_indexes": [index for index in expected if index in dispatchable_indexes],
+        "dispatchable_scene_indexes": dispatchable_indexes,
+        "active_scene_indexes": active_indexes,
+        "fallback_candidate_indexes": fallback_candidate_indexes,
+        "unprocessed_result_indexes": unprocessed_result_indexes,
+        "exhausted_scene_indexes": exhausted_indexes,
+        "scene_dispatch_state_by_index": scene_dispatch_state_by_index,
+        "scene_dispatch_attempt_by_index": scene_dispatch_attempt_by_index,
+        "scene_dispatch_block_reason_by_index": scene_dispatch_block_reason_by_index,
+        "scene_dispatch_idempotency_key": scene_dispatch_idempotency_keys,
+        "missing_scene_dispatch_recovered": bool(any(records[index]["dispatch_recovered"] for index in expected)),
+        "processing_truth_applied": bool(processing_truth and not final_delivered),
+        "stale_persisted_failure_cleared": bool(processing_truth and str(job.get("status") or "").strip().lower() in {"failed", "error"}),
+        "terminal_suppressed_due_to_active_scene": bool(active_indexes and terminal_requested),
+        "terminal_suppressed_due_to_dispatchable_scene": bool(dispatchable_indexes and terminal_requested),
+        "terminal_blocked_by_active_task": bool(active_indexes),
+        "terminal_blocked_by_pending_scene": bool(dispatchable_indexes),
+        "terminal_blocked_by_unprocessed_result": bool(unprocessed_result_indexes),
+        "terminal_eligibility": bool(terminal_no_charge),
+        "final_terminal_eligibility": bool(terminal_no_charge),
+        "state_repair_event": (
+            "processing_truth_overrode_stale_persisted_failure"
+            if processing_truth and str(job.get("status") or "").strip().lower() in {"failed", "error"}
+            else ""
+        ),
+        "task_scene_index_map": dict(task_to_scene_index),
+        "task_to_scene_index": dict(task_to_scene_index),
+        "task_scene_mapping_conflicts": dict(task_scene_mapping_conflicts),
+        "task_scene_mapping_verified": bool(not task_scene_mapping_conflicts),
+        "result_task_id_by_scene": result_task_id_by_scene,
+        "result_url_source_by_scene": result_url_source_by_scene,
+        "authoritative_status_source_by_scene": authoritative_status_source_by_scene,
+        "result_processing_action_by_scene": result_processing_action_by_scene,
+        "effective_submit_outcome_by_scene": effective_submit_outcome_by_scene,
+        "duplicate_submit_prevented": any(
+            bool(records[index]["duplicate_submit_prevented"]) for index in expected
+        ),
+        "historical_status_ignored": any(bool(records[index]["historical_status_ignored"]) for index in expected),
+        "success_result_overrode_stale_not_start": any(
+            bool(records[index]["success_result_overrode_stale_not_start"]) for index in expected
+        ),
+        "provider_status_conflict": any(bool(records[index]["provider_status_conflict"]) for index in expected),
+        "provider_status_conflict_resolution": next(
+            (
+                str(records[index]["provider_status_conflict_resolution"])
+                for index in expected
+                if records[index]["provider_status_conflict_resolution"]
+            ),
+            "",
+        ),
+        "phantom_result_prevented": bool(
+            phantom_result_prevented
+            or any(bool(records[index]["phantom_result_prevented"]) for index in expected)
+        ),
         "scene_status_by_index": scene_status_by_index,
         "scene_status_by_scene": scene_status_by_index,
         "scene_active_task_by_index": scene_active_task_by_index,
