@@ -182732,7 +182732,7 @@ async def _execute_video_dubbing_pipeline_core(
     admin_interactive_confirm: bool = False,
 ) -> dict:
     uid = query.from_user.id
-    mode = normalize_video_translate_mode(
+    mode = subdub_resolved_route_mode("", state) or normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     state = {**dict(state or {}), "_pipeline_is_admin": bool(is_admin_user(uid))}
@@ -183591,7 +183591,11 @@ async def _execute_video_dubbing_pipeline_core(
         delivery = await send_public_subtitle_dub_final_outputs(
             query.message,
             mode=mode,
-            active_flow=str(state.get("active_flow") or ""),
+            active_flow=str(
+                product_result.get("_subdub_delivery_active_flow")
+                or state.get("active_flow")
+                or ""
+            ),
             requested_mode=str(state.get("requested_mode") or ""),
             subtitle_items=subtitle_items,
             srt_text=srt_text,
