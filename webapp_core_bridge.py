@@ -135,6 +135,33 @@ def _feature_input_text(input_data: dict) -> str:
     return ""
 
 
+def _confirmed(value: Any) -> bool:
+    """Accept an explicit affirmative value without treating arbitrary input as consent."""
+    return value is True or (isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"})
+
+
+def _voice_clone_contract_error(input_data: dict, uploads: list[dict]) -> str | None:
+    """Validate the non-provider contract that the Telegram flow requires.
+
+    A Voice Clone request must have an owned audio sample and an explicit
+    rights confirmation before it may be priced or passed to a future job
+    adapter.  This intentionally does not inspect or expose the audio bytes.
+    """
+    if not uploads:
+        return "voice_clone_sample_required"
+    audio_extensions = {".mp3", ".wav", ".m4a", ".ogg"}
+    has_audio = any(
+        str(item.get("content_type") or "").lower().startswith("audio/")
+        or any(str(item.get("file_name") or "").lower().endswith(ext) for ext in audio_extensions)
+        for item in uploads
+    )
+    if not has_audio:
+        return "voice_clone_audio_sample_required"
+    if not _confirmed(input_data.get("consent")):
+        return "voice_clone_consent_required"
+    return None
+
+
 def _validate_upload_content(name: str, extension: str, content_type: Any, content: bytes) -> str:
     media_type = str(content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
     if media_type not in _UPLOAD_MIME_TYPES:
@@ -546,6 +573,44 @@ class BotCoreBridge:
             return result
         return {"available": True, "combos": entries("combos"), "monthly": entries("monthly")}
 
+    def voice_profiles(self, user_id: str) -> list[dict]:
+        """Return safe Voice Vault metadata from the bot-owned profile store."""
+        rows_fn = self.fn("user_voice_profile_rows")
+        can_generate = self.fn("voice_profile_can_generate_tts")
+        can_preview = self.fn("voice_profile_can_preview")
+        if not rows_fn:
+            return []
+        try:
+            rows = list(rows_fn(str(user_id), limit=20, offset=0, include_inactive=True) or [])
+        except Exception:
+            return []
+        result: list[dict] = []
+        for row in rows[:20]:
+            profile = dict(row or {})
+            try:
+                tts_ready = bool(can_generate(profile)) if can_generate else False
+            except Exception:
+                tts_ready = False
+            try:
+                preview_ready = bool(can_preview(profile)) if can_preview else False
+            except Exception:
+                preview_ready = False
+            # Provider voice IDs, Telegram file IDs and preview references stay
+            # inside the bot. The numeric profile ID is only an ownership-
+            # checked selector for later bridge requests.
+            result.append({
+                "id": str(profile.get("id") or ""),
+                "display_name": _safe_text(profile.get("display_name") or "Chưa đặt tên", 180),
+                "status": _safe_text(profile.get("status") or "draft", 60),
+                "is_default": bool(profile.get("is_default")),
+                "consent_status": _safe_text(profile.get("consent_status") or "", 60),
+                "tts_ready": tts_ready,
+                "preview_ready": preview_ready,
+                "created_at": _safe_text(profile.get("created_at") or "", 80),
+                "updated_at": _safe_text(profile.get("updated_at") or "", 80),
+            })
+        return result
+
     def feature_draft_payload(self, feature: str, input_data: dict) -> dict:
         """Build provider-free drafts with the same pure helpers used by bot.py.
 
@@ -557,6 +622,24 @@ class BotCoreBridge:
         feature = str(feature or "").strip()
         input_data = dict(input_data or {})
         text = _feature_input_text(input_data)
+        if feature == "voice_clone":
+            # File ownership and consent are enforced by
+            # _voice_clone_contract_error before this method is reached.  The
+            # draft is deliberately only an intake receipt, never a generated
+            # voice, provider task or completed profile.
+            return {
+                "available": True,
+                "feature": feature,
+                "source": "bot.voice_vault_intake_contract",
+                "provider_called": False,
+                "charged_xu": 0,
+                "content": {
+                    "display_name": _safe_text(input_data.get("display_name") or "Giọng mới", 180),
+                    "sample_staged": True,
+                    "consent_confirmed": True,
+                    "next_step": "Ước tính theo chính sách Voice Vault canonical trước khi xác nhận.",
+                },
+            }
         if not text:
             return {
                 "available": False,
@@ -640,7 +723,7 @@ class BotCoreBridge:
             "content": _sanitize_data(content),
         }
 
-    def feature_estimate_payload(self, feature: str, input_data: dict) -> dict:
+    def feature_estimate_payload(self, feature: str, input_data: dict, *, user_id: str = "") -> dict:
         """Quote only values returned by canonical bot pricing helpers."""
         feature = str(feature or "").strip()
         input_data = dict(input_data or {})
@@ -663,6 +746,46 @@ class BotCoreBridge:
                 return {**base, "available": True, "estimated_xu": max(0, int(calculator(len(text)) or 0)), "pricing_rule": "bot.calculate_chat_cost"}
             except Exception:
                 return {**base, "available": False, "reason": "chat_cost_helper_failed"}
+        if feature in {"voice_tts", "voice_saved_tts"}:
+            estimate = self.fn("voice_tts_credit_estimate")
+            duration = self.fn("estimate_voice_duration_seconds")
+            if not estimate or not text:
+                return {**base, "available": False, "reason": "voice_text_or_price_helper_unavailable"}
+            try:
+                payload = dict(estimate(text) or {})
+                seconds = max(0, int(duration(text, str(input_data.get("speed") or "normal")) or 0)) if duration else 0
+            except Exception:
+                return {**base, "available": False, "reason": "voice_price_helper_failed"}
+            requested_profile = str(input_data.get("voice_profile_id") or "").strip()
+            selected_profile = next((item for item in self.voice_profiles(user_id) if item.get("id") == requested_profile), None) if requested_profile else None
+            if requested_profile and not selected_profile:
+                return {**base, "available": False, "reason": "voice_profile_not_found"}
+            return {
+                **base,
+                "available": True,
+                "estimated_xu": max(0, int(payload.get("price_xu") or 0)),
+                "duration_seconds": seconds,
+                "billing": _sanitize_data(payload),
+                "selected_voice_profile": selected_profile or {},
+                "voice_profile_required": feature == "voice_saved_tts" and not bool(selected_profile),
+                "pricing_rule": "bot.voice_tts_credit_estimate",
+            }
+        if feature == "voice_clone":
+            price_fn = self.fn("voice_profile_storage_price_xu")
+            if not price_fn or not user_id:
+                return {**base, "available": False, "reason": "voice_clone_price_helper_unavailable"}
+            try:
+                price = max(0, int(price_fn(str(user_id)) or 0))
+            except Exception:
+                return {**base, "available": False, "reason": "voice_clone_price_helper_failed"}
+            return {
+                **base,
+                "available": True,
+                "estimated_xu": price,
+                "consent_required": True,
+                "sample_required": True,
+                "pricing_rule": "bot.voice_profile_storage_price_xu",
+            }
         cost_helpers = {
             "script": "workflow_script_storyboard_cost_xu",
             "storyboard": "workflow_script_storyboard_cost_xu",
@@ -1156,14 +1279,27 @@ def _feature_draft_or_estimate(bridge: BotCoreBridge, feature: str, user_id: str
     # Draft/estimate deliberately remain open for guarded public features. The
     # payload below comes only from pure bot.py planning/pricing helpers and
     # never invokes a provider or ledger writer.
-    canonical = bridge.feature_draft_payload(feature, input_data) if action == "draft" else bridge.feature_estimate_payload(feature, input_data)
+    contract_error = _voice_clone_contract_error(input_data, uploads) if feature == "voice_clone" else None
+    if contract_error:
+        canonical = {
+            "available": False,
+            "feature": feature,
+            "source": "bot.voice_vault_intake_contract",
+            "reason": contract_error,
+            "sample_required": True,
+            "consent_required": True,
+            "provider_called": False,
+            "charged_xu": 0,
+        }
+    else:
+        canonical = bridge.feature_draft_payload(feature, input_data) if action == "draft" else bridge.feature_estimate_payload(feature, input_data, user_id=user_id)
     if action == "draft" and canonical.get("available"):
         message = "Bản nháp canonical từ bot đã sẵn sàng để xem xét."
     elif action == "estimate" and canonical.get("available"):
         message = "Ước tính canonical đã sẵn sàng; chưa trừ Xu và vẫn cần xác nhận."
     else:
         message = "Yêu cầu đã được kiểm tra nhưng adapter canonical chi tiết vẫn đang được bảo vệ."
-    status_name = "draft" if action == "draft" else "awaiting_confirm"
+    status_name = "draft" if action == "draft" else ("awaiting_confirm" if canonical.get("available") else "guarded")
     return response(True, status_name, message, data={
         "feature": feature,
         "readiness": readiness,
@@ -1189,61 +1325,26 @@ async def _feature_confirm(bridge: BotCoreBridge, feature: str, user_id: str, pa
         bridge.idempotency_put(scope, key, result)
         bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="failed", note="invalid upload reference")
         return result
+    if feature == "voice_clone":
+        contract_error = _voice_clone_contract_error(input_data, uploads)
+        if contract_error:
+            result = response(False, "guarded", "Voice Clone cần mẫu audio thuộc tài khoản và xác nhận quyền sử dụng trước khi có thể chạy.", data={"feature": feature, "reason": contract_error}, error_code="VOICE_CLONE_CONTRACT_REQUIRED")
+            bridge.idempotency_put(scope, key, result)
+            bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="guarded", note=contract_error)
+            return result
     if not _bool_env("WEBAPP_PROVIDER_CALLS_ENABLED", False):
         result = response(False, "guarded", "Tính năng đang ở chế độ an toàn và chưa gọi engine từ Web.", data={"feature": feature, "readiness": readiness, "uploads": uploads}, error_code="WEBAPP_PROVIDER_CALLS_DISABLED")
         bridge.idempotency_put(scope, key, result)
         bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="guarded", note="provider calls disabled")
         return result
-    executable = {"voice_tts", "voice_clone", "voice_saved_tts", "music_background", "music_song", "subtitle_asr", "subtitle_translate", "video_dub", "video_single", "video_multiscene", "video_long"}
-    if feature not in executable:
-        result = response(False, "guarded", PUBLIC_GUARD, data={"feature": feature, "readiness": readiness}, error_code="BOT_FEATURE_NOT_BRIDGED")
-        bridge.idempotency_put(scope, key, result)
-        bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome="guarded", note="no safe executor mapping")
-        return result
-    executor = bridge.fn("execute_engine")
-    if not executor:
-        result = response(False, "guarded", PUBLIC_GUARD, data={"feature": feature, "readiness": readiness}, error_code="ENGINE_EXECUTOR_UNAVAILABLE")
-        bridge.idempotency_put(scope, key, result)
-        return result
-    # Never accept a callable/runner or privileged context from an HTTP client.
-    safe_input = _sanitize_data(input_data)
-    context = {
-        "user_id": user_id,
-        "entry_source": bridge.core.get("ENGINE_ENTRY_SOURCE_PRODUCT", "interactive_product"),
-        "confirm_paid": True,
-        "admin_interactive_confirm": bridge.is_admin(user_id),
-        "allow_admin": bridge.is_admin(user_id),
-    }
-    try:
-        raw = await executor(feature, safe_input, context)
-    except Exception:
-        raw = {"ok": False, "status": "EXECUTOR_FAILED"}
-    raw = dict(raw or {})
-    output_bytes = b""
-    bytes_fn = bridge.fn("engine_output_bytes")
-    task_fn = bridge.fn("engine_provider_task_id")
-    try:
-        output_bytes = bytes_fn(raw) if bytes_fn else b""
-    except Exception:
-        output_bytes = b""
-    try:
-        task_id = str(task_fn(raw) or "") if task_fn else ""
-    except Exception:
-        task_id = ""
-    if raw.get("ok") and output_bytes:
-        result = response(True, "completed", "Engine đã tạo đầu ra hợp lệ.", data={"feature": feature, "output_available": True, "output_bytes": len(output_bytes), "readiness": readiness})
-        outcome = "completed"
-    elif raw.get("ok") and task_id:
-        result = response(True, "queued", "Yêu cầu đã được core tiếp nhận và đang theo dõi trạng thái.", data={"feature": feature, "job_accepted": True, "readiness": readiness})
-        outcome = "queued"
-    elif str(raw.get("status") or "").upper() == "GATE_BLOCKED":
-        result = response(False, "guarded", _safe_text(raw.get("message") or PUBLIC_GUARD, 300), data={"feature": feature, "readiness": readiness}, error_code="FEATURE_GUARDED")
-        outcome = "guarded"
-    else:
-        result = response(False, "failed", "TOAN AAS chưa tạo được đầu ra hợp lệ và chưa xác nhận thành công.", data={"feature": feature, "readiness": readiness}, error_code="ENGINE_NO_VALID_OUTPUT")
-        outcome = "failed"
+    # A generic engine call cannot prove that the bot created a canonical job,
+    # charged it once, validated its delivery and registered a private asset.
+    # Keep the feature guarded even if an environment flag is toggled until a
+    # feature-specific canonical job adapter is added to the bot branch.
+    result = response(False, "guarded", "Core Bridge chưa có adapter job canonical cho tính năng này; hệ thống chưa gọi engine và chưa trừ Xu.", data={"feature": feature, "readiness": readiness, "uploads": uploads}, error_code="CANONICAL_JOB_ADAPTER_REQUIRED")
+    outcome = "guarded"
     bridge.idempotency_put(scope, key, result)
-    bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome=outcome)
+    bridge.audit(user_id, "feature.confirm", getattr(request.state, "bridge_request_id", ""), target=feature, outcome=outcome, note="canonical job adapter required")
     return result
 
 
@@ -1382,6 +1483,14 @@ def build_core_bridge_router(core: dict[str, Any]) -> APIRouter:
         result = bridge.asset_download(user_id, asset_id)
         bridge.audit(user_id, "asset.download.request", getattr(request.state, "bridge_request_id", ""), target=asset_id, outcome=result["status"])
         return result
+
+    @router.get("/voice/profiles")
+    async def voice_profiles(request: Request):
+        actor = await _authorize(request)
+        user_id = _target_user(request, {}, actor)
+        if not bridge.identity(user_id):
+            return response(False, "failed", "Không tìm thấy tài khoản canonical.", error_code="USER_NOT_FOUND")
+        return response(True, "completed", "Kho voice canonical", data={"items": bridge.voice_profiles(user_id)})
 
     @router.post("/uploads")
     async def upload_create(request: Request):

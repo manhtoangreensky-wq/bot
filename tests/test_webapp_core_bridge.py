@@ -64,6 +64,16 @@ def make_app(tmp_path, monkeypatch):
         "workflow_content_cost_xu": lambda: 35,
         "calculate_scene_video_price": lambda base, scenes: int(base) * int(scenes) * (90 if int(scenes) > 1 else 100) // 100,
         "video_scene_discount_percent": lambda scenes: 90 if int(scenes) > 1 else 100,
+        "user_voice_profile_rows": lambda user_id, limit=20, offset=0, include_inactive=True: [{
+            "id": "voice-1", "display_name": "Giọng thương hiệu", "status": "active", "is_default": 1,
+            "consent_status": "confirmed", "provider_voice_id": "private-provider-voice-id",
+            "preview_audio_ref": "private-preview-ref", "created_at": "2026-01-01", "updated_at": "2026-01-02",
+        }] if str(user_id) == "u-1" else [],
+        "voice_profile_can_generate_tts": lambda profile: bool(profile.get("provider_voice_id")) and profile.get("status") == "active",
+        "voice_profile_can_preview": lambda profile: bool(profile.get("preview_audio_ref")),
+        "voice_tts_credit_estimate": lambda text: {"chars": len(text), "billable_blocks": 1, "price_xu": 17},
+        "estimate_voice_duration_seconds": lambda text, speed="normal": 6 if speed == "normal" else 8,
+        "voice_profile_storage_price_xu": lambda user_id, product_context="showroom", profile_id=0: 47,
     }
     monkeypatch.setenv("CORE_BRIDGE_TOKEN", "test-token")
     monkeypatch.setenv("CORE_BRIDGE_HMAC_SECRET", "test-secret")
@@ -245,6 +255,90 @@ def test_video_draft_and_multiscene_estimate_use_bot_planning_and_pricing_helper
         assert estimate.json()["data"]["estimate"]["estimated_xu"] == 810
         assert estimate.json()["data"]["estimate"]["scene_discount_percent"] == 90
         assert estimate.json()["data"]["estimate"]["pricing_rule"] == "bot.calculate_scene_video_price"
+
+
+def test_voice_vault_and_estimates_use_bot_helpers_without_leaking_provider_references(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        profiles = client.get("/internal/v1/voice/profiles?user_id=u-1", headers=signed_headers("GET", "/internal/v1/voice/profiles"))
+        assert profiles.status_code == 200
+        profile = profiles.json()["data"]["items"][0]
+        assert profile["id"] == "voice-1"
+        assert profile["tts_ready"] is True
+        assert profile["preview_ready"] is True
+        assert "provider_voice_id" not in profiles.text
+        assert "private-preview-ref" not in profiles.text
+
+        estimate_payload = {"user_id": "u-1", "input": {"script": "Xin chào TOAN AAS", "voice_profile_id": "voice-1", "speed": "normal"}}
+        estimate_body = json.dumps(estimate_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        estimate = client.post(
+            "/internal/v1/features/voice_saved_tts/estimate",
+            content=estimate_body,
+            headers=signed_headers("POST", "/internal/v1/features/voice_saved_tts/estimate", estimate_body),
+        )
+        assert estimate.json()["status"] == "awaiting_confirm"
+        assert estimate.json()["data"]["estimate"]["estimated_xu"] == 17
+        assert estimate.json()["data"]["estimate"]["duration_seconds"] == 6
+        assert estimate.json()["data"]["estimate"]["selected_voice_profile"]["display_name"] == "Giọng thương hiệu"
+
+        invalid_payload = {"user_id": "u-1", "input": {"script": "Xin chào", "voice_profile_id": "not-owned"}}
+        invalid_body = json.dumps(invalid_payload, ensure_ascii=False, separators=(",", ":")).encode()
+        invalid = client.post(
+            "/internal/v1/features/voice_saved_tts/estimate",
+            content=invalid_body,
+            headers=signed_headers("POST", "/internal/v1/features/voice_saved_tts/estimate", invalid_body),
+        )
+        assert invalid.json()["status"] == "guarded"
+        assert invalid.json()["data"]["estimate"]["reason"] == "voice_profile_not_found"
+
+
+def test_voice_clone_requires_owned_audio_and_explicit_consent_before_estimate(tmp_path, monkeypatch):
+    with make_app(tmp_path, monkeypatch) as client:
+        audio = b"RIFF\x24\x00\x00\x00WAVEfmt "
+        upload_payload = {
+            "user_id": "u-1", "file_name": "voice-sample.wav", "content_type": "audio/wav",
+            "content_base64": base64.b64encode(audio).decode("ascii"), "sha256": hashlib.sha256(audio).hexdigest(),
+            "idempotency_key": "voice-clone-upload-0001",
+        }
+        upload_body = json.dumps(upload_payload, separators=(",", ":")).encode()
+        uploaded = client.post("/internal/v1/uploads", content=upload_body, headers=signed_headers("POST", "/internal/v1/uploads", upload_body))
+        upload_id = uploaded.json()["data"]["id"]
+
+        missing_consent_payload = {"user_id": "u-1", "input": {"display_name": "Giọng demo", "upload_ids": [upload_id], "consent": False}}
+        missing_consent_body = json.dumps(missing_consent_payload, separators=(",", ":")).encode()
+        missing_consent = client.post(
+            "/internal/v1/features/voice_clone/draft",
+            content=missing_consent_body,
+            headers=signed_headers("POST", "/internal/v1/features/voice_clone/draft", missing_consent_body),
+        )
+        assert missing_consent.json()["status"] == "draft"
+        assert missing_consent.json()["data"]["draft"]["reason"] == "voice_clone_consent_required"
+
+        valid_payload = {"user_id": "u-1", "input": {"display_name": "Giọng demo", "upload_ids": [upload_id], "consent": True}}
+        valid_body = json.dumps(valid_payload, separators=(",", ":")).encode()
+        draft = client.post(
+            "/internal/v1/features/voice_clone/draft",
+            content=valid_body,
+            headers=signed_headers("POST", "/internal/v1/features/voice_clone/draft", valid_body),
+        )
+        assert draft.json()["data"]["draft"]["content"]["sample_staged"] is True
+        estimate = client.post(
+            "/internal/v1/features/voice_clone/estimate",
+            content=valid_body,
+            headers=signed_headers("POST", "/internal/v1/features/voice_clone/estimate", valid_body),
+        )
+        assert estimate.json()["status"] == "awaiting_confirm"
+        assert estimate.json()["data"]["estimate"]["estimated_xu"] == 47
+        assert estimate.json()["data"]["estimate"]["consent_required"] is True
+
+        confirm_payload = {"user_id": "u-1", "input": valid_payload["input"], "idempotency_key": "voice-clone-confirm-0001"}
+        confirm_body = json.dumps(confirm_payload, separators=(",", ":")).encode()
+        confirm = client.post(
+            "/internal/v1/features/voice_clone/confirm",
+            content=confirm_body,
+            headers=signed_headers("POST", "/internal/v1/features/voice_clone/confirm", confirm_body),
+        )
+        assert confirm.json()["status"] == "guarded"
+        assert confirm.json()["error_code"] == "WEBAPP_PROVIDER_CALLS_DISABLED"
 
 
 def test_admin_module_adapter_is_canonical_read_only_and_role_protected(tmp_path, monkeypatch):
