@@ -67,8 +67,9 @@ def test_job119_in_progress_smooths_public_progress_and_scene_board():
     board = product_progress_status.video_per_scene_progress_board_text({**payload, **telemetry})
     assert "Cảnh 1/2" in board
     assert "Cảnh 2/2" in board
-    assert "đang dựng" in board
-    assert "chưa có MP4" in board
+    assert "Đang tạo" in board
+    assert "chưa có MP4" not in board
+    assert "ShopAIKey" not in board
 
     coverage = video_project_queue.product_video_scene_coverage_state(
         result={**payload, "scene_count": 2, "concat_attempted": True}
