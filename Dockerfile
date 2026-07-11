@@ -2,9 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# FFmpeg dùng để ghép scene/voice thành final_video trong Operator composer
+# FFmpeg renders SubDub output. Fontconfig and Noto provide real glyphs for
+# Vietnamese, CJK, Thai, Arabic, Devanagari and Cyrillic subtitles.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        fontconfig \
+        fonts-dejavu-core \
+        fonts-noto-core \
+        fonts-noto-cjk \
+        fonts-noto-extra \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 # Sao chép file cài đặt thư viện vào trước
