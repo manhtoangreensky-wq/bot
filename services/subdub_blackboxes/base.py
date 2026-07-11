@@ -7,6 +7,29 @@ from typing import Any, Awaitable, Callable, Mapping
 SubDubRunner = Callable[..., Awaitable[dict[str, Any]]]
 
 
+_COMBO_MODE = "subtitle_plus_dub"
+_VIDEO_LANE_PROFILES = {
+    "subtitle_create": {
+        "active_flow": "auto_subtitle",
+        "product": "auto_subtitle",
+        "product_type": "subtitle_only",
+        "output_type": "burn",
+    },
+    "subtitle_translate": {
+        "active_flow": "subtitle_translate",
+        "product": "subtitle_translation",
+        "product_type": "subtitle_only",
+        "output_type": "burn",
+    },
+    "dub": {
+        "active_flow": "dub_audio",
+        "product": "auto_dubbing",
+        "product_type": "dub_only",
+        "output_type": "video",
+    },
+}
+
+
 def _video_source(state: Mapping[str, Any]) -> bool:
     content_type = str(
         state.get("source_mime_type")
@@ -24,11 +47,61 @@ def _video_source(state: Mapping[str, Any]) -> bool:
     )
 
 
+def normalize_standalone_video_lane_entry_state(
+    state: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Clear stale cross-lane keys without changing a real combo session."""
+    current = state if isinstance(state, dict) else dict(state or {})
+    if not _video_source(current):
+        return current
+
+    active_flow = str(current.get("active_flow") or "").strip().lower()
+    if active_flow == _COMBO_MODE:
+        return current
+
+    mode = str(
+        current.get("video_processing_mode")
+        or current.get("mode")
+        or current.get("process_type")
+        or ""
+    ).strip()
+    profile = _VIDEO_LANE_PROFILES.get(mode)
+    if not profile:
+        return current
+
+    canonical_fields = {
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "requested_mode": mode,
+        "active_flow": str(profile["active_flow"]),
+        "product": str(profile["product"]),
+        "product_type": str(profile["product_type"]),
+        "output_type": str(profile["output_type"]),
+        "output_format": str(profile["output_type"]),
+    }
+    normalized = dict(current)
+    changed = False
+    for key, canonical_value in canonical_fields.items():
+        existing = normalized.get(key)
+        if existing is None or str(existing).strip() == "":
+            continue
+        if str(existing).strip().lower() == canonical_value.lower():
+            continue
+        normalized[key] = canonical_value
+        changed = True
+    if not changed:
+        return current
+    normalized["_subdub_standalone_lane_normalized"] = True
+    return normalized
+
+
 def normalize_video_lane_state(mode: str, state: Mapping[str, Any]) -> dict[str, Any]:
     """Keep video-only outputs on their MP4 contract without changing file/audio flows."""
-    if not _video_source(state):
-        return state if isinstance(state, dict) else dict(state or {})
-    current = dict(state or {})
+    normalized = normalize_standalone_video_lane_entry_state(state)
+    if not _video_source(normalized):
+        return normalized
+    current = dict(normalized)
     if mode in {"subtitle_create", "subtitle_translate"}:
         output = str(current.get("output_type") or "").strip().lower()
         if output not in {"burn", "both", "video_subtitle"}:
@@ -38,7 +111,7 @@ def normalize_video_lane_state(mode: str, state: Mapping[str, Any]) -> dict[str,
         current["output_type"] = "video_subtitle"
         current["output_format"] = "video_subtitle"
     else:
-        return state if isinstance(state, dict) else current
+        return current
     current["_subdub_delivery_active_flow"] = "subdub_video"
     current["_subdub_lane_video_output_locked"] = True
     return current
