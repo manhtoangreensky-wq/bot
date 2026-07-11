@@ -48,6 +48,7 @@ PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
 PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY = "b13_r18c"
 PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
 PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
+PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT = 15
 PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
     "pending",
     "leased",
@@ -56,6 +57,18 @@ PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
     "completed",
     "terminal_failed",
 )
+
+_PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
+    "scheduler_registered": False,
+    "scheduler_running": False,
+    "last_run_at": "",
+    "last_success_at": "",
+    "last_error": "",
+    "jobs_scanned": 0,
+    "jobs_reconciled": 0,
+    "next_run_at": "",
+    "interval_seconds": PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
+}
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
     "low": 200,
     "trial": 200,
@@ -1876,6 +1889,111 @@ def get_product_video_dispatch_outbox(
     return _dispatch_outbox_from_row(row)
 
 
+def product_video_dispatch_outbox_diagnostic(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Explain the durable owner-worker claim decision for one Product Video job."""
+    ensure_video_project_queue_schema(conn)
+    current_dt = now or datetime.now()
+    current_epoch = current_dt.timestamp()
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        return {
+            "job_id": int(job_id),
+            "outbox_exists": False,
+            "claimable": False,
+            "exact_claim_block_reason": "job_not_found",
+            "claim_query_source": "video_dispatch_outbox_join_video_jobs_video_projects",
+        }
+    project = get_video_project(conn, int(job.get("project_id") or 0))
+    if not project:
+        return {
+            "job_id": int(job_id),
+            "project_id": int(job.get("project_id") or 0),
+            "outbox_exists": False,
+            "claimable": False,
+            "exact_claim_block_reason": "project_not_found",
+            "claim_query_source": "video_dispatch_outbox_join_video_jobs_video_projects",
+        }
+    result = _json_loads(str(job.get("result_json") or ""), {})
+    if not isinstance(result, dict):
+        result = {}
+    outbox = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+    route_contract = canonical_product_video_route_contract(project, result)
+    job_status = str(job.get("status") or "").strip().lower()
+    project_status = str(project.get("status") or "").strip().lower()
+    outbox_status = str(outbox.get("dispatch_status") or "").strip().lower()
+    available_at = str(outbox.get("available_at") or "")
+    lease_expiry = str(outbox.get("lease_expires_at") or "")
+    available_epoch = _parse_time_epoch(available_at)
+    lease_expiry_epoch = _parse_time_epoch(lease_expiry)
+    job_lease_expiry = _parse_time_epoch(job.get("lease_expires_at"))
+    job_active_lease = bool(
+        job_status == "processing"
+        and str(job.get("locked_by") or "").strip()
+        and job_lease_expiry > current_epoch
+    )
+    reason = ""
+    if not _is_product_video_project(project):
+        reason = "not_product_video_project"
+    elif job_status not in {"queued", "processing"}:
+        reason = f"job_status_{job_status or 'missing'}"
+    elif _as_int(project.get("is_confirmed"), 0) != 1:
+        reason = "project_not_confirmed"
+    elif project_status not in {"queued_for_worker", "processing"}:
+        reason = f"project_status_{project_status or 'missing'}"
+    elif not outbox:
+        reason = "dispatch_outbox_missing"
+    elif str(outbox.get("owner") or "") != PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER:
+        reason = "dispatch_outbox_owner_mismatch"
+    elif job_active_lease:
+        reason = "video_job_lease_active"
+    elif outbox_status in {"terminal_failed", "completed", "cancelled"}:
+        reason = f"dispatch_outbox_{outbox_status}"
+    elif outbox_status == "acknowledged":
+        reason = "dispatch_outbox_already_acknowledged"
+    elif outbox_status == "leased" and lease_expiry_epoch > current_epoch:
+        reason = "dispatch_outbox_lease_active"
+    elif outbox_status in {"pending", "retry_wait"} and available_epoch > current_epoch:
+        reason = "dispatch_outbox_not_available_yet"
+    elif outbox_status not in {"pending", "retry_wait", "leased"}:
+        reason = f"dispatch_outbox_status_{outbox_status or 'missing'}"
+    claimable = not bool(reason)
+    watchdog = product_video_zero_task_watchdog_state(job, result, now=current_dt)
+    return {
+        "job_id": int(job_id),
+        "project_id": int(project.get("project_id") or 0),
+        "job_status": job_status,
+        "project_status": project_status,
+        "project_confirmed": _as_int(project.get("is_confirmed"), 0) == 1,
+        "outbox_exists": bool(outbox),
+        "outbox_id": _as_int(outbox.get("outbox_id"), 0),
+        "outbox_status": outbox_status,
+        "outbox_owner": str(outbox.get("owner") or ""),
+        "outbox_available_at": available_at,
+        "outbox_lease_owner": str(outbox.get("lease_owner") or ""),
+        "outbox_lease_expiry": lease_expiry,
+        "job_lease_owner": str(job.get("locked_by") or ""),
+        "job_lease_expiry": str(job.get("lease_expires_at") or ""),
+        "job_active_lease": job_active_lease,
+        "claimable": claimable,
+        "exact_claim_block_reason": reason,
+        "claim_query_source": "video_dispatch_outbox_join_video_jobs_video_projects",
+        "claim_allowed_job_statuses": ["queued", "processing"],
+        "claim_allowed_outbox_states": ["pending", "retry_wait", "expired_lease"],
+        "claim_owner_filter": PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER,
+        "claim_job_age_filter": "none",
+        "claim_zero_task_filter": "watchdog_recovery_before_claim",
+        "valid_provider_task_count": _as_int(watchdog.get("valid_provider_task_count"), 0),
+        "valid_scene_clip_count": _as_int(watchdog.get("valid_scene_clip_count"), 0),
+        "zero_task_watchdog_triggered": bool(watchdog.get("zero_task_watchdog_triggered")),
+        **route_contract,
+    }
+
+
 def _insert_product_video_dispatch_outbox_record(
     conn: sqlite3.Connection,
     *,
@@ -1957,6 +2075,12 @@ def claim_product_video_dispatch_outbox(
                  JOIN video_projects p ON p.project_id=o.project_id
                 WHERE o.owner=?
                   AND j.status IN ('queued','processing')
+                  AND (
+                       j.status='queued'
+                       OR COALESCE(j.locked_by,'')=''
+                       OR j.lease_expires_at IS NULL
+                       OR j.lease_expires_at<?
+                  )
                   AND COALESCE(p.is_confirmed,0)=1
                   AND p.status IN ('queued_for_worker','processing')
                   AND (
@@ -1965,7 +2089,7 @@ def claim_product_video_dispatch_outbox(
                   )
                 ORDER BY o.available_at ASC,o.created_at ASC,o.outbox_id ASC
                 LIMIT 1""",
-            (PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER, current, current),
+            (PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER, current, current, current),
         ).fetchone()
         if not row:
             conn.commit()
@@ -2171,18 +2295,11 @@ def _product_video_final_admission_state(
     handler_id = str(admission.get("admission_callback_handler_id") or snapshot.get("admission_callback_handler_id") or "")
     callback_data = str(admission.get("admission_callback_data") or snapshot.get("admission_callback_data") or "")
     worker_version_compatible = bool(admission.get("admission_worker_version_compatible"))
-    from services import video_provider_router
-
-    route_contract = video_provider_router.product_video_route_contract(
-        str(asset_pack.get("product_type") or invoice.get("product_type") or project.get("profile_id") or ""),
-        str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or ""),
-        str(asset_pack.get("orchestration_mode") or invoice.get("orchestration_mode") or ""),
-        explicit_local_renderer=bool(asset_pack.get("explicit_local_renderer") or invoice.get("explicit_local_renderer")),
-    )
-    route_requires_provider = bool(
-        admission.get("admission_route_requires_provider")
-        and route_contract.get("route_requires_provider")
-    )
+    route_contract = canonical_product_video_route_contract(project, admission)
+    persisted_admission_route = admission.get("admission_route_requires_provider")
+    route_requires_provider = bool(route_contract.get("route_requires_provider"))
+    if route_requires_provider and persisted_admission_route is False:
+        route_contract["route_requirement_override"] = "legacy_persisted_false_ignored"
     duplicate_handler_detected = bool(admission.get("duplicate_confirm_handler_detected"))
     replayed = bool(admission.get("admission_snapshot_consumed") or snapshot.get("admission_snapshot_consumed"))
     result_value = str(admission.get("admission_result") or ("PASS" if admission.get("ok") else "BLOCKED")).upper()
@@ -2262,6 +2379,7 @@ def _product_video_final_admission_state(
         "admission_worker_sha": str(admission.get("admission_worker_sha") or ""),
         "admission_worker_version_compatible": worker_version_compatible,
         "admission_route_requires_provider": route_requires_provider,
+        "persisted_admission_route_requires_provider": persisted_admission_route,
         **route_contract,
         "worker_admission_block_reason": str(admission.get("worker_admission_block_reason") or ""),
         "duplicate_confirm_handler_detected": duplicate_handler_detected,
@@ -2974,6 +3092,71 @@ def _is_product_video_project(project: dict[str, Any]) -> bool:
     )
 
 
+def canonical_product_video_route_contract(
+    project: dict[str, Any] | None,
+    result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve the immutable Product Video route contract from durable inputs."""
+    project = dict(project or {})
+    result = dict(result or {})
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    if not isinstance(invoice, dict):
+        invoice = {}
+    from services import video_provider_router
+
+    product_type = str(
+        result.get("product_type")
+        or asset_pack.get("product_type")
+        or invoice.get("product_type")
+        or project.get("profile_id")
+        or ""
+    )
+    engine_adapter = str(
+        result.get("engine_adapter")
+        or asset_pack.get("engine_adapter")
+        or invoice.get("engine_adapter")
+        or ""
+    )
+    orchestration_mode = str(
+        result.get("orchestration_mode")
+        or result.get("provider_orchestration_mode")
+        or asset_pack.get("orchestration_mode")
+        or asset_pack.get("provider_orchestration_mode")
+        or invoice.get("orchestration_mode")
+        or invoice.get("provider_orchestration_mode")
+        or ""
+    )
+    explicit_local_renderer = bool(
+        result.get("explicit_local_renderer")
+        or asset_pack.get("explicit_local_renderer")
+        or invoice.get("explicit_local_renderer")
+    )
+    contract = video_provider_router.product_video_route_contract(
+        product_type,
+        engine_adapter,
+        orchestration_mode,
+        explicit_local_renderer=explicit_local_renderer,
+    )
+    persisted_value = result.get("route_requires_provider")
+    persisted_false_ignored = bool(contract.get("route_requires_provider") and persisted_value is False)
+    return {
+        **contract,
+        "route_contract_product_type": product_type,
+        "route_contract_engine_adapter": engine_adapter,
+        "route_contract_orchestration_mode": orchestration_mode,
+        "persisted_route_requires_provider_before_reconcile": persisted_value,
+        "route_requirement_override": (
+            "legacy_persisted_false_ignored"
+            if persisted_false_ignored
+            else str(result.get("route_requirement_override") or "")
+        ),
+        "route_requirement_product_contract": bool(contract.get("route_requires_provider")),
+    }
+
+
 def _product_video_scene_count(project: dict[str, Any], payload: dict[str, Any] | None = None) -> int:
     payload = dict(payload or {})
     invoice = _json_loads(str(project.get("invoice_json") or ""), {})
@@ -3643,6 +3826,7 @@ def sweep_product_video_zero_task_watchdog(
         params,
     ).fetchall()
     report = {
+        "scanned": 0,
         "checked": 0,
         "triggered": 0,
         "recovered": 0,
@@ -3655,9 +3839,11 @@ def sweep_product_video_zero_task_watchdog(
         project = get_video_project(conn, int(row[1]))
         if not job or not project or not _is_product_video_project(project):
             continue
+        report["scanned"] += 1
         result = _json_loads(str(job.get("result_json") or ""), {})
         if not isinstance(result, dict):
             result = {}
+        result.update(canonical_product_video_route_contract(project, result))
         preliminary = product_video_zero_task_watchdog_state(job, result, now=current_dt)
         if not preliminary.get("zero_task_progress_guard"):
             continue
@@ -3900,9 +4086,98 @@ def sweep_product_video_zero_task_watchdog(
                 "zero_task_recovery_action": recovery_action,
                 "zero_task_terminal_reason": terminal_reason,
                 "candidate_count": len(candidates),
+                "dispatch_outbox": product_video_dispatch_outbox_diagnostic(
+                    conn,
+                    job_id=int(job["id"]),
+                    now=current_dt,
+                ),
             }
         )
     return report
+
+
+def mark_product_video_watchdog_scheduler(
+    *,
+    registered: bool | None = None,
+    running: bool | None = None,
+    interval_seconds: int | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current_dt = now or datetime.now()
+    if registered is not None:
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["scheduler_registered"] = bool(registered)
+    if running is not None:
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["scheduler_running"] = bool(running)
+    if interval_seconds is not None:
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["interval_seconds"] = max(5, min(300, int(interval_seconds)))
+    interval = int(
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("interval_seconds")
+        or PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT
+    )
+    if _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("scheduler_running"):
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["next_run_at"] = now_text(
+            current_dt + timedelta(seconds=interval)
+        )
+    elif running is False:
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["next_run_at"] = ""
+    return product_video_watchdog_scheduler_status()
+
+
+def product_video_watchdog_scheduler_status() -> dict[str, Any]:
+    return dict(_PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE)
+
+
+def run_product_video_watchdog_scheduler_tick(
+    conn: sqlite3.Connection,
+    *,
+    eligibility_evaluator: Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]] | None,
+    now: datetime | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Run the exact durable watchdog tick used by the bot scheduler."""
+    current_dt = now or datetime.now()
+    interval = int(
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("interval_seconds")
+        or PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT
+    )
+    _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
+        {
+            "scheduler_registered": True,
+            "scheduler_running": True,
+            "last_run_at": now_text(current_dt),
+            "last_error": "",
+            "next_run_at": now_text(current_dt + timedelta(seconds=interval)),
+        }
+    )
+    try:
+        report = sweep_product_video_zero_task_watchdog(
+            conn,
+            now=current_dt,
+            eligibility_evaluator=eligibility_evaluator,
+            limit=limit,
+        )
+    except Exception as exc:
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
+            {
+                "last_error": f"{type(exc).__name__}:{str(exc)[:160]}",
+                "jobs_scanned": 0,
+                "jobs_reconciled": 0,
+            }
+        )
+        raise
+    jobs_reconciled = int(report.get("recovered") or 0) + int(report.get("terminal_failed") or 0)
+    _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
+        {
+            "last_success_at": now_text(current_dt),
+            "jobs_scanned": int(report.get("scanned") or 0),
+            "jobs_reconciled": jobs_reconciled,
+            "last_error": "",
+        }
+    )
+    return {
+        **report,
+        **product_video_watchdog_scheduler_status(),
+    }
 
 
 def kickoff_product_video_job_after_confirm(

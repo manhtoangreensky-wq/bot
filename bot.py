@@ -47394,6 +47394,10 @@ def video_render_debug_compact_text(
         f"• progress_monotonic_applied: <code>{'yes' if (result or {}).get('progress_monotonic_applied') else 'no'}</code>",
         f"• claimable owner-product: <code>{'yes' if (claim_debug or {}).get('claimable') else 'no'}</code>",
         f"• claim reason: <code>{_video_debug_safe_value((claim_debug or {}).get('reason'), 120)}</code>",
+        f"• outbox exists/id/status: <code>{'yes' if (claim_debug or {}).get('outbox_exists') else 'no'}/{safe_int((claim_debug or {}).get('outbox_id'), 0)}/{_video_debug_safe_value((claim_debug or {}).get('outbox_status'), 60)}</code>",
+        f"• outbox owner/available: <code>{_video_debug_safe_value((claim_debug or {}).get('outbox_owner'), 80)}/{_video_debug_safe_value((claim_debug or {}).get('outbox_available_at'), 80)}</code>",
+        f"• outbox lease owner/expiry: <code>{_video_debug_safe_value((claim_debug or {}).get('outbox_lease_owner'), 80)}/{_video_debug_safe_value((claim_debug or {}).get('outbox_lease_expiry'), 80)}</code>",
+        f"• exact claim block reason: <code>{_video_debug_safe_value((claim_debug or {}).get('exact_claim_block_reason'), 120)}</code>",
         f"• voice: <code>{'on' if addon_plan.get('voice_enabled') else 'off'}</code>",
         f"• music: <code>{'on' if addon_plan.get('music_enabled') else 'off'}</code>",
         f"• subtitle: <code>{'on' if addon_plan.get('subtitle_enabled') else 'off'}</code>",
@@ -47571,6 +47575,10 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• scenes: <code>{safe_int((project or {}).get('scene_count') or asset_pack.get('scene_count'), 0)}</code>",
         f"• claimable owner-product: <code>{'yes' if claim_debug.get('claimable') else 'no'}</code>",
         f"• claim reason: <code>{html.escape(str(claim_debug.get('reason') or '-'))}</code>",
+        f"• outbox exists/id/status: <code>{'yes' if claim_debug.get('outbox_exists') else 'no'}/{safe_int(claim_debug.get('outbox_id'), 0)}/{html.escape(str(claim_debug.get('outbox_status') or '-'))}</code>",
+        f"• outbox owner/available: <code>{html.escape(str(claim_debug.get('outbox_owner') or '-'))}/{html.escape(str(claim_debug.get('outbox_available_at') or '-'))}</code>",
+        f"• outbox lease owner/expiry: <code>{html.escape(str(claim_debug.get('outbox_lease_owner') or '-'))}/{html.escape(str(claim_debug.get('outbox_lease_expiry') or '-'))}</code>",
+        f"• exact claim block reason: <code>{html.escape(str(claim_debug.get('exact_claim_block_reason') or '-'))}</code>",
         "",
         "Add-ons:",
         f"• voice: <code>{'on' if addon_plan.get('voice_enabled') else 'off'}</code> source=<code>{html.escape(str(addon_plan.get('voice_source') or '-'))}</code>",
@@ -70768,11 +70776,40 @@ def video_b14_render_job_by_id(job_id: int) -> dict:
 def video_b14_job_result_payload(job: dict | None = None) -> dict:
     raw = (job or {}).get("result_json")
     if isinstance(raw, dict):
-        return dict(raw)
-    try:
-        return json.loads(str(raw or "{}"))
-    except Exception:
+        payload = dict(raw)
+    else:
+        try:
+            payload = json.loads(str(raw or "{}"))
+        except Exception:
+            payload = {}
+    if not isinstance(payload, dict):
         return {}
+    product_type = str(payload.get("product_type") or payload.get("profile_id") or "")
+    engine_adapter = str(payload.get("engine_adapter") or "")
+    orchestration_mode = str(
+        payload.get("orchestration_mode")
+        or payload.get("provider_orchestration_mode")
+        or ""
+    )
+    product_video_payload = bool(
+        payload.get("product_video")
+        or str(payload.get("source") or "") == "product_video"
+        or product_type in video_provider_router.PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES
+    )
+    if product_video_payload:
+        contract = video_provider_router.product_video_route_contract(
+            product_type,
+            engine_adapter,
+            orchestration_mode,
+            explicit_local_renderer=bool(payload.get("explicit_local_renderer")),
+        )
+        persisted_route = payload.get("route_requires_provider")
+        payload.update(contract)
+        payload["route_requirement_product_contract"] = bool(contract.get("route_requires_provider"))
+        if contract.get("route_requires_provider") and persisted_route is False:
+            payload["route_requirement_override"] = "legacy_persisted_false_ignored"
+        payload["persisted_route_requires_provider_before_reconcile"] = persisted_route
+    return payload
 
 
 def video_b14_render_mode_from_job(job: dict | None = None, project: dict | None = None) -> str:
@@ -71029,6 +71066,15 @@ def video_b14_primary_alive_attempt(result: dict | None = None) -> dict:
 
 def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict | None = None, result: dict | None = None, *, refresh_source: str = "debug") -> dict:
     data = dict(result or {})
+    try:
+        route_contract = video_project_queue.canonical_product_video_route_contract(
+            dict(project or {}),
+            data,
+        )
+        if route_contract.get("route_requires_provider") or str(data.get("source") or "") == "product_video":
+            data.update(route_contract)
+    except Exception as exc:
+        data["route_contract_reconcile_error"] = type(exc).__name__
     canonical_fields: dict = {}
     try:
         jid = safe_int((job or {}).get("id") or (job or {}).get("job_id"), 0)
@@ -72856,6 +72902,54 @@ def run_product_video_bot_side_zero_task_watchdog(job_id: int | str) -> dict:
         )
     finally:
         conn.close()
+
+
+def product_video_watchdog_scheduler_interval_seconds() -> int:
+    return max(
+        5,
+        min(
+            300,
+            safe_int(
+                os.getenv("PRODUCT_VIDEO_ZERO_TASK_WATCHDOG_INTERVAL_SECONDS"),
+                video_project_queue.PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
+            ),
+        ),
+    )
+
+
+def run_product_video_watchdog_scheduler_tick() -> dict:
+    conn = db_connect()
+    try:
+        return video_project_queue.run_product_video_watchdog_scheduler_tick(
+            conn,
+            eligibility_evaluator=product_video_bot_watchdog_eligibility,
+        )
+    finally:
+        conn.close()
+
+
+async def product_video_watchdog_scheduler_loop() -> None:
+    interval = product_video_watchdog_scheduler_interval_seconds()
+    video_project_queue.mark_product_video_watchdog_scheduler(
+        registered=True,
+        running=True,
+        interval_seconds=interval,
+    )
+    try:
+        while True:
+            try:
+                await asyncio.to_thread(run_product_video_watchdog_scheduler_tick)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("product video zero-task watchdog tick failed: %s", type(exc).__name__)
+            await asyncio.sleep(interval)
+    finally:
+        video_project_queue.mark_product_video_watchdog_scheduler(
+            registered=True,
+            running=False,
+            interval_seconds=interval,
+        )
 
 
 def product_video_apply_provider_preflight_to_session(user_id, session: dict, preflight: dict) -> dict:
@@ -91019,11 +91113,6 @@ def video_public_status_payload() -> dict:
         worker = {"frame": {"local_worker_connected": False, "ffmpeg_configured": False, "last_error": f"local_worker_status_unavailable:{type(exc).__name__}"}}
         section_errors.append(f"local_worker:{type(exc).__name__}")
     try:
-        remote_worker = video_remote_worker_runtime_status()
-    except Exception as exc:
-        remote_worker = {"connected": False, "reason": f"remote_worker_status_unavailable:{type(exc).__name__}"}
-        section_errors.append(f"product_video_worker:{type(exc).__name__}")
-    try:
         product_video_worker = product_video_worker_admission_status()
     except Exception as exc:
         product_video_worker = {
@@ -91031,6 +91120,18 @@ def video_public_status_payload() -> dict:
             "worker_admission_block_reason": f"owner_product_video_status_unavailable:{type(exc).__name__}",
         }
         section_errors.append(f"owner_product_video_worker:{type(exc).__name__}")
+    remote_worker = {
+        **product_video_worker,
+        "runtime_short": str(product_video_worker.get("runtime_sha") or "-")[:12],
+        "worker_short": str(product_video_worker.get("worker_sha") or "-")[:12],
+        "connected": bool(product_video_worker.get("worker_connected")),
+        "worker_code_matches_runtime": (
+            "yes" if product_video_worker.get("worker_sha_matches_runtime") else "no"
+        ),
+        "last_heartbeat": str(product_video_worker.get("worker_heartbeat_at") or ""),
+        "reason": str(product_video_worker.get("worker_admission_block_reason") or "-"),
+    }
+    product_video_watchdog = video_project_queue.product_video_watchdog_scheduler_status()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
     frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
     ai_public = bool(
@@ -91060,6 +91161,7 @@ def video_public_status_payload() -> dict:
         "worker": worker,
         "remote_worker": remote_worker,
         "product_video_worker_admission": product_video_worker,
+        "product_video_watchdog_scheduler": product_video_watchdog,
         "product_video_confirm_handler_diagnostics": dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {}),
         "freeze": freeze,
         "public_flags": {
@@ -91161,6 +91263,7 @@ def video_public_status_text() -> str:
     model_catalog = payload.get("product_video_model_catalog") if isinstance(payload.get("product_video_model_catalog"), dict) else {}
     remote_worker = payload.get("remote_worker") if isinstance(payload.get("remote_worker"), dict) else {}
     product_worker = payload.get("product_video_worker_admission") if isinstance(payload.get("product_video_worker_admission"), dict) else {}
+    watchdog_scheduler = payload.get("product_video_watchdog_scheduler") if isinstance(payload.get("product_video_watchdog_scheduler"), dict) else {}
     confirm_handlers = payload.get("product_video_confirm_handler_diagnostics") if isinstance(payload.get("product_video_confirm_handler_diagnostics"), dict) else {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
@@ -91242,10 +91345,20 @@ def video_public_status_text() -> str:
         f"• sync note: <code>{html.escape(str(remote_worker.get('reason') or '-'))}</code>",
         f"• owner runtime SHA: <code>{html.escape(str(product_worker.get('runtime_sha') or '-')[:12])}</code>",
         f"• owner worker SHA: <code>{html.escape(str(product_worker.get('worker_sha') or '-')[:12])}</code>",
+        f"• owner SHA source: <code>{html.escape(str(product_worker.get('worker_sha_source') or 'unknown'))}</code>",
+        f"• owner git HEAD: <code>{html.escape(str(product_worker.get('worker_git_head_sha') or '-')[:12])}</code>",
+        f"• owner cwd: <code>{html.escape(str(product_worker.get('worker_cwd') or '-'))}</code>",
         f"• owner worker compatible: <code>{video_public_bool_label(product_worker.get('worker_version_compatible'))}</code>",
         f"• owner heartbeat age: <code>{html.escape(str(product_worker.get('worker_heartbeat_age') if product_worker.get('worker_heartbeat_age') is not None else '-'))}</code>",
+        f"• heartbeat selected by: <code>{html.escape(str(product_worker.get('heartbeat_record_selected_by') or '-'))}</code>",
+        f"• stale worker SHA ignored: <code>{video_public_bool_label(product_worker.get('stale_worker_sha_ignored'))}</code>",
         f"• owner capability version: <code>{html.escape(str(product_worker.get('worker_capability_version') or '-'))}</code>",
         f"• owner admission blocker: <code>{html.escape(str(product_worker.get('worker_admission_block_reason') or '-'))}</code>",
+        f"• watchdog registered/running: <code>{video_public_bool_label(watchdog_scheduler.get('scheduler_registered'))}/{video_public_bool_label(watchdog_scheduler.get('scheduler_running'))}</code>",
+        f"• watchdog last run/success: <code>{html.escape(str(watchdog_scheduler.get('last_run_at') or '-'))}/{html.escape(str(watchdog_scheduler.get('last_success_at') or '-'))}</code>",
+        f"• watchdog scanned/reconciled: <code>{safe_int(watchdog_scheduler.get('jobs_scanned'), 0)}/{safe_int(watchdog_scheduler.get('jobs_reconciled'), 0)}</code>",
+        f"• watchdog next run: <code>{html.escape(str(watchdog_scheduler.get('next_run_at') or '-'))}</code>",
+        f"• watchdog last error: <code>{html.escape(str(watchdog_scheduler.get('last_error') or '-'))}</code>",
         f"• confirm handler count: <code>{safe_int(confirm_handlers.get('product_video_confirm_handler_count'), 0)}</code>",
         f"• duplicate confirm handler: <code>{video_public_bool_label(confirm_handlers.get('duplicate_confirm_handler_detected'))}</code>",
         "",
@@ -190526,6 +190639,7 @@ tg_auto_backup_task: asyncio.Task | None = None
 tg_memory_reminder_task: asyncio.Task | None = None
 tg_shopaikey_usage_task: asyncio.Task | None = None
 tg_payos_expiry_task: asyncio.Task | None = None
+tg_product_video_watchdog_task: asyncio.Task | None = None
 
 async def shopaikey_usage_monitor_loop(bot_client):
     await asyncio.sleep(20)
@@ -190577,7 +190691,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED, PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, tg_product_video_watchdog_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED, PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS
     init_db()
     try:
         run_storage_cleanup_auto_once()
@@ -191914,6 +192028,7 @@ async def lifespan(app: FastAPI):
         if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
             storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
         tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
+        tg_product_video_watchdog_task = asyncio.create_task(product_video_watchdog_scheduler_loop())
         if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
             tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
         if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
@@ -191960,6 +192075,12 @@ async def lifespan(app: FastAPI):
         tg_payos_expiry_task.cancel()
         try:
             await tg_payos_expiry_task
+        except asyncio.CancelledError:
+            pass
+    if tg_product_video_watchdog_task:
+        tg_product_video_watchdog_task.cancel()
+        try:
+            await tg_product_video_watchdog_task
         except asyncio.CancelledError:
             pass
     if tg_app and telegram_started:
@@ -192052,10 +192173,15 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
     if not owner_mode:
         return
     prefix = "remote_worker:owner_product_video:"
+    heartbeat_updated_at = now_text()
     values = {
-        "last_heartbeat": now_text(),
+        "last_heartbeat": heartbeat_updated_at,
+        "heartbeat_updated_at": heartbeat_updated_at,
         "worker_id": str(worker_id or "")[:120],
         "worker_git_sha": str(payload.get("worker_git_sha") or "")[:80],
+        "worker_git_head_sha": str(payload.get("worker_git_head_sha") or payload.get("worker_git_sha") or "")[:80],
+        "worker_sha_source": str(payload.get("worker_sha_source") or "worker_claim_payload")[:80],
+        "worker_cwd": str(payload.get("worker_cwd") or "")[:500],
         "worker_parser_version": str(payload.get("worker_parser_version") or "")[:80],
         "worker_service_mode": service_mode or "owner_product_video",
         "worker_capabilities": json.dumps(list(capabilities or []), ensure_ascii=True, separators=(",", ":")),
@@ -192071,26 +192197,53 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
 def product_video_worker_admission_status() -> dict:
     prefix = "remote_worker:owner_product_video:"
     runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
-    worker_sha = str(get_system_setting(prefix + "worker_git_sha", "") or "").strip()
-    worker_id = str(get_system_setting(prefix + "worker_id", "") or "").strip()
-    heartbeat_at = str(get_system_setting(prefix + "last_heartbeat", "") or "").strip()
-    service_mode = str(get_system_setting(prefix + "worker_service_mode", "") or "").strip()
-    capability_version = str(get_system_setting(prefix + "worker_capability_version", "") or "").strip()
-    raw_capabilities = str(get_system_setting(prefix + "worker_capabilities", "") or "").strip()
+    settings = get_system_settings(
+        [
+            prefix + "worker_git_sha",
+            prefix + "worker_git_head_sha",
+            prefix + "worker_sha_source",
+            prefix + "worker_cwd",
+            prefix + "worker_id",
+            prefix + "last_heartbeat",
+            prefix + "heartbeat_updated_at",
+            prefix + "worker_service_mode",
+            prefix + "worker_capability_version",
+            prefix + "worker_capabilities",
+        ]
+    )
+    raw_capabilities = str(settings.get(prefix + "worker_capabilities") or "").strip()
     try:
         capabilities = json.loads(raw_capabilities) if raw_capabilities else []
     except Exception:
         capabilities = []
     capabilities = [str(item or "").strip() for item in capabilities if str(item or "").strip()]
-    heartbeat_dt = parse_now_text(heartbeat_at)
-    heartbeat_age = max(0, int((datetime.now() - heartbeat_dt).total_seconds())) if heartbeat_dt else None
     heartbeat_ttl = max(30, min(300, safe_int(os.getenv("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS"), 90)))
-    connected = bool(heartbeat_age is not None and heartbeat_age <= heartbeat_ttl)
-    version_compatible = bool(
-        runtime_sha
-        and worker_sha
-        and (runtime_sha.startswith(worker_sha) or worker_sha.startswith(runtime_sha))
+    identity = remote_worker_api.authoritative_product_video_worker_identity(
+        [
+            {
+                "worker_git_sha": settings.get(prefix + "worker_git_sha") or "",
+                "worker_git_head_sha": settings.get(prefix + "worker_git_head_sha") or "",
+                "worker_sha_source": settings.get(prefix + "worker_sha_source") or "",
+                "worker_cwd": settings.get(prefix + "worker_cwd") or "",
+                "worker_id": settings.get(prefix + "worker_id") or "",
+                "last_heartbeat": settings.get(prefix + "last_heartbeat") or "",
+                "heartbeat_updated_at": settings.get(prefix + "heartbeat_updated_at") or settings.get(prefix + "last_heartbeat") or "",
+                "worker_service_mode": settings.get(prefix + "worker_service_mode") or "",
+                "worker_capability_version": settings.get(prefix + "worker_capability_version") or "",
+                "worker_capabilities": capabilities,
+            }
+        ],
+        runtime_sha=runtime_sha,
+        heartbeat_ttl_seconds=heartbeat_ttl,
     )
+    worker_sha = str(identity.get("worker_sha") or "")
+    worker_id = str(identity.get("worker_id") or "")
+    heartbeat_at = str(identity.get("worker_heartbeat_at") or "")
+    heartbeat_age = identity.get("worker_heartbeat_age")
+    service_mode = str(identity.get("worker_service_mode") or "")
+    capability_version = str(identity.get("worker_capability_version") or "")
+    connected = bool(identity.get("worker_connected"))
+    version_compatible = bool(identity.get("worker_sha_matches_runtime"))
     canonical_capability = video_project_queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY
     capability_ok = canonical_capability in capabilities and capability_version == canonical_capability
     if not heartbeat_at:
@@ -192108,9 +192261,7 @@ def product_video_worker_admission_status() -> dict:
     else:
         block_reason = ""
     return {
-        "runtime_sha": runtime_sha,
-        "worker_sha": worker_sha,
-        "worker_id": worker_id,
+        **identity,
         "worker_version_compatible": bool(version_compatible and not block_reason),
         "worker_sha_matches_runtime": version_compatible,
         "worker_connected": connected,

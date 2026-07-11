@@ -255,6 +255,66 @@ def _parse_queue_time(value: Any) -> datetime | None:
             continue
     return None
 
+
+def authoritative_product_video_worker_identity(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    *,
+    runtime_sha: str,
+    now: datetime | None = None,
+    heartbeat_ttl_seconds: int = 90,
+) -> dict[str, Any]:
+    """Select the latest owner-worker heartbeat and never reuse a stale SHA."""
+    current_dt = now or datetime.now()
+    candidates = [dict(item) for item in (records or []) if isinstance(item, dict)]
+    candidates.sort(
+        key=lambda item: (
+            _parse_queue_time(item.get("heartbeat_updated_at") or item.get("last_heartbeat")) or datetime.min,
+            str(item.get("worker_id") or ""),
+        ),
+        reverse=True,
+    )
+    selected = candidates[0] if candidates else {}
+    heartbeat_at = str(selected.get("heartbeat_updated_at") or selected.get("last_heartbeat") or "").strip()
+    heartbeat_dt = _parse_queue_time(heartbeat_at)
+    heartbeat_age = max(0, int((current_dt - heartbeat_dt).total_seconds())) if heartbeat_dt else None
+    ttl = max(30, min(300, int(heartbeat_ttl_seconds or 90)))
+    connected = bool(heartbeat_age is not None and heartbeat_age <= ttl)
+    reported_sha = str(
+        selected.get("worker_git_head_sha")
+        or selected.get("worker_sha")
+        or selected.get("worker_git_sha")
+        or ""
+    ).strip()
+    stale_sha_ignored = bool(reported_sha and not connected)
+    effective_sha = reported_sha if connected else ""
+    runtime_value = str(runtime_sha or "").strip()
+    version_match = bool(
+        runtime_value
+        and effective_sha
+        and (runtime_value.startswith(effective_sha) or effective_sha.startswith(runtime_value))
+    )
+    return {
+        "runtime_sha": runtime_value,
+        "worker_sha": effective_sha,
+        "worker_git_head_sha": effective_sha,
+        "worker_sha_source": str(selected.get("worker_sha_source") or "worker_claim_payload") if connected else "unknown",
+        "worker_cwd": str(selected.get("worker_cwd") or "") if connected else "",
+        "worker_id": sanitize_worker_id(str(selected.get("worker_id") or "")) if selected else "",
+        "worker_service_mode": str(selected.get("worker_service_mode") or ""),
+        "worker_capabilities": sanitize_capabilities(selected.get("worker_capabilities") or []),
+        "worker_capability_version": str(selected.get("worker_capability_version") or ""),
+        "worker_connected": connected,
+        "worker_heartbeat_at": heartbeat_at,
+        "heartbeat_updated_at": heartbeat_at,
+        "worker_heartbeat_age": heartbeat_age,
+        "heartbeat_age_seconds": heartbeat_age,
+        "worker_heartbeat_ttl_seconds": ttl,
+        "worker_sha_matches_runtime": version_match,
+        "heartbeat_record_selected_by": "latest_owner_product_video_updated_at",
+        "heartbeat_records_considered": len(candidates),
+        "stale_worker_sha_ignored": stale_sha_ignored,
+    }
+
 def classify_remote_worker_error(value: Any, *, status: str = "", worker_id: str = "") -> dict[str, str]:
     raw = scrub_secret_text(value)
     lowered = raw.lower()
@@ -643,8 +703,16 @@ def explain_product_video_claimability(
         result_payload,
         worker_id="claim_debug",
     )
+    outbox_diagnostic = video_project_queue.product_video_dispatch_outbox_diagnostic(
+        conn,
+        job_id=wanted,
+    )
+    if not reason and not outbox_diagnostic.get("outbox_exists"):
+        reason = "dispatch_outbox_missing"
     if not reason and status == "processing" and not scene_claim.get("processing_job_scene_claimable"):
-        reason = "processing_job_has_no_claimable_scene"
+        has_provider_task = _safe_int(scene_claim.get("valid_provider_task_count"), 0) > 0
+        if not has_provider_task:
+            reason = "processing_job_has_no_claimable_scene"
     claimable = not bool(reason)
     return {
         "ok": True,
@@ -659,6 +727,15 @@ def explain_product_video_claimability(
         "owner_only": bool(owner_only),
         "public_enabled": bool(public_enabled),
         "flags": flags,
+        "dispatch_outbox_diagnostic": outbox_diagnostic,
+        "outbox_exists": bool(outbox_diagnostic.get("outbox_exists")),
+        "outbox_id": _safe_int(outbox_diagnostic.get("outbox_id"), 0),
+        "outbox_status": str(outbox_diagnostic.get("outbox_status") or ""),
+        "outbox_owner": str(outbox_diagnostic.get("outbox_owner") or ""),
+        "outbox_available_at": str(outbox_diagnostic.get("outbox_available_at") or ""),
+        "outbox_lease_owner": str(outbox_diagnostic.get("outbox_lease_owner") or ""),
+        "outbox_lease_expiry": str(outbox_diagnostic.get("outbox_lease_expiry") or ""),
+        "exact_claim_block_reason": str(outbox_diagnostic.get("exact_claim_block_reason") or reason),
         **scene_claim,
     }
 
@@ -1878,6 +1955,10 @@ def _claim_video_render_candidate(
                     if int(job["id"]) != int(dispatch_outbox_claim.get("job_id") or 0):
                         continue
                     dispatch_outbox = dict(dispatch_outbox_claim)
+                elif not dispatch_outbox.get("outbox_id"):
+                    # Product Video handoff is durable: a missing historical outbox
+                    # must be reconciled by the watchdog before a worker can claim it.
+                    continue
                 elif dispatch_outbox.get("dispatch_status") in {"pending", "retry_wait", "leased"}:
                     continue
                 if _product_video_is_claimable(
@@ -2399,9 +2480,18 @@ def remote_worker_claim_debug_snapshot(
     return {
         "claim_route": str(claim_route or ""),
         "public_worker_enabled": public_gate,
+        "claim_query_source": "video_dispatch_outbox_join_video_jobs_video_projects",
+        "claim_allowed_job_statuses": ["queued", "processing"],
+        "claim_allowed_outbox_states": ["pending", "retry_wait", "expired_lease"],
+        "claim_owner_filter": video_project_queue.PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER,
+        "claim_available_at_filter": "available_at<=now",
+        "claim_lease_filter": "no_active_job_or_outbox_lease",
+        "claim_job_age_filter": "none",
+        "claim_zero_task_filter": "durable_watchdog_before_claim",
         "lane_counts": remote_worker_claim_lane_counts(conn, public_enabled=public_gate),
         "latest_admin_canary": _latest_video_claim_summary(conn, source=REMOTE_WORKER_ADMIN_CANARY_SOURCE, claim_lane="admin_canary"),
         "latest_product_diagnostic": _latest_video_claim_summary(conn, source=REMOTE_WORKER_PRODUCT_VIDEO_SOURCE, claim_lane="owner_product_video"),
+        "product_video_watchdog_scheduler": video_project_queue.product_video_watchdog_scheduler_status(),
     }
 
 

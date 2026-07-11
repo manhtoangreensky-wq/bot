@@ -1788,6 +1788,24 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "route_block_reason",
         ):
             payload[key] = job.get(key)
+        try:
+            from services import video_provider_router
+
+            route_contract = video_provider_router.product_video_route_contract(
+                str(job.get("product_type") or job.get("profile_id") or ""),
+                str(job.get("engine_adapter") or ""),
+                str(job.get("orchestration_mode") or job.get("provider_orchestration_mode") or ""),
+                explicit_local_renderer=bool(job.get("explicit_local_renderer")),
+            )
+            persisted_route = job.get("route_requires_provider")
+            if route_contract.get("route_requires_provider") or str(job.get("source") or "") == "product_video":
+                payload.update(route_contract)
+                payload["route_requirement_product_contract"] = bool(route_contract.get("route_requires_provider"))
+                payload["persisted_route_requires_provider_before_reconcile"] = persisted_route
+                if route_contract.get("route_requires_provider") and persisted_route is False:
+                    payload["route_requirement_override"] = "legacy_persisted_false_ignored"
+        except Exception:
+            pass
     return payload
 
 
