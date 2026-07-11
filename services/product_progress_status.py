@@ -1762,11 +1762,19 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "admission_result",
             "admission_block_reason",
             "dispatch_outbox_present",
+            "dispatch_outbox_id",
             "dispatch_outbox_status",
+            "dispatch_outbox_owner",
+            "dispatch_outbox_available_at",
             "dispatch_outbox_attempt_count",
+            "dispatch_outbox_last_attempt_at",
             "dispatch_outbox_lease_owner",
             "dispatch_outbox_lease_expires_at",
+            "dispatch_outbox_claimable",
+            "dispatch_outbox_claim_block_reason",
+            "dispatch_outbox_acknowledged_at",
             "dispatch_outbox_last_error",
+            "dispatch_outbox_terminal_reason",
             "dispatch_outbox_acknowledged",
             "worker_scan_seen_job",
             "worker_scan_seen_outbox",
@@ -1788,6 +1796,24 @@ def product_progress_debug_payload(product_type: str = "", job_id: str = "", job
             "route_block_reason",
         ):
             payload[key] = job.get(key)
+        try:
+            from services import video_provider_router
+
+            route_contract = video_provider_router.product_video_route_contract(
+                str(job.get("product_type") or job.get("profile_id") or ""),
+                str(job.get("engine_adapter") or ""),
+                str(job.get("orchestration_mode") or job.get("provider_orchestration_mode") or ""),
+                explicit_local_renderer=bool(job.get("explicit_local_renderer")),
+            )
+            persisted_route = job.get("route_requires_provider")
+            if route_contract.get("route_requires_provider") or str(job.get("source") or "") == "product_video":
+                payload.update(route_contract)
+                payload["route_requirement_product_contract"] = bool(route_contract.get("route_requires_provider"))
+                payload["persisted_route_requires_provider_before_reconcile"] = persisted_route
+                if route_contract.get("route_requires_provider") and persisted_route is False:
+                    payload["route_requirement_override"] = "legacy_persisted_false_ignored"
+        except Exception:
+            pass
     return payload
 
 

@@ -90,6 +90,17 @@ BOT_API_URL = normalize_base_url(
 )
 LOCAL_WORKER_TOKEN = str(os.environ.get("LOCAL_WORKER_TOKEN", "")).strip()
 WORKER_ID = str(os.environ.get("WORKER_ID") or os.environ.get("LOCAL_WORKER_ID") or "vps-1").strip()
+WORKER_HOSTNAME = str(socket.gethostname() or "").strip()
+WORKER_PID = int(os.getpid() or 0)
+WORKER_GENERATION_ID = uuid.uuid4().hex
+WORKER_INSTANCE_ID = str(
+    os.environ.get("WORKER_INSTANCE_ID")
+    or f"{WORKER_ID}:{WORKER_HOSTNAME or 'host'}:{WORKER_PID}"
+).strip()
+WORKER_HEARTBEAT_LEASE_SECONDS = max(
+    30,
+    min(300, env_int("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS", 90)),
+)
 WORKER_POLL_INTERVAL_SECONDS = max(1, env_int("WORKER_POLL_INTERVAL_SECONDS", 5))
 WORKER_CONCURRENCY = max(1, env_int("WORKER_CONCURRENCY", 1))
 WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).strip()
@@ -115,6 +126,45 @@ def worker_git_sha() -> str:
     except Exception:
         return ""
     return ""
+
+
+def worker_identity_payload(service_mode: str, capabilities: list[str] | None = None) -> dict[str, object]:
+    git_sha = worker_git_sha()
+    lease_expires_at = time.strftime(
+        "%Y-%m-%d %H:%M:%S",
+        time.localtime(time.time() + WORKER_HEARTBEAT_LEASE_SECONDS),
+    )
+    capability_list = list(capabilities or [])
+    return {
+        "worker_instance_id": WORKER_INSTANCE_ID,
+        "generation_id": WORKER_GENERATION_ID,
+        "worker_generation_id": WORKER_GENERATION_ID,
+        "worker_service_mode": str(service_mode or "general"),
+        "service_mode": str(service_mode or "general"),
+        "worker_git_sha": git_sha,
+        "worker_git_head_sha": git_sha,
+        "git_sha": git_sha,
+        "runtime_target_sha": git_sha,
+        "worker_capability_version": (
+            PRODUCT_VIDEO_CANONICAL_CAPABILITY
+            if PRODUCT_VIDEO_CANONICAL_CAPABILITY in capability_list
+            else ""
+        ),
+        "capability_version": (
+            PRODUCT_VIDEO_CANONICAL_CAPABILITY
+            if PRODUCT_VIDEO_CANONICAL_CAPABILITY in capability_list
+            else ""
+        ),
+        "worker_process_started_at": WORKER_STARTED_AT,
+        "process_started_at": WORKER_STARTED_AT,
+        "worker_lease_expires_at": lease_expires_at,
+        "lease_expires_at": lease_expires_at,
+        "worker_hostname": WORKER_HOSTNAME,
+        "hostname": WORKER_HOSTNAME,
+        "worker_pid": WORKER_PID,
+        "pid": WORKER_PID,
+        "capabilities": capability_list,
+    }
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
 LAST_CLAIM_RESPONSE: dict = {}
 LAST_IDLE_REASON = ""
@@ -225,13 +275,13 @@ def claim_job(
         capabilities = ["canary", "ffmpeg"]
     else:
         capabilities = ["ffmpeg", "video_postprocess"]
+    service_mode = "owner_product_video" if owner_product_video_only else ("product_video" if product_video_only else "general")
     payload = {
+        **worker_identity_payload(service_mode, capabilities),
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
         "max_jobs": 1,
-        "worker_git_sha": worker_git_sha(),
         "worker_parser_version": WORKER_PARSER_VERSION,
-        "worker_service_mode": "owner_product_video" if owner_product_video_only else ("product_video" if product_video_only else "general"),
         "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video_only or owner_product_video_only) else "",
     }
     if canary_only:
@@ -343,12 +393,12 @@ def ping_server(
         capabilities = ["canary", "ffmpeg"]
     else:
         capabilities = ["ffmpeg", "video_postprocess"]
+    service_mode = "owner_product_video" if owner_product_video else ("product_video" if product_video else "general")
     payload = {
+        **worker_identity_payload(service_mode, capabilities),
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
-        "worker_git_sha": worker_git_sha(),
         "worker_parser_version": WORKER_PARSER_VERSION,
-        "worker_service_mode": "owner_product_video" if owner_product_video else ("product_video" if product_video else "general"),
         "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video or owner_product_video) else "",
         "dry_run": True,
     }
@@ -367,13 +417,12 @@ def ping_server(
 
 def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") -> None:
     payload = {
+        **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
         "worker_id": WORKER_ID,
         "job_id": str(job_id),
         "progress_percent": int(progress_percent or 0),
         "message": str(message or "")[:500],
-        "worker_git_sha": worker_git_sha(),
         "worker_parser_version": WORKER_PARSER_VERSION,
-        "worker_service_mode": ACTIVE_WORKER_SERVICE_MODE,
         "capabilities": list(ACTIVE_WORKER_CAPABILITIES),
         "worker_capability_version": (
             PRODUCT_VIDEO_CANONICAL_CAPABILITY
