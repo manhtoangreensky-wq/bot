@@ -47457,6 +47457,30 @@ async def video_debug_safe_reply_text(message, text: str):
         return await message.reply_text(_video_debug_plain_compact_text(clean, reason=f"html_send_{type(exc).__name__}"))
 
 
+def _video_dispatch_outbox_debug_lines(data: dict | None) -> list[str]:
+    item = dict(data or {})
+    fields = (
+        "dispatch_outbox_present",
+        "dispatch_outbox_id",
+        "dispatch_outbox_status",
+        "dispatch_outbox_owner",
+        "dispatch_outbox_available_at",
+        "dispatch_outbox_attempt_count",
+        "dispatch_outbox_last_attempt_at",
+        "dispatch_outbox_lease_owner",
+        "dispatch_outbox_lease_expires_at",
+        "dispatch_outbox_claimable",
+        "dispatch_outbox_claim_block_reason",
+        "dispatch_outbox_acknowledged_at",
+        "dispatch_outbox_last_error",
+        "dispatch_outbox_terminal_reason",
+    )
+    return [
+        f"• {field}: <code>{html.escape(str(item.get(field) if item.get(field) not in (None, '') else '-'))}</code>"
+        for field in fields
+    ]
+
+
 def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     jid = safe_int(job_id, 0)
     if jid <= 0:
@@ -47516,6 +47540,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• Job status: <code>{html.escape(str((job or {}).get('status') or '-'))}</code>",
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
         f"• Progress message: <code>{html.escape(str((job or {}).get('progress_message') or '-')[:160])}</code>",
+        *_video_dispatch_outbox_debug_lines(result),
         f"• provider progress raw: <code>{html.escape(str(result.get('provider_progress_raw') or '-')[:80])}</code>",
         f"• provider progress raw number: <code>{html.escape(str(result.get('provider_progress_raw_number') or '-'))}</code>",
         f"• canonical task: <code>{html.escape(str(result.get('canonical_task_id_masked') or '-'))}</code>",
@@ -47815,6 +47840,7 @@ def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
         "",
         f"• job id: <code>{jid}</code>",
         f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        *_video_dispatch_outbox_debug_lines(result),
         *_video_scene_ledger_debug_lines(result),
         f"• provider: <code>{html.escape(provider)}</code>",
         f"• selected model: <code>{html.escape(str(result.get('selected_model') or result.get('provider_payload_model') or '-'))}</code>",
@@ -71162,6 +71188,41 @@ def video_b14_reconciled_provider_debug(job: dict | None = None, project: dict |
         data.setdefault("summary_provider_attempt_source", "result_json")
         data.setdefault("summary_fields_from_primary_alive_task", False)
         data.setdefault("stale_failed_attempt_ignored", False)
+    try:
+        worker_compatibility = product_video_worker_admission_status()
+        data.update(
+            {
+                "worker_compatibility_source": "product_video_worker_compatibility",
+                "worker_compatible": bool(worker_compatibility.get("compatible")),
+                "worker_compatibility_block_reason": str(worker_compatibility.get("block_reason") or ""),
+                "authoritative_worker_instance_id": str(worker_compatibility.get("authoritative_worker_instance_id") or ""),
+                "authoritative_worker_generation_id": str(worker_compatibility.get("authoritative_worker_generation_id") or ""),
+                "worker_identity_conflict": bool(worker_compatibility.get("worker_identity_conflict")),
+                "worker_runtime_target_sha": str(worker_compatibility.get("runtime_target_sha") or ""),
+            }
+        )
+    except Exception as exc:
+        data["worker_compatibility_error"] = type(exc).__name__
+    try:
+        outbox_job_id = safe_int((job or {}).get("id") or (job or {}).get("job_id"), 0)
+        if outbox_job_id > 0:
+            outbox_conn = db_connect()
+            try:
+                outbox_diagnostic = video_project_queue.product_video_dispatch_outbox_diagnostic(
+                    outbox_conn,
+                    job_id=outbox_job_id,
+                )
+            finally:
+                outbox_conn.close()
+            data.update(
+                {
+                    key: value
+                    for key, value in outbox_diagnostic.items()
+                    if key.startswith("dispatch_outbox_")
+                }
+            )
+    except Exception as exc:
+        data["dispatch_outbox_diagnostic_error"] = type(exc).__name__
     worker_sha = str(data.get("worker_git_sha") or "").strip()
     if worker_sha and APP_BUILD_SHA:
         data["worker_code_matches_runtime"] = "yes" if worker_sha.startswith(APP_BUILD_SHA[:12]) or APP_BUILD_SHA.startswith(worker_sha[:12]) else "no"
@@ -72905,15 +72966,10 @@ def run_product_video_bot_side_zero_task_watchdog(job_id: int | str) -> dict:
 
 
 def product_video_watchdog_scheduler_interval_seconds() -> int:
-    return max(
-        5,
-        min(
-            300,
-            safe_int(
-                os.getenv("PRODUCT_VIDEO_ZERO_TASK_WATCHDOG_INTERVAL_SECONDS"),
-                video_project_queue.PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
-            ),
-        ),
+    configured = os.getenv("PRODUCT_VIDEO_ZERO_TASK_WATCHDOG_INTERVAL_SECONDS")
+    return safe_int(
+        video_project_queue.product_video_watchdog_interval_config(configured).get("effective_interval_seconds"),
+        video_project_queue.PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
     )
 
 
@@ -72929,27 +72985,17 @@ def run_product_video_watchdog_scheduler_tick() -> dict:
 
 
 async def product_video_watchdog_scheduler_loop() -> None:
-    interval = product_video_watchdog_scheduler_interval_seconds()
-    video_project_queue.mark_product_video_watchdog_scheduler(
-        registered=True,
-        running=True,
-        interval_seconds=interval,
+    configured = os.getenv("PRODUCT_VIDEO_ZERO_TASK_WATCHDOG_INTERVAL_SECONDS")
+
+    async def _tick() -> dict:
+        return await asyncio.to_thread(run_product_video_watchdog_scheduler_tick)
+
+    await video_project_queue.run_product_video_watchdog_scheduler_loop(
+        _tick,
+        sleep=asyncio.sleep,
+        configured_interval_seconds=configured,
+        generation_id=PRODUCT_VIDEO_WATCHDOG_GENERATION_ID,
     )
-    try:
-        while True:
-            try:
-                await asyncio.to_thread(run_product_video_watchdog_scheduler_tick)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("product video zero-task watchdog tick failed: %s", type(exc).__name__)
-            await asyncio.sleep(interval)
-    finally:
-        video_project_queue.mark_product_video_watchdog_scheduler(
-            registered=True,
-            running=False,
-            interval_seconds=interval,
-        )
 
 
 def product_video_apply_provider_preflight_to_session(user_id, session: dict, preflight: dict) -> dict:
@@ -91349,12 +91395,20 @@ def video_public_status_text() -> str:
         f"• owner git HEAD: <code>{html.escape(str(product_worker.get('worker_git_head_sha') or '-')[:12])}</code>",
         f"• owner cwd: <code>{html.escape(str(product_worker.get('worker_cwd') or '-'))}</code>",
         f"• owner worker compatible: <code>{video_public_bool_label(product_worker.get('worker_version_compatible'))}</code>",
+        f"• owner instance/generation: <code>{html.escape(str(product_worker.get('authoritative_worker_instance_id') or '-'))}/{html.escape(str(product_worker.get('authoritative_worker_generation_id') or '-'))}</code>",
+        f"• owner runtime target: <code>{html.escape(str(product_worker.get('runtime_target_sha') or '-')[:12])}</code>",
+        f"• owner lease: <code>{html.escape(str(product_worker.get('lease_expires_at') or '-'))}</code>",
+        f"• owner host/pid: <code>{html.escape(str(product_worker.get('hostname') or '-'))}/{safe_int(product_worker.get('pid'), 0) or '-'}</code>",
+        f"• owner generation conflict: <code>{video_public_bool_label(product_worker.get('worker_identity_conflict'))}</code>",
         f"• owner heartbeat age: <code>{html.escape(str(product_worker.get('worker_heartbeat_age') if product_worker.get('worker_heartbeat_age') is not None else '-'))}</code>",
         f"• heartbeat selected by: <code>{html.escape(str(product_worker.get('heartbeat_record_selected_by') or '-'))}</code>",
         f"• stale worker SHA ignored: <code>{video_public_bool_label(product_worker.get('stale_worker_sha_ignored'))}</code>",
         f"• owner capability version: <code>{html.escape(str(product_worker.get('worker_capability_version') or '-'))}</code>",
         f"• owner admission blocker: <code>{html.escape(str(product_worker.get('worker_admission_block_reason') or '-'))}</code>",
         f"• watchdog registered/running: <code>{video_public_bool_label(watchdog_scheduler.get('scheduler_registered'))}/{video_public_bool_label(watchdog_scheduler.get('scheduler_running'))}</code>",
+        f"• watchdog enabled: <code>{video_public_bool_label(watchdog_scheduler.get('watchdog_enabled'))}</code>",
+        f"• watchdog generation/start: <code>{html.escape(str(watchdog_scheduler.get('watchdog_generation_id') or '-'))}/{html.escape(str(watchdog_scheduler.get('watchdog_started_at') or '-'))}</code>",
+        f"• watchdog interval configured/effective: <code>{safe_int(watchdog_scheduler.get('watchdog_configured_interval_seconds'), 0)}/{safe_int(watchdog_scheduler.get('watchdog_effective_interval_seconds'), 0)}s</code> clamp=<code>{video_public_bool_label(watchdog_scheduler.get('watchdog_interval_clamp_applied'))}</code>",
         f"• watchdog last run/success: <code>{html.escape(str(watchdog_scheduler.get('last_run_at') or '-'))}/{html.escape(str(watchdog_scheduler.get('last_success_at') or '-'))}</code>",
         f"• watchdog scanned/reconciled: <code>{safe_int(watchdog_scheduler.get('jobs_scanned'), 0)}/{safe_int(watchdog_scheduler.get('jobs_reconciled'), 0)}</code>",
         f"• watchdog next run: <code>{html.escape(str(watchdog_scheduler.get('next_run_at') or '-'))}</code>",
@@ -190670,6 +190724,7 @@ tg_memory_reminder_task: asyncio.Task | None = None
 tg_shopaikey_usage_task: asyncio.Task | None = None
 tg_payos_expiry_task: asyncio.Task | None = None
 tg_product_video_watchdog_task: asyncio.Task | None = None
+PRODUCT_VIDEO_WATCHDOG_GENERATION_ID = f"watchdog-{uuid.uuid4().hex}"
 
 async def shopaikey_usage_monitor_loop(bot_client):
     await asyncio.sleep(20)
@@ -192058,7 +192113,8 @@ async def lifespan(app: FastAPI):
         if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
             storage_weekly_task = asyncio.create_task(storage_weekly_maintenance_loop())
         tg_memory_reminder_task = asyncio.create_task(memory_reminder_loop(tg_app.bot))
-        tg_product_video_watchdog_task = asyncio.create_task(product_video_watchdog_scheduler_loop())
+        if tg_product_video_watchdog_task is None or tg_product_video_watchdog_task.done():
+            tg_product_video_watchdog_task = asyncio.create_task(product_video_watchdog_scheduler_loop())
         if SHOPAIKEY_USAGE_CHECK_ENABLED and SHOPAIKEY_API_KEY:
             tg_shopaikey_usage_task = asyncio.create_task(shopaikey_usage_monitor_loop(tg_app.bot))
         if PAYOS_EXPIRY_ALERT_ENABLED and PAYOS_REGISTRATION_EXPIRES_AT:
@@ -192194,7 +192250,7 @@ def _record_remote_worker_ping(worker_id: str) -> None:
 
 
 def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, capabilities: list[str]) -> None:
-    service_mode = str(payload.get("worker_service_mode") or "").strip()
+    service_mode = str(payload.get("service_mode") or payload.get("worker_service_mode") or "").strip()
     owner_mode = bool(
         str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
         or service_mode == "owner_product_video"
@@ -192204,28 +192260,99 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
         return
     prefix = "remote_worker:owner_product_video:"
     heartbeat_updated_at = now_text()
+    heartbeat_ttl = max(30, min(300, safe_int(os.getenv("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS"), 90)))
+    lease_expires_at = now_text(datetime.now() + timedelta(seconds=heartbeat_ttl))
+    generation_id = str(payload.get("generation_id") or payload.get("worker_generation_id") or "").strip()
+    if not generation_id:
+        generation_id = f"legacy-{remote_worker_api.sanitize_worker_id(worker_id)}"
+    worker_instance_id = str(payload.get("worker_instance_id") or worker_id or "").strip()
+    git_sha = str(
+        payload.get("git_sha")
+        or payload.get("worker_git_head_sha")
+        or payload.get("worker_git_sha")
+        or ""
+    ).strip()
+    runtime_target_sha = str(payload.get("runtime_target_sha") or git_sha).strip()
+    capability_version = str(
+        payload.get("capability_version") or payload.get("worker_capability_version") or ""
+    ).strip()
+    clean_capabilities = remote_worker_api.sanitize_capabilities(capabilities or payload.get("capabilities") or [])
+    record = {
+        "worker_id": str(worker_id or "")[:120],
+        "worker_instance_id": worker_instance_id[:240],
+        "generation_id": generation_id[:160],
+        "service_mode": service_mode or "owner_product_video",
+        "git_sha": git_sha[:80],
+        "runtime_target_sha": runtime_target_sha[:80],
+        "capability_version": capability_version[:120],
+        "capabilities": clean_capabilities,
+        "process_started_at": str(payload.get("process_started_at") or payload.get("worker_process_started_at") or "")[:80],
+        "heartbeat_at": heartbeat_updated_at,
+        "heartbeat_updated_at": heartbeat_updated_at,
+        "lease_expires_at": lease_expires_at,
+        "hostname": str(payload.get("hostname") or payload.get("worker_hostname") or "")[:160],
+        "pid": safe_int(payload.get("pid") or payload.get("worker_pid"), 0),
+        "worker_sha_source": str(payload.get("worker_sha_source") or "worker_claim_payload")[:80],
+        "worker_cwd": str(payload.get("worker_cwd") or "")[:500],
+    }
     values = {
         "last_heartbeat": heartbeat_updated_at,
         "heartbeat_updated_at": heartbeat_updated_at,
         "worker_id": str(worker_id or "")[:120],
-        "worker_git_sha": str(payload.get("worker_git_sha") or "")[:80],
-        "worker_git_head_sha": str(payload.get("worker_git_head_sha") or payload.get("worker_git_sha") or "")[:80],
+        "worker_instance_id": worker_instance_id[:240],
+        "generation_id": generation_id[:160],
+        "worker_git_sha": git_sha[:80],
+        "worker_git_head_sha": git_sha[:80],
+        "runtime_target_sha": runtime_target_sha[:80],
         "worker_sha_source": str(payload.get("worker_sha_source") or "worker_claim_payload")[:80],
         "worker_cwd": str(payload.get("worker_cwd") or "")[:500],
         "worker_parser_version": str(payload.get("worker_parser_version") or "")[:80],
         "worker_service_mode": service_mode or "owner_product_video",
-        "worker_capabilities": json.dumps(list(capabilities or []), ensure_ascii=True, separators=(",", ":")),
-        "worker_capability_version": str(payload.get("worker_capability_version") or "")[:120],
+        "worker_capabilities": json.dumps(clean_capabilities, ensure_ascii=True, separators=(",", ":")),
+        "worker_capability_version": capability_version[:120],
+        "process_started_at": record["process_started_at"],
+        "lease_expires_at": lease_expires_at,
+        "hostname": record["hostname"],
+        "pid": record["pid"],
     }
     try:
         for key, value in values.items():
             set_system_setting(prefix + key, value, "owner product video worker identity", worker_id)
+        generation_key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", generation_id)[:160]
+        set_system_setting(
+            prefix + "generation:" + generation_key,
+            json.dumps(record, ensure_ascii=True, separators=(",", ":")),
+            "owner product video worker generation heartbeat",
+            worker_id,
+        )
     except Exception as exc:
         logger.warning("owner product video worker identity skipped: %s", type(exc).__name__)
 
 
-def product_video_worker_admission_status() -> dict:
+def product_video_worker_identity_records(limit: int = 32) -> list[dict]:
     prefix = "remote_worker:owner_product_video:"
+    records: list[dict] = []
+    conn = None
+    try:
+        conn = db_connect()
+        rows = conn.execute(
+            "SELECT value FROM system_settings WHERE key LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            (prefix + "generation:%", max(2, min(100, int(limit or 32)))),
+        ).fetchall()
+        for row in rows or []:
+            try:
+                item = json.loads(str(row[0] or "{}"))
+            except Exception:
+                continue
+            if isinstance(item, dict):
+                records.append(item)
+    except Exception as exc:
+        logger.warning("owner product video generation scan skipped: %s", type(exc).__name__)
+    finally:
+        if conn:
+            conn.close()
+    if records:
+        return records
     runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
     settings = get_system_settings(
         [
@@ -192234,11 +192361,18 @@ def product_video_worker_admission_status() -> dict:
             prefix + "worker_sha_source",
             prefix + "worker_cwd",
             prefix + "worker_id",
+            prefix + "worker_instance_id",
+            prefix + "generation_id",
             prefix + "last_heartbeat",
             prefix + "heartbeat_updated_at",
+            prefix + "runtime_target_sha",
             prefix + "worker_service_mode",
             prefix + "worker_capability_version",
             prefix + "worker_capabilities",
+            prefix + "process_started_at",
+            prefix + "lease_expires_at",
+            prefix + "hostname",
+            prefix + "pid",
         ]
     )
     raw_capabilities = str(settings.get(prefix + "worker_capabilities") or "").strip()
@@ -192247,62 +192381,43 @@ def product_video_worker_admission_status() -> dict:
     except Exception:
         capabilities = []
     capabilities = [str(item or "").strip() for item in capabilities if str(item or "").strip()]
+    return [
+        {
+            "worker_git_sha": settings.get(prefix + "worker_git_sha") or "",
+            "worker_git_head_sha": settings.get(prefix + "worker_git_head_sha") or "",
+            "git_sha": settings.get(prefix + "worker_git_head_sha") or settings.get(prefix + "worker_git_sha") or "",
+            "runtime_target_sha": settings.get(prefix + "runtime_target_sha") or runtime_sha,
+            "worker_sha_source": settings.get(prefix + "worker_sha_source") or "",
+            "worker_cwd": settings.get(prefix + "worker_cwd") or "",
+            "worker_id": settings.get(prefix + "worker_id") or "",
+            "worker_instance_id": settings.get(prefix + "worker_instance_id") or settings.get(prefix + "worker_id") or "",
+            "generation_id": settings.get(prefix + "generation_id") or "",
+            "heartbeat_at": settings.get(prefix + "heartbeat_updated_at") or settings.get(prefix + "last_heartbeat") or "",
+            "lease_expires_at": settings.get(prefix + "lease_expires_at") or "",
+            "service_mode": settings.get(prefix + "worker_service_mode") or "",
+            "capability_version": settings.get(prefix + "worker_capability_version") or "",
+            "capabilities": capabilities,
+            "process_started_at": settings.get(prefix + "process_started_at") or "",
+            "hostname": settings.get(prefix + "hostname") or "",
+            "pid": safe_int(settings.get(prefix + "pid"), 0),
+        }
+    ]
+
+
+def product_video_worker_admission_status(*, caller_generation_id: str = "") -> dict:
+    runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
     heartbeat_ttl = max(30, min(300, safe_int(os.getenv("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS"), 90)))
-    identity = remote_worker_api.authoritative_product_video_worker_identity(
-        [
-            {
-                "worker_git_sha": settings.get(prefix + "worker_git_sha") or "",
-                "worker_git_head_sha": settings.get(prefix + "worker_git_head_sha") or "",
-                "worker_sha_source": settings.get(prefix + "worker_sha_source") or "",
-                "worker_cwd": settings.get(prefix + "worker_cwd") or "",
-                "worker_id": settings.get(prefix + "worker_id") or "",
-                "last_heartbeat": settings.get(prefix + "last_heartbeat") or "",
-                "heartbeat_updated_at": settings.get(prefix + "heartbeat_updated_at") or settings.get(prefix + "last_heartbeat") or "",
-                "worker_service_mode": settings.get(prefix + "worker_service_mode") or "",
-                "worker_capability_version": settings.get(prefix + "worker_capability_version") or "",
-                "worker_capabilities": capabilities,
-            }
-        ],
+    identity = remote_worker_api.product_video_worker_compatibility(
+        product_video_worker_identity_records(),
         runtime_sha=runtime_sha,
+        caller_generation_id=caller_generation_id,
         heartbeat_ttl_seconds=heartbeat_ttl,
     )
-    worker_sha = str(identity.get("worker_sha") or "")
-    worker_id = str(identity.get("worker_id") or "")
-    heartbeat_at = str(identity.get("worker_heartbeat_at") or "")
-    heartbeat_age = identity.get("worker_heartbeat_age")
-    service_mode = str(identity.get("worker_service_mode") or "")
-    capability_version = str(identity.get("worker_capability_version") or "")
-    connected = bool(identity.get("worker_connected"))
-    version_compatible = bool(identity.get("worker_sha_matches_runtime"))
-    canonical_capability = video_project_queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY
-    capability_ok = canonical_capability in capabilities and capability_version == canonical_capability
-    if not heartbeat_at:
-        block_reason = "owner_product_video_worker_disconnected"
-    elif not connected:
-        block_reason = "owner_product_video_worker_heartbeat_stale"
-    elif not worker_sha:
-        block_reason = "owner_product_video_worker_sha_missing"
-    elif not version_compatible:
-        block_reason = "owner_product_video_worker_version_mismatch"
-    elif service_mode != "owner_product_video":
-        block_reason = "owner_product_video_worker_service_mode_invalid"
-    elif not capability_ok:
-        block_reason = "owner_product_video_worker_canonical_capability_missing"
-    else:
-        block_reason = ""
     return {
         **identity,
-        "worker_version_compatible": bool(version_compatible and not block_reason),
-        "worker_sha_matches_runtime": version_compatible,
-        "worker_connected": connected,
-        "worker_heartbeat_at": heartbeat_at,
-        "worker_heartbeat_age": heartbeat_age,
         "worker_heartbeat_ttl_seconds": heartbeat_ttl,
-        "worker_service_mode": service_mode,
-        "worker_capabilities": capabilities,
-        "worker_capability_version": capability_version,
-        "worker_canonical_capability_present": capability_ok,
-        "worker_admission_block_reason": block_reason,
+        "worker_canonical_capability_present": bool(identity.get("capability_match")),
+        "compatibility_source": "product_video_worker_compatibility",
     }
 
 
@@ -192550,6 +192665,13 @@ async def api_worker_claim(request: Request):
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
     _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
+    worker_compatibility = (
+        product_video_worker_admission_status(
+            caller_generation_id=str(payload.get("generation_id") or payload.get("worker_generation_id") or "")
+        )
+        if owner_product_video_only
+        else {}
+    )
     conn = db_connect()
     try:
         return remote_worker_api.claim_remote_worker_job(
@@ -192563,6 +192685,7 @@ async def api_worker_claim(request: Request):
             admin_video_only=admin_video_only,
             product_video_only=product_video_only,
             owner_product_video_only=owner_product_video_only,
+            worker_compatibility=worker_compatibility,
         )
     finally:
         conn.close()
@@ -192578,6 +192701,8 @@ async def api_worker_heartbeat(request: Request):
         raise HTTPException(status_code=400, detail="job_id required")
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker heartbeat", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    heartbeat_capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+    _record_owner_product_video_worker_identity(worker_id, payload, heartbeat_capabilities)
     worker_sha = str(payload.get("worker_git_sha") or "").strip()
     if worker_sha:
         set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sqlite3
 from datetime import datetime, timedelta
@@ -317,21 +318,34 @@ def test_canonical_route_contract_ignores_legacy_persisted_false(tmp_path):
 
 def test_latest_owner_heartbeat_wins_and_stale_sha_is_not_reused():
     now = datetime(2030, 1, 2, 3, 4, 5)
+    capability = queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY
     identity = remote_worker_api.authoritative_product_video_worker_identity(
         [
             {
                 "worker_id": "owner-product-video",
+                "worker_instance_id": "owner-product-video:old",
+                "generation_id": "generation-old",
                 "worker_git_head_sha": "73b7d9b56aa0",
+                "runtime_target_sha": "73b7d9b56aa0",
                 "heartbeat_updated_at": queue.now_text(now - timedelta(minutes=10)),
+                "lease_expires_at": queue.now_text(now - timedelta(minutes=8)),
                 "worker_service_mode": "owner_product_video",
+                "worker_capability_version": capability,
+                "worker_capabilities": ["owner_product_video", capability],
             },
             {
                 "worker_id": "owner-product-video",
+                "worker_instance_id": "owner-product-video:new",
+                "generation_id": "generation-new",
                 "worker_git_head_sha": "4080cf000401b2da6d5c3f4cf6e81f7a7d682077",
+                "runtime_target_sha": "4080cf000401b2da6d5c3f4cf6e81f7a7d682077",
                 "worker_sha_source": "git_rev_parse_head",
                 "worker_cwd": "/opt/toanaas-worker",
                 "heartbeat_updated_at": queue.now_text(now - timedelta(seconds=5)),
+                "lease_expires_at": queue.now_text(now + timedelta(seconds=85)),
                 "worker_service_mode": "owner_product_video",
+                "worker_capability_version": capability,
+                "worker_capabilities": ["owner_product_video", capability],
             },
         ],
         runtime_sha="4080cf000401b2da6d5c3f4cf6e81f7a7d682077",
@@ -341,8 +355,15 @@ def test_latest_owner_heartbeat_wins_and_stale_sha_is_not_reused():
         [
             {
                 "worker_id": "owner-product-video",
+                "worker_instance_id": "owner-product-video:old",
+                "generation_id": "generation-old",
                 "worker_git_head_sha": "73b7d9b56aa0",
+                "runtime_target_sha": "73b7d9b56aa0",
                 "heartbeat_updated_at": queue.now_text(now - timedelta(minutes=10)),
+                "lease_expires_at": queue.now_text(now - timedelta(minutes=8)),
+                "worker_service_mode": "owner_product_video",
+                "worker_capability_version": capability,
+                "worker_capabilities": ["owner_product_video", capability],
             }
         ],
         runtime_sha="4080cf000401b2da6d5c3f4cf6e81f7a7d682077",
@@ -351,7 +372,7 @@ def test_latest_owner_heartbeat_wins_and_stale_sha_is_not_reused():
 
     assert identity["worker_sha"].startswith("4080cf")
     assert identity["worker_sha_matches_runtime"] is True
-    assert identity["heartbeat_record_selected_by"] == "latest_owner_product_video_updated_at"
+    assert identity["heartbeat_record_selected_by"] == "latest_active_owner_product_video_generation"
     assert identity["heartbeat_records_considered"] == 2
     assert stale_only["worker_sha"] == ""
     assert stale_only["worker_sha_source"] == "unknown"
@@ -402,3 +423,326 @@ def test_r18s6_has_no_provider_http_or_charge_path():
         "KEY4U" + "_API_KEY",
     )
     assert all(token not in test_source for token in forbidden)
+
+
+def _worker_generation(
+    now: datetime,
+    generation_id: str,
+    *,
+    sha: str = "45e5ea499465588563a746a5cc2f962762a9244a",
+    heartbeat_age_seconds: int = 5,
+    lease_seconds: int = 85,
+    service_mode: str = "owner_product_video",
+    capability_version: str | None = None,
+) -> dict:
+    capability = capability_version or queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY
+    return {
+        "worker_id": "owner-product-video",
+        "worker_instance_id": f"owner-product-video:{generation_id}",
+        "generation_id": generation_id,
+        "service_mode": service_mode,
+        "git_sha": sha,
+        "runtime_target_sha": sha,
+        "capability_version": capability,
+        "capabilities": ["owner_product_video", capability],
+        "process_started_at": queue.now_text(now - timedelta(minutes=2)),
+        "heartbeat_at": queue.now_text(now - timedelta(seconds=heartbeat_age_seconds)),
+        "lease_expires_at": queue.now_text(now + timedelta(seconds=lease_seconds)),
+        "hostname": "vpssieutoc",
+        "pid": 13100,
+    }
+
+
+def test_scheduler_loop_runs_two_ticks_and_survives_first_tick_exception():
+    queue.mark_product_video_watchdog_scheduler(registered=True, running=False)
+    calls: list[int] = []
+    sleeps: list[float] = []
+    moments = iter(
+        datetime(2030, 1, 1, 0, 0, second)
+        for second in range(10)
+    )
+
+    async def tick():
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            raise RuntimeError("first_tick_fixture")
+        return {"scanned": 2, "recovered": 1, "terminal_failed": 0}
+
+    async def fake_sleep(seconds: float):
+        sleeps.append(seconds)
+
+    result = asyncio.run(
+        queue.run_product_video_watchdog_scheduler_loop(
+            tick,
+            sleep=fake_sleep,
+            configured_interval_seconds=20,
+            generation_id="watchdog-two-ticks",
+            max_ticks=2,
+            now_provider=lambda: next(moments),
+        )
+    )
+
+    assert calls == [1, 2]
+    assert sleeps == [20.0]
+    assert result["ticks_executed"] == 2
+    assert result["watchdog_tick_count"] >= 2
+    assert result["watchdog_tick_error_count"] >= 1
+    assert result["watchdog_enabled"] is True
+    assert result["watchdog_scheduler_registered"] is True
+    assert result["scheduler_running_at_return"] is True
+    assert result["watchdog_started_at"]
+    assert result["watchdog_last_run_at"]
+    assert result["watchdog_last_success_at"]
+    assert result["watchdog_jobs_scanned"] == 2
+    assert result["watchdog_jobs_reconciled"] == 1
+    assert result["watchdog_next_run_at"]
+    assert result["watchdog_interval_seconds"] == 20
+    assert result["watchdog_generation_id"] == "watchdog-two-ticks"
+
+
+def test_scheduler_registers_once_and_rejects_duplicate_generation():
+    queue.mark_product_video_watchdog_scheduler(registered=True, running=False)
+    first = queue.mark_product_video_watchdog_scheduler(
+        registered=True,
+        running=True,
+        configured_interval_seconds=20,
+        generation_id="watchdog-primary",
+    )
+    calls: list[int] = []
+
+    async def duplicate_tick():
+        calls.append(1)
+        return {}
+
+    duplicate = asyncio.run(
+        queue.run_product_video_watchdog_scheduler_loop(
+            duplicate_tick,
+            configured_interval_seconds=20,
+            generation_id="watchdog-duplicate",
+            max_ticks=1,
+        )
+    )
+    queue.mark_product_video_watchdog_scheduler(
+        registered=True,
+        running=False,
+        configured_interval_seconds=20,
+        generation_id="watchdog-primary",
+    )
+
+    assert first["scheduler_start_accepted"] is True
+    assert duplicate["duplicate_scheduler_prevented"] is True
+    assert duplicate["ticks_executed"] == 0
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("configured", "effective", "clamped"),
+    [(5, 15, True), (300, 30, True), (20, 20, False)],
+)
+def test_watchdog_interval_is_locked_to_15_30_seconds(configured, effective, clamped):
+    config = queue.product_video_watchdog_interval_config(configured)
+    assert config["effective_interval_seconds"] == effective
+    assert config["clamp_applied"] is clamped
+
+
+def test_worker_generation_authority_and_conflict_fail_closed():
+    now = datetime(2030, 1, 2, 3, 4, 5)
+    runtime_sha = "45e5ea499465588563a746a5cc2f962762a9244a"
+    active = _worker_generation(now, "generation-new")
+    expired = _worker_generation(now, "generation-old", heartbeat_age_seconds=600, lease_seconds=-500)
+
+    one = remote_worker_api.product_video_worker_compatibility([active], runtime_sha=runtime_sha, now=now)
+    restarted = remote_worker_api.product_video_worker_compatibility([active, expired], runtime_sha=runtime_sha, now=now)
+    conflict = remote_worker_api.product_video_worker_compatibility(
+        [active, _worker_generation(now, "generation-other")],
+        runtime_sha=runtime_sha,
+        now=now,
+    )
+
+    assert one["compatible"] is True
+    assert one["authoritative_worker_generation_id"] == "generation-new"
+    assert one["runtime_target_sha"] == runtime_sha
+    assert one["lease_valid"] is True
+    assert one["hostname"] == "vpssieutoc"
+    assert one["pid"] == 13100
+    assert restarted["compatible"] is True
+    assert restarted["stale_worker_generations"] == ["generation-old"]
+    assert conflict["compatible"] is False
+    assert conflict["worker_identity_conflict"] is True
+    assert conflict["duplicate_active_worker_generations"] is True
+    assert set(conflict["active_worker_generation_ids"]) == {"generation-new", "generation-other"}
+    assert conflict["block_reason"] == "worker_generation_conflict"
+
+
+def test_generic_stale_heartbeat_is_ignored_and_worker_block_reasons_are_exact():
+    now = datetime(2030, 1, 2, 3, 4, 5)
+    runtime_sha = "45e5ea499465588563a746a5cc2f962762a9244a"
+    generic_stale = {
+        **_worker_generation(now, "generic-old", heartbeat_age_seconds=600, lease_seconds=-500),
+        "service_mode": "general",
+        "capabilities": ["ffmpeg"],
+    }
+    active = _worker_generation(now, "owner-current")
+    selected = remote_worker_api.product_video_worker_compatibility(
+        [generic_stale, active],
+        runtime_sha=runtime_sha,
+        now=now,
+    )
+    expired = remote_worker_api.product_video_worker_compatibility(
+        [_worker_generation(now, "expired", lease_seconds=-1)],
+        runtime_sha=runtime_sha,
+        now=now,
+    )
+    bad_capability = remote_worker_api.product_video_worker_compatibility(
+        [_worker_generation(now, "bad-capability", capability_version="old-capability")],
+        runtime_sha=runtime_sha,
+        now=now,
+    )
+    bad_sha = remote_worker_api.product_video_worker_compatibility(
+        [_worker_generation(now, "bad-sha", sha="different-sha")],
+        runtime_sha=runtime_sha,
+        now=now,
+    )
+
+    assert selected["compatible"] is True
+    assert selected["authoritative_worker_generation_id"] == "owner-current"
+    assert selected["heartbeat_records_considered"] == 1
+    assert expired["block_reason"] == "worker_lease_expired"
+    assert bad_capability["block_reason"] == "worker_capability_mismatch"
+    assert bad_sha["block_reason"] == "worker_sha_mismatch"
+
+
+def test_claim_uses_shared_compatibility_and_does_not_consume_outbox_when_blocked(tmp_path):
+    conn = _conn(tmp_path)
+    job, project = _legacy_zero_task_job(conn, age_seconds=90)
+    queue.ensure_product_video_dispatch_outbox(
+        conn,
+        job_id=int(job["id"]),
+        project_id=int(project["project_id"]),
+        scene_indexes=[1, 2],
+    )
+    now = datetime(2030, 1, 2, 3, 4, 5)
+    runtime_sha = "45e5ea499465588563a746a5cc2f962762a9244a"
+    compatibility = remote_worker_api.product_video_worker_compatibility(
+        [_worker_generation(now, "one"), _worker_generation(now, "two")],
+        runtime_sha=runtime_sha,
+        caller_generation_id="two",
+        now=now,
+    )
+
+    result = remote_worker_api.claim_remote_worker_job(
+        conn,
+        worker_id="owner-product-video",
+        capabilities=["owner_product_video", queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY],
+        owner_product_video_only=True,
+        worker_compatibility=compatibility,
+    )
+    outbox = queue.get_product_video_dispatch_outbox(conn, job_id=int(job["id"]))
+
+    assert result["job"] is None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "worker_generation_conflict"
+    assert result["provider_submit_called"] is False
+    assert result["debug"]["exact_claim_block_reason"] == "worker_generation_conflict"
+    assert outbox["dispatch_status"] == "pending"
+    assert outbox["attempt_count"] == 0
+
+
+def test_shared_compatibility_result_is_identical_for_admission_claim_and_watchdog():
+    now = datetime(2030, 1, 2, 3, 4, 5)
+    runtime_sha = "45e5ea499465588563a746a5cc2f962762a9244a"
+    records = [_worker_generation(now, "shared-generation")]
+    results = [
+        remote_worker_api.product_video_worker_compatibility(
+            records,
+            runtime_sha=runtime_sha,
+            caller_generation_id="shared-generation" if context == "claim" else "",
+            now=now,
+        )
+        for context in ("admission", "claim", "watchdog")
+    ]
+    assert {item["compatible"] for item in results} == {True}
+    assert {item["worker_sha"] for item in results} == {runtime_sha}
+    assert {item["block_reason"] for item in results} == {""}
+
+
+def test_complete_dispatch_outbox_contract_matches_exact_query_and_terminal_truth(tmp_path):
+    conn = _conn(tmp_path)
+    job, project = _legacy_zero_task_job(conn, age_seconds=90)
+    queue.ensure_product_video_dispatch_outbox(
+        conn,
+        job_id=int(job["id"]),
+        project_id=int(project["project_id"]),
+        scene_indexes=[1, 2],
+    )
+    pending = queue.product_video_dispatch_outbox_diagnostic(conn, job_id=int(job["id"]))
+    required = {
+        "dispatch_outbox_present",
+        "dispatch_outbox_id",
+        "dispatch_outbox_status",
+        "dispatch_outbox_owner",
+        "dispatch_outbox_available_at",
+        "dispatch_outbox_attempt_count",
+        "dispatch_outbox_last_attempt_at",
+        "dispatch_outbox_lease_owner",
+        "dispatch_outbox_lease_expires_at",
+        "dispatch_outbox_claimable",
+        "dispatch_outbox_claim_block_reason",
+        "dispatch_outbox_acknowledged_at",
+        "dispatch_outbox_last_error",
+        "dispatch_outbox_terminal_reason",
+    }
+    assert required <= set(pending)
+    assert pending["dispatch_outbox_claimable"] is pending["claimable"] is True
+    assert pending["dispatch_outbox_claim_block_reason"] == ""
+
+    queue.run_product_video_watchdog_scheduler_tick(
+        conn,
+        eligibility_evaluator=lambda *_args: _eligibility([]),
+    )
+    terminal = queue.product_video_dispatch_outbox_diagnostic(conn, job_id=int(job["id"]))
+    failed = queue.get_video_render_job(conn, int(job["id"]))
+    payload = _payload(failed)
+
+    assert terminal["dispatch_outbox_status"] == "terminal_failed"
+    assert terminal["dispatch_outbox_claimable"] is False
+    assert terminal["dispatch_outbox_claim_block_reason"] == "dispatch_outbox_terminal_failed"
+    assert terminal["dispatch_outbox_terminal_reason"] == "no_eligible_provider_before_scene_dispatch"
+    assert payload["dispatch_outbox_claimable"] is False
+    assert payload["dispatch_outbox_terminal_reason"] == "no_eligible_provider_before_scene_dispatch"
+    assert payload["terminal_state"] == "failed_no_charge"
+    assert payload["continue_polling"] is False
+    assert payload["provider_http_status"] == 0
+    assert payload["fallback_count_effective"] == 0
+    assert payload["charged_xu"] == 0
+    progress_debug = product_progress_status.product_progress_debug_payload(
+        "multiscene_video",
+        str(job["id"]),
+        {**payload, "status": failed["status"]},
+    )
+    assert progress_debug["dispatch_outbox_claimable"] is False
+    assert progress_debug["dispatch_outbox_terminal_reason"] == "no_eligible_provider_before_scene_dispatch"
+    assert progress_debug["terminal_state"] == "failed_no_charge"
+    assert progress_debug["route_requires_provider"] is True
+
+
+def test_bot_wires_production_scheduler_and_shared_compatibility_at_all_gates():
+    source = (ROOT / "bot.py").read_text(encoding="utf-8")
+    worker_source = (ROOT / "remote_worker.py").read_text(encoding="utf-8")
+    assert "video_project_queue.run_product_video_watchdog_scheduler_loop(" in source
+    assert "if tg_product_video_watchdog_task is None or tg_product_video_watchdog_task.done():" in source
+    assert source.count("def product_video_worker_admission_status(") == 1
+    assert "product_video_worker_compatibility(" in source
+    assert "worker_compatibility=worker_compatibility" in source
+    assert "worker_compatibility = product_video_worker_admission_status(" in source
+    assert "worker = product_video_worker_admission_status()" in source
+    assert source.count("*_video_dispatch_outbox_debug_lines(result)") >= 2
+    for field in (
+        "worker_instance_id",
+        "generation_id",
+        "runtime_target_sha",
+        "lease_expires_at",
+        "hostname",
+        "pid",
+    ):
+        assert field in worker_source

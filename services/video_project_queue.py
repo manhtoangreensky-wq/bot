@@ -7,6 +7,8 @@ atomically from SQLite.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import hashlib
 import os
@@ -48,7 +50,9 @@ PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
 PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY = "b13_r18c"
 PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
 PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
-PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT = 15
+PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT = 20
+PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MIN = 15
+PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MAX = 30
 PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
     "pending",
     "leased",
@@ -59,8 +63,12 @@ PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
 )
 
 _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
+    "watchdog_enabled": True,
     "scheduler_registered": False,
     "scheduler_running": False,
+    "watchdog_started_at": "",
+    "watchdog_generation_id": "",
+    "watchdog_tick_count": 0,
     "last_run_at": "",
     "last_success_at": "",
     "last_error": "",
@@ -68,6 +76,11 @@ _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
     "jobs_reconciled": 0,
     "next_run_at": "",
     "interval_seconds": PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
+    "watchdog_configured_interval_seconds": PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
+    "watchdog_effective_interval_seconds": PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
+    "watchdog_interval_clamp_applied": False,
+    "watchdog_interval_clamp_reason": "",
+    "duplicate_scheduler_prevented": False,
 }
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
     "low": 200,
@@ -1620,7 +1633,66 @@ def _dispatch_outbox_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]
     payload["dispatch_outbox_lease_expires_at"] = str(payload.get("lease_expires_at") or "")
     payload["dispatch_outbox_last_error"] = str(payload.get("last_error") or "")
     payload["dispatch_outbox_acknowledged"] = bool(payload.get("acknowledged_at"))
+    payload.update(product_video_dispatch_outbox_debug_contract(payload))
     return payload
+
+
+def product_video_dispatch_outbox_debug_contract(
+    outbox: dict[str, Any] | None,
+    *,
+    diagnostic: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    item = dict(outbox or {})
+    truth = dict(diagnostic or {})
+    current_epoch = (now or datetime.now()).timestamp()
+    present = bool(item or truth.get("outbox_exists"))
+    status = str(item.get("dispatch_status") or truth.get("outbox_status") or "").strip().lower()
+    available_at = str(item.get("available_at") or truth.get("outbox_available_at") or "")
+    lease_expires_at = str(item.get("lease_expires_at") or truth.get("outbox_lease_expiry") or "")
+    exact_reason = str(truth.get("exact_claim_block_reason") or "").strip()
+    if "claimable" in truth:
+        claimable = bool(truth.get("claimable"))
+    elif not present:
+        claimable = False
+        exact_reason = exact_reason or "dispatch_outbox_missing"
+    elif status in {"completed", "terminal_failed", "cancelled", "acknowledged"}:
+        claimable = False
+        exact_reason = exact_reason or f"dispatch_outbox_{status}"
+    elif status == "leased":
+        claimable = _parse_time_epoch(lease_expires_at) <= current_epoch
+        exact_reason = "" if claimable else "dispatch_outbox_lease_active"
+    elif status in {"pending", "retry_wait"}:
+        claimable = _parse_time_epoch(available_at) <= current_epoch
+        exact_reason = "" if claimable else "dispatch_outbox_not_available_yet"
+    else:
+        claimable = False
+        exact_reason = exact_reason or f"dispatch_outbox_status_{status or 'missing'}"
+    if status in {"completed", "terminal_failed", "cancelled", "acknowledged"}:
+        public_reason = f"dispatch_outbox_{status}"
+    elif exact_reason in {"video_job_lease_active", "dispatch_outbox_lease_active"}:
+        public_reason = "active_lease"
+    else:
+        public_reason = exact_reason
+    if not claimable and not public_reason:
+        public_reason = "dispatch_outbox_not_claimable"
+    return {
+        "dispatch_outbox_present": present,
+        "dispatch_outbox_id": _as_int(item.get("outbox_id") or truth.get("outbox_id"), 0),
+        "dispatch_outbox_status": status,
+        "dispatch_outbox_owner": str(item.get("owner") or truth.get("outbox_owner") or ""),
+        "dispatch_outbox_available_at": available_at,
+        "dispatch_outbox_attempt_count": _as_int(item.get("attempt_count"), 0),
+        "dispatch_outbox_last_attempt_at": str(item.get("last_attempt_at") or ""),
+        "dispatch_outbox_lease_owner": str(item.get("lease_owner") or truth.get("outbox_lease_owner") or ""),
+        "dispatch_outbox_lease_expires_at": lease_expires_at,
+        "dispatch_outbox_claimable": claimable,
+        "dispatch_outbox_claim_block_reason": public_reason,
+        "dispatch_outbox_acknowledged_at": str(item.get("acknowledged_at") or ""),
+        "dispatch_outbox_last_error": str(item.get("last_error") or ""),
+        "dispatch_outbox_terminal_reason": str(item.get("terminal_reason") or ""),
+        "dispatch_outbox_exact_claim_block_reason": exact_reason,
+    }
 
 
 def get_video_project(conn: sqlite3.Connection, project_id: int | None = None, project_uuid: str = "") -> dict[str, Any]:
@@ -1963,7 +2035,7 @@ def product_video_dispatch_outbox_diagnostic(
         reason = f"dispatch_outbox_status_{outbox_status or 'missing'}"
     claimable = not bool(reason)
     watchdog = product_video_zero_task_watchdog_state(job, result, now=current_dt)
-    return {
+    diagnostic = {
         "job_id": int(job_id),
         "project_id": int(project.get("project_id") or 0),
         "job_status": job_status,
@@ -1992,6 +2064,14 @@ def product_video_dispatch_outbox_diagnostic(
         "zero_task_watchdog_triggered": bool(watchdog.get("zero_task_watchdog_triggered")),
         **route_contract,
     }
+    diagnostic.update(
+        product_video_dispatch_outbox_debug_contract(
+            outbox,
+            diagnostic=diagnostic,
+            now=current_dt,
+        )
+    )
+    return diagnostic
 
 
 def _insert_product_video_dispatch_outbox_record(
@@ -4080,17 +4160,33 @@ def sweep_product_video_zero_task_watchdog(
             )
             conn.commit()
             report["recovered"] += 1
+        outbox_diagnostic = product_video_dispatch_outbox_diagnostic(
+            conn,
+            job_id=int(job["id"]),
+            now=current_dt,
+        )
+        latest_job = get_video_render_job(conn, int(job["id"]))
+        latest_result = _json_loads(str((latest_job or {}).get("result_json") or ""), {})
+        if isinstance(latest_result, dict):
+            latest_result.update(
+                {
+                    key: value
+                    for key, value in outbox_diagnostic.items()
+                    if key.startswith("dispatch_outbox_")
+                }
+            )
+            conn.execute(
+                "UPDATE video_jobs SET result_json=?,updated_at=? WHERE id=?",
+                (_json_dumps(latest_result), current, int(job["id"])),
+            )
+            conn.commit()
         report["details"].append(
             {
                 "job_id": int(job["id"]),
                 "zero_task_recovery_action": recovery_action,
                 "zero_task_terminal_reason": terminal_reason,
                 "candidate_count": len(candidates),
-                "dispatch_outbox": product_video_dispatch_outbox_diagnostic(
-                    conn,
-                    job_id=int(job["id"]),
-                    now=current_dt,
-                ),
+                "dispatch_outbox": outbox_diagnostic,
             }
         )
     return report
@@ -4101,15 +4197,43 @@ def mark_product_video_watchdog_scheduler(
     registered: bool | None = None,
     running: bool | None = None,
     interval_seconds: int | None = None,
+    configured_interval_seconds: Any = None,
+    generation_id: str = "",
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
+    interval_config = product_video_watchdog_interval_config(
+        configured_interval_seconds
+        if configured_interval_seconds is not None
+        else interval_seconds
+    )
     if registered is not None:
         _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["scheduler_registered"] = bool(registered)
-    if running is not None:
-        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["scheduler_running"] = bool(running)
-    if interval_seconds is not None:
-        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["interval_seconds"] = max(5, min(300, int(interval_seconds)))
+    start_accepted = True
+    current_generation = str(_PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("watchdog_generation_id") or "")
+    requested_generation = str(generation_id or current_generation or uuid.uuid4().hex)
+    if running is True and _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("scheduler_running"):
+        start_accepted = False
+        _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["duplicate_scheduler_prevented"] = True
+    elif running is not None:
+        if running is False and generation_id and current_generation and generation_id != current_generation:
+            start_accepted = False
+        else:
+            _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["scheduler_running"] = bool(running)
+            if running:
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_started_at"] = now_text(current_dt)
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_generation_id"] = requested_generation
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["duplicate_scheduler_prevented"] = False
+    _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
+        {
+            "watchdog_enabled": True,
+            "interval_seconds": interval_config["effective_interval_seconds"],
+            "watchdog_configured_interval_seconds": interval_config["configured_interval_seconds"],
+            "watchdog_effective_interval_seconds": interval_config["effective_interval_seconds"],
+            "watchdog_interval_clamp_applied": interval_config["clamp_applied"],
+            "watchdog_interval_clamp_reason": interval_config["clamp_reason"],
+        }
+    )
     interval = int(
         _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("interval_seconds")
         or PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT
@@ -4120,11 +4244,144 @@ def mark_product_video_watchdog_scheduler(
         )
     elif running is False:
         _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["next_run_at"] = ""
-    return product_video_watchdog_scheduler_status()
+    return {**product_video_watchdog_scheduler_status(), "scheduler_start_accepted": start_accepted}
 
 
 def product_video_watchdog_scheduler_status() -> dict[str, Any]:
-    return dict(_PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE)
+    status = dict(_PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE)
+    status.update(
+        {
+            "watchdog_scheduler_registered": bool(status.get("scheduler_registered")),
+            "watchdog_scheduler_running": bool(status.get("scheduler_running")),
+            "watchdog_last_run_at": str(status.get("last_run_at") or ""),
+            "watchdog_last_success_at": str(status.get("last_success_at") or ""),
+            "watchdog_last_error": str(status.get("last_error") or ""),
+            "watchdog_jobs_scanned": _as_int(status.get("jobs_scanned"), 0),
+            "watchdog_jobs_reconciled": _as_int(status.get("jobs_reconciled"), 0),
+            "watchdog_next_run_at": str(status.get("next_run_at") or ""),
+            "watchdog_interval_seconds": _as_int(status.get("interval_seconds"), PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT),
+        }
+    )
+    return status
+
+
+def product_video_watchdog_interval_config(configured: Any = None) -> dict[str, Any]:
+    raw = configured
+    if raw in (None, ""):
+        parsed = PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT
+        configured_text = str(PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT)
+    else:
+        configured_text = str(raw)
+        try:
+            parsed = int(str(raw).strip())
+        except Exception:
+            parsed = PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT
+    effective = max(
+        PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MIN,
+        min(PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MAX, parsed),
+    )
+    clamp_applied = effective != parsed
+    if parsed < PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MIN:
+        clamp_reason = "below_minimum_15_seconds"
+    elif parsed > PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MAX:
+        clamp_reason = "above_maximum_30_seconds"
+    elif raw not in (None, "") and str(raw).strip() and not str(raw).strip().lstrip("+-").isdigit():
+        clamp_reason = "invalid_interval_default_20_seconds"
+    else:
+        clamp_reason = ""
+    return {
+        "configured_interval": configured_text,
+        "configured_interval_seconds": parsed,
+        "effective_interval_seconds": effective,
+        "clamp_applied": clamp_applied or bool(clamp_reason),
+        "clamp_reason": clamp_reason,
+    }
+
+
+async def run_product_video_watchdog_scheduler_loop(
+    tick: Callable[[], Any],
+    *,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+    configured_interval_seconds: Any = None,
+    generation_id: str = "",
+    max_ticks: int = 0,
+    now_provider: Callable[[], datetime] = datetime.now,
+) -> dict[str, Any]:
+    """Production scheduler loop with injectable clock/sleep for deterministic tests."""
+    generation = str(generation_id or uuid.uuid4().hex)
+    started = mark_product_video_watchdog_scheduler(
+        registered=True,
+        running=True,
+        configured_interval_seconds=configured_interval_seconds,
+        generation_id=generation,
+        now=now_provider(),
+    )
+    if not started.get("scheduler_start_accepted"):
+        return {**started, "duplicate_scheduler_prevented": True, "ticks_executed": 0}
+    effective_interval = _as_int(
+        started.get("watchdog_effective_interval_seconds"),
+        PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
+    )
+    ticks_executed = 0
+    running_snapshot: dict[str, Any] = {}
+    try:
+        while True:
+            tick_now = now_provider()
+            tick_result: dict[str, Any] = {}
+            tick_error = ""
+            try:
+                value = tick()
+                if inspect.isawaitable(value):
+                    value = await value
+                tick_result = dict(value or {}) if isinstance(value, dict) else {}
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                tick_error = f"{type(exc).__name__}:{str(exc)[:160]}"
+            ticks_executed += 1
+            _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_tick_count"] = _as_int(
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("watchdog_tick_count"), 0
+            ) + 1
+            _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["last_run_at"] = now_text(tick_now)
+            _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["next_run_at"] = now_text(
+                tick_now + timedelta(seconds=effective_interval)
+            )
+            if tick_error:
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["last_error"] = tick_error
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_tick_error_count"] = _as_int(
+                    _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("watchdog_tick_error_count"), 0
+                ) + 1
+            else:
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
+                    {
+                        "last_success_at": str(tick_result.get("last_success_at") or now_text(tick_now)),
+                        "last_error": "",
+                        "jobs_scanned": _as_int(tick_result.get("scanned") or tick_result.get("jobs_scanned"), 0),
+                        "jobs_reconciled": _as_int(
+                            tick_result.get("jobs_reconciled")
+                            or _as_int(tick_result.get("recovered"), 0) + _as_int(tick_result.get("terminal_failed"), 0),
+                            0,
+                        ),
+                    }
+                )
+            running_snapshot = product_video_watchdog_scheduler_status()
+            if max_ticks > 0 and ticks_executed >= max_ticks:
+                return {
+                    **running_snapshot,
+                    "scheduler_running_at_return": True,
+                    "ticks_executed": ticks_executed,
+                }
+            wait_result = sleep(float(effective_interval))
+            if inspect.isawaitable(wait_result):
+                await wait_result
+    finally:
+        mark_product_video_watchdog_scheduler(
+            registered=True,
+            running=False,
+            configured_interval_seconds=effective_interval,
+            generation_id=generation,
+            now=now_provider(),
+        )
 
 
 def run_product_video_watchdog_scheduler_tick(

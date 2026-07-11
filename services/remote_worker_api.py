@@ -263,55 +263,192 @@ def authoritative_product_video_worker_identity(
     now: datetime | None = None,
     heartbeat_ttl_seconds: int = 90,
 ) -> dict[str, Any]:
-    """Select the latest owner-worker heartbeat and never reuse a stale SHA."""
+    """Backward-compatible identity view backed by the shared compatibility evaluator."""
+    return product_video_worker_compatibility(
+        records,
+        runtime_sha=runtime_sha,
+        now=now,
+        heartbeat_ttl_seconds=heartbeat_ttl_seconds,
+    )
+
+
+def product_video_worker_compatibility(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    *,
+    runtime_sha: str,
+    caller_generation_id: str = "",
+    now: datetime | None = None,
+    heartbeat_ttl_seconds: int = 90,
+    expected_service_mode: str = "owner_product_video",
+    expected_capability_version: str = video_project_queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY,
+) -> dict[str, Any]:
+    """Resolve one authoritative Product Video worker generation and fail closed on conflicts."""
     current_dt = now or datetime.now()
-    candidates = [dict(item) for item in (records or []) if isinstance(item, dict)]
-    candidates.sort(
+    ttl = max(30, min(300, int(heartbeat_ttl_seconds or 90)))
+    runtime_value = str(runtime_sha or "").strip()
+    normalized: list[dict[str, Any]] = []
+    for raw in (records or []):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        service_mode = str(item.get("service_mode") or item.get("worker_service_mode") or "").strip()
+        capabilities = sanitize_capabilities(item.get("capabilities") or item.get("worker_capabilities") or [])
+        if service_mode and service_mode != expected_service_mode and REMOTE_WORKER_OWNER_PRODUCT_VIDEO_CAPABILITY not in capabilities:
+            continue
+        heartbeat_at = str(
+            item.get("heartbeat_at")
+            or item.get("heartbeat_updated_at")
+            or item.get("last_heartbeat")
+            or ""
+        ).strip()
+        heartbeat_dt = _parse_queue_time(heartbeat_at)
+        heartbeat_age = max(0, int((current_dt - heartbeat_dt).total_seconds())) if heartbeat_dt else None
+        lease_expires_at = str(item.get("lease_expires_at") or item.get("worker_lease_expires_at") or "").strip()
+        lease_dt = _parse_queue_time(lease_expires_at)
+        heartbeat_fresh = bool(heartbeat_age is not None and heartbeat_age <= ttl)
+        lease_valid = bool(lease_dt and lease_dt > current_dt)
+        generation_id = str(item.get("generation_id") or item.get("worker_generation_id") or "").strip()
+        normalized.append(
+            {
+                **item,
+                "worker_instance_id": str(item.get("worker_instance_id") or item.get("worker_id") or "").strip(),
+                "generation_id": generation_id,
+                "service_mode": service_mode,
+                "git_sha": str(
+                    item.get("git_sha")
+                    or item.get("worker_git_head_sha")
+                    or item.get("worker_git_sha")
+                    or item.get("worker_sha")
+                    or ""
+                ).strip(),
+                "runtime_target_sha": str(item.get("runtime_target_sha") or "").strip(),
+                "capability_version": str(
+                    item.get("capability_version") or item.get("worker_capability_version") or ""
+                ).strip(),
+                "capabilities": capabilities,
+                "process_started_at": str(item.get("process_started_at") or item.get("worker_process_started_at") or ""),
+                "heartbeat_at": heartbeat_at,
+                "heartbeat_dt": heartbeat_dt,
+                "heartbeat_age_seconds": heartbeat_age,
+                "heartbeat_fresh": heartbeat_fresh,
+                "lease_expires_at": lease_expires_at,
+                "lease_valid": lease_valid,
+                "hostname": str(item.get("hostname") or item.get("worker_hostname") or ""),
+                "pid": _safe_int(item.get("pid") or item.get("worker_pid"), 0),
+                "active": bool(generation_id and heartbeat_fresh and lease_valid),
+            }
+        )
+    normalized.sort(
         key=lambda item: (
-            _parse_queue_time(item.get("heartbeat_updated_at") or item.get("last_heartbeat")) or datetime.min,
-            str(item.get("worker_id") or ""),
+            item.get("heartbeat_dt") or datetime.min,
+            str(item.get("generation_id") or ""),
         ),
         reverse=True,
     )
-    selected = candidates[0] if candidates else {}
-    heartbeat_at = str(selected.get("heartbeat_updated_at") or selected.get("last_heartbeat") or "").strip()
-    heartbeat_dt = _parse_queue_time(heartbeat_at)
-    heartbeat_age = max(0, int((current_dt - heartbeat_dt).total_seconds())) if heartbeat_dt else None
-    ttl = max(30, min(300, int(heartbeat_ttl_seconds or 90)))
-    connected = bool(heartbeat_age is not None and heartbeat_age <= ttl)
-    reported_sha = str(
-        selected.get("worker_git_head_sha")
-        or selected.get("worker_sha")
-        or selected.get("worker_git_sha")
-        or ""
-    ).strip()
-    stale_sha_ignored = bool(reported_sha and not connected)
-    effective_sha = reported_sha if connected else ""
-    runtime_value = str(runtime_sha or "").strip()
-    version_match = bool(
-        runtime_value
-        and effective_sha
-        and (runtime_value.startswith(effective_sha) or effective_sha.startswith(runtime_value))
+    latest_by_generation: dict[str, dict[str, Any]] = {}
+    for item in normalized:
+        generation = str(item.get("generation_id") or "")
+        key = generation or f"legacy:{item.get('worker_instance_id') or len(latest_by_generation)}"
+        latest_by_generation.setdefault(key, item)
+    generations = list(latest_by_generation.values())
+    active = [item for item in generations if item.get("active")]
+    active_generation_ids = [str(item.get("generation_id") or "") for item in active if item.get("generation_id")]
+    conflict = len(set(active_generation_ids)) > 1
+    selected = active[0] if len(active) == 1 else (generations[0] if generations else {})
+    stale_generations = [
+        str(item.get("generation_id") or "")
+        for item in generations
+        if not item.get("active") and item.get("generation_id")
+    ]
+    heartbeat_fresh = bool(selected.get("heartbeat_fresh"))
+    lease_valid = bool(selected.get("lease_valid"))
+    connected = bool(len(active) == 1 and not conflict)
+    git_sha = str(selected.get("git_sha") or "") if connected else ""
+    runtime_target_sha = str(selected.get("runtime_target_sha") or "") if connected else ""
+    service_mode_match = bool(selected.get("service_mode") == expected_service_mode)
+    capability_match = bool(
+        selected.get("capability_version") == expected_capability_version
+        and expected_capability_version in set(selected.get("capabilities") or [])
     )
+    sha_match = bool(
+        runtime_value
+        and git_sha
+        and runtime_target_sha
+        and (runtime_value.startswith(git_sha) or git_sha.startswith(runtime_value))
+        and (runtime_value.startswith(runtime_target_sha) or runtime_target_sha.startswith(runtime_value))
+    )
+    caller_generation = str(caller_generation_id or "").strip()
+    caller_generation_match = bool(
+        not caller_generation
+        or (selected.get("generation_id") and caller_generation == selected.get("generation_id"))
+    )
+    if conflict:
+        block_reason = "worker_generation_conflict"
+    elif not heartbeat_fresh:
+        block_reason = "worker_heartbeat_stale"
+    elif not lease_valid:
+        block_reason = "worker_lease_expired"
+    elif not caller_generation_match:
+        block_reason = "worker_generation_conflict"
+    elif not service_mode_match:
+        block_reason = "worker_service_mode_mismatch"
+    elif not capability_match:
+        block_reason = "worker_capability_mismatch"
+    elif not sha_match:
+        block_reason = "worker_sha_mismatch"
+    else:
+        block_reason = ""
+    compatible = bool(connected and caller_generation_match and service_mode_match and capability_match and sha_match)
+    heartbeat_at = str(selected.get("heartbeat_at") or "")
+    heartbeat_age = selected.get("heartbeat_age_seconds")
+    stale_sha_ignored = bool(selected.get("git_sha") and not connected)
     return {
         "runtime_sha": runtime_value,
-        "worker_sha": effective_sha,
-        "worker_git_head_sha": effective_sha,
+        "runtime_target_sha": runtime_target_sha,
+        "worker_sha": git_sha,
+        "git_sha": git_sha,
+        "worker_git_head_sha": git_sha,
         "worker_sha_source": str(selected.get("worker_sha_source") or "worker_claim_payload") if connected else "unknown",
         "worker_cwd": str(selected.get("worker_cwd") or "") if connected else "",
-        "worker_id": sanitize_worker_id(str(selected.get("worker_id") or "")) if selected else "",
-        "worker_service_mode": str(selected.get("worker_service_mode") or ""),
-        "worker_capabilities": sanitize_capabilities(selected.get("worker_capabilities") or []),
-        "worker_capability_version": str(selected.get("worker_capability_version") or ""),
+        "worker_id": sanitize_worker_id(str(selected.get("worker_id") or selected.get("worker_instance_id") or "")) if selected else "",
+        "worker_instance_id": str(selected.get("worker_instance_id") or ""),
+        "authoritative_worker_instance_id": str(selected.get("worker_instance_id") or "") if connected else "",
+        "generation_id": str(selected.get("generation_id") or "") if connected else "",
+        "authoritative_worker_generation_id": str(selected.get("generation_id") or "") if connected else "",
+        "active_worker_generation_ids": active_generation_ids,
+        "stale_worker_generations": stale_generations,
+        "duplicate_active_worker_generations": conflict,
+        "worker_identity_conflict": conflict,
+        "worker_identity_conflict_reason": "multiple_active_owner_product_video_generations" if conflict else "",
+        "worker_identity_conflict_resolution": "wait_for_old_generation_lease_expiry" if conflict else "authoritative_generation_selected",
+        "worker_service_mode": str(selected.get("service_mode") or ""),
+        "service_mode": str(selected.get("service_mode") or ""),
+        "worker_capabilities": list(selected.get("capabilities") or []),
+        "worker_capability_version": str(selected.get("capability_version") or ""),
+        "capability_version": str(selected.get("capability_version") or ""),
+        "process_started_at": str(selected.get("process_started_at") or ""),
+        "lease_expires_at": str(selected.get("lease_expires_at") or ""),
+        "hostname": str(selected.get("hostname") or ""),
+        "pid": _safe_int(selected.get("pid"), 0),
         "worker_connected": connected,
         "worker_heartbeat_at": heartbeat_at,
         "heartbeat_updated_at": heartbeat_at,
         "worker_heartbeat_age": heartbeat_age,
         "heartbeat_age_seconds": heartbeat_age,
         "worker_heartbeat_ttl_seconds": ttl,
-        "worker_sha_matches_runtime": version_match,
-        "heartbeat_record_selected_by": "latest_owner_product_video_updated_at",
-        "heartbeat_records_considered": len(candidates),
+        "heartbeat_fresh": heartbeat_fresh,
+        "lease_valid": lease_valid,
+        "sha_match": sha_match,
+        "capability_match": capability_match,
+        "service_mode_match": service_mode_match,
+        "identity_conflict": conflict,
+        "compatible": compatible,
+        "worker_version_compatible": compatible,
+        "worker_admission_block_reason": block_reason,
+        "block_reason": block_reason,
+        "worker_sha_matches_runtime": sha_match,
+        "heartbeat_record_selected_by": "latest_active_owner_product_video_generation",
+        "heartbeat_records_considered": len(normalized),
         "stale_worker_sha_ignored": stale_sha_ignored,
     }
 
@@ -707,12 +844,16 @@ def explain_product_video_claimability(
         conn,
         job_id=wanted,
     )
-    if not reason and not outbox_diagnostic.get("outbox_exists"):
-        reason = "dispatch_outbox_missing"
     if not reason and status == "processing" and not scene_claim.get("processing_job_scene_claimable"):
         has_provider_task = _safe_int(scene_claim.get("valid_provider_task_count"), 0) > 0
         if not has_provider_task:
             reason = "processing_job_has_no_claimable_scene"
+    if not reason and not outbox_diagnostic.get("dispatch_outbox_claimable"):
+        reason = str(
+            outbox_diagnostic.get("dispatch_outbox_claim_block_reason")
+            or outbox_diagnostic.get("exact_claim_block_reason")
+            or "dispatch_outbox_missing"
+        )
     claimable = not bool(reason)
     return {
         "ok": True,
@@ -736,6 +877,11 @@ def explain_product_video_claimability(
         "outbox_lease_owner": str(outbox_diagnostic.get("outbox_lease_owner") or ""),
         "outbox_lease_expiry": str(outbox_diagnostic.get("outbox_lease_expiry") or ""),
         "exact_claim_block_reason": str(outbox_diagnostic.get("exact_claim_block_reason") or reason),
+        **{
+            key: value
+            for key, value in outbox_diagnostic.items()
+            if key.startswith("dispatch_outbox_")
+        },
         **scene_claim,
     }
 
@@ -2135,17 +2281,22 @@ def _claim_video_render_candidate(
             result_payload = {}
         if product_video_only or owner_product_video_only:
             chosen_outbox = dict(chosen.get("dispatch_outbox") or {})
+            outbox_contract = video_project_queue.product_video_dispatch_outbox_debug_contract(
+                chosen_outbox,
+                now=current_dt,
+            )
+            if dispatch_outbox_claim:
+                outbox_contract.update(
+                    {
+                        "dispatch_outbox_status": "acknowledged",
+                        "dispatch_outbox_claimable": False,
+                        "dispatch_outbox_claim_block_reason": "dispatch_outbox_already_acknowledged",
+                        "dispatch_outbox_acknowledged_at": current,
+                    }
+                )
             result_payload.update(
                 {
-                    "dispatch_outbox_present": bool(chosen_outbox),
-                    "dispatch_outbox_id": int(chosen_outbox.get("outbox_id") or 0),
-                    "dispatch_outbox_status": (
-                        "acknowledged" if dispatch_outbox_claim else str(chosen_outbox.get("dispatch_status") or "")
-                    ),
-                    "dispatch_outbox_attempt_count": int(chosen_outbox.get("attempt_count") or 0),
-                    "dispatch_outbox_lease_owner": str(chosen_outbox.get("lease_owner") or ""),
-                    "dispatch_outbox_lease_expires_at": str(chosen_outbox.get("lease_expires_at") or ""),
-                    "dispatch_outbox_last_error": str(chosen_outbox.get("last_error") or ""),
+                    **outbox_contract,
                     "dispatch_outbox_acknowledged": bool(dispatch_outbox_claim or chosen_outbox.get("acknowledged_at")),
                     "worker_scan_seen_job": True,
                     "worker_scan_seen_outbox": bool(chosen_outbox),
@@ -2579,6 +2730,7 @@ def claim_remote_worker_job(
     admin_video_only: bool = False,
     product_video_only: bool = False,
     owner_product_video_only: bool = False,
+    worker_compatibility: dict[str, Any] | None = None,
 ) -> dict:
     worker = sanitize_worker_id(worker_id)
     requested = {str(item).strip().lower() for item in (capabilities or []) if str(item).strip()}
@@ -2623,6 +2775,30 @@ def claim_remote_worker_job(
         product_caps = {REMOTE_WORKER_PRODUCT_VIDEO_CAPABILITY, REMOTE_WORKER_OWNER_PRODUCT_VIDEO_CAPABILITY}
         if requested and not (requested & product_caps):
             return {"ok": True, "job": None, "reason": "product_video_capability_required"}
+        compatibility = dict(worker_compatibility or {})
+        if owner_product_video_only and compatibility and not compatibility.get("compatible"):
+            reason = str(
+                compatibility.get("block_reason")
+                or compatibility.get("worker_admission_block_reason")
+                or "worker_heartbeat_stale"
+            )
+            debug = remote_worker_claim_debug_snapshot(conn, claim_route="owner_product_video")
+            debug.update(
+                {
+                    "worker_compatibility": strip_secret_fields(compatibility),
+                    "worker_compatibility_blocked": True,
+                    "exact_claim_block_reason": reason,
+                }
+            )
+            return {
+                "ok": True,
+                "status": "blocked",
+                "job": None,
+                "reason": reason,
+                "owner_product_video_only": True,
+                "provider_submit_called": False,
+                "debug": debug,
+            }
         config = remote_worker_production_guard_config()
         public_enabled = bool(config["public_enabled"]) and not bool(owner_product_video_only)
         job = claim_remote_worker_product_video_job(
