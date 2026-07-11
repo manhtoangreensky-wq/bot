@@ -22,7 +22,20 @@ import urllib.request
 from pathlib import Path
 
 WORKER_PARSER_VERSION = "r8d_product_video_canonical_parser"
+PRODUCT_VIDEO_CANONICAL_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
 WORKER_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+ACTIVE_WORKER_SERVICE_MODE = "general"
+ACTIVE_WORKER_CAPABILITIES: list[str] = ["ffmpeg", "video_postprocess"]
+
+
+def product_video_worker_capabilities() -> list[str]:
+    return [
+        "product_video",
+        "owner_product_video",
+        "ffmpeg",
+        "video_postprocess",
+        PRODUCT_VIDEO_CANONICAL_CAPABILITY,
+    ]
 
 
 def load_dotenv(path: str) -> None:
@@ -203,7 +216,7 @@ def claim_job(
     global LAST_CLAIM_RESPONSE, LAST_CLAIMED_JOB
     LAST_CLAIMED_JOB = {}
     if product_video_only or owner_product_video_only:
-        capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
+        capabilities = product_video_worker_capabilities()
     elif admin_video_only:
         capabilities = ["admin_video", "ffmpeg"]
     elif admin_canary_only:
@@ -216,6 +229,10 @@ def claim_job(
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
         "max_jobs": 1,
+        "worker_git_sha": worker_git_sha(),
+        "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_service_mode": "owner_product_video" if owner_product_video_only else ("product_video" if product_video_only else "general"),
+        "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video_only or owner_product_video_only) else "",
     }
     if canary_only:
         payload["canary_only"] = True
@@ -317,7 +334,7 @@ def ping_server(
     owner_product_video: bool = False,
 ) -> dict:
     if product_video or owner_product_video:
-        capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
+        capabilities = product_video_worker_capabilities()
     elif admin_video:
         capabilities = ["admin_video", "ffmpeg"]
     elif admin_canary:
@@ -331,6 +348,8 @@ def ping_server(
         "capabilities": capabilities,
         "worker_git_sha": worker_git_sha(),
         "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_service_mode": "owner_product_video" if owner_product_video else ("product_video" if product_video else "general"),
+        "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video or owner_product_video) else "",
         "dry_run": True,
     }
     if canary:
@@ -354,6 +373,13 @@ def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") ->
         "message": str(message or "")[:500],
         "worker_git_sha": worker_git_sha(),
         "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_service_mode": ACTIVE_WORKER_SERVICE_MODE,
+        "capabilities": list(ACTIVE_WORKER_CAPABILITIES),
+        "worker_capability_version": (
+            PRODUCT_VIDEO_CANONICAL_CAPABILITY
+            if PRODUCT_VIDEO_CANONICAL_CAPABILITY in ACTIVE_WORKER_CAPABILITIES
+            else ""
+        ),
     }
     http_json("POST", "/api/v1/worker/heartbeat", payload, timeout=20)
 
@@ -1174,11 +1200,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES
     args = build_arg_parser().parse_args(argv)
     special_modes = [bool(args.canary), bool(args.admin_canary), bool(args.admin_video), bool(args.product_video), bool(args.owner_product_video)]
     if sum(1 for item in special_modes if item) > 1:
         print("[remote_worker] choose only one of --canary, --admin-canary, --admin-video, --product-video, or --owner-product-video")
         return 2
+    ACTIVE_WORKER_SERVICE_MODE = claim_mode_label(
+        canary_only=args.canary,
+        admin_canary_only=args.admin_canary,
+        admin_video_only=args.admin_video,
+        product_video_only=args.product_video,
+        owner_product_video_only=args.owner_product_video,
+    )
+    ACTIVE_WORKER_CAPABILITIES = (
+        product_video_worker_capabilities()
+        if args.product_video or args.owner_product_video
+        else ["ffmpeg", "video_postprocess"]
+    )
     if args.doctor:
         return run_doctor()
     if args.ping:

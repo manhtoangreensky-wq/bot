@@ -33,6 +33,7 @@ import shutil
 import traceback
 import zipfile
 import xml.etree.ElementTree as ET
+import uuid
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qsl, quote, urlencode, urlparse
 from contextlib import asynccontextmanager
@@ -5282,6 +5283,103 @@ def save_video_project_storyboard(project_id: int, storyboard, *, conn=None) -> 
         if owned:
             db.close()
 
+def build_product_video_public_final_admission(
+    project: dict,
+    user_id: int,
+    preflight: dict,
+    scene_gate: dict,
+) -> dict:
+    project = dict(project or {})
+    preflight = dict(preflight or {})
+    scene_gate = dict(scene_gate or {})
+    worker = product_video_worker_admission_status()
+    asset_pack = _product_video_json_dict(project.get("asset_pack_json"))
+    invoice = _product_video_json_dict(project.get("invoice_json"))
+    route_contract = video_provider_router.product_video_route_contract(
+        str(asset_pack.get("product_type") or invoice.get("product_type") or project.get("profile_id") or ""),
+        str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or ""),
+        str(asset_pack.get("orchestration_mode") or invoice.get("orchestration_mode") or ""),
+        explicit_local_renderer=bool(asset_pack.get("explicit_local_renderer") or invoice.get("explicit_local_renderer")),
+    )
+    candidates = [
+        str(item or "").strip()
+        for item in (
+            scene_gate.get("eligible_provider_keys")
+            or scene_gate.get("runtime_candidate_keys")
+            or preflight.get("effective_provider_chain")
+            or []
+        )
+        if str(item or "").strip()
+    ]
+    diagnostics = dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {})
+    handler_ok = bool(
+        diagnostics.get("product_video_confirm_handler_count") == 1
+        and not diagnostics.get("duplicate_confirm_handler_detected")
+        and not diagnostics.get("duplicate_callback_pattern_detected")
+    )
+    route_ok = bool(route_contract.get("route_requires_provider"))
+    worker_ok = bool(worker.get("worker_version_compatible"))
+    gate_ok = bool(preflight.get("ok") and scene_gate.get("ok"))
+    allowed = bool(candidates and gate_ok and worker_ok and route_ok and handler_ok)
+    snapshot_id = f"pv-admission-{int(project.get('project_id') or 0)}-{uuid.uuid4().hex}"
+    checked_at = now_text()
+    quote_fingerprint = video_project_queue.product_video_admission_quote_fingerprint(project, int(user_id))
+    if not candidates:
+        block_reason = "no_eligible_product_video_provider"
+    elif not handler_ok:
+        block_reason = "duplicate_product_video_confirm_handler"
+    elif not worker_ok:
+        block_reason = str(worker.get("worker_admission_block_reason") or "worker_version_incompatible")
+    elif not route_ok:
+        block_reason = "product_video_route_contract_mismatch"
+    elif not gate_ok:
+        block_reason = str(scene_gate.get("blocker") or preflight.get("blocker") or "product_video_admission_blocked")
+    else:
+        block_reason = ""
+    snapshot = {
+        **dict(scene_gate.get("provider_eligibility_snapshot") or {}),
+        "provider_eligibility_snapshot_id": snapshot_id,
+        "admission_snapshot_id": snapshot_id,
+        "admission_checked_at": checked_at,
+        "admission_user_id": int(user_id),
+        "admission_project_id": int(project.get("project_id") or 0),
+        "admission_quote_fingerprint": quote_fingerprint,
+        "admission_callback_handler_id": video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
+        "admission_callback_data": video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK,
+        "eligible_provider_keys": candidates,
+        "runtime_candidate_keys": candidates,
+        "final_eligible_provider_count": len(candidates),
+    }
+    return {
+        **preflight,
+        **scene_gate,
+        **route_contract,
+        "ok": allowed,
+        "provider_eligibility_snapshot": snapshot,
+        "provider_eligibility_snapshot_id": snapshot_id,
+        "admission_snapshot_id": snapshot_id,
+        "admission_checked_at": checked_at,
+        "admission_ttl_seconds": max(5, min(300, safe_int(os.getenv("PRODUCT_VIDEO_ADMISSION_TTL_SECONDS"), 60))),
+        "admission_candidate_keys": candidates,
+        "admission_candidate_count": len(candidates),
+        "admission_result": "PASS" if allowed else "BLOCKED",
+        "admission_block_reason": block_reason,
+        "admission_user_id": int(user_id),
+        "admission_project_id": int(project.get("project_id") or 0),
+        "admission_quote_fingerprint": quote_fingerprint,
+        "admission_callback_handler_id": video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
+        "admission_callback_data": video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK,
+        "admission_worker_runtime_sha": str(worker.get("runtime_sha") or ""),
+        "admission_worker_sha": str(worker.get("worker_sha") or ""),
+        "admission_worker_version_compatible": worker_ok,
+        "admission_route_requires_provider": route_ok,
+        "worker_heartbeat_age": worker.get("worker_heartbeat_age"),
+        "worker_capability_version": str(worker.get("worker_capability_version") or ""),
+        "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
+        "duplicate_confirm_handler_detected": bool(diagnostics.get("duplicate_confirm_handler_detected")),
+    }
+
+
 def confirm_video_project_invoice(
     project_id: int,
     user_id,
@@ -5314,34 +5412,20 @@ def confirm_video_project_invoice(
             current_project = video_project_queue.get_video_project(db, int(project_id))
             scene_count = max(1, safe_int((current_project or {}).get("scene_count"), 1))
             preflight = product_video_provider_availability_preflight(db)
-            if preflight.get("ok"):
-                scene_gate = product_video_multi_scene_health_gate(scene_count, preflight)
-                final_admission = {
-                    **preflight,
-                    **scene_gate,
-                    "provider_eligibility_snapshot": scene_gate.get("provider_eligibility_snapshot") or scene_gate,
-                    "admission_snapshot_id": str(
-                        scene_gate.get("provider_eligibility_snapshot_id")
-                        or preflight.get("provider_eligibility_snapshot_id")
-                        or ""
-                    ),
-                    "admission_candidate_keys": list(scene_gate.get("eligible_provider_keys") or []),
-                    "admission_candidate_count": safe_int(scene_gate.get("final_eligible_provider_count"), 0),
-                    "admission_result": "allowed" if scene_gate.get("ok") else "blocked",
-                    "admission_block_reason": "" if scene_gate.get("ok") else str(
-                        scene_gate.get("blocker") or "no_eligible_product_video_provider"
-                    ),
-                }
-            else:
-                final_admission = {
-                    **preflight,
-                    "admission_candidate_keys": [],
-                    "admission_candidate_count": 0,
-                    "admission_result": "blocked",
-                    "admission_block_reason": str(
-                        preflight.get("blocker") or preflight.get("no_charge_reason") or "no_eligible_product_video_provider"
-                    ),
-                }
+            scene_gate = product_video_multi_scene_health_gate(scene_count, preflight) if preflight.get("ok") else {}
+            final_admission = build_product_video_public_final_admission(
+                current_project,
+                int(user_id),
+                preflight,
+                scene_gate,
+            )
+            return video_project_queue.confirm_public_product_video_invoice(
+                db,
+                project_id=int(project_id),
+                user_id=int(user_id),
+                balance_xu=balance_xu,
+                provider_admission=final_admission,
+            )
         return video_project_queue.confirm_video_project_invoice(
             db,
             project_id=int(project_id),
@@ -49372,6 +49456,26 @@ async def video_b14_autonomous_materialize_and_deliver(
     jid = safe_int(job_id, 0)
     if jid <= 0:
         return {"ok": False, "sent": False, "reason": "job_id_required", "no_new_paid_submit": True, "charge": 0}
+    watchdog = run_product_video_bot_side_zero_task_watchdog(jid)
+    if safe_int(watchdog.get("terminal_failed"), 0) > 0:
+        detail = next(
+            (
+                dict(item)
+                for item in (watchdog.get("details") or [])
+                if isinstance(item, dict) and safe_int(item.get("job_id"), 0) == jid
+            ),
+            {},
+        )
+        return {
+            "ok": False,
+            "sent": False,
+            "terminal": True,
+            "reason": str(detail.get("zero_task_terminal_reason") or "failed_no_charge"),
+            "public_message": "TOAN AAS chưa thể bắt đầu tạo video. Hệ thống chưa trừ Xu.",
+            "bot_side_zero_task_watchdog": watchdog,
+            "no_new_paid_submit": True,
+            "charge": 0,
+        }
     already = video_b14_delivered_video_artifact(jid)
     if already.get("ok"):
         charge_after_delivery = product_video_charge_after_final_delivery(
@@ -72204,8 +72308,9 @@ def video_b14_public_render_guard(user_id=0) -> tuple[bool, str]:
         return False, VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI
     if not VIDEO_B14_2_PROJECT_WORKER_READY:
         return False, VIDEO_B14_2_WORKER_NOT_READY_VI
-    if not frame_video_worker_connected():
-        return False, VIDEO_B14_2_WORKER_NOT_READY_VI
+    worker = product_video_worker_admission_status()
+    if not worker.get("worker_version_compatible"):
+        return False, "Hệ thống tạo video nhiều cảnh đang được cập nhật. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau."
     return True, ""
 
 
@@ -72215,6 +72320,45 @@ PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI = (
 PRODUCT_VIDEO_MULTI_SCENE_PROVIDER_BUSY_COPY_VI = (
     "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau."
 )
+PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS = {
+    "product_video_confirm_handler_count": 1,
+    "product_video_confirm_handler_ids": [video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID],
+    "duplicate_confirm_handler_detected": False,
+    "duplicate_callback_pattern_detected": False,
+}
+
+
+def audit_product_video_confirm_handler_registration(application) -> dict:
+    callback_value = video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
+    owners: list[dict] = []
+    relevant_callbacks = {
+        "handle_product_video_public_confirm_callback",
+        "handle_video_product_callback",
+    }
+    for group, handlers in dict(getattr(application, "handlers", {}) or {}).items():
+        for handler in handlers or []:
+            if not isinstance(handler, CallbackQueryHandler):
+                continue
+            callback_name = str(getattr(getattr(handler, "callback", None), "__name__", "") or "")
+            if callback_name not in relevant_callbacks:
+                continue
+            pattern_obj = getattr(handler, "pattern", None)
+            pattern_text = str(getattr(pattern_obj, "pattern", pattern_obj) or "")
+            try:
+                matches = bool(re.match(pattern_text, callback_value)) if pattern_text else True
+            except Exception:
+                matches = False
+            if matches:
+                owners.append({"handler": callback_name, "pattern": pattern_text, "group": group})
+    authoritative = [item for item in owners if item["handler"] == "handle_product_video_public_confirm_callback"]
+    handler_ids = [video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID for _item in authoritative]
+    return {
+        "product_video_confirm_handler_count": len(authoritative),
+        "product_video_confirm_handler_ids": handler_ids,
+        "matching_product_video_confirm_handlers": owners,
+        "duplicate_confirm_handler_detected": len(authoritative) != 1,
+        "duplicate_callback_pattern_detected": len(owners) != 1,
+    }
 try:
     VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS = max(30, int(os.getenv("VIDEO_PROVIDER_PREFLIGHT_TTL_SECONDS", "900") or 900))
 except Exception:
@@ -72629,6 +72773,89 @@ def product_video_provider_availability_preflight(conn=None) -> dict:
     finally:
         if owned:
             db.close()
+
+
+def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dict) -> dict:
+    result = dict(result or {})
+    project = dict(project or {})
+    explicit_zero_at_creation = bool(
+        ("admission_candidate_count" in result and safe_int(result.get("admission_candidate_count"), 0) <= 0)
+        or (
+            "provider_candidates_count" in result
+            and safe_int(result.get("provider_candidates_count"), 0) <= 0
+            and not result.get("provider_router_called")
+        )
+    )
+    runtime_sha_at_creation = str(
+        result.get("admission_worker_runtime_sha") or result.get("runtime_sha_at_creation") or ""
+    ).strip()
+    worker_sha_at_creation = str(
+        result.get("admission_worker_sha") or result.get("worker_sha_at_creation") or ""
+    ).strip()
+    worker_mismatch_at_creation = bool(
+        runtime_sha_at_creation
+        and worker_sha_at_creation
+        and not (
+            runtime_sha_at_creation.startswith(worker_sha_at_creation)
+            or worker_sha_at_creation.startswith(runtime_sha_at_creation)
+        )
+    )
+    if explicit_zero_at_creation or worker_mismatch_at_creation:
+        reason = (
+            "worker_version_mismatch_before_dispatch"
+            if worker_mismatch_at_creation
+            else "admission_bypassed_no_eligible_provider"
+        )
+        return {
+            "eligible_provider_keys": [],
+            "runtime_candidate_keys": [],
+            "final_eligible_provider_count": 0,
+            "reconciliation_reason": reason,
+            "worker_admission_block_reason": reason,
+            "admission_block_reason": reason,
+            "no_provider_call_verified": True,
+            "no_charge_verified": safe_int(result.get("charged_xu") or result.get("charge"), 0) == 0,
+        }
+    preflight = product_video_provider_availability_preflight()
+    scene_count = max(1, safe_int(project.get("scene_count") or result.get("scene_count"), 1))
+    scene_gate = product_video_multi_scene_health_gate(scene_count, preflight) if preflight.get("ok") else {}
+    worker = product_video_worker_admission_status()
+    candidates = [
+        str(item or "").strip()
+        for item in (scene_gate.get("eligible_provider_keys") or scene_gate.get("runtime_candidate_keys") or [])
+        if str(item or "").strip()
+    ]
+    if not worker.get("worker_version_compatible"):
+        candidates = []
+    reason = "" if candidates else str(
+        worker.get("worker_admission_block_reason")
+        or scene_gate.get("blocker")
+        or preflight.get("blocker")
+        or "no_eligible_provider_before_scene_dispatch"
+    )
+    return {
+        "eligible_provider_keys": candidates,
+        "runtime_candidate_keys": candidates,
+        "final_eligible_provider_count": len(candidates),
+        "reconciliation_reason": reason,
+        "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
+        "admission_block_reason": reason,
+    }
+
+
+def run_product_video_bot_side_zero_task_watchdog(job_id: int | str) -> dict:
+    wanted = safe_int(job_id, 0)
+    if wanted <= 0:
+        return {"checked": 0, "terminal_failed": 0, "details": []}
+    conn = db_connect()
+    try:
+        return video_project_queue.sweep_product_video_zero_task_watchdog(
+            conn,
+            job_id=wanted,
+            eligibility_evaluator=product_video_bot_watchdog_eligibility,
+        )
+    finally:
+        conn.close()
 
 
 def product_video_apply_provider_preflight_to_session(user_id, session: dict, preflight: dict) -> dict:
@@ -74188,6 +74415,32 @@ async def handle_video_prompt_library_callback(update: Update, context: ContextT
     return await safe_edit_or_send(query, video_prompt_library_text(lang), parse_mode="HTML", reply_markup=video_prompt_library_keyboard(lang))
 
 
+async def handle_product_video_public_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or str(query.data or "") != video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK:
+        return
+    diagnostics = dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {})
+    if (
+        diagnostics.get("product_video_confirm_handler_count") != 1
+        or diagnostics.get("duplicate_confirm_handler_detected")
+        or diagnostics.get("duplicate_callback_pattern_detected")
+    ):
+        await query.answer()
+        logger.error("product_video_public_confirm_fail_closed | %s", json.dumps(diagnostics, ensure_ascii=True, sort_keys=True))
+        return await safe_edit_or_send(
+            query,
+            "Hệ thống tạo video nhiều cảnh đang được cập nhật. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
+        )
+    setattr(context, "_product_video_authoritative_confirm", True)
+    try:
+        return await handle_video_product_callback(update, context)
+    finally:
+        try:
+            delattr(context, "_product_video_authoritative_confirm")
+        except Exception:
+            pass
+
+
 async def handle_video_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -74195,6 +74448,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "open"
     value = parts[2] if len(parts) > 2 else ""
+    if action == "b14_confirm" and not bool(getattr(context, "_product_video_authoritative_confirm", False)):
+        return await handle_product_video_public_confirm_callback(update, context)
     # Delegated legacy handlers answer their own callback. Answering here as
     # well can produce a Telegram "query is too old/already answered" error.
     if action not in {"legacy", "prompt_image_execute"}:
@@ -90768,6 +91023,14 @@ def video_public_status_payload() -> dict:
     except Exception as exc:
         remote_worker = {"connected": False, "reason": f"remote_worker_status_unavailable:{type(exc).__name__}"}
         section_errors.append(f"product_video_worker:{type(exc).__name__}")
+    try:
+        product_video_worker = product_video_worker_admission_status()
+    except Exception as exc:
+        product_video_worker = {
+            "worker_version_compatible": False,
+            "worker_admission_block_reason": f"owner_product_video_status_unavailable:{type(exc).__name__}",
+        }
+        section_errors.append(f"owner_product_video_worker:{type(exc).__name__}")
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
     frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
     ai_public = bool(
@@ -90796,6 +91059,8 @@ def video_public_status_payload() -> dict:
         "billing_gate": billing_gate,
         "worker": worker,
         "remote_worker": remote_worker,
+        "product_video_worker_admission": product_video_worker,
+        "product_video_confirm_handler_diagnostics": dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {}),
         "freeze": freeze,
         "public_flags": {
             "VIDEO_PLANNING_PUBLIC_ENABLED": bool(VIDEO_PLANNING_PUBLIC_ENABLED),
@@ -90895,6 +91160,8 @@ def video_public_status_text() -> str:
         health_render_error = f"{type(exc).__name__}"
     model_catalog = payload.get("product_video_model_catalog") if isinstance(payload.get("product_video_model_catalog"), dict) else {}
     remote_worker = payload.get("remote_worker") if isinstance(payload.get("remote_worker"), dict) else {}
+    product_worker = payload.get("product_video_worker_admission") if isinstance(payload.get("product_video_worker_admission"), dict) else {}
+    confirm_handlers = payload.get("product_video_confirm_handler_diagnostics") if isinstance(payload.get("product_video_confirm_handler_diagnostics"), dict) else {}
     lines = [
         "🎬 <b>VIDEO PUBLIC STATUS</b>",
         f"• video_public_status_chunked: <code>no</code>",
@@ -90973,6 +91240,14 @@ def video_public_status_text() -> str:
         f"• worker code matches runtime: <code>{html.escape(str(remote_worker.get('worker_code_matches_runtime') or 'unknown'))}</code>",
         f"• last heartbeat: <code>{html.escape(vietnam_time_display(remote_worker.get('last_heartbeat') or '', '-'))}</code>",
         f"• sync note: <code>{html.escape(str(remote_worker.get('reason') or '-'))}</code>",
+        f"• owner runtime SHA: <code>{html.escape(str(product_worker.get('runtime_sha') or '-')[:12])}</code>",
+        f"• owner worker SHA: <code>{html.escape(str(product_worker.get('worker_sha') or '-')[:12])}</code>",
+        f"• owner worker compatible: <code>{video_public_bool_label(product_worker.get('worker_version_compatible'))}</code>",
+        f"• owner heartbeat age: <code>{html.escape(str(product_worker.get('worker_heartbeat_age') if product_worker.get('worker_heartbeat_age') is not None else '-'))}</code>",
+        f"• owner capability version: <code>{html.escape(str(product_worker.get('worker_capability_version') or '-'))}</code>",
+        f"• owner admission blocker: <code>{html.escape(str(product_worker.get('worker_admission_block_reason') or '-'))}</code>",
+        f"• confirm handler count: <code>{safe_int(confirm_handlers.get('product_video_confirm_handler_count'), 0)}</code>",
+        f"• duplicate confirm handler: <code>{video_public_bool_label(confirm_handlers.get('duplicate_confirm_handler_detected'))}</code>",
         "",
         "<b>Billing safety</b>",
         f"• confirm before deduct: <code>{video_public_bool_label(SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT)}</code>",
@@ -190302,7 +190577,7 @@ async def run_polling_guarded():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
+    global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED, PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS
     init_db()
     try:
         run_storage_cleanup_auto_once()
@@ -191419,7 +191694,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
-    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_prompt_library_callback, pattern=r"^vpromptlib\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_guided_callback, pattern=r"^trendg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
@@ -191479,6 +191755,15 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_creative_callback, pattern=r"^creative\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_task_callback, pattern=r"^task\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_operator_menu_callback, pattern=r"^opmenu\|"))
+    PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS = audit_product_video_confirm_handler_registration(tg_app)
+    if (
+        PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS.get("duplicate_confirm_handler_detected")
+        or PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS.get("duplicate_callback_pattern_detected")
+    ):
+        logger.error(
+            "product_video_confirm_handler_registration_invalid | %s",
+            json.dumps(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS, ensure_ascii=True, sort_keys=True),
+        )
     tg_app.add_error_handler(on_telegram_error)
     TELEGRAM_HANDLERS_REGISTERED = telegram_handler_count(tg_app)
     logger.info("Telegram handlers registered OK | handlers_registered=%s", TELEGRAM_HANDLERS_REGISTERED)
@@ -191757,6 +192042,89 @@ def _record_remote_worker_ping(worker_id: str) -> None:
         logger.warning("remote worker ping setting skipped: %s", type(exc).__name__)
 
 
+def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, capabilities: list[str]) -> None:
+    service_mode = str(payload.get("worker_service_mode") or "").strip()
+    owner_mode = bool(
+        str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        or service_mode == "owner_product_video"
+        or "owner_product_video" in set(capabilities or [])
+    )
+    if not owner_mode:
+        return
+    prefix = "remote_worker:owner_product_video:"
+    values = {
+        "last_heartbeat": now_text(),
+        "worker_id": str(worker_id or "")[:120],
+        "worker_git_sha": str(payload.get("worker_git_sha") or "")[:80],
+        "worker_parser_version": str(payload.get("worker_parser_version") or "")[:80],
+        "worker_service_mode": service_mode or "owner_product_video",
+        "worker_capabilities": json.dumps(list(capabilities or []), ensure_ascii=True, separators=(",", ":")),
+        "worker_capability_version": str(payload.get("worker_capability_version") or "")[:120],
+    }
+    try:
+        for key, value in values.items():
+            set_system_setting(prefix + key, value, "owner product video worker identity", worker_id)
+    except Exception as exc:
+        logger.warning("owner product video worker identity skipped: %s", type(exc).__name__)
+
+
+def product_video_worker_admission_status() -> dict:
+    prefix = "remote_worker:owner_product_video:"
+    runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
+    worker_sha = str(get_system_setting(prefix + "worker_git_sha", "") or "").strip()
+    worker_id = str(get_system_setting(prefix + "worker_id", "") or "").strip()
+    heartbeat_at = str(get_system_setting(prefix + "last_heartbeat", "") or "").strip()
+    service_mode = str(get_system_setting(prefix + "worker_service_mode", "") or "").strip()
+    capability_version = str(get_system_setting(prefix + "worker_capability_version", "") or "").strip()
+    raw_capabilities = str(get_system_setting(prefix + "worker_capabilities", "") or "").strip()
+    try:
+        capabilities = json.loads(raw_capabilities) if raw_capabilities else []
+    except Exception:
+        capabilities = []
+    capabilities = [str(item or "").strip() for item in capabilities if str(item or "").strip()]
+    heartbeat_dt = parse_now_text(heartbeat_at)
+    heartbeat_age = max(0, int((datetime.now() - heartbeat_dt).total_seconds())) if heartbeat_dt else None
+    heartbeat_ttl = max(30, min(300, safe_int(os.getenv("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS"), 90)))
+    connected = bool(heartbeat_age is not None and heartbeat_age <= heartbeat_ttl)
+    version_compatible = bool(
+        runtime_sha
+        and worker_sha
+        and (runtime_sha.startswith(worker_sha) or worker_sha.startswith(runtime_sha))
+    )
+    canonical_capability = video_project_queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY
+    capability_ok = canonical_capability in capabilities and capability_version == canonical_capability
+    if not heartbeat_at:
+        block_reason = "owner_product_video_worker_disconnected"
+    elif not connected:
+        block_reason = "owner_product_video_worker_heartbeat_stale"
+    elif not worker_sha:
+        block_reason = "owner_product_video_worker_sha_missing"
+    elif not version_compatible:
+        block_reason = "owner_product_video_worker_version_mismatch"
+    elif service_mode != "owner_product_video":
+        block_reason = "owner_product_video_worker_service_mode_invalid"
+    elif not capability_ok:
+        block_reason = "owner_product_video_worker_canonical_capability_missing"
+    else:
+        block_reason = ""
+    return {
+        "runtime_sha": runtime_sha,
+        "worker_sha": worker_sha,
+        "worker_id": worker_id,
+        "worker_version_compatible": bool(version_compatible and not block_reason),
+        "worker_sha_matches_runtime": version_compatible,
+        "worker_connected": connected,
+        "worker_heartbeat_at": heartbeat_at,
+        "worker_heartbeat_age": heartbeat_age,
+        "worker_heartbeat_ttl_seconds": heartbeat_ttl,
+        "worker_service_mode": service_mode,
+        "worker_capabilities": capabilities,
+        "worker_capability_version": capability_version,
+        "worker_canonical_capability_present": capability_ok,
+        "worker_admission_block_reason": block_reason,
+    }
+
+
 def remote_worker_status_snapshot() -> dict:
     worker_flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
     settings = get_system_settings(
@@ -191954,6 +192322,7 @@ async def api_worker_ping(request: Request):
     )
     capabilities = _safe_worker_ping_capabilities(payload, request)
     _record_remote_worker_ping(worker_id)
+    _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
     worker_sha = str(payload.get("worker_git_sha") or "").strip()
     if worker_sha:
         set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
@@ -191999,6 +192368,7 @@ async def api_worker_claim(request: Request):
     owner_product_video_only = str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
     conn = db_connect()
     try:
         return remote_worker_api.claim_remote_worker_job(
@@ -192033,6 +192403,8 @@ async def api_worker_heartbeat(request: Request):
     worker_parser = str(payload.get("worker_parser_version") or "").strip()
     if worker_parser:
         set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
+    capabilities = remote_worker_api.sanitize_capabilities(payload.get("capabilities") or [])
+    _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
     conn = db_connect()
     try:
         result = remote_worker_api.heartbeat_remote_worker_job(

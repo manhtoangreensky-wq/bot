@@ -43,6 +43,7 @@ from services.video_provider_router import (
     PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK,
     capability_options,
     normalize_capability_values,
+    product_video_route_contract,
     provider_status_payload,
     run_provider_generation,
 )
@@ -961,6 +962,14 @@ def _route_requires_provider(
     orchestration_mode: str = "",
     explicit_local_renderer: bool = False,
 ) -> bool:
+    route_contract = product_video_route_contract(
+        product_type,
+        engine_adapter,
+        orchestration_mode,
+        explicit_local_renderer=explicit_local_renderer,
+    )
+    if route_contract.get("route_requires_provider") or route_contract.get("local_renderer_selected"):
+        return bool(route_contract.get("route_requires_provider"))
     product = video_final_output.normalize_video_product_type(product_type)
     capability = str(required_capability or "").strip()
     fallback = str(fallback_capability or "").strip()
@@ -4438,6 +4447,12 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         and orchestration_contract in {"per_scene_8s", "scene_orchestrator", "per_scene"}
         and not explicit_local_renderer
     )
+    route_contract = product_video_route_contract(
+        product_type,
+        engine_adapter,
+        orchestration_contract,
+        explicit_local_renderer=explicit_local_renderer,
+    )
     force_product_provider_route = bool(
         is_product_video
         and render_mode == "real"
@@ -4449,6 +4464,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         is_product_video
         and (
             force_product_provider_route
+            or route_contract.get("route_requires_provider")
             or _route_requires_provider(
                 product_type,
                 required_capability,
@@ -4631,10 +4647,13 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["fallback_capability"] = fallback_capability
         data["route_requires_provider"] = bool(route_requires_provider)
         data["route_requirement_source"] = (
-            "product_contract_text_to_video_per_scene"
-            if product_contract_requires_provider
+            str(route_contract.get("route_requirement_source") or "")
+            if route_contract.get("route_requires_provider") or route_contract.get("local_renderer_selected")
             else ("product_type_or_capability_contract" if route_requires_provider else "local_renderer_contract")
         )
+        data["allowed_execution_modes"] = list(route_contract.get("allowed_execution_modes") or [])
+        data["local_renderer_selected"] = bool(route_contract.get("local_renderer_selected"))
+        data["provider_required_reason"] = str(route_contract.get("provider_required_reason") or "")
         data["route_requirement_product_contract"] = bool(product_contract_requires_provider)
         data["route_requirement_override"] = "explicit_valid_local_renderer" if explicit_local_renderer else ""
         data["route_block_reason"] = "" if provider_candidates else (
@@ -4985,10 +5004,13 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["fallback_capability"] = fallback_capability
     result["route_requires_provider"] = bool(route_requires_provider)
     result["route_requirement_source"] = (
-        "product_contract_text_to_video_per_scene"
-        if product_contract_requires_provider
+        str(route_contract.get("route_requirement_source") or "")
+        if route_contract.get("route_requires_provider") or route_contract.get("local_renderer_selected")
         else ("product_type_or_capability_contract" if route_requires_provider else "local_renderer_contract")
     )
+    result["allowed_execution_modes"] = list(route_contract.get("allowed_execution_modes") or [])
+    result["local_renderer_selected"] = bool(route_contract.get("local_renderer_selected"))
+    result["provider_required_reason"] = str(route_contract.get("provider_required_reason") or "")
     result["route_requirement_product_contract"] = bool(product_contract_requires_provider)
     result["route_requirement_override"] = "explicit_valid_local_renderer" if explicit_local_renderer else ""
     result["route_block_reason"] = "" if provider_candidates else (

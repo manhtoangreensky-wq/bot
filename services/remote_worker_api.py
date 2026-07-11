@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from services import video_project_queue
+from services import video_project_queue, video_provider_router
 from services.video_provider_catalog import model_metadata_from_resolution, resolve_product_video_model
 
 
@@ -897,6 +897,12 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         product_video_orchestration_mode = _product_video_explicit_orchestration_mode()
         product_video_per_scene_orchestration = product_video_orchestration_mode == "per_scene_8s"
         product_video_render_pipeline_mode = "historical_multi_clip_concat" if product_video_per_scene_orchestration else "single_task_legacy"
+        route_contract = video_provider_router.product_video_route_contract(
+            product_type,
+            engine_adapter,
+            product_video_orchestration_mode,
+            explicit_local_renderer=False,
+        )
         payload.update(
             {
                 "product_video": True,
@@ -949,6 +955,20 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "orchestration_mode": product_video_orchestration_mode,
                 "provider_orchestration_mode": product_video_orchestration_mode,
                 "render_pipeline_mode": product_video_render_pipeline_mode,
+                **route_contract,
+                "admission_handler_id": str(persisted_result.get("admission_handler_id") or ""),
+                "outbox_id": _safe_int(persisted_result.get("dispatch_outbox_id"), 0),
+                "worker_claim_id": str(persisted_result.get("worker_claim_id") or ""),
+                "canonical_engine_entry": str(
+                    persisted_result.get("canonical_engine_entry")
+                    or video_project_queue.PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY
+                ),
+                "canonical_manifest_id": str(persisted_result.get("canonical_manifest_id") or ""),
+                "scene_dispatch_count": _safe_int(
+                    persisted_result.get("scene_dispatch_count"),
+                    safe_scene_count,
+                ),
+                "finalizer_reached": bool(persisted_result.get("finalizer_reached")),
                 "raw_render_delivery_baseline": not product_video_per_scene_orchestration,
                 "r18a_raw_render_delivery_default": not product_video_per_scene_orchestration,
                 "provider_router_called": bool(persisted_result.get("provider_router_called")),
@@ -2071,6 +2091,20 @@ def _claim_video_render_candidate(
         claim_progress = 10
         result_json_value = chosen.get("result_json")
         if product_video_only or owner_product_video_only:
+            result_payload.update(
+                {
+                    "worker_claim_id": f"{sanitize_worker_id(worker_id)}:{int(chosen['id'])}:{int(current_dt.timestamp())}",
+                    "canonical_engine_entry": video_project_queue.PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY,
+                    "canonical_manifest_id": str(
+                        result_payload.get("canonical_manifest_id")
+                        or f"product-video-{int(chosen['id'])}-manifest"
+                    ),
+                    "scene_dispatch_count": len(
+                        list(result_payload.get("scene_record_indexes") or result_payload.get("scene_indexes") or [])
+                    ),
+                    "finalizer_reached": bool(result_payload.get("finalizer_reached")),
+                }
+            )
             result_payload.update(telemetry)
             result_json_value = video_project_queue._json_dumps(result_payload)
             claim_progress = int(telemetry.get("final_progress_after_reconcile") or telemetry.get("final_progress") or 10)

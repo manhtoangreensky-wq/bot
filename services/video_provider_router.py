@@ -70,6 +70,72 @@ PUBLIC_PRODUCT_VIDEO_TERMINAL_FAILURE_COPY = (
     "TOAN AAS chưa nhận được video hoàn chỉnh từ hệ thống dựng video. "
     "Bot chưa trừ Xu. Anh/chị có thể gửi video khác hoặc thử lại sau."
 )
+PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES = {
+    "video_trend",
+    "video_ai_prompt",
+    "video_ai_image",
+    "video_ai_video_reference",
+    "script_to_video",
+    "storyboard_prompt",
+    "self_shot_scene_change",
+    "multi_scene_film",
+}
+PRODUCT_VIDEO_PROVIDER_ADAPTERS = {
+    "text_to_video",
+    "text_to_video_or_scene_engine",
+    "text_to_video_or_scene_video",
+}
+PRODUCT_VIDEO_PER_SCENE_MODES = {"per_scene", "per_scene_8s", "scene_orchestrator"}
+PRODUCT_VIDEO_LOCAL_EXECUTION_MODES = {"local_image_sequence", "local_slideshow"}
+
+
+def product_video_route_contract(
+    product_type: str = "",
+    engine_adapter: str = "",
+    orchestration_mode: str = "",
+    *,
+    explicit_local_renderer: bool = False,
+) -> dict[str, Any]:
+    """Return the route contract without consulting provider/runtime state."""
+    product = str(product_type or "").strip().lower().replace("-", "_")
+    adapter = str(engine_adapter or "").strip().lower().replace("-", "_")
+    orchestration = str(orchestration_mode or "").strip().lower().replace("-", "_")
+    local_renderer_selected = bool(
+        explicit_local_renderer
+        and (
+            orchestration in PRODUCT_VIDEO_LOCAL_EXECUTION_MODES
+            or adapter in {"local_image_sequence", "local_slideshow"}
+        )
+    )
+    text_scene_contract = bool(
+        adapter in PRODUCT_VIDEO_PROVIDER_ADAPTERS
+        and orchestration in PRODUCT_VIDEO_PER_SCENE_MODES
+    )
+    product_contract = product in PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES
+    route_requires_provider = bool(not local_renderer_selected and (text_scene_contract or product_contract))
+    if local_renderer_selected:
+        source = "explicit_valid_local_renderer"
+        reason = "explicit_local_renderer_selected"
+        modes = sorted(PRODUCT_VIDEO_LOCAL_EXECUTION_MODES)
+    elif text_scene_contract:
+        source = "product_video_text_per_scene_contract"
+        reason = "text_to_video_per_scene_requires_provider"
+        modes = ["provider_per_scene_8s"]
+    elif product_contract:
+        source = "product_video_type_contract"
+        reason = "product_type_requires_provider"
+        modes = ["provider_single", "provider_per_scene_8s"]
+    else:
+        source = "product_video_local_or_unknown_contract"
+        reason = "provider_not_required_by_contract"
+        modes = sorted(PRODUCT_VIDEO_LOCAL_EXECUTION_MODES)
+    return {
+        "route_requires_provider": route_requires_provider,
+        "route_requirement_source": source,
+        "allowed_execution_modes": modes,
+        "local_renderer_selected": local_renderer_selected,
+        "provider_required_reason": reason,
+    }
 
 
 def _provider_status_is_not_start(*values: Any) -> bool:
