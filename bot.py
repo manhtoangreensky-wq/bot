@@ -38959,16 +38959,16 @@ TRANSLATE_LANGUAGE_OPTIONS = {
     "de": {"name": "Deutsch", "deepl": "DE"},
     "es": {"name": "Español", "deepl": "ES"},
     "id": {"name": "Indonesia", "deepl": "ID"},
-    "ms": {"name": "Malay", "deepl": "EN-US"},
+    "ms": {"name": "Malay", "deepl": ""},
     "pt": {"name": "Português", "deepl": "PT-PT"},
     "ru": {"name": "Русский", "deepl": "RU"},
     "ar": {"name": "العربية", "deepl": "AR"},
-    "hi": {"name": "हिन्दी", "deepl": "EN-US"},
-    "lo": {"name": "ລາວ", "deepl": "EN-US"},
-    "km": {"name": "ខ្មែរ", "deepl": "EN-US"},
-    "my": {"name": "Burmese", "deepl": "EN-US"},
-    "fil": {"name": "Filipino", "deepl": "EN-US"},
-    "auto": {"name": "Tự nhận diện", "deepl": "EN-US"},
+    "hi": {"name": "हिन्दी", "deepl": ""},
+    "lo": {"name": "ລາວ", "deepl": ""},
+    "km": {"name": "ខ្មែរ", "deepl": ""},
+    "my": {"name": "Burmese", "deepl": ""},
+    "fil": {"name": "Filipino", "deepl": ""},
+    "auto": {"name": "Tự nhận diện", "deepl": ""},
 }
 
 def normalize_translate_target(value: str) -> str:
@@ -104357,6 +104357,8 @@ async def translate_with_deepl(text: str, target_lang: str = "vi") -> str:
     endpoint = (DEEPL_API_URL or "https://api-free.deepl.com/v2/translate").strip()
     target = normalize_translate_target(target_lang)
     target_code = TRANSLATE_LANGUAGE_OPTIONS.get(target, TRANSLATE_LANGUAGE_OPTIONS["vi"])["deepl"]
+    if not target_code:
+        raise RuntimeError(f"DeepL target unsupported: {target or 'unknown'}")
     async with httpx.AsyncClient(timeout=30.0) as client:
         res = await client.post(
             endpoint,
@@ -104541,7 +104543,8 @@ async def translate_to_language(text: str, target_lang: str = "vi") -> dict:
     target = normalize_translate_target(target_lang) or "vi"
     statuses = {"deepl": "MISSING", "key4u": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
     errors = {}
-    if DEEPL_API_KEY:
+    deepl_target = str(TRANSLATE_LANGUAGE_OPTIONS.get(target, {}).get("deepl") or "").strip()
+    if DEEPL_API_KEY and deepl_target:
         try:
             return {"provider": "deepl", "text": await translate_with_deepl(text, target), "target": target, "statuses": {**statuses, "deepl": "PASS"}, "errors": errors}
         except Exception as e:
@@ -178315,16 +178318,21 @@ def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
     )
 
 
-def subdub_restore_delivered_combo_result(
+def subdub_restore_delivered_video_result(
     mode: str,
     result: dict | None = None,
     job: dict | None = None,
     state: dict | None = None,
 ) -> dict:
-    """Recover combo completion only when Telegram video delivery is evidenced."""
+    """Recover completion only when Telegram video delivery is evidenced."""
     current_result = dict(result or {})
     current_job = dict(job or {})
-    if normalize_video_translate_mode(mode) != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+    normalized_mode = normalize_video_translate_mode(mode)
+    if normalized_mode not in {
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    }:
         return current_result
     if current_result.get("ok"):
         return current_result
@@ -178364,6 +178372,18 @@ def subdub_restore_delivered_combo_result(
         "late_fail_suppressed": True,
         "state": restored_state,
     }
+
+
+def subdub_restore_delivered_combo_result(
+    mode: str,
+    result: dict | None = None,
+    job: dict | None = None,
+    state: dict | None = None,
+) -> dict:
+    """Backward-compatible combo-only wrapper for delivered video recovery."""
+    if normalize_video_translate_mode(mode) != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return dict(result or {})
+    return subdub_restore_delivered_video_result(mode, result, job, state)
 
 def subdub_job_in_final_video_delivery_path(job: dict | None = None) -> bool:
     current = dict(job or {})
@@ -188825,17 +188845,27 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
             return None
-        if not result.get("ok") and mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            delivered_combo_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
-            if not str(delivered_combo_job.get("video_delivery_message_id") or "").strip():
-                fallback_combo_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
-                if fallback_combo_job:
-                    delivered_combo_job = dict(fallback_combo_job)
-            result = subdub_restore_delivered_combo_result(mode, result, delivered_combo_job, state)
+        if not result.get("ok") and mode in {
+            VIDEO_SUBTITLE_MODE_CREATE,
+            VIDEO_SUBTITLE_MODE_TRANSLATE,
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        }:
+            delivered_video_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
+            if (
+                mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+                and not str(delivered_video_job.get("video_delivery_message_id") or "").strip()
+            ):
+                fallback_video_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
+                if fallback_video_job:
+                    delivered_video_job = dict(fallback_video_job)
+            if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+                result = subdub_restore_delivered_combo_result(mode, result, delivered_video_job, state)
+            else:
+                result = subdub_restore_delivered_video_result(mode, result, delivered_video_job, state)
             if result.get("ok"):
-                delivered_combo_key = str(delivered_combo_job.get("job_key") or pipeline_job_key)
+                delivered_video_key = str(delivered_video_job.get("job_key") or pipeline_job_key)
                 update_subtitle_dub_pipeline_job(
-                    delivered_combo_key,
+                    delivered_video_key,
                     status="completed",
                     terminal_state="delivered",
                     lifecycle_state="delivered",
@@ -189057,7 +189087,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 subdub_video_requires_final_mp4(mode, subdub_product_type_from_mode(mode, result_state or state))
                 and not SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED
             ) else ("1" if result.get("has_audio") else "0"),
-            "final_video_available": "1" if result.get("has_video") else "0",
+            "final_video_available": "1" if delivered_result_video else "0",
             "final_dub_asset_id": str(result.get("dub_asset_id") or ""),
             "final_dub_video_asset_id": str(result.get("dub_video_asset_id") or ""),
             "final_subtitle_asset_ids": ",".join(str(item) for item in (result.get("subtitle_asset_ids") or []) if str(item or "").strip()),
@@ -189098,7 +189128,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     cost_line_reason="partial_audio_no_full_video_charge",
                 )
             return None
-        if result.get("has_video") and str(result.get("telegram_message_id") or result.get("video_delivery_message_id") or "").strip():
+        if delivered_result_video:
             completed_job_id = str(
                 result.get("job_id")
                 or latest_pipeline_job.get("job_id")
