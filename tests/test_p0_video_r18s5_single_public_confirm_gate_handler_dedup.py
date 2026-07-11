@@ -109,7 +109,7 @@ def _admission(
         "runtime_candidate_keys": candidates,
         "final_eligible_provider_count": len(candidates),
     }
-    return {
+    admission = {
         "ok": bool(candidates and worker_ok),
         "provider_eligibility_snapshot": snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
@@ -129,10 +129,24 @@ def _admission(
         "admission_worker_sha": "0400e614d4e2" if worker_ok else "778ba8eb555a",
         "admission_worker_version_compatible": worker_ok,
         "admission_route_requires_provider": bool(route["route_requires_provider"]),
+        "admission_provider_health_gate_pass": bool(candidates),
+        "worker_generation_id": "r18s5-generation",
+        "worker_git_sha": "0400e614d4e2",
+        "runtime_sha": "0400e614d4e2",
+        "worker_compatible": worker_ok,
+        "worker_connected": worker_ok,
+        "worker_heartbeat_fresh": worker_ok,
+        "worker_lease_valid": worker_ok,
+        "worker_sha_match": worker_ok,
+        "worker_capability_match": worker_ok,
+        "worker_identity_conflict": False,
+        "route_requires_provider": bool(route["route_requires_provider"]),
+        "handler_id": queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
         "worker_admission_block_reason": worker_reason,
         "duplicate_confirm_handler_detected": duplicate_handler,
         "_test_failure_stage": failure_stage,
     }
+    return queue.sign_product_video_final_admission_context(admission)
 
 
 def _confirm(conn: sqlite3.Connection, project: dict, admission: dict) -> dict:

@@ -113,7 +113,7 @@ def _payload(job: dict) -> dict:
     return json.loads(str(job.get("result_json") or "{}"))
 
 
-def test_final_confirm_candidate_zero_persists_snapshot_but_creates_nothing(tmp_path):
+def test_final_confirm_candidate_zero_creates_nothing_and_does_not_mutate_project(tmp_path):
     conn = _conn(tmp_path)
     project = _project(conn)
 
@@ -121,14 +121,18 @@ def test_final_confirm_candidate_zero_persists_snapshot_but_creates_nothing(tmp_
 
     assert result["ok"] is False
     assert result["reason"] == "no_eligible_product_video_provider"
-    assert "tạm bận" in result["public_message"]
+    assert result["public_message"] == (
+        "TOAN AAS chưa thể bắt đầu tạo video lúc này.\n"
+        "Hệ thống chưa trừ Xu.\n"
+        "Anh/chị vui lòng thử lại sau."
+    )
     assert conn.execute("SELECT COUNT(*) FROM video_jobs").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM video_scenes").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM video_dispatch_outbox").fetchone()[0] == 0
     persisted = queue.get_video_project(conn, int(project["project_id"]))
     asset_pack = json.loads(persisted["asset_pack_json"])
-    assert asset_pack["admission_result"] == "blocked"
-    assert asset_pack["admission_candidate_count"] == 0
+    assert "admission_result" not in asset_pack
+    assert "admission_candidate_count" not in asset_pack
     assert persisted["is_confirmed"] == 0
 
 
@@ -415,7 +419,8 @@ def test_r18s3_source_contract_has_no_real_provider_calls_and_keeps_scope():
     ):
         assert marker in queue_source
     assert "claim_product_video_dispatch_outbox" in worker_source
-    assert "require_provider_admission=not is_internal" in bot_source
+    assert "require_provider_admission=True" in bot_source
+    assert "require_provider_admission=not is_internal" not in bot_source
     forbidden = (
         "SHOPAIKEY" + "_API_KEY",
         "KEY4U" + "_API_KEY",
