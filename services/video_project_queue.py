@@ -8,6 +8,7 @@ atomically from SQLite.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import socket
 import sqlite3
@@ -42,6 +43,11 @@ SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
 PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER = "owner_product_video"
+PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID = "product_video_public_confirm_v1"
+PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
+PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY = "b13_r18c"
+PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
+PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
 PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
     "pending",
     "leased",
@@ -195,6 +201,23 @@ def _product_video_quote_consistency(invoice: dict[str, Any], project: dict[str,
         "quote_consistent": consistent,
         "quote_mismatch_reason": reason,
     }
+
+
+def product_video_admission_quote_fingerprint(project: dict[str, Any], user_id: int | None = None) -> str:
+    project = dict(project or {})
+    invoice = _json_loads(str(project.get("invoice_json") or ""), {})
+    if not isinstance(invoice, dict):
+        invoice = {}
+    quote = _product_video_quote_consistency(invoice, project)
+    payload = {
+        "user_id": int(user_id if user_id is not None else project.get("user_id") or 0),
+        "project_id": int(project.get("project_id") or 0),
+        "project_uuid": str(project.get("project_uuid") or ""),
+        "scene_count": max(1, _as_int(project.get("scene_count") or invoice.get("scene_count"), 1)),
+        "selected_tier": str(quote.get("selected_tier") or ""),
+        "customer_charge_planned_xu": _as_int(quote.get("customer_charge_planned_xu"), 0),
+    }
+    return hashlib.sha256(_json_dumps(payload).encode("utf-8")).hexdigest()
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -2067,7 +2090,9 @@ def _product_video_final_admission_state(
     project: dict[str, Any],
     admission: dict[str, Any] | None,
     *,
+    user_id: int,
     require_provider_admission: bool,
+    require_authoritative_snapshot: bool,
     checked_at: str,
 ) -> dict[str, Any]:
     project = dict(project or {})
@@ -2081,7 +2106,7 @@ def _product_video_final_admission_state(
     snapshot = admission.get("provider_eligibility_snapshot")
     if not isinstance(snapshot, dict):
         snapshot = admission if admission.get("provider_eligibility_snapshot_id") else {}
-    if not snapshot:
+    if not snapshot and not require_authoritative_snapshot:
         persisted = asset_pack.get("provider_eligibility_snapshot") or invoice.get("provider_eligibility_snapshot") or {}
         snapshot = dict(persisted) if isinstance(persisted, dict) else {}
     candidates = [
@@ -2107,29 +2132,139 @@ def _product_video_final_admission_state(
                 or invoice.get("provider_order")
                 or ""
             ) or resolve_product_video_provider_chain()
-    admission_ok = bool(candidates) and (
-        not require_provider_admission
-        or bool(admission.get("ok", True))
-    )
+    declared_candidate_count = _as_int(admission.get("admission_candidate_count"), len(candidates))
     snapshot_id = str(
         admission.get("admission_snapshot_id")
         or admission.get("provider_eligibility_snapshot_id")
         or snapshot.get("provider_eligibility_snapshot_id")
         or (f"legacy-{project.get('project_id')}" if not require_provider_admission else "")
     )
-    block_reason = "" if admission_ok else str(
-        admission.get("admission_block_reason")
-        or admission.get("blocker")
-        or "no_eligible_product_video_provider"
+    admission_checked_at = str(admission.get("admission_checked_at") or snapshot.get("admission_checked_at") or checked_at)
+    ttl_seconds = max(
+        5,
+        min(
+            300,
+            _as_int(
+                admission.get("admission_ttl_seconds")
+                or os.getenv("PRODUCT_VIDEO_ADMISSION_TTL_SECONDS"),
+                PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT,
+            ),
+        ),
     )
+    checked_epoch = _parse_time_epoch(admission_checked_at)
+    current_epoch = _parse_time_epoch(checked_at)
+    snapshot_age_seconds = max(0, int(current_epoch - checked_epoch)) if checked_epoch and current_epoch else -1
+    snapshot_fresh = bool(
+        checked_epoch
+        and current_epoch
+        and checked_epoch <= current_epoch + 5
+        and snapshot_age_seconds <= ttl_seconds
+    )
+    quote_fingerprint = product_video_admission_quote_fingerprint(project, int(user_id))
+    snapshot_user_id = _as_int(admission.get("admission_user_id") or snapshot.get("admission_user_id"), 0)
+    snapshot_project_id = _as_int(admission.get("admission_project_id") or snapshot.get("admission_project_id"), 0)
+    snapshot_quote_fingerprint = str(
+        admission.get("admission_quote_fingerprint")
+        or snapshot.get("admission_quote_fingerprint")
+        or ""
+    )
+    handler_id = str(admission.get("admission_callback_handler_id") or snapshot.get("admission_callback_handler_id") or "")
+    callback_data = str(admission.get("admission_callback_data") or snapshot.get("admission_callback_data") or "")
+    worker_version_compatible = bool(admission.get("admission_worker_version_compatible"))
+    from services import video_provider_router
+
+    route_contract = video_provider_router.product_video_route_contract(
+        str(asset_pack.get("product_type") or invoice.get("product_type") or project.get("profile_id") or ""),
+        str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or ""),
+        str(asset_pack.get("orchestration_mode") or invoice.get("orchestration_mode") or ""),
+        explicit_local_renderer=bool(asset_pack.get("explicit_local_renderer") or invoice.get("explicit_local_renderer")),
+    )
+    route_requires_provider = bool(
+        admission.get("admission_route_requires_provider")
+        and route_contract.get("route_requires_provider")
+    )
+    duplicate_handler_detected = bool(admission.get("duplicate_confirm_handler_detected"))
+    replayed = bool(admission.get("admission_snapshot_consumed") or snapshot.get("admission_snapshot_consumed"))
+    result_value = str(admission.get("admission_result") or ("PASS" if admission.get("ok") else "BLOCKED")).upper()
+    authoritative_ok = bool(
+        snapshot_id
+        and candidates
+        and declared_candidate_count == len(candidates)
+        and result_value in {"PASS", "ALLOWED"}
+        and snapshot_fresh
+        and snapshot_user_id == int(user_id)
+        and snapshot_project_id == _as_int(project.get("project_id"), 0)
+        and snapshot_quote_fingerprint == quote_fingerprint
+        and handler_id == PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID
+        and callback_data == PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
+        and worker_version_compatible
+        and route_requires_provider
+        and not duplicate_handler_detected
+        and not replayed
+    )
+    admission_ok = bool(candidates) and (
+        not require_provider_admission
+        or (
+            authoritative_ok
+            if require_authoritative_snapshot
+            else bool(admission.get("ok", True)) and result_value in {"PASS", "ALLOWED"}
+        )
+    )
+    if admission_ok:
+        block_reason = ""
+    elif not candidates or declared_candidate_count <= 0:
+        block_reason = "no_eligible_product_video_provider"
+    elif require_authoritative_snapshot and duplicate_handler_detected:
+        block_reason = "duplicate_product_video_confirm_handler"
+    elif require_authoritative_snapshot and not worker_version_compatible:
+        block_reason = str(admission.get("worker_admission_block_reason") or "worker_version_incompatible")
+    elif require_authoritative_snapshot and not route_requires_provider:
+        block_reason = "product_video_route_contract_mismatch"
+    elif require_authoritative_snapshot and replayed:
+        block_reason = "admission_snapshot_replayed"
+    elif require_authoritative_snapshot and not snapshot_fresh:
+        block_reason = "admission_snapshot_stale"
+    elif require_authoritative_snapshot and snapshot_user_id != int(user_id):
+        block_reason = "admission_snapshot_user_mismatch"
+    elif require_authoritative_snapshot and snapshot_project_id != _as_int(project.get("project_id"), 0):
+        block_reason = "admission_snapshot_project_mismatch"
+    elif require_authoritative_snapshot and snapshot_quote_fingerprint != quote_fingerprint:
+        block_reason = "admission_snapshot_quote_mismatch"
+    elif require_authoritative_snapshot and handler_id != PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID:
+        block_reason = "admission_callback_handler_mismatch"
+    else:
+        block_reason = str(
+            admission.get("admission_block_reason")
+            or admission.get("blocker")
+            or "product_video_admission_blocked"
+        )
     return {
         "admission_enforced": bool(require_provider_admission),
+        "admission_authoritative_snapshot_required": bool(require_authoritative_snapshot),
         "admission_snapshot_id": snapshot_id,
-        "admission_checked_at": str(checked_at),
+        "admission_checked_at": admission_checked_at,
+        "admission_ttl_seconds": ttl_seconds,
+        "admission_snapshot_age_seconds": snapshot_age_seconds,
+        "admission_snapshot_fresh": snapshot_fresh,
         "admission_candidate_keys": candidates,
         "admission_candidate_count": len(candidates),
-        "admission_result": "allowed" if admission_ok else "blocked",
+        "admission_result": (
+            "PASS" if admission_ok else "BLOCKED"
+        ) if require_authoritative_snapshot else ("allowed" if admission_ok else "blocked"),
+        "admission_passed": admission_ok,
         "admission_block_reason": block_reason,
+        "admission_user_id": snapshot_user_id,
+        "admission_project_id": snapshot_project_id,
+        "admission_quote_fingerprint": snapshot_quote_fingerprint,
+        "admission_callback_handler_id": handler_id,
+        "admission_callback_data": callback_data,
+        "admission_worker_runtime_sha": str(admission.get("admission_worker_runtime_sha") or ""),
+        "admission_worker_sha": str(admission.get("admission_worker_sha") or ""),
+        "admission_worker_version_compatible": worker_version_compatible,
+        "admission_route_requires_provider": route_requires_provider,
+        **route_contract,
+        "worker_admission_block_reason": str(admission.get("worker_admission_block_reason") or ""),
+        "duplicate_confirm_handler_detected": duplicate_handler_detected,
         "provider_eligibility_snapshot": snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
         "preconfirm_candidate_keys": candidates,
@@ -2146,6 +2281,7 @@ def _confirm_product_video_invoice_atomic(
     user_id: int,
     admission: dict[str, Any] | None,
     require_provider_admission: bool,
+    require_authoritative_snapshot: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
@@ -2153,10 +2289,12 @@ def _confirm_product_video_invoice_atomic(
     admission_state = _product_video_final_admission_state(
         project,
         admission,
+        user_id=int(user_id),
         require_provider_admission=require_provider_admission,
+        require_authoritative_snapshot=require_authoritative_snapshot,
         checked_at=current,
     )
-    if admission_state["admission_candidate_count"] <= 0:
+    if not admission_state.get("admission_passed"):
         if not require_provider_admission:
             legacy_blocker = "provider_chain_missing_no_charge"
             legacy_payload = {
@@ -2260,8 +2398,8 @@ def _confirm_product_video_invoice_atomic(
                 pass
         return {
             "ok": False,
-            "reason": "no_eligible_product_video_provider",
-            "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
+            "reason": str(admission_state.get("admission_block_reason") or "product_video_admission_blocked"),
+            "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận hoặc đang được cập nhật.\nTOAN AAS chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
             "admission": admission_state,
             "job_created": False,
             "scene_records_created": False,
@@ -2284,6 +2422,55 @@ def _confirm_product_video_invoice_atomic(
         if str(locked[0] or "") not in {"draft_invoice", "queued_for_worker"}:
             conn.rollback()
             return {"ok": False, "reason": "project_not_at_invoice"}
+        locked_project = {
+            **project,
+            "status": str(locked[0] or ""),
+            "user_id": int(locked[1] or 0),
+            "job_id": int(locked[2] or 0),
+            "asset_pack_json": str(locked[3] or ""),
+            "invoice_json": str(locked[4] or ""),
+        }
+        if require_authoritative_snapshot:
+            boundary_state = _product_video_final_admission_state(
+                locked_project,
+                admission,
+                user_id=int(user_id),
+                require_provider_admission=True,
+                require_authoritative_snapshot=True,
+                checked_at=current,
+            )
+            if not boundary_state.get("admission_passed"):
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "reason": str(boundary_state.get("admission_block_reason") or "product_video_admission_blocked"),
+                    "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận hoặc đang được cập nhật.\nTOAN AAS chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
+                    "admission": boundary_state,
+                    "job_created": False,
+                    "scene_records_created": False,
+                    "dispatch_outbox_created": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            admission_state = boundary_state
+            locked_asset_pack = _json_loads(str(locked[3] or ""), {})
+            locked_invoice = _json_loads(str(locked[4] or ""), {})
+            consumed_ids = {
+                str((locked_asset_pack or {}).get("admission_snapshot_consumed_id") or ""),
+                str((locked_invoice or {}).get("admission_snapshot_consumed_id") or ""),
+            }
+            if str(admission_state.get("admission_snapshot_id") or "") in consumed_ids:
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "reason": "admission_snapshot_replayed",
+                    "public_message": "Yêu cầu xác nhận này đã được xử lý. TOAN AAS chưa trừ thêm Xu.",
+                    "job_created": False,
+                    "scene_records_created": False,
+                    "dispatch_outbox_created": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
         active_row = conn.execute(
             """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
                       lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at,
@@ -2370,6 +2557,9 @@ def _confirm_product_video_invoice_atomic(
             ),
         )
         job_id = int(cursor.lastrowid or 0)
+        failure_stage = str((admission or {}).get("_test_failure_stage") or "") if os.getenv("PYTEST_CURRENT_TEST") else ""
+        if failure_stage == "after_job_insert":
+            raise RuntimeError("injected_after_job_insert")
         project_for_payload = {
             **project,
             "asset_pack_json": _json_dumps(asset_pack),
@@ -2414,6 +2604,8 @@ def _confirm_product_video_invoice_atomic(
                    VALUES (?,?,?,?)""",
                 (int(project["project_id"]), int(scene_index), "product_video_scene", "pending"),
             )
+        if failure_stage == "after_scene_insert":
+            raise RuntimeError("injected_after_scene_insert")
         outbox_id = _insert_product_video_dispatch_outbox_record(
             conn,
             job_id=job_id,
@@ -2421,6 +2613,8 @@ def _confirm_product_video_invoice_atomic(
             scene_indexes=scene_indexes,
             available_at=current,
         )
+        if failure_stage == "after_outbox_insert":
+            raise RuntimeError("injected_after_outbox_insert")
         payload = {
             **kickoff,
             **admission_state,
@@ -2445,11 +2639,28 @@ def _confirm_product_video_invoice_atomic(
             "final_decision": "continue_polling",
             "charge": 0,
             "charged_xu": 0,
+            "admission_handler_id": str(admission_state.get("admission_callback_handler_id") or ""),
+            "worker_claim_id": "",
+            "canonical_engine_entry": PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY,
+            "canonical_manifest_id": f"product-video-{job_id}-manifest",
+            "scene_dispatch_count": len(scene_indexes),
+            "finalizer_reached": False,
         }
         conn.execute(
             "UPDATE video_jobs SET result_json=?,progress_percent=10,progress_message='dispatch_outbox_pending',updated_at=? WHERE id=?",
             (_json_dumps(payload), current, job_id),
         )
+        if failure_stage == "before_snapshot_consume":
+            raise RuntimeError("injected_before_snapshot_consume")
+        if require_authoritative_snapshot:
+            consumed = {
+                "admission_snapshot_consumed": True,
+                "admission_snapshot_consumed_id": str(admission_state.get("admission_snapshot_id") or ""),
+                "admission_snapshot_consumed_at": current,
+                "admission_snapshot_consumed_job_id": job_id,
+            }
+            asset_pack.update(consumed)
+            invoice.update(consumed)
         conn.execute(
             """UPDATE video_projects
                   SET status='queued_for_worker',is_confirmed=1,confirmed_at=?,job_id=?,
@@ -2464,6 +2675,8 @@ def _confirm_product_video_invoice_atomic(
                 int(project["project_id"]),
             ),
         )
+        if failure_stage == "during_commit":
+            raise RuntimeError("injected_during_commit")
         conn.commit()
         return {
             "ok": True,
@@ -2501,6 +2714,7 @@ def confirm_video_project_invoice(
     deduct_func: Callable[[int, int], Any] | None = None,
     provider_admission: dict[str, Any] | None = None,
     require_provider_admission: bool = False,
+    require_authoritative_admission: bool = False,
 ) -> dict[str, Any]:
     ensure_video_project_queue_schema(conn)
     project = get_video_project(conn, int(project_id))
@@ -2538,6 +2752,7 @@ def confirm_video_project_invoice(
             user_id=int(user_id),
             admission=provider_admission,
             require_provider_admission=bool(require_provider_admission),
+            require_authoritative_snapshot=bool(require_authoritative_admission),
         )
     if deduct_func is not None:
         charge = deduct_func(int(user_id), total_xu)
@@ -2563,6 +2778,27 @@ def confirm_video_project_invoice(
     else:
         project = get_video_project(conn, int(project_id))
     return {"ok": True, "project": project, "job": job, "duplicate_prevented": bool(job.get("duplicate_prevented"))}
+
+
+def confirm_public_product_video_invoice(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    user_id: int,
+    balance_xu: int | None = None,
+    provider_admission: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The only queue entry point authorized for a public final-confirm callback."""
+    return confirm_video_project_invoice(
+        conn,
+        project_id=int(project_id),
+        user_id=int(user_id),
+        balance_xu=balance_xu,
+        deduct_func=None,
+        provider_admission=provider_admission,
+        require_provider_admission=True,
+        require_authoritative_admission=True,
+    )
 
 
 def requeue_stale_video_jobs(conn: sqlite3.Connection, *, now: datetime | None = None) -> int:
@@ -3509,7 +3745,19 @@ def sweep_product_video_zero_task_watchdog(
         recovery_action = ""
         terminal_reason = ""
         if not candidates:
-            terminal_reason = "no_eligible_provider_before_scene_dispatch"
+            if not outbox:
+                outbox = ensure_product_video_dispatch_outbox(
+                    conn,
+                    job_id=int(job["id"]),
+                    project_id=int(project["project_id"]),
+                    scene_indexes=list(range(1, max(1, _as_int(result.get("scene_count"), 1)) + 1)),
+                    now=current_dt,
+                )
+            terminal_reason = str(
+                eligibility.get("reconciliation_reason")
+                or eligibility.get("worker_admission_block_reason")
+                or "no_eligible_provider_before_scene_dispatch"
+            )
             recovery_action = "failed_no_charge"
             result.update(
                 {
@@ -3535,6 +3783,13 @@ def sweep_product_video_zero_task_watchdog(
                     "delivery_attempted": False,
                     "charge": 0,
                     "charged_xu": 0,
+                    "reconciliation_reason": terminal_reason,
+                    "original_admission_snapshot": result.get("provider_eligibility_snapshot") or {},
+                    "handler_id_that_created_job": str(result.get("admission_callback_handler_id") or ""),
+                    "worker_sha_at_creation": str(result.get("admission_worker_sha") or ""),
+                    "runtime_sha_at_creation": str(result.get("admission_worker_runtime_sha") or ""),
+                    "no_provider_call_verified": not bool(watchdog.get("provider_http_request_sent")),
+                    "no_charge_verified": _as_int(result.get("charged_xu") or result.get("charge"), 0) == 0,
                     "worker_claim_result": "blocked_no_eligible_provider",
                     "worker_claim_block_reason": terminal_reason,
                     "dispatch_outbox_present": bool(outbox),
