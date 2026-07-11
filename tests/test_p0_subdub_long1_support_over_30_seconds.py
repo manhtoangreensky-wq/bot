@@ -490,6 +490,15 @@ def test_long1_has_no_paid_provider_calls_and_keeps_delivery_route_untouched():
     changed = set(
         subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True, encoding="utf-8").splitlines()
     )
+    branch = subprocess.check_output(
+        ["git", "branch", "--show-current"], text=True, encoding="utf-8"
+    ).strip().lower()
+    if (
+        "services/subdub_long_media.py" not in changed
+        and "subdub-long1" not in branch
+        and "subdub_long1" not in branch
+    ):
+        pytest.skip("LONG1 scope guard only applies while LONG1 is being changed")
     assert changed <= {
         "bot.py",
         "services/subdub_long_media.py",

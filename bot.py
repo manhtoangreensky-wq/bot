@@ -183644,8 +183644,32 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     shopaikey_ready = shopaikey_minimax_tts_configured() if allow_admin else shopaikey_minimax_tts_public_ready()
     direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
     shopaikey_fallback_ready = bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_DUBBING_TTS_ENDPOINT) if allow_admin else shopaikey_tts_fallback_public_ready()
+
+    async def _key4u_minimax_candidate(value: str):
+        candidate = call_key4u_minimax_tts_bytes_with_speed
+        kwargs = {
+            "voice_id": voice_id,
+            "voice_style": voice_style,
+            "voice_speed": voice_speed,
+            "allow_admin": allow_admin,
+        }
+        try:
+            parameters = inspect.signature(candidate).parameters
+            accepts_extra_kwargs = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+            if accepts_extra_kwargs or "tts_language_code" in parameters:
+                kwargs["tts_language_code"] = tts_language_code
+            if accepts_extra_kwargs or "tts_language_boost" in parameters:
+                kwargs["tts_language_boost"] = tts_language_boost
+        except (TypeError, ValueError):
+            kwargs["tts_language_code"] = tts_language_code
+            kwargs["tts_language_boost"] = tts_language_boost
+        return await candidate(value, **kwargs)
+
     if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready:
-        candidates.append(("Key4U MiniMax", lambda value: call_key4u_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin, tts_language_code=tts_language_code, tts_language_boost=tts_language_boost)))
+        candidates.append(("Key4U MiniMax", _key4u_minimax_candidate))
     if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_ready:
         candidates.append(("ShopAIKey MiniMax", lambda value: call_shopaikey_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
     if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_ready and not international_route:
@@ -184160,6 +184184,7 @@ async def _execute_video_dubbing_pipeline_core(
     admin_interactive_confirm: bool = False,
 ) -> dict:
     uid = query.from_user.id
+    state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
     mode = subdub_resolved_route_mode("", state) or normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
@@ -185459,6 +185484,7 @@ async def execute_video_dubbing_pipeline(
 ) -> dict:
     uid = query.from_user.id
     chat_id = getattr(query.message, "chat_id", uid)
+    state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
     job_key = subtitle_dub_pipeline_job_key(uid, chat_id, state)
     acquired, job = acquire_subtitle_dub_pipeline_job(
         job_key,
@@ -188789,6 +188815,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         "confirm_subtitle_plus_dub": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }
     if action in confirm_modes or action == "final":
+        state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
+        mode = normalize_video_translate_mode(
+            state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
+        )
         is_preview_action = action in confirm_modes
         expected_mode = mode if action == "final" else normalize_video_translate_mode(confirm_modes.get(action))
         if state.get("step") == "completed":

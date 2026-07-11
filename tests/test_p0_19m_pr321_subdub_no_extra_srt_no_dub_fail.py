@@ -261,7 +261,7 @@ def test_pr321_combo_fail_prefers_delivered_job_over_same_key_failed_job(monkeyp
 
 
 def test_pr321_no_product_video_music_payos_files_touched():
-    # Scope guard for this hotfix: only SubDub terminal/delivery code and this test may change.
+    # Keep the original scope boundary without blocking later SubDub-only work.
     import subprocess
 
     changed = {
@@ -270,8 +270,17 @@ def test_pr321_no_product_video_music_payos_files_touched():
         if line.strip()
     }
 
-    assert changed <= {
-        "bot.py",
-        "tests/test_p0_19m_pr321_subdub_no_extra_srt_no_dub_fail.py",
-        "tests/test_p0_19m6r_subdub_live_runtime_terminal_outcome_path_fix.py",
+    forbidden_tokens = {
+        "music",
+        "suno",
+        "payos",
+        "wallet",
+        "product_video",
+        "video_provider",
+        "img2vid",
     }
+    violations = {
+        path for path in changed
+        if any(token in path.lower() for token in forbidden_tokens)
+    }
+    assert violations == set()

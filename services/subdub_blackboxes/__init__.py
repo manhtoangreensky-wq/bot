@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import dub_only, subtitle_dub, subtitle_only
-from .base import SubDubRunner
+from .base import SubDubRunner, normalize_standalone_video_lane_entry_state
 
 
 _LANES = (subtitle_only.LANE, dub_only.LANE, subtitle_dub.LANE)
