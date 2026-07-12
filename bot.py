@@ -47557,7 +47557,12 @@ def _video_dispatch_outbox_debug_lines(data: dict | None) -> list[str]:
         "dispatch_outbox_status",
         "dispatch_outbox_owner",
         "dispatch_outbox_available_at",
+        "dispatch_outbox_available_at_timezone",
+        "dispatch_outbox_due",
+        "dispatch_outbox_retry_seconds_remaining",
         "dispatch_outbox_attempt_count",
+        "dispatch_outbox_retry_count",
+        "dispatch_outbox_retry_reason",
         "dispatch_outbox_last_attempt_at",
         "dispatch_outbox_lease_owner",
         "dispatch_outbox_lease_expires_at",
@@ -47566,6 +47571,14 @@ def _video_dispatch_outbox_debug_lines(data: dict | None) -> list[str]:
         "dispatch_outbox_acknowledged_at",
         "dispatch_outbox_last_error",
         "dispatch_outbox_terminal_reason",
+        "probation_lock_owner_job",
+        "current_job_matches_lock",
+        "same_job_lock_reentry_allowed",
+        "candidate_before_retry",
+        "candidate_after_retry",
+        "candidate_after_worker_revalidation",
+        "router_skip_reason",
+        "provider_submit_block_reason",
     )
     return [
         f"• {field}: <code>{html.escape(str(item.get(field) if item.get(field) not in (None, '') else '-'))}</code>"
@@ -71525,6 +71538,15 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or provider_telemetry.get("fallback_candidate_indexes")
     )
     zero_task_progress_guard = bool(provider_telemetry.get("zero_task_progress_guard"))
+    outbox_wait = video_project_queue.product_video_dispatch_outbox_debug_contract(
+        {
+            "outbox_id": job_result.get("dispatch_outbox_id"),
+            "dispatch_status": job_result.get("dispatch_outbox_status"),
+            "available_at": job_result.get("dispatch_outbox_available_at"),
+            "attempt_count": job_result.get("dispatch_outbox_attempt_count"),
+            "last_error": job_result.get("dispatch_outbox_last_error"),
+        }
+    )
     terminal_state = str(
         job_result.get("canonical_status")
         or job_result.get("terminal_state")
@@ -71577,7 +71599,16 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if status in {"queued", "queued_for_worker"}:
         status_label = "Đang chuẩn bị"
         stage = "hệ thống đang chờ bắt đầu tạo các cảnh" if zero_task_progress_guard else "hệ thống đang xếp lịch dựng video"
-        if safe_int(provider_telemetry.get("scene_tasks_created_count") or job_result.get("scene_tasks_created_count"), 0) > 0:
+        if outbox_wait.get("dispatch_outbox_status") == "retry_wait":
+            if outbox_wait.get("dispatch_outbox_due"):
+                stage = "hệ thống đang chuyển lại yêu cầu sang bộ phận dựng video"
+            else:
+                wait_seconds = safe_int(outbox_wait.get("dispatch_outbox_retry_seconds_remaining"), 0)
+                stage = f"hệ thống sẽ thử bắt đầu lại sau khoảng {wait_seconds} giây"
+        if (
+            outbox_wait.get("dispatch_outbox_status") != "retry_wait"
+            and safe_int(provider_telemetry.get("scene_tasks_created_count") or job_result.get("scene_tasks_created_count"), 0) > 0
+        ):
             scene_total = safe_int(provider_telemetry.get("scene_tasks_total") or provider_telemetry.get("scenes_total") or job_result.get("scene_count"), 0)
             stage = f"hệ thống đang chuẩn bị dựng {scene_total} cảnh" if scene_total else "hệ thống đang chờ worker nhận job"
             progress = max(progress, 10)

@@ -2663,6 +2663,8 @@ def product_video_provider_eligibility_snapshot(
     public_submit_enabled: bool = False,
     worker_compatible: bool = False,
     probation_lock_clear: bool = False,
+    probation_lock_owner_job_id: int = 0,
+    current_job_id: int = 0,
     hard_block_reason_by_provider: dict[str, str] | None = None,
     global_hard_block_reason: str = "",
     environ: dict[str, str] | None = None,
@@ -2737,11 +2739,16 @@ def product_video_provider_eligibility_snapshot(
         },
         public_submit_enabled=bool(public_submit_enabled),
     )
+    lock_owner_job_id = int(probation_lock_owner_job_id or 0)
+    evaluated_job_id = int(current_job_id or 0)
+    current_job_matches_lock = bool(lock_owner_job_id > 0 and evaluated_job_id == lock_owner_job_id)
+    lock_owned_by_other_job = bool(lock_owner_job_id > 0 and not current_job_matches_lock)
+    effective_probation_lock_clear = bool(probation_lock_clear or current_job_matches_lock)
     public_confirm_probation_allowed = bool(
         allow_public_confirmed_probation
         and probation_source_policy.get("provider_submit_allowed")
         and bool(worker_compatible)
-        and bool(probation_lock_clear)
+        and effective_probation_lock_clear
     )
     if not allow_public_confirmed_probation:
         probation_context_reject_reason = "probation_requires_public_final_confirm"
@@ -2752,8 +2759,12 @@ def product_video_provider_eligibility_snapshot(
         )
     elif not worker_compatible:
         probation_context_reject_reason = "worker_incompatible"
-    elif not probation_lock_clear:
-        probation_context_reject_reason = "probation_lock_not_clear"
+    elif not effective_probation_lock_clear:
+        probation_context_reject_reason = (
+            "probation_lock_owned_by_other_job"
+            if lock_owned_by_other_job
+            else "probation_lock_not_clear"
+        )
     else:
         probation_context_reject_reason = ""
     for provider in configured_chain:
@@ -2927,6 +2938,12 @@ def product_video_provider_eligibility_snapshot(
             else (probation_context_reject_reason if probation_candidates else hard_block_reason)
         ),
         "probation_lock_clear": bool(probation_lock_clear),
+        "probation_lock_clear_for_current_job": effective_probation_lock_clear,
+        "probation_lock_owner_job": lock_owner_job_id,
+        "current_probation_job_id": evaluated_job_id,
+        "current_job_matches_lock": current_job_matches_lock,
+        "same_job_lock_reentry_allowed": current_job_matches_lock,
+        "probation_lock_owned_by_other_job": lock_owned_by_other_job,
         "probation_submit_source": str(probation_source_policy.get("submit_source") or ""),
         "probation_submit_source_allowed": bool(probation_source_policy.get("provider_submit_allowed")),
         "probation_submit_block_reason": str(probation_source_policy.get("provider_submit_block_reason") or ""),

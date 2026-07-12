@@ -1928,9 +1928,10 @@ def _product_video_runtime_eligibility(
     project: dict[str, Any],
     *,
     now: datetime | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Re-evaluate enforced public admission without submitting a provider job."""
-    del project
+    project = dict(project or {})
     persisted_candidates = [
         str(item or "").strip()
         for item in (
@@ -1967,10 +1968,45 @@ def _product_video_runtime_eligibility(
         or result.get("admission_worker_version_compatible")
         or result.get("worker_connected")
     )
+    current_job_id = _safe_int(job.get("id"), 0)
+    selected_probation_provider = str(
+        result.get("probation_candidate_key")
+        or result.get("probation_candidate_selected")
+        or result.get("selected_probation_provider")
+        or ""
+    ).strip()
     probation_job_id = _safe_int(result.get("probation_job_id"), 0)
+    lock_truth: dict[str, Any] = {}
+    if conn is not None and str(result.get("admission_mode") or "") == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+        lock_truth = video_project_queue.product_video_probation_lock_state(
+            conn,
+            provider_key=selected_probation_provider,
+            current_job_id=current_job_id,
+            current_project_id=_safe_int(job.get("project_id") or project.get("project_id"), 0),
+            current_user_id=_safe_int(job.get("user_id") or project.get("user_id"), 0),
+            now=now,
+        )
+        selected_probation_provider = str(
+            selected_probation_provider
+            or lock_truth.get("active_probation_provider")
+            or ""
+        ).strip()
+    lock_owner_job_id = _safe_int(
+        lock_truth.get("probation_lock_owner_job")
+        or lock_truth.get("active_probation_job_id")
+        or result.get("probation_lock_owner_job")
+        or result.get("active_probation_job_id"),
+        0,
+    )
+    current_job_matches_lock = bool(
+        lock_truth.get("current_job_matches_lock")
+        or (current_job_id > 0 and probation_job_id == current_job_id)
+        or (current_job_id > 0 and lock_owner_job_id == current_job_id)
+    )
     probation_lock_clear = bool(
-        result.get("probation_lock_clear")
-        or (probation_job_id > 0 and probation_job_id == _safe_int(job.get("id"), 0))
+        lock_truth.get("probation_lock_clear_for_current_job")
+        if lock_truth
+        else (result.get("probation_lock_clear") or current_job_matches_lock)
     )
     snapshot = result.get("provider_eligibility_snapshot")
     if not isinstance(snapshot, dict):
@@ -2012,6 +2048,12 @@ def _product_video_runtime_eligibility(
         if isinstance(chain, str)
         else [str(item or "").strip() for item in (chain or []) if str(item or "").strip()]
     )
+    if (
+        selected_probation_provider
+        and str(result.get("admission_mode") or "") == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+        and selected_probation_provider not in runtime_chain
+    ):
+        runtime_chain.insert(0, selected_probation_provider)
     contract_chain = (
         snapshot.get("contract_valid_provider_chain")
         or result.get("contract_valid_provider_chain")
@@ -2022,6 +2064,12 @@ def _product_video_runtime_eligibility(
         if isinstance(contract_chain, str)
         else [str(item or "").strip() for item in (contract_chain or []) if str(item or "").strip()]
     )
+    if (
+        selected_probation_provider
+        and str(result.get("admission_mode") or "") == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+        and selected_probation_provider not in contract_chain
+    ):
+        contract_chain.insert(0, selected_probation_provider)
     persisted_hard_blocks = result.get("provider_hard_block_reason_by_provider")
     if not isinstance(persisted_hard_blocks, dict):
         persisted_hard_blocks = {}
@@ -2069,6 +2117,8 @@ def _product_video_runtime_eligibility(
         ),
         worker_compatible=worker_compatible,
         probation_lock_clear=probation_lock_clear,
+        probation_lock_owner_job_id=lock_owner_job_id,
+        current_job_id=current_job_id,
         hard_block_reason_by_provider=persisted_hard_blocks,
         global_hard_block_reason=str(runtime_freeze_truth.get("blocker_code") or ""),
         persisted_snapshot_id=str(result.get("admission_snapshot_id") or result.get("provider_eligibility_snapshot_id") or ""),
@@ -2090,6 +2140,9 @@ def _product_video_runtime_eligibility(
         "candidate_resolver_source": str(submit_policy.get("submit_source") or ""),
         "candidate_resolver_public_user_confirmed": bool(submit_policy.get("public_user_confirmed")),
         "candidate_filter_stage": "worker_runtime_eligibility",
+        "candidate_before_retry": list(persisted_candidates or ([selected_probation_provider] if selected_probation_provider else [])),
+        "candidate_after_retry": list(runtime_chain),
+        "candidate_after_worker_revalidation": list(runtime_candidates),
         "provider_submit_allowed_at_candidate_resolver": submit_allowed,
         "provider_submit_block_reason_at_candidate_resolver": submit_block_reason,
         "provider_submit_allowed": submit_allowed,
@@ -2109,6 +2162,16 @@ def _product_video_runtime_eligibility(
         "configured_chain_at_runtime": runtime_chain,
         "contract_valid_chain_at_runtime": list(contract_chain or []),
         "probation_lock_clear_at_candidate_resolver": probation_lock_clear,
+        "probation_lock_owner_job": lock_owner_job_id,
+        "current_probation_job_id": current_job_id,
+        "current_job_matches_lock": current_job_matches_lock,
+        "same_job_lock_reentry_allowed": current_job_matches_lock,
+        "probation_lock_owned_by_other_job": bool(lock_owner_job_id > 0 and not current_job_matches_lock),
+        "probation_lock_reject_reason": str(
+            evaluated.get("probation_reject_reason")
+            or lock_truth.get("probation_lock_reject_reason")
+            or ""
+        ),
     }
 
 
@@ -2217,6 +2280,7 @@ def _claim_video_render_candidate(
                 result,
                 project,
                 now=current_dt,
+                conn=conn,
             ),
             reconciliation_source="worker_claim_recovery",
         )
@@ -2333,6 +2397,7 @@ def _claim_video_render_candidate(
                             result_payload,
                             project,
                             now=current_dt,
+                            conn=conn,
                         )
                         runtime_candidates = [
                             str(item or "").strip()
@@ -2364,6 +2429,25 @@ def _claim_video_render_candidate(
                                 "probation_candidate": str(runtime_eligibility.get("probation_candidate_selected") or ""),
                                 "probation_eligible": bool(runtime_eligibility.get("probation_eligible")),
                                 "probation_reject_reason": str(runtime_eligibility.get("probation_reject_reason") or ""),
+                                "probation_job_id": int(
+                                    runtime_eligibility.get("probation_lock_owner_job")
+                                    or result_payload.get("probation_job_id")
+                                    or job.get("id")
+                                    or 0
+                                ),
+                                "probation_lock_owner_job": int(runtime_eligibility.get("probation_lock_owner_job") or 0),
+                                "current_job_matches_lock": bool(runtime_eligibility.get("current_job_matches_lock")),
+                                "same_job_lock_reentry_allowed": bool(
+                                    runtime_eligibility.get("same_job_lock_reentry_allowed")
+                                ),
+                                "probation_lock_owned_by_other_job": bool(
+                                    runtime_eligibility.get("probation_lock_owned_by_other_job")
+                                ),
+                                "candidate_before_retry": list(runtime_eligibility.get("candidate_before_retry") or []),
+                                "candidate_after_retry": list(runtime_eligibility.get("candidate_after_retry") or []),
+                                "candidate_after_worker_revalidation": list(
+                                    runtime_eligibility.get("candidate_after_worker_revalidation") or runtime_candidates
+                                ),
                                 "provider_submit_allowed": bool(runtime_eligibility.get("provider_submit_allowed")),
                                 "provider_submit_block_reason": str(runtime_eligibility.get("provider_submit_block_reason") or ""),
                                 "router_skip_reason": str(runtime_eligibility.get("router_skip_reason") or ""),
