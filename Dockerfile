@@ -12,6 +12,8 @@ RUN apt-get update \
         fonts-noto-core \
         fonts-noto-cjk \
         fonts-noto-extra \
+        tesseract-ocr \
+        tesseract-ocr-all \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 

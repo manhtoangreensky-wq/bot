@@ -94,7 +94,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -1865,6 +1865,11 @@ PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SEC
 SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
 SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
 SUBDUB_LONG_CHUNK_SECONDS = max(10, min(30, env_int("SUBDUB_LONG_CHUNK_SECONDS", 30)))
+SUBDUB_VISUAL_OCR_ENABLED = env_flag("SUBDUB_VISUAL_OCR_ENABLED", "true")
+SUBDUB_VISUAL_OCR_FPS = max(0.5, min(4.0, env_float("SUBDUB_VISUAL_OCR_FPS", 2.0)))
+SUBDUB_VISUAL_OCR_BOTTOM_RATIO = max(0.20, min(0.60, env_float("SUBDUB_VISUAL_OCR_BOTTOM_RATIO", 0.35)))
+SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO = max(0.0, min(0.15, env_float("SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO", 0.04)))
+SUBDUB_VISUAL_OCR_MAX_FRAMES = max(20, min(1200, env_int("SUBDUB_VISUAL_OCR_MAX_FRAMES", 1200)))
 SUBDUB_LONG_PROJECT_MAX_PARTS = max(1, min(48, env_int("SUBDUB_LONG_PROJECT_MAX_PARTS", 12)))
 SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS = max(
     SUBDUB_MAX_DURATION_SECONDS,
@@ -94798,6 +94803,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• TTS timeline duration: <code>{esc(job.get('tts_timeline_duration'))}</code>",
         f"• audio padding seconds: <code>{esc(job.get('audio_padding_seconds'))}</code>",
         f"• subtitle timing source: <code>{esc(job.get('subtitle_timing_source'))}</code>",
+        f"• source subtitle timing source: <code>{esc(job.get('source_subtitle_timing_source'))}</code>",
+        f"• visual OCR frames/cues: <code>{intval(job.get('visual_ocr_frame_count'))}/{intval(job.get('visual_ocr_cue_count'))}</code>",
         f"• original cue count: <code>{intval(job.get('original_cue_count'))}</code>",
         f"• translated cue count: <code>{intval(job.get('translated_cue_count'))}</code>",
         f"• cue start mismatch: <code>{intval(job.get('cue_start_mismatch_count'))}</code>",
@@ -183137,6 +183144,172 @@ async def video_dubbing_extract_embedded_subtitle(source_bytes: bytes, content_t
         with open(subtitle_path, "r", encoding="utf-8", errors="replace") as handle:
             return handle.read().strip(), "embedded_subtitle"
 
+
+SUBDUB_TESSERACT_LANGUAGE_MAP = {
+    "vi": "vie", "en": "eng", "zh": "chi_sim", "zh_cn": "chi_sim", "zh_tw": "chi_tra",
+    "ja": "jpn", "ko": "kor", "th": "tha", "fr": "fra", "de": "deu", "es": "spa",
+    "id": "ind", "ms": "msa", "pt": "por", "ru": "rus", "ar": "ara", "hi": "hin",
+    "lo": "lao", "km": "khm", "my": "mya", "fil": "fil",
+}
+_SUBDUB_TESSERACT_LANGUAGE_CACHE: set[str] | None = None
+
+
+def subdub_tesseract_available_languages() -> set[str]:
+    global _SUBDUB_TESSERACT_LANGUAGE_CACHE
+    if _SUBDUB_TESSERACT_LANGUAGE_CACHE is not None:
+        return set(_SUBDUB_TESSERACT_LANGUAGE_CACHE)
+    binary = shutil.which("tesseract")
+    if not binary:
+        _SUBDUB_TESSERACT_LANGUAGE_CACHE = set()
+        return set()
+    try:
+        completed = subprocess.run(
+            [binary, "--list-langs"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        languages = {
+            line.strip()
+            for line in str(completed.stdout or "").splitlines()
+            if line.strip() and "available languages" not in line.lower()
+        }
+    except Exception:
+        languages = set()
+    _SUBDUB_TESSERACT_LANGUAGE_CACHE = languages
+    return set(languages)
+
+
+def subdub_tesseract_language_pack(source_language: str = "auto") -> tuple[str, str]:
+    available = subdub_tesseract_available_languages()
+    if not available:
+        return "", "tesseract_language_data_missing"
+    normalized = normalize_translate_target(source_language) or subdub_normalize_language_code(source_language)
+    if normalized and normalized != "auto":
+        requested = SUBDUB_TESSERACT_LANGUAGE_MAP.get(normalized, normalized)
+        if requested in available:
+            return requested, "source_language"
+        return "", f"ocr_language_missing:{normalized}"
+    configured = str(
+        _env(
+            "SUBDUB_VISUAL_OCR_AUTO_LANGS",
+            "eng+vie+chi_sim+chi_tra+jpn+kor+tha+ara+hin+rus+fra+deu+spa+ind+msa+por+lao+khm+mya+fil",
+        )
+        or "eng"
+    )
+    selected = [item for item in configured.split("+") if item in available]
+    if selected:
+        return "+".join(selected), "auto_multilingual"
+    if "eng" in available:
+        return "eng", "auto_english_fallback"
+    return sorted(available)[0], "auto_available_fallback"
+
+
+def subdub_tesseract_frame_text(frame_path: str, source_language: str = "auto") -> dict:
+    binary = shutil.which("tesseract")
+    if not binary:
+        return {"text": "", "confidence": 0.0, "language": "", "status": "tesseract_missing"}
+    language_pack, language_reason = subdub_tesseract_language_pack(source_language)
+    if not language_pack:
+        return {"text": "", "confidence": 0.0, "language": "", "status": language_reason}
+    try:
+        completed = subprocess.run(
+            [binary, str(frame_path), "stdout", "-l", language_pack, "--oem", "1", "--psm", "6"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except Exception as exc:
+        return {"text": "", "confidence": 0.0, "language": language_pack, "status": type(exc).__name__}
+    text = subdub_visual_subtitle.normalize_ocr_text(completed.stdout)
+    return {
+        "text": text,
+        "confidence": 0.0,
+        "language": language_pack,
+        "status": "PASS" if text else "ocr_text_empty",
+        "language_reason": language_reason,
+    }
+
+
+async def video_dubbing_extract_visual_subtitle(
+    source_bytes: bytes,
+    content_type: str = "video/mp4",
+    *,
+    duration_seconds: float = 0.0,
+    source_language: str = "auto",
+    max_seconds: int = 0,
+) -> dict:
+    if not SUBDUB_VISUAL_OCR_ENABLED:
+        return {"ok": False, "status": "visual_ocr_disabled", "segments": []}
+    if not source_bytes or not str(content_type or "").lower().startswith("video/"):
+        return {"ok": False, "status": "visual_ocr_video_required", "segments": []}
+    ffmpeg = frame_video_ffmpeg_path()
+    if not ffmpeg or not shutil.which("tesseract"):
+        return {"ok": False, "status": "visual_ocr_runtime_missing", "segments": []}
+    effective_duration = max(0.0, float(duration_seconds or 0.0))
+    if int(max_seconds or 0) > 0:
+        effective_duration = min(effective_duration or float(max_seconds), float(max_seconds))
+    if effective_duration <= 0:
+        probe = await subdub_probe_video_bytes(source_bytes)
+        effective_duration = max(0.0, float(probe.get("duration") or 0.0))
+    fps = float(SUBDUB_VISUAL_OCR_FPS)
+    expected_frames = int(math.ceil(effective_duration * fps)) if effective_duration > 0 else SUBDUB_VISUAL_OCR_MAX_FRAMES
+    max_frames = max(1, min(int(SUBDUB_VISUAL_OCR_MAX_FRAMES), expected_frames or SUBDUB_VISUAL_OCR_MAX_FRAMES))
+    with tempfile.TemporaryDirectory(prefix="toanaas_subdub_visual_ocr_") as tmpdir:
+        source_path = os.path.join(tmpdir, "source_video")
+        frame_pattern = os.path.join(tmpdir, "frame_%06d.png")
+        with open(source_path, "wb") as handle:
+            handle.write(source_bytes)
+
+        async def _extract_frames(_source: bytes, requested_fps: float, requested_max_frames: int) -> list[str]:
+            bottom_ratio = float(SUBDUB_VISUAL_OCR_BOTTOM_RATIO)
+            side_margin = float(SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO)
+            filter_chain = (
+                f"fps={requested_fps:.3f},"
+                f"crop=iw*(1-{2 * side_margin:.4f}):ih*{bottom_ratio:.4f}:iw*{side_margin:.4f}:ih*(1-{bottom_ratio:.4f}),"
+                "scale=iw*2:ih*2,format=gray,eq=contrast=1.8:brightness=0.05"
+            )
+            command = [ffmpeg, "-y", "-i", source_path]
+            if int(max_seconds or 0) > 0:
+                command.extend(["-t", str(int(max_seconds))])
+            command.extend(["-vf", filter_chain, "-frames:v", str(requested_max_frames), frame_pattern])
+            timeout_seconds = max(120, min(1200, int((effective_duration or 30) * 4)))
+            ok, _detail = await run_ffmpeg_command(command, timeout=timeout_seconds)
+            if not ok:
+                return []
+            return [str(path) for path in sorted(Path(tmpdir).glob("frame_*.png"))]
+
+        detected_ocr_language = str(source_language or "auto")
+
+        async def _ocr_frame(frame_path: str, language: str) -> dict:
+            nonlocal detected_ocr_language
+            requested_language = detected_ocr_language or language or "auto"
+            result = await asyncio.to_thread(subdub_tesseract_frame_text, frame_path, requested_language)
+            if subdub_normalize_language_code(detected_ocr_language) == "auto" and result.get("text"):
+                detected = subdub_detect_language_from_text(str(result.get("text") or ""), "auto")
+                if detected != "auto":
+                    detected_ocr_language = detected
+            return result
+
+        result = await subdub_visual_subtitle.extract_visual_subtitle_cues(
+            source_bytes,
+            source_duration=effective_duration,
+            source_language=source_language,
+            frames_per_second=fps,
+            max_frames=max_frames,
+            extract_frames=_extract_frames,
+            ocr_frame=_ocr_frame,
+        )
+    if result.get("ok"):
+        result["subtitle"] = video_dubbing_srt_from_segments(list(result.get("segments") or []))
+        result["script"] = "\n".join(str(item.get("text") or "") for item in (result.get("segments") or [])).strip()
+        result["source_kind"] = "visual_hardsub_ocr"
+    return result
+
 async def video_dubbing_extract_audio(source_bytes: bytes, content_type: str = "application/octet-stream", max_seconds: int = 0) -> tuple[bytes, str, str]:
     content_type = str(content_type or "application/octet-stream").lower()
     ffmpeg = frame_video_ffmpeg_path()
@@ -183962,6 +184135,8 @@ async def video_dubbing_resolve_source_script(
     updated_by="",
     file_name: str = "",
     media_kind: str = "",
+    source_language: str = "auto",
+    prefer_visual_subtitles: bool = False,
 ) -> dict:
     embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
     if embedded_subtitle:
@@ -183973,6 +184148,34 @@ async def video_dubbing_resolve_source_script(
             "detail": subtitle_detail,
             "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
         }
+    if prefer_visual_subtitles:
+        visual_result = await video_dubbing_extract_visual_subtitle(
+            source_bytes,
+            content_type,
+            duration_seconds=duration_seconds,
+            source_language=source_language,
+            max_seconds=max_seconds,
+        )
+        if visual_result.get("ok") and visual_result.get("subtitle"):
+            return {
+                "source_kind": "visual_hardsub_ocr",
+                "subtitle": str(visual_result.get("subtitle") or ""),
+                "script": str(visual_result.get("script") or ""),
+                "asr_provider": "visual_hardsub_ocr",
+                "detail": str(visual_result.get("detail") or ""),
+                "segments": list(visual_result.get("segments") or []),
+                "detected_language": subdub_detect_language_from_text(
+                    str(visual_result.get("script") or ""),
+                    source_language,
+                ),
+                "duration_seconds": int(duration_seconds or 0),
+                "chunk_count": 1,
+                "chunk_strategy": "visual_frame_ocr",
+                "global_timing_preserved": True,
+                "subtitle_timing_source": "visual_hardsub_ocr",
+                "visual_ocr_frame_count": int(visual_result.get("frame_count") or 0),
+                "visual_ocr_cue_count": int(visual_result.get("cue_count") or 0),
+            }
     # Media routing stays here; transcribe_media_to_segments calls video_dubbing_transcribe_bytes only after audio is valid.
     result = await transcribe_media_to_segments(
         {
@@ -183987,6 +184190,7 @@ async def video_dubbing_resolve_source_script(
         context=context,
         duration_seconds=duration_seconds,
         max_seconds=max_seconds,
+        source_language=source_language,
         allow_admin=allow_admin,
         updated_by=updated_by,
     )
@@ -184300,6 +184504,11 @@ async def execute_video_dubbing_preview(
         updated_by=query.from_user.id,
         file_name=str(state.get("source_file_name") or ""),
         media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
+        source_language=str(state.get("source_language") or "auto"),
+        prefer_visual_subtitles=bool(
+            mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+            and video_dubbing_has_existing_subtitle_metadata(state) is not False
+        ),
     )
     source_subtitle = str(source_info.get("subtitle") or "").strip()
     source_script = str(source_info.get("script") or "").strip()
@@ -184857,6 +185066,11 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                 updated_by=user_id,
                 file_name=str(state.get("source_file_name") or ""),
                 media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
+                source_language=str(state.get("source_language") or "auto"),
+                prefer_visual_subtitles=bool(
+                    mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+                    and video_dubbing_has_existing_subtitle_metadata(state) is not False
+                ),
             )
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
@@ -184933,6 +185147,9 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         "chunk_strategy": str(source_info.get("chunk_strategy") or state.get("chunk_strategy") or "single_pass"),
         "global_timing_preserved": bool(source_info.get("global_timing_preserved", state.get("global_timing_preserved", True))),
         "subtitle_timing_source": "original_cues" if needs_translation else str(source_info.get("subtitle_timing_source") or ("embedded_subtitle" if source_info.get("source_kind") == "embedded_subtitle" else "source_cues")),
+        "source_subtitle_timing_source": str(source_info.get("subtitle_timing_source") or source_info.get("source_kind") or "source_cues"),
+        "visual_ocr_frame_count": int(source_info.get("visual_ocr_frame_count") or 0),
+        "visual_ocr_cue_count": int(source_info.get("visual_ocr_cue_count") or 0),
         "subtitle_artifact_used_for_burnin": "translated_srt" if needs_translation else "source_srt",
         **timing_validation,
     }
@@ -186185,6 +186402,9 @@ async def _execute_video_dubbing_pipeline_core(
             "canonical_final_artifact_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
             "artifact_lane": str(render_debug.get("subdub_blackbox_lane") or subdub_blackboxes.subdub_lane_name(mode)),
             "subtitle_timing_source": str(prepared.get("subtitle_timing_source") or ""),
+            "source_subtitle_timing_source": str(prepared.get("source_subtitle_timing_source") or ""),
+            "visual_ocr_frame_count": int(prepared.get("visual_ocr_frame_count") or 0),
+            "visual_ocr_cue_count": int(prepared.get("visual_ocr_cue_count") or 0),
             "subtitle_artifact_used_for_burnin": str(prepared.get("subtitle_artifact_used_for_burnin") or ""),
             "original_cue_count": int(prepared.get("original_cue_count") or prepared.get("source_segment_count") or 0),
             "translated_cue_count": int(prepared.get("translated_cue_count") or prepared.get("translated_segment_count") or 0),
@@ -186365,6 +186585,9 @@ async def _execute_video_dubbing_pipeline_core(
         "artifact_validation_result": str(final_output_validation.get("detail") or ""),
         "artifact_validation_error": "" if final_output_validation.get("ok") else str(final_output_validation.get("detail") or "final_mp4_invalid"),
         "subtitle_timing_source": str(prepared.get("subtitle_timing_source") or ""),
+        "source_subtitle_timing_source": str(prepared.get("source_subtitle_timing_source") or ""),
+        "visual_ocr_frame_count": int(prepared.get("visual_ocr_frame_count") or 0),
+        "visual_ocr_cue_count": int(prepared.get("visual_ocr_cue_count") or 0),
         "subtitle_artifact_used_for_burnin": str(prepared.get("subtitle_artifact_used_for_burnin") or ""),
         "original_cue_count": int(prepared.get("original_cue_count") or prepared.get("source_segment_count") or 0),
         "translated_cue_count": int(prepared.get("translated_cue_count") or prepared.get("translated_segment_count") or 0),
@@ -186537,6 +186760,9 @@ async def execute_video_dubbing_pipeline(
             "canonical_final_artifact_bytes": int(result.get("canonical_final_artifact_bytes") or result_state.get("canonical_final_artifact_bytes") or 0),
             "canonical_final_artifact_duration": float(result.get("canonical_final_artifact_duration") or result_state.get("canonical_final_artifact_duration") or 0.0),
             "subtitle_timing_source": str(result.get("subtitle_timing_source") or result_state.get("subtitle_timing_source") or ""),
+            "source_subtitle_timing_source": str(result.get("source_subtitle_timing_source") or result_state.get("source_subtitle_timing_source") or ""),
+            "visual_ocr_frame_count": int(result.get("visual_ocr_frame_count") or result_state.get("visual_ocr_frame_count") or 0),
+            "visual_ocr_cue_count": int(result.get("visual_ocr_cue_count") or result_state.get("visual_ocr_cue_count") or 0),
             "subtitle_artifact_used_for_burnin": str(result.get("subtitle_artifact_used_for_burnin") or result_state.get("subtitle_artifact_used_for_burnin") or ""),
             "original_cue_count": int(result.get("original_cue_count") or result_state.get("original_cue_count") or 0),
             "translated_cue_count": int(result.get("translated_cue_count") or result_state.get("translated_cue_count") or 0),
