@@ -1930,7 +1930,7 @@ def _product_video_runtime_eligibility(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Re-evaluate enforced public admission without submitting a provider job."""
-    del job, project
+    del project
     persisted_candidates = [
         str(item or "").strip()
         for item in (
@@ -1952,6 +1952,26 @@ def _product_video_runtime_eligibility(
     from services import video_provider_router
 
     status = video_provider_router.provider_status_payload()
+    submit_switch = video_provider_router.product_video_submit_switch_detail()
+    submit_policy = video_provider_router.product_video_provider_submit_source_policy(
+        result,
+        public_submit_enabled=bool(submit_switch.get("resolved")),
+        poll_existing_task=False,
+    )
+    public_confirmed_submit = bool(
+        submit_policy.get("provider_submit_allowed")
+        and submit_policy.get("public_user_confirmed")
+    )
+    worker_compatible = bool(
+        result.get("worker_compatible")
+        or result.get("admission_worker_version_compatible")
+        or result.get("worker_connected")
+    )
+    probation_job_id = _safe_int(result.get("probation_job_id"), 0)
+    probation_lock_clear = bool(
+        result.get("probation_lock_clear")
+        or (probation_job_id > 0 and probation_job_id == _safe_int(job.get("id"), 0))
+    )
     snapshot = result.get("provider_eligibility_snapshot")
     if not isinstance(snapshot, dict):
         snapshot = {}
@@ -1998,12 +2018,26 @@ def _product_video_runtime_eligibility(
         contract_valid_provider_chain=contract_chain,
         scene_count=max(1, _safe_int(result.get("scene_count") or result.get("scenes_total"), 1)),
         require_live_health=True,
+        allow_public_confirmed_probation=public_confirmed_submit,
+        admission_source=str(submit_policy.get("submit_source") or ""),
+        public_user_confirmed=bool(submit_policy.get("public_user_confirmed")),
+        public_submit_enabled=bool(submit_switch.get("resolved")),
+        worker_compatible=worker_compatible,
+        probation_lock_clear=probation_lock_clear,
         persisted_snapshot_id=str(result.get("admission_snapshot_id") or result.get("provider_eligibility_snapshot_id") or ""),
     )
     return {
         **evaluated,
         "provider_eligibility_snapshot": evaluated,
         "runtime_candidate_keys": list(evaluated.get("eligible_provider_keys") or []),
+        "candidate_resolver_source": str(submit_policy.get("submit_source") or ""),
+        "candidate_resolver_public_user_confirmed": bool(submit_policy.get("public_user_confirmed")),
+        "candidate_filter_stage": "worker_runtime_eligibility",
+        "provider_submit_allowed_at_candidate_resolver": bool(submit_policy.get("provider_submit_allowed")),
+        "provider_submit_block_reason_at_candidate_resolver": str(
+            submit_policy.get("provider_submit_block_reason") or ""
+        ),
+        "probation_lock_clear_at_candidate_resolver": probation_lock_clear,
     }
 
 
@@ -2254,6 +2288,9 @@ def _claim_video_render_candidate(
                                 {
                                     "admission_result": "blocked",
                                     "admission_block_reason": blocker,
+                                    "router_skipped_reason": blocker,
+                                    "provider_submit_allowed": False,
+                                    "provider_submit_block_reason": blocker,
                                     "terminal_state": "failed_no_charge",
                                     "final_decision": "failed_no_charge",
                                     "zero_task_terminal_reason": blocker,
