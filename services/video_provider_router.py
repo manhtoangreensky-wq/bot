@@ -1690,6 +1690,13 @@ def _product_video_attempt_clip_valid(attempt: dict[str, Any]) -> bool:
         or attempt.get("telegram_delivery_success")
     )
     if str(attempt.get("admission_mode") or "") == "public_confirmed_probation":
+        delivery_message_id = str(
+            attempt.get("delivery_message_id")
+            or attempt.get("telegram_delivery_message_id")
+            or attempt.get("video_delivery_message_id")
+            or attempt.get("success_message_id")
+            or ""
+        ).strip()
         try:
             coverage_expected = max(0, int(float(attempt.get("scene_coverage_expected") or attempt.get("scenes_total") or 0)))
         except Exception:
@@ -1709,6 +1716,7 @@ def _product_video_attempt_clip_valid(attempt: dict[str, Any]) -> bool:
         )
         return bool(
             delivered
+            and delivery_message_id
             and coverage_complete
             and final_mp4_valid
             and artifact_size > 0

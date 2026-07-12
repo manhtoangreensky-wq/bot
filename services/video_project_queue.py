@@ -6554,6 +6554,7 @@ def note_video_delivery_result(
     current = now_text()
     attempts = int(project.get("delivery_attempt_count") or 0) + 1
     if sent:
+        delivery_message_id_value = str(delivery_message_id or success_message_id or "").strip()
         if str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
             scene_tasks = [
                 dict(item)
@@ -6577,6 +6578,7 @@ def note_video_delivery_result(
                 and (payload.get("final_mp4_valid") or payload.get("final_mp4_validated") or payload.get("artifact_valid_for_charge"))
                 and _as_int(payload.get("output_bytes") or payload.get("artifact_size"), 0) > 0
                 and result_url_present
+                and delivery_message_id_value
             )
             if promotion_eligible:
                 payload.update(
@@ -6595,7 +6597,7 @@ def note_video_delivery_result(
                     {
                         "probation_result": "pending",
                         "provider_health_promotion_eligible": False,
-                        "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_required",
+                        "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_delivery_message_required",
                     }
                 )
                 conn.execute(
@@ -6619,6 +6621,8 @@ def note_video_delivery_result(
                 "delivery_succeeded": True,
                 "video_delivered": True,
                 "final_delivered_at": current,
+                "delivery_message_id": delivery_message_id_value,
+                "telegram_delivery_message_id": delivery_message_id_value,
                 "download_button_visible": True,
                 "public_progress_source": "final_delivered",
                 "final_progress_after_reconcile": 100,

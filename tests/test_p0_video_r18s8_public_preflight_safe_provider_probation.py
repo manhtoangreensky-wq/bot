@@ -160,7 +160,14 @@ def test_probation_provider_is_not_promoted_by_artifact_before_telegram_delivery
     )
     after = router.product_video_provider_public_degradation(
         "shopaikey_video",
-        [{**base_attempt, "final_delivered": True, "delivery_succeeded": True}],
+        [
+            {
+                **base_attempt,
+                "final_delivered": True,
+                "delivery_succeeded": True,
+                "telegram_delivery_message_id": "telegram-r18s8-health",
+            }
+        ],
         route_ready=True,
         now_epoch=now_epoch,
     )
@@ -429,6 +436,54 @@ def test_probation_delivery_marker_without_valid_final_mp4_does_not_promote_heal
     assert payload["charged_xu"] == 0
     assert delivered["project"].get("video_delivered_at") in (None, "")
     assert queue.product_video_probation_lock_state(conn)["probation_active"] is True
+
+
+def test_probation_valid_output_without_telegram_message_id_does_not_promote_health(tmp_path):
+    conn = _conn(tmp_path)
+    project = _project(conn, user_id=807)
+    created = _confirm(conn, project, _probation_admission(project, snapshot_id="r18s8-missing-message-id"))
+    job_id = int(created["job"]["id"])
+    payload = json.loads(created["job"]["result_json"])
+    payload["scene_tasks"] = [
+        {
+            **item,
+            "result_url": f"https://fixture.invalid/scene-{item['scene_index']}.mp4",
+            "clip_valid": True,
+        }
+        for item in payload["scene_tasks"]
+    ]
+    payload.update(
+        {
+            "scene_coverage_expected": 2,
+            "scene_coverage_count": 2,
+            "scene_clip_coverage_complete": True,
+            "artifact_valid": True,
+            "final_mp4_valid": True,
+            "output_bytes": 4096,
+        }
+    )
+    conn.execute(
+        "UPDATE video_jobs SET status='completed',result_json=? WHERE id=?",
+        (json.dumps(payload), job_id),
+    )
+    conn.commit()
+
+    delivered = queue.note_video_delivery_result(
+        conn,
+        job_id=job_id,
+        sent=True,
+        delivery_message_id="",
+    )
+    after = json.loads(delivered["job"]["result_json"])
+
+    assert delivered["ok"] is False
+    assert delivered["sent"] is False
+    assert delivered["reason"] == "probation_final_delivery_requirements_missing"
+    assert after["probation_result"] == "pending"
+    assert after["provider_health_promotion_eligible"] is False
+    assert after["charged_xu"] == 0
+    assert delivered["project"].get("video_delivered_at") in (None, "")
+    assert delivered["project"].get("video_delivery_message_id") in (None, "")
 
 
 def _heartbeat_record(now: datetime) -> dict:
