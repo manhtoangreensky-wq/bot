@@ -8,6 +8,7 @@ atomically from SQLite.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import inspect
 import json
 import hashlib
@@ -41,7 +42,7 @@ PROJECT_STATUSES = (
     "cancelled",
 )
 PROJECT_DRAFT_STATUSES = tuple(status for status in PROJECT_STATUSES if status.startswith("draft_"))
-SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed")
+SCENE_STATUSES = ("pending", "gen_audio", "gen_image", "gen_video", "postprocess", "done", "failed", "terminal_failed")
 JOB_STATUSES = ("queued", "processing", "completed", "failed", "cancelled")
 VIDEO_RENDER_JOB_TYPE = "video_render"
 PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER = "owner_product_video"
@@ -50,6 +51,16 @@ PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK = "vproduct|b14_confirm"
 PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY = "b13_r18c"
 PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
 PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
+PRODUCT_VIDEO_FINAL_ADMISSION_CONTEXT_VERSION = "product_video_final_admission_v1"
+PRODUCT_VIDEO_RECONCILIATION_SOURCES = frozenset(
+    {
+        "watchdog_scheduler",
+        "startup_sweep",
+        "worker_claim_recovery",
+        "public_status_read_reconcile",
+        "manual_admin_reconcile",
+    }
+)
 PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT = 20
 PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MIN = 15
 PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_MAX = 30
@@ -74,6 +85,10 @@ _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
     "last_error": "",
     "jobs_scanned": 0,
     "jobs_reconciled": 0,
+    "watchdog_generation_jobs_scanned": 0,
+    "watchdog_generation_jobs_reconciled": 0,
+    "watchdog_last_reconciled_job_ids": [],
+    "last_reconciliation_source": "",
     "next_run_at": "",
     "interval_seconds": PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
     "watchdog_configured_interval_seconds": PRODUCT_VIDEO_WATCHDOG_INTERVAL_SECONDS_DEFAULT,
@@ -82,6 +97,33 @@ _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
     "watchdog_interval_clamp_reason": "",
     "duplicate_scheduler_prevented": False,
 }
+_PRODUCT_VIDEO_FINAL_ADMISSION_SIGNING_KEY = os.urandom(32)
+_PRODUCT_VIDEO_FINAL_ADMISSION_SIGNED_FIELDS = (
+    "admission_context_version",
+    "admission_snapshot_id",
+    "admission_checked_at",
+    "admission_candidate_keys",
+    "admission_candidate_count",
+    "admission_result",
+    "admission_user_id",
+    "admission_project_id",
+    "admission_quote_fingerprint",
+    "admission_callback_handler_id",
+    "admission_callback_data",
+    "admission_provider_health_gate_pass",
+    "worker_generation_id",
+    "worker_git_sha",
+    "runtime_sha",
+    "worker_compatible",
+    "worker_connected",
+    "worker_heartbeat_fresh",
+    "worker_lease_valid",
+    "worker_sha_match",
+    "worker_capability_match",
+    "worker_identity_conflict",
+    "route_requires_provider",
+    "handler_id",
+)
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
     "low": 200,
     "trial": 200,
@@ -100,6 +142,11 @@ PRODUCT_VIDEO_TIER_PRICE_MAP = {
 
 def now_text(moment: datetime | None = None) -> str:
     return (moment or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def normalize_product_video_reconciliation_source(value: Any, default: str = "manual_admin_reconcile") -> str:
+    source = str(value or default or "manual_admin_reconcile").strip()
+    return source if source in PRODUCT_VIDEO_RECONCILIATION_SOURCES else "manual_admin_reconcile"
 
 
 def _json_dumps(value: Any) -> str:
@@ -244,6 +291,43 @@ def product_video_admission_quote_fingerprint(project: dict[str, Any], user_id: 
         "customer_charge_planned_xu": _as_int(quote.get("customer_charge_planned_xu"), 0),
     }
     return hashlib.sha256(_json_dumps(payload).encode("utf-8")).hexdigest()
+
+
+def _product_video_final_admission_signature_payload(admission: dict[str, Any] | None) -> bytes:
+    current = dict(admission or {})
+    payload = {key: current.get(key) for key in _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNED_FIELDS}
+    return _json_dumps(payload).encode("utf-8")
+
+
+def sign_product_video_final_admission_context(admission: dict[str, Any] | None) -> dict[str, Any]:
+    """Seal a short-lived server-created final-confirm context.
+
+    The process-local key prevents public/legacy callers from manufacturing a
+    PASS context. The context is consumed immediately by the same bot process.
+    """
+    sealed = dict(admission or {})
+    sealed["admission_context_version"] = PRODUCT_VIDEO_FINAL_ADMISSION_CONTEXT_VERSION
+    sealed["admission_context_signature"] = hmac.new(
+        _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNING_KEY,
+        _product_video_final_admission_signature_payload(sealed),
+        hashlib.sha256,
+    ).hexdigest()
+    return sealed
+
+
+def verify_product_video_final_admission_context(admission: dict[str, Any] | None) -> bool:
+    current = dict(admission or {})
+    if current.get("admission_context_version") != PRODUCT_VIDEO_FINAL_ADMISSION_CONTEXT_VERSION:
+        return False
+    supplied = str(current.get("admission_context_signature") or "").strip()
+    if not supplied:
+        return False
+    expected = hmac.new(
+        _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNING_KEY,
+        _product_video_final_admission_signature_payload(current),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(supplied, expected)
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -2374,20 +2458,50 @@ def _product_video_final_admission_state(
     )
     handler_id = str(admission.get("admission_callback_handler_id") or snapshot.get("admission_callback_handler_id") or "")
     callback_data = str(admission.get("admission_callback_data") or snapshot.get("admission_callback_data") or "")
-    worker_version_compatible = bool(admission.get("admission_worker_version_compatible"))
+    context_signature_valid = verify_product_video_final_admission_context(admission)
+    provider_health_gate_pass = bool(admission.get("admission_provider_health_gate_pass"))
+    worker_version_compatible = bool(
+        admission.get("worker_compatible")
+        if "worker_compatible" in admission
+        else admission.get("admission_worker_version_compatible")
+    )
+    worker_connected = bool(admission.get("worker_connected"))
+    worker_heartbeat_fresh = bool(admission.get("worker_heartbeat_fresh"))
+    worker_lease_valid = bool(admission.get("worker_lease_valid"))
+    worker_sha_match = bool(admission.get("worker_sha_match"))
+    worker_capability_match = bool(admission.get("worker_capability_match"))
+    worker_identity_conflict = bool(admission.get("worker_identity_conflict"))
+    worker_generation_id = str(admission.get("worker_generation_id") or "")
+    worker_git_sha = str(admission.get("worker_git_sha") or admission.get("admission_worker_sha") or "")
+    runtime_sha = str(admission.get("runtime_sha") or admission.get("admission_worker_runtime_sha") or "")
     route_contract = canonical_product_video_route_contract(project, admission)
     persisted_admission_route = admission.get("admission_route_requires_provider")
-    route_requires_provider = bool(route_contract.get("route_requires_provider"))
-    if route_requires_provider and persisted_admission_route is False:
+    canonical_route_requires_provider = bool(route_contract.get("route_requires_provider"))
+    route_requires_provider = bool(canonical_route_requires_provider)
+    if require_authoritative_snapshot and persisted_admission_route is False:
+        route_requires_provider = False
+        route_contract["route_requirement_override"] = "signed_admission_route_false_rejected"
+    elif route_requires_provider and persisted_admission_route is False:
         route_contract["route_requirement_override"] = "legacy_persisted_false_ignored"
     duplicate_handler_detected = bool(admission.get("duplicate_confirm_handler_detected"))
-    replayed = bool(admission.get("admission_snapshot_consumed") or snapshot.get("admission_snapshot_consumed"))
+    consumed_ids = {
+        str(asset_pack.get("admission_snapshot_consumed_id") or ""),
+        str(invoice.get("admission_snapshot_consumed_id") or ""),
+    }
+    replayed = bool(
+        admission.get("admission_snapshot_consumed")
+        or snapshot.get("admission_snapshot_consumed")
+        or (snapshot_id and snapshot_id in consumed_ids)
+    )
     result_value = str(admission.get("admission_result") or ("PASS" if admission.get("ok") else "BLOCKED")).upper()
     authoritative_ok = bool(
-        snapshot_id
+        context_signature_valid
+        and snapshot_id
         and candidates
+        and declared_candidate_count > 0
         and declared_candidate_count == len(candidates)
         and result_value in {"PASS", "ALLOWED"}
+        and provider_health_gate_pass
         and snapshot_fresh
         and snapshot_user_id == int(user_id)
         and snapshot_project_id == _as_int(project.get("project_id"), 0)
@@ -2395,6 +2509,13 @@ def _product_video_final_admission_state(
         and handler_id == PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID
         and callback_data == PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK
         and worker_version_compatible
+        and worker_connected
+        and worker_heartbeat_fresh
+        and worker_lease_valid
+        and worker_sha_match
+        and worker_capability_match
+        and not worker_identity_conflict
+        and bool(worker_generation_id and worker_git_sha and runtime_sha)
         and route_requires_provider
         and not duplicate_handler_detected
         and not replayed
@@ -2409,10 +2530,26 @@ def _product_video_final_admission_state(
     )
     if admission_ok:
         block_reason = ""
+    elif require_authoritative_snapshot and not context_signature_valid:
+        block_reason = "admission_context_missing_or_invalid"
     elif not candidates or declared_candidate_count <= 0:
         block_reason = "no_eligible_product_video_provider"
+    elif require_authoritative_snapshot and not provider_health_gate_pass:
+        block_reason = str(admission.get("admission_block_reason") or "provider_health_gate_blocked")
     elif require_authoritative_snapshot and duplicate_handler_detected:
         block_reason = "duplicate_product_video_confirm_handler"
+    elif require_authoritative_snapshot and worker_identity_conflict:
+        block_reason = "worker_generation_conflict"
+    elif require_authoritative_snapshot and not worker_connected:
+        block_reason = str(admission.get("worker_admission_block_reason") or "worker_disconnected")
+    elif require_authoritative_snapshot and not worker_heartbeat_fresh:
+        block_reason = str(admission.get("worker_admission_block_reason") or "worker_heartbeat_stale")
+    elif require_authoritative_snapshot and not worker_lease_valid:
+        block_reason = str(admission.get("worker_admission_block_reason") or "worker_lease_expired")
+    elif require_authoritative_snapshot and not worker_sha_match:
+        block_reason = str(admission.get("worker_admission_block_reason") or "worker_sha_mismatch")
+    elif require_authoritative_snapshot and not worker_capability_match:
+        block_reason = str(admission.get("worker_admission_block_reason") or "worker_capability_mismatch")
     elif require_authoritative_snapshot and not worker_version_compatible:
         block_reason = str(admission.get("worker_admission_block_reason") or "worker_version_incompatible")
     elif require_authoritative_snapshot and not route_requires_provider:
@@ -2449,18 +2586,32 @@ def _product_video_final_admission_state(
             "PASS" if admission_ok else "BLOCKED"
         ) if require_authoritative_snapshot else ("allowed" if admission_ok else "blocked"),
         "admission_passed": admission_ok,
+        "admission_context_verified": context_signature_valid,
+        "admission_provider_health_gate_pass": provider_health_gate_pass,
         "admission_block_reason": block_reason,
         "admission_user_id": snapshot_user_id,
         "admission_project_id": snapshot_project_id,
         "admission_quote_fingerprint": snapshot_quote_fingerprint,
         "admission_callback_handler_id": handler_id,
         "admission_callback_data": callback_data,
+        **route_contract,
         "admission_worker_runtime_sha": str(admission.get("admission_worker_runtime_sha") or ""),
         "admission_worker_sha": str(admission.get("admission_worker_sha") or ""),
         "admission_worker_version_compatible": worker_version_compatible,
         "admission_route_requires_provider": route_requires_provider,
+        "worker_generation_id": worker_generation_id,
+        "worker_git_sha": worker_git_sha,
+        "runtime_sha": runtime_sha,
+        "worker_compatible": worker_version_compatible,
+        "worker_connected": worker_connected,
+        "worker_heartbeat_fresh": worker_heartbeat_fresh,
+        "worker_lease_valid": worker_lease_valid,
+        "worker_sha_match": worker_sha_match,
+        "worker_capability_match": worker_capability_match,
+        "worker_identity_conflict": worker_identity_conflict,
+        "route_requires_provider": route_requires_provider,
+        "handler_id": handler_id,
         "persisted_admission_route_requires_provider": persisted_admission_route,
-        **route_contract,
         "worker_admission_block_reason": str(admission.get("worker_admission_block_reason") or ""),
         "duplicate_confirm_handler_detected": duplicate_handler_detected,
         "provider_eligibility_snapshot": snapshot,
@@ -2469,6 +2620,30 @@ def _product_video_final_admission_state(
         "runtime_candidate_keys": candidates,
         "final_eligible_provider_count": len(candidates),
         "candidate_set_consistent": True,
+    }
+
+
+def product_video_assert_final_admission(
+    project: dict[str, Any],
+    admission: dict[str, Any] | None,
+    *,
+    user_id: int,
+    checked_at: str,
+    assertion_phase: str,
+) -> dict[str, Any]:
+    """Evaluate the mandatory public final-confirm gate without any DB write."""
+    state = _product_video_final_admission_state(
+        project,
+        admission,
+        user_id=int(user_id),
+        require_provider_admission=True,
+        require_authoritative_snapshot=True,
+        checked_at=checked_at,
+    )
+    return {
+        **state,
+        "admission_assertion_phase": str(assertion_phase or "pre_transaction"),
+        "admission_pre_insert_hard_stop": not bool(state.get("admission_passed")),
     }
 
 
@@ -2484,14 +2659,23 @@ def _confirm_product_video_invoice_atomic(
 ) -> dict[str, Any]:
     current_dt = now or datetime.now()
     current = now_text(current_dt)
-    admission_state = _product_video_final_admission_state(
-        project,
-        admission,
-        user_id=int(user_id),
-        require_provider_admission=require_provider_admission,
-        require_authoritative_snapshot=require_authoritative_snapshot,
-        checked_at=current,
-    )
+    if require_authoritative_snapshot:
+        admission_state = product_video_assert_final_admission(
+            project,
+            admission,
+            user_id=int(user_id),
+            checked_at=current,
+            assertion_phase="pre_transaction",
+        )
+    else:
+        admission_state = _product_video_final_admission_state(
+            project,
+            admission,
+            user_id=int(user_id),
+            require_provider_admission=require_provider_admission,
+            require_authoritative_snapshot=False,
+            checked_at=current,
+        )
     if not admission_state.get("admission_passed"):
         if not require_provider_admission:
             legacy_blocker = "provider_chain_missing_no_charge"
@@ -2562,42 +2746,10 @@ def _confirm_product_video_invoice_atomic(
                 except Exception:
                     pass
                 raise
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            locked = conn.execute(
-                "SELECT status,user_id,asset_pack_json,invoice_json FROM video_projects WHERE project_id=?",
-                (int(project["project_id"]),),
-            ).fetchone()
-            if locked and int(locked[1] or 0) == int(user_id):
-                asset_pack = _json_loads(str(locked[2] or ""), {})
-                invoice = _json_loads(str(locked[3] or ""), {})
-                if not isinstance(asset_pack, dict):
-                    asset_pack = {}
-                if not isinstance(invoice, dict):
-                    invoice = {}
-                asset_pack.update(admission_state)
-                invoice.update(admission_state)
-                conn.execute(
-                    """UPDATE video_projects
-                          SET asset_pack_json=?,invoice_json=?,updated_at=?
-                        WHERE project_id=? AND status='draft_invoice'""",
-                    (
-                        _json_dumps(asset_pack),
-                        _json_dumps(invoice),
-                        current,
-                        int(project["project_id"]),
-                    ),
-                )
-            conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
         return {
             "ok": False,
             "reason": str(admission_state.get("admission_block_reason") or "product_video_admission_blocked"),
-            "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận hoặc đang được cập nhật.\nTOAN AAS chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
+            "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
             "admission": admission_state,
             "job_created": False,
             "scene_records_created": False,
@@ -2629,20 +2781,19 @@ def _confirm_product_video_invoice_atomic(
             "invoice_json": str(locked[4] or ""),
         }
         if require_authoritative_snapshot:
-            boundary_state = _product_video_final_admission_state(
+            boundary_state = product_video_assert_final_admission(
                 locked_project,
                 admission,
                 user_id=int(user_id),
-                require_provider_admission=True,
-                require_authoritative_snapshot=True,
-                checked_at=current,
+                checked_at=now_text(),
+                assertion_phase="inside_transaction_before_first_insert",
             )
             if not boundary_state.get("admission_passed"):
                 conn.rollback()
                 return {
                     "ok": False,
                     "reason": str(boundary_state.get("admission_block_reason") or "product_video_admission_blocked"),
-                    "public_message": "Hệ thống tạo video nhiều cảnh đang tạm bận hoặc đang được cập nhật.\nTOAN AAS chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
+                    "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
                     "admission": boundary_state,
                     "job_created": False,
                     "scene_records_created": False,
@@ -2987,6 +3138,17 @@ def confirm_public_product_video_invoice(
     provider_admission: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The only queue entry point authorized for a public final-confirm callback."""
+    if not verify_product_video_final_admission_context(provider_admission):
+        return {
+            "ok": False,
+            "reason": "admission_context_missing_or_invalid",
+            "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
+            "job_created": False,
+            "scene_records_created": False,
+            "dispatch_outbox_created": False,
+            "charge": 0,
+            "charged_xu": 0,
+        }
     return confirm_video_project_invoice(
         conn,
         project_id=int(project_id),
@@ -3875,6 +4037,73 @@ def acquire_product_video_scene_dispatch_leases(
     return updated
 
 
+def product_video_failed_no_charge_terminal_payload(
+    result: dict[str, Any] | None,
+    *,
+    scene_count: int,
+    reason: str,
+    reconciliation_source: str,
+    reconciliation_run_id: str,
+    reconciled_at: str,
+) -> dict[str, Any]:
+    """Canonical zero-task terminal truth shared by watchdog/status/claim recovery."""
+    current = dict(result or {})
+    source = normalize_product_video_reconciliation_source(reconciliation_source)
+    count = max(1, _as_int(scene_count, 1))
+    scene_status = {str(index): "terminal_failed" for index in range(1, count + 1)}
+    tasks: list[dict[str, Any]] = []
+    for offset, item in enumerate(current.get("scene_tasks") or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row["scene_index"] = max(1, _as_int(row.get("scene_index"), offset))
+        row["status"] = "terminal_failed"
+        row["current_scene_status"] = "terminal_failed"
+        row["continue_polling"] = False
+        row["next_poll_at"] = ""
+        tasks.append(row)
+    return {
+        **current,
+        "status": "failed",
+        "canonical_status": "failed_no_charge",
+        "terminal_state": "failed_no_charge",
+        "final_decision": "failed_no_charge",
+        "terminal": True,
+        "continue_polling": False,
+        "next_poll_scheduled": False,
+        "next_poll_scheduled_at": "",
+        "next_poll_at": "",
+        "next_scene_poll_at": "",
+        "next_refresh_expected_at": "",
+        "auto_refresh_next_tick_at": "",
+        "fallback_allowed": False,
+        "fallback_provider_candidate": "",
+        "fallback_candidate": "",
+        "next_provider_or_model_candidate": "",
+        "dispatch_status": "terminal_failed",
+        "dispatch_outbox_status": "terminal_failed",
+        "dispatch_outbox_claimable": False,
+        "scene_status": "terminal_failed",
+        "current_scene_status": "terminal_failed",
+        "scene_status_by_scene": scene_status,
+        "scene_tasks": tasks,
+        "provider_task_alive": False,
+        "provider_submit_called": False,
+        "provider_http_request_sent": False,
+        "provider_http_status": 0,
+        "fallback_count_effective": 0,
+        "concat_attempted": False,
+        "delivery_attempted": False,
+        "charge": 0,
+        "charged_xu": 0,
+        "wallet_charge_recorded": False,
+        "reconciliation_source": source,
+        "reconciliation_run_id": str(reconciliation_run_id or ""),
+        "reconciliation_at": str(reconciled_at or now_text()),
+        "reconciliation_reason": str(reason or "no_eligible_provider_before_scene_dispatch"),
+    }
+
+
 def sweep_product_video_zero_task_watchdog(
     conn: sqlite3.Connection,
     *,
@@ -3882,11 +4111,15 @@ def sweep_product_video_zero_task_watchdog(
     eligibility_evaluator: Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
     job_id: int = 0,
     limit: int = 50,
+    reconciliation_source: str = "watchdog_scheduler",
+    reconciliation_run_id: str = "",
 ) -> dict[str, Any]:
     """Reconcile zero-task Product Video jobs from durable DB state only."""
     ensure_video_project_queue_schema(conn)
     current_dt = now or datetime.now()
     current = now_text(current_dt)
+    source = normalize_product_video_reconciliation_source(reconciliation_source, "watchdog_scheduler")
+    run_id = str(reconciliation_run_id or f"pv-reconcile-{uuid.uuid4().hex}")
     params: list[Any] = [VIDEO_RENDER_JOB_TYPE]
     wanted = int(job_id or 0)
     extra = ""
@@ -3906,6 +4139,9 @@ def sweep_product_video_zero_task_watchdog(
         params,
     ).fetchall()
     report = {
+        "reconciliation_source": source,
+        "reconciliation_run_id": run_id,
+        "reconciliation_at": current,
         "scanned": 0,
         "checked": 0,
         "triggered": 0,
@@ -3946,6 +4182,10 @@ def sweep_product_video_zero_task_watchdog(
                     "zero_task_elapsed_seconds": _as_int(preliminary.get("dispatch_grace_elapsed"), 0),
                     "zero_task_candidate_count": _as_int(preliminary.get("final_eligible_provider_count"), 0),
                     "zero_task_recovery_action": "wait_dispatch_grace",
+                    "reconciliation_source": source,
+                    "reconciliation_run_id": run_id,
+                    "reconciliation_at": current,
+                    "reconciliation_reason": "wait_dispatch_grace",
                 }
             )
             conn.execute(
@@ -4025,8 +4265,9 @@ def sweep_product_video_zero_task_watchdog(
                 or "no_eligible_provider_before_scene_dispatch"
             )
             recovery_action = "failed_no_charge"
-            result.update(
+            result = product_video_failed_no_charge_terminal_payload(
                 {
+                    **result,
                     **watchdog,
                     **worker_scan,
                     "zero_task_watchdog_checked_at": current,
@@ -4035,21 +4276,6 @@ def sweep_product_video_zero_task_watchdog(
                     "zero_task_candidate_count": 0,
                     "zero_task_recovery_action": recovery_action,
                     "zero_task_terminal_reason": terminal_reason,
-                    "terminal_state": "failed_no_charge",
-                    "final_decision": "failed_no_charge",
-                    "continue_polling": False,
-                    "next_poll_scheduled": False,
-                    "fallback_allowed": False,
-                    "fallback_provider_candidate": "",
-                    "next_provider_or_model_candidate": "",
-                    "provider_http_request_sent": False,
-                    "provider_http_status": 0,
-                    "fallback_count_effective": 0,
-                    "concat_attempted": False,
-                    "delivery_attempted": False,
-                    "charge": 0,
-                    "charged_xu": 0,
-                    "reconciliation_reason": terminal_reason,
                     "original_admission_snapshot": result.get("provider_eligibility_snapshot") or {},
                     "handler_id_that_created_job": str(result.get("admission_callback_handler_id") or ""),
                     "worker_sha_at_creation": str(result.get("admission_worker_sha") or ""),
@@ -4060,7 +4286,12 @@ def sweep_product_video_zero_task_watchdog(
                     "worker_claim_block_reason": terminal_reason,
                     "dispatch_outbox_present": bool(outbox),
                     "dispatch_outbox_status": "terminal_failed" if outbox else "",
-                }
+                },
+                scene_count=max(1, _as_int(result.get("scene_count"), 1)),
+                reason=terminal_reason,
+                reconciliation_source=source,
+                reconciliation_run_id=run_id,
+                reconciled_at=current,
             )
             conn.execute(
                 """UPDATE video_jobs
@@ -4083,6 +4314,10 @@ def sweep_product_video_zero_task_watchdog(
                         WHERE outbox_id=?""",
                     (terminal_reason, terminal_reason, current, int(outbox["outbox_id"])),
                 )
+            conn.execute(
+                "UPDATE video_scenes SET scene_status='terminal_failed' WHERE project_id=?",
+                (int(project["project_id"]),),
+            )
             conn.commit()
             report["terminal_failed"] += 1
         elif active_lease:
@@ -4097,6 +4332,10 @@ def sweep_product_video_zero_task_watchdog(
                     "zero_task_candidate_count": len(candidates),
                     "zero_task_recovery_action": recovery_action,
                     "zero_task_terminal_reason": "",
+                    "reconciliation_source": source,
+                    "reconciliation_run_id": run_id,
+                    "reconciliation_at": current,
+                    "reconciliation_reason": recovery_action,
                     "continue_polling": True,
                     "public_stage": "preparing",
                     "worker_claim_result": "active_dispatch_lease",
@@ -4142,6 +4381,10 @@ def sweep_product_video_zero_task_watchdog(
                     "zero_task_candidate_count": len(candidates),
                     "zero_task_recovery_action": recovery_action,
                     "zero_task_terminal_reason": "",
+                    "reconciliation_source": source,
+                    "reconciliation_run_id": run_id,
+                    "reconciliation_at": current,
+                    "reconciliation_reason": recovery_action,
                     "continue_polling": True,
                     "public_stage": "preparing",
                     "dispatch_outbox_present": bool(outbox),
@@ -4186,6 +4429,8 @@ def sweep_product_video_zero_task_watchdog(
                 "zero_task_recovery_action": recovery_action,
                 "zero_task_terminal_reason": terminal_reason,
                 "candidate_count": len(candidates),
+                "reconciliation_source": source,
+                "reconciliation_run_id": run_id,
                 "dispatch_outbox": outbox_diagnostic,
             }
         )
@@ -4224,6 +4469,9 @@ def mark_product_video_watchdog_scheduler(
                 _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_started_at"] = now_text(current_dt)
                 _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_generation_id"] = requested_generation
                 _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["duplicate_scheduler_prevented"] = False
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_generation_jobs_scanned"] = 0
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_generation_jobs_reconciled"] = 0
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE["watchdog_last_reconciled_job_ids"] = []
     _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
         {
             "watchdog_enabled": True,
@@ -4407,11 +4655,14 @@ def run_product_video_watchdog_scheduler_tick(
         }
     )
     try:
+        run_id = f"watchdog-{_PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get('watchdog_generation_id') or 'generation'}-{uuid.uuid4().hex}"
         report = sweep_product_video_zero_task_watchdog(
             conn,
             now=current_dt,
             eligibility_evaluator=eligibility_evaluator,
             limit=limit,
+            reconciliation_source="watchdog_scheduler",
+            reconciliation_run_id=run_id,
         )
     except Exception as exc:
         _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
@@ -4423,11 +4674,26 @@ def run_product_video_watchdog_scheduler_tick(
         )
         raise
     jobs_reconciled = int(report.get("recovered") or 0) + int(report.get("terminal_failed") or 0)
+    reconciled_ids = [
+        _as_int(item.get("job_id"), 0)
+        for item in (report.get("details") or [])
+        if isinstance(item, dict)
+        and str(item.get("zero_task_recovery_action") or "") not in {"", "wait_dispatch_grace", "active_dispatch_lease"}
+        and _as_int(item.get("job_id"), 0) > 0
+    ]
     _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.update(
         {
             "last_success_at": now_text(current_dt),
             "jobs_scanned": int(report.get("scanned") or 0),
             "jobs_reconciled": jobs_reconciled,
+            "watchdog_generation_jobs_scanned": _as_int(
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("watchdog_generation_jobs_scanned"), 0
+            ) + int(report.get("scanned") or 0),
+            "watchdog_generation_jobs_reconciled": _as_int(
+                _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE.get("watchdog_generation_jobs_reconciled"), 0
+            ) + jobs_reconciled,
+            "watchdog_last_reconciled_job_ids": reconciled_ids,
+            "last_reconciliation_source": "watchdog_scheduler",
             "last_error": "",
         }
     )

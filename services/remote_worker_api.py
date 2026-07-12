@@ -335,6 +335,13 @@ def product_video_worker_compatibility(
                 "lease_valid": lease_valid,
                 "hostname": str(item.get("hostname") or item.get("worker_hostname") or ""),
                 "pid": _safe_int(item.get("pid") or item.get("worker_pid"), 0),
+                "last_claim_at": str(item.get("last_claim_at") or ""),
+                "last_idle_claim_at": str(item.get("last_idle_claim_at") or ""),
+                "heartbeat_refresh_source": str(item.get("heartbeat_refresh_source") or ""),
+                "owner_heartbeat_request_received": bool(item.get("owner_heartbeat_request_received", True)),
+                "owner_heartbeat_authenticated": bool(item.get("owner_heartbeat_authenticated", True)),
+                "owner_heartbeat_persisted": bool(item.get("owner_heartbeat_persisted", True)),
+                "owner_heartbeat_reject_reason": str(item.get("owner_heartbeat_reject_reason") or ""),
                 "active": bool(generation_id and heartbeat_fresh and lease_valid),
             }
         )
@@ -430,6 +437,13 @@ def product_video_worker_compatibility(
         "lease_expires_at": str(selected.get("lease_expires_at") or ""),
         "hostname": str(selected.get("hostname") or ""),
         "pid": _safe_int(selected.get("pid"), 0),
+        "last_claim_at": str(selected.get("last_claim_at") or ""),
+        "last_idle_claim_at": str(selected.get("last_idle_claim_at") or ""),
+        "heartbeat_refresh_source": str(selected.get("heartbeat_refresh_source") or ""),
+        "owner_heartbeat_request_received": bool(selected.get("owner_heartbeat_request_received")) if selected else False,
+        "owner_heartbeat_authenticated": bool(selected.get("owner_heartbeat_authenticated")) if selected else False,
+        "owner_heartbeat_persisted": bool(selected.get("owner_heartbeat_persisted")) if selected else False,
+        "owner_heartbeat_reject_reason": str(selected.get("owner_heartbeat_reject_reason") or ""),
         "worker_connected": connected,
         "worker_heartbeat_at": heartbeat_at,
         "heartbeat_updated_at": heartbeat_at,
@@ -450,6 +464,85 @@ def product_video_worker_compatibility(
         "heartbeat_record_selected_by": "latest_active_owner_product_video_generation",
         "heartbeat_records_considered": len(normalized),
         "stale_worker_sha_ignored": stale_sha_ignored,
+    }
+
+
+def owner_product_video_heartbeat_update_decision(
+    records: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    payload: dict[str, Any] | None,
+    *,
+    runtime_sha: str,
+    now: datetime | None = None,
+    heartbeat_ttl_seconds: int = 90,
+) -> dict[str, Any]:
+    """Validate an owner-worker heartbeat before it can replace authoritative state."""
+    current_dt = now or datetime.now()
+    current = dict(payload or {})
+    service_mode = str(current.get("service_mode") or current.get("worker_service_mode") or "").strip()
+    capabilities = sanitize_capabilities(current.get("capabilities") or [])
+    owner_request = bool(
+        service_mode == "owner_product_video"
+        or REMOTE_WORKER_OWNER_PRODUCT_VIDEO_CAPABILITY in capabilities
+        or str(current.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+    )
+    generation_id = str(current.get("generation_id") or current.get("worker_generation_id") or "").strip()
+    git_sha = str(current.get("git_sha") or current.get("worker_git_head_sha") or current.get("worker_git_sha") or "").strip()
+    runtime_target_sha = str(current.get("runtime_target_sha") or "").strip()
+    capability_version = str(current.get("capability_version") or current.get("worker_capability_version") or "").strip()
+    existing = product_video_worker_compatibility(
+        records,
+        runtime_sha=str(runtime_sha or ""),
+        now=current_dt,
+        heartbeat_ttl_seconds=heartbeat_ttl_seconds,
+    )
+    reject_reason = ""
+    if not owner_request:
+        reject_reason = "not_owner_product_video_heartbeat"
+    elif not re.fullmatch(r"[A-Za-z0-9_.:-]{8,160}", generation_id):
+        reject_reason = "worker_generation_malformed"
+    elif not re.fullmatch(r"[0-9A-Fa-f]{7,40}", git_sha):
+        reject_reason = "worker_git_sha_malformed"
+    elif not re.fullmatch(r"[0-9A-Fa-f]{7,40}", runtime_target_sha):
+        reject_reason = "worker_runtime_target_sha_malformed"
+    elif service_mode != "owner_product_video":
+        reject_reason = "worker_service_mode_mismatch"
+    elif (
+        capability_version != video_project_queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY
+        or video_project_queue.PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY not in capabilities
+    ):
+        reject_reason = "worker_capability_mismatch"
+    elif existing.get("worker_identity_conflict"):
+        reject_reason = "worker_generation_conflict"
+    elif (
+        existing.get("compatible")
+        and existing.get("authoritative_worker_generation_id")
+        and existing.get("authoritative_worker_generation_id") != generation_id
+    ):
+        reject_reason = "worker_generation_conflict"
+    elif not (
+        str(runtime_sha or "").strip()
+        and (str(runtime_sha).startswith(git_sha) or git_sha.startswith(str(runtime_sha)))
+        and (str(runtime_sha).startswith(runtime_target_sha) or runtime_target_sha.startswith(str(runtime_sha)))
+    ):
+        reject_reason = "worker_sha_mismatch"
+    accepted = bool(owner_request and not reject_reason)
+    ttl = max(30, min(300, _safe_int(heartbeat_ttl_seconds, 90)))
+    lease_expires_at = video_project_queue.now_text(current_dt + timedelta(seconds=ttl)) if accepted else ""
+    return {
+        "owner_heartbeat_request_received": owner_request,
+        "owner_heartbeat_persisted": False,
+        "owner_heartbeat_reject_reason": reject_reason,
+        "heartbeat_accepted": accepted,
+        "caller_generation_id": generation_id,
+        "authoritative_generation_id": generation_id if accepted else str(existing.get("authoritative_worker_generation_id") or ""),
+        "caller_git_sha": git_sha,
+        "authoritative_git_sha": git_sha if accepted else str(existing.get("git_sha") or ""),
+        "runtime_target_sha": runtime_target_sha,
+        "capability_version": capability_version,
+        "service_mode": service_mode,
+        "capabilities": capabilities,
+        "lease_expires_at": lease_expires_at,
+        "heartbeat_at": video_project_queue.now_text(current_dt) if accepted else "",
     }
 
 def classify_remote_worker_error(value: Any, *, status: str = "", worker_id: str = "") -> dict[str, str]:
@@ -2020,6 +2113,7 @@ def _claim_video_render_candidate(
                 project,
                 now=current_dt,
             ),
+            reconciliation_source="worker_claim_recovery",
         )
         dispatch_outbox_claim = video_project_queue.claim_product_video_dispatch_outbox(
             conn,
@@ -2862,6 +2956,8 @@ def fail_stale_product_video_jobs(
     now: datetime | None = None,
     job_id: int | str = 0,
     reason: str = "product_video_worker_unavailable",
+    reconciliation_source: str = "manual_admin_reconcile",
+    reconciliation_run_id: str = "",
 ) -> int:
     video_project_queue.ensure_video_project_queue_schema(conn)
     timeout = _safe_int(max_wait_seconds, -1)
@@ -2870,6 +2966,21 @@ def fail_stale_product_video_jobs(
     if timeout <= 0:
         return 0
     current_dt = now or datetime.now()
+    allowed_sources = {
+        "watchdog_scheduler",
+        "startup_sweep",
+        "worker_claim_recovery",
+        "public_status_read_reconcile",
+        "manual_admin_reconcile",
+    }
+    source = str(reconciliation_source or "manual_admin_reconcile").strip()
+    if source not in allowed_sources:
+        source = "manual_admin_reconcile"
+    run_id = str(
+        reconciliation_run_id
+        or f"{source}-{int(current_dt.timestamp())}-{_safe_int(job_id, 0) or 'batch'}"
+    )
+    reconciled_at = video_project_queue.now_text(current_dt)
     params: list[Any] = [video_project_queue.VIDEO_RENDER_JOB_TYPE]
     where_job = ""
     wanted_job_id = _safe_int(job_id, 0)
@@ -2910,23 +3021,61 @@ def fail_stale_product_video_jobs(
                 refresh_source="zero_task_dispatch_watchdog",
             )
             payload.update(telemetry)
+            payload.update(
+                {
+                    "reconciliation_source": source,
+                    "reconciliation_run_id": run_id,
+                    "reconciliation_at": reconciled_at,
+                    "reconciliation_reason": str(
+                        watchdog.get("zero_task_terminal_reason") or "wait_dispatch_grace"
+                    ),
+                }
+            )
             if watchdog.get("failed_no_charge"):
                 clean_reason = str(watchdog.get("zero_task_terminal_reason") or "no_eligible_provider_before_scene_dispatch")
+                scene_count = max(
+                    1,
+                    _safe_int(
+                        payload.get("scene_count")
+                        or payload.get("required_scene_count")
+                        or payload.get("scene_tasks_total"),
+                        1,
+                    ),
+                )
+                payload = video_project_queue.product_video_failed_no_charge_terminal_payload(
+                    {**payload, **watchdog},
+                    scene_count=scene_count,
+                    reason=clean_reason,
+                    reconciliation_source=source,
+                    reconciliation_run_id=run_id,
+                    reconciled_at=reconciled_at,
+                )
                 conn.execute(
                     "UPDATE video_jobs SET status='failed', result_json=?, progress_percent=?, progress_message=?, last_error=?, updated_at=?, completed_at=COALESCE(completed_at, ?) WHERE id=?",
                     (
                         json.dumps(payload, ensure_ascii=False),
-                        int(telemetry.get("final_progress_after_reconcile") or 10),
+                        0,
                         clean_reason,
                         clean_reason,
-                        video_project_queue.now_text(current_dt),
-                        video_project_queue.now_text(current_dt),
+                        reconciled_at,
+                        reconciled_at,
                         int(job["id"]),
                     ),
                 )
                 conn.execute(
                     "UPDATE video_projects SET status='failed', video_terminal_state='failed_no_charge', error_log=?, updated_at=? WHERE project_id=?",
-                    (clean_reason, video_project_queue.now_text(current_dt), int(project["project_id"])),
+                    (clean_reason, reconciled_at, int(project["project_id"])),
+                )
+                conn.execute(
+                    "UPDATE video_scenes SET scene_status='terminal_failed' WHERE project_id=?",
+                    (int(project["project_id"]),),
+                )
+                conn.execute(
+                    """UPDATE video_dispatch_outbox
+                          SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
+                              lease_owner='',lease_expires_at=NULL,updated_at=?
+                        WHERE job_id=?""",
+                    (clean_reason, clean_reason, reconciled_at, int(job["id"])),
                 )
                 conn.commit()
                 failed += 1
@@ -2963,6 +3112,10 @@ def fail_stale_product_video_jobs(
                     "terminal_after_reconcile": "final_rendering",
                     "terminal_override_reason": "provider_running_overrides_failed_no_charge",
                     "no_new_paid_submit": True,
+                    "reconciliation_source": source,
+                    "reconciliation_run_id": run_id,
+                    "reconciliation_at": reconciled_at,
+                    "reconciliation_reason": "provider_task_alive",
                 }
             )
             conn.execute(
@@ -2983,8 +3136,9 @@ def fail_stale_product_video_jobs(
             continue
         if isinstance(payload, dict) and payload.get("public_confirm_kickoff_attempted"):
             clean_reason = "queued_dispatch_failed_no_charge"
-            payload.update(
+            payload = video_project_queue.product_video_failed_no_charge_terminal_payload(
                 {
+                    **payload,
                     "ok": False,
                     "worker_dispatch_attempted": True,
                     "worker_dispatch_success": False,
@@ -2992,7 +3146,6 @@ def fail_stale_product_video_jobs(
                     "dispatch_status": clean_reason,
                     "worker_claim_status": "dispatch_failed",
                     "worker_claim_reason": clean_reason,
-                    "terminal_state": clean_reason,
                     "blocker": clean_reason,
                     "provider_submit_called": False,
                     "provider_attempted": False,
@@ -3001,7 +3154,20 @@ def fail_stale_product_video_jobs(
                     "charged_xu": 0,
                     "no_charge": True,
                     "no_new_paid_submit": True,
-                }
+                },
+                scene_count=max(
+                    1,
+                    _safe_int(
+                        payload.get("scene_count")
+                        or payload.get("required_scene_count")
+                        or payload.get("scene_tasks_total"),
+                        1,
+                    ),
+                ),
+                reason=clean_reason,
+                reconciliation_source=source,
+                reconciliation_run_id=run_id,
+                reconciled_at=reconciled_at,
             )
             conn.execute(
                 """UPDATE video_jobs
@@ -3012,8 +3178,8 @@ def fail_stale_product_video_jobs(
                     json.dumps(payload, ensure_ascii=False),
                     clean_reason,
                     clean_reason,
-                    video_project_queue.now_text(current_dt),
-                    video_project_queue.now_text(current_dt),
+                    reconciled_at,
+                    reconciled_at,
                     int(job["id"]),
                 ),
             )
@@ -3022,11 +3188,22 @@ def fail_stale_product_video_jobs(
                    SET status='failed', video_terminal_state=?, error_log=?, updated_at=?
                    WHERE project_id=?""",
                 (
+                    "failed_no_charge",
                     clean_reason,
-                    clean_reason,
-                    video_project_queue.now_text(current_dt),
+                    reconciled_at,
                     int(project["project_id"]),
                 ),
+            )
+            conn.execute(
+                "UPDATE video_scenes SET scene_status='terminal_failed' WHERE project_id=?",
+                (int(project["project_id"]),),
+            )
+            conn.execute(
+                """UPDATE video_dispatch_outbox
+                      SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
+                          lease_owner='',lease_expires_at=NULL,updated_at=?
+                    WHERE job_id=?""",
+                (clean_reason, clean_reason, reconciled_at, int(job["id"])),
             )
             conn.commit()
         else:

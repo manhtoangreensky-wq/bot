@@ -301,6 +301,15 @@ def claim_job(
         LAST_CLAIM_RESPONSE = {"ok": False, "reason": type(exc).__name__}
         raise
     LAST_CLAIM_RESPONSE = data if isinstance(data, dict) else {}
+    if owner_product_video_only:
+        print(
+            "[remote_worker] owner heartbeat "
+            f"accepted={'yes' if data.get('heartbeat_accepted') else 'no'} "
+            f"generation={data.get('authoritative_generation_id') or data.get('caller_generation_id') or WORKER_GENERATION_ID} "
+            f"lease_expires_at={data.get('lease_expires_at') or '-'} "
+            f"source={data.get('heartbeat_refresh_source') or 'claim_request'} "
+            f"reject_reason={data.get('owner_heartbeat_reject_reason') or '-'}"
+        )
     job = data.get("job") if isinstance(data, dict) and data.get("ok") else None
     if isinstance(job, dict) and job:
         service_mode = claim_mode_label(
@@ -435,6 +444,7 @@ def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") ->
 
 def complete_job(job_id: str, result: dict, final_video_path: str = "") -> dict:
     metadata = {
+        **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
         "worker_id": WORKER_ID,
         "job_id": str(job_id),
         "result": result or {},
@@ -453,6 +463,7 @@ def complete_job(job_id: str, result: dict, final_video_path: str = "") -> dict:
 
 def fail_job(job_id: str, safe_error: str, retryable: bool = True, partial_artifacts: list | None = None) -> dict:
     payload = {
+        **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
         "worker_id": WORKER_ID,
         "job_id": str(job_id),
         "safe_error": str(safe_error or "remote_worker_failed")[:500],

@@ -5319,8 +5319,26 @@ def build_product_video_public_final_admission(
     )
     route_ok = bool(route_contract.get("route_requires_provider"))
     worker_ok = bool(worker.get("worker_version_compatible"))
+    worker_connected = bool(worker.get("worker_connected"))
+    worker_heartbeat_fresh = bool(worker.get("heartbeat_fresh"))
+    worker_lease_valid = bool(worker.get("lease_valid"))
+    worker_sha_match = bool(worker.get("sha_match"))
+    worker_capability_match = bool(worker.get("capability_match"))
+    worker_identity_conflict = bool(worker.get("worker_identity_conflict"))
     gate_ok = bool(preflight.get("ok") and scene_gate.get("ok"))
-    allowed = bool(candidates and gate_ok and worker_ok and route_ok and handler_ok)
+    allowed = bool(
+        candidates
+        and gate_ok
+        and worker_ok
+        and worker_connected
+        and worker_heartbeat_fresh
+        and worker_lease_valid
+        and worker_sha_match
+        and worker_capability_match
+        and not worker_identity_conflict
+        and route_ok
+        and handler_ok
+    )
     snapshot_id = f"pv-admission-{int(project.get('project_id') or 0)}-{uuid.uuid4().hex}"
     checked_at = now_text()
     quote_fingerprint = video_project_queue.product_video_admission_quote_fingerprint(project, int(user_id))
@@ -5350,7 +5368,7 @@ def build_product_video_public_final_admission(
         "runtime_candidate_keys": candidates,
         "final_eligible_provider_count": len(candidates),
     }
-    return {
+    admission = {
         **preflight,
         **scene_gate,
         **route_contract,
@@ -5373,11 +5391,25 @@ def build_product_video_public_final_admission(
         "admission_worker_sha": str(worker.get("worker_sha") or ""),
         "admission_worker_version_compatible": worker_ok,
         "admission_route_requires_provider": route_ok,
+        "admission_provider_health_gate_pass": gate_ok,
+        "worker_generation_id": str(worker.get("generation_id") or worker.get("authoritative_worker_generation_id") or ""),
+        "worker_git_sha": str(worker.get("git_sha") or worker.get("worker_sha") or ""),
+        "runtime_sha": str(worker.get("runtime_sha") or ""),
+        "worker_compatible": worker_ok,
+        "worker_connected": worker_connected,
+        "worker_heartbeat_fresh": worker_heartbeat_fresh,
+        "worker_lease_valid": worker_lease_valid,
+        "worker_sha_match": worker_sha_match,
+        "worker_capability_match": worker_capability_match,
+        "worker_identity_conflict": worker_identity_conflict,
+        "route_requires_provider": route_ok,
+        "handler_id": video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID,
         "worker_heartbeat_age": worker.get("worker_heartbeat_age"),
         "worker_capability_version": str(worker.get("worker_capability_version") or ""),
         "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
         "duplicate_confirm_handler_detected": bool(diagnostics.get("duplicate_confirm_handler_detected")),
     }
+    return video_project_queue.sign_product_video_final_admission_context(admission)
 
 
 def confirm_video_project_invoice(
@@ -5409,16 +5441,17 @@ def confirm_video_project_invoice(
 
         final_admission = dict(provider_admission or {})
         if require_provider_admission:
-            current_project = video_project_queue.get_video_project(db, int(project_id))
-            scene_count = max(1, safe_int((current_project or {}).get("scene_count"), 1))
-            preflight = product_video_provider_availability_preflight(db)
-            scene_gate = product_video_multi_scene_health_gate(scene_count, preflight) if preflight.get("ok") else {}
-            final_admission = build_product_video_public_final_admission(
-                current_project,
-                int(user_id),
-                preflight,
-                scene_gate,
-            )
+            if not final_admission:
+                return {
+                    "ok": False,
+                    "reason": "admission_context_missing_or_invalid",
+                    "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị vui lòng thử lại sau.",
+                    "job_created": False,
+                    "scene_records_created": False,
+                    "dispatch_outbox_created": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
             return video_project_queue.confirm_public_product_video_invoice(
                 db,
                 project_id=int(project_id),
@@ -49499,7 +49532,10 @@ async def video_b14_autonomous_materialize_and_deliver(
     jid = safe_int(job_id, 0)
     if jid <= 0:
         return {"ok": False, "sent": False, "reason": "job_id_required", "no_new_paid_submit": True, "charge": 0}
-    watchdog = run_product_video_bot_side_zero_task_watchdog(jid)
+    watchdog = run_product_video_bot_side_zero_task_watchdog(
+        jid,
+        reconciliation_source="worker_claim_recovery",
+    )
     if safe_int(watchdog.get("terminal_failed"), 0) > 0:
         detail = next(
             (
@@ -70879,8 +70915,13 @@ def video_b14_render_mode_from_job(job: dict | None = None, project: dict | None
 
 VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE = (
     "❌ TOAN AAS chưa tạo được video lúc này.\n"
-    "Hệ thống chưa trừ Xu hoặc đã hoàn Xu nếu cần.\n"
+    "Hệ thống chưa trừ Xu.\n"
     "Anh/chị có thể thử lại với video/prompt khác."
+)
+PRODUCT_VIDEO_FAILED_NO_CHARGE_PUBLIC_MESSAGE = (
+    "TOAN AAS chưa thể bắt đầu tạo video lúc này.\n"
+    "Hệ thống chưa trừ Xu.\n"
+    "Anh/chị vui lòng thử lại sau."
 )
 VIDEO_B14_PARTIAL_SIMPLE_MESSAGE = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
 
@@ -70943,7 +70984,11 @@ def video_b14_fail_stale_product_job_for_status(job_id: int) -> int:
         return 0
     conn = db_connect()
     try:
-        return remote_worker_api.fail_stale_product_video_jobs(conn, job_id=wanted)
+        return remote_worker_api.fail_stale_product_video_jobs(
+            conn,
+            job_id=wanted,
+            reconciliation_source="public_status_read_reconcile",
+        )
     finally:
         conn.close()
 
@@ -71430,9 +71475,26 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or provider_telemetry.get("fallback_candidate_indexes")
     )
     zero_task_progress_guard = bool(provider_telemetry.get("zero_task_progress_guard"))
+    terminal_state = str(
+        job_result.get("canonical_status")
+        or job_result.get("terminal_state")
+        or job_result.get("final_decision")
+        or project.get("video_terminal_state")
+        or ""
+    ).strip().lower()
+    failed_no_charge_terminal = bool(
+        terminal_state == "failed_no_charge"
+        or (
+            str(job.get("status") or "").strip().lower() == "failed"
+            and str(job_result.get("final_decision") or "").strip().lower() == "failed_no_charge"
+        )
+    )
     provider_task_alive = bool(
-        provider_telemetry.get("provider_task_alive")
-        or (processing_truth and not zero_task_progress_guard)
+        not failed_no_charge_terminal
+        and (
+            provider_telemetry.get("provider_task_alive")
+            or (processing_truth and not zero_task_progress_guard)
+        )
     )
     fallback_running = bool(
         provider_telemetry.get("fallback_used")
@@ -71444,7 +71506,11 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     )
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
-    if zero_task_progress_guard and status not in {"failed", "error", "completed", "success"}:
+    if failed_no_charge_terminal:
+        status = "failed"
+        progress = 0
+        fallback_running = False
+    elif zero_task_progress_guard and status not in {"failed", "error", "completed", "success"}:
         status = "queued_for_worker"
         progress = max(0, min(20, safe_int(provider_telemetry.get("public_effective_progress"), 10)))
     if provider_task_alive and status not in {"completed", "success"}:
@@ -71490,8 +71556,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         stage = "hệ thống đang gửi kết quả cuối"
         progress = max(progress, 100)
     elif status in {"failed", "error"}:
-        status_label = "chưa dựng được"
-        stage = "hệ thống chưa dựng được video"
+        if failed_no_charge_terminal:
+            status_label = "Chưa thể bắt đầu tạo video"
+            stage = "hệ thống chưa bắt đầu tạo video"
+        else:
+            status_label = "chưa dựng được"
+            stage = "hệ thống chưa dựng được video"
     else:
         status_label = "Chưa xác nhận"
     final_path = str(project.get("final_video_path") or job.get("final_video_path") or "")
@@ -71505,7 +71575,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or job.get("final_video_file_id")
         or legacy_artifact_only_status
     )
-    if provider_task_alive and not has_final_artifact:
+    if provider_task_alive and not has_final_artifact and not failed_no_charge_terminal:
         status = "processing"
         if provider_telemetry.get("scene_ledger") and safe_int(provider_telemetry.get("required_scene_count"), 0) > 1:
             progress = safe_int(
@@ -71551,11 +71621,16 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         "concat_attempted": provider_telemetry.get("concat_attempted") if "concat_attempted" in provider_telemetry else job_result.get("concat_attempted"),
         "delivery_succeeded": delivery_done,
         "auto_refresh_interval_seconds": VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS,
+        "canonical_status": "failed_no_charge" if failed_no_charge_terminal else job_result.get("canonical_status"),
+        "terminal_state": "failed_no_charge" if failed_no_charge_terminal else job_result.get("terminal_state"),
+        "terminal": failed_no_charge_terminal or bool(job_result.get("terminal")),
     }
     scene_board = product_progress_status.video_per_scene_progress_board(scene_board_payload)
     scene_board_text = product_progress_status.video_per_scene_progress_board_text(scene_board_payload)
     public_progress_mode = str(scene_board.get("public_progress_mode") or provider_telemetry.get("public_progress_mode") or "").strip()
-    if delivery_done:
+    if failed_no_charge_terminal:
+        progress_line = "Tiến độ: <b>0%</b>"
+    elif delivery_done:
         progress_line = "Tiến độ: <b>100%</b>"
     elif public_progress_mode == "scene_and_elapsed":
         progress_line = "Tiến độ: <b>Theo từng cảnh</b>"
@@ -71596,7 +71671,9 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if scene_board_text and scene_count > 1:
         lines.extend([scene_board_text, ""])
 
-    if visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
+    if failed_no_charge_terminal:
+        lines.extend(PRODUCT_VIDEO_FAILED_NO_CHARGE_PUBLIC_MESSAGE.splitlines())
+    elif visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
         lines.extend(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE.splitlines())
     elif status in {"completed", "success"} and has_final_artifact and delivery_done:
         lines.extend([
@@ -72448,6 +72525,11 @@ PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI = (
 PRODUCT_VIDEO_MULTI_SCENE_PROVIDER_BUSY_COPY_VI = (
     "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau."
 )
+PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI = (
+    "TOAN AAS chưa thể bắt đầu tạo video lúc này.\n"
+    "Hệ thống chưa trừ Xu.\n"
+    "Anh/chị vui lòng thử lại sau."
+)
 PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS = {
     "product_video_confirm_handler_count": 1,
     "product_video_confirm_handler_ids": [video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_HANDLER_ID],
@@ -72971,7 +73053,11 @@ def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dic
     }
 
 
-def run_product_video_bot_side_zero_task_watchdog(job_id: int | str) -> dict:
+def run_product_video_bot_side_zero_task_watchdog(
+    job_id: int | str,
+    *,
+    reconciliation_source: str = "manual_admin_reconcile",
+) -> dict:
     wanted = safe_int(job_id, 0)
     if wanted <= 0:
         return {"checked": 0, "terminal_failed": 0, "details": []}
@@ -72981,6 +73067,7 @@ def run_product_video_bot_side_zero_task_watchdog(job_id: int | str) -> dict:
             conn,
             job_id=wanted,
             eligibility_evaluator=product_video_bot_watchdog_eligibility,
+            reconciliation_source=reconciliation_source,
         )
     finally:
         conn.close()
@@ -76249,8 +76336,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not ok:
             return await safe_edit_or_send(query, guard_message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
         if not project_id:
-            project = video_b14_prepare_project_for_invoice(uid, session)
-            project_id = safe_int(project.get("project_id"), 0)
+            return await safe_edit_or_send(
+                query,
+                PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
         if video_b14_is_trial_quality((draft.get("b14_invoice") or {}).get("quality_xu") or draft.get("b14_quality_xu")) and not video_b14_is_admin_or_owner(uid):
             trial_usage = video_b14_trial_usage_allowed(uid)
             if not trial_usage.get("ok"):
@@ -76261,43 +76354,42 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
                 )
         is_internal = video_b14_is_admin_or_owner(uid)
-        if not is_internal:
-            provider_preflight = product_video_provider_availability_preflight()
-            if not provider_preflight.get("ok"):
-                draft["b14_provider_preflight"] = provider_preflight
-                draft["provider_called"] = False
-                draft["xu_charged"] = 0
-                session["draft"] = draft
-                save_video_session(uid, session)
-                return await safe_edit_or_send(
-                    query,
-                    provider_preflight.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                    ]),
-                )
-            confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
-            scene_health_gate = product_video_multi_scene_health_gate(confirm_scene_count, provider_preflight)
-            if not scene_health_gate.get("ok"):
-                draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                draft["provider_called"] = False
-                draft["xu_charged"] = 0
-                session["draft"] = draft
-                save_video_session(uid, session)
-                return await safe_edit_or_send(
-                    query,
-                    scene_health_gate.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
-                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                    ]),
-                )
-            provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-            session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
-            draft = dict(session.get("draft") or {})
+        provider_preflight = product_video_provider_availability_preflight()
+        if not provider_preflight.get("ok"):
+            draft["b14_provider_preflight"] = provider_preflight
+            draft["provider_called"] = False
+            draft["xu_charged"] = 0
+            session["draft"] = draft
+            save_video_session(uid, session)
+            return await safe_edit_or_send(
+                query,
+                PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI,
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
+        confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
+        scene_health_gate = product_video_multi_scene_health_gate(confirm_scene_count, provider_preflight)
+        if not scene_health_gate.get("ok"):
+            draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+            draft["provider_called"] = False
+            draft["xu_charged"] = 0
+            session["draft"] = draft
+            save_video_session(uid, session)
+            return await safe_edit_or_send(
+                query,
+                PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI,
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
+        provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+        session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+        draft = dict(session.get("draft") or {})
         draft.update({
             "submit_source": "public_user_final_confirm",
             "provider_submit_source": "public_user_final_confirm",
@@ -76309,13 +76401,20 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         save_video_session(uid, session)
         project = video_b14_prepare_project_for_invoice(uid, session)
         project_id = safe_int(project.get("project_id"), project_id)
+        final_admission = build_product_video_public_final_admission(
+            project,
+            int(uid),
+            provider_preflight,
+            scene_health_gate,
+        )
         credits, _, _ = get_user(uid)
         result = confirm_video_project_invoice(
             project_id,
             uid,
             balance_xu=None if is_internal else int(credits or 0),
             use_wallet=False,
-            require_provider_admission=not is_internal,
+            provider_admission=final_admission,
+            require_provider_admission=True,
         )
         if not result.get("ok"):
             reason = str(result.get("reason") or "confirm_failed")
@@ -91422,6 +91521,14 @@ def video_public_status_text() -> str:
         f"• owner host/pid: <code>{html.escape(str(product_worker.get('hostname') or '-'))}/{safe_int(product_worker.get('pid'), 0) or '-'}</code>",
         f"• owner generation conflict: <code>{video_public_bool_label(product_worker.get('worker_identity_conflict'))}</code>",
         f"• owner heartbeat age: <code>{html.escape(str(product_worker.get('worker_heartbeat_age') if product_worker.get('worker_heartbeat_age') is not None else '-'))}</code>",
+        f"• owner heartbeat request received: <code>{video_public_bool_label(product_worker.get('owner_heartbeat_request_received'))}</code>",
+        f"• owner heartbeat authenticated: <code>{video_public_bool_label(product_worker.get('owner_heartbeat_authenticated'))}</code>",
+        f"• owner heartbeat persisted: <code>{video_public_bool_label(product_worker.get('owner_heartbeat_persisted'))}</code>",
+        f"• owner heartbeat reject reason: <code>{html.escape(str(product_worker.get('owner_heartbeat_reject_reason') or '-'))}</code>",
+        f"• caller/authoritative generation: <code>{html.escape(str(product_worker.get('caller_generation_id') or '-'))}/{html.escape(str(product_worker.get('authoritative_worker_generation_id') or '-'))}</code>",
+        f"• caller/authoritative git SHA: <code>{html.escape(str(product_worker.get('caller_git_sha') or '-')[:12])}/{html.escape(str(product_worker.get('git_sha') or '-')[:12])}</code>",
+        f"• owner last claim/idle: <code>{html.escape(str(product_worker.get('last_claim_at') or '-'))}/{html.escape(str(product_worker.get('last_idle_claim_at') or '-'))}</code>",
+        f"• owner heartbeat refresh source: <code>{html.escape(str(product_worker.get('heartbeat_refresh_source') or '-'))}</code>",
         f"• heartbeat selected by: <code>{html.escape(str(product_worker.get('heartbeat_record_selected_by') or '-'))}</code>",
         f"• stale worker SHA ignored: <code>{video_public_bool_label(product_worker.get('stale_worker_sha_ignored'))}</code>",
         f"• owner capability version: <code>{html.escape(str(product_worker.get('worker_capability_version') or '-'))}</code>",
@@ -91432,6 +91539,9 @@ def video_public_status_text() -> str:
         f"• watchdog interval configured/effective: <code>{safe_int(watchdog_scheduler.get('watchdog_configured_interval_seconds'), 0)}/{safe_int(watchdog_scheduler.get('watchdog_effective_interval_seconds'), 0)}s</code> clamp=<code>{video_public_bool_label(watchdog_scheduler.get('watchdog_interval_clamp_applied'))}</code>",
         f"• watchdog last run/success: <code>{html.escape(str(watchdog_scheduler.get('last_run_at') or '-'))}/{html.escape(str(watchdog_scheduler.get('last_success_at') or '-'))}</code>",
         f"• watchdog scanned/reconciled: <code>{safe_int(watchdog_scheduler.get('jobs_scanned'), 0)}/{safe_int(watchdog_scheduler.get('jobs_reconciled'), 0)}</code>",
+        f"• watchdog generation scanned/reconciled: <code>{safe_int(watchdog_scheduler.get('watchdog_generation_jobs_scanned'), 0)}/{safe_int(watchdog_scheduler.get('watchdog_generation_jobs_reconciled'), 0)}</code>",
+        f"• watchdog last reconciled jobs: <code>{html.escape(','.join(str(item) for item in (watchdog_scheduler.get('watchdog_last_reconciled_job_ids') or [])) or '-')}</code>",
+        f"• watchdog last reconciliation source: <code>{html.escape(str(watchdog_scheduler.get('last_reconciliation_source') or '-'))}</code>",
         f"• watchdog next run: <code>{html.escape(str(watchdog_scheduler.get('next_run_at') or '-'))}</code>",
         f"• watchdog last error: <code>{html.escape(str(watchdog_scheduler.get('last_error') or '-'))}</code>",
         f"• confirm handler count: <code>{safe_int(confirm_handlers.get('product_video_confirm_handler_count'), 0)}</code>",
@@ -192392,7 +192502,13 @@ def _record_remote_worker_ping(worker_id: str) -> None:
         logger.warning("remote worker ping setting skipped: %s", type(exc).__name__)
 
 
-def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, capabilities: list[str]) -> None:
+def _record_owner_product_video_worker_identity(
+    worker_id: str,
+    payload: dict,
+    capabilities: list[str],
+    *,
+    refresh_source: str,
+) -> dict:
     service_mode = str(payload.get("service_mode") or payload.get("worker_service_mode") or "").strip()
     owner_mode = bool(
         str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -192400,26 +192516,80 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
         or "owner_product_video" in set(capabilities or [])
     )
     if not owner_mode:
-        return
+        return {
+            "owner_heartbeat_request_received": False,
+            "owner_heartbeat_authenticated": True,
+            "owner_heartbeat_persisted": False,
+            "owner_heartbeat_reject_reason": "not_owner_product_video_heartbeat",
+            "heartbeat_refresh_source": str(refresh_source or "generic"),
+        }
     prefix = "remote_worker:owner_product_video:"
-    heartbeat_updated_at = now_text()
     heartbeat_ttl = max(30, min(300, safe_int(os.getenv("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS"), 90)))
-    lease_expires_at = now_text(datetime.now() + timedelta(seconds=heartbeat_ttl))
-    generation_id = str(payload.get("generation_id") or payload.get("worker_generation_id") or "").strip()
-    if not generation_id:
-        generation_id = f"legacy-{remote_worker_api.sanitize_worker_id(worker_id)}"
-    worker_instance_id = str(payload.get("worker_instance_id") or worker_id or "").strip()
-    git_sha = str(
-        payload.get("git_sha")
-        or payload.get("worker_git_head_sha")
-        or payload.get("worker_git_sha")
-        or ""
-    ).strip()
-    runtime_target_sha = str(payload.get("runtime_target_sha") or git_sha).strip()
-    capability_version = str(
-        payload.get("capability_version") or payload.get("worker_capability_version") or ""
-    ).strip()
+    runtime_sha = str(APP_BUILD_SHA or APP_BUILD or "").strip()
     clean_capabilities = remote_worker_api.sanitize_capabilities(capabilities or payload.get("capabilities") or [])
+    decision_payload = {
+        **dict(payload or {}),
+        "capabilities": clean_capabilities,
+        "service_mode": service_mode,
+    }
+    decision = remote_worker_api.owner_product_video_heartbeat_update_decision(
+        product_video_worker_identity_records(),
+        decision_payload,
+        runtime_sha=runtime_sha,
+        heartbeat_ttl_seconds=heartbeat_ttl,
+    )
+    diagnostics = {
+        **decision,
+        "owner_heartbeat_authenticated": True,
+        "heartbeat_refresh_source": str(refresh_source or "authenticated_worker_interaction"),
+    }
+    if not decision.get("heartbeat_accepted"):
+        diagnostic_values = {
+            "owner_heartbeat_request_received": "yes",
+            "owner_heartbeat_authenticated": "yes",
+            "owner_heartbeat_persisted": "no",
+            "owner_heartbeat_reject_reason": str(
+                decision.get("owner_heartbeat_reject_reason") or "owner_heartbeat_rejected"
+            )[:160],
+            "caller_generation_id": str(decision.get("caller_generation_id") or "")[:160],
+            "caller_git_sha": str(decision.get("caller_git_sha") or "")[:80],
+            "last_heartbeat_request_at": now_text(),
+            "heartbeat_refresh_source": str(refresh_source or "authenticated_worker_interaction")[:80],
+        }
+        try:
+            for key, value in diagnostic_values.items():
+                set_system_setting(prefix + key, value, "owner product video heartbeat diagnostic", worker_id)
+        except Exception as exc:
+            logger.warning("owner product video heartbeat reject diagnostic skipped: %s", type(exc).__name__)
+        logger.warning(
+            "owner_product_video_heartbeat_rejected | worker=%s generation=%s reason=%s source=%s",
+            remote_worker_api.sanitize_worker_id(worker_id),
+            str(decision.get("caller_generation_id") or "-"),
+            str(decision.get("owner_heartbeat_reject_reason") or "unknown"),
+            str(refresh_source or "unknown"),
+        )
+        return diagnostics
+    heartbeat_updated_at = str(decision.get("heartbeat_at") or now_text())
+    lease_expires_at = str(decision.get("lease_expires_at") or "")
+    generation_id = str(decision.get("caller_generation_id") or "").strip()
+    worker_instance_id = str(payload.get("worker_instance_id") or worker_id or "").strip()
+    git_sha = str(decision.get("caller_git_sha") or "").strip()
+    runtime_target_sha = str(decision.get("runtime_target_sha") or "").strip()
+    capability_version = str(decision.get("capability_version") or "").strip()
+    existing_record = next(
+        (
+            dict(item)
+            for item in product_video_worker_identity_records()
+            if str((item or {}).get("generation_id") or "") == generation_id
+        ),
+        {},
+    )
+    last_claim_at = str(existing_record.get("last_claim_at") or "")
+    last_idle_claim_at = str(existing_record.get("last_idle_claim_at") or "")
+    if str(refresh_source or "") in {"claim_request", "claim", "claim_idle"}:
+        last_claim_at = heartbeat_updated_at
+    if str(refresh_source or "") == "claim_idle":
+        last_idle_claim_at = heartbeat_updated_at
     record = {
         "worker_id": str(worker_id or "")[:120],
         "worker_instance_id": worker_instance_id[:240],
@@ -192437,6 +192607,13 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
         "pid": safe_int(payload.get("pid") or payload.get("worker_pid"), 0),
         "worker_sha_source": str(payload.get("worker_sha_source") or "worker_claim_payload")[:80],
         "worker_cwd": str(payload.get("worker_cwd") or "")[:500],
+        "last_claim_at": last_claim_at,
+        "last_idle_claim_at": last_idle_claim_at,
+        "heartbeat_refresh_source": str(refresh_source or "authenticated_worker_interaction")[:80],
+        "owner_heartbeat_request_received": True,
+        "owner_heartbeat_authenticated": True,
+        "owner_heartbeat_persisted": True,
+        "owner_heartbeat_reject_reason": "",
     }
     values = {
         "last_heartbeat": heartbeat_updated_at,
@@ -192457,6 +192634,16 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
         "lease_expires_at": lease_expires_at,
         "hostname": record["hostname"],
         "pid": record["pid"],
+        "last_claim_at": last_claim_at,
+        "last_idle_claim_at": last_idle_claim_at,
+        "heartbeat_refresh_source": record["heartbeat_refresh_source"],
+        "owner_heartbeat_request_received": "yes",
+        "owner_heartbeat_authenticated": "yes",
+        "owner_heartbeat_persisted": "no",
+        "owner_heartbeat_reject_reason": "",
+        "caller_generation_id": generation_id[:160],
+        "caller_git_sha": git_sha[:80],
+        "last_heartbeat_request_at": heartbeat_updated_at,
     }
     try:
         for key, value in values.items():
@@ -192468,8 +192655,47 @@ def _record_owner_product_video_worker_identity(worker_id: str, payload: dict, c
             "owner product video worker generation heartbeat",
             worker_id,
         )
+        set_system_setting(
+            prefix + "owner_heartbeat_persisted",
+            "yes",
+            "owner product video heartbeat diagnostic",
+            worker_id,
+        )
+        authoritative = product_video_worker_admission_status(caller_generation_id=generation_id)
+        return {
+            **diagnostics,
+            "owner_heartbeat_persisted": True,
+            "owner_heartbeat_reject_reason": "",
+            "heartbeat_accepted": True,
+            "authoritative_generation_id": str(authoritative.get("authoritative_worker_generation_id") or generation_id),
+            "authoritative_git_sha": str(authoritative.get("git_sha") or git_sha),
+            "lease_expires_at": str(authoritative.get("lease_expires_at") or lease_expires_at),
+            "last_claim_at": last_claim_at,
+            "last_idle_claim_at": last_idle_claim_at,
+        }
     except Exception as exc:
         logger.warning("owner product video worker identity skipped: %s", type(exc).__name__)
+        try:
+            set_system_setting(
+                prefix + "owner_heartbeat_persisted",
+                "no",
+                "owner product video heartbeat diagnostic",
+                worker_id,
+            )
+            set_system_setting(
+                prefix + "owner_heartbeat_reject_reason",
+                f"heartbeat_persist_failed:{type(exc).__name__}",
+                "owner product video heartbeat diagnostic",
+                worker_id,
+            )
+        except Exception:
+            pass
+        return {
+            **diagnostics,
+            "owner_heartbeat_persisted": False,
+            "owner_heartbeat_reject_reason": f"heartbeat_persist_failed:{type(exc).__name__}",
+            "heartbeat_accepted": False,
+        }
 
 
 def product_video_worker_identity_records(limit: int = 32) -> list[dict]:
@@ -192516,6 +192742,16 @@ def product_video_worker_identity_records(limit: int = 32) -> list[dict]:
             prefix + "lease_expires_at",
             prefix + "hostname",
             prefix + "pid",
+            prefix + "last_claim_at",
+            prefix + "last_idle_claim_at",
+            prefix + "heartbeat_refresh_source",
+            prefix + "owner_heartbeat_request_received",
+            prefix + "owner_heartbeat_authenticated",
+            prefix + "owner_heartbeat_persisted",
+            prefix + "owner_heartbeat_reject_reason",
+            prefix + "caller_generation_id",
+            prefix + "caller_git_sha",
+            prefix + "last_heartbeat_request_at",
         ]
     )
     raw_capabilities = str(settings.get(prefix + "worker_capabilities") or "").strip()
@@ -192543,6 +192779,16 @@ def product_video_worker_identity_records(limit: int = 32) -> list[dict]:
             "process_started_at": settings.get(prefix + "process_started_at") or "",
             "hostname": settings.get(prefix + "hostname") or "",
             "pid": safe_int(settings.get(prefix + "pid"), 0),
+            "last_claim_at": settings.get(prefix + "last_claim_at") or "",
+            "last_idle_claim_at": settings.get(prefix + "last_idle_claim_at") or "",
+            "heartbeat_refresh_source": settings.get(prefix + "heartbeat_refresh_source") or "",
+            "owner_heartbeat_request_received": str(settings.get(prefix + "owner_heartbeat_request_received") or "").lower() == "yes",
+            "owner_heartbeat_authenticated": str(settings.get(prefix + "owner_heartbeat_authenticated") or "").lower() == "yes",
+            "owner_heartbeat_persisted": str(settings.get(prefix + "owner_heartbeat_persisted") or "").lower() == "yes",
+            "owner_heartbeat_reject_reason": settings.get(prefix + "owner_heartbeat_reject_reason") or "",
+            "caller_generation_id": settings.get(prefix + "caller_generation_id") or "",
+            "caller_git_sha": settings.get(prefix + "caller_git_sha") or "",
+            "last_heartbeat_request_at": settings.get(prefix + "last_heartbeat_request_at") or "",
         }
     ]
 
@@ -192556,8 +192802,49 @@ def product_video_worker_admission_status(*, caller_generation_id: str = "") -> 
         caller_generation_id=caller_generation_id,
         heartbeat_ttl_seconds=heartbeat_ttl,
     )
+    prefix = "remote_worker:owner_product_video:"
+    diagnostics = get_system_settings(
+        [
+            prefix + "owner_heartbeat_request_received",
+            prefix + "owner_heartbeat_authenticated",
+            prefix + "owner_heartbeat_persisted",
+            prefix + "owner_heartbeat_reject_reason",
+            prefix + "caller_generation_id",
+            prefix + "caller_git_sha",
+            prefix + "last_heartbeat_request_at",
+            prefix + "last_claim_at",
+            prefix + "last_idle_claim_at",
+            prefix + "heartbeat_refresh_source",
+        ]
+    )
     return {
         **identity,
+        "owner_heartbeat_request_received": str(
+            diagnostics.get(prefix + "owner_heartbeat_request_received") or ""
+        ).lower() == "yes",
+        "owner_heartbeat_authenticated": str(
+            diagnostics.get(prefix + "owner_heartbeat_authenticated") or ""
+        ).lower() == "yes",
+        "owner_heartbeat_persisted": str(
+            diagnostics.get(prefix + "owner_heartbeat_persisted") or ""
+        ).lower() == "yes",
+        "owner_heartbeat_reject_reason": str(
+            diagnostics.get(prefix + "owner_heartbeat_reject_reason") or ""
+        ),
+        "caller_generation_id": str(diagnostics.get(prefix + "caller_generation_id") or ""),
+        "caller_git_sha": str(diagnostics.get(prefix + "caller_git_sha") or ""),
+        "last_heartbeat_request_at": str(diagnostics.get(prefix + "last_heartbeat_request_at") or ""),
+        "last_claim_at": str(
+            diagnostics.get(prefix + "last_claim_at") or identity.get("last_claim_at") or ""
+        ),
+        "last_idle_claim_at": str(
+            diagnostics.get(prefix + "last_idle_claim_at") or identity.get("last_idle_claim_at") or ""
+        ),
+        "heartbeat_refresh_source": str(
+            diagnostics.get(prefix + "heartbeat_refresh_source")
+            or identity.get("heartbeat_refresh_source")
+            or ""
+        ),
         "worker_heartbeat_ttl_seconds": heartbeat_ttl,
         "worker_canonical_capability_present": bool(identity.get("capability_match")),
         "compatibility_source": "product_video_worker_compatibility",
@@ -192761,7 +193048,12 @@ async def api_worker_ping(request: Request):
     )
     capabilities = _safe_worker_ping_capabilities(payload, request)
     _record_remote_worker_ping(worker_id)
-    _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
+    heartbeat = _record_owner_product_video_worker_identity(
+        worker_id,
+        payload,
+        capabilities,
+        refresh_source="ping",
+    )
     worker_sha = str(payload.get("worker_git_sha") or "").strip()
     if worker_sha:
         set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
@@ -192780,7 +193072,7 @@ async def api_worker_ping(request: Request):
             sort_keys=True,
         ),
     )
-    return remote_worker_api.build_worker_ping_payload(
+    response = remote_worker_api.build_worker_ping_payload(
         worker_id=worker_id,
         capabilities=capabilities,
         server_time=now_text(),
@@ -192790,6 +193082,8 @@ async def api_worker_ping(request: Request):
         remote_worker_mode_supported=True,
         dry_run=True,
     )
+    response.update(heartbeat)
+    return response
 
 
 @fastapi_app.post("/api/v1/worker/claim")
@@ -192807,7 +193101,12 @@ async def api_worker_claim(request: Request):
     owner_product_video_only = str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
-    _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
+    heartbeat = _record_owner_product_video_worker_identity(
+        worker_id,
+        payload,
+        capabilities,
+        refresh_source="claim_request",
+    )
     worker_compatibility = (
         product_video_worker_admission_status(
             caller_generation_id=str(payload.get("generation_id") or payload.get("worker_generation_id") or "")
@@ -192817,7 +193116,7 @@ async def api_worker_claim(request: Request):
     )
     conn = db_connect()
     try:
-        return remote_worker_api.claim_remote_worker_job(
+        claim_result = remote_worker_api.claim_remote_worker_job(
             conn,
             worker_id=worker_id,
             capabilities=capabilities,
@@ -192832,6 +193131,15 @@ async def api_worker_claim(request: Request):
         )
     finally:
         conn.close()
+    if owner_product_video_only and not claim_result.get("job") and heartbeat.get("heartbeat_accepted"):
+        heartbeat = _record_owner_product_video_worker_identity(
+            worker_id,
+            payload,
+            capabilities,
+            refresh_source="claim_idle",
+        )
+    claim_result.update(heartbeat)
+    return claim_result
 
 
 @fastapi_app.post("/api/v1/worker/heartbeat")
@@ -192845,15 +193153,20 @@ async def api_worker_heartbeat(request: Request):
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker heartbeat", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
     heartbeat_capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
-    _record_owner_product_video_worker_identity(worker_id, payload, heartbeat_capabilities)
+    heartbeat = _record_owner_product_video_worker_identity(
+        worker_id,
+        payload,
+        heartbeat_capabilities,
+        refresh_source="job_heartbeat",
+    )
+    if heartbeat.get("owner_heartbeat_request_received") and not heartbeat.get("heartbeat_accepted"):
+        raise HTTPException(status_code=409, detail=heartbeat.get("owner_heartbeat_reject_reason") or "owner_heartbeat_rejected")
     worker_sha = str(payload.get("worker_git_sha") or "").strip()
     if worker_sha:
         set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
     worker_parser = str(payload.get("worker_parser_version") or "").strip()
     if worker_parser:
         set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
-    capabilities = remote_worker_api.sanitize_capabilities(payload.get("capabilities") or [])
-    _record_owner_product_video_worker_identity(worker_id, payload, capabilities)
     conn = db_connect()
     try:
         result = remote_worker_api.heartbeat_remote_worker_job(
@@ -192866,6 +193179,7 @@ async def api_worker_heartbeat(request: Request):
         )
         if not result.get("ok"):
             raise HTTPException(status_code=409, detail=result.get("reason") or "heartbeat_rejected")
+        result.update(heartbeat)
         return result
     finally:
         conn.close()
@@ -192965,6 +193279,15 @@ async def api_worker_complete(request: Request):
     job_id = safe_int(payload.get("job_id"), 0)
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
+    completion_capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+    heartbeat = _record_owner_product_video_worker_identity(
+        worker_id,
+        payload,
+        completion_capabilities,
+        refresh_source="job_complete",
+    )
+    if heartbeat.get("owner_heartbeat_request_received") and not heartbeat.get("heartbeat_accepted"):
+        raise HTTPException(status_code=409, detail=heartbeat.get("owner_heartbeat_reject_reason") or "owner_heartbeat_rejected")
     result_payload = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     artifact_meta = {}
     if uploaded_path:
@@ -193039,6 +193362,7 @@ async def api_worker_complete(request: Request):
         "delivery": delivery,
         "artifact_storage": artifact_storage.public_metadata(artifact_meta),
         "local_cleanup": local_cleanup,
+        **heartbeat,
     }
 
 
@@ -193050,6 +193374,15 @@ async def api_worker_fail(request: Request):
     job_id = safe_int(payload.get("job_id"), 0)
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
+    failure_capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+    heartbeat = _record_owner_product_video_worker_identity(
+        worker_id,
+        payload,
+        failure_capabilities,
+        refresh_source="job_fail",
+    )
+    if heartbeat.get("owner_heartbeat_request_received") and not heartbeat.get("heartbeat_accepted"):
+        raise HTTPException(status_code=409, detail=heartbeat.get("owner_heartbeat_reject_reason") or "owner_heartbeat_rejected")
     partial_artifacts = payload.get("partial_artifacts") if isinstance(payload.get("partial_artifacts"), list) else []
     diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
     conn = db_connect()
@@ -193065,7 +193398,7 @@ async def api_worker_fail(request: Request):
         )
         if not result.get("ok"):
             raise HTTPException(status_code=409, detail=result.get("reason") or "fail_rejected")
-        return result
+        return {**result, **heartbeat}
     finally:
         conn.close()
 

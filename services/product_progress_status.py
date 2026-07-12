@@ -992,7 +992,7 @@ def _video_scene_status_label(status: Any, clip_ready: bool = False) -> str:
         return "Đang tạo"
     if raw in {"provider_stalled_not_start", "stalled", "fallback_pending", "retrying"}:
         return "Đang chuyển hướng xử lý"
-    if raw in {"submit_blocked_with_reason"}:
+    if raw in {"submit_blocked_with_reason", "terminal_failed"}:
         return "Chưa thể bắt đầu"
     if raw in {"failed", "failed_no_charge", "error", "provider_failed", "exhausted"}:
         return "Chưa tạo được"
@@ -1054,6 +1054,58 @@ def video_per_scene_progress_board(job: dict[str, Any] | None = None) -> dict[st
     status_by_scene = current.get("scene_status_by_scene") or {}
     if scene_count <= 0 and tasks:
         scene_count = max(_as_int(item.get("scene_index") or item.get("index"), idx + 1) for idx, item in enumerate(tasks))
+    terminal_state = str(
+        current.get("canonical_status")
+        or current.get("terminal_state")
+        or current.get("final_decision")
+        or ""
+    ).strip().lower().replace("-", "_")
+    failed_no_charge_terminal = bool(
+        terminal_state == "failed_no_charge"
+        or (
+            _as_bool(current.get("terminal"))
+            and str(current.get("status") or "").strip().lower() == "failed"
+            and _as_int(current.get("charged_xu") or current.get("charge"), 0) == 0
+        )
+    )
+    if failed_no_charge_terminal:
+        scene_count = max(1, scene_count, len(tasks))
+        lines = [
+            *[f"• Cảnh {idx}/{scene_count}: Chưa thể bắt đầu" for idx in range(1, scene_count + 1)],
+            f"• Hoàn tất: 0/{scene_count} cảnh",
+        ]
+        if scene_count > 1:
+            lines.append("• Ghép video: Chưa bắt đầu")
+        lines.append("• Gửi kết quả: Chưa bắt đầu")
+        return {
+            "visible": True,
+            "scene_count": scene_count,
+            "lines": lines,
+            "scene_statuses": [
+                {
+                    "scene_index": idx,
+                    "status": "Chưa thể bắt đầu",
+                    "elapsed_seconds": 0,
+                    "provider_progress": 0,
+                    "clip_ready": False,
+                    "elapsed_source": "terminal_failed",
+                }
+                for idx in range(1, scene_count + 1)
+            ],
+            "elapsed_live_tick_enabled": False,
+            "elapsed_source": "terminal_failed",
+            "elapsed_seconds_by_scene": {str(idx): 0 for idx in range(1, scene_count + 1)},
+            "concat_waiting_for_scene_coverage": False,
+            "concat_attempted": False,
+            "scene_coverage_count": 0,
+            "panel_completed_scene_count": 0,
+            "panel_unresolved_scene_count": scene_count,
+            "public_progress_mode": "percent",
+            "public_progress_percent_visible": True,
+            "public_technical_terms_hidden": True,
+            "terminal": True,
+            "auto_refresh_enabled": False,
+        }
     if scene_count <= 1 and not tasks:
         return {
             "visible": False,
