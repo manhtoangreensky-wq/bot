@@ -52,6 +52,8 @@ PRODUCT_VIDEO_CANONICAL_ENGINE_ENTRY = "b13_r18c"
 PRODUCT_VIDEO_CANONICAL_WORKER_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
 PRODUCT_VIDEO_ADMISSION_TTL_SECONDS_DEFAULT = 60
 PRODUCT_VIDEO_FINAL_ADMISSION_CONTEXT_VERSION = "product_video_final_admission_v1"
+PRODUCT_VIDEO_PROBATION_ADMISSION_MODE = "public_confirmed_probation"
+PRODUCT_VIDEO_PROBATION_FAILURE_COOLDOWN_SECONDS_DEFAULT = 1800
 PRODUCT_VIDEO_RECONCILIATION_SOURCES = frozenset(
     {
         "watchdog_scheduler",
@@ -123,6 +125,12 @@ _PRODUCT_VIDEO_FINAL_ADMISSION_SIGNED_FIELDS = (
     "worker_identity_conflict",
     "route_requires_provider",
     "handler_id",
+    "admission_mode",
+    "probation_candidate_key",
+    "probation_reason",
+    "probation_lock_clear",
+    "submit_source",
+    "public_user_confirmed",
 )
 PRODUCT_VIDEO_TIER_PRICE_MAP = {
     "low": 200,
@@ -2022,6 +2030,94 @@ def get_video_render_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any
     return _job_from_row(row)
 
 
+def product_video_probation_lock_state(
+    conn: sqlite3.Connection,
+    *,
+    provider_key: str = "",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return the persisted single-probation lock without probing providers."""
+    wanted_provider = str(provider_key or "").strip()
+    current_dt = now or datetime.now()
+    current_epoch = current_dt.timestamp()
+    try:
+        rows = conn.execute(
+            """SELECT id,status,result_json,created_at,updated_at,completed_at
+                 FROM video_jobs
+                WHERE job_type=? AND result_json LIKE ?
+                ORDER BY id DESC LIMIT 500""",
+            (VIDEO_RENDER_JOB_TYPE, f"%{PRODUCT_VIDEO_PROBATION_ADMISSION_MODE}%"),
+        ).fetchall()
+    except Exception as exc:
+        return {
+            "probation_active": False,
+            "probation_lock_clear": False,
+            "probation_lock_status": "unknown",
+            "probation_lock_error": type(exc).__name__,
+            "active_probation_job_id": 0,
+            "active_probation_provider": "",
+            "probation_last_result": "unknown",
+            "probation_cooldown_active": False,
+        }
+
+    active: dict[str, Any] = {}
+    latest_terminal: dict[str, Any] = {}
+    for row in rows:
+        job_id = int(row["id"] if isinstance(row, sqlite3.Row) else row[0])
+        status = str(row["status"] if isinstance(row, sqlite3.Row) else row[1])
+        raw_payload = row["result_json"] if isinstance(row, sqlite3.Row) else row[2]
+        payload = _json_loads(str(raw_payload or ""), {})
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("admission_mode") or "") != PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+            continue
+        candidate = str(
+            payload.get("probation_candidate_key")
+            or payload.get("selected_provider")
+            or payload.get("provider")
+            or ""
+        ).strip()
+        if wanted_provider and candidate != wanted_provider:
+            continue
+        record = {
+            "job_id": job_id,
+            "status": status,
+            "provider": candidate,
+            "probation_result": str(payload.get("probation_result") or "pending"),
+            "probation_started_at": str(payload.get("probation_started_at") or ""),
+            "probation_terminal_at": str(payload.get("probation_terminal_at") or ""),
+            "probation_cooldown_until": str(payload.get("probation_cooldown_until") or ""),
+        }
+        probation_result = str(payload.get("probation_result") or "pending").strip().lower()
+        pending_delivery = bool(
+            probation_result == "pending"
+            and status not in {"failed", "cancelled"}
+        )
+        if (status in {"queued", "processing"} or pending_delivery) and not active:
+            active = record
+        elif (probation_result in {"success", "failed"} or status in {"failed", "cancelled"}) and not latest_terminal:
+            latest_terminal = record
+
+    cooldown_until = str(latest_terminal.get("probation_cooldown_until") or "")
+    cooldown_epoch = _parse_time_epoch(cooldown_until)
+    cooldown_active = bool(cooldown_epoch and cooldown_epoch > current_epoch)
+    lock_clear = bool(not active and not cooldown_active)
+    return {
+        "probation_active": bool(active),
+        "probation_lock_clear": lock_clear,
+        "probation_lock_status": "clear" if lock_clear else ("active" if active else "cooldown"),
+        "active_probation_job_id": int(active.get("job_id") or 0),
+        "active_probation_provider": str(active.get("provider") or ""),
+        "active_probation_started_at": str(active.get("probation_started_at") or ""),
+        "probation_last_job_id": int(latest_terminal.get("job_id") or 0),
+        "probation_last_provider": str(latest_terminal.get("provider") or ""),
+        "probation_last_result": str(latest_terminal.get("probation_result") or "none"),
+        "probation_last_terminal_at": str(latest_terminal.get("probation_terminal_at") or ""),
+        "probation_cooldown_active": cooldown_active,
+        "probation_cooldown_until": cooldown_until,
+    }
+
+
 def get_product_video_dispatch_outbox(
     conn: sqlite3.Connection,
     *,
@@ -2484,6 +2580,41 @@ def _product_video_final_admission_state(
     elif route_requires_provider and persisted_admission_route is False:
         route_contract["route_requirement_override"] = "legacy_persisted_false_ignored"
     duplicate_handler_detected = bool(admission.get("duplicate_confirm_handler_detected"))
+    admission_mode = str(admission.get("admission_mode") or "healthy").strip().lower()
+    probation_mode = admission_mode == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+    probation_candidate_key = str(admission.get("probation_candidate_key") or "").strip()
+    probation_reason = str(admission.get("probation_reason") or "").strip()
+    probation_lock_clear = bool(admission.get("probation_lock_clear"))
+    submit_source = str(
+        admission.get("submit_source")
+        or asset_pack.get("submit_source")
+        or asset_pack.get("provider_submit_source")
+        or invoice.get("submit_source")
+        or invoice.get("provider_submit_source")
+        or ""
+    ).strip().lower()
+    public_user_confirmed = bool(
+        admission.get("public_user_confirmed")
+        if "public_user_confirmed" in admission
+        else (
+            asset_pack.get("public_user_confirmed")
+            or asset_pack.get("b14_public_user_confirmed")
+            or invoice.get("public_user_confirmed")
+            or invoice.get("b14_public_user_confirmed")
+        )
+    )
+    probation_contract_ok = bool(
+        not probation_mode
+        or (
+            admission_mode == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+            and len(candidates) == 1
+            and candidates[0] == probation_candidate_key
+            and submit_source == "public_user_final_confirm"
+            and public_user_confirmed
+            and probation_lock_clear
+        )
+    )
+    admission_mode_valid = admission_mode in {"healthy", PRODUCT_VIDEO_PROBATION_ADMISSION_MODE}
     consumed_ids = {
         str(asset_pack.get("admission_snapshot_consumed_id") or ""),
         str(invoice.get("admission_snapshot_consumed_id") or ""),
@@ -2519,6 +2650,8 @@ def _product_video_final_admission_state(
         and route_requires_provider
         and not duplicate_handler_detected
         and not replayed
+        and admission_mode_valid
+        and probation_contract_ok
     )
     admission_ok = bool(candidates) and (
         not require_provider_admission
@@ -2536,6 +2669,18 @@ def _product_video_final_admission_state(
         block_reason = "no_eligible_product_video_provider"
     elif require_authoritative_snapshot and not provider_health_gate_pass:
         block_reason = str(admission.get("admission_block_reason") or "provider_health_gate_blocked")
+    elif require_authoritative_snapshot and not admission_mode_valid:
+        block_reason = "product_video_admission_mode_invalid"
+    elif require_authoritative_snapshot and probation_mode and submit_source != "public_user_final_confirm":
+        block_reason = "probation_requires_public_final_confirm"
+    elif require_authoritative_snapshot and probation_mode and not public_user_confirmed:
+        block_reason = "probation_public_user_confirm_missing"
+    elif require_authoritative_snapshot and probation_mode and len(candidates) != 1:
+        block_reason = "probation_requires_exactly_one_candidate"
+    elif require_authoritative_snapshot and probation_mode and candidates[0] != probation_candidate_key:
+        block_reason = "probation_candidate_mismatch"
+    elif require_authoritative_snapshot and probation_mode and not probation_lock_clear:
+        block_reason = "probation_lock_not_clear"
     elif require_authoritative_snapshot and duplicate_handler_detected:
         block_reason = "duplicate_product_video_confirm_handler"
     elif require_authoritative_snapshot and worker_identity_conflict:
@@ -2614,6 +2759,13 @@ def _product_video_final_admission_state(
         "persisted_admission_route_requires_provider": persisted_admission_route,
         "worker_admission_block_reason": str(admission.get("worker_admission_block_reason") or ""),
         "duplicate_confirm_handler_detected": duplicate_handler_detected,
+        "admission_mode": admission_mode,
+        "probation_candidate_key": probation_candidate_key,
+        "probation_reason": probation_reason,
+        "probation_lock_clear": probation_lock_clear,
+        "submit_source": submit_source,
+        "public_user_confirmed": public_user_confirmed,
+        "probation_contract_ok": probation_contract_ok,
         "provider_eligibility_snapshot": snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
         "preconfirm_candidate_keys": candidates,
@@ -2820,6 +2972,31 @@ def _confirm_product_video_invoice_atomic(
                     "charge": 0,
                     "charged_xu": 0,
                 }
+        if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+            probation_lock = product_video_probation_lock_state(conn, now=current_dt)
+            if not probation_lock.get("probation_lock_clear"):
+                conn.rollback()
+                return {
+                    "ok": False,
+                    "reason": "product_video_probation_lock_active",
+                    "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể kiểm tra lại sau.",
+                    "admission": {**admission_state, **probation_lock},
+                    "job_created": False,
+                    "scene_records_created": False,
+                    "dispatch_outbox_created": False,
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            admission_state.update(
+                {
+                    "probation_started_at": current,
+                    "probation_job_id": 0,
+                    "probation_result": "pending",
+                    "probation_terminal_at": "",
+                    "probation_cooldown_active": False,
+                    "probation_cooldown_until": "",
+                }
+            )
         active_row = conn.execute(
             """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
                       lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at,
@@ -2906,6 +3083,10 @@ def _confirm_product_video_invoice_atomic(
             ),
         )
         job_id = int(cursor.lastrowid or 0)
+        if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+            admission_state["probation_job_id"] = job_id
+            asset_pack.update(admission_state)
+            invoice.update(admission_state)
         failure_stage = str((admission or {}).get("_test_failure_stage") or "") if os.getenv("PYTEST_CURRENT_TEST") else ""
         if failure_stage == "after_job_insert":
             raise RuntimeError("injected_after_job_insert")
@@ -6373,6 +6554,62 @@ def note_video_delivery_result(
     current = now_text()
     attempts = int(project.get("delivery_attempt_count") or 0) + 1
     if sent:
+        if str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+            scene_tasks = [
+                dict(item)
+                for item in (payload.get("scene_tasks") or payload.get("provider_scene_tasks") or [])
+                if isinstance(item, dict)
+            ]
+            coverage_expected = max(1, _as_int(payload.get("scene_coverage_expected") or payload.get("scenes_total"), 1))
+            coverage_count = max(0, _as_int(payload.get("scene_coverage_count") or payload.get("scenes_done"), 0))
+            coverage_complete = bool(
+                payload.get("scene_clip_coverage_complete")
+                or coverage_count >= coverage_expected
+            )
+            result_url_present = bool(
+                payload.get("result_url")
+                or payload.get("provider_result_url")
+                or payload.get("download_url")
+                or any(item.get("result_url") or item.get("download_url") for item in scene_tasks)
+            )
+            promotion_eligible = bool(
+                coverage_complete
+                and (payload.get("final_mp4_valid") or payload.get("final_mp4_validated") or payload.get("artifact_valid_for_charge"))
+                and _as_int(payload.get("output_bytes") or payload.get("artifact_size"), 0) > 0
+                and result_url_present
+            )
+            if promotion_eligible:
+                payload.update(
+                    {
+                        "probation_result": "success",
+                        "probation_terminal_at": current,
+                        "probation_cooldown_active": False,
+                        "probation_cooldown_until": "",
+                        "last_valid_mp4_at": current,
+                        "provider_health_promotion_eligible": True,
+                        "probation_result_validation_blocker": "",
+                    }
+                )
+            else:
+                payload.update(
+                    {
+                        "probation_result": "pending",
+                        "provider_health_promotion_eligible": False,
+                        "probation_result_validation_blocker": "valid_result_scene_coverage_final_mp4_required",
+                    }
+                )
+                conn.execute(
+                    "UPDATE video_jobs SET result_json=?,updated_at=? WHERE id=?",
+                    (_json_dumps(payload), current, int(job_id)),
+                )
+                conn.commit()
+                return {
+                    "ok": False,
+                    "sent": False,
+                    "reason": "probation_final_delivery_requirements_missing",
+                    "job": get_video_render_job(conn, int(job_id)),
+                    "project": get_video_project(conn, int(project["project_id"])),
+                }
         payload.update(
             {
                 "final_delivery_attempted": True,
@@ -6552,13 +6789,43 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
     attempts = int(job.get("attempts") or 0)
     max_attempts = int(job.get("max_attempts") or 3)
     current = now_text()
+    payload = _json_loads(job.get("result_json"), {})
+    if not isinstance(payload, dict):
+        payload = {}
+    probation_mode = str(payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+    if probation_mode:
+        retry = False
+        cooldown_seconds = max(
+            60,
+            _as_int(
+                os.getenv("PRODUCT_VIDEO_PROBATION_FAILURE_COOLDOWN_SECONDS"),
+                PRODUCT_VIDEO_PROBATION_FAILURE_COOLDOWN_SECONDS_DEFAULT,
+            ),
+        )
+        payload.update(
+            {
+                "probation_result": "failed",
+                "probation_terminal_at": current,
+                "probation_cooldown_started_at": current,
+                "probation_cooldown_seconds": cooldown_seconds,
+                "probation_cooldown_active": True,
+                "probation_cooldown_until": now_text(datetime.now() + timedelta(seconds=cooldown_seconds)),
+                "provider_health_promotion_eligible": False,
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "continue_polling": False,
+                "no_charge": True,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        )
     if retry and attempts < max_attempts:
         conn.execute(
             """UPDATE video_jobs
                SET status='queued', locked_by='', locked_at=NULL, lease_expires_at=NULL,
-                   last_error=?, updated_at=?
+                   last_error=?, result_json=?, updated_at=?
                WHERE id=?""",
-            (str(error or "")[:1000], current, int(job_id)),
+            (str(error or "")[:1000], _json_dumps(payload), current, int(job_id)),
         )
         conn.execute("UPDATE video_projects SET status='queued_for_worker', video_terminal_state='final_rendering', error_log=?, updated_at=? WHERE project_id=?", (str(error or "")[:2000], current, int(job["project_id"])))
         final_status = "queued"
@@ -6566,9 +6833,9 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
         conn.execute(
             """UPDATE video_jobs
                SET status='failed', lease_expires_at=NULL,
-                   last_error=?, completed_at=?, updated_at=?
+                   last_error=?, result_json=?, completed_at=?, updated_at=?
                WHERE id=?""",
-            (str(error or "")[:1000], current, current, int(job_id)),
+            (str(error or "")[:1000], _json_dumps(payload), current, current, int(job_id)),
         )
         conn.execute("UPDATE video_projects SET status='failed', video_terminal_state='failed_no_charge', video_terminal_locked_at=?, error_log=?, updated_at=? WHERE project_id=?", (current, str(error or "")[:2000], current, int(job["project_id"])))
         final_status = "failed"

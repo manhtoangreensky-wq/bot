@@ -5326,6 +5326,18 @@ def build_product_video_public_final_admission(
     worker_capability_match = bool(worker.get("capability_match"))
     worker_identity_conflict = bool(worker.get("worker_identity_conflict"))
     gate_ok = bool(preflight.get("ok") and scene_gate.get("ok"))
+    admission_mode = str(
+        scene_gate.get("admission_mode")
+        or preflight.get("admission_mode")
+        or "healthy"
+    ).strip()
+    probation_candidate_key = str(
+        scene_gate.get("probation_candidate_selected")
+        or preflight.get("probation_candidate_selected")
+        or (candidates[0] if admission_mode == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE and candidates else "")
+    ).strip()
+    probation_reason = str(scene_gate.get("probation_reason") or preflight.get("probation_reason") or "").strip()
+    probation_lock_clear = bool(scene_gate.get("probation_lock_clear", preflight.get("probation_lock_clear")))
     allowed = bool(
         candidates
         and gate_ok
@@ -5392,6 +5404,12 @@ def build_product_video_public_final_admission(
         "admission_worker_version_compatible": worker_ok,
         "admission_route_requires_provider": route_ok,
         "admission_provider_health_gate_pass": gate_ok,
+        "admission_mode": admission_mode,
+        "probation_candidate_key": probation_candidate_key,
+        "probation_reason": probation_reason,
+        "probation_lock_clear": probation_lock_clear,
+        "submit_source": "public_user_final_confirm",
+        "public_user_confirmed": True,
         "worker_generation_id": str(worker.get("generation_id") or worker.get("authoritative_worker_generation_id") or ""),
         "worker_git_sha": str(worker.get("git_sha") or worker.get("worker_sha") or ""),
         "runtime_sha": str(worker.get("runtime_sha") or ""),
@@ -72719,12 +72737,50 @@ def _product_video_collect_provider_attempts_from_payload(payload: dict) -> list
         context = dict(context or {})
         if isinstance(item, dict):
             next_context = dict(context)
-            for key in ("job_id", "project_id", "updated_at", "created_at"):
+            for key in (
+                "job_id",
+                "project_id",
+                "updated_at",
+                "created_at",
+                "admission_mode",
+                "probation_result",
+                "final_delivered",
+                "delivery_succeeded",
+                "video_delivered",
+                "scene_coverage_expected",
+                "scene_coverage_count",
+                "scene_clip_coverage_complete",
+                "scenes_total",
+                "scenes_done",
+                "final_mp4_valid",
+                "final_mp4_validated",
+                "artifact_valid_for_charge",
+                "output_bytes",
+            ):
                 if item.get(key) not in (None, ""):
                     next_context[key] = item.get(key)
             if _product_video_provider_attempt_like(item):
                 attempt = dict(item)
-                for key in ("job_id", "project_id", "updated_at", "created_at"):
+                for key in (
+                    "job_id",
+                    "project_id",
+                    "updated_at",
+                    "created_at",
+                    "admission_mode",
+                    "probation_result",
+                    "final_delivered",
+                    "delivery_succeeded",
+                    "video_delivered",
+                    "scene_coverage_expected",
+                    "scene_coverage_count",
+                    "scene_clip_coverage_complete",
+                    "scenes_total",
+                    "scenes_done",
+                    "final_mp4_valid",
+                    "final_mp4_validated",
+                    "artifact_valid_for_charge",
+                    "output_bytes",
+                ):
                     if attempt.get(key) in (None, "") and next_context.get(key) not in (None, ""):
                         attempt[key] = next_context.get(key)
                 attempts.append(attempt)
@@ -72830,7 +72886,15 @@ def _product_video_contract_valid_provider_chain(
     return valid, invalid
 
 
-def product_video_provider_public_route_preflight(conn=None) -> dict:
+def product_video_provider_public_route_preflight(
+    conn=None,
+    *,
+    scene_count: int = 1,
+    allow_public_confirmed_probation: bool = False,
+    admission_source: str = "",
+    public_user_confirmed: bool = False,
+    recent_failure: dict | None = None,
+) -> dict:
     owned_conn = None
     if conn is None:
         try:
@@ -72869,18 +72933,79 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         chain=chain,
         degraded_providers=degraded_providers,
     )
-    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(chain, scene_count=1)
+    count = max(1, safe_int(scene_count, 1))
+    contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(chain, scene_count=count)
+    submit_switch = video_provider_router.product_video_submit_switch_detail()
+    public_submit_enabled = bool(submit_switch.get("resolved"))
+    public_maintenance = product_video_public_maintenance_enabled()
+    worker = product_video_worker_admission_status()
+    worker_compatible = bool(
+        worker.get("worker_version_compatible")
+        and worker.get("worker_connected")
+        and worker.get("heartbeat_fresh")
+        and worker.get("lease_valid")
+        and worker.get("sha_match")
+        and worker.get("capability_match")
+        and not worker.get("worker_identity_conflict")
+    )
+    try:
+        probation_lock = video_project_queue.product_video_probation_lock_state(conn) if conn is not None else {
+            "probation_lock_clear": False,
+            "probation_lock_status": "unknown",
+        }
+    except Exception as exc:
+        probation_lock = {
+            "probation_lock_clear": False,
+            "probation_lock_status": "unknown",
+            "probation_lock_error": type(exc).__name__,
+        }
+    hard_block_reason = ""
+    recent_failure = dict(recent_failure or {})
+    if not public_submit_enabled:
+        hard_block_reason = "public_provider_submit_disabled"
+    elif public_maintenance:
+        hard_block_reason = "product_video_public_maintenance"
+    elif not worker_compatible:
+        hard_block_reason = str(worker.get("worker_admission_block_reason") or "worker_incompatible")
+    elif recent_failure and not recent_failure.get("ok", True):
+        hard_block_reason = str(recent_failure.get("no_charge_reason") or "provider_cooldown_active")
+    provider_hard_blocks = {
+        str(provider): "provider_freeze_active"
+        for provider in chain
+        if str(provider or "").strip() and provider_freeze_runtime_on(str(provider))
+    }
     eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
         status=status,
         chain=chain,
         provider_health=degraded_providers,
         contract_valid_provider_chain=contract_valid_chain,
-        scene_count=1,
+        scene_count=count,
         require_live_health=True,
+        allow_public_confirmed_probation=allow_public_confirmed_probation,
+        admission_source=admission_source,
+        public_user_confirmed=public_user_confirmed,
+        public_submit_enabled=bool(public_submit_enabled and not public_maintenance),
+        worker_compatible=worker_compatible,
+        probation_lock_clear=bool(probation_lock.get("probation_lock_clear")),
+        hard_block_reason_by_provider=provider_hard_blocks,
+        global_hard_block_reason=hard_block_reason,
     )
     selected_chain = list(eligibility_snapshot.get("eligible_provider_keys") or [])
     final_ok = bool(selected_chain)
     final_selected_provider = selected_chain[0] if selected_chain else ""
+    eligibility_state = str(eligibility_snapshot.get("eligibility_state") or "blocked")
+    preflight_ready_for_final_confirm = bool(
+        final_ok
+        or (
+            eligibility_state == "probation"
+            and eligibility_snapshot.get("probation_candidate_keys")
+            and public_submit_enabled
+            and not public_maintenance
+            and worker_compatible
+            and probation_lock.get("probation_lock_clear")
+            and not hard_block_reason
+        )
+    )
     if not final_ok and contract_invalid_providers:
         decision = {
             **decision,
@@ -72894,7 +73019,11 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         **eligibility_snapshot,
         "provider_preflight_checked": True,
         "provider_preflight_source": "provider_status_and_recent_jobs",
-        "provider_preflight_result": "provider_route_ready" if final_ok else "no_real_mp4_provider_available",
+        "provider_preflight_result": (
+            "provider_route_ready"
+            if final_ok
+            else ("provider_probation_ready" if preflight_ready_for_final_confirm else "no_real_mp4_provider_available")
+        ),
         "provider_status_checked": True,
         "shopaikey_public_degradation": shopaikey_degradation,
         "key4u_public_degradation": key4u_degradation,
@@ -72916,6 +73045,15 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
         "route_ready_provider_chain": list(decision.get("route_ready_provider_order") or []),
         "live_healthy_provider_chain": list(decision.get("live_healthy_provider_order") or []),
         "selected_provider": final_selected_provider,
+        "scene_count": count,
+        "preflight_ready_for_final_confirm": preflight_ready_for_final_confirm,
+        "public_submit_enabled": public_submit_enabled,
+        "public_maintenance": public_maintenance,
+        "worker_compatible": worker_compatible,
+        "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
+        "provider_hard_block_reason": str(eligibility_snapshot.get("hard_block_reason") or hard_block_reason),
+        "probation_lock": probation_lock,
+        **probation_lock,
         "job_creation_blocked_by_provider_availability": not final_ok,
         "no_charge_reason": "" if final_ok else "no_healthy_video_provider_no_charge",
         "legacy_no_charge_reason": "" if final_ok else "product_video_no_public_mp4_provider",
@@ -72927,7 +73065,14 @@ def product_video_provider_public_route_preflight(conn=None) -> dict:
     return result
 
 
-def product_video_multi_scene_health_gate(scene_count: int, preflight: dict | None = None) -> dict:
+def product_video_multi_scene_health_gate(
+    scene_count: int,
+    preflight: dict | None = None,
+    *,
+    allow_public_confirmed_probation: bool = False,
+    admission_source: str = "",
+    public_user_confirmed: bool = False,
+) -> dict:
     preflight = dict(preflight or {})
     count = max(1, safe_int(scene_count, 1))
     configured = [
@@ -72939,14 +73084,28 @@ def product_video_multi_scene_health_gate(scene_count: int, preflight: dict | No
         configured,
         scene_count=count,
     )
-    eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
-        status=preflight.get("provider_status_snapshot") if isinstance(preflight.get("provider_status_snapshot"), dict) else {},
-        chain=configured,
-        provider_health=preflight.get("provider_health_summary") if isinstance(preflight.get("provider_health_summary"), dict) else {},
-        contract_valid_provider_chain=contract_valid,
-        scene_count=count,
-        require_live_health=True,
-    )
+    eligibility_snapshot = dict(preflight.get("provider_eligibility_snapshot") or {})
+    if safe_int(eligibility_snapshot.get("scene_count"), 0) != count:
+        eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
+            status=preflight.get("provider_status_snapshot") if isinstance(preflight.get("provider_status_snapshot"), dict) else {},
+            chain=configured,
+            provider_health=preflight.get("provider_health_summary") if isinstance(preflight.get("provider_health_summary"), dict) else {},
+            contract_valid_provider_chain=contract_valid,
+            scene_count=count,
+            require_live_health=True,
+            allow_public_confirmed_probation=allow_public_confirmed_probation,
+            admission_source=admission_source,
+            public_user_confirmed=public_user_confirmed,
+            public_submit_enabled=bool(preflight.get("public_submit_enabled") and not preflight.get("public_maintenance")),
+            worker_compatible=bool(preflight.get("worker_compatible")),
+            probation_lock_clear=bool(preflight.get("probation_lock_clear")),
+            hard_block_reason_by_provider={
+                str(provider): "provider_freeze_active"
+                for provider in configured
+                if provider_freeze_runtime_on(str(provider))
+            },
+            global_hard_block_reason=str(preflight.get("provider_hard_block_reason") or ""),
+        )
     effective = list(eligibility_snapshot.get("eligible_provider_keys") or [])
     result = video_provider_router.product_video_multi_scene_public_gate(
         count,
@@ -72955,34 +73114,180 @@ def product_video_multi_scene_health_gate(scene_count: int, preflight: dict | No
         contract_valid_provider_chain=contract_valid,
         eligibility_snapshot=eligibility_snapshot,
     )
+    ready_for_confirm = bool(
+        result.get("ok")
+        or (
+            eligibility_snapshot.get("eligibility_state") == "probation"
+            and eligibility_snapshot.get("probation_candidate_keys")
+            and not (count > 1 and result.get("blocker") == "product_video_multi_scene_public_disabled")
+            and preflight.get("probation_lock_clear")
+            and preflight.get("worker_compatible")
+            and preflight.get("public_submit_enabled")
+            and not preflight.get("public_maintenance")
+        )
+    )
     return {
-        **result,
         **eligibility_snapshot,
+        **result,
         "provider_eligibility_snapshot": eligibility_snapshot,
         "contract_invalid_providers": contract_invalid,
+        "preflight_ready_for_final_confirm": ready_for_confirm,
         "public_message": "" if result.get("ok") else PRODUCT_VIDEO_MULTI_SCENE_PROVIDER_BUSY_COPY_VI,
     }
 
 
-def product_video_provider_availability_preflight(conn=None) -> dict:
+def product_video_provider_availability_preflight(
+    conn=None,
+    *,
+    scene_count: int = 1,
+    allow_public_confirmed_probation: bool = False,
+    admission_source: str = "",
+    public_user_confirmed: bool = False,
+) -> dict:
     owned = conn is None
     db = conn or db_connect()
     try:
         result = _video_provider_preflight_recent_failure(db)
-        if not result.get("ok"):
-            return result
-        route_result = product_video_provider_public_route_preflight(db)
-        if not route_result.get("ok"):
-            return route_result
+        route_result = product_video_provider_public_route_preflight(
+            db,
+            scene_count=scene_count,
+            allow_public_confirmed_probation=allow_public_confirmed_probation,
+            admission_source=admission_source,
+            public_user_confirmed=public_user_confirmed,
+            recent_failure=result,
+        )
         return {
             **result,
             **route_result,
             "provider_preflight_result": route_result.get("provider_preflight_result") or result.get("provider_preflight_result"),
-            "job_creation_blocked_by_provider_availability": False,
+            "job_creation_blocked_by_provider_availability": not bool(route_result.get("ok")),
         }
     finally:
         if owned:
             db.close()
+
+
+PRODUCT_VIDEO_PREFLIGHT_UI_TTL_SECONDS = 900
+
+
+def product_video_public_preflight_evaluation(
+    scene_count: int,
+    *,
+    explicit_public_final_confirm: bool = False,
+) -> dict:
+    """Read admission truth only; this function never creates or submits a job."""
+    count = max(1, safe_int(scene_count, 1))
+    source = "public_user_final_confirm" if explicit_public_final_confirm else ""
+    preflight = product_video_provider_availability_preflight(
+        scene_count=count,
+        allow_public_confirmed_probation=explicit_public_final_confirm,
+        admission_source=source,
+        public_user_confirmed=explicit_public_final_confirm,
+    )
+    scene_gate = product_video_multi_scene_health_gate(
+        count,
+        preflight,
+        allow_public_confirmed_probation=explicit_public_final_confirm,
+        admission_source=source,
+        public_user_confirmed=explicit_public_final_confirm,
+    )
+    ready = bool(
+        scene_gate.get("ok")
+        if explicit_public_final_confirm
+        else scene_gate.get("preflight_ready_for_final_confirm")
+    )
+    return {
+        "ready": ready,
+        "scene_count": count,
+        "preflight": preflight,
+        "scene_gate": scene_gate,
+        "admission_mode": str(scene_gate.get("admission_mode") or preflight.get("admission_mode") or "blocked"),
+    }
+
+
+def product_video_public_preflight_panel_text(
+    scene_count: int,
+    *,
+    ready: bool = False,
+    total_xu: int = 0,
+) -> str:
+    count = max(1, safe_int(scene_count, 1))
+    if ready:
+        price_line = f"• Tổng dự kiến: <b>{xu_number(max(0, safe_int(total_xu, 0)))} Xu</b>\n" if safe_int(total_xu, 0) > 0 else ""
+        return (
+            "🎬 <b>Trạng thái tạo video</b>\n\n"
+            "✅ <b>Có thể xác nhận</b>\n\n"
+            f"• Số cảnh đã chọn: <b>{count}</b>\n"
+            f"{price_line}"
+            "• Hệ thống dựng video: Sẵn sàng thử\n"
+            "• Khả năng tạo nhiều cảnh: Đã sẵn sàng để xác nhận\n"
+            "• Hệ thống chưa trừ Xu.\n\n"
+            "Hệ thống đã sẵn sàng thử tạo video.\n"
+            "TOAN AAS chỉ bắt đầu sau khi anh/chị xác nhận."
+        )
+    return (
+        "🎬 <b>Trạng thái tạo video</b>\n\n"
+        "⚠️ <b>Chưa thể bắt đầu</b>\n\n"
+        f"• Số cảnh đã chọn: <b>{count}</b>\n"
+        "• Hệ thống dựng video: Đang kiểm tra\n"
+        "• Khả năng tạo nhiều cảnh: Tạm thời chưa sẵn sàng\n"
+        "• Hệ thống chưa trừ Xu.\n\n"
+        "TOAN AAS chưa thể bắt đầu tạo video lúc này.\n"
+        "Hệ thống chưa trừ Xu.\n"
+        "Anh/chị có thể kiểm tra lại sau."
+    )
+
+
+def product_video_public_preflight_panel_keyboard(lang: str = "vi", *, ready: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if ready:
+        rows.append([InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm")])
+    rows.append([InlineKeyboardButton("🔄 Kiểm tra lại", callback_data="vproduct|b14_preflight_refresh")])
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def product_video_store_public_preflight_context(user_id: int, session: dict, query, scene_count: int) -> dict:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    now_ts = time.time()
+    message = getattr(query, "message", None) or query
+    message_id = safe_int(getattr(message, "message_id", 0), 0)
+    previous = draft.get("b14_preflight_ui_context") if isinstance(draft.get("b14_preflight_ui_context"), dict) else {}
+    created_at = float(previous.get("created_at") or now_ts)
+    draft.pop("b14_provider_preflight", None)
+    draft["b14_preflight_ui_context"] = {
+        "user_id": int(user_id),
+        "project_draft_reference": safe_int(draft.get("b14_project_id"), 0),
+        "selected_scene_count": max(1, safe_int(scene_count, 1)),
+        "preflight_message_id": message_id,
+        "created_at": created_at,
+        "expires_at": now_ts + PRODUCT_VIDEO_PREFLIGHT_UI_TTL_SECONDS,
+    }
+    draft["provider_called"] = False
+    draft["xu_charged"] = 0
+    session["draft"] = draft
+    return save_video_session(user_id, session)
+
+
+async def product_video_show_public_preflight_panel(query, user_id: int, session: dict, lang: str, scene_count: int):
+    evaluation = product_video_public_preflight_evaluation(scene_count)
+    ready = bool(evaluation.get("ready"))
+    invoice = video_b14_invoice_for_session(session, user_id) if ready else {}
+    product_video_store_public_preflight_context(user_id, session, query, scene_count)
+    return await safe_edit_or_send(
+        query,
+        product_video_public_preflight_panel_text(
+            scene_count,
+            ready=ready,
+            total_xu=safe_int(invoice.get("total_xu"), 0),
+        ),
+        parse_mode="HTML",
+        reply_markup=product_video_public_preflight_panel_keyboard(lang, ready=ready),
+    )
 
 
 def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dict) -> dict:
@@ -76268,6 +76573,29 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             )
         session = task3d_session_step(uid, "waiting_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_custom_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+    if action == "b14_preflight_refresh":
+        draft = dict(session.get("draft") or {})
+        context_data = draft.get("b14_preflight_ui_context") if isinstance(draft.get("b14_preflight_ui_context"), dict) else {}
+        context_valid = bool(
+            safe_int(context_data.get("user_id"), 0) == int(uid)
+            and float(context_data.get("expires_at") or 0) >= time.time()
+            and safe_int(context_data.get("selected_scene_count"), 0) > 0
+        )
+        if not context_valid:
+            draft.pop("b14_preflight_ui_context", None)
+            session["draft"] = draft
+            save_video_session(uid, session)
+            return await safe_edit_or_send(
+                query,
+                "🎬 <b>Trạng thái tạo video</b>\n\nPhiên kiểm tra đã hết hạn. Hệ thống chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ]]),
+            )
+        count = max(1, safe_int(context_data.get("selected_scene_count"), 1))
+        return await product_video_show_public_preflight_panel(query, uid, session, lang, count)
     if action == "b14_scene_count":
         count = max(1, min(20, safe_int(value, 3)))
         scene_policy = video_b14_trial_scene_policy(video_b14_quality_for_session(session), count)
@@ -76284,43 +76612,21 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("b14_quality_xu"):
             session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
+        scene_preflight_ready = True
         if not video_b14_is_admin_or_owner(uid):
             provider_preflight = product_video_provider_availability_preflight()
-            if not provider_preflight.get("ok"):
-                draft = dict((session.get("draft") or {}))
-                draft["b14_provider_preflight"] = provider_preflight
-                draft["provider_called"] = False
-                draft["xu_charged"] = 0
-                session["draft"] = draft
-                save_video_session(uid, session)
-                return await safe_edit_or_send(
-                    query,
-                    provider_preflight.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen")],
-                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                    ]),
-                )
             scene_health_gate = product_video_multi_scene_health_gate(count, provider_preflight)
-            if not scene_health_gate.get("ok"):
-                draft = dict((session.get("draft") or {}))
-                draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                draft["provider_called"] = False
-                draft["xu_charged"] = 0
-                session["draft"] = draft
-                save_video_session(uid, session)
-                return await safe_edit_or_send(
-                    query,
-                    scene_health_gate.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
-                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                    ]),
-                )
-            provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-            session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+            scene_preflight_ready = bool(scene_health_gate.get("preflight_ready_for_final_confirm"))
+            if provider_preflight.get("ok") and scene_health_gate.get("ok"):
+                provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+                session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+        if not scene_preflight_ready:
+            logger.info(
+                "product_video_preinvoice_preflight_blocked | user_id=%s | public_copy=%s",
+                uid,
+                PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
+            )
+            return await product_video_show_public_preflight_panel(query, uid, session, lang, count)
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
@@ -76332,18 +76638,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
         project_id = safe_int(draft.get("b14_project_id"), 0)
+        confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
         ok, guard_message = video_b14_public_render_guard(uid)
         if not ok:
-            return await safe_edit_or_send(query, guard_message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
-        if not project_id:
-            return await safe_edit_or_send(
-                query,
-                PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                ]),
-            )
+            return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
         if video_b14_is_trial_quality((draft.get("b14_invoice") or {}).get("quality_xu") or draft.get("b14_quality_xu")) and not video_b14_is_admin_or_owner(uid):
             trial_usage = video_b14_trial_usage_allowed(uid)
             if not trial_usage.get("ok"):
@@ -76355,38 +76653,29 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 )
         is_internal = video_b14_is_admin_or_owner(uid)
         provider_preflight = product_video_provider_availability_preflight()
-        if not provider_preflight.get("ok"):
-            draft["b14_provider_preflight"] = provider_preflight
-            draft["provider_called"] = False
-            draft["xu_charged"] = 0
-            session["draft"] = draft
-            save_video_session(uid, session)
-            return await safe_edit_or_send(
-                query,
-                PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI,
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                ]),
+        if provider_preflight.get("ok"):
+            baseline_scene_gate = product_video_multi_scene_health_gate(confirm_scene_count, provider_preflight)
+            admission_evaluation = {
+                "ready": bool(baseline_scene_gate.get("ok")),
+                "scene_count": confirm_scene_count,
+                "preflight": provider_preflight,
+                "scene_gate": baseline_scene_gate,
+                "admission_mode": str(baseline_scene_gate.get("admission_mode") or "healthy"),
+            }
+        else:
+            admission_evaluation = product_video_public_preflight_evaluation(
+                confirm_scene_count,
+                explicit_public_final_confirm=True,
             )
-        confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
-        scene_health_gate = product_video_multi_scene_health_gate(confirm_scene_count, provider_preflight)
-        if not scene_health_gate.get("ok"):
-            draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-            draft["provider_called"] = False
-            draft["xu_charged"] = 0
-            session["draft"] = draft
-            save_video_session(uid, session)
-            return await safe_edit_or_send(
-                query,
-                PRODUCT_VIDEO_FINAL_ADMISSION_BLOCKED_COPY_VI,
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
-                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                ]),
+        if not admission_evaluation.get("ready"):
+            logger.info(
+                "product_video_final_preflight_blocked | user_id=%s | public_copy=%s",
+                uid,
+                PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
             )
+            return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
+        provider_preflight = dict(admission_evaluation.get("preflight") or {})
+        scene_health_gate = dict(admission_evaluation.get("scene_gate") or {})
         provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
         session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
         draft = dict(session.get("draft") or {})
@@ -76430,26 +76719,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 "no_eligible_product_video_provider",
                 "no_eligible_provider_before_scene_dispatch",
                 "no_healthy_video_provider_no_charge",
+                "product_video_probation_lock_active",
+                "probation_lock_not_clear",
+                "probation_requires_public_final_confirm",
             }:
-                return await safe_edit_or_send(
-                    query,
-                    result.get("public_message") or "Hệ thống tạo video nhiều cảnh đang tạm bận. TOAN AAS chưa trừ Xu. Anh/chị vui lòng thử lại sau.",
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                    ]),
-                )
+                return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
             if result.get("public_message"):
-                return await safe_edit_or_send(
-                    query,
-                    str(result.get("public_message") or ""),
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen")],
-                        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                    ]),
-                )
+                return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
             return await safe_edit_or_send(query, f"⚠️ Chưa thể xác nhận video: {html.escape(reason)}. TOAN AAS chưa xử lý thêm.", parse_mode="HTML")
         session = get_video_session(uid)
         draft = dict(session.get("draft") or {})
@@ -77018,47 +77294,24 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         session, resize_note = video_b14_resize_storyboard_for_session(uid, session, count)
         if (session.get("draft") or {}).get("b14_quality_xu"):
             ok, guard_message = video_b14_public_render_guard(uid)
-            if not ok:
-                await update.message.reply_text(guard_message, parse_mode="HTML")
-                return True
+            custom_preflight_ready = bool(ok)
             if not video_b14_is_admin_or_owner(uid):
                 provider_preflight = product_video_provider_availability_preflight()
-                if not provider_preflight.get("ok"):
-                    draft = dict(session.get("draft") or {})
-                    draft["b14_provider_preflight"] = provider_preflight
-                    draft["provider_called"] = False
-                    draft["xu_charged"] = 0
-                    session["draft"] = draft
-                    save_video_session(uid, session)
-                    await update.message.reply_text(
-                        provider_preflight.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                        parse_mode=None,
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen")],
-                            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                        ]),
-                    )
-                    return True
                 scene_health_gate = product_video_multi_scene_health_gate(count, provider_preflight)
-                if not scene_health_gate.get("ok"):
-                    draft = dict(session.get("draft") or {})
-                    draft["b14_provider_preflight"] = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                    draft["provider_called"] = False
-                    draft["xu_charged"] = 0
-                    session["draft"] = draft
-                    save_video_session(uid, session)
-                    await update.message.reply_text(
-                        scene_health_gate.get("public_message") or PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-                        parse_mode=None,
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🎬 Chọn lại số cảnh", callback_data="vproduct|b14_scene_count_screen")],
-                            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-                        ]),
-                    )
-                    return True
-                provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+                custom_preflight_ready = bool(scene_health_gate.get("preflight_ready_for_final_confirm"))
+                if provider_preflight.get("ok") and scene_health_gate.get("ok"):
+                    provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+                    session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+            if not custom_preflight_ready:
+                panel_message = await update.message.reply_text(
+                    product_video_public_preflight_panel_text(count, ready=False),
+                    parse_mode="HTML",
+                    reply_markup=product_video_public_preflight_panel_keyboard(lang, ready=False),
+                )
+                product_video_store_public_preflight_context(uid, session, panel_message, count)
+                return True
             video_b14_prepare_project_for_invoice(uid, session)
+            session = get_video_session(uid)
             session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
             prefix = ""
             if scene_policy.get("message"):
@@ -91370,6 +91623,23 @@ def video_public_status_payload() -> dict:
             ),
         },
         "product_video_provider_health": product_video_provider_health,
+        "product_video_probation_admission": {
+            "provider_eligibility_state": str(product_video_provider_health.get("eligibility_state") or "blocked"),
+            "healthy_candidates": list(product_video_provider_health.get("healthy_candidate_keys") or []),
+            "probation_candidates": list(product_video_provider_health.get("probation_candidate_keys") or []),
+            "hard_blocked_candidates": list(product_video_provider_health.get("hard_blocked_candidate_keys") or []),
+            "probation_active_job": safe_int(product_video_provider_health.get("active_probation_job_id"), 0),
+            "probation_lock_status": str(product_video_provider_health.get("probation_lock_status") or "unknown"),
+            "probation_last_result": str(product_video_provider_health.get("probation_last_result") or "none"),
+            "final_admission_mode": str(product_video_provider_health.get("admission_mode") or "blocked"),
+            "worker_heartbeat_accepted": bool(
+                product_video_worker.get("owner_heartbeat_request_received")
+                and product_video_worker.get("owner_heartbeat_authenticated")
+                and product_video_worker.get("owner_heartbeat_persisted")
+                and not product_video_worker.get("owner_heartbeat_reject_reason")
+            ),
+            "worker_compatible": bool(product_video_worker.get("worker_version_compatible")),
+        },
         "product_video_multi_scene_health_gate": product_video_multi_scene_gate,
         "product_video_model_catalog": model_catalog,
         "video_public_status_section_errors": section_errors,
@@ -91413,6 +91683,7 @@ def video_public_status_text() -> str:
     freeze = payload.get("freeze") if isinstance(payload.get("freeze"), dict) else {}
     conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), dict) else {}
     product_submit = payload.get("product_video_provider_submit") if isinstance(payload.get("product_video_provider_submit"), dict) else {}
+    probation_admission = payload.get("product_video_probation_admission") if isinstance(payload.get("product_video_probation_admission"), dict) else {}
     multi_scene_health_gate = payload.get("product_video_multi_scene_health_gate") if isinstance(payload.get("product_video_multi_scene_health_gate"), dict) else {}
     health_render_error = ""
     try:
@@ -91478,6 +91749,14 @@ def video_public_status_text() -> str:
         f"• Product Video effective primary: <code>{html.escape(str(provider_health.get('effective_primary_for_low_basic') or provider_health.get('selected_provider') or '-'))}</code>",
         f"• Product Video route-ready chain: <code>{html.escape(','.join(provider_health.get('route_ready_provider_chain') or []) or '-')}</code>",
         f"• Product Video live-healthy chain: <code>{html.escape(','.join(provider_health.get('live_healthy_provider_chain') or []) or '-')}</code>",
+        f"• Product Video provider eligibility state: <code>{html.escape(str(probation_admission.get('provider_eligibility_state') or 'blocked'))}</code>",
+        f"• Product Video healthy candidates: <code>{html.escape(','.join(probation_admission.get('healthy_candidates') or []) or '-')}</code>",
+        f"• Product Video probation candidates: <code>{html.escape(','.join(probation_admission.get('probation_candidates') or []) or '-')}</code>",
+        f"• Product Video hard-blocked candidates: <code>{html.escape(','.join(probation_admission.get('hard_blocked_candidates') or []) or '-')}</code>",
+        f"• Product Video probation active job: <code>{safe_int(probation_admission.get('probation_active_job'), 0) or '-'}</code>",
+        f"• Product Video probation lock: <code>{html.escape(str(probation_admission.get('probation_lock_status') or 'unknown'))}</code>",
+        f"• Product Video probation last result: <code>{html.escape(str(probation_admission.get('probation_last_result') or 'none'))}</code>",
+        f"• Product Video final admission mode: <code>{html.escape(str(probation_admission.get('final_admission_mode') or 'blocked'))}</code>",
         f"• Product Video multi-scene health gate: <code>{'PASS' if multi_scene_health_gate.get('ok') else 'BLOCKED'}</code> reason=<code>{html.escape(str(multi_scene_health_gate.get('blocker') or '-'))}</code>",
         f"• ShopAIKey route/live health: <code>{'ready' if shopaikey_health.get('route_ready') else 'not_ready'}/{'healthy' if shopaikey_health.get('live_healthy') else 'not_healthy'}</code>",
         f"• ShopAIKey health: <code>{html.escape(str(shopaikey_health.get('health_status') or 'unknown'))}</code> last_valid=<code>{html.escape(str(shopaikey_health.get('last_valid_scene_at') or '-'))}</code> stalled_jobs=<code>{html.escape(str(shopaikey_health.get('recent_stalled_jobs') or []))}</code> reason=<code>{html.escape(str(shopaikey_health.get('degraded_reason') or shopaikey_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(shopaikey_health.get('degraded_until') or '-'))}</code>",
@@ -91515,6 +91794,7 @@ def video_public_status_text() -> str:
         f"• owner git HEAD: <code>{html.escape(str(product_worker.get('worker_git_head_sha') or '-')[:12])}</code>",
         f"• owner cwd: <code>{html.escape(str(product_worker.get('worker_cwd') or '-'))}</code>",
         f"• owner worker compatible: <code>{video_public_bool_label(product_worker.get('worker_version_compatible'))}</code>",
+        f"• owner heartbeat accepted: <code>{video_public_bool_label(probation_admission.get('worker_heartbeat_accepted'))}</code>",
         f"• owner instance/generation: <code>{html.escape(str(product_worker.get('authoritative_worker_instance_id') or '-'))}/{html.escape(str(product_worker.get('authoritative_worker_generation_id') or '-'))}</code>",
         f"• owner runtime target: <code>{html.escape(str(product_worker.get('runtime_target_sha') or '-')[:12])}</code>",
         f"• owner lease: <code>{html.escape(str(product_worker.get('lease_expires_at') or '-'))}</code>",
