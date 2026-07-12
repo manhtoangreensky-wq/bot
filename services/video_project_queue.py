@@ -16,7 +16,7 @@ import os
 import socket
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -157,6 +157,18 @@ PRODUCT_VIDEO_TIER_PRICE_MAP = {
 
 def now_text(moment: datetime | None = None) -> str:
     return (moment or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def product_video_outbox_utc_datetime(moment: datetime | None = None) -> datetime:
+    """Return an aware UTC datetime for the SQLite outbox timestamp contract."""
+    current = moment or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.astimezone()
+    return current.astimezone(timezone.utc)
+
+
+def product_video_outbox_time_text(moment: datetime | None = None) -> str:
+    return product_video_outbox_utc_datetime(moment).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def normalize_product_video_reconciliation_source(value: Any, default: str = "manual_admin_reconcile") -> str:
@@ -375,6 +387,29 @@ def _parse_time_epoch(value: Any) -> float:
         except Exception:
             continue
     return 0.0
+
+
+def _parse_outbox_utc_epoch(value: Any) -> float:
+    """Parse outbox timestamps as UTC instead of the host's local timezone."""
+    if value in (None, ""):
+        return 0.0
+    try:
+        numeric = float(value)
+        if numeric > 0:
+            return numeric
+    except Exception:
+        pass
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).timestamp()
+    except Exception:
+        return 0.0
 
 
 def _format_epoch(epoch: float) -> str:
@@ -1744,7 +1779,8 @@ def product_video_dispatch_outbox_debug_contract(
 ) -> dict[str, Any]:
     item = dict(outbox or {})
     truth = dict(diagnostic or {})
-    current_epoch = (now or datetime.now()).timestamp()
+    current_dt = product_video_outbox_utc_datetime(now)
+    current_epoch = current_dt.replace(tzinfo=timezone.utc).timestamp()
     present = bool(item or truth.get("outbox_exists"))
     status = str(item.get("dispatch_status") or truth.get("outbox_status") or "").strip().lower()
     available_at = str(item.get("available_at") or truth.get("outbox_available_at") or "")
@@ -1759,10 +1795,10 @@ def product_video_dispatch_outbox_debug_contract(
         claimable = False
         exact_reason = exact_reason or f"dispatch_outbox_{status}"
     elif status == "leased":
-        claimable = _parse_time_epoch(lease_expires_at) <= current_epoch
+        claimable = _parse_outbox_utc_epoch(lease_expires_at) <= current_epoch
         exact_reason = "" if claimable else "dispatch_outbox_lease_active"
     elif status in {"pending", "retry_wait"}:
-        claimable = _parse_time_epoch(available_at) <= current_epoch
+        claimable = _parse_outbox_utc_epoch(available_at) <= current_epoch
         exact_reason = "" if claimable else "dispatch_outbox_not_available_yet"
     else:
         claimable = False
@@ -1775,13 +1811,21 @@ def product_video_dispatch_outbox_debug_contract(
         public_reason = exact_reason
     if not claimable and not public_reason:
         public_reason = "dispatch_outbox_not_claimable"
+    available_epoch = _parse_outbox_utc_epoch(available_at)
+    due = bool(status in {"pending", "retry_wait"} and available_epoch <= current_epoch)
+    retry_seconds_remaining = int(max(0, available_epoch - current_epoch)) if available_epoch else 0
     return {
         "dispatch_outbox_present": present,
         "dispatch_outbox_id": _as_int(item.get("outbox_id") or truth.get("outbox_id"), 0),
         "dispatch_outbox_status": status,
         "dispatch_outbox_owner": str(item.get("owner") or truth.get("outbox_owner") or ""),
         "dispatch_outbox_available_at": available_at,
+        "dispatch_outbox_available_at_timezone": "UTC",
+        "dispatch_outbox_due": due,
+        "dispatch_outbox_retry_seconds_remaining": retry_seconds_remaining,
         "dispatch_outbox_attempt_count": _as_int(item.get("attempt_count"), 0),
+        "dispatch_outbox_retry_count": _as_int(item.get("attempt_count"), 0),
+        "dispatch_outbox_retry_reason": str(item.get("last_error") or ""),
         "dispatch_outbox_last_attempt_at": str(item.get("last_attempt_at") or ""),
         "dispatch_outbox_lease_owner": str(item.get("lease_owner") or truth.get("outbox_lease_owner") or ""),
         "dispatch_outbox_lease_expires_at": lease_expires_at,
@@ -2041,6 +2085,9 @@ def product_video_probation_lock_state(
     conn: sqlite3.Connection,
     *,
     provider_key: str = "",
+    current_job_id: int = 0,
+    current_project_id: int = 0,
+    current_user_id: int = 0,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Return the persisted single-probation lock without probing providers."""
@@ -2049,7 +2096,7 @@ def product_video_probation_lock_state(
     current_epoch = current_dt.timestamp()
     try:
         rows = conn.execute(
-            """SELECT id,status,result_json,created_at,updated_at,completed_at
+            """SELECT id,project_id,user_id,status,result_json,created_at,updated_at,completed_at
                  FROM video_jobs
                 WHERE job_type=? AND result_json LIKE ?
                 ORDER BY id DESC LIMIT 500""",
@@ -2071,8 +2118,10 @@ def product_video_probation_lock_state(
     latest_terminal: dict[str, Any] = {}
     for row in rows:
         job_id = int(row["id"] if isinstance(row, sqlite3.Row) else row[0])
-        status = str(row["status"] if isinstance(row, sqlite3.Row) else row[1])
-        raw_payload = row["result_json"] if isinstance(row, sqlite3.Row) else row[2]
+        project_id = int(row["project_id"] if isinstance(row, sqlite3.Row) else row[1])
+        user_id = int(row["user_id"] if isinstance(row, sqlite3.Row) else row[2])
+        status = str(row["status"] if isinstance(row, sqlite3.Row) else row[3])
+        raw_payload = row["result_json"] if isinstance(row, sqlite3.Row) else row[4]
         payload = _json_loads(str(raw_payload or ""), {})
         if not isinstance(payload, dict):
             continue
@@ -2088,19 +2137,24 @@ def product_video_probation_lock_state(
             continue
         record = {
             "job_id": job_id,
+            "project_id": project_id,
+            "user_id": user_id,
             "status": status,
             "provider": candidate,
             "probation_result": str(payload.get("probation_result") or "pending"),
             "probation_started_at": str(payload.get("probation_started_at") or ""),
             "probation_terminal_at": str(payload.get("probation_terminal_at") or ""),
             "probation_cooldown_until": str(payload.get("probation_cooldown_until") or ""),
+            "probation_lock_expires_at": str(payload.get("probation_lock_expires_at") or ""),
         }
+        lock_expiry_epoch = _parse_time_epoch(record["probation_lock_expires_at"])
+        lock_expired = bool(lock_expiry_epoch and lock_expiry_epoch <= current_epoch)
         probation_result = str(payload.get("probation_result") or "pending").strip().lower()
         pending_delivery = bool(
             probation_result == "pending"
             and status not in {"failed", "cancelled"}
         )
-        if (status in {"queued", "processing"} or pending_delivery) and not active:
+        if (status in {"queued", "processing"} or pending_delivery) and not lock_expired and not active:
             active = record
         elif (probation_result in {"success", "failed"} or status in {"failed", "cancelled"}) and not latest_terminal:
             latest_terminal = record
@@ -2109,13 +2163,37 @@ def product_video_probation_lock_state(
     cooldown_epoch = _parse_time_epoch(cooldown_until)
     cooldown_active = bool(cooldown_epoch and cooldown_epoch > current_epoch)
     lock_clear = bool(not active and not cooldown_active)
+    active_job_id = int(active.get("job_id") or 0)
+    current_job_matches_lock = bool(int(current_job_id or 0) > 0 and active_job_id == int(current_job_id or 0))
+    same_project = bool(
+        int(current_project_id or 0) > 0
+        and int(active.get("project_id") or 0) == int(current_project_id or 0)
+    )
+    same_user = bool(
+        int(current_user_id or 0) > 0
+        and int(active.get("user_id") or 0) == int(current_user_id or 0)
+    )
+    owned_by_other_job = bool(active_job_id > 0 and not current_job_matches_lock)
+    clear_for_current_job = bool(lock_clear or current_job_matches_lock)
     return {
         "probation_active": bool(active),
         "probation_lock_clear": lock_clear,
+        "probation_lock_clear_for_current_job": clear_for_current_job,
         "probation_lock_status": "clear" if lock_clear else ("active" if active else "cooldown"),
-        "active_probation_job_id": int(active.get("job_id") or 0),
+        "active_probation_job_id": active_job_id,
+        "probation_lock_owner_job": active_job_id,
+        "probation_lock_owner_project": int(active.get("project_id") or 0),
+        "probation_lock_owner_user": int(active.get("user_id") or 0),
         "active_probation_provider": str(active.get("provider") or ""),
         "active_probation_started_at": str(active.get("probation_started_at") or ""),
+        "probation_lock_expires_at": str(active.get("probation_lock_expires_at") or ""),
+        "current_probation_job_id": int(current_job_id or 0),
+        "current_job_matches_lock": current_job_matches_lock,
+        "current_project_matches_lock": same_project,
+        "current_user_matches_lock": same_user,
+        "same_job_lock_reentry_allowed": current_job_matches_lock,
+        "probation_lock_owned_by_other_job": owned_by_other_job,
+        "probation_lock_reject_reason": "probation_lock_owned_by_other_job" if owned_by_other_job else "",
         "probation_last_job_id": int(latest_terminal.get("job_id") or 0),
         "probation_last_provider": str(latest_terminal.get("provider") or ""),
         "probation_last_result": str(latest_terminal.get("probation_result") or "none"),
@@ -2156,8 +2234,8 @@ def product_video_dispatch_outbox_diagnostic(
 ) -> dict[str, Any]:
     """Explain the durable owner-worker claim decision for one Product Video job."""
     ensure_video_project_queue_schema(conn)
-    current_dt = now or datetime.now()
-    current_epoch = current_dt.timestamp()
+    current_dt = product_video_outbox_utc_datetime(now)
+    current_epoch = current_dt.replace(tzinfo=timezone.utc).timestamp()
     job = get_video_render_job(conn, int(job_id))
     if not job:
         return {
@@ -2187,8 +2265,8 @@ def product_video_dispatch_outbox_diagnostic(
     outbox_status = str(outbox.get("dispatch_status") or "").strip().lower()
     available_at = str(outbox.get("available_at") or "")
     lease_expiry = str(outbox.get("lease_expires_at") or "")
-    available_epoch = _parse_time_epoch(available_at)
-    lease_expiry_epoch = _parse_time_epoch(lease_expiry)
+    available_epoch = _parse_outbox_utc_epoch(available_at)
+    lease_expiry_epoch = _parse_outbox_utc_epoch(lease_expiry)
     job_lease_expiry = _parse_time_epoch(job.get("lease_expires_at"))
     job_active_lease = bool(
         job_status == "processing"
@@ -2302,7 +2380,7 @@ def ensure_product_video_dispatch_outbox(
     existing = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
     if existing:
         return {**existing, "dispatch_outbox_created": False}
-    current = now_text(now)
+    current = product_video_outbox_time_text(now)
     try:
         _insert_product_video_dispatch_outbox_record(
             conn,
@@ -2328,9 +2406,11 @@ def claim_product_video_dispatch_outbox(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     ensure_video_project_queue_schema(conn)
-    current_dt = now or datetime.now()
-    current = now_text(current_dt)
-    expires = now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
+    input_dt = now or datetime.now()
+    current_dt = product_video_outbox_utc_datetime(input_dt)
+    job_current = now_text(input_dt)
+    current = product_video_outbox_time_text(input_dt)
+    expires = product_video_outbox_time_text(input_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
@@ -2356,7 +2436,7 @@ def claim_product_video_dispatch_outbox(
                   )
                 ORDER BY o.available_at ASC,o.created_at ASC,o.outbox_id ASC
                 LIMIT 1""",
-            (PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER, current, current, current),
+            (PRODUCT_VIDEO_DISPATCH_OUTBOX_OWNER, job_current, current, current),
         ).fetchone()
         if not row:
             conn.commit()
@@ -2364,12 +2444,13 @@ def claim_product_video_dispatch_outbox(
         outbox = _dispatch_outbox_from_row(row)
         stale_recovered = bool(
             str(outbox.get("dispatch_status") or "") == "leased"
-            and _parse_time_epoch(outbox.get("lease_expires_at")) <= current_dt.timestamp()
+            and _parse_outbox_utc_epoch(outbox.get("lease_expires_at"))
+            <= current_dt.replace(tzinfo=timezone.utc).timestamp()
         )
         cursor = conn.execute(
             """UPDATE video_dispatch_outbox
                   SET dispatch_status='leased',attempt_count=COALESCE(attempt_count,0)+1,
-                      last_attempt_at=?,lease_owner=?,lease_expires_at=?,last_error='',updated_at=?
+                      last_attempt_at=?,lease_owner=?,lease_expires_at=?,updated_at=?
                 WHERE outbox_id=?
                   AND (
                        dispatch_status IN ('pending','retry_wait')
@@ -2406,7 +2487,7 @@ def acknowledge_product_video_dispatch_outbox(
     now: datetime | None = None,
     commit: bool = True,
 ) -> bool:
-    current = now_text(now)
+    current = product_video_outbox_time_text(now)
     cursor = conn.execute(
         """UPDATE video_dispatch_outbox
               SET dispatch_status='acknowledged',acknowledged_at=COALESCE(acknowledged_at,?),updated_at=?
@@ -2427,16 +2508,90 @@ def retry_product_video_dispatch_outbox(
     retry_seconds: int = 15,
     now: datetime | None = None,
 ) -> bool:
-    current_dt = now or datetime.now()
-    current = now_text(current_dt)
-    available = now_text(current_dt + timedelta(seconds=max(1, int(retry_seconds or 15))))
+    current_dt = product_video_outbox_utc_datetime(now)
+    current = product_video_outbox_time_text(current_dt)
+    previous = conn.execute(
+        """SELECT o.available_at,o.last_error,o.attempt_count,o.job_id,o.project_id,
+                  j.max_attempts,j.result_json
+             FROM video_dispatch_outbox o
+             JOIN video_jobs j ON j.id=o.job_id
+            WHERE o.outbox_id=?""",
+        (int(outbox_id),),
+    ).fetchone()
+    previous_available = str((previous[0] if previous else "") or "")
+    previous_error = str((previous[1] if previous else "") or "")
+    normalized_error = str(error or "dispatch_claim_failed")[:500]
+    attempt_count = _as_int(previous[2] if previous else 0, 0)
+    max_attempts = max(1, _as_int(previous[5] if previous else 3, 3))
+    previous_result = _json_loads(str((previous[6] if previous else "") or ""), {})
+    if not isinstance(previous_result, dict):
+        previous_result = {}
+    has_provider_task = bool(
+        str(previous_result.get("provider_task_id") or previous_result.get("provider_video_id") or "").strip()
+        or any(
+            _product_video_scene_task_identity(item)
+            for item in (previous_result.get("scene_tasks") or previous_result.get("provider_scene_tasks") or [])
+            if isinstance(item, dict)
+        )
+    )
+    if previous and attempt_count >= max_attempts and not has_provider_task:
+        terminal_reason = f"dispatch_not_started_{normalized_error}"
+        previous_result.update(
+            {
+                "terminal_state": "failed_no_charge",
+                "final_decision": "failed_no_charge",
+                "canonical_status": "failed_no_charge",
+                "continue_polling": False,
+                "next_poll_scheduled": False,
+                "dispatch_outbox_status": "terminal_failed",
+                "dispatch_outbox_terminal_reason": terminal_reason,
+                "provider_submit_called": False,
+                "provider_http_request_sent": False,
+                "provider_router_called": False,
+                "router_skip_reason": normalized_error,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        )
+        conn.execute(
+            """UPDATE video_jobs
+                  SET status='failed',result_json=?,last_error=?,progress_percent=0,
+                      progress_message=?,completed_at=COALESCE(completed_at,?),updated_at=?
+                WHERE id=?""",
+            (_json_dumps(previous_result), terminal_reason, terminal_reason, current, current, int(previous[3])),
+        )
+        conn.execute(
+            """UPDATE video_projects
+                  SET status='failed',video_terminal_state='failed_no_charge',error_log=?,updated_at=?
+                WHERE project_id=?""",
+            (terminal_reason, current, int(previous[4])),
+        )
+        conn.execute(
+            """UPDATE video_dispatch_outbox
+                  SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
+                      lease_owner='',lease_expires_at=NULL,updated_at=?
+                WHERE outbox_id=?""",
+            (terminal_reason, normalized_error, current, int(outbox_id)),
+        )
+        conn.execute(
+            "UPDATE video_scenes SET scene_status='terminal_failed' WHERE project_id=?",
+            (int(previous[4]),),
+        )
+        conn.commit()
+        return True
+    repeated_without_new_failure = bool(previous_error and previous_error == normalized_error)
+    available = (
+        previous_available
+        if repeated_without_new_failure and previous_available
+        else product_video_outbox_time_text(current_dt + timedelta(seconds=max(1, int(retry_seconds or 15))))
+    )
     cursor = conn.execute(
         """UPDATE video_dispatch_outbox
               SET dispatch_status='retry_wait',available_at=?,last_error=?,lease_owner='',lease_expires_at=NULL,updated_at=?
             WHERE outbox_id=? AND dispatch_status='leased' AND lease_owner=?""",
         (
             available,
-            str(error or "dispatch_claim_failed")[:500],
+            normalized_error,
             current,
             int(outbox_id),
             str(worker_id or "")[:120],
@@ -2980,12 +3135,22 @@ def _confirm_product_video_invoice_atomic(
                     "charged_xu": 0,
                 }
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
-            probation_lock = product_video_probation_lock_state(conn, now=current_dt)
-            if not probation_lock.get("probation_lock_clear"):
+            existing_job_id = int(locked[2] or 0)
+            probation_lock = product_video_probation_lock_state(
+                conn,
+                current_job_id=existing_job_id,
+                current_project_id=int(project["project_id"]),
+                current_user_id=int(user_id),
+                now=current_dt,
+            )
+            if not probation_lock.get("probation_lock_clear_for_current_job"):
                 conn.rollback()
                 return {
                     "ok": False,
-                    "reason": "product_video_probation_lock_active",
+                    "reason": str(
+                        probation_lock.get("probation_lock_reject_reason")
+                        or "product_video_probation_lock_active"
+                    ),
                     "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể kiểm tra lại sau.",
                     "admission": {**admission_state, **probation_lock},
                     "job_created": False,
@@ -2994,16 +3159,30 @@ def _confirm_product_video_invoice_atomic(
                     "charge": 0,
                     "charged_xu": 0,
                 }
-            admission_state.update(
-                {
-                    "probation_started_at": current,
-                    "probation_job_id": 0,
-                    "probation_result": "pending",
-                    "probation_terminal_at": "",
-                    "probation_cooldown_active": False,
-                    "probation_cooldown_until": "",
-                }
-            )
+            admission_state.update(probation_lock)
+            if probation_lock.get("same_job_lock_reentry_allowed"):
+                admission_state.update(
+                    {
+                        "probation_job_id": existing_job_id,
+                        "probation_candidate_key": str(
+                            probation_lock.get("active_probation_provider")
+                            or admission_state.get("probation_candidate_key")
+                            or ""
+                        ),
+                        "probation_result": "pending",
+                    }
+                )
+            else:
+                admission_state.update(
+                    {
+                        "probation_started_at": current,
+                        "probation_job_id": 0,
+                        "probation_result": "pending",
+                        "probation_terminal_at": "",
+                        "probation_cooldown_active": False,
+                        "probation_cooldown_until": "",
+                    }
+                )
         active_row = conn.execute(
             """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
                       lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at,
@@ -3018,7 +3197,17 @@ def _confirm_product_video_invoice_atomic(
             active_payload = _json_loads(str(active.get("result_json") or ""), {})
             if not isinstance(active_payload, dict):
                 active_payload = {}
+            existing_probation_started_at = str(active_payload.get("probation_started_at") or "")
+            existing_probation_provider = str(active_payload.get("probation_candidate_key") or "")
             active_payload.update(admission_state)
+            if str(active_payload.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
+                active_payload["probation_job_id"] = int(active["id"])
+                active_payload["same_job_lock_reentry_allowed"] = True
+                active_payload["current_job_matches_lock"] = True
+                if existing_probation_started_at:
+                    active_payload["probation_started_at"] = existing_probation_started_at
+                if existing_probation_provider:
+                    active_payload["probation_candidate_key"] = existing_probation_provider
             has_task = any(
                 _product_video_scene_task_identity(item)
                 for item in (active_payload.get("scene_tasks") or [])
@@ -3040,7 +3229,7 @@ def _confirm_product_video_invoice_atomic(
                     job_id=int(active["id"]),
                     project_id=int(project["project_id"]),
                     scene_indexes=list(range(1, active_scene_count + 1)),
-                    available_at=current,
+                    available_at=product_video_outbox_time_text(current_dt),
                 )
                 active_payload.update(
                     {
@@ -3091,7 +3280,18 @@ def _confirm_product_video_invoice_atomic(
         )
         job_id = int(cursor.lastrowid or 0)
         if str(admission_state.get("admission_mode") or "") == PRODUCT_VIDEO_PROBATION_ADMISSION_MODE:
-            admission_state["probation_job_id"] = job_id
+            admission_state.update(
+                {
+                    "probation_job_id": job_id,
+                    "probation_lock_owner_job": job_id,
+                    "current_probation_job_id": job_id,
+                    "current_job_matches_lock": True,
+                    "same_job_lock_reentry_allowed": True,
+                    "probation_lock_clear_for_current_job": True,
+                    "probation_lock_owned_by_other_job": False,
+                    "probation_lock_reject_reason": "",
+                }
+            )
             asset_pack.update(admission_state)
             invoice.update(admission_state)
         failure_stage = str((admission or {}).get("_test_failure_stage") or "") if os.getenv("PYTEST_CURRENT_TEST") else ""
@@ -3148,7 +3348,7 @@ def _confirm_product_video_invoice_atomic(
             job_id=job_id,
             project_id=int(project["project_id"]),
             scene_indexes=scene_indexes,
-            available_at=current,
+            available_at=product_video_outbox_time_text(current_dt),
         )
         if failure_stage == "after_outbox_insert":
             raise RuntimeError("injected_after_outbox_insert")
@@ -4306,6 +4506,7 @@ def sweep_product_video_zero_task_watchdog(
     ensure_video_project_queue_schema(conn)
     current_dt = now or datetime.now()
     current = now_text(current_dt)
+    outbox_current = product_video_outbox_time_text(current_dt)
     source = normalize_product_video_reconciliation_source(reconciliation_source, "watchdog_scheduler")
     run_id = str(reconciliation_run_id or f"pv-reconcile-{uuid.uuid4().hex}")
     params: list[Any] = [VIDEO_RENDER_JOB_TYPE]
@@ -4584,7 +4785,7 @@ def sweep_product_video_zero_task_watchdog(
                           SET dispatch_status='retry_wait',available_at=?,lease_owner='',lease_expires_at=NULL,
                               last_error='zero_task_dispatch_recovery',updated_at=?
                         WHERE outbox_id=?""",
-                    (current, current, int(outbox["outbox_id"])),
+                    (outbox_current, current, int(outbox["outbox_id"])),
                 )
                 conn.commit()
                 outbox = get_product_video_dispatch_outbox(conn, job_id=int(job["id"]))

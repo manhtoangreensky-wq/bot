@@ -35,6 +35,15 @@ def pytest_collection_modifyitems(config, items):
         "test_music_h14m_scope_does_not_touch_forbidden_runtime_areas": "tests/test_p0_23h14m_music_delivery_lock_no_duplicate_mp3_no_late_x.py",
         "test_h14n_no_product_video_subdub_voice_payos_db_changes": "tests/test_p0_23h14n_music_female_real_output_and_one_mp3_only.py",
         "test_h14o_does_not_touch_product_video_subdub_voice_payos_db": "tests/test_p0_23h14o_music_female_suggestion_one_mp3_only.py",
+        "test_m4live1_no_product_video_runtime_changes": "tests/test_p0_19m_m4live1_subdub_style_renderer_only_and_dub_modes_restore.py",
+        "test_m4live4_no_product_video_changes": "tests/test_p0_19m_m4live4_subdub_mode_specific_restore.py",
+        "test_pr321_no_product_video_music_payos_files_touched": "tests/test_p0_19m_pr321_subdub_no_extra_srt_no_dub_fail.py",
+        "test_no_music_product_video_subdub_runtime_touched": "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "test_product_video_runtime_untouched": "tests/test_p0_cskh2_toan_aas_training_data_playbook.py",
+        "test_cskh2a_no_product_video_runtime_changes": "tests/test_p0_cskh2a_business_arm_mode_without_connection.py",
+        "test_cskh3_no_product_video_runtime_changes": "tests/test_p0_cskh3_conversation_brain_natural_replies.py",
+        "test_cskh4_no_product_video_runtime_changes": "tests/test_p0_cskh4_aas_product_knowledge_pricing_mixed_intents.py",
+        "test_videoflow_lock_no_product_video_provider_changes": "tests/test_p0_video_uiflow_lock_current_good_flow.py",
     }
     for item in items:
         report_path = branch_scoped_static_guards.get(item.name)
