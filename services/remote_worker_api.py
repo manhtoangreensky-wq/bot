@@ -2007,36 +2007,68 @@ def _product_video_runtime_eligibility(
         or result.get("provider_chain")
         or persisted_candidates
     )
-    contract_chain = snapshot.get("contract_valid_provider_chain")
-    if contract_chain is None:
-        contract_chain = persisted_candidates
+    runtime_chain = (
+        video_provider_router.split_provider_chain(chain)
+        if isinstance(chain, str)
+        else [str(item or "").strip() for item in (chain or []) if str(item or "").strip()]
+    )
+    contract_chain = (
+        snapshot.get("contract_valid_provider_chain")
+        or result.get("contract_valid_provider_chain")
+        or runtime_chain
+    )
+    contract_chain = (
+        video_provider_router.split_provider_chain(contract_chain)
+        if isinstance(contract_chain, str)
+        else [str(item or "").strip() for item in (contract_chain or []) if str(item or "").strip()]
+    )
+    persisted_hard_blocks = result.get("provider_hard_block_reason_by_provider")
+    if not isinstance(persisted_hard_blocks, dict):
+        persisted_hard_blocks = {}
     evaluated = video_provider_router.product_video_provider_eligibility_snapshot(
         status=status,
-        chain=chain,
+        chain=runtime_chain,
         required_capability=str(result.get("required_capability") or "text_to_video_or_scene_video"),
         provider_health=refreshed_health,
         contract_valid_provider_chain=contract_chain,
         scene_count=max(1, _safe_int(result.get("scene_count") or result.get("scenes_total"), 1)),
         require_live_health=True,
         allow_public_confirmed_probation=public_confirmed_submit,
+        allow_operational_degradation_probation=True,
         admission_source=str(submit_policy.get("submit_source") or ""),
         public_user_confirmed=bool(submit_policy.get("public_user_confirmed")),
         public_submit_enabled=bool(submit_switch.get("resolved")),
         worker_compatible=worker_compatible,
         probation_lock_clear=probation_lock_clear,
+        hard_block_reason_by_provider=persisted_hard_blocks,
+        global_hard_block_reason=str(result.get("global_hard_block_reason") or ""),
         persisted_snapshot_id=str(result.get("admission_snapshot_id") or result.get("provider_eligibility_snapshot_id") or ""),
+    )
+    runtime_candidates = list(evaluated.get("eligible_provider_keys") or [])
+    submit_allowed = bool(
+        runtime_candidates
+        and submit_policy.get("provider_submit_allowed")
+    )
+    submit_block_reason = "" if submit_allowed else str(
+        submit_policy.get("provider_submit_block_reason")
+        or evaluated.get("blocker")
+        or "no_eligible_provider_before_scene_dispatch"
     )
     return {
         **evaluated,
         "provider_eligibility_snapshot": evaluated,
-        "runtime_candidate_keys": list(evaluated.get("eligible_provider_keys") or []),
+        "runtime_candidate_keys": runtime_candidates,
         "candidate_resolver_source": str(submit_policy.get("submit_source") or ""),
         "candidate_resolver_public_user_confirmed": bool(submit_policy.get("public_user_confirmed")),
         "candidate_filter_stage": "worker_runtime_eligibility",
-        "provider_submit_allowed_at_candidate_resolver": bool(submit_policy.get("provider_submit_allowed")),
-        "provider_submit_block_reason_at_candidate_resolver": str(
-            submit_policy.get("provider_submit_block_reason") or ""
-        ),
+        "provider_submit_allowed_at_candidate_resolver": submit_allowed,
+        "provider_submit_block_reason_at_candidate_resolver": submit_block_reason,
+        "provider_submit_allowed": submit_allowed,
+        "provider_submit_block_reason": submit_block_reason,
+        "router_called": False,
+        "router_skip_reason": "" if runtime_candidates else submit_block_reason,
+        "configured_chain_at_runtime": runtime_chain,
+        "contract_valid_chain_at_runtime": list(contract_chain or []),
         "probation_lock_clear_at_candidate_resolver": probation_lock_clear,
     }
 
@@ -2280,6 +2312,22 @@ def _claim_video_render_candidate(
                                 "final_eligible_provider_count": len(runtime_candidates),
                                 "admission_candidate_count_at_dispatch": len(runtime_candidates),
                                 "admission_rechecked_before_dispatch": True,
+                                "candidate_resolver_source": str(runtime_eligibility.get("candidate_resolver_source") or ""),
+                                "candidate_resolver_public_user_confirmed": bool(
+                                    runtime_eligibility.get("candidate_resolver_public_user_confirmed")
+                                ),
+                                "candidate_filter_stage": str(runtime_eligibility.get("candidate_filter_stage") or "worker_runtime_eligibility"),
+                                "candidates_before_filter": list(runtime_eligibility.get("candidates_before_filter") or []),
+                                "candidates_after_route_filter": list(runtime_eligibility.get("candidates_after_route_filter") or []),
+                                "candidates_after_freeze_filter": list(runtime_eligibility.get("candidates_after_freeze_filter") or []),
+                                "candidates_after_health_filter": list(runtime_eligibility.get("candidates_after_health_filter") or []),
+                                "candidates_after_hard_block_filter": list(runtime_eligibility.get("candidates_after_hard_block_filter") or []),
+                                "probation_candidate": str(runtime_eligibility.get("probation_candidate_selected") or ""),
+                                "probation_eligible": bool(runtime_eligibility.get("probation_eligible")),
+                                "probation_reject_reason": str(runtime_eligibility.get("probation_reject_reason") or ""),
+                                "provider_submit_allowed": bool(runtime_eligibility.get("provider_submit_allowed")),
+                                "provider_submit_block_reason": str(runtime_eligibility.get("provider_submit_block_reason") or ""),
+                                "router_skip_reason": str(runtime_eligibility.get("router_skip_reason") or ""),
                             }
                         )
                         if not runtime_candidates and not has_existing_provider_task and not has_existing_scene_clip:
@@ -2376,6 +2424,10 @@ def _claim_video_render_candidate(
                         and not has_existing_provider_task
                     ):
                         continue
+                    # Carry the authoritative runtime candidate decision into the
+                    # claimed payload. Re-reading the stale pre-claim JSON here
+                    # otherwise drops the probation provider before render dispatch.
+                    job["result_json"] = video_project_queue._json_dumps(result_payload)
                     job["scene_claim_state"] = claim_state
                     job["dispatch_outbox"] = dispatch_outbox
                     chosen = job
