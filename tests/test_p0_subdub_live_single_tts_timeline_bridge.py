@@ -40,10 +40,10 @@ def test_timeline_audio_hard_stops_each_tts_track_before_next_cue(monkeypatch):
     assert audio == b"timeline-audio"
     assert detail == "ffmpeg_timeline_audio"
     filters = captured["command"][captured["command"].index("-filter_complex") + 1]
-    assert "atrim=duration=1.500" in filters
+    assert "atrim=duration=1.000" in filters
     assert "adelay=0|0" in filters
     assert "adelay=1500|1500" in filters
-    assert filters.count("atrim=duration=") == 2
+    assert filters.count("atrim=duration=") == 3
 
 
 def test_target_tts_policy_has_one_track_and_never_source_tts():
