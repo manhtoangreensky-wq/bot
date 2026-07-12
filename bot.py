@@ -1865,7 +1865,12 @@ PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SEC
 SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
 SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
 SUBDUB_LONG_CHUNK_SECONDS = max(10, min(30, env_int("SUBDUB_LONG_CHUNK_SECONDS", 30)))
-SUBDUB_VISUAL_OCR_ENABLED = env_flag("SUBDUB_VISUAL_OCR_ENABLED", "true")
+SUBDUB_VISUAL_OCR_ENABLED = env_flag("SUBDUB_VISUAL_OCR_ENABLED", "false")
+SUBDUB_VISUAL_OCR_PUBLIC_ENABLED = env_flag("SUBDUB_VISUAL_OCR_PUBLIC_ENABLED", "false")
+SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS = max(
+    1,
+    min(120, env_int("SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS", 15)),
+)
 SUBDUB_VISUAL_OCR_FPS = max(0.5, min(4.0, env_float("SUBDUB_VISUAL_OCR_FPS", 2.0)))
 SUBDUB_VISUAL_OCR_BOTTOM_RATIO = max(0.20, min(0.60, env_float("SUBDUB_VISUAL_OCR_BOTTOM_RATIO", 0.35)))
 SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO = max(0.0, min(0.15, env_float("SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO", 0.04)))
@@ -38661,6 +38666,7 @@ LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
 ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 120
 PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
 SUBTITLE_DUB_PIPELINE_JOBS: dict[str, dict] = {}
+SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
 ADMIN_CAPTION_TOOL_TEST_COMMANDS = {
     "tool_test_asr": "asr",
     "tool_test_auto_subtitle": "auto_subtitle",
@@ -124490,6 +124496,8 @@ async def run_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> tuple[bo
     except Exception as e:
         return False, type(e).__name__
 
+_SUBDUB_BASE_RUN_FFMPEG_COMMAND = run_ffmpeg_command
+
 def media_temp_suffix(info: dict, default_suffix: str) -> str:
     name = str(info.get("file_name") or "")
     mime = str(info.get("mime_type") or "")
@@ -182551,6 +182559,49 @@ def subdub_original_audio_volume(mode: str = "", keep_original_audio: bool = Fal
         return subdub_percent_value(token, SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT, 0, 100) / 100.0
     return 0.0
 
+
+async def run_subdub_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> tuple[bool, str]:
+    """Run a SubDub FFmpeg command with bounded, reaped process lifetime."""
+    if run_ffmpeg_command is not _SUBDUB_BASE_RUN_FFMPEG_COMMAND:
+        return await run_ffmpeg_command(cmd, timeout=timeout)
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=max(1.0, float(timeout or 120.0)))
+        if proc.returncode == 0:
+            return True, "ok"
+        detail = (stderr or stdout or b"").decode("utf-8", errors="ignore")[-500:]
+        return False, detail or f"ffmpeg_return_{proc.returncode}"
+    except asyncio.TimeoutError:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=10)
+            except Exception:
+                pass
+        return False, "ffmpeg_timeout"
+    except asyncio.CancelledError:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=10)
+            except Exception:
+                pass
+        raise
+    except Exception as exc:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=10)
+            except Exception:
+                pass
+        return False, type(exc).__name__
+
+
 async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
     ffprobe = ffprobe_path_for_ffmpeg()
     if not ffprobe:
@@ -182561,6 +182612,7 @@ async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
         path = os.path.join(tmpdir, "probe.mp4")
         with open(path, "wb") as handle:
             handle.write(video_bytes)
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 ffprobe,
@@ -182591,7 +182643,29 @@ async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
                 "height": _safe_int(video_stream.get("height"), 0),
                 "size": len(video_bytes),
             }
+        except asyncio.TimeoutError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=10)
+                except Exception:
+                    pass
+            return {"ok": False, "detail": "ffprobe_timeout", "duration": 0.0, "has_video": False, "has_audio": False, "size": len(video_bytes)}
+        except asyncio.CancelledError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=10)
+                except Exception:
+                    pass
+            raise
         except Exception as exc:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=10)
+                except Exception:
+                    pass
             return {"ok": False, "detail": sanitize_log_text(type(exc).__name__), "duration": 0.0, "has_video": False, "has_audio": False, "size": len(video_bytes)}
 
 def subdub_basic_mp4_validation(video_bytes: bytes, *, min_bytes: int | None = None) -> dict:
@@ -182739,7 +182813,7 @@ async def subdub_compress_video_bytes(
             "-movflags", "+faststart",
             output_path,
         ]
-        ok, detail = await run_ffmpeg_command(command, timeout=300)
+        ok, detail = await run_subdub_ffmpeg_command(command, timeout=300)
         if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
             return b"", str(detail or "compress_failed")
         with open(output_path, "rb") as handle:
@@ -183233,7 +183307,7 @@ async def video_dubbing_extract_embedded_subtitle(source_bytes: bytes, content_t
         subtitle_path = os.path.join(tmpdir, "embedded.srt")
         with open(source_path, "wb") as handle:
             handle.write(source_bytes)
-        ok, detail = await run_ffmpeg_command([
+        ok, detail = await run_subdub_ffmpeg_command([
             ffmpeg, "-y", "-i", source_path,
             "-map", "0:s:0", "-c:s", "srt", subtitle_path,
         ], timeout=90)
@@ -183376,7 +183450,7 @@ async def video_dubbing_extract_visual_subtitle(
                 command.extend(["-t", str(int(max_seconds))])
             command.extend(["-vf", filter_chain, "-frames:v", str(requested_max_frames), frame_pattern])
             timeout_seconds = max(120, min(1200, int((effective_duration or 30) * 4)))
-            ok, _detail = await run_ffmpeg_command(command, timeout=timeout_seconds)
+            ok, _detail = await run_subdub_ffmpeg_command(command, timeout=timeout_seconds)
             if not ok:
                 return []
             return [str(path) for path in sorted(Path(tmpdir).glob("frame_*.png"))]
@@ -183424,7 +183498,7 @@ async def video_dubbing_extract_audio(source_bytes: bytes, content_type: str = "
         if int(max_seconds or 0) > 0:
             command.extend(["-t", str(max(2, int(max_seconds)))])
         command.extend(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "96k", audio_path])
-        ok, detail = await run_ffmpeg_command(command, timeout=120)
+        ok, detail = await run_subdub_ffmpeg_command(command, timeout=120)
         if not ok or not os.path.exists(audio_path) or os.path.getsize(audio_path) <= 0:
             raise RuntimeError("audio_extract_failed:" + sanitize_log_text(str(detail or "unknown"))[:120])
         with open(audio_path, "rb") as handle:
@@ -183440,7 +183514,7 @@ async def video_dubbing_extract_audio_chunk(
     return await subdub_long_media.extract_audio_chunk(
         source_bytes,
         ffmpeg_path=frame_video_ffmpeg_path(),
-        run_command=run_ffmpeg_command,
+        run_command=run_subdub_ffmpeg_command,
         start_seconds=start_seconds,
         duration_seconds=duration_seconds,
     )
@@ -184247,13 +184321,26 @@ async def video_dubbing_resolve_source_script(
             "detected_language": subdub_detect_language_from_text(embedded_subtitle, "auto"),
         }
     if prefer_visual_subtitles:
-        visual_result = await video_dubbing_extract_visual_subtitle(
-            source_bytes,
-            content_type,
-            duration_seconds=duration_seconds,
-            source_language=source_language,
-            max_seconds=max_seconds,
-        )
+        try:
+            visual_result = await asyncio.wait_for(
+                video_dubbing_extract_visual_subtitle(
+                    source_bytes,
+                    content_type,
+                    duration_seconds=duration_seconds,
+                    source_language=source_language,
+                    max_seconds=max_seconds,
+                ),
+                timeout=float(SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS),
+            )
+        except asyncio.TimeoutError:
+            visual_result = {"ok": False, "status": "visual_ocr_timeout", "segments": []}
+        except Exception as exc:
+            visual_result = {
+                "ok": False,
+                "status": "visual_ocr_unavailable",
+                "detail": type(exc).__name__,
+                "segments": [],
+            }
         if visual_result.get("ok") and visual_result.get("subtitle"):
             return {
                 "source_kind": "visual_hardsub_ocr",
@@ -184432,7 +184519,7 @@ async def video_dubbing_render_video(
             if dubbed_audio and source_duration > 0:
                 command.extend(["-t", f"{source_duration:.3f}"])
             command.extend(["-movflags", "+faststart", output_path])
-            ok, detail = await run_ffmpeg_command(command, timeout=300)
+            ok, detail = await run_subdub_ffmpeg_command(command, timeout=300)
             if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
                 return b"", f"{label}_render_failed:{sanitize_log_text(str(detail or 'video_render_failed'))[:180]}"
             with open(output_path, "rb") as handle:
@@ -184604,7 +184691,8 @@ async def execute_video_dubbing_preview(
         media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
         source_language=str(state.get("source_language") or "auto"),
         prefer_visual_subtitles=bool(
-            mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+            SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
+            and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
             and video_dubbing_has_existing_subtitle_metadata(state) is not False
         ),
     )
@@ -184990,7 +185078,7 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
             "-b:a", "160k",
             output_path,
         ])
-        ok, detail = await run_ffmpeg_command(command, timeout=max(180, len(ordered_chunks) * 30))
+        ok, detail = await run_subdub_ffmpeg_command(command, timeout=max(180, len(ordered_chunks) * 30))
         if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
             if len(chunks) == 1 and float((chunks[0] or {}).get("start") or 0) <= 0.05:
                 audio_bytes = bytes((chunks[0] or {}).get("audio_bytes") or b"")
@@ -185032,7 +185120,7 @@ async def normalize_dub_audio_bytes(audio_bytes: bytes) -> tuple[bytes, str]:
         normalized_path = os.path.join(tmpdir, "dub_normalized.mp3")
         with open(source_path, "wb") as handle:
             handle.write(bytes(audio_bytes))
-        ok, detail = await run_ffmpeg_command([
+        ok, detail = await run_subdub_ffmpeg_command([
             ffmpeg, "-y", "-i", source_path,
             "-af", filter_chain,
             "-c:a", "libmp3lame", "-b:a", "160k", normalized_path,
@@ -185041,7 +185129,7 @@ async def normalize_dub_audio_bytes(audio_bytes: bytes) -> tuple[bytes, str]:
             with open(normalized_path, "rb") as handle:
                 return handle.read(), f"ffmpeg_subdub_gain_loudnorm:gain={SUBDUB_DUB_VOICE_GAIN:g};target_lufs={target_lufs:.1f}"
         gain_path = os.path.join(tmpdir, "dub_gain.mp3")
-        gain_ok, gain_detail = await run_ffmpeg_command([
+        gain_ok, gain_detail = await run_subdub_ffmpeg_command([
             ffmpeg, "-y", "-i", source_path,
             "-af", subdub_dub_audio_filter_chain(fallback=True),
             "-c:a", "libmp3lame", "-b:a", "160k", gain_path,
@@ -185166,7 +185254,8 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                 media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
                 source_language=str(state.get("source_language") or "auto"),
                 prefer_visual_subtitles=bool(
-                    mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+                    SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
+                    and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
                     and video_dubbing_has_existing_subtitle_metadata(state) is not False
                 ),
             )
@@ -188745,15 +188834,138 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
     state = set_video_dubbing_pending(user_id, "confirm")
     return state, video_dubbing_confirm_text(state, lang), video_dubbing_confirm_keyboard(lang, state)
 
-async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _terminalize_subdub_background_failure(
+    update: Update,
+    *,
+    task_key: str,
+    reason: str,
+    send_public: bool,
+) -> None:
+    query = getattr(update, "callback_query", None)
+    uid = getattr(getattr(query, "from_user", None), "id", 0)
+    state = get_video_dubbing_pending(uid) or {}
+    mode = normalize_video_translate_mode(
+        state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
+    )
+    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(task_key) or {})
+    if subdub_job_video_delivery_succeeded(job):
+        update_subtitle_dub_pipeline_job(
+            task_key,
+            late_fail_suppressed=True,
+            late_public_error_suppressed=True,
+            public_error_sent=False,
+            public_failure_sent=False,
+            refresh_stopped_after_terminal=True,
+            status_panel_terminalized=True,
+        )
+        set_video_dubbing_pending(uid, "completed", processing="0", terminal_state="delivered")
+        return
+    safe_reason = sanitize_log_text(str(reason or "background_processing_failed"))[:180]
+    update_subtitle_dub_pipeline_job(
+        task_key,
+        status="failed_no_charge",
+        terminal_state="failed_no_charge",
+        lifecycle_state="failed_no_charge",
+        current_stage="failed_no_charge",
+        progress_stage="failed_no_charge",
+        last_error_stage="orchestration",
+        last_error_safe=safe_reason,
+        pipeline_blocker=safe_reason,
+        no_charge_reason=safe_reason,
+        charge_status="not_charged",
+        charged_xu=0,
+        continue_polling=False,
+        refresh_stopped_after_terminal=True,
+        status_panel_terminalized=True,
+        panel_finalized=True,
+        delivery_success=False,
+        delivery_succeeded=False,
+        final_mp4_delivered=False,
+    )
+    set_video_dubbing_pending(uid, "confirm", processing="0", terminal_state="failed_no_charge")
+    if not send_public or query is None or getattr(query, "message", None) is None:
+        return
+    try:
+        await send_subdub_fail_once(
+            query.message,
+            task_key,
+            mode=mode,
+            reason=safe_reason,
+            lang=get_user_language(uid) or "vi",
+            reply_markup=(
+                subtitle_plus_dub_clean_failure_keyboard(get_user_language(uid) or "vi")
+                if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+                else video_dubbing_guard_keyboard(get_user_language(uid) or "vi", admin=False)
+            ),
+        )
+    except Exception as exc:
+        logger.warning("subdub background failure message failed | error=%s", type(exc).__name__)
+
+
+async def _run_subdub_public_final_background(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    task_key: str,
+) -> None:
+    try:
+        await handle_video_dubbing_callback(update, context, _subdub_background=True)
+    except asyncio.CancelledError:
+        await _terminalize_subdub_background_failure(
+            update,
+            task_key=task_key,
+            reason="background_processing_cancelled",
+            send_public=False,
+        )
+        raise
+    except Exception as exc:
+        logger.exception("subdub background processing failed | task=%s", task_key)
+        await _terminalize_subdub_background_failure(
+            update,
+            task_key=task_key,
+            reason=f"background_processing_failed:{type(exc).__name__}",
+            send_public=True,
+        )
+    finally:
+        current_task = asyncio.current_task()
+        if SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS.get(task_key) is current_task:
+            SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS.pop(task_key, None)
+
+
+async def handle_video_dubbing_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    _subdub_background: bool = False,
+):
     query = update.callback_query
-    await query.answer()
+    if not _subdub_background:
+        await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
     state = get_video_dubbing_pending(uid) or {}
+    if action == "final" and not _subdub_background:
+        task_key = subtitle_dub_pipeline_job_key(
+            uid,
+            getattr(getattr(query, "message", None), "chat_id", uid),
+            state,
+        )
+        active_task = SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS.get(task_key)
+        if active_task is not None and not active_task.done():
+            return None
+        runner = _run_subdub_public_final_background(update, context, task_key)
+        application = getattr(context, "application", None)
+        create_task = getattr(application, "create_task", None)
+        if callable(create_task):
+            try:
+                task = create_task(runner, update=update, name=f"subdub-final-{abs(hash(task_key))}")
+            except TypeError:
+                task = create_task(runner)
+            SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS[task_key] = task
+            return None
+        return await runner
     if action == "subdub_status":
         job = subdub_progress_job_for_user(value, uid) or subtitle_dub_find_pipeline_job_for_user(uid, value)
         if not job:
@@ -190202,6 +190414,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 result = {"ok": False, "guard": True, "text": engine_result.get("message") or video_dubbing_guard_text(mode, state, lang, admin=False)}
         except Exception as exc:
             logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
+            if _subdub_background:
+                await _terminalize_subdub_background_failure(
+                    update,
+                    task_key=pipeline_job_key,
+                    reason=f"pipeline_failed:{type(exc).__name__}",
+                    send_public=True,
+                )
+                return None
             set_video_dubbing_pending(uid, "confirm", processing="0")
             await send_subdub_fail_once(
                 query.message,
