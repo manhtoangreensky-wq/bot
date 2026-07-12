@@ -72947,6 +72947,12 @@ def product_video_provider_public_route_preflight(
         degraded_providers=degraded_providers,
     )
     count = max(1, safe_int(scene_count, 1))
+    explicit_public_final_confirm = bool(
+        allow_public_confirmed_probation
+        and public_user_confirmed
+        and video_provider_router.normalize_product_video_submit_source(admission_source)
+        == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
     contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(chain, scene_count=count)
     submit_switch = video_provider_router.product_video_submit_switch_detail()
     public_submit_enabled = bool(submit_switch.get("resolved"))
@@ -72980,9 +72986,13 @@ def product_video_provider_public_route_preflight(
         hard_block_reason = "product_video_public_maintenance"
     elif not worker_compatible:
         hard_block_reason = str(worker.get("worker_admission_block_reason") or "worker_incompatible")
-    elif recent_failure and not recent_failure.get("ok", True):
+    elif (
+        recent_failure
+        and not recent_failure.get("ok", True)
+        and not explicit_public_final_confirm
+    ):
         hard_block_reason = str(recent_failure.get("no_charge_reason") or "provider_cooldown_active")
-    provider_hard_blocks = {
+    provider_hard_blocks = {} if explicit_public_final_confirm else {
         str(provider): "provider_freeze_active"
         for provider in chain
         if str(provider or "").strip() and provider_freeze_runtime_on(str(provider))
@@ -73126,6 +73136,12 @@ def product_video_multi_scene_health_gate(
         effective_provider_chain=effective,
         contract_valid_provider_chain=contract_valid,
         eligibility_snapshot=eligibility_snapshot,
+        public_user_final_confirm=bool(
+            allow_public_confirmed_probation
+            and public_user_confirmed
+            and video_provider_router.normalize_product_video_submit_source(admission_source)
+            == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+        ),
     )
     ready_for_confirm = bool(
         result.get("ok")
@@ -76711,34 +76727,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("b14_quality_xu"):
             session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
-        provider_preflight = product_video_provider_availability_preflight()
-        scene_evaluation = product_video_public_preflight_evaluation(
-            count,
-            preflight_snapshot=provider_preflight,
-        )
-        scene_preflight_ready = bool(
-            scene_evaluation.get("preflight_resolved_state") == "ready_healthy"
-        )
-        provider_preflight = dict(scene_evaluation.get("preflight") or {})
-        scene_health_gate = dict(scene_evaluation.get("scene_gate") or {})
-        if scene_preflight_ready and provider_preflight.get("ok") and scene_health_gate.get("ok"):
-            provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-            session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
-        if not scene_preflight_ready:
-            logger.info(
-                "product_video_preinvoice_preflight_resolved | user_id=%s | state=%s | public_copy=%s",
-                uid,
-                scene_evaluation.get("preflight_resolved_state"),
-                PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
-            )
-            return await product_video_show_public_preflight_panel(
-                query,
-                uid,
-                session,
-                lang,
-                count,
-                evaluation=scene_evaluation,
-            )
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
@@ -76761,32 +76749,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
                 )
         is_internal = video_b14_is_admin_or_owner(uid)
-        provider_preflight = product_video_provider_availability_preflight()
-        if provider_preflight.get("ok"):
-            scene_health_gate = product_video_multi_scene_health_gate(
-                confirm_scene_count,
-                provider_preflight,
-                allow_public_confirmed_probation=True,
-                admission_source="public_user_final_confirm",
-                public_user_confirmed=True,
-            )
-            admission_resolution = video_provider_router.resolve_product_video_public_preflight_state(
-                provider_preflight,
-                scene_health_gate,
-            )
-            admission_evaluation = {
-                "ready": bool(admission_resolution.get("final_confirm_enabled")),
-                "scene_count": confirm_scene_count,
-                "preflight": provider_preflight,
-                "scene_gate": scene_health_gate,
-                "admission_mode": str(admission_resolution.get("selected_admission_mode") or "blocked"),
-                **admission_resolution,
-            }
-        else:
-            admission_evaluation = product_video_public_preflight_evaluation(
-                confirm_scene_count,
-                explicit_public_final_confirm=True,
-            )
+        admission_evaluation = product_video_public_preflight_evaluation(
+            confirm_scene_count,
+            explicit_public_final_confirm=True,
+        )
         if not admission_evaluation.get("ready"):
             logger.info(
                 "product_video_final_preflight_blocked | user_id=%s | state=%s | public_copy=%s",
@@ -77421,28 +77387,6 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         session = save_video_session(uid, session)
         session, resize_note = video_b14_resize_storyboard_for_session(uid, session, count)
         if (session.get("draft") or {}).get("b14_quality_xu"):
-            custom_evaluation = product_video_public_preflight_evaluation(count)
-            custom_preflight_ready = bool(
-                custom_evaluation.get("preflight_resolved_state") == "ready_healthy"
-            )
-            provider_preflight = dict(custom_evaluation.get("preflight") or {})
-            scene_health_gate = dict(custom_evaluation.get("scene_gate") or {})
-            if custom_preflight_ready and provider_preflight.get("ok") and scene_health_gate.get("ok"):
-                provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
-            if not custom_preflight_ready:
-                resolved_state = str(custom_evaluation.get("preflight_resolved_state") or "internal_error")
-                panel_message = await update.message.reply_text(
-                    product_video_public_preflight_panel_text(count, resolved_state=resolved_state),
-                    parse_mode="HTML",
-                    reply_markup=product_video_public_preflight_panel_keyboard(
-                        lang,
-                        resolved_state=resolved_state,
-                        back_callback="vproduct|b14_scene_count_screen",
-                    ),
-                )
-                product_video_store_public_preflight_context(uid, session, panel_message, count)
-                return True
             video_b14_prepare_project_for_invoice(uid, session)
             session = get_video_session(uid)
             session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)

@@ -564,7 +564,7 @@ def test_public_preflight_panel_and_refresh_are_non_job_same_message_source_cont
         assert forbidden not in callback
 
 
-def test_blocked_preflight_returns_before_any_project_job_scene_or_outbox_insert():
+def test_preinvoice_planning_reaches_invoice_without_job_scene_outbox_or_submit():
     source = (ROOT / "bot.py").read_text(encoding="utf-8")
     callback_scene = source[
         source.index('if action == "b14_scene_count":'):
@@ -579,15 +579,19 @@ def test_blocked_preflight_returns_before_any_project_job_scene_or_outbox_insert
         source.index("def product_video_bot_watchdog_eligibility")
     ]
 
-    callback_block = callback_scene.index("if not scene_preflight_ready:")
-    callback_return = callback_scene.index("return await product_video_show_public_preflight_panel", callback_block)
-    callback_prepare = callback_scene.index("video_b14_prepare_project_for_invoice", callback_return)
-    assert callback_block < callback_return < callback_prepare
-
-    custom_block = custom_scene.index("if not custom_preflight_ready:")
-    custom_return = custom_scene.index("return True", custom_block)
-    custom_prepare = custom_scene.index("video_b14_prepare_project_for_invoice", custom_return)
-    assert custom_block < custom_return < custom_prepare
+    for block in (callback_scene, custom_scene):
+        assert "video_b14_prepare_project_for_invoice" in block
+        assert 'task3d_session_step(uid, "b14_invoice"' in block
+        assert "product_video_public_preflight_evaluation" not in block
+        assert "product_video_show_public_preflight_panel" not in block
+        for forbidden in (
+            "confirm_video_project_invoice",
+            "create_video_job",
+            "video_dispatch_outbox",
+            "provider_submit",
+            "spend_fixed_credit",
+        ):
+            assert forbidden not in block
 
     for forbidden in (
         "create_video_project",
