@@ -73108,6 +73108,12 @@ def product_video_multi_scene_health_gate(
         scene_count=count,
     )
     eligibility_snapshot = dict(preflight.get("provider_eligibility_snapshot") or {})
+    explicit_public_final_confirm = bool(
+        allow_public_confirmed_probation
+        and public_user_confirmed
+        and video_provider_router.normalize_product_video_submit_source(admission_source)
+        == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
     if safe_int(eligibility_snapshot.get("scene_count"), 0) != count:
         eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
             status=preflight.get("provider_status_snapshot") if isinstance(preflight.get("provider_status_snapshot"), dict) else {},
@@ -73122,7 +73128,7 @@ def product_video_multi_scene_health_gate(
             public_submit_enabled=bool(preflight.get("public_submit_enabled") and not preflight.get("public_maintenance")),
             worker_compatible=bool(preflight.get("worker_compatible")),
             probation_lock_clear=bool(preflight.get("probation_lock_clear")),
-            hard_block_reason_by_provider={
+            hard_block_reason_by_provider={} if explicit_public_final_confirm else {
                 str(provider): "provider_freeze_active"
                 for provider in configured
                 if provider_freeze_runtime_on(str(provider))
@@ -73136,12 +73142,7 @@ def product_video_multi_scene_health_gate(
         effective_provider_chain=effective,
         contract_valid_provider_chain=contract_valid,
         eligibility_snapshot=eligibility_snapshot,
-        public_user_final_confirm=bool(
-            allow_public_confirmed_probation
-            and public_user_confirmed
-            and video_provider_router.normalize_product_video_submit_source(admission_source)
-            == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
-        ),
+        public_user_final_confirm=explicit_public_final_confirm,
     )
     ready_for_confirm = bool(
         result.get("ok")
