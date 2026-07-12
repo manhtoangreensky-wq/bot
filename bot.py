@@ -73187,77 +73187,137 @@ def product_video_public_preflight_evaluation(
     scene_count: int,
     *,
     explicit_public_final_confirm: bool = False,
+    preflight_snapshot: dict | None = None,
 ) -> dict:
     """Read admission truth only; this function never creates or submits a job."""
     count = max(1, safe_int(scene_count, 1))
     source = "public_user_final_confirm" if explicit_public_final_confirm else ""
-    preflight = product_video_provider_availability_preflight(
-        scene_count=count,
-        allow_public_confirmed_probation=explicit_public_final_confirm,
-        admission_source=source,
-        public_user_confirmed=explicit_public_final_confirm,
-    )
-    scene_gate = product_video_multi_scene_health_gate(
-        count,
-        preflight,
-        allow_public_confirmed_probation=explicit_public_final_confirm,
-        admission_source=source,
-        public_user_confirmed=explicit_public_final_confirm,
-    )
-    ready = bool(
-        scene_gate.get("ok")
-        if explicit_public_final_confirm
-        else scene_gate.get("preflight_ready_for_final_confirm")
-    )
+    try:
+        preflight = (
+            dict(preflight_snapshot)
+            if preflight_snapshot is not None
+            else product_video_provider_availability_preflight(
+                scene_count=count,
+                allow_public_confirmed_probation=explicit_public_final_confirm,
+                admission_source=source,
+                public_user_confirmed=explicit_public_final_confirm,
+            )
+        )
+        scene_gate = product_video_multi_scene_health_gate(
+            count,
+            preflight,
+            allow_public_confirmed_probation=explicit_public_final_confirm,
+            admission_source=source,
+            public_user_confirmed=explicit_public_final_confirm,
+        )
+        resolution = video_provider_router.resolve_product_video_public_preflight_state(
+            preflight,
+            scene_gate,
+        )
+    except Exception as exc:
+        preflight = {}
+        scene_gate = {}
+        resolution = video_provider_router.resolve_product_video_public_preflight_state(
+            {},
+            {},
+            internal_error=f"preflight_evaluation_error:{type(exc).__name__}",
+        )
+    ready = bool(resolution.get("final_confirm_enabled"))
     return {
         "ready": ready,
         "scene_count": count,
         "preflight": preflight,
         "scene_gate": scene_gate,
-        "admission_mode": str(scene_gate.get("admission_mode") or preflight.get("admission_mode") or "blocked"),
+        "admission_mode": str(resolution.get("selected_admission_mode") or "blocked"),
+        **resolution,
     }
+
+
+def product_video_public_preflight_public_kind(resolved_state: str) -> str:
+    return {
+        "ready_healthy": "ready",
+        "ready_probation": "ready_try",
+        "expired_context": "expired",
+        "internal_error": "error",
+    }.get(str(resolved_state or "").strip().lower(), "blocked")
+
+
+def product_video_public_preflight_default_state(ready) -> str:
+    return "ready_healthy" if bool(ready) else "blocked_provider"
 
 
 def product_video_public_preflight_panel_text(
     scene_count: int,
     *,
-    ready: bool = False,
+    resolved_state: str = "",
+    ready=None,
     total_xu: int = 0,
 ) -> str:
     count = max(1, safe_int(scene_count, 1))
-    if ready:
-        price_line = f"• Tổng dự kiến: <b>{xu_number(max(0, safe_int(total_xu, 0)))} Xu</b>\n" if safe_int(total_xu, 0) > 0 else ""
+    if not resolved_state:
+        resolved_state = product_video_public_preflight_default_state(ready)
+    panel_kind = product_video_public_preflight_public_kind(resolved_state)
+    if panel_kind == "ready":
         return (
             "🎬 <b>Trạng thái tạo video</b>\n\n"
-            "✅ <b>Có thể xác nhận</b>\n\n"
+            "✅ <b>Hệ thống đã sẵn sàng</b>\n\n"
             f"• Số cảnh đã chọn: <b>{count}</b>\n"
-            f"{price_line}"
+            "• Hệ thống dựng video: Sẵn sàng\n"
+            "• Khả năng tạo nhiều cảnh: Sẵn sàng\n"
+            "• Hệ thống chỉ bắt đầu sau khi anh/chị xác nhận."
+        )
+    if panel_kind == "ready_try":
+        return (
+            "🎬 <b>Trạng thái tạo video</b>\n\n"
+            "✅ <b>Có thể bắt đầu thử tạo</b>\n\n"
+            f"• Số cảnh đã chọn: <b>{count}</b>\n"
             "• Hệ thống dựng video: Sẵn sàng thử\n"
-            "• Khả năng tạo nhiều cảnh: Đã sẵn sàng để xác nhận\n"
+            "• Hệ thống chỉ bắt đầu sau khi anh/chị xác nhận.\n"
+            "• Hệ thống chưa trừ Xu."
+        )
+    if panel_kind == "expired":
+        return (
+            "🎬 <b>Trạng thái tạo video</b>\n\n"
+            "⚠️ <b>Phiên kiểm tra đã hết hạn</b>\n\n"
+            f"• Số cảnh đã chọn: <b>{count}</b>\n"
             "• Hệ thống chưa trừ Xu.\n\n"
-            "Hệ thống đã sẵn sàng thử tạo video.\n"
-            "TOAN AAS chỉ bắt đầu sau khi anh/chị xác nhận."
+            "Anh/chị vui lòng quay lại chọn số cảnh."
+        )
+    if panel_kind == "error":
+        return (
+            "🎬 <b>Trạng thái tạo video</b>\n\n"
+            "⚠️ <b>Chưa thể đọc trạng thái lúc này</b>\n\n"
+            f"• Số cảnh đã chọn: <b>{count}</b>\n"
+            "• Hệ thống chưa trừ Xu.\n\n"
+            "Anh/chị có thể kiểm tra lại sau."
         )
     return (
         "🎬 <b>Trạng thái tạo video</b>\n\n"
         "⚠️ <b>Chưa thể bắt đầu</b>\n\n"
         f"• Số cảnh đã chọn: <b>{count}</b>\n"
-        "• Hệ thống dựng video: Đang kiểm tra\n"
-        "• Khả năng tạo nhiều cảnh: Tạm thời chưa sẵn sàng\n"
+        "• Hệ thống dựng video: Tạm thời chưa sẵn sàng\n"
         "• Hệ thống chưa trừ Xu.\n\n"
-        "TOAN AAS chưa thể bắt đầu tạo video lúc này.\n"
-        "Hệ thống chưa trừ Xu.\n"
         "Anh/chị có thể kiểm tra lại sau."
     )
 
 
-def product_video_public_preflight_panel_keyboard(lang: str = "vi", *, ready: bool = False) -> InlineKeyboardMarkup:
+def product_video_public_preflight_panel_keyboard(
+    lang: str = "vi",
+    *,
+    resolved_state: str = "",
+    ready=None,
+    back_callback: str = "vproduct|b14_scene_count_screen",
+) -> InlineKeyboardMarkup:
+    if not resolved_state:
+        resolved_state = "ready_healthy" if bool(ready) else "blocked_provider"
+    panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
-    if ready:
+    if panel_kind in {"ready", "ready_try"}:
         rows.append([InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm")])
-    rows.append([InlineKeyboardButton("🔄 Kiểm tra lại", callback_data="vproduct|b14_preflight_refresh")])
+    if panel_kind in {"ready_try", "blocked", "error"}:
+        rows.append([InlineKeyboardButton("🔄 Kiểm tra lại", callback_data="vproduct|b14_preflight_refresh")])
     rows.append([
-        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -73286,20 +73346,36 @@ def product_video_store_public_preflight_context(user_id: int, session: dict, qu
     return save_video_session(user_id, session)
 
 
-async def product_video_show_public_preflight_panel(query, user_id: int, session: dict, lang: str, scene_count: int):
-    evaluation = product_video_public_preflight_evaluation(scene_count)
-    ready = bool(evaluation.get("ready"))
-    invoice = video_b14_invoice_for_session(session, user_id) if ready else {}
+async def product_video_show_public_preflight_panel(
+    query,
+    user_id: int,
+    session: dict,
+    lang: str,
+    scene_count: int,
+    *,
+    evaluation: dict | None = None,
+):
+    evaluation = dict(evaluation or product_video_public_preflight_evaluation(scene_count))
+    resolved_state = str(evaluation.get("preflight_resolved_state") or "internal_error")
+    draft = dict((session or {}).get("draft") or {})
+    back_callback = (
+        "vproduct|b14_invoice_screen"
+        if safe_int(draft.get("b14_project_id"), 0) > 0
+        else "vproduct|b14_scene_count_screen"
+    )
     product_video_store_public_preflight_context(user_id, session, query, scene_count)
     return await safe_edit_or_send(
         query,
         product_video_public_preflight_panel_text(
             scene_count,
-            ready=ready,
-            total_xu=safe_int(invoice.get("total_xu"), 0),
+            resolved_state=resolved_state,
         ),
         parse_mode="HTML",
-        reply_markup=product_video_public_preflight_panel_keyboard(lang, ready=ready),
+        reply_markup=product_video_public_preflight_panel_keyboard(
+            lang,
+            resolved_state=resolved_state,
+            back_callback=back_callback,
+        ),
     )
 
 
@@ -76598,14 +76674,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             draft.pop("b14_preflight_ui_context", None)
             session["draft"] = draft
             save_video_session(uid, session)
+            count = max(1, safe_int(context_data.get("selected_scene_count") or draft.get("b14_scene_count"), 1))
+            back_callback = (
+                "vproduct|b14_invoice_screen"
+                if safe_int(draft.get("b14_project_id"), 0) > 0
+                else "vproduct|b14_scene_count_screen"
+            )
             return await safe_edit_or_send(
                 query,
-                "🎬 <b>Trạng thái tạo video</b>\n\nPhiên kiểm tra đã hết hạn. Hệ thống chưa trừ Xu.",
+                product_video_public_preflight_panel_text(
+                    count,
+                    resolved_state="expired_context",
+                ),
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_invoice_screen"),
-                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-                ]]),
+                reply_markup=product_video_public_preflight_panel_keyboard(
+                    lang,
+                    resolved_state="expired_context",
+                    back_callback=back_callback,
+                ),
             )
         count = max(1, safe_int(context_data.get("selected_scene_count"), 1))
         return await product_video_show_public_preflight_panel(query, uid, session, lang, count)
@@ -76625,21 +76711,34 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("b14_quality_xu"):
             session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
-        scene_preflight_ready = True
-        if not video_b14_is_admin_or_owner(uid):
-            provider_preflight = product_video_provider_availability_preflight()
-            scene_health_gate = product_video_multi_scene_health_gate(count, provider_preflight)
-            scene_preflight_ready = bool(scene_health_gate.get("preflight_ready_for_final_confirm"))
-            if provider_preflight.get("ok") and scene_health_gate.get("ok"):
-                provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+        provider_preflight = product_video_provider_availability_preflight()
+        scene_evaluation = product_video_public_preflight_evaluation(
+            count,
+            preflight_snapshot=provider_preflight,
+        )
+        scene_preflight_ready = bool(
+            scene_evaluation.get("preflight_resolved_state") == "ready_healthy"
+        )
+        provider_preflight = dict(scene_evaluation.get("preflight") or {})
+        scene_health_gate = dict(scene_evaluation.get("scene_gate") or {})
+        if scene_preflight_ready and provider_preflight.get("ok") and scene_health_gate.get("ok"):
+            provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+            session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
         if not scene_preflight_ready:
             logger.info(
-                "product_video_preinvoice_preflight_blocked | user_id=%s | public_copy=%s",
+                "product_video_preinvoice_preflight_resolved | user_id=%s | state=%s | public_copy=%s",
                 uid,
+                scene_evaluation.get("preflight_resolved_state"),
                 PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
             )
-            return await product_video_show_public_preflight_panel(query, uid, session, lang, count)
+            return await product_video_show_public_preflight_panel(
+                query,
+                uid,
+                session,
+                lang,
+                count,
+                evaluation=scene_evaluation,
+            )
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
@@ -76652,9 +76751,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
         project_id = safe_int(draft.get("b14_project_id"), 0)
         confirm_scene_count = max(1, safe_int(draft.get("b14_scene_count"), 1))
-        ok, guard_message = video_b14_public_render_guard(uid)
-        if not ok:
-            return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
         if video_b14_is_trial_quality((draft.get("b14_invoice") or {}).get("quality_xu") or draft.get("b14_quality_xu")) and not video_b14_is_admin_or_owner(uid):
             trial_usage = video_b14_trial_usage_allowed(uid)
             if not trial_usage.get("ok"):
@@ -76667,13 +76763,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         is_internal = video_b14_is_admin_or_owner(uid)
         provider_preflight = product_video_provider_availability_preflight()
         if provider_preflight.get("ok"):
-            baseline_scene_gate = product_video_multi_scene_health_gate(confirm_scene_count, provider_preflight)
+            scene_health_gate = product_video_multi_scene_health_gate(
+                confirm_scene_count,
+                provider_preflight,
+                allow_public_confirmed_probation=True,
+                admission_source="public_user_final_confirm",
+                public_user_confirmed=True,
+            )
+            admission_resolution = video_provider_router.resolve_product_video_public_preflight_state(
+                provider_preflight,
+                scene_health_gate,
+            )
             admission_evaluation = {
-                "ready": bool(baseline_scene_gate.get("ok")),
+                "ready": bool(admission_resolution.get("final_confirm_enabled")),
                 "scene_count": confirm_scene_count,
                 "preflight": provider_preflight,
-                "scene_gate": baseline_scene_gate,
-                "admission_mode": str(baseline_scene_gate.get("admission_mode") or "healthy"),
+                "scene_gate": scene_health_gate,
+                "admission_mode": str(admission_resolution.get("selected_admission_mode") or "blocked"),
+                **admission_resolution,
             }
         else:
             admission_evaluation = product_video_public_preflight_evaluation(
@@ -76682,11 +76789,19 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             )
         if not admission_evaluation.get("ready"):
             logger.info(
-                "product_video_final_preflight_blocked | user_id=%s | public_copy=%s",
+                "product_video_final_preflight_blocked | user_id=%s | state=%s | public_copy=%s",
                 uid,
+                admission_evaluation.get("preflight_resolved_state"),
                 PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI,
             )
-            return await product_video_show_public_preflight_panel(query, uid, session, lang, confirm_scene_count)
+            return await product_video_show_public_preflight_panel(
+                query,
+                uid,
+                session,
+                lang,
+                confirm_scene_count,
+                evaluation=admission_evaluation,
+            )
         provider_preflight = dict(admission_evaluation.get("preflight") or {})
         scene_health_gate = dict(admission_evaluation.get("scene_gate") or {})
         provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
@@ -77306,20 +77421,25 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         session = save_video_session(uid, session)
         session, resize_note = video_b14_resize_storyboard_for_session(uid, session, count)
         if (session.get("draft") or {}).get("b14_quality_xu"):
-            ok, guard_message = video_b14_public_render_guard(uid)
-            custom_preflight_ready = bool(ok)
-            if not video_b14_is_admin_or_owner(uid):
-                provider_preflight = product_video_provider_availability_preflight()
-                scene_health_gate = product_video_multi_scene_health_gate(count, provider_preflight)
-                custom_preflight_ready = bool(scene_health_gate.get("preflight_ready_for_final_confirm"))
-                if provider_preflight.get("ok") and scene_health_gate.get("ok"):
-                    provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
-                    session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
+            custom_evaluation = product_video_public_preflight_evaluation(count)
+            custom_preflight_ready = bool(
+                custom_evaluation.get("preflight_resolved_state") == "ready_healthy"
+            )
+            provider_preflight = dict(custom_evaluation.get("preflight") or {})
+            scene_health_gate = dict(custom_evaluation.get("scene_gate") or {})
+            if custom_preflight_ready and provider_preflight.get("ok") and scene_health_gate.get("ok"):
+                provider_preflight = {**provider_preflight, "multi_scene_health_gate": scene_health_gate}
+                session = product_video_apply_provider_preflight_to_session(uid, session, provider_preflight)
             if not custom_preflight_ready:
+                resolved_state = str(custom_evaluation.get("preflight_resolved_state") or "internal_error")
                 panel_message = await update.message.reply_text(
-                    product_video_public_preflight_panel_text(count, ready=False),
+                    product_video_public_preflight_panel_text(count, resolved_state=resolved_state),
                     parse_mode="HTML",
-                    reply_markup=product_video_public_preflight_panel_keyboard(lang, ready=False),
+                    reply_markup=product_video_public_preflight_panel_keyboard(
+                        lang,
+                        resolved_state=resolved_state,
+                        back_callback="vproduct|b14_scene_count_screen",
+                    ),
                 )
                 product_video_store_public_preflight_context(uid, session, panel_message, count)
                 return True
@@ -91509,13 +91629,15 @@ def video_public_status_payload() -> dict:
     billing_gate = video_billing_public_gate()
     product_video_submit_switch = video_provider_router.product_video_submit_switch_detail()
     product_video_submit_enabled = bool(product_video_submit_switch.get("resolved"))
+    product_video_preflight_resolution_error = ""
     try:
         product_video_provider_health = product_video_provider_public_route_preflight()
     except Exception as exc:
+        product_video_preflight_resolution_error = f"provider_health_unavailable:{type(exc).__name__}"
         product_video_provider_health = {
             "ok": False,
             "provider_preflight_checked": False,
-            "provider_preflight_result": f"provider_health_unavailable:{type(exc).__name__}",
+            "provider_preflight_result": product_video_preflight_resolution_error,
             "provider_health_summary": {},
             "effective_provider_chain": [],
             "selected_provider": "",
@@ -91523,11 +91645,34 @@ def video_public_status_payload() -> dict:
     try:
         product_video_multi_scene_gate = product_video_multi_scene_health_gate(2, product_video_provider_health)
     except Exception as exc:
+        product_video_preflight_resolution_error = (
+            product_video_preflight_resolution_error
+            or f"multi_scene_health_gate_unavailable:{type(exc).__name__}"
+        )
         product_video_multi_scene_gate = {
             "ok": False,
             "blocker": f"multi_scene_health_gate_unavailable:{type(exc).__name__}",
             "provider_submit_count": 0,
             "charge": 0,
+        }
+    try:
+        product_video_preflight_resolution = video_provider_router.resolve_product_video_public_preflight_state(
+            product_video_provider_health,
+            product_video_multi_scene_gate,
+            internal_error=product_video_preflight_resolution_error,
+        )
+    except Exception as exc:
+        product_video_preflight_resolution = {
+            "preflight_resolved_state": "internal_error",
+            "preflight_blocker_code": f"preflight_resolution_error:{type(exc).__name__}",
+            "worker_eligible": False,
+            "healthy_candidate_count": 0,
+            "probation_candidate_count": 0,
+            "hard_blocked_candidate_count": 0,
+            "selected_admission_mode": "blocked",
+            "final_confirm_enabled": False,
+            "final_confirm_disabled_reason": f"preflight_resolution_error:{type(exc).__name__}",
+            "preflight_resolution_final": True,
         }
     freeze = provider_freeze_display("shopaikey_video")
     hidden_video_freeze = bool(freeze.get("frozen"))
@@ -91636,6 +91781,7 @@ def video_public_status_payload() -> dict:
             ),
         },
         "product_video_provider_health": product_video_provider_health,
+        "product_video_public_preflight_resolution": product_video_preflight_resolution,
         "product_video_probation_admission": {
             "provider_eligibility_state": str(product_video_provider_health.get("eligibility_state") or "blocked"),
             "healthy_candidates": list(product_video_provider_health.get("healthy_candidate_keys") or []),
@@ -91698,6 +91844,7 @@ def video_public_status_text() -> str:
     product_submit = payload.get("product_video_provider_submit") if isinstance(payload.get("product_video_provider_submit"), dict) else {}
     probation_admission = payload.get("product_video_probation_admission") if isinstance(payload.get("product_video_probation_admission"), dict) else {}
     multi_scene_health_gate = payload.get("product_video_multi_scene_health_gate") if isinstance(payload.get("product_video_multi_scene_health_gate"), dict) else {}
+    preflight_resolution = payload.get("product_video_public_preflight_resolution") if isinstance(payload.get("product_video_public_preflight_resolution"), dict) else {}
     health_render_error = ""
     try:
         provider_health = payload.get("product_video_provider_health") if isinstance(payload.get("product_video_provider_health"), dict) else {}
@@ -91770,6 +91917,13 @@ def video_public_status_text() -> str:
         f"• Product Video probation lock: <code>{html.escape(str(probation_admission.get('probation_lock_status') or 'unknown'))}</code>",
         f"• Product Video probation last result: <code>{html.escape(str(probation_admission.get('probation_last_result') or 'none'))}</code>",
         f"• Product Video final admission mode: <code>{html.escape(str(probation_admission.get('final_admission_mode') or 'blocked'))}</code>",
+        f"• Product Video preflight resolved state: <code>{html.escape(str(preflight_resolution.get('preflight_resolved_state') or 'internal_error'))}</code>",
+        f"• Product Video preflight blocker: <code>{html.escape(str(preflight_resolution.get('preflight_blocker_code') or '-'))}</code>",
+        f"• Product Video preflight worker eligible: <code>{video_public_bool_label(preflight_resolution.get('worker_eligible'))}</code>",
+        f"• Product Video preflight healthy/probation/hard-blocked: <code>{safe_int(preflight_resolution.get('healthy_candidate_count'), 0)}/{safe_int(preflight_resolution.get('probation_candidate_count'), 0)}/{safe_int(preflight_resolution.get('hard_blocked_candidate_count'), 0)}</code>",
+        f"• Product Video preflight admission mode: <code>{html.escape(str(preflight_resolution.get('selected_admission_mode') or 'blocked'))}</code>",
+        f"• Product Video final confirm enabled: <code>{video_public_bool_label(preflight_resolution.get('final_confirm_enabled'))}</code>",
+        f"• Product Video final confirm disabled reason: <code>{html.escape(str(preflight_resolution.get('final_confirm_disabled_reason') or '-'))}</code>",
         f"• Product Video multi-scene health gate: <code>{'PASS' if multi_scene_health_gate.get('ok') else 'BLOCKED'}</code> reason=<code>{html.escape(str(multi_scene_health_gate.get('blocker') or '-'))}</code>",
         f"• ShopAIKey route/live health: <code>{'ready' if shopaikey_health.get('route_ready') else 'not_ready'}/{'healthy' if shopaikey_health.get('live_healthy') else 'not_healthy'}</code>",
         f"• ShopAIKey health: <code>{html.escape(str(shopaikey_health.get('health_status') or 'unknown'))}</code> last_valid=<code>{html.escape(str(shopaikey_health.get('last_valid_scene_at') or '-'))}</code> stalled_jobs=<code>{html.escape(str(shopaikey_health.get('recent_stalled_jobs') or []))}</code> reason=<code>{html.escape(str(shopaikey_health.get('degraded_reason') or shopaikey_health.get('degrade_reason') or '-'))}</code> until=<code>{html.escape(str(shopaikey_health.get('degraded_until') or '-'))}</code>",

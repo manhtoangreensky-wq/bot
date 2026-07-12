@@ -2533,6 +2533,204 @@ def product_video_provider_eligibility_snapshot(
     }
 
 
+PRODUCT_VIDEO_PUBLIC_PREFLIGHT_RESOLVED_STATES = frozenset(
+    {
+        "ready_healthy",
+        "ready_probation",
+        "blocked_worker",
+        "blocked_provider",
+        "blocked_cooldown",
+        "blocked_configuration",
+        "blocked_concurrency",
+        "blocked_security_cost",
+        "expired_context",
+        "internal_error",
+    }
+)
+
+
+def resolve_product_video_public_preflight_state(
+    preflight: dict[str, Any] | None = None,
+    scene_gate: dict[str, Any] | None = None,
+    *,
+    context_valid: bool = True,
+    internal_error: str = "",
+) -> dict[str, Any]:
+    """Resolve one final, public-safe admission state without side effects."""
+    current = dict(preflight or {})
+    gate = dict(scene_gate or {})
+    snapshot = dict(
+        gate.get("provider_eligibility_snapshot")
+        or current.get("provider_eligibility_snapshot")
+        or {}
+    )
+
+    def _items(*values: Any) -> list[str]:
+        result: list[str] = []
+        for value in values:
+            if isinstance(value, (list, tuple, set)):
+                candidates = value
+            elif value in (None, ""):
+                candidates = []
+            else:
+                candidates = [value]
+            for candidate in candidates:
+                token = str(candidate or "").strip()
+                if token and token not in result:
+                    result.append(token)
+        return result
+
+    def _authoritative_items(key: str) -> list[str]:
+        for source in (gate, current, snapshot):
+            if key in source:
+                return _items(source.get(key))
+        return []
+
+    healthy = _authoritative_items("healthy_candidate_keys")
+    probation = _authoritative_items("probation_candidate_keys")
+    hard_blocked = _authoritative_items("hard_blocked_candidate_keys")
+    eligibility_state = str(
+        gate.get("eligibility_state")
+        or current.get("eligibility_state")
+        or snapshot.get("eligibility_state")
+        or ("healthy" if healthy else ("probation" if probation else "blocked"))
+    ).strip().lower()
+    raw_admission_mode = str(
+        gate.get("admission_mode")
+        or current.get("admission_mode")
+        or snapshot.get("admission_mode")
+        or "blocked"
+    ).strip().lower()
+    worker_eligible = bool(current.get("worker_compatible"))
+    worker_reason = str(current.get("worker_admission_block_reason") or "").strip()
+    lock_clear = bool(current.get("probation_lock_clear"))
+    lock_active = bool(
+        current.get("probation_active")
+        or current.get("active_probation_job_id")
+        or str(current.get("probation_lock_status") or "").strip().lower() == "active"
+    )
+    cooldown_active = bool(
+        current.get("probation_cooldown_active")
+        or str(current.get("probation_lock_status") or "").strip().lower() == "cooldown"
+    )
+    ready_hint = bool(
+        gate.get("ok")
+        or gate.get("preflight_ready_for_final_confirm")
+        or current.get("preflight_ready_for_final_confirm")
+    )
+    reason = str(
+        internal_error
+        or worker_reason
+        or current.get("provider_hard_block_reason")
+        or gate.get("blocker")
+        or current.get("blocker")
+        or snapshot.get("hard_block_reason")
+        or snapshot.get("blocker")
+        or current.get("no_charge_reason")
+        or ""
+    ).strip()
+    reason_lower = reason.lower()
+
+    if not context_valid:
+        resolved_state = "expired_context"
+        blocker = "preflight_context_expired"
+    elif internal_error:
+        resolved_state = "internal_error"
+        blocker = str(internal_error)
+    elif worker_eligible and eligibility_state == "healthy" and healthy and ready_hint:
+        resolved_state = "ready_healthy"
+        blocker = ""
+    elif (
+        worker_eligible
+        and eligibility_state == "probation"
+        and probation
+        and ready_hint
+        and lock_clear
+    ):
+        # A probation candidate is already contract/config/worker eligible. The
+        # scene gate may still carry the soft pre-confirm blocker used before
+        # explicit confirmation; that blocker must not hide the confirm action.
+        resolved_state = "ready_probation"
+        blocker = ""
+    elif not worker_eligible:
+        resolved_state = "blocked_worker"
+        blocker = worker_reason or "worker_incompatible"
+    elif lock_active or "concurr" in reason_lower or "probation_lock_active" in reason_lower:
+        resolved_state = "blocked_concurrency"
+        blocker = reason or "probation_lock_active"
+    elif cooldown_active or any(token in reason_lower for token in ("cooldown", "recent_failure", "preflight_all_unavailable")):
+        resolved_state = "blocked_cooldown"
+        blocker = reason or "provider_cooldown_active"
+    elif any(
+        token in reason_lower
+        for token in (
+            "public_provider_submit_disabled",
+            "maintenance",
+            "freeze",
+            "security",
+            "cost",
+            "billing",
+            "quote",
+        )
+    ):
+        resolved_state = "blocked_security_cost"
+        blocker = reason or "public_provider_submit_disabled"
+    elif any(
+        token in reason_lower
+        for token in (
+            "not_configured",
+            "credentials",
+            "endpoint",
+            "submit_route_missing",
+            "poll_route_missing",
+            "model_missing",
+            "model_interface_contract_invalid",
+            "capability_or_payload_builder_missing",
+            "contract_invalid",
+            "provider_chain_empty",
+        )
+    ):
+        resolved_state = "blocked_configuration"
+        blocker = reason or "provider_configuration_invalid"
+    elif eligibility_state == "probation" and probation and not lock_clear:
+        resolved_state = "internal_error"
+        blocker = reason or "probation_lock_state_unavailable"
+    else:
+        resolved_state = "blocked_provider"
+        blocker = reason or "no_eligible_product_video_provider"
+
+    if resolved_state not in PRODUCT_VIDEO_PUBLIC_PREFLIGHT_RESOLVED_STATES:
+        resolved_state = "internal_error"
+        blocker = "preflight_state_resolution_failed"
+    final_confirm_enabled = resolved_state in {"ready_healthy", "ready_probation"}
+    selected_admission_mode = (
+        "healthy"
+        if resolved_state == "ready_healthy"
+        else (
+            "public_confirmed_probation"
+            if resolved_state == "ready_probation"
+            else raw_admission_mode or "blocked"
+        )
+    )
+    return {
+        "preflight_resolved_state": resolved_state,
+        "preflight_blocker_code": blocker,
+        "worker_eligible": worker_eligible,
+        "healthy_candidate_count": len(healthy),
+        "probation_candidate_count": len(probation),
+        "hard_blocked_candidate_count": len(hard_blocked),
+        "healthy_candidate_keys": healthy,
+        "probation_candidate_keys": probation,
+        "hard_blocked_candidate_keys": hard_blocked,
+        "eligibility_state": eligibility_state,
+        "raw_admission_mode": raw_admission_mode,
+        "selected_admission_mode": selected_admission_mode,
+        "final_confirm_enabled": final_confirm_enabled,
+        "final_confirm_disabled_reason": "" if final_confirm_enabled else blocker,
+        "preflight_resolution_final": True,
+    }
+
+
 def preferred_provider_capability(adapter: VideoProviderAdapter, required_capability: str) -> str:
     caps = adapter.capabilities()
     supported = set(normalize_capability_values(caps.get("capabilities") or []))
