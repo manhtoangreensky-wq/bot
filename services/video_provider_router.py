@@ -2312,6 +2312,112 @@ def provider_supports(adapter: VideoProviderAdapter, required_capability: str) -
     return any(cap in supported for cap in capability_options(required_capability))
 
 
+PRODUCT_VIDEO_OPERATIONAL_PROBATION_FREEZE_REASONS = frozenset(
+    {
+        "NO_CHANNEL",
+        "PROVIDER_UNAVAILABLE",
+        "RATE_LIMITED",
+        "TIMEOUT",
+        "VIDEO_ERROR_THRESHOLD_LONG",
+        "VIDEO_ERROR_THRESHOLD_SHORT",
+        "IN_PROGRESS_STALL_REPEATED",
+        "RESULT_URL_EMPTY_REPEATED",
+        "ARTIFACT_SIZE_ZERO_REPEATED",
+        "TERMINAL_FAILURE_REPEATED",
+    }
+)
+PRODUCT_VIDEO_HARD_COST_FREEZE_REASONS = frozenset(
+    {
+        "CREDIT_LOW_OR_EMPTY",
+        "INSUFFICIENT_BALANCE",
+        "LOW_CREDIT_HARD_BLOCK",
+        "PROVIDER_COST_LOCK",
+        "PROVIDER_SPEND_LOCK",
+    }
+)
+
+
+def product_video_provider_freeze_probation_policy(
+    *,
+    provider: str = "",
+    provider_frozen: bool = False,
+    provider_freeze_reason: str = "",
+    explicit_public_final_confirm: bool = False,
+    public_provider_freeze: bool = False,
+    public_maintenance: bool = False,
+    payment_freeze: bool = False,
+    tool_freeze: bool = False,
+    security_block: bool = False,
+    cost_lock: bool = False,
+) -> dict[str, Any]:
+    """Classify Product Video freezes without treating provider history as security policy."""
+    normalized_reason = re.sub(
+        r"[^A-Z0-9]+",
+        "_",
+        str(provider_freeze_reason or "").strip().upper(),
+    ).strip("_")
+    operational_degradation = bool(
+        normalized_reason in PRODUCT_VIDEO_OPERATIONAL_PROBATION_FREEZE_REASONS
+        or normalized_reason.startswith("VIDEO_ERROR_THRESHOLD_")
+        or normalized_reason.startswith("IN_PROGRESS_STALL_")
+        or normalized_reason.startswith("RESULT_URL_EMPTY_")
+        or normalized_reason.startswith("ARTIFACT_SIZE_ZERO_")
+        or normalized_reason.startswith("TERMINAL_FAILURE_")
+    )
+    hard_cost_lock = bool(
+        cost_lock
+        or normalized_reason in PRODUCT_VIDEO_HARD_COST_FREEZE_REASONS
+        or normalized_reason.startswith("CREDIT_LOW")
+        or normalized_reason.startswith("SPEND_LOCK")
+    )
+    hard_block_reason = ""
+    if security_block:
+        hard_block_reason = "security_block_active"
+    elif public_maintenance:
+        hard_block_reason = "product_video_public_maintenance"
+    elif payment_freeze:
+        hard_block_reason = "payment_freeze_active"
+    elif tool_freeze:
+        hard_block_reason = "tool_freeze_active"
+    elif public_provider_freeze:
+        hard_block_reason = "public_provider_freeze_active"
+    elif hard_cost_lock:
+        hard_block_reason = "provider_cost_lock_active"
+    elif provider_frozen and not operational_degradation:
+        hard_block_reason = "provider_freeze_active"
+
+    controlled_probation = bool(
+        explicit_public_final_confirm
+        and provider_frozen
+        and operational_degradation
+        and not hard_block_reason
+    )
+    if hard_block_reason:
+        probation_reject_reason = hard_block_reason
+    elif controlled_probation:
+        probation_reject_reason = ""
+    elif provider_frozen:
+        probation_reject_reason = "public_final_confirm_required"
+    else:
+        probation_reject_reason = ""
+    return {
+        "provider": str(provider or "").strip(),
+        "public_provider_freeze": bool(public_provider_freeze),
+        "hidden_submit_freeze": bool(provider_frozen and not public_provider_freeze),
+        "provider_freeze_reason": normalized_reason,
+        "operational_degradation": operational_degradation,
+        "operational_health_state": (
+            "degraded_probation"
+            if controlled_probation
+            else ("degraded_hidden_block" if operational_degradation and provider_frozen else "normal")
+        ),
+        "hard_cost_lock": hard_cost_lock,
+        "hard_block_reason": hard_block_reason,
+        "probation_eligible": controlled_probation,
+        "probation_reject_reason": probation_reject_reason,
+    }
+
+
 def product_video_provider_eligibility_snapshot(
     *,
     status: dict[str, Any] | None = None,
@@ -2323,6 +2429,7 @@ def product_video_provider_eligibility_snapshot(
     require_live_health: bool = True,
     allow_legacy_missing_health: bool = False,
     allow_public_confirmed_probation: bool = False,
+    allow_operational_degradation_probation: bool = False,
     admission_source: str = "",
     public_user_confirmed: bool = False,
     public_submit_enabled: bool = False,
@@ -2391,6 +2498,9 @@ def product_video_provider_eligibility_snapshot(
     probation_reason_map: dict[str, list[str]] = {}
     healthy_candidates: list[str] = []
     probation_candidates: list[str] = []
+    route_filtered_candidates: list[str] = []
+    freeze_filtered_candidates: list[str] = []
+    health_filtered_candidates: list[str] = []
     probation_source_policy = product_video_provider_submit_source_policy(
         {
             "submit_source": admission_source,
@@ -2405,10 +2515,24 @@ def product_video_provider_eligibility_snapshot(
         and bool(worker_compatible)
         and bool(probation_lock_clear)
     )
+    if not allow_public_confirmed_probation:
+        probation_context_reject_reason = "probation_requires_public_final_confirm"
+    elif not probation_source_policy.get("provider_submit_allowed"):
+        probation_context_reject_reason = str(
+            probation_source_policy.get("provider_submit_block_reason")
+            or "probation_submit_source_blocked"
+        )
+    elif not worker_compatible:
+        probation_context_reject_reason = "worker_incompatible"
+    elif not probation_lock_clear:
+        probation_context_reject_reason = "probation_lock_not_clear"
+    else:
+        probation_context_reject_reason = ""
     for provider in configured_chain:
         item = status_items.get(provider, {})
         adapter = adapters.get(provider)
         hard_reasons: list[str] = []
+        route_reasons: list[str] = []
         probation_reasons: list[str] = []
         if global_hard_block_reason:
             hard_reasons.append(str(global_hard_block_reason))
@@ -2416,27 +2540,44 @@ def product_video_provider_eligibility_snapshot(
             hard_reasons.append(external_hard_blocks[provider])
         if item and "enabled" in item and not bool(item.get("enabled")):
             hard_reasons.append("provider_disabled")
+            route_reasons.append("provider_disabled")
         if not bool(item.get("configured")):
-            hard_reasons.append(str(item.get("config_blocker") or item.get("selection_blocker") or "provider_not_configured"))
+            reason = str(item.get("config_blocker") or item.get("selection_blocker") or "provider_not_configured")
+            hard_reasons.append(reason)
+            route_reasons.append(reason)
         if not bool(item.get("credit_ok", True)):
-            hard_reasons.append(f"credit_{item.get('credit_status') or 'unavailable'}")
+            reason = f"credit_{item.get('credit_status') or 'unavailable'}"
+            hard_reasons.append(reason)
+            route_reasons.append(reason)
         submit_ready = bool(item.get("submit_url_configured") or item.get("endpoint_configured"))
         poll_ready = bool(item.get("poll_url_configured") or item.get("endpoint_configured"))
         auth_ready = bool(item.get("auth_configured") or item.get("auth_present"))
         model_ready = bool(item.get("model_present") or item.get("provider_model_present") or item.get("provider_payload_model"))
         if transport_status_reported and item.get("configured") and not submit_ready:
             hard_reasons.append("submit_route_missing")
+            route_reasons.append("submit_route_missing")
         if transport_status_reported and item.get("configured") and not poll_ready:
             hard_reasons.append("poll_route_missing")
+            route_reasons.append("poll_route_missing")
         if transport_status_reported and item.get("configured") and not auth_ready:
             hard_reasons.append("provider_credentials_missing")
+            route_reasons.append("provider_credentials_missing")
         if transport_status_reported and item.get("configured") and not model_ready:
             hard_reasons.append("provider_model_missing")
+            route_reasons.append("provider_model_missing")
         if transport_status_reported and (adapter is None or not provider_supports(adapter, required_capability)):
             hard_reasons.append("provider_capability_or_payload_builder_missing")
+            route_reasons.append("provider_capability_or_payload_builder_missing")
         if contract_filter_supplied and provider not in contract_valid:
             hard_reasons.append("provider_model_interface_contract_invalid")
+            route_reasons.append("provider_model_interface_contract_invalid")
+        route_reasons = list(dict.fromkeys(reason for reason in route_reasons if reason))
+        if not route_reasons:
+            route_filtered_candidates.append(provider)
+        if not route_reasons and not global_hard_block_reason and not external_hard_blocks.get(provider):
+            freeze_filtered_candidates.append(provider)
         health_state = health.get(provider, {})
+        health_route_unavailable = False
         if require_live_health:
             if not health_state and allow_legacy_missing_health:
                 health_state = {"live_healthy": True, "multi_scene_eligible": True}
@@ -2447,9 +2588,14 @@ def product_video_provider_eligibility_snapshot(
             ).strip().lower()
             if ("route_ready" in health_state and not bool(health_state.get("route_ready"))) or state_name == "unavailable":
                 hard_reasons.append("provider_route_not_ready")
+                health_route_unavailable = True
             elif health_state.get("provider_degraded_for_product_video_public") or state_name == "degraded":
-                if public_confirm_probation_allowed:
-                    probation_reasons.append("provider_health_degraded_public_confirm")
+                if public_confirm_probation_allowed or allow_operational_degradation_probation:
+                    probation_reasons.append(
+                        "provider_health_degraded_public_confirm"
+                        if public_confirm_probation_allowed
+                        else "provider_health_degraded_probation"
+                    )
                 else:
                     hard_reasons.append("provider_health_degraded")
             elif health_state.get("probation") or state_name == "probation":
@@ -2460,6 +2606,8 @@ def product_video_provider_eligibility_snapshot(
                 health_state.get("multi_scene_eligible", health_state.get("live_healthy"))
             ):
                 probation_reasons.append("provider_not_multi_scene_eligible")
+        if provider in freeze_filtered_candidates and not health_route_unavailable:
+            health_filtered_candidates.append(provider)
         hard_reasons = list(dict.fromkeys(reason for reason in hard_reasons if reason))
         probation_reasons = list(dict.fromkeys(reason for reason in probation_reasons if reason))
         hard_block_reason_map[provider] = hard_reasons
@@ -2517,6 +2665,20 @@ def product_video_provider_eligibility_snapshot(
         "runtime_candidate_keys": eligible,
         "candidate_keys": eligible,
         "candidate_count": len(eligible),
+        "candidates_before_filter": list(configured_chain),
+        "candidates_after_route_filter": route_filtered_candidates,
+        "candidates_after_freeze_filter": freeze_filtered_candidates,
+        "candidates_after_health_filter": health_filtered_candidates,
+        "candidates_after_hard_block_filter": [
+            provider for provider in configured_chain if not hard_block_reason_map.get(provider)
+        ],
+        "candidate_count_before_filters": len(configured_chain),
+        "candidate_count_after_route_filter": len(route_filtered_candidates),
+        "candidate_count_after_freeze_filter": len(freeze_filtered_candidates),
+        "candidate_count_after_health_filter": len(health_filtered_candidates),
+        "candidate_count_after_hard_block_filter": sum(
+            1 for provider in configured_chain if not hard_block_reason_map.get(provider)
+        ),
         "healthy_candidate_keys": healthy_candidates,
         "probation_candidate_keys": probation_candidates,
         "hard_blocked_candidate_keys": [
@@ -2530,6 +2692,12 @@ def product_video_provider_eligibility_snapshot(
         "hard_block_reason_by_provider": hard_block_reason_map,
         "probation_admission_allowed": probation_admission_allowed,
         "probation_candidate_selected": selected_probation[0] if selected_probation else "",
+        "probation_eligible": bool(probation_candidates),
+        "probation_reject_reason": (
+            ""
+            if selected_probation
+            else (probation_context_reject_reason if probation_candidates else hard_block_reason)
+        ),
         "probation_lock_clear": bool(probation_lock_clear),
         "probation_submit_source": str(probation_source_policy.get("submit_source") or ""),
         "probation_submit_source_allowed": bool(probation_source_policy.get("provider_submit_allowed")),
@@ -2543,7 +2711,8 @@ def product_video_provider_eligibility_snapshot(
         "contract_valid_provider_chain": sorted(contract_valid) if contract_filter_supplied else configured_chain,
         "ok": bool(eligible),
         "blocker": "" if eligible else (
-            hard_block_reason or ("probation_requires_public_final_confirm" if probation_candidates else "no_eligible_product_video_provider")
+            hard_block_reason
+            or (probation_context_reject_reason if probation_candidates else "no_eligible_product_video_provider")
         ),
     }
 

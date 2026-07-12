@@ -72905,6 +72905,71 @@ def _product_video_contract_valid_provider_chain(
     return valid, invalid
 
 
+def product_video_provider_freeze_admission_snapshot(
+    chain,
+    *,
+    explicit_public_final_confirm: bool = False,
+) -> dict:
+    """Separate public hard freezes from provider-history freezes for Product Video."""
+    configured_chain = [
+        str(provider or "").strip()
+        for provider in (chain or [])
+        if str(provider or "").strip()
+    ]
+    ops = current_system_mode()
+    public_maintenance = bool(
+        product_video_public_maintenance_enabled()
+        or ops.get("maintenance_mode")
+    )
+    public_provider_freeze = bool(
+        ops.get("provider_freeze")
+        or PROVIDER_FREEZE_ENABLED
+    )
+    policies: dict[str, dict] = {}
+    hard_blocks: dict[str, str] = {}
+    for provider in configured_chain:
+        freeze_key = "key4u" if provider == "key4u_video" else provider
+        display = provider_freeze_display(freeze_key)
+        policy = video_provider_router.product_video_provider_freeze_probation_policy(
+            provider=provider,
+            provider_frozen=bool(display.get("frozen")),
+            provider_freeze_reason=str(display.get("reason") or ""),
+            explicit_public_final_confirm=explicit_public_final_confirm,
+            public_provider_freeze=public_provider_freeze,
+            public_maintenance=public_maintenance,
+            payment_freeze=bool(ops.get("payment_freeze")),
+            tool_freeze=bool(ops.get("tool_freeze")),
+            security_block=bool(ops.get("emergency_lock")),
+        )
+        policies[provider] = policy
+        if policy.get("hard_block_reason"):
+            hard_blocks[provider] = str(policy["hard_block_reason"])
+    global_hard_block_reason = ""
+    for reason in (
+        "security_block_active" if ops.get("emergency_lock") else "",
+        "product_video_public_maintenance" if public_maintenance else "",
+        "payment_freeze_active" if ops.get("payment_freeze") else "",
+        "tool_freeze_active" if ops.get("tool_freeze") else "",
+        "public_provider_freeze_active" if public_provider_freeze else "",
+    ):
+        if reason:
+            global_hard_block_reason = reason
+            break
+    return {
+        "public_provider_freeze": public_provider_freeze,
+        "hidden_submit_freeze": any(
+            bool(item.get("hidden_submit_freeze")) for item in policies.values()
+        ),
+        "operational_health_state": {
+            provider: str(item.get("operational_health_state") or "normal")
+            for provider, item in policies.items()
+        },
+        "provider_freeze_policy_by_provider": policies,
+        "hard_block_reason_by_provider": hard_blocks,
+        "global_hard_block_reason": global_hard_block_reason,
+    }
+
+
 def product_video_provider_public_route_preflight(
     conn=None,
     *,
@@ -72912,6 +72977,7 @@ def product_video_provider_public_route_preflight(
     allow_public_confirmed_probation: bool = False,
     admission_source: str = "",
     public_user_confirmed: bool = False,
+    current_probation_job_id: int = 0,
     recent_failure: dict | None = None,
 ) -> dict:
     owned_conn = None
@@ -72959,6 +73025,10 @@ def product_video_provider_public_route_preflight(
         and video_provider_router.normalize_product_video_submit_source(admission_source)
         == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
     )
+    freeze_admission = product_video_provider_freeze_admission_snapshot(
+        chain,
+        explicit_public_final_confirm=explicit_public_final_confirm,
+    )
     contract_valid_chain, contract_invalid_providers = _product_video_contract_valid_provider_chain(chain, scene_count=count)
     submit_switch = video_provider_router.product_video_submit_switch_detail()
     public_submit_enabled = bool(submit_switch.get("resolved"))
@@ -72984,9 +73054,20 @@ def product_video_provider_public_route_preflight(
             "probation_lock_status": "unknown",
             "probation_lock_error": type(exc).__name__,
         }
+    active_probation_job_id = safe_int(probation_lock.get("active_probation_job_id"), 0)
+    probation_lock_owned_by_current_job = bool(
+        safe_int(current_probation_job_id, 0) > 0
+        and active_probation_job_id == safe_int(current_probation_job_id, 0)
+    )
+    probation_lock_clear_for_request = bool(
+        probation_lock.get("probation_lock_clear")
+        or probation_lock_owned_by_current_job
+    )
     hard_block_reason = ""
     recent_failure = dict(recent_failure or {})
-    if not public_submit_enabled:
+    if freeze_admission.get("global_hard_block_reason"):
+        hard_block_reason = str(freeze_admission.get("global_hard_block_reason") or "")
+    elif not public_submit_enabled:
         hard_block_reason = "public_provider_submit_disabled"
     elif public_maintenance:
         hard_block_reason = "product_video_public_maintenance"
@@ -72998,11 +73079,7 @@ def product_video_provider_public_route_preflight(
         and not explicit_public_final_confirm
     ):
         hard_block_reason = str(recent_failure.get("no_charge_reason") or "provider_cooldown_active")
-    provider_hard_blocks = {} if explicit_public_final_confirm else {
-        str(provider): "provider_freeze_active"
-        for provider in chain
-        if str(provider or "").strip() and provider_freeze_runtime_on(str(provider))
-    }
+    provider_hard_blocks = dict(freeze_admission.get("hard_block_reason_by_provider") or {})
     eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
         status=status,
         chain=chain,
@@ -73011,11 +73088,12 @@ def product_video_provider_public_route_preflight(
         scene_count=count,
         require_live_health=True,
         allow_public_confirmed_probation=allow_public_confirmed_probation,
+        allow_operational_degradation_probation=True,
         admission_source=admission_source,
         public_user_confirmed=public_user_confirmed,
         public_submit_enabled=bool(public_submit_enabled and not public_maintenance),
         worker_compatible=worker_compatible,
-        probation_lock_clear=bool(probation_lock.get("probation_lock_clear")),
+        probation_lock_clear=probation_lock_clear_for_request,
         hard_block_reason_by_provider=provider_hard_blocks,
         global_hard_block_reason=hard_block_reason,
     )
@@ -73031,7 +73109,7 @@ def product_video_provider_public_route_preflight(
             and public_submit_enabled
             and not public_maintenance
             and worker_compatible
-            and probation_lock.get("probation_lock_clear")
+            and probation_lock_clear_for_request
             and not hard_block_reason
         )
     )
@@ -73081,8 +73159,28 @@ def product_video_provider_public_route_preflight(
         "worker_compatible": worker_compatible,
         "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
         "provider_hard_block_reason": str(eligibility_snapshot.get("hard_block_reason") or hard_block_reason),
+        "global_hard_block_reason": hard_block_reason,
+        "provider_hard_block_reason_by_provider": provider_hard_blocks,
+        "public_provider_freeze": bool(freeze_admission.get("public_provider_freeze")),
+        "hidden_submit_freeze": bool(freeze_admission.get("hidden_submit_freeze")),
+        "operational_health_state": dict(freeze_admission.get("operational_health_state") or {}),
+        "provider_freeze_policy_by_provider": dict(freeze_admission.get("provider_freeze_policy_by_provider") or {}),
         "probation_lock": probation_lock,
         **probation_lock,
+        "probation_lock_clear": probation_lock_clear_for_request,
+        "probation_lock_owned_by_current_job": probation_lock_owned_by_current_job,
+        "probation_current_job_id": safe_int(current_probation_job_id, 0),
+        "probation_eligible": bool(eligibility_snapshot.get("probation_candidate_keys")),
+        "probation_reject_reason": str(
+            eligibility_snapshot.get("probation_reject_reason")
+            or eligibility_snapshot.get("hard_block_reason")
+            or ""
+        ),
+        "probation_candidate": str(eligibility_snapshot.get("probation_candidate_selected") or ""),
+        "router_called": False,
+        "router_skip_reason": "" if final_ok else str(eligibility_snapshot.get("blocker") or hard_block_reason or "no_eligible_product_video_provider"),
+        "submit_allowed": final_ok,
+        "submit_block_reason": "" if final_ok else str(eligibility_snapshot.get("blocker") or hard_block_reason or "no_eligible_product_video_provider"),
         "job_creation_blocked_by_provider_availability": not final_ok,
         "no_charge_reason": "" if final_ok else "no_healthy_video_provider_no_charge",
         "legacy_no_charge_reason": "" if final_ok else "product_video_no_public_mp4_provider",
@@ -73120,7 +73218,11 @@ def product_video_multi_scene_health_gate(
         and video_provider_router.normalize_product_video_submit_source(admission_source)
         == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
     )
-    if safe_int(eligibility_snapshot.get("scene_count"), 0) != count:
+    if safe_int(eligibility_snapshot.get("scene_count"), 0) != count or explicit_public_final_confirm:
+        freeze_admission = product_video_provider_freeze_admission_snapshot(
+            configured,
+            explicit_public_final_confirm=explicit_public_final_confirm,
+        )
         eligibility_snapshot = video_provider_router.product_video_provider_eligibility_snapshot(
             status=preflight.get("provider_status_snapshot") if isinstance(preflight.get("provider_status_snapshot"), dict) else {},
             chain=configured,
@@ -73129,17 +73231,18 @@ def product_video_multi_scene_health_gate(
             scene_count=count,
             require_live_health=True,
             allow_public_confirmed_probation=allow_public_confirmed_probation,
+            allow_operational_degradation_probation=True,
             admission_source=admission_source,
             public_user_confirmed=public_user_confirmed,
             public_submit_enabled=bool(preflight.get("public_submit_enabled") and not preflight.get("public_maintenance")),
             worker_compatible=bool(preflight.get("worker_compatible")),
             probation_lock_clear=bool(preflight.get("probation_lock_clear")),
-            hard_block_reason_by_provider={} if explicit_public_final_confirm else {
-                str(provider): "provider_freeze_active"
-                for provider in configured
-                if provider_freeze_runtime_on(str(provider))
-            },
-            global_hard_block_reason=str(preflight.get("provider_hard_block_reason") or ""),
+            hard_block_reason_by_provider=dict(freeze_admission.get("hard_block_reason_by_provider") or {}),
+            global_hard_block_reason=str(
+                freeze_admission.get("global_hard_block_reason")
+                or preflight.get("global_hard_block_reason")
+                or ""
+            ),
         )
     effective = list(eligibility_snapshot.get("eligible_provider_keys") or [])
     result = video_provider_router.product_video_multi_scene_public_gate(
@@ -73179,6 +73282,7 @@ def product_video_provider_availability_preflight(
     allow_public_confirmed_probation: bool = False,
     admission_source: str = "",
     public_user_confirmed: bool = False,
+    current_probation_job_id: int = 0,
 ) -> dict:
     owned = conn is None
     db = conn or db_connect()
@@ -73190,6 +73294,7 @@ def product_video_provider_availability_preflight(
             allow_public_confirmed_probation=allow_public_confirmed_probation,
             admission_source=admission_source,
             public_user_confirmed=public_user_confirmed,
+            current_probation_job_id=current_probation_job_id,
             recent_failure=result,
         )
         return {
@@ -73405,6 +73510,18 @@ async def product_video_show_public_preflight_panel(
 def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dict) -> dict:
     result = dict(result or {})
     project = dict(project or {})
+    submit_switch = video_provider_router.product_video_submit_switch_detail()
+    submit_policy = video_provider_router.product_video_provider_submit_source_policy(
+        result,
+        public_submit_enabled=bool(submit_switch.get("resolved")),
+        poll_existing_task=False,
+    )
+    explicit_public_final_confirm = bool(
+        submit_policy.get("provider_submit_allowed")
+        and submit_policy.get("public_user_confirmed")
+        and submit_policy.get("submit_source")
+        == video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM
+    )
     explicit_zero_at_creation = bool(
         ("admission_candidate_count" in result and safe_int(result.get("admission_candidate_count"), 0) <= 0)
         or (
@@ -73427,7 +73544,9 @@ def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dic
             or worker_sha_at_creation.startswith(runtime_sha_at_creation)
         )
     )
-    if explicit_zero_at_creation or worker_mismatch_at_creation:
+    if worker_mismatch_at_creation or (
+        explicit_zero_at_creation and not explicit_public_final_confirm
+    ):
         reason = (
             "worker_version_mismatch_before_dispatch"
             if worker_mismatch_at_creation
@@ -73443,9 +73562,21 @@ def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dic
             "no_provider_call_verified": True,
             "no_charge_verified": safe_int(result.get("charged_xu") or result.get("charge"), 0) == 0,
         }
-    preflight = product_video_provider_availability_preflight()
     scene_count = max(1, safe_int(project.get("scene_count") or result.get("scene_count"), 1))
-    scene_gate = product_video_multi_scene_health_gate(scene_count, preflight) if preflight.get("ok") else {}
+    preflight = product_video_provider_availability_preflight(
+        scene_count=scene_count,
+        allow_public_confirmed_probation=explicit_public_final_confirm,
+        admission_source=str(submit_policy.get("submit_source") or ""),
+        public_user_confirmed=bool(submit_policy.get("public_user_confirmed")),
+        current_probation_job_id=safe_int(job.get("id"), 0),
+    )
+    scene_gate = product_video_multi_scene_health_gate(
+        scene_count,
+        preflight,
+        allow_public_confirmed_probation=explicit_public_final_confirm,
+        admission_source=str(submit_policy.get("submit_source") or ""),
+        public_user_confirmed=bool(submit_policy.get("public_user_confirmed")),
+    )
     worker = product_video_worker_admission_status()
     candidates = [
         str(item or "").strip()
@@ -73461,12 +73592,24 @@ def product_video_bot_watchdog_eligibility(job: dict, result: dict, project: dic
         or "no_eligible_provider_before_scene_dispatch"
     )
     return {
+        **scene_gate,
         "eligible_provider_keys": candidates,
         "runtime_candidate_keys": candidates,
         "final_eligible_provider_count": len(candidates),
         "reconciliation_reason": reason,
         "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
         "admission_block_reason": reason,
+        "candidate_resolver_source": str(submit_policy.get("submit_source") or ""),
+        "candidate_resolver_public_user_confirmed": bool(submit_policy.get("public_user_confirmed")),
+        "provider_submit_allowed": bool(candidates and submit_policy.get("provider_submit_allowed")),
+        "provider_submit_block_reason": "" if candidates else str(
+            submit_policy.get("provider_submit_block_reason")
+            or reason
+            or "no_eligible_provider_before_scene_dispatch"
+        ),
+        "router_skip_reason": "" if candidates else str(
+            reason or "no_eligible_provider_before_scene_dispatch"
+        ),
     }
 
 
@@ -73567,6 +73710,30 @@ def product_video_apply_provider_preflight_to_session(user_id, session: dict, pr
         asset_pack["preconfirm_candidate_keys"] = list(eligibility_snapshot.get("eligible_provider_keys") or [])
         asset_pack["candidate_rejection_reason_by_provider"] = dict(eligibility_snapshot.get("candidate_rejection_reason_by_provider") or {})
         asset_pack["final_eligible_provider_count"] = safe_int(eligibility_snapshot.get("final_eligible_provider_count"), 0)
+        for key in (
+            "public_provider_freeze",
+            "hidden_submit_freeze",
+            "operational_health_state",
+            "provider_freeze_policy_by_provider",
+            "provider_hard_block_reason_by_provider",
+            "probation_eligible",
+            "probation_reject_reason",
+            "probation_candidate",
+            "candidates_before_filter",
+            "candidates_after_route_filter",
+            "candidates_after_freeze_filter",
+            "candidates_after_health_filter",
+            "candidates_after_hard_block_filter",
+            "candidate_count_before_filters",
+            "candidate_count_after_route_filter",
+            "candidate_count_after_freeze_filter",
+            "candidate_count_after_health_filter",
+            "candidate_count_after_hard_block_filter",
+            "submit_allowed",
+            "submit_block_reason",
+        ):
+            if key in preflight:
+                asset_pack[key] = preflight.get(key)
         draft["asset_pack"] = asset_pack
     session["draft"] = draft
     return save_video_session(user_id, session)
@@ -91583,6 +91750,12 @@ def video_public_status_payload() -> dict:
     product_video_preflight_resolution_error = ""
     try:
         product_video_provider_health = product_video_provider_public_route_preflight()
+        product_video_public_confirm_preview = product_video_provider_public_route_preflight(
+            scene_count=2,
+            allow_public_confirmed_probation=True,
+            admission_source=video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+            public_user_confirmed=True,
+        )
     except Exception as exc:
         product_video_preflight_resolution_error = f"provider_health_unavailable:{type(exc).__name__}"
         product_video_provider_health = {
@@ -91593,8 +91766,15 @@ def video_public_status_payload() -> dict:
             "effective_provider_chain": [],
             "selected_provider": "",
         }
+        product_video_public_confirm_preview = dict(product_video_provider_health)
     try:
-        product_video_multi_scene_gate = product_video_multi_scene_health_gate(2, product_video_provider_health)
+        product_video_multi_scene_gate = product_video_multi_scene_health_gate(
+            2,
+            product_video_public_confirm_preview,
+            allow_public_confirmed_probation=True,
+            admission_source=video_provider_router.PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+            public_user_confirmed=True,
+        )
     except Exception as exc:
         product_video_preflight_resolution_error = (
             product_video_preflight_resolution_error
@@ -91608,7 +91788,7 @@ def video_public_status_payload() -> dict:
         }
     try:
         product_video_preflight_resolution = video_provider_router.resolve_product_video_public_preflight_state(
-            product_video_provider_health,
+            product_video_public_confirm_preview,
             product_video_multi_scene_gate,
             internal_error=product_video_preflight_resolution_error,
         )
@@ -91628,7 +91808,15 @@ def video_public_status_payload() -> dict:
     freeze = provider_freeze_display("shopaikey_video")
     hidden_video_freeze = bool(freeze.get("frozen"))
     public_video_maintenance = product_video_public_maintenance_enabled()
-    public_live_provider_allowed = bool(product_video_submit_enabled and not public_video_maintenance)
+    public_provider_freeze = bool(ops.get("provider_freeze") or PROVIDER_FREEZE_ENABLED)
+    public_live_provider_allowed = bool(
+        product_video_submit_enabled
+        and not public_video_maintenance
+        and not public_provider_freeze
+        and not ops.get("payment_freeze")
+        and not ops.get("tool_freeze")
+        and not ops.get("emergency_lock")
+    )
     section_errors: list[str] = []
     try:
         model_catalog = video_provider_catalog.catalog_status_payload()
@@ -91722,6 +91910,7 @@ def video_public_status_payload() -> dict:
             "enabled": product_video_submit_enabled,
             "state": "ENABLED" if product_video_submit_enabled else "LOCKED",
             "source": str(product_video_submit_switch.get("source") or "default"),
+            "public_provider_freeze": public_provider_freeze,
             "hidden_video_freeze": hidden_video_freeze,
             "public_video_maintenance": public_video_maintenance,
             "public_live_provider_allowed": public_live_provider_allowed,
@@ -91732,16 +91921,27 @@ def video_public_status_payload() -> dict:
             ),
         },
         "product_video_provider_health": product_video_provider_health,
+        "product_video_public_confirm_preview": product_video_public_confirm_preview,
         "product_video_public_preflight_resolution": product_video_preflight_resolution,
         "product_video_probation_admission": {
-            "provider_eligibility_state": str(product_video_provider_health.get("eligibility_state") or "blocked"),
-            "healthy_candidates": list(product_video_provider_health.get("healthy_candidate_keys") or []),
-            "probation_candidates": list(product_video_provider_health.get("probation_candidate_keys") or []),
-            "hard_blocked_candidates": list(product_video_provider_health.get("hard_blocked_candidate_keys") or []),
-            "probation_active_job": safe_int(product_video_provider_health.get("active_probation_job_id"), 0),
-            "probation_lock_status": str(product_video_provider_health.get("probation_lock_status") or "unknown"),
-            "probation_last_result": str(product_video_provider_health.get("probation_last_result") or "none"),
-            "final_admission_mode": str(product_video_provider_health.get("admission_mode") or "blocked"),
+            "provider_eligibility_state": str(product_video_public_confirm_preview.get("eligibility_state") or "blocked"),
+            "healthy_candidates": list(product_video_public_confirm_preview.get("healthy_candidate_keys") or []),
+            "probation_candidates": list(product_video_public_confirm_preview.get("probation_candidate_keys") or []),
+            "hard_blocked_candidates": list(product_video_public_confirm_preview.get("hard_blocked_candidate_keys") or []),
+            "probation_candidate": str(product_video_public_confirm_preview.get("probation_candidate_selected") or ""),
+            "probation_eligible": bool(product_video_public_confirm_preview.get("probation_candidate_keys")),
+            "probation_reject_reason": str(product_video_public_confirm_preview.get("probation_reject_reason") or ""),
+            "public_provider_freeze": bool(product_video_public_confirm_preview.get("public_provider_freeze")),
+            "hidden_submit_freeze": bool(product_video_public_confirm_preview.get("hidden_submit_freeze")),
+            "operational_health_state": dict(product_video_public_confirm_preview.get("operational_health_state") or {}),
+            "hard_block_reason": str(product_video_public_confirm_preview.get("hard_block_reason") or ""),
+            "candidates_before_filter": list(product_video_public_confirm_preview.get("candidates_before_filter") or []),
+            "candidates_after_route_filter": list(product_video_public_confirm_preview.get("candidates_after_route_filter") or []),
+            "candidates_after_hard_block_filter": list(product_video_public_confirm_preview.get("candidates_after_hard_block_filter") or []),
+            "probation_active_job": safe_int(product_video_public_confirm_preview.get("active_probation_job_id"), 0),
+            "probation_lock_status": str(product_video_public_confirm_preview.get("probation_lock_status") or "unknown"),
+            "probation_last_result": str(product_video_public_confirm_preview.get("probation_last_result") or "none"),
+            "final_admission_mode": str(product_video_public_confirm_preview.get("admission_mode") or "blocked"),
             "worker_heartbeat_accepted": bool(
                 product_video_worker.get("owner_heartbeat_request_received")
                 and product_video_worker.get("owner_heartbeat_authenticated")
@@ -91823,6 +92023,7 @@ def video_public_status_text() -> str:
         f"• payment_freeze: <code>{video_public_bool_label(ops.get('payment_freeze'))}</code>",
         f"• tool_freeze: <code>{video_public_bool_label(ops.get('tool_freeze'))}</code>",
         f"• provider_freeze: <code>{video_public_bool_label(ops.get('provider_freeze'))}</code>",
+        f"• public_provider_freeze: <code>{video_public_bool_label(product_submit.get('public_provider_freeze'))}</code>",
         f"• hidden_video_freeze: <code>{video_public_bool_label(product_submit.get('hidden_video_freeze'))}</code>",
         f"• public_video_maintenance: <code>{video_public_bool_label(product_submit.get('public_video_maintenance'))}</code>",
         f"• public_live_provider_allowed: <code>{video_public_bool_label(product_submit.get('public_live_provider_allowed'))}</code>",
@@ -91863,7 +92064,14 @@ def video_public_status_text() -> str:
         f"• Product Video provider eligibility state: <code>{html.escape(str(probation_admission.get('provider_eligibility_state') or 'blocked'))}</code>",
         f"• Product Video healthy candidates: <code>{html.escape(','.join(probation_admission.get('healthy_candidates') or []) or '-')}</code>",
         f"• Product Video probation candidates: <code>{html.escape(','.join(probation_admission.get('probation_candidates') or []) or '-')}</code>",
+        f"• Product Video probation candidate selected: <code>{html.escape(str(probation_admission.get('probation_candidate') or '-'))}</code>",
+        f"• Product Video probation eligible: <code>{video_public_bool_label(probation_admission.get('probation_eligible'))}</code>",
+        f"• Product Video probation reject reason: <code>{html.escape(str(probation_admission.get('probation_reject_reason') or '-'))}</code>",
         f"• Product Video hard-blocked candidates: <code>{html.escape(','.join(probation_admission.get('hard_blocked_candidates') or []) or '-')}</code>",
+        f"• Product Video hard block reason: <code>{html.escape(str(probation_admission.get('hard_block_reason') or '-'))}</code>",
+        f"• Product Video public/hidden freeze: <code>{video_public_bool_label(probation_admission.get('public_provider_freeze'))}/{video_public_bool_label(probation_admission.get('hidden_submit_freeze'))}</code>",
+        f"• Product Video operational health: <code>{html.escape(json.dumps(probation_admission.get('operational_health_state') or {}, ensure_ascii=False, sort_keys=True))}</code>",
+        f"• Product Video candidates before/route/hard: <code>{len(probation_admission.get('candidates_before_filter') or [])}/{len(probation_admission.get('candidates_after_route_filter') or [])}/{len(probation_admission.get('candidates_after_hard_block_filter') or [])}</code>",
         f"• Product Video probation active job: <code>{safe_int(probation_admission.get('probation_active_job'), 0) or '-'}</code>",
         f"• Product Video probation lock: <code>{html.escape(str(probation_admission.get('probation_lock_status') or 'unknown'))}</code>",
         f"• Product Video probation last result: <code>{html.escape(str(probation_admission.get('probation_last_result') or 'none'))}</code>",

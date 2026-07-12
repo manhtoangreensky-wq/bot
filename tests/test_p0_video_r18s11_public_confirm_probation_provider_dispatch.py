@@ -227,7 +227,8 @@ def test_r18s11_scene_not_terminal_failed_before_candidate_routing_source_contra
     assert "router_skipped_reason" in claim
     assert "no_eligible_provider_before_scene_dispatch" in claim
     assert "explicit_public_final_confirm = bool(" in bot_source
-    assert "hard_block_reason_by_provider={} if explicit_public_final_confirm else {" in bot_source
+    assert "product_video_provider_freeze_admission_snapshot(" in bot_source
+    assert 'hard_block_reason_by_provider=dict(freeze_admission.get("hard_block_reason_by_provider") or {})' in bot_source
 
 
 def test_r18s11_tests_use_no_real_provider_transport():

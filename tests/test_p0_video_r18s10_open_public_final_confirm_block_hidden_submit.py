@@ -240,7 +240,8 @@ def test_public_final_confirm_ignores_non_public_freeze_and_stale_cooldown_only(
 
     assert "explicit_public_final_confirm = bool(" in route
     assert "and not explicit_public_final_confirm" in route
-    assert "provider_hard_blocks = {} if explicit_public_final_confirm else" in route
+    assert "product_video_provider_freeze_admission_snapshot(" in route
+    assert 'provider_hard_blocks = dict(freeze_admission.get("hard_block_reason_by_provider") or {})' in route
     assert "public_provider_submit_disabled" in route
     assert "product_video_public_maintenance" in route
     assert "worker_incompatible" in route

@@ -4411,6 +4411,32 @@ def sweep_product_video_zero_task_watchdog(
                     "candidate_rejection_reason_by_provider": dict(
                         eligibility.get("candidate_rejection_reason_by_provider") or {}
                     ),
+                    "candidate_resolver_source": str(eligibility.get("candidate_resolver_source") or ""),
+                    "candidate_resolver_public_user_confirmed": bool(
+                        eligibility.get("candidate_resolver_public_user_confirmed")
+                    ),
+                    "provider_submit_allowed": bool(eligibility.get("provider_submit_allowed")),
+                    "provider_submit_block_reason": str(
+                        eligibility.get("provider_submit_block_reason")
+                        or eligibility.get("provider_submit_block_reason_at_candidate_resolver")
+                        or ("" if candidates else eligibility.get("blocker") or "no_eligible_provider_before_scene_dispatch")
+                    ),
+                    "router_skip_reason": str(
+                        eligibility.get("router_skip_reason")
+                        or ("" if candidates else eligibility.get("blocker") or "no_eligible_provider_before_scene_dispatch")
+                    ),
+                    "candidates_before_filter": list(eligibility.get("candidates_before_filter") or []),
+                    "candidates_after_route_filter": list(eligibility.get("candidates_after_route_filter") or []),
+                    "candidates_after_freeze_filter": list(eligibility.get("candidates_after_freeze_filter") or []),
+                    "candidates_after_health_filter": list(eligibility.get("candidates_after_health_filter") or []),
+                    "candidates_after_hard_block_filter": list(eligibility.get("candidates_after_hard_block_filter") or []),
+                    "probation_candidate": str(
+                        eligibility.get("probation_candidate_selected")
+                        or eligibility.get("probation_candidate")
+                        or ""
+                    ),
+                    "probation_eligible": bool(eligibility.get("probation_eligible")),
+                    "probation_reject_reason": str(eligibility.get("probation_reject_reason") or ""),
                 }
             )
         watchdog = product_video_zero_task_watchdog_state(job, result, now=current_dt)
@@ -4441,7 +4467,9 @@ def sweep_product_video_zero_task_watchdog(
                     now=current_dt,
                 )
             terminal_reason = str(
-                eligibility.get("reconciliation_reason")
+                eligibility.get("provider_submit_block_reason")
+                or eligibility.get("provider_submit_block_reason_at_candidate_resolver")
+                or eligibility.get("reconciliation_reason")
                 or eligibility.get("worker_admission_block_reason")
                 or "no_eligible_provider_before_scene_dispatch"
             )
@@ -4457,6 +4485,10 @@ def sweep_product_video_zero_task_watchdog(
                     "zero_task_candidate_count": 0,
                     "zero_task_recovery_action": recovery_action,
                     "zero_task_terminal_reason": terminal_reason,
+                    "provider_submit_allowed": False,
+                    "provider_submit_block_reason": terminal_reason,
+                    "router_called": False,
+                    "router_skip_reason": terminal_reason,
                     "original_admission_snapshot": result.get("provider_eligibility_snapshot") or {},
                     "handler_id_that_created_job": str(result.get("admission_callback_handler_id") or ""),
                     "worker_sha_at_creation": str(result.get("admission_worker_sha") or ""),
