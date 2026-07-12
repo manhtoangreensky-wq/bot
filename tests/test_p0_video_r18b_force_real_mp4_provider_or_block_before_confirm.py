@@ -119,14 +119,16 @@ def test_product_video_preflight_reads_recent_jobs_and_provider_status_source_co
     assert "product_video_no_public_mp4_provider" in BOT_SOURCE
 
 
-def test_product_video_blocks_before_invoice_when_preflight_fails_source_contract():
+def test_product_video_scene_count_reaches_invoice_without_submit_source_contract():
     scene_count_start = BOT_SOURCE.index('if action == "b14_scene_count":')
     scene_count_end = BOT_SOURCE.index('if action == "b14_confirm":', scene_count_start)
     scene_count_source = BOT_SOURCE[scene_count_start:scene_count_end]
 
-    assert "product_video_provider_availability_preflight()" in scene_count_source
-    assert scene_count_source.index("product_video_provider_availability_preflight()") < scene_count_source.index("video_b14_prepare_project_for_invoice")
-    assert "PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI" in scene_count_source
+    assert "video_b14_prepare_project_for_invoice" in scene_count_source
+    assert 'task3d_session_step(uid, "b14_invoice"' in scene_count_source
+    assert "product_video_provider_availability_preflight()" not in scene_count_source
+    assert "confirm_video_project_invoice" not in scene_count_source
+    assert "provider_submit" not in scene_count_source
 
 
 def test_product_video_confirm_blocks_before_submit_when_preflight_fails_source_contract():
@@ -134,8 +136,9 @@ def test_product_video_confirm_blocks_before_submit_when_preflight_fails_source_
     confirm_end = BOT_SOURCE.index('if action == "b14_job_status":', confirm_start)
     confirm_source = BOT_SOURCE[confirm_start:confirm_end]
 
-    assert "product_video_provider_availability_preflight()" in confirm_source
-    assert confirm_source.index("product_video_provider_availability_preflight()") < confirm_source.index("confirm_video_project_invoice")
+    assert "product_video_public_preflight_evaluation(" in confirm_source
+    assert "explicit_public_final_confirm=True" in confirm_source
+    assert confirm_source.index("product_video_public_preflight_evaluation(") < confirm_source.index("confirm_video_project_invoice")
     assert "job_creation_blocked_by_provider_availability" not in confirm_source
     assert "PRODUCT_VIDEO_PROVIDER_BUSY_COPY_VI" in confirm_source
 

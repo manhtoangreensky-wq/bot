@@ -259,7 +259,7 @@ def test_refresh_rereads_authoritative_state_and_edits_same_message_without_reco
         assert forbidden not in panel
 
 
-def test_scene_button_custom_text_and_owner_follow_same_current_evaluator():
+def test_scene_button_custom_text_and_owner_all_reach_invoice_before_final_evaluator():
     source = _source()
     scene_button = _between(
         source,
@@ -272,9 +272,11 @@ def test_scene_button_custom_text_and_owner_follow_same_current_evaluator():
         'current_step = str(session.get("current_step") or "")',
     )
 
-    assert "scene_evaluation = product_video_public_preflight_evaluation(" in scene_button
-    assert "preflight_snapshot=provider_preflight" in scene_button
-    assert "custom_evaluation = product_video_public_preflight_evaluation(count)" in custom_text
+    for block in (scene_button, custom_text):
+        assert "video_b14_prepare_project_for_invoice" in block
+        assert 'task3d_session_step(uid, "b14_invoice"' in block
+        assert "product_video_public_preflight_evaluation" not in block
+        assert "product_video_show_public_preflight_panel" not in block
     assert "if not video_b14_is_admin_or_owner(uid)" not in scene_button
     assert "if not video_b14_is_admin_or_owner(uid)" not in custom_text
     assert "video_b14_public_render_guard" not in scene_button

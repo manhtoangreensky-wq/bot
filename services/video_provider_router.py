@@ -2182,6 +2182,7 @@ def product_video_multi_scene_public_gate(
     effective_provider_chain: list[str] | tuple[str, ...] | None = None,
     contract_valid_provider_chain: list[str] | tuple[str, ...] | None = None,
     eligibility_snapshot: dict[str, Any] | None = None,
+    public_user_final_confirm: bool = False,
     environ: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     env = dict(environ or os.environ)
@@ -2218,23 +2219,31 @@ def product_video_multi_scene_public_gate(
             and not bool(health.get(provider, {}).get("provider_degraded_for_product_video_public"))
         ]
     live_health_gate_pass = bool(healthy)
+    public_confirm_override = bool(public_user_final_confirm and live_health_gate_pass)
     if not live_health_gate_pass:
         blocker = "no_healthy_provider_no_charge"
-    elif count > 1 and explicitly_disabled:
+    elif count > 1 and explicitly_disabled and not public_confirm_override:
         blocker = "product_video_multi_scene_public_disabled"
     else:
         blocker = ""
-    ok = bool(live_health_gate_pass and not (count > 1 and explicitly_disabled))
+    ok = bool(
+        live_health_gate_pass
+        and not (count > 1 and explicitly_disabled and not public_confirm_override)
+    )
     return {
         "ok": ok,
         "scene_count": count,
         "single_scene_allowed": bool(count == 1 and live_health_gate_pass),
         "multi_scene_requested": bool(count > 1),
-        "multi_scene_public_enabled": bool(count <= 1 or (not explicitly_disabled and live_health_gate_pass)),
+        "multi_scene_public_enabled": bool(
+            count <= 1
+            or (live_health_gate_pass and (not explicitly_disabled or public_confirm_override))
+        ),
         "multi_scene_public_enabled_raw": raw_flag,
         "multi_scene_public_enabled_source": "env" if raw_flag else "live_health_gate",
         "multi_scene_env_explicitly_enabled": explicitly_enabled,
         "multi_scene_env_explicitly_disabled": explicitly_disabled,
+        "multi_scene_public_confirm_override": public_confirm_override,
         "multi_scene_health_gate_pass": live_health_gate_pass,
         "healthy_contract_provider_order": healthy,
         "effective_provider_chain": effective,
@@ -2382,6 +2391,20 @@ def product_video_provider_eligibility_snapshot(
     probation_reason_map: dict[str, list[str]] = {}
     healthy_candidates: list[str] = []
     probation_candidates: list[str] = []
+    probation_source_policy = product_video_provider_submit_source_policy(
+        {
+            "submit_source": admission_source,
+            "provider_submit_source": admission_source,
+            "public_user_confirmed": bool(public_user_confirmed),
+        },
+        public_submit_enabled=bool(public_submit_enabled),
+    )
+    public_confirm_probation_allowed = bool(
+        allow_public_confirmed_probation
+        and probation_source_policy.get("provider_submit_allowed")
+        and bool(worker_compatible)
+        and bool(probation_lock_clear)
+    )
     for provider in configured_chain:
         item = status_items.get(provider, {})
         adapter = adapters.get(provider)
@@ -2425,7 +2448,10 @@ def product_video_provider_eligibility_snapshot(
             if ("route_ready" in health_state and not bool(health_state.get("route_ready"))) or state_name == "unavailable":
                 hard_reasons.append("provider_route_not_ready")
             elif health_state.get("provider_degraded_for_product_video_public") or state_name == "degraded":
-                hard_reasons.append("provider_health_degraded")
+                if public_confirm_probation_allowed:
+                    probation_reasons.append("provider_health_degraded_public_confirm")
+                else:
+                    hard_reasons.append("provider_health_degraded")
             elif health_state.get("probation") or state_name == "probation":
                 probation_reasons.append("provider_health_probation")
             elif not bool(health_state.get("live_healthy")):
@@ -2444,20 +2470,9 @@ def product_video_provider_eligibility_snapshot(
         elif not hard_reasons and probation_reasons:
             probation_candidates.append(provider)
 
-    probation_source_policy = product_video_provider_submit_source_policy(
-        {
-            "submit_source": admission_source,
-            "provider_submit_source": admission_source,
-            "public_user_confirmed": bool(public_user_confirmed),
-        },
-        public_submit_enabled=bool(public_submit_enabled),
-    )
     probation_admission_allowed = bool(
-        allow_public_confirmed_probation
+        public_confirm_probation_allowed
         and probation_candidates
-        and probation_source_policy.get("provider_submit_allowed")
-        and bool(worker_compatible)
-        and bool(probation_lock_clear)
     )
     selected_probation = probation_candidates[:1] if probation_admission_allowed else []
     eligible = list(healthy_candidates or selected_probation)
@@ -3231,6 +3246,23 @@ def run_provider_generation(
     )
     metadata = dict(request.metadata or {})
     is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or allow_pending_result)
+    submit_switch = product_video_submit_switch_detail(env)
+    submit_enabled = bool(submit_switch.get("resolved"))
+    runtime_submit_source_policy = product_video_provider_submit_source_policy(
+        metadata,
+        public_submit_enabled=submit_enabled,
+        poll_existing_task=False,
+    )
+    runtime_public_confirmed_submit = bool(
+        runtime_submit_source_policy.get("provider_submit_allowed")
+        and runtime_submit_source_policy.get("public_user_confirmed")
+    )
+    runtime_worker_compatible = bool(
+        metadata.get("worker_compatible")
+        or metadata.get("admission_worker_version_compatible")
+        or metadata.get("worker_version_compatible")
+    )
+    runtime_probation_lock_clear = bool(metadata.get("probation_lock_clear"))
     persisted_eligibility_snapshot = (
         metadata.get("provider_eligibility_snapshot")
         if isinstance(metadata.get("provider_eligibility_snapshot"), dict)
@@ -3260,6 +3292,12 @@ def run_provider_generation(
             contract_valid_provider_chain=persisted_eligibility_snapshot.get("contract_valid_provider_chain") or [],
             scene_count=int(metadata.get("scene_count") or metadata.get("scenes_total") or 1),
             require_live_health=True,
+            allow_public_confirmed_probation=runtime_public_confirmed_submit,
+            admission_source=str(runtime_submit_source_policy.get("submit_source") or ""),
+            public_user_confirmed=bool(runtime_submit_source_policy.get("public_user_confirmed")),
+            public_submit_enabled=submit_enabled,
+            worker_compatible=runtime_worker_compatible,
+            probation_lock_clear=runtime_probation_lock_clear,
             environ=env,
             persisted_snapshot_id=str(persisted_eligibility_snapshot.get("provider_eligibility_snapshot_id") or ""),
         )
@@ -3294,8 +3332,6 @@ def run_provider_generation(
     pending_video_id = str(metadata.get("provider_pending_video_id") or existing_video_id or "").strip()
     pending_request_job_id = str(metadata.get("provider_pending_request_job_id") or "").strip()
     pending_attempts = [dict(item) for item in (metadata.get("provider_pending_attempts") or []) if isinstance(item, dict)]
-    submit_switch = product_video_submit_switch_detail(env)
-    submit_enabled = bool(submit_switch.get("resolved"))
     submit_source_policy = product_video_provider_submit_source_policy(
         metadata,
         public_submit_enabled=submit_enabled,

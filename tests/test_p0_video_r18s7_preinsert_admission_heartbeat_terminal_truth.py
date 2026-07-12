@@ -567,7 +567,9 @@ def test_exact_live_path_and_protocol_diagnostics_are_wired_without_provider_htt
     assert 'CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\\|b14_confirm$")' in bot_source
     assert "setattr(context, \"_product_video_authoritative_confirm\", True)" in bot_source
     live_confirm = bot_source[bot_source.index('if action == "b14_confirm":'):bot_source.index('if action == "b14_job_status":')]
-    assert live_confirm.index("product_video_provider_availability_preflight()") < live_confirm.index("video_b14_prepare_project_for_invoice(uid, session)")
+    assert "product_video_public_preflight_evaluation(" in live_confirm
+    assert "explicit_public_final_confirm=True" in live_confirm
+    assert live_confirm.index("product_video_public_preflight_evaluation(") < live_confirm.index("build_product_video_public_final_admission")
     assert "build_product_video_public_final_admission" in live_confirm
     assert "require_provider_admission=True" in live_confirm
     assert "product_video_assert_final_admission" in queue_source
