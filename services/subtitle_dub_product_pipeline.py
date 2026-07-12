@@ -263,6 +263,12 @@ async def process_subtitle_dub_job(
     raw_audio_bytes = b""
     normalization_detail = "not_requested"
     tts_chunks: list[dict] = []
+    tts_expected_segments = 0
+    tts_generated_segments = 0
+    tts_mixed_segments = 0
+    tts_dropped_segments = 0
+    tts_timeline_duration = 0.0
+    audio_padding_seconds = 0.0
     selected_tts_voice_id = ""
     dub_audio_policy: dict[str, Any] = {}
     if _mode_needs_dub(mode):
@@ -285,6 +291,7 @@ async def process_subtitle_dub_job(
                 "route_attempts": route_attempts,
                 **dub_audio_policy,
             }
+        tts_expected_segments = len(tts_segments)
         selected_tts_voice_id = str(resolve_voice_id(user_id, pipeline_state) or "")
         if not selected_tts_voice_id:
             return {
@@ -328,11 +335,45 @@ async def process_subtitle_dub_job(
         )
         segment_tts = dict(segment_tts or {})
         tts_chunks = list(segment_tts.get("chunks") or [])
+        tts_generated_segments = len(tts_chunks)
+        tts_dropped_segments = max(0, tts_expected_segments - tts_generated_segments)
+        if tts_dropped_segments:
+            return {
+                "ok": False,
+                "status": "TTS_SEGMENT_COVERAGE_FAILED",
+                "error_code": "tts_segments_dropped",
+                "provider_called": True,
+                "charged": False,
+                "created_files": [],
+                "state": pipeline_state,
+                "prepared": prepared,
+                "route_attempts": route_attempts,
+                "tts_expected_segments": tts_expected_segments,
+                "tts_generated_segments": tts_generated_segments,
+                "tts_mixed_segments": 0,
+                "tts_dropped_segments": tts_dropped_segments,
+            }
         tts_provider = str(segment_tts.get("provider") or "")
         timeline_duration = max(
-            _safe_int(pipeline_state.get("video_duration") or pipeline_state.get("source_duration"), 0),
-            int(max((float(item.get("end") or 0) for item in tts_segments), default=0)),
+            float(
+                pipeline_state.get("input_duration_seconds")
+                or pipeline_state.get("input_duration")
+                or pipeline_state.get("video_duration")
+                or pipeline_state.get("source_duration")
+                or 0
+            ),
+            max((float(item.get("end") or 0) for item in tts_segments), default=0.0),
         )
+        tts_timeline_duration = float(timeline_duration or 0.0)
+        latest_audio_end = max(
+            (
+                float(item.get("start") or 0.0)
+                + float(item.get("audio_duration") or 0.0)
+                for item in tts_chunks
+            ),
+            default=0.0,
+        )
+        audio_padding_seconds = max(0.0, tts_timeline_duration - latest_audio_end)
         raw_audio_bytes, _timeline_detail = await _maybe_await(build_timeline_audio(tts_chunks, timeline_duration))
         if not raw_audio_bytes:
             return {
@@ -344,6 +385,7 @@ async def process_subtitle_dub_job(
                 "created_files": [],
                 "route_attempts": route_attempts,
             }
+        tts_mixed_segments = tts_generated_segments
         audio_bytes, normalization_detail = await _maybe_await(normalize_audio(raw_audio_bytes))
         if not audio_bytes:
             return {
@@ -426,6 +468,13 @@ async def process_subtitle_dub_job(
         "srt_bytes": srt_bytes,
         "subtitle_items": subtitle_items,
         "tts_chunks": tts_chunks,
+        "tts_expected_segments": tts_expected_segments,
+        "tts_generated_segments": tts_generated_segments,
+        "tts_mixed_segments": tts_mixed_segments,
+        "tts_dropped_segments": tts_dropped_segments,
+        "tts_overlap_resolutions": max(0, sum(1 for item in tts_chunks if float(item.get("audio_duration") or 0.0) > max(0.1, float(item.get("end") or 0.0) - float(item.get("start") or 0.0)))),
+        "tts_timeline_duration": tts_timeline_duration,
+        "audio_padding_seconds": audio_padding_seconds,
         "raw_audio_bytes": raw_audio_bytes,
         "audio_bytes": audio_bytes,
         "video_output": video_output,

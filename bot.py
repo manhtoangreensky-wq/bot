@@ -94457,7 +94457,14 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• project split required: <code>{yes_no(job.get('project_split_required'))}</code>",
         f"• project parts delivered: <code>{intval(job.get('project_parts_delivered'))}/{intval(job.get('project_part_count'))}</code>",
         f"• project max duration: <code>{intval(job.get('project_max_duration_seconds'))}</code>",
+        f"• source duration: <code>{esc(job.get('source_duration') or job.get('expected_duration'))}</code>",
         f"• final mux duration: <code>{intval(job.get('final_mux_duration') or job.get('final_mp4_duration'))}</code>",
+        f"• duration coverage ratio: <code>{esc(job.get('duration_coverage_ratio'))}</code>",
+        f"• duration coverage ok: <code>{yes_no(job.get('duration_coverage_ok'))}</code>",
+        f"• canonical final artifact path: <code>{esc_path(job.get('canonical_final_artifact_path'))}</code>",
+        f"• canonical final artifact source: <code>{esc(job.get('canonical_final_artifact_source'))}</code>",
+        f"• artifact validation result: <code>{esc(job.get('artifact_validation_result'))}</code>",
+        f"• artifact validation error: <code>{esc(job.get('artifact_validation_error'))}</code>",
         f"• delivery status: <code>{esc(job.get('delivery_status'))}</code>",
         f"• gate product route allowed: <code>{yes_no(matrix.get('product_route_allowed'))}</code>",
         f"• gate blackbox enabled: <code>{yes_no(matrix.get('blackbox_enabled'))}</code>",
@@ -94496,6 +94503,17 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• dubbed audio exists: <code>{yes_no(job.get('dubbed_audio_exists'))}</code>",
         f"• generated audio path: <code>{esc_path(job.get('generated_audio_path'))}</code>",
         f"• generated audio duration: <code>{esc(job.get('generated_audio_duration'))}</code>",
+        f"• TTS expected segments: <code>{intval(job.get('tts_expected_segments'))}</code>",
+        f"• TTS generated segments: <code>{intval(job.get('tts_generated_segments'))}</code>",
+        f"• TTS mixed segments: <code>{intval(job.get('tts_mixed_segments'))}</code>",
+        f"• TTS dropped segments: <code>{intval(job.get('tts_dropped_segments'))}</code>",
+        f"• TTS timeline duration: <code>{esc(job.get('tts_timeline_duration'))}</code>",
+        f"• audio padding seconds: <code>{esc(job.get('audio_padding_seconds'))}</code>",
+        f"• subtitle timing source: <code>{esc(job.get('subtitle_timing_source'))}</code>",
+        f"• original cue count: <code>{intval(job.get('original_cue_count'))}</code>",
+        f"• translated cue count: <code>{intval(job.get('translated_cue_count'))}</code>",
+        f"• cue start mismatch: <code>{intval(job.get('cue_start_mismatch_count'))}</code>",
+        f"• cue end mismatch: <code>{intval(job.get('cue_end_mismatch_count'))}</code>",
         f"• mux/render route called: <code>{yes_no(job.get('mux_render_called'))}</code>",
         f"• final MP4 path: <code>{esc_path(job.get('final_mp4_path'))}</code>",
         f"• final MP4 exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
@@ -94503,6 +94521,10 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• final MP4 validated: <code>{yes_no(job.get('final_mp4_validated'))}</code>",
         f"• final MP4 delivered: <code>{yes_no(job.get('final_mp4_delivered'))}</code>",
         f"• final MP4 duration: <code>{intval(job.get('final_mp4_duration') or job.get('duration_seconds'))}</code>",
+        f"• mux duration policy: <code>{esc(job.get('mux_duration_policy'))}</code>",
+        f"• shortest used: <code>{yes_no(job.get('shortest_used'))}</code>",
+        f"• receipt gate pass: <code>{yes_no(subdub_duration_validation_allows_success(job) and job.get('delivery_succeeded'))}</code>",
+        f"• receipt blocker: <code>{esc(job.get('success_blocked_reason') or ('' if subdub_duration_validation_allows_success(job) else 'video_duration_coverage_failed'))}</code>",
         f"• subtitle style: <code>{esc(job.get('subtitle_style_preset'))}</code>",
         f"• subtitle font multiplier: <code>{esc(job.get('subtitle_font_multiplier'))}</code>",
         f"• subtitle render font size: <code>{esc(job.get('subtitle_render_font_size'))}</code>",
@@ -177246,8 +177268,38 @@ def video_dubbing_flow_failure_text(mode: str, lang: str = "vi") -> str:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
     return subdub_mode_fail_text(VIDEO_SUBTITLE_MODE_CREATE, lang)
 
+
+def subdub_duration_validation_allows_success(payload: dict | None = None) -> bool:
+    current = dict(payload or {})
+    validation = dict(current.get("output_validation") or current.get("_subdub_output_validation") or {})
+    blocker = str(current.get("success_blocked_reason") or current.get("artifact_validation_result") or validation.get("detail") or "").strip()
+    if blocker == "video_duration_coverage_failed":
+        return False
+    has_duration_contract = bool(
+        "duration_coverage_ok" in current
+        or "duration_coverage_ok" in validation
+        or float(current.get("expected_duration") or validation.get("expected_duration") or 0.0) > 0
+    )
+    if not has_duration_contract:
+        return True
+    if "duration_coverage_ok" in current and not truthy_value(current.get("duration_coverage_ok"), False):
+        return False
+    if "duration_coverage_ok" in validation and not truthy_value(validation.get("duration_coverage_ok"), False):
+        return False
+    if validation and "ok" in validation and not truthy_value(validation.get("ok"), False):
+        return False
+    expected = max(0.0, float(current.get("expected_duration") or current.get("source_duration") or validation.get("expected_duration") or validation.get("source_duration") or 0.0))
+    actual = max(0.0, float(current.get("canonical_final_artifact_duration") or current.get("final_mp4_duration") or validation.get("actual_duration") or validation.get("duration") or 0.0))
+    if expected > 0:
+        if actual <= 0 or actual < expected * 0.97:
+            return False
+    return True
+
+
 def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
     current = dict(result or {})
+    if not subdub_duration_validation_allows_success(current):
+        return False
     message_id = str(
         current.get("video_delivery_message_id")
         or current.get("final_video_message_id")
@@ -177315,12 +177367,19 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
     outcome_type = str(result.get("terminal_public_outcome_type") or state.get("terminal_public_outcome_type") or "").strip().lower()
     public_error_already_sent = bool(result.get("public_error_sent") or state.get("public_error_sent") or int(result.get("public_error_sent_count") or state.get("public_error_sent_count") or 0) > 0)
+    receipt_context = {**state, **dict(result.get("state") or {}), **result}
+    duration_valid = subdub_duration_validation_allows_success(receipt_context)
+    # Keep the historical result-only check for compatibility, then include
+    # persisted state fields used by refreshed status/receipt rendering.
     delivered_video = subdub_result_has_delivered_video(result)
-    terminal_delivered = str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
+    delivered_video = delivered_video or subdub_result_has_delivered_video(receipt_context)
+    terminal_delivered = duration_valid and str(result.get("terminal_state") or state.get("terminal_state") or "").strip().lower() == "delivered"
     if outcome_type == "partial_audio_delivered" or result.get("partial_audio_delivered") or state.get("partial_audio_delivered"):
         if SUBDUB_PUBLIC_AUDIO_FALLBACK_ENABLED:
             return subdub_audio_fallback_text(mode, lang)
         return subdub_final_video_failed_text(lang) if subdub_video_requires_final_mp4(mode) else subdub_mode_fail_text(mode, lang)
+    if not duration_valid:
+        return subdub_duration_invalid_output_text(lang)
     if not (delivered_video or terminal_delivered) and (outcome_type == "failure" or (
         public_error_already_sent
         and not bool(result.get("late_fail_suppressed") or state.get("late_fail_suppressed"))
@@ -177329,7 +177388,14 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     charged_xu = int(result.get("charged") or result.get("charged_xu") or state.get("charged_xu") or 0)
     cost_line = subdub_success_cost_line(charged_xu, lang)
     if delivered_video or terminal_delivered:
-        duration = subtitle_plus_dub_duration_label({**state, **dict(result.get("state") or {})})
+        actual_duration = float(
+            receipt_context.get("canonical_final_artifact_duration")
+            or receipt_context.get("final_mp4_duration")
+            or (receipt_context.get("output_validation") or {}).get("actual_duration")
+            or (receipt_context.get("output_validation") or {}).get("duration")
+            or 0.0
+        )
+        duration = video_translate_duration_text(actual_duration) if actual_duration > 0 else subtitle_plus_dub_duration_label(receipt_context)
         if "chưa" in duration.lower():
             duration = "Đang cập nhật" if normalize_user_language(lang) == "vi" else "Updating"
         product_labels = {
@@ -178473,6 +178539,20 @@ def subdub_final_video_failed_text(lang: str = "vi") -> str:
         "Anh/chị có thể thử video rõ tiếng hơn hoặc gửi video khác."
     )
 
+
+def subdub_duration_invalid_output_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "TOAN AAS could not create the complete video.\n"
+            "The result does not cover the full source duration, so it was not marked complete.\n"
+            "No Xu was charged."
+        )
+    return (
+        "TOAN AAS chưa tạo được video hoàn chỉnh.\n"
+        "Video kết quả chưa đủ thời lượng nên hệ thống chưa xác nhận hoàn tất.\n"
+        "Hệ thống chưa trừ Xu."
+    )
+
 def subdub_mode_success_text(mode: str = "", lang: str = "vi") -> str:
     mode = normalize_video_translate_mode(mode)
     if normalize_user_language(lang) != "vi":
@@ -178587,6 +178667,8 @@ def subdub_final_video_artifact_exists(job: dict | None = None) -> bool:
 
 def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
     current = dict(job or {})
+    if not subdub_duration_validation_allows_success(current):
+        return False
     terminal = str(current.get("terminal_state") or "").strip().lower()
     outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
     message_id = str(
@@ -182133,7 +182215,15 @@ def subdub_basic_mp4_validation(video_bytes: bytes, *, min_bytes: int | None = N
         "size": size,
     }
 
-async def subdub_validate_video_output(video_bytes: bytes, *, require_audio: bool = False, min_bytes: int | None = None) -> dict:
+async def subdub_validate_video_output(
+    video_bytes: bytes,
+    *,
+    require_audio: bool = False,
+    min_bytes: int | None = None,
+    expected_duration: float = 0.0,
+    min_duration_coverage: float = 0.97,
+    max_duration_overage: float = 1.0,
+) -> dict:
     min_size = int(min_bytes or SUBDUB_MIN_VIDEO_OUTPUT_BYTES or 512)
     if not video_bytes or len(video_bytes) < min_size:
         return {"ok": False, "detail": "video_too_small", "size": len(video_bytes or b""), "duration": 0.0, "has_video": False, "has_audio": False}
@@ -182151,7 +182241,28 @@ async def subdub_validate_video_output(video_bytes: bytes, *, require_audio: boo
         return {**probe, "ok": False, "detail": "video_duration_zero"}
     if require_audio and not probe.get("has_audio"):
         return {**probe, "ok": False, "detail": "audio_stream_missing"}
-    return {**probe, "ok": True, "detail": "ok"}
+    actual_duration = float(probe.get("duration") or 0.0)
+    expected = max(0.0, float(expected_duration or 0.0))
+    coverage_ratio = (actual_duration / expected) if expected > 0 else 1.0
+    duration_coverage_ok = bool(
+        expected <= 0
+        or (
+            actual_duration >= expected * max(0.01, float(min_duration_coverage or 0.97))
+            and actual_duration <= expected + max(0.0, float(max_duration_overage or 1.0))
+        )
+    )
+    duration_fields = {
+        "source_duration": expected,
+        "expected_duration": expected,
+        "actual_duration": actual_duration,
+        "duration_coverage_ratio": coverage_ratio,
+        "duration_coverage_ok": duration_coverage_ok,
+        "duration_min_required": expected * max(0.01, float(min_duration_coverage or 0.97)) if expected > 0 else 0.0,
+        "duration_max_allowed": expected + max(0.0, float(max_duration_overage or 1.0)) if expected > 0 else 0.0,
+    }
+    if not duration_coverage_ok:
+        return {**probe, **duration_fields, "ok": False, "detail": "video_duration_coverage_failed"}
+    return {**probe, **duration_fields, "ok": True, "detail": "ok"}
 
 def subdub_mode_requires_final_video(mode: str = "", state: dict | None = None, content_type: str = "", output_type: str = "") -> bool:
     state = dict(state or {})
@@ -182212,7 +182323,12 @@ def subdub_aspect_ratio_close(
     output_ratio = float(output_width) / float(output_height)
     return abs(source_ratio - output_ratio) <= max(0.001, float(tolerance or 0.03))
 
-async def subdub_compress_video_bytes(video_bytes: bytes, *, require_audio: bool = False) -> tuple[bytes, str]:
+async def subdub_compress_video_bytes(
+    video_bytes: bytes,
+    *,
+    require_audio: bool = False,
+    expected_duration: float = 0.0,
+) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
     if not ffmpeg or not video_bytes:
         return b"", "compress_unavailable"
@@ -182235,7 +182351,11 @@ async def subdub_compress_video_bytes(video_bytes: bytes, *, require_audio: bool
             return b"", str(detail or "compress_failed")
         with open(output_path, "rb") as handle:
             compressed = handle.read()
-        validation = await subdub_validate_video_output(compressed, require_audio=require_audio)
+        validation = await subdub_validate_video_output(
+            compressed,
+            require_audio=require_audio,
+            expected_duration=expected_duration,
+        )
         if not validation.get("ok"):
             return b"", str(validation.get("detail") or "compress_validation_failed")
         return compressed, "compressed"
@@ -182267,12 +182387,22 @@ async def send_public_subtitle_dub_final_outputs(
     include_subtitle_outputs: bool = True,
     strict_validation: bool = False,
     job_key: str = "",
+    expected_duration_seconds: float = 0.0,
+    canonical_video_path: str = "",
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
     is_combined = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     requires_final_mp4 = subdub_video_requires_final_mp4(mode)
-    metadata_enabled = bool(strict_validation)
+    expected_duration_seconds = max(0.0, float(expected_duration_seconds or 0.0))
+    canonical_video_path = str(canonical_video_path or "").strip()
+    if canonical_video_path:
+        try:
+            with open(canonical_video_path, "rb") as handle:
+                video_bytes = handle.read()
+        except OSError:
+            video_bytes = b""
+    metadata_enabled = bool(strict_validation or expected_duration_seconds > 0)
     video_product_subtitle_mode = bool(
         active_flow not in {VIDEO_DUBBING_FLOW_TRANSCRIPT, VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}
         and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -182309,6 +182439,11 @@ async def send_public_subtitle_dub_final_outputs(
         "srt_suppress_reason": "",
         "partial_copy_suppressed": False,
         "explicit_srt_download_available": False,
+        "source_duration": expected_duration_seconds,
+        "expected_duration": expected_duration_seconds,
+        "duration_coverage_ok": False,
+        "canonical_final_artifact_path": canonical_video_path,
+        "canonical_final_artifact_source": "workspace_final_mp4" if canonical_video_path else "pipeline_video_output",
     }
     if video_bytes:
         if metadata_enabled:
@@ -182316,13 +182451,23 @@ async def send_public_subtitle_dub_final_outputs(
         filename, caption, _button = video_dubbing_final_video_label(mode, lang)
         require_audio = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and bool(audio_bytes)
         validation = (
-            await subdub_validate_video_output(video_bytes, require_audio=require_audio)
-            if strict_validation
+            await subdub_validate_video_output(
+                video_bytes,
+                require_audio=require_audio,
+                expected_duration=expected_duration_seconds,
+            )
+            if strict_validation or expected_duration_seconds > 0
             else {"ok": True, "detail": "not_requested"}
         )
         if metadata_enabled:
             sent["output_validation"] = dict(validation or {})
         sent["final_mp4_validated"] = bool(validation.get("ok"))
+        sent["duration_coverage_ok"] = bool(validation.get("duration_coverage_ok", validation.get("ok")))
+        sent["final_mp4_duration"] = float(validation.get("actual_duration") or validation.get("duration") or 0.0)
+        sent["duration_coverage_ratio"] = float(validation.get("duration_coverage_ratio") or 0.0)
+        if not validation.get("ok"):
+            sent["success_blocked_reason"] = str(validation.get("detail") or "final_mp4_invalid")
+            sent["delivery_reason"] = sent["success_blocked_reason"]
         send_limit_mb = max(1, int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or TELEGRAM_VIDEO_PREVIEW_MAX_MB))
         doc_limit_mb = max(send_limit_mb, int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB or TELEGRAM_DOCUMENT_MAX_MB))
         generated_limit_mb = max(doc_limit_mb, int(GENERATED_MEDIA_MAX_MB or doc_limit_mb))
@@ -182392,7 +182537,11 @@ async def send_public_subtitle_dub_final_outputs(
                     return sent
             compressed = b""
             if not sent.get("video_delivery_message_id") and (len(video_bytes) > doc_limit or len(video_bytes) >= compress_threshold):
-                compressed, _compress_detail = await subdub_compress_video_bytes(video_bytes, require_audio=require_audio)
+                compressed, _compress_detail = await subdub_compress_video_bytes(
+                    video_bytes,
+                    require_audio=require_audio,
+                    expected_duration=expected_duration_seconds,
+                )
                 if compressed and await _deliver_video_payload(compressed, "compressed"):
                     if sent.get("final_mp4_delivered") and video_product_subtitle_mode:
                         return sent
@@ -182404,7 +182553,7 @@ async def send_public_subtitle_dub_final_outputs(
         sent["partial_audio_available"] = bool(audio_bytes)
         sent["partial_audio_delivered"] = False
         sent["full_video_failed"] = True
-        sent["success_blocked_reason"] = "missing_valid_delivered_mp4"
+        sent["success_blocked_reason"] = sent.get("success_blocked_reason") or "missing_valid_delivered_mp4"
         sent["terminal_public_outcome_type"] = "failure"
         sent["charge_status"] = "not_charged"
         sent["delivery_reason"] = sent.get("delivery_reason") or "missing_valid_delivered_mp4"
@@ -182977,6 +183126,64 @@ def video_dubbing_segments_from_text(text: str, duration_seconds: int = 0) -> li
         })
     return segments
 
+
+def subdub_wrap_cue_text_two_lines(text: str, max_chars_per_line: int = 42) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean or len(clean) <= max_chars_per_line:
+        return clean
+    words = clean.split(" ")
+    if len(words) <= 1:
+        midpoint = max(1, int(math.ceil(len(clean) / 2.0)))
+        return f"{clean[:midpoint]}\n{clean[midpoint:]}".strip()
+    best_index = 1
+    best_score = float("inf")
+    for index in range(1, len(words)):
+        left = " ".join(words[:index])
+        right = " ".join(words[index:])
+        overflow = max(0, len(left) - max_chars_per_line) + max(0, len(right) - max_chars_per_line)
+        score = (overflow * 1000) + abs(len(left) - len(right))
+        if score < best_score:
+            best_score = score
+            best_index = index
+    return f"{' '.join(words[:best_index])}\n{' '.join(words[best_index:])}".strip()
+
+
+def subdub_validate_cue_locked_timing(
+    source_segments: list[dict],
+    translated_segments: list[dict],
+    *,
+    tolerance: float = 0.001,
+) -> dict:
+    source = [dict(item or {}) for item in (source_segments or []) if str((item or {}).get("text") or "").strip()]
+    translated = [dict(item or {}) for item in (translated_segments or []) if str((item or {}).get("text") or "").strip()]
+    start_mismatches = 0
+    end_mismatches = 0
+    index_mismatches = 0
+    for position, source_item in enumerate(source):
+        if position >= len(translated):
+            break
+        translated_item = translated[position]
+        expected_index = int(source_item.get("index") or position + 1)
+        actual_index = int(translated_item.get("index") or position + 1)
+        if actual_index != expected_index:
+            index_mismatches += 1
+        if abs(float(translated_item.get("start") or 0.0) - float(source_item.get("start") or 0.0)) > tolerance:
+            start_mismatches += 1
+        if abs(float(translated_item.get("end") or 0.0) - float(source_item.get("end") or 0.0)) > tolerance:
+            end_mismatches += 1
+    cue_count_matches = len(source) == len(translated)
+    return {
+        "ok": bool(cue_count_matches and not start_mismatches and not end_mismatches and not index_mismatches),
+        "original_cue_count": len(source),
+        "translated_cue_count": len(translated),
+        "cue_count_matches": cue_count_matches,
+        "cue_index_mismatch_count": index_mismatches,
+        "cue_start_mismatch_count": start_mismatches,
+        "cue_end_mismatch_count": end_mismatches,
+        "subtitle_timing_source": "original_cues",
+    }
+
+
 def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool = False) -> list[dict]:
     qc_segments = []
     for source in segments or []:
@@ -182989,23 +183196,13 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
             end = start + 1.0
         duration = max(0.1, end - start)
         if preserve_timestamps:
-            lines = []
-            line = ""
-            for word in text.split():
-                candidate = f"{line} {word}".strip()
-                if line and len(candidate) > 42 and len(lines) < 1:
-                    lines.append(line)
-                    line = word
-                else:
-                    line = candidate
-            if line:
-                lines.append(line)
             qc_segments.append({
-                "index": len(qc_segments) + 1,
+                "index": int((source or {}).get("index") or len(qc_segments) + 1),
                 "start": round(start, 3),
                 "end": round(end, 3),
-                "text": "\n".join(lines[:2]).strip(),
+                "text": subdub_wrap_cue_text_two_lines(text),
                 "confidence": (source or {}).get("confidence"),
+                "translate_missing": bool((source or {}).get("translate_missing")),
             })
             continue
         max_chars = 84 if preserve_timestamps else max(24, min(84, int(duration * 20)))
@@ -183171,10 +183368,14 @@ async def translate_subtitle_segments(
         raise RuntimeError("translation_empty")
     translated_segments = subdub_retime_translated_segments_to_source(segments, translated_segments)
     translated_segments = video_dubbing_qc_segments(translated_segments, preserve_timestamps=True)
+    timing_validation = subdub_validate_cue_locked_timing(segments, translated_segments)
+    if not timing_validation.get("ok"):
+        raise RuntimeError("translated_cue_timing_mismatch")
     return {
         "segments": translated_segments,
         "provider": next((provider for provider in providers if provider), ""),
         "srt": video_dubbing_srt_from_segments(translated_segments),
+        **timing_validation,
     }
 
 async def transcribe_media_to_segments(
@@ -183552,7 +183753,10 @@ async def video_dubbing_render_video(
         with open(source_path, "wb") as handle:
             handle.write(source_bytes)
         source_probe = await subdub_probe_video_bytes(source_bytes)
+        source_duration = max(0.0, float(source_probe.get("duration") or 0.0))
         source_has_audio = bool(source_probe.get("has_audio"))
+        if dubbed_audio and source_duration <= 0:
+            return b"", "source_video_duration_unavailable"
         command = [ffmpeg, "-y", "-i", source_path]
         if dubbed_audio:
             with open(audio_path, "wb") as handle:
@@ -183612,25 +183816,31 @@ async def video_dubbing_render_video(
             if not source_has_audio:
                 original_volume = 0.0
             dub_volume = subdub_percent_value(dubbed_voice_volume_percent, SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT, 0, 200) / 100.0
+            duration_filter = f"apad=whole_dur={source_duration:.3f},atrim=duration={source_duration:.3f}"
             if dubbed_audio and original_volume > 0:
                 command.extend([
                     "-filter_complex",
-                    f"[0:a]volume={original_volume:.3f}[original];"
-                    f"[1:a]volume={dub_volume:.3f}[dub];"
+                    f"[0:a]volume={original_volume:.3f},{duration_filter}[original];"
+                    f"[1:a]volume={dub_volume:.3f},{duration_filter}[dub];"
                     "[original][dub]amix=inputs=2:duration=longest:dropout_transition=0,"
-                    "alimiter=limit=0.95[mixed]",
-                    "-map", "0:v:0", "-map", "[mixed]", "-c:a", "aac", "-b:a", "160k", "-shortest",
+                    f"atrim=duration={source_duration:.3f},alimiter=limit=0.95[mixed]",
+                    "-map", "0:v:0", "-map", "[mixed]", "-c:a", "aac", "-b:a", "160k",
                 ])
             elif dubbed_audio and abs(dub_volume - 1.0) > 0.001:
                 command.extend([
                     "-filter_complex",
-                    f"[1:a]volume={dub_volume:.3f},alimiter=limit=0.95[dub]",
-                    "-map", "0:v:0", "-map", "[dub]", "-c:a", "aac", "-b:a", "160k", "-shortest",
+                    f"[1:a]volume={dub_volume:.3f},{duration_filter},alimiter=limit=0.95[dub]",
+                    "-map", "0:v:0", "-map", "[dub]", "-c:a", "aac", "-b:a", "160k",
                 ])
             elif dubbed_audio:
-                command.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "160k", "-shortest"])
+                command.extend([
+                    "-filter_complex", f"[1:a]{duration_filter}[dub]",
+                    "-map", "0:v:0", "-map", "[dub]", "-c:a", "aac", "-b:a", "160k",
+                ])
             else:
                 command.extend(["-map", "0:v:0", "-map", "0:a?", "-c:a", "copy"])
+            if dubbed_audio and source_duration > 0:
+                command.extend(["-t", f"{source_duration:.3f}"])
             command.extend(["-movflags", "+faststart", output_path])
             ok, detail = await run_ffmpeg_command(command, timeout=300)
             if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
@@ -183640,10 +183850,16 @@ async def video_dubbing_render_video(
             validation = await subdub_validate_video_output(
                 output_bytes,
                 require_audio=bool(dubbed_audio) if require_audio is None else bool(require_audio),
+                expected_duration=source_duration,
             )
             if not validation.get("ok"):
                 return b"", f"{label}_validation_failed:{sanitize_log_text(str(validation.get('detail') or 'video_output_invalid'))[:180]}"
-            return output_bytes, f"ffmpeg_video_render_{label}:{validation.get('detail') or 'validated'}"
+            return output_bytes, (
+                f"ffmpeg_video_render_{label}:{validation.get('detail') or 'validated'};"
+                f"source_duration={source_duration:.3f};"
+                f"output_duration={float(validation.get('duration') or 0.0):.3f};"
+                "shortest_used=no"
+            )
 
         fit_filters = subdub_video_fit_filters(subtitle_style)
         basic_filter = fallback_subtitle_filter if advanced_filters and fallback_subtitle_filter else subtitle_filter
@@ -184100,38 +184316,6 @@ async def synthesize_dub_segment_chunks(
                 provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
                 duration = retry_duration
                 speed = retry_speed
-        if duration > slot_seconds * 1.15 and safe_max_speed > speed:
-            target_chars = max(12, int(slot_seconds * 18))
-            compact_words = []
-            for word in text.split():
-                candidate = " ".join([*compact_words, word])
-                if compact_words and len(candidate) > target_chars:
-                    break
-                compact_words.append(word)
-            compact_text = " ".join(compact_words).strip()
-            if compact_text and compact_text != text:
-                compact_speed = min(safe_max_speed, max(speed, 1.0))
-                try:
-                    compact_provider, compact_audio, compact_detail = await video_dubbing_tts_bytes(
-                        compact_text,
-                        voice_style,
-                        voice_id,
-                        f"{compact_speed:.3f}",
-                        allow_admin=allow_admin,
-                    )
-                except TypeError:
-                    compact_provider, compact_audio, compact_detail = await video_dubbing_tts_bytes(
-                        compact_text,
-                        voice_style,
-                        voice_id,
-                        f"{compact_speed:.3f}",
-                    )
-                compact_duration = await video_dubbing_audio_duration_seconds(compact_audio)
-                if compact_audio and compact_duration and compact_duration < duration:
-                    provider, audio_bytes, detail = compact_provider, compact_audio, compact_detail
-                    duration = compact_duration
-                    speed = compact_speed
-                    text = compact_text
         if not audio_bytes:
             raise RuntimeError("tts_segment_empty")
         providers.append(provider)
@@ -184182,9 +184366,9 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
             next_start = (
                 max(start + 0.1, float(ordered_chunks[index + 1].get("start") or 0))
                 if index + 1 < len(ordered_chunks)
-                else max(cue_end, float(total_duration or 0), start + float(item.get("audio_duration") or 0))
+                else max(cue_end, float(total_duration or 0))
             )
-            hard_end = max(start + 0.1, min(next_start, max(next_start, cue_end)))
+            hard_end = max(start + 0.1, min(cue_end, next_start))
             slot_seconds = max(0.1, hard_end - start)
             audio_duration = max(0.0, float(item.get("audio_duration") or 0))
             tempo = 1.0
@@ -184199,7 +184383,8 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
             delayed_labels.append(f"[{label}]")
         filters.append(
             f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:duration=longest:dropout_transition=0,"
-            f"apad=pad_dur={max(0.1, timeline_end):.3f}[mix]"
+            f"apad=whole_dur={max(0.1, timeline_end):.3f},"
+            f"atrim=duration={max(0.1, timeline_end):.3f}[mix]"
         )
         output_path = os.path.join(tmpdir, "dub_timeline.mp3")
         command.extend([
@@ -184428,8 +184613,14 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             output_segments = video_dubbing_segments_from_subtitle(output_subtitle) or output_segments
             retimed_segments = subdub_retime_translated_segments_to_source(source_segments, output_segments)
             if retimed_segments:
-                output_segments = retimed_segments
+                output_segments = video_dubbing_qc_segments(retimed_segments, preserve_timestamps=True)
                 output_subtitle = video_dubbing_srt_from_segments(output_segments) or output_subtitle
+    timing_validation = subdub_validate_cue_locked_timing(
+        source_segments,
+        output_segments if needs_translation else source_segments,
+    )
+    if needs_translation and not timing_validation.get("ok"):
+        raise RuntimeError("translated_cue_timing_mismatch")
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
@@ -184453,7 +184644,9 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         "chunk_count": int(source_info.get("chunk_count") or state.get("chunk_count") or (1 if duration_hint else 0)),
         "chunk_strategy": str(source_info.get("chunk_strategy") or state.get("chunk_strategy") or "single_pass"),
         "global_timing_preserved": bool(source_info.get("global_timing_preserved", state.get("global_timing_preserved", True))),
-        "subtitle_timing_source": str(source_info.get("subtitle_timing_source") or ("embedded_subtitle" if source_info.get("source_kind") == "embedded_subtitle" else "")),
+        "subtitle_timing_source": "original_cues" if needs_translation else str(source_info.get("subtitle_timing_source") or ("embedded_subtitle" if source_info.get("source_kind") == "embedded_subtitle" else "source_cues")),
+        "subtitle_artifact_used_for_burnin": "translated_srt" if needs_translation else "source_srt",
+        **timing_validation,
     }
 
 async def _execute_video_dubbing_pipeline_core(
@@ -184781,6 +184974,9 @@ async def _execute_video_dubbing_pipeline_core(
         "fallback_render_attempted": False,
         "fallback_render_pass": False,
         "render_detail": "",
+        "mux_duration_policy": "source_video",
+        "shortest_used": False,
+        "ffmpeg_args_summary": "map source video; pad/trim audio to source duration; no shortest",
     }
 
     async def _prepare_subtitles_for_blackbox(service_state: dict) -> dict:
@@ -185127,6 +185323,24 @@ async def _execute_video_dubbing_pipeline_core(
     partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
     partial_reason = str(product_result.get("partial_reason") or "")
     final_video_required = subdub_mode_requires_final_video(mode, state, content_type, str(product_result.get("output_type") or state.get("output_type") or ""))
+    source_video_probe = await subdub_probe_video_bytes(video_bytes) if video_bytes else {}
+    source_duration_seconds = max(
+        0.0,
+        float(source_video_probe.get("duration") or 0.0),
+        float(input_save.get("ffprobe_duration") or 0.0),
+        float(input_save.get("duration") or 0.0),
+        float(state.get("input_duration_seconds") or 0.0),
+        float(state.get("input_duration") or 0.0),
+        float(state.get("video_duration") or 0.0),
+        float(state.get("source_duration") or 0.0),
+    )
+    final_output_validation: dict = {
+        "ok": not final_video_required,
+        "detail": "not_required" if not final_video_required else "not_validated",
+        "source_duration": source_duration_seconds,
+        "expected_duration": source_duration_seconds,
+        "duration_coverage_ok": not final_video_required,
+    }
     subtitle_readability = {"ok": True, "blocker": "", "cue_count": 0, "broken_glyph_ratio": 0.0}
     if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         subtitle_text_for_validation = (
@@ -185164,15 +185378,17 @@ async def _execute_video_dubbing_pipeline_core(
             stage="video",
         )
     if final_video_required and video_output:
-        validation = await subdub_validate_video_output(
+        final_output_validation = await subdub_validate_video_output(
             video_output,
             require_audio=mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB},
+            expected_duration=source_duration_seconds,
         )
-        if not validation.get("ok"):
+        if not final_output_validation.get("ok"):
+            validation_detail = str(final_output_validation.get("detail") or "final_video_invalid")
             return _failed_product_result(
-                "FINAL_VIDEO_INVALID",
-                subdub_mode_fail_text(mode, lang),
-                str(validation.get("detail") or "final_video_invalid"),
+                "FINAL_VIDEO_DURATION_INVALID" if validation_detail == "video_duration_coverage_failed" else "FINAL_VIDEO_INVALID",
+                subdub_duration_invalid_output_text(lang) if validation_detail == "video_duration_coverage_failed" else subdub_mode_fail_text(mode, lang),
+                validation_detail,
                 stage="video",
             )
     style_state = subdub_output_style_state(state, mode)
@@ -185195,6 +185411,21 @@ async def _execute_video_dubbing_pipeline_core(
         ),
         "_subdub_render_debug": dict(render_debug),
         "_subdub_subtitle_readability": dict(subtitle_readability),
+        "_subdub_output_validation": dict(final_output_validation),
+        "source_duration": source_duration_seconds,
+        "input_duration_seconds": source_duration_seconds,
+        "final_mp4_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+        "duration_coverage_ratio": float(final_output_validation.get("duration_coverage_ratio") or 0.0),
+        "duration_coverage_ok": bool(final_output_validation.get("duration_coverage_ok")),
+        "artifact_validation_result": str(final_output_validation.get("detail") or ""),
+        "artifact_validation_error": "" if final_output_validation.get("ok") else str(final_output_validation.get("detail") or "final_mp4_invalid"),
+        "tts_expected_segments": int(product_result.get("tts_expected_segments") or 0),
+        "tts_generated_segments": int(product_result.get("tts_generated_segments") or 0),
+        "tts_mixed_segments": int(product_result.get("tts_mixed_segments") or 0),
+        "tts_dropped_segments": int(product_result.get("tts_dropped_segments") or 0),
+        "tts_overlap_resolutions": int(product_result.get("tts_overlap_resolutions") or 0),
+        "tts_timeline_duration": float(product_result.get("tts_timeline_duration") or 0.0),
+        "audio_padding_seconds": float(product_result.get("audio_padding_seconds") or 0.0),
         "original_audio_mode": str(
             state.get("original_audio_mode")
             or state.get("source_audio_mode")
@@ -185202,6 +185433,8 @@ async def _execute_video_dubbing_pipeline_core(
             or ("mute" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "keep")
         ),
     }
+    canonical_final_artifact_path = ""
+    canonical_final_artifact_source = "pipeline_video_output"
     if workspace:
         source_name = os.path.basename(str(state.get("source_file_name") or "source.bin"))
         workspace_artifacts["source"] = write_subtitle_dub_pipeline_artifact(
@@ -185235,6 +185468,47 @@ async def _execute_video_dubbing_pipeline_core(
             "final.mp4",
             video_output,
         )
+        canonical_final_artifact_path = str(workspace_artifacts.get("final_mp4") or "")
+        if not canonical_final_artifact_path or not os.path.exists(canonical_final_artifact_path):
+            return _failed_product_result(
+                "FINAL_VIDEO_ARTIFACT_MISSING",
+                subdub_mode_fail_text(mode, lang),
+                "canonical_final_artifact_missing",
+                stage="video",
+            )
+        if canonical_final_artifact_path and os.path.exists(canonical_final_artifact_path):
+            try:
+                with open(canonical_final_artifact_path, "rb") as handle:
+                    canonical_video_output = handle.read()
+            except OSError:
+                canonical_video_output = b""
+            canonical_validation = await subdub_validate_video_output(
+                canonical_video_output,
+                require_audio=mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB},
+                expected_duration=source_duration_seconds,
+            )
+            if not canonical_validation.get("ok"):
+                validation_detail = str(canonical_validation.get("detail") or "canonical_final_mp4_invalid")
+                return _failed_product_result(
+                    "FINAL_VIDEO_DURATION_INVALID" if validation_detail == "video_duration_coverage_failed" else "FINAL_VIDEO_INVALID",
+                    subdub_duration_invalid_output_text(lang) if validation_detail == "video_duration_coverage_failed" else subdub_mode_fail_text(mode, lang),
+                    validation_detail,
+                    stage="video",
+                )
+            video_output = canonical_video_output
+            final_output_validation = dict(canonical_validation)
+            canonical_final_artifact_source = "workspace_final_mp4"
+    state = {
+        **state,
+        "canonical_final_artifact_path": canonical_final_artifact_path,
+        "canonical_final_artifact_source": canonical_final_artifact_source,
+        "canonical_final_artifact_bytes": len(video_output or b""),
+        "canonical_final_artifact_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+        "artifact_lane": str(render_debug.get("subdub_blackbox_lane") or subdub_blackboxes.subdub_lane_name(mode)),
+        "artifact_validation_result": str(final_output_validation.get("detail") or ""),
+        "duration_coverage_ratio": float(final_output_validation.get("duration_coverage_ratio") or 0.0),
+        "duration_coverage_ok": bool(final_output_validation.get("duration_coverage_ok")),
+    }
     tts_price = int(video_dubbing_tts_price_estimate(mode, output_text=output_text).get("price_xu") or 0)
     final_price_xu = int(pricing.get("total_price_xu") or 0) + tts_price
     if partial_result and not video_output:
@@ -185394,16 +185668,24 @@ async def _execute_video_dubbing_pipeline_core(
             subtitle_items=subtitle_items,
             srt_text=srt_text,
             audio_bytes=audio_bytes,
-            video_bytes=video_output,
+            video_bytes=b"",
             lang=lang,
             include_subtitle_outputs=include_subtitle_outputs,
             strict_validation=bool(render_supports_validation),
             job_key=delivery_job_key,
+            expected_duration_seconds=source_duration_seconds,
+            canonical_video_path=canonical_final_artifact_path,
         )
         state = {
             **state,
             "_subdub_delivery_method": str(delivery.get("delivery_method") or ""),
             "_subdub_output_validation": dict(delivery.get("output_validation") or {}),
+            "source_duration": source_duration_seconds,
+            "canonical_final_artifact_duration": float(delivery.get("final_mp4_duration") or state.get("canonical_final_artifact_duration") or 0.0),
+            "final_mp4_duration": float(delivery.get("final_mp4_duration") or state.get("canonical_final_artifact_duration") or 0.0),
+            "duration_coverage_ratio": float(delivery.get("duration_coverage_ratio") or state.get("duration_coverage_ratio") or 0.0),
+            "duration_coverage_ok": bool(delivery.get("duration_coverage_ok")),
+            "artifact_validation_result": str((delivery.get("output_validation") or {}).get("detail") or state.get("artifact_validation_result") or ""),
             "video_delivery_message_id": str(delivery.get("video_delivery_message_id") or ""),
             "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
             "srt_delivery_message_id": str(delivery.get("srt_delivery_message_id") or ""),
@@ -185463,8 +185745,8 @@ async def _execute_video_dubbing_pipeline_core(
         charged = 0
         missing_detail = str(delivery.get("success_blocked_reason") or delivery.get("delivery_reason") or "no_delivered_artifact")
         return _failed_product_result(
-            "OUTPUT_DELIVERY_FAILED",
-            subdub_final_video_failed_text(lang) if subdub_video_requires_final_mp4(mode, subdub_product_type_from_mode(mode, state)) else video_dubbing_product_public_failure_text(mode, state, gate_matrix, lang),
+            "FINAL_VIDEO_DURATION_INVALID" if missing_detail == "video_duration_coverage_failed" else "OUTPUT_DELIVERY_FAILED",
+            subdub_duration_invalid_output_text(lang) if missing_detail == "video_duration_coverage_failed" else (subdub_final_video_failed_text(lang) if subdub_video_requires_final_mp4(mode, subdub_product_type_from_mode(mode, state)) else video_dubbing_product_public_failure_text(mode, state, gate_matrix, lang)),
             missing_detail,
             stage="delivery",
         )
@@ -185593,11 +185875,41 @@ async def _execute_video_dubbing_pipeline_core(
             "dubbed_audio_path": dub_path,
             "dubbed_audio_exists": bool(dub_path and os.path.exists(dub_path)),
             "mux_render_called": bool(video_output or partial_reason or (audio_bytes and str(content_type or "").lower().startswith("video/"))),
+            "mux_duration_policy": "source_video",
+            "shortest_used": False,
+            "ffmpeg_args_summary": str(render_debug.get("ffmpeg_args_summary") or ""),
+            "mux_input_video": source_path,
+            "mux_input_audio": dub_path,
             "final_mp4_path": dub_video_path,
             "final_mp4_exists": bool(dub_video_path and os.path.exists(dub_video_path)),
             "final_mp4_size": len(video_output or b""),
-            "final_mp4_duration": duration_seconds,
-            "final_mux_duration": duration_seconds,
+            "final_mp4_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+            "final_mux_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+            "source_duration": source_duration_seconds,
+            "expected_duration": source_duration_seconds,
+            "duration_coverage_ratio": float(final_output_validation.get("duration_coverage_ratio") or 0.0),
+            "duration_coverage_ok": bool(final_output_validation.get("duration_coverage_ok")),
+            "artifact_validation_result": str(final_output_validation.get("detail") or ""),
+            "artifact_validation_error": "" if final_output_validation.get("ok") else str(final_output_validation.get("detail") or "final_mp4_invalid"),
+            "canonical_final_artifact_path": canonical_final_artifact_path,
+            "canonical_final_artifact_source": canonical_final_artifact_source,
+            "canonical_final_artifact_bytes": len(video_output or b""),
+            "canonical_final_artifact_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+            "artifact_lane": str(render_debug.get("subdub_blackbox_lane") or subdub_blackboxes.subdub_lane_name(mode)),
+            "subtitle_timing_source": str(prepared.get("subtitle_timing_source") or ""),
+            "subtitle_artifact_used_for_burnin": str(prepared.get("subtitle_artifact_used_for_burnin") or ""),
+            "original_cue_count": int(prepared.get("original_cue_count") or prepared.get("source_segment_count") or 0),
+            "translated_cue_count": int(prepared.get("translated_cue_count") or prepared.get("translated_segment_count") or 0),
+            "cue_index_mismatch_count": int(prepared.get("cue_index_mismatch_count") or 0),
+            "cue_start_mismatch_count": int(prepared.get("cue_start_mismatch_count") or 0),
+            "cue_end_mismatch_count": int(prepared.get("cue_end_mismatch_count") or 0),
+            "tts_expected_segments": int(product_result.get("tts_expected_segments") or 0),
+            "tts_generated_segments": int(product_result.get("tts_generated_segments") or 0),
+            "tts_mixed_segments": int(product_result.get("tts_mixed_segments") or 0),
+            "tts_dropped_segments": int(product_result.get("tts_dropped_segments") or 0),
+            "tts_overlap_resolutions": int(product_result.get("tts_overlap_resolutions") or 0),
+            "tts_timeline_duration": float(product_result.get("tts_timeline_duration") or 0.0),
+            "audio_padding_seconds": float(product_result.get("audio_padding_seconds") or 0.0),
             **subdub_voice_style_state_fields(
                 mode=mode,
                 state=state,
@@ -185749,7 +186061,35 @@ async def _execute_video_dubbing_pipeline_core(
         "global_timing_preserved": bool(state.get("global_timing_preserved")),
         "input_duration_seconds": int(state.get("input_duration_seconds") or state.get("input_duration") or duration_seconds or 0),
         "duration_limit_source": str(state.get("duration_limit_source") or "SUBDUB_MAX_DURATION_SECONDS"),
-        "final_mux_duration": duration_seconds,
+        "source_duration": source_duration_seconds,
+        "expected_duration": source_duration_seconds,
+        "final_mp4_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+        "final_mux_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+        "mux_duration_policy": "source_video",
+        "shortest_used": False,
+        "ffmpeg_args_summary": str(render_debug.get("ffmpeg_args_summary") or ""),
+        "duration_coverage_ratio": float(final_output_validation.get("duration_coverage_ratio") or 0.0),
+        "duration_coverage_ok": bool(final_output_validation.get("duration_coverage_ok")),
+        "canonical_final_artifact_path": canonical_final_artifact_path,
+        "canonical_final_artifact_source": canonical_final_artifact_source,
+        "canonical_final_artifact_bytes": len(video_output or b""),
+        "canonical_final_artifact_duration": float(final_output_validation.get("actual_duration") or final_output_validation.get("duration") or 0.0),
+        "artifact_validation_result": str(final_output_validation.get("detail") or ""),
+        "artifact_validation_error": "" if final_output_validation.get("ok") else str(final_output_validation.get("detail") or "final_mp4_invalid"),
+        "subtitle_timing_source": str(prepared.get("subtitle_timing_source") or ""),
+        "subtitle_artifact_used_for_burnin": str(prepared.get("subtitle_artifact_used_for_burnin") or ""),
+        "original_cue_count": int(prepared.get("original_cue_count") or prepared.get("source_segment_count") or 0),
+        "translated_cue_count": int(prepared.get("translated_cue_count") or prepared.get("translated_segment_count") or 0),
+        "cue_index_mismatch_count": int(prepared.get("cue_index_mismatch_count") or 0),
+        "cue_start_mismatch_count": int(prepared.get("cue_start_mismatch_count") or 0),
+        "cue_end_mismatch_count": int(prepared.get("cue_end_mismatch_count") or 0),
+        "tts_expected_segments": int(product_result.get("tts_expected_segments") or 0),
+        "tts_generated_segments": int(product_result.get("tts_generated_segments") or 0),
+        "tts_mixed_segments": int(product_result.get("tts_mixed_segments") or 0),
+        "tts_dropped_segments": int(product_result.get("tts_dropped_segments") or 0),
+        "tts_overlap_resolutions": int(product_result.get("tts_overlap_resolutions") or 0),
+        "tts_timeline_duration": float(product_result.get("tts_timeline_duration") or 0.0),
+        "audio_padding_seconds": float(product_result.get("audio_padding_seconds") or 0.0),
         "delivery_status": "delivered" if delivered_video else result_terminal_state,
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,
@@ -185896,6 +186236,32 @@ async def execute_video_dubbing_pipeline(
             "pipeline_attempted": bool(result.get("pipeline_attempted") or debug_job.get("pipeline_attempted")),
             "delivery_method": str(result.get("delivery_method") or debug_job.get("delivery_method") or ""),
             "output_validation": dict(result.get("output_validation") or debug_job.get("output_validation") or {}),
+            "source_duration": float(result.get("source_duration") or result_state.get("source_duration") or 0.0),
+            "expected_duration": float(result.get("expected_duration") or result_state.get("source_duration") or 0.0),
+            "final_mp4_duration": float(result.get("final_mp4_duration") or result_state.get("final_mp4_duration") or 0.0),
+            "final_mux_duration": float(result.get("final_mux_duration") or result_state.get("final_mp4_duration") or 0.0),
+            "duration_coverage_ratio": float(result.get("duration_coverage_ratio") or result_state.get("duration_coverage_ratio") or 0.0),
+            "duration_coverage_ok": bool(result.get("duration_coverage_ok") or result_state.get("duration_coverage_ok")),
+            "artifact_validation_result": str(result.get("artifact_validation_result") or result_state.get("artifact_validation_result") or ""),
+            "artifact_validation_error": str(result.get("artifact_validation_error") or result_state.get("artifact_validation_error") or ""),
+            "canonical_final_artifact_path": str(result.get("canonical_final_artifact_path") or result_state.get("canonical_final_artifact_path") or artifacts.get("final_mp4") or ""),
+            "canonical_final_artifact_source": str(result.get("canonical_final_artifact_source") or result_state.get("canonical_final_artifact_source") or ""),
+            "canonical_final_artifact_bytes": int(result.get("canonical_final_artifact_bytes") or result_state.get("canonical_final_artifact_bytes") or 0),
+            "canonical_final_artifact_duration": float(result.get("canonical_final_artifact_duration") or result_state.get("canonical_final_artifact_duration") or 0.0),
+            "subtitle_timing_source": str(result.get("subtitle_timing_source") or result_state.get("subtitle_timing_source") or ""),
+            "subtitle_artifact_used_for_burnin": str(result.get("subtitle_artifact_used_for_burnin") or result_state.get("subtitle_artifact_used_for_burnin") or ""),
+            "original_cue_count": int(result.get("original_cue_count") or result_state.get("original_cue_count") or 0),
+            "translated_cue_count": int(result.get("translated_cue_count") or result_state.get("translated_cue_count") or 0),
+            "cue_index_mismatch_count": int(result.get("cue_index_mismatch_count") or result_state.get("cue_index_mismatch_count") or 0),
+            "cue_start_mismatch_count": int(result.get("cue_start_mismatch_count") or result_state.get("cue_start_mismatch_count") or 0),
+            "cue_end_mismatch_count": int(result.get("cue_end_mismatch_count") or result_state.get("cue_end_mismatch_count") or 0),
+            "tts_expected_segments": int(result.get("tts_expected_segments") or result_state.get("tts_expected_segments") or 0),
+            "tts_generated_segments": int(result.get("tts_generated_segments") or result_state.get("tts_generated_segments") or 0),
+            "tts_mixed_segments": int(result.get("tts_mixed_segments") or result_state.get("tts_mixed_segments") or 0),
+            "tts_dropped_segments": int(result.get("tts_dropped_segments") or result_state.get("tts_dropped_segments") or 0),
+            "tts_overlap_resolutions": int(result.get("tts_overlap_resolutions") or result_state.get("tts_overlap_resolutions") or 0),
+            "tts_timeline_duration": float(result.get("tts_timeline_duration") or result_state.get("tts_timeline_duration") or 0.0),
+            "audio_padding_seconds": float(result.get("audio_padding_seconds") or result_state.get("audio_padding_seconds") or 0.0),
             "input_duration": int(result_state.get("input_duration") or input_save.get("input_duration") or input_save.get("duration") or debug_job.get("input_duration") or 0),
             "duration_seconds": int(result_state.get("input_duration") or input_save.get("duration") or debug_job.get("duration_seconds") or 0),
             "detected_duration_source": str(result_state.get("detected_duration_source") or input_save.get("detected_duration_source") or debug_job.get("detected_duration_source") or ""),
