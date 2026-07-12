@@ -402,6 +402,212 @@ def normalize_product_video_submit_source(value: Any = "") -> str:
     return aliases.get(normalized, normalized)
 
 
+PRODUCT_VIDEO_PUBLIC_FLOW_SOURCES = frozenset(
+    {
+        "public_preflight",
+        "public_invoice",
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_FINAL_CONFIRM,
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_FALLBACK_ONCE,
+        PRODUCT_VIDEO_SUBMIT_SOURCE_PUBLIC_CONFIRMED_SCENE_FALLBACK_ONCE,
+    }
+)
+
+
+def product_video_freeze_truth(
+    source: str = "",
+    job_context: dict[str, Any] | None = None,
+    *,
+    environ: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return the canonical Product Video public/hidden freeze decision.
+
+    Generic provider and spend freezes protect hidden/background entry points.
+    Only an explicitly named public freeze may turn them into a public block.
+    This evaluator is side-effect free and never probes or submits a provider.
+    """
+    context = dict(job_context or {})
+    env = dict(os.environ if environ is None else environ)
+    normalized_source = normalize_product_video_submit_source(source)
+    if normalized_source in {"public_preflight", "public_invoice"}:
+        source_kind = normalized_source
+    elif normalized_source in PRODUCT_VIDEO_PUBLIC_FLOW_SOURCES:
+        source_kind = "public_final_confirm"
+    elif normalized_source == PRODUCT_VIDEO_SUBMIT_SOURCE_WORKER_POLL_EXISTING_TASK:
+        source_kind = "worker_poll_existing_task"
+    elif normalized_source in PRODUCT_VIDEO_HIDDEN_SUBMIT_SOURCES:
+        source_kind = normalized_source
+    else:
+        source_kind = "hidden_submit"
+
+    def _bool_value(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return bool(default)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    def _context_bool(name: str, default: bool = False) -> bool:
+        return _bool_value(context.get(name), default) if name in context else bool(default)
+
+    explicit_public_env_name = next(
+        (
+            name
+            for name in ("PUBLIC_VIDEO_PROVIDER_FREEZE",)
+            if _env_flag(env, name, "0")
+        ),
+        "",
+    )
+    public_provider_freeze = bool(
+        explicit_public_env_name
+        or _context_bool("explicit_public_provider_freeze")
+        or _context_bool("runtime_public_provider_freeze")
+    )
+    public_provider_freeze_source = str(
+        context.get("public_provider_freeze_source") or ""
+    ).strip()
+    if explicit_public_env_name:
+        public_provider_freeze_source = f"env:{explicit_public_env_name}"
+    elif public_provider_freeze and not public_provider_freeze_source:
+        public_provider_freeze_source = "runtime:public_provider_freeze"
+
+    provider_freeze = bool(
+        _context_bool("provider_freeze")
+        or _context_bool("provider_freeze_enabled")
+        or _env_flag(env, "PROVIDER_FREEZE", "0")
+        or _env_flag(env, "PROVIDER_FREEZE_ENABLED", "0")
+    )
+    provider_spend_freeze = bool(
+        _context_bool("provider_spend_freeze")
+        or _env_flag(env, "PROVIDER_SPEND_FREEZE", "0")
+    )
+    hidden_video_freeze = bool(
+        _context_bool("hidden_video_freeze")
+        or _context_bool("provider_frozen")
+        or provider_freeze
+        or provider_spend_freeze
+    )
+    hidden_submit_freeze = bool(
+        _context_bool("hidden_submit_freeze")
+        or hidden_video_freeze
+        or provider_spend_freeze
+    )
+    background_submit_freeze = bool(
+        _context_bool("background_submit_freeze") or hidden_submit_freeze
+    )
+    smoke_disabled = not _env_flag(env, "REAL_PROVIDER_SMOKE_ENABLED", "0")
+    smoke_freeze = bool(
+        _context_bool("smoke_freeze") or hidden_submit_freeze or smoke_disabled
+    )
+
+    public_maintenance_env = next(
+        (
+            name
+            for name in ("VIDEO_PUBLIC_MAINTENANCE", "PRODUCT_VIDEO_PUBLIC_MAINTENANCE")
+            if _env_flag(env, name, "0")
+        ),
+        "",
+    )
+    public_maintenance = bool(
+        public_maintenance_env
+        or _context_bool("public_maintenance")
+        or _context_bool("product_video_public_maintenance")
+    )
+    payment_freeze = _context_bool("payment_freeze")
+    tool_freeze = _context_bool("tool_freeze")
+    security_block = bool(
+        _context_bool("security_block") or _context_bool("emergency_lock")
+    )
+    hard_public_cost_block = bool(
+        _context_bool("hard_public_cost_block")
+        or _context_bool("security_cost_block")
+    )
+    hard_security_cost_block = bool(security_block or hard_public_cost_block)
+
+    public_submit_enabled = _context_bool("public_submit_enabled", True)
+    provider_configured = _context_bool("provider_configured", True)
+    worker_available = _context_bool("worker_available", True)
+    worker_compatible = _context_bool("worker_compatible", True)
+    public_limits_exceeded = _context_bool("public_limits_exceeded")
+
+    public_blocker_code = ""
+    public_blocker_source = ""
+    for blocked, code, blocker_source in (
+        (security_block, "security_block_active", "security_block"),
+        (hard_public_cost_block, "hard_public_cost_block_active", "security_cost_block"),
+        (payment_freeze, "payment_freeze_active", "payment_freeze"),
+        (tool_freeze, "tool_freeze_active", "tool_freeze"),
+        (
+            public_maintenance,
+            "product_video_public_maintenance",
+            f"env:{public_maintenance_env}" if public_maintenance_env else "runtime:public_maintenance",
+        ),
+        (
+            public_provider_freeze,
+            "public_provider_freeze_active",
+            public_provider_freeze_source or "runtime:public_provider_freeze",
+        ),
+        (not public_submit_enabled, "public_provider_submit_disabled", "runtime:public_submit_switch"),
+        (not provider_configured, "provider_not_configured", "runtime:provider_configuration"),
+        (not worker_available, "worker_unavailable", "runtime:owner_product_video_worker"),
+        (not worker_compatible, "worker_incompatible", "runtime:owner_product_video_worker"),
+        (public_limits_exceeded, "public_limits_exceeded", "runtime:public_limits"),
+    ):
+        if blocked:
+            public_blocker_code = code
+            public_blocker_source = blocker_source
+            break
+
+    public_live_allowed = not bool(public_blocker_code)
+    blocker_code = public_blocker_code
+    blocker_source = public_blocker_source
+    if source_kind not in {"public_preflight", "public_invoice", "public_final_confirm"}:
+        if source_kind == "worker_poll_existing_task":
+            blocker_code = "worker_poll_existing_task_read_only"
+            blocker_source = "source:worker_poll_existing_task"
+        elif source_kind == "smoke":
+            blocker_code = "smoke_submit_blocked"
+            blocker_source = "source:smoke"
+        elif source_kind in {"background_retry", "fallback"}:
+            blocker_code = "background_submit_blocked"
+            blocker_source = f"source:{source_kind}"
+        else:
+            blocker_code = "hidden_submit_source_blocked"
+            blocker_source = f"source:{source_kind}"
+
+    return {
+        "source": normalized_source or str(source or "").strip(),
+        "source_kind": source_kind,
+        "provider_freeze": provider_freeze,
+        "provider_spend_freeze": provider_spend_freeze,
+        "public_provider_freeze": public_provider_freeze,
+        "explicit_public_provider_freeze": public_provider_freeze,
+        "public_provider_freeze_source": public_provider_freeze_source,
+        "hidden_video_freeze": hidden_video_freeze,
+        "hidden_submit_freeze": hidden_submit_freeze,
+        "background_submit_freeze": background_submit_freeze,
+        "smoke_freeze": smoke_freeze,
+        "payment_freeze": payment_freeze,
+        "tool_freeze": tool_freeze,
+        "public_maintenance": public_maintenance,
+        "security_block": security_block,
+        "hard_security_cost_block": hard_security_cost_block,
+        "hard_public_cost_block": hard_public_cost_block,
+        "public_submit_enabled": public_submit_enabled,
+        "provider_configured": provider_configured,
+        "worker_available": worker_available,
+        "worker_compatible": worker_compatible,
+        "public_limits_exceeded": public_limits_exceeded,
+        "public_live_allowed": public_live_allowed,
+        "public_preflight_allowed": public_live_allowed,
+        "invoice_allowed": public_live_allowed,
+        "public_final_confirm_allowed": public_live_allowed,
+        "blocker_code": blocker_code,
+        "blocker_source": blocker_source,
+        "public_blocker_code": public_blocker_code,
+        "public_blocker_source": public_blocker_source,
+    }
+
+
 def product_video_provider_submit_source_policy(
     metadata: dict[str, Any] | None = None,
     *,
@@ -2335,6 +2541,17 @@ PRODUCT_VIDEO_HARD_COST_FREEZE_REASONS = frozenset(
         "PROVIDER_SPEND_LOCK",
     }
 )
+PRODUCT_VIDEO_HIDDEN_ONLY_FREEZE_REASONS = frozenset(
+    {
+        "ENV_PROVIDER_FREEZE",
+        "PROVIDER_FREEZE",
+        "SYSTEM_FLAG_FREEZE",
+        "PROVIDER_SPEND_FREEZE",
+        "HIDDEN_VIDEO_FREEZE",
+        "BACKGROUND_SUBMIT_FREEZE",
+        "PROVIDER_PROBE_LOCK",
+    }
+)
 
 
 def product_video_provider_freeze_probation_policy(
@@ -2370,6 +2587,18 @@ def product_video_provider_freeze_probation_policy(
         or normalized_reason.startswith("CREDIT_LOW")
         or normalized_reason.startswith("SPEND_LOCK")
     )
+    hidden_only_freeze = bool(
+        provider_frozen
+        and not operational_degradation
+        and not hard_cost_lock
+        and (
+            normalized_reason in PRODUCT_VIDEO_HIDDEN_ONLY_FREEZE_REASONS
+            or normalized_reason.startswith("HIDDEN_")
+            or normalized_reason.startswith("BACKGROUND_")
+            or normalized_reason.startswith("PROVIDER_PROBE_")
+            or bool(normalized_reason)
+        )
+    )
     hard_block_reason = ""
     if security_block:
         hard_block_reason = "security_block_active"
@@ -2383,8 +2612,6 @@ def product_video_provider_freeze_probation_policy(
         hard_block_reason = "public_provider_freeze_active"
     elif hard_cost_lock:
         hard_block_reason = "provider_cost_lock_active"
-    elif provider_frozen and not operational_degradation:
-        hard_block_reason = "provider_freeze_active"
 
     controlled_probation = bool(
         explicit_public_final_confirm
@@ -2404,6 +2631,7 @@ def product_video_provider_freeze_probation_policy(
         "provider": str(provider or "").strip(),
         "public_provider_freeze": bool(public_provider_freeze),
         "hidden_submit_freeze": bool(provider_frozen and not public_provider_freeze),
+        "hidden_only_freeze": hidden_only_freeze,
         "provider_freeze_reason": normalized_reason,
         "operational_degradation": operational_degradation,
         "operational_health_state": (
@@ -3416,7 +3644,8 @@ def run_provider_generation(
     metadata = dict(request.metadata or {})
     is_product_video = bool(metadata.get("product_video") or metadata.get("interactive_product") or allow_pending_result)
     submit_switch = product_video_submit_switch_detail(env)
-    submit_enabled = bool(submit_switch.get("resolved"))
+    submit_switch_enabled = bool(submit_switch.get("resolved"))
+    submit_enabled = submit_switch_enabled
     runtime_submit_source_policy = product_video_provider_submit_source_policy(
         metadata,
         public_submit_enabled=submit_enabled,
@@ -3431,7 +3660,38 @@ def run_provider_generation(
         or metadata.get("admission_worker_version_compatible")
         or metadata.get("worker_version_compatible")
     )
+    if not metadata.get("admission_enforced") and not any(
+        key in metadata
+        for key in (
+            "worker_compatible",
+            "admission_worker_version_compatible",
+            "worker_version_compatible",
+        )
+    ):
+        runtime_worker_compatible = True
     runtime_probation_lock_clear = bool(metadata.get("probation_lock_clear"))
+    persisted_freeze_truth = metadata.get("product_video_freeze_truth")
+    if not isinstance(persisted_freeze_truth, dict):
+        persisted_freeze_truth = {}
+    runtime_freeze_truth = product_video_freeze_truth(
+        str(runtime_submit_source_policy.get("submit_source") or ""),
+        {
+            **persisted_freeze_truth,
+            "explicit_public_provider_freeze": bool(metadata.get("public_provider_freeze")),
+            "public_provider_freeze_source": str(metadata.get("freeze_blocker_source") or ""),
+            "hidden_submit_freeze": bool(metadata.get("hidden_submit_freeze")),
+            "background_submit_freeze": bool(metadata.get("background_submit_freeze")),
+            "smoke_freeze": bool(metadata.get("smoke_freeze")),
+            "public_submit_enabled": submit_switch_enabled,
+            "provider_configured": bool(candidate_adapters),
+            "worker_available": runtime_worker_compatible,
+            "worker_compatible": runtime_worker_compatible,
+        },
+        environ=env,
+    )
+    submit_enabled = bool(
+        submit_switch_enabled and runtime_freeze_truth.get("public_live_allowed")
+    )
     persisted_eligibility_snapshot = (
         metadata.get("provider_eligibility_snapshot")
         if isinstance(metadata.get("provider_eligibility_snapshot"), dict)
@@ -3467,6 +3727,7 @@ def run_provider_generation(
             public_submit_enabled=submit_enabled,
             worker_compatible=runtime_worker_compatible,
             probation_lock_clear=runtime_probation_lock_clear,
+            global_hard_block_reason=str(runtime_freeze_truth.get("blocker_code") or ""),
             environ=env,
             persisted_snapshot_id=str(persisted_eligibility_snapshot.get("provider_eligibility_snapshot_id") or ""),
         )
@@ -3474,6 +3735,9 @@ def run_provider_generation(
         runtime_eligibility_snapshot["preconfirm_candidate_keys"] = persisted_preconfirm_candidates
         runtime_eligibility_snapshot["runtime_candidate_keys"] = runtime_candidates
         runtime_eligibility_snapshot["candidate_set_consistent"] = runtime_candidates == persisted_preconfirm_candidates
+        runtime_eligibility_snapshot["product_video_freeze_truth"] = runtime_freeze_truth
+        runtime_eligibility_snapshot["freeze_blocker_code"] = str(runtime_freeze_truth.get("blocker_code") or "")
+        runtime_eligibility_snapshot["freeze_blocker_source"] = str(runtime_freeze_truth.get("blocker_source") or "")
         candidate_adapters = [item for item in candidate_adapters if item.provider_name in runtime_candidates]
         adapter = candidate_adapters[0] if candidate_adapters else None
         provider_candidates = [item.provider_name for item in candidate_adapters]
@@ -3503,7 +3767,7 @@ def run_provider_generation(
     pending_attempts = [dict(item) for item in (metadata.get("provider_pending_attempts") or []) if isinstance(item, dict)]
     submit_source_policy = product_video_provider_submit_source_policy(
         metadata,
-        public_submit_enabled=submit_enabled,
+        public_submit_enabled=submit_switch_enabled,
         poll_existing_task=bool(pending_task_id or pending_video_id),
     )
     fallback_context = product_video_public_confirm_context(metadata)
@@ -3517,6 +3781,17 @@ def run_provider_generation(
     ).hexdigest()[:24]
     base_debug = {
         "provider_router_called": True,
+        "product_video_freeze_truth": dict(runtime_freeze_truth),
+        "provider_freeze": bool(runtime_freeze_truth.get("provider_freeze")),
+        "provider_spend_freeze": bool(runtime_freeze_truth.get("provider_spend_freeze")),
+        "public_provider_freeze": bool(runtime_freeze_truth.get("public_provider_freeze")),
+        "hidden_video_freeze": bool(runtime_freeze_truth.get("hidden_video_freeze")),
+        "hidden_submit_freeze": bool(runtime_freeze_truth.get("hidden_submit_freeze")),
+        "background_submit_freeze": bool(runtime_freeze_truth.get("background_submit_freeze")),
+        "smoke_freeze": bool(runtime_freeze_truth.get("smoke_freeze")),
+        "public_live_provider_allowed": bool(runtime_freeze_truth.get("public_live_allowed")),
+        "freeze_blocker_code": str(runtime_freeze_truth.get("blocker_code") or ""),
+        "freeze_blocker_source": str(runtime_freeze_truth.get("blocker_source") or ""),
         "provider_request_job_id": str(request.job_id or ""),
         "provider_submit_idempotency_key": submit_idempotency_key,
         "scene_dispatch_idempotency_key": str(metadata.get("scene_dispatch_idempotency_key") or submit_idempotency_key),
@@ -3644,8 +3919,23 @@ def run_provider_generation(
         "provider_poll_called": False,
         "provider_result_url_present": False,
     }
-    if is_product_video and not submit_source_policy.get("provider_submit_allowed") and not (pending_task_id or pending_video_id):
-        policy_reason = str(submit_source_policy.get("provider_submit_block_reason") or "provider_submit_source_blocked")
+    canonical_submit_blocked = bool(
+        adapter is not None and not runtime_freeze_truth.get("public_live_allowed")
+    )
+    if (
+        is_product_video
+        and (
+            not submit_source_policy.get("provider_submit_allowed")
+            or canonical_submit_blocked
+        )
+        and not (pending_task_id or pending_video_id)
+    ):
+        policy_reason = str(
+            submit_source_policy.get("provider_submit_block_reason")
+            if not submit_source_policy.get("provider_submit_allowed")
+            else runtime_freeze_truth.get("blocker_code")
+            or "provider_submit_source_blocked"
+        )
         legacy_kill_switch_block = policy_reason == "public_provider_submit_disabled"
         return {
             "ok": False,

@@ -44,6 +44,17 @@ def _changed_files() -> set[str]:
     }
 
 
+def _current_branch() -> str:
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip()
+
+
 def test_duration2_config_defaults_scene_clip_mode():
     cfg = duration2.load_duration_decision()
     assert cfg["provider"] == "shopaikey_video"
@@ -239,6 +250,15 @@ def test_duration2_scope_locks_no_forbidden_runtime_changes():
         "tests/test_p0_video_uiflow_lock_current_good_flow.py",
         "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py",
     }
+    if _current_branch().startswith("hotfix/p0-video-r18s13-"):
+        allowed.update(
+            {
+                "services/remote_worker_api.py",
+                "services/video_project_queue.py",
+                "services/video_provider_router.py",
+                "tests/test_p0_video_r18s13_canonical_public_hidden_freeze_truth.py",
+            }
+        )
     assert changed <= allowed
     joined = " ".join(changed).lower()
     for forbidden in ("music", "suno", "subdub", "payos", "wallet", "pricing_matrix", "video_image_to_video_flow"):

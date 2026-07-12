@@ -2025,6 +2025,32 @@ def _product_video_runtime_eligibility(
     persisted_hard_blocks = result.get("provider_hard_block_reason_by_provider")
     if not isinstance(persisted_hard_blocks, dict):
         persisted_hard_blocks = {}
+    persisted_freeze_truth = result.get("product_video_freeze_truth")
+    if not isinstance(persisted_freeze_truth, dict):
+        persisted_freeze_truth = {}
+    runtime_freeze_context = {
+        **persisted_freeze_truth,
+        "explicit_public_provider_freeze": bool(result.get("public_provider_freeze")),
+        "public_provider_freeze_source": str(result.get("freeze_blocker_source") or ""),
+        "hidden_submit_freeze": bool(result.get("hidden_submit_freeze")),
+        "background_submit_freeze": bool(result.get("background_submit_freeze")),
+        "smoke_freeze": bool(result.get("smoke_freeze")),
+        "public_submit_enabled": bool(submit_switch.get("resolved")),
+        "provider_configured": bool(runtime_chain and contract_chain),
+        "worker_available": worker_compatible,
+        "worker_compatible": worker_compatible,
+    }
+    runtime_freeze_truth = video_provider_router.product_video_freeze_truth(
+        str(submit_policy.get("submit_source") or ""),
+        runtime_freeze_context,
+    )
+    if runtime_freeze_truth.get("public_live_allowed"):
+        persisted_hard_blocks = {
+            provider: reason
+            for provider, reason in persisted_hard_blocks.items()
+            if str(reason or "").strip()
+            not in {"provider_freeze_active", "public_provider_freeze_active"}
+        }
     evaluated = video_provider_router.product_video_provider_eligibility_snapshot(
         status=status,
         chain=runtime_chain,
@@ -2037,11 +2063,14 @@ def _product_video_runtime_eligibility(
         allow_operational_degradation_probation=True,
         admission_source=str(submit_policy.get("submit_source") or ""),
         public_user_confirmed=bool(submit_policy.get("public_user_confirmed")),
-        public_submit_enabled=bool(submit_switch.get("resolved")),
+        public_submit_enabled=bool(
+            submit_switch.get("resolved")
+            and runtime_freeze_truth.get("public_live_allowed")
+        ),
         worker_compatible=worker_compatible,
         probation_lock_clear=probation_lock_clear,
         hard_block_reason_by_provider=persisted_hard_blocks,
-        global_hard_block_reason=str(result.get("global_hard_block_reason") or ""),
+        global_hard_block_reason=str(runtime_freeze_truth.get("blocker_code") or ""),
         persisted_snapshot_id=str(result.get("admission_snapshot_id") or result.get("provider_eligibility_snapshot_id") or ""),
     )
     runtime_candidates = list(evaluated.get("eligible_provider_keys") or [])
@@ -2065,6 +2094,16 @@ def _product_video_runtime_eligibility(
         "provider_submit_block_reason_at_candidate_resolver": submit_block_reason,
         "provider_submit_allowed": submit_allowed,
         "provider_submit_block_reason": submit_block_reason,
+        "product_video_freeze_truth": runtime_freeze_truth,
+        "provider_freeze": bool(runtime_freeze_truth.get("provider_freeze")),
+        "public_provider_freeze": bool(runtime_freeze_truth.get("public_provider_freeze")),
+        "hidden_video_freeze": bool(runtime_freeze_truth.get("hidden_video_freeze")),
+        "hidden_submit_freeze": bool(runtime_freeze_truth.get("hidden_submit_freeze")),
+        "background_submit_freeze": bool(runtime_freeze_truth.get("background_submit_freeze")),
+        "smoke_freeze": bool(runtime_freeze_truth.get("smoke_freeze")),
+        "public_live_provider_allowed": bool(runtime_freeze_truth.get("public_live_allowed")),
+        "freeze_blocker_code": str(runtime_freeze_truth.get("blocker_code") or ""),
+        "freeze_blocker_source": str(runtime_freeze_truth.get("blocker_source") or ""),
         "router_called": False,
         "router_skip_reason": "" if runtime_candidates else submit_block_reason,
         "configured_chain_at_runtime": runtime_chain,
