@@ -7,6 +7,41 @@ AIEDIT1_BRANCH_PREFIX = "hotfix/p0-video-aiedit1-"
 LOCAL1_BOOT_COMPAT_SERVICE = "services/video_local_editing.py"
 LOCAL1_BOOT_COMPAT_TEST = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
 LOCAL1_BOOT_COMPAT_MARKER = "test_local1_concat_manifest_is_python311_safe_and_escapes_paths"
+ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
+ARCH1_SCOPE_MARKER = "test_arch1_scope_lock"
+ARCH1_PROFILE_FILES = frozenset(
+    {
+        "knowledge/profiles/architecture_exterior.json",
+        "knowledge/profiles/interior_design.json",
+        "knowledge/profiles/space_renovation.json",
+        "knowledge/profiles/real_estate_property.json",
+        "knowledge/profiles/architecture_walkthrough.json",
+        "knowledge/profiles/floorplan_visualization.json",
+        "knowledge/profiles/commercial_space.json",
+        "knowledge/profiles/landscape_garden.json",
+    }
+)
+ARCH1_RUNTIME_FILES = frozenset(
+    {
+        "services/profile_router.py",
+        "services/architecture_profile_router.py",
+        "services/architecture_prompt_builder.py",
+        "services/architecture_video_prompt_builder.py",
+        "services/architecture_scene_planner.py",
+        "services/architecture_profile_status.py",
+    }
+)
+ARCH1_SCOPE_FILES = frozenset(
+    {
+        *ARCH1_RUNTIME_FILES,
+        "tests/aiedit1_scope_guard.py",
+        ARCH1_TEST_FILE,
+        "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py",
+        "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
+    }
+)
+ARCH1_ALLOWED_FILES = frozenset({"bot.py"}) | ARCH1_SCOPE_FILES | ARCH1_PROFILE_FILES
 AIEDIT1_SCOPE_FILES = frozenset(
     {
         "bot.py",
@@ -69,6 +104,22 @@ def aiedit1_scope_active(paths=()):
     return AIEDIT1_TEST_FILE in normalized or _current_branch().startswith(AIEDIT1_BRANCH_PREFIX)
 
 
+def arch1_scope_active(paths=()):
+    normalized = _normalize(paths)
+    marker_path = Path(__file__).resolve().parents[1] / ARCH1_TEST_FILE
+    marker_present = (
+        marker_path.is_file()
+        and ARCH1_SCOPE_MARKER in marker_path.read_text(encoding="utf-8")
+    )
+    has_architecture_change = bool(normalized & (ARCH1_RUNTIME_FILES | ARCH1_PROFILE_FILES))
+    return (
+        marker_present
+        and ARCH1_TEST_FILE in normalized
+        and has_architecture_change
+        and normalized <= ARCH1_ALLOWED_FILES
+    )
+
+
 def aiedit1_scope_files(paths=()):
     normalized = _normalize(paths)
     allowed = set(AIEDIT1_SCOPE_FILES)
@@ -82,6 +133,9 @@ def aiedit1_scope_files(paths=()):
         and marker_present
     ):
         allowed.add(LOCAL1_BOOT_COMPAT_SERVICE)
+    if arch1_scope_active(normalized):
+        allowed.update(ARCH1_SCOPE_FILES)
+        allowed.update(ARCH1_PROFILE_FILES)
     return frozenset(allowed)
 
 

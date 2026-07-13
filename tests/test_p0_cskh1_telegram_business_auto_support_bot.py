@@ -3,7 +3,7 @@ import subprocess
 from types import SimpleNamespace
 
 from services import telegram_business_support as cskh
-from tests.aiedit1_scope_guard import without_aiedit1_scope
+from tests.aiedit1_scope_guard import arch1_scope_active, without_aiedit1_scope
 
 
 def _obj(**kwargs):
@@ -250,6 +250,8 @@ def test_no_music_product_video_subdub_runtime_touched():
     if _is_storage5_scope(changed):
         return
     if _is_subdub_scope(changed):
+        return
+    if arch1_scope_active(changed):
         return
     allowed = {
         "bot.py",

@@ -17,6 +17,14 @@ KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 TEST_FILE = "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py"
 LOCAL1_TEST_FILE = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
 AIEDIT1_TEST_FILE = "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py"
+ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
+ARCH1_SERVICE_FILES = {
+    "services/architecture_profile_router.py",
+    "services/architecture_prompt_builder.py",
+    "services/architecture_video_prompt_builder.py",
+    "services/architecture_scene_planner.py",
+    "services/architecture_profile_status.py",
+}
 ALIGNED_REGRESSION_TESTS = {
     "tests/test_core.py",
     "tests/test_p0_17b11_video_ui_ux_cleanup.py",
@@ -61,7 +69,7 @@ def test_all_knowledge_json_loads_and_startup_validation_is_safe() -> None:
     validation = profile_router.validate_knowledge_catalog()
     assert validation["ok"] is True
     assert validation["errors"] == []
-    assert validation["profile_count"] == 8
+    assert validation["profile_count"] == 15
     assert validation["video_store_count"] == 6
 
 
@@ -103,7 +111,7 @@ def test_every_reference_maps_to_at_least_one_existing_store() -> None:
 def test_profile_ids_are_unique_and_profiles_have_required_fields() -> None:
     payloads = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(profile_router.PROFILE_ROOT.glob("*.json"))]
     ids = [payload["profile_id"] for payload in payloads]
-    assert len(ids) == 8
+    assert len(ids) == 15
     assert len(ids) == len(set(ids))
     for payload in payloads:
         assert not profile_router.validate_profile_payload(payload, source=payload["profile_id"])
@@ -271,6 +279,16 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         "services/video_ai_edit_validation.py",
         AIEDIT1_TEST_FILE,
     } if aiedit1_scope else set()
+    arch1_scope = ARCH1_TEST_FILE in touched
+    arch1_allowed = (
+        ARCH1_SERVICE_FILES
+        | {
+            ARCH1_TEST_FILE,
+            "tests/aiedit1_scope_guard.py",
+            "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py",
+            "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
+        }
+    ) if arch1_scope else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -280,6 +298,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path.startswith("knowledge/")
             or path in local1_allowed
             or path in aiedit1_allowed
+            or path in arch1_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",

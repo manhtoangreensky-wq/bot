@@ -49,6 +49,11 @@ VIDEO_STORE_FILES = (
 )
 
 SAFE_FALLBACK_PROFILE_ID = "creator_tutorial_ugc"
+ARCHITECTURE_STUDIO_ONLY_PROFILE_IDS = {
+    "architecture_exterior", "interior_design", "space_renovation",
+    "architecture_walkthrough", "floorplan_visualization",
+    "commercial_space", "landscape_garden",
+}
 
 # Menu selection IDs are intentionally separate from canonical profile IDs.
 # Several public choices share one production profile but keep their variant.
@@ -252,6 +257,8 @@ def _fallback_profile(profiles: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 
 def _score_profile(profile: dict[str, Any], normalized: str, requested_output: str, uploaded_asset_type: str) -> tuple[int, list[str]]:
+    if str(profile.get("profile_id") or "") in ARCHITECTURE_STUDIO_ONLY_PROFILE_IDS:
+        return -1, []
     score = 0
     signals: list[str] = []
     for alias in profile.get("aliases") or []:
