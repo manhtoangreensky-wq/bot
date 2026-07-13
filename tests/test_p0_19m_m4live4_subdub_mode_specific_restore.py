@@ -1,4 +1,3 @@
-import os
 import subprocess
 from pathlib import Path
 
@@ -9,26 +8,6 @@ BOT = (ROOT / "bot.py").read_text(encoding="utf-8")
 VIDEO_SUBTITLE_MODE_TRANSLATE = "VIDEO_SUBTITLE_MODE_TRANSLATE"
 VIDEO_SUBTITLE_MODE_DUB = "VIDEO_SUBTITLE_MODE_DUB"
 VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB = "VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB"
-
-
-def _current_branch_name() -> str:
-    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    try:
-        return subprocess.check_output(
-            ["git", "branch", "--show-current"],
-            cwd=ROOT,
-            text=True,
-            encoding="utf-8",
-        ).strip()
-    except Exception:
-        return ""
-
-
-def _is_m4live4_scope_branch(branch: str) -> bool:
-    return "m4live4" in str(branch or "").lower()
 
 
 def function_source(name: str, *, async_def: bool = False) -> str:
@@ -137,8 +116,6 @@ def test_m4live4_subtitle_dub_uses_bottom_renderer():
 
 
 def test_m4live4_subtitle_dub_does_not_touch_subtitle_only_lane():
-    if not _is_m4live4_scope_branch(_current_branch_name()):
-        return
     changed = _changed_paths_from_main()
     assert changed <= {
         "bot.py",
@@ -146,11 +123,6 @@ def test_m4live4_subtitle_dub_does_not_touch_subtitle_only_lane():
         "tests/test_p0_19m_m4live4_subdub_mode_specific_restore.py",
         "tests/test_p0_19m_m4live5_subdub_full_runtime_rollback_to_3mp4_baseline.py",
     }
-
-
-def test_m4live4_scope_guard_is_task_scoped():
-    assert _is_m4live4_scope_branch("hotfix/p0-19m-m4live4-subdub-mode-specific-restore")
-    assert not _is_m4live4_scope_branch("hotfix/p0-subdub-terminal-contract")
 
 
 def test_m4live4_ass_alignment_bottom_center():
