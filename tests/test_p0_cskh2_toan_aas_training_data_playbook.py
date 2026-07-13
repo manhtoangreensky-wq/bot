@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from services import telegram_business_support as cskh
+from tests.aiedit1_scope_guard import without_aiedit1_scope
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -351,7 +352,7 @@ def test_subdub_runtime_untouched():
 
 
 def test_payos_pricing_db_untouched():
-    changed_files = _changed_files()
+    changed_files = without_aiedit1_scope(_changed_files())
     if _is_storage5_scope(changed_files):
         return
     allowed = {

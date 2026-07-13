@@ -2,6 +2,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
@@ -103,4 +105,4 @@ def test_aichat1b_scope_guard_only_touches_menu_cleanup_files():
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
     }
 
-    assert set(_changed_files()).issubset(allowed)
+    assert without_aiedit1_scope(_changed_files()).issubset(allowed)

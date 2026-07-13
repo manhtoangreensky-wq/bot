@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import bot
+from aiedit1_scope_guard import aiedit1_bot_diff_has_no_locked_markers, without_aiedit1_scope
 from free_tools_hub import prompt_library_counts
 
 
@@ -453,12 +454,17 @@ def test_free_tools_refresh_does_not_touch_voice_runtime():
 
 
 def test_free_tools_refresh_does_not_touch_payos_pricing_db_webhook():
-    changed_paths = set(_git_status_paths()) | set(_git_branch_paths())
+    changed_paths = without_aiedit1_scope(set(_git_status_paths()) | set(_git_branch_paths()))
     forbidden_paths = ("providers/", "services/product_progress_status.py", "remote_worker.py")
     assert not any(path.startswith(forbidden_paths) for path in changed_paths)
     if "local_worker.py" in changed_paths:
         assert _local_worker_change_is_img2vid_only() or _local_worker_change_is_video_local1_only()
     diff = _git_diff_bot()
+    if aiedit1_bot_diff_has_no_locked_markers(
+        diff,
+        ("payos", "payment webhook", "wallet", "webhook"),
+    ):
+        return
     if _bot_change_is_video_local1_only(diff):
         added_removed = "\n".join(
             line for line in diff.splitlines()

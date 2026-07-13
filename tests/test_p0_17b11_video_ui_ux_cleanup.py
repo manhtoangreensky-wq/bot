@@ -150,7 +150,7 @@ def test_video_numeric_buttons_8_four_by_four():
 def test_video_local_edit_buttons_have_handlers():
     markup = bot.task3d_product_intro_keyboard("video_local_edit", "vi")
     callbacks = _callbacks(markup)
-    assert callbacks == ["videoedit|manual", "videoedit|split", "menu|main_video"]
+    assert callbacks == ["videoedit|ai", "videoedit|manual", "videoedit|split", "menu|main_video"]
     assert bot.handle_video_editor_callback.__name__ == "handle_video_editor_callback"
     assert "submit_local_video_editor_job" in bot.handle_video_editor_callback.__code__.co_names
 

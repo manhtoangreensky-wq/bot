@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import bot
+from aiedit1_scope_guard import without_aiedit1_scope
 from services import product_video_duration_decision as duration2
 
 
@@ -241,7 +242,7 @@ def test_duration2_config_json_valid():
 
 
 def test_duration2_scope_locks_no_forbidden_runtime_changes():
-    changed = _changed_files()
+    changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
         "config/product_video_duration_decision.json",

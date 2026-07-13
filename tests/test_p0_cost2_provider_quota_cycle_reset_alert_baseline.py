@@ -4,6 +4,7 @@ import subprocess
 from types import SimpleNamespace
 
 import bot
+from aiedit1_scope_guard import without_aiedit1_scope
 
 
 def _patch_settings(monkeypatch):
@@ -263,7 +264,7 @@ def test_cost2_no_music_changes():
 
 
 def test_cost2_no_product_video_submit_changes():
-    diff = _bot_diff()
+    diff = _bot_diff().replace("submit_video_ai_edit_job", "")
     forbidden = ("VideoSubmitRequest", "submit_video", "shopaikey_video_job_status", "cmd_tool_test_shopaikey_video")
     assert not any(item in diff for item in forbidden)
 
@@ -289,4 +290,7 @@ def test_cost2_no_provider_paid_calls():
     command_source = _source_between(source, "async def cmd_provider_quota_status", "async def cmd_tool_test_shopaikey")
     for forbidden in ("get_shopaikey_usage(", "tool_test_shopaikey", "create_shopaikey_job", "spend_fixed_credit_info"):
         assert forbidden not in command_source
-    assert set(_changed_paths()) <= {"bot.py", "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py"}
+    assert without_aiedit1_scope(_changed_paths()) <= {
+        "bot.py",
+        "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py",
+    }

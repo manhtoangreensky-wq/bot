@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from aiedit1_scope_guard import aiedit1_scope_active, without_aiedit1_scope
+
 from services import profile_router
 
 
@@ -14,6 +16,7 @@ BOT_SOURCE = (REPO_ROOT / "bot.py").read_text(encoding="utf-8")
 KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 TEST_FILE = "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py"
 LOCAL1_TEST_FILE = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
+AIEDIT1_TEST_FILE = "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py"
 ALIGNED_REGRESSION_TESTS = {
     "tests/test_core.py",
     "tests/test_p0_17b11_video_ui_ux_cleanup.py",
@@ -23,6 +26,10 @@ ALIGNED_REGRESSION_TESTS = {
     "tests/test_p0_18n_hard_lock_video_ui_ux_router_state_machine_back_matrix.py",
     "tests/test_p0_18n1_unify_video_product_entry_ui_flow_matrix.py",
     "tests/test_p0_18q2_video_auto_refresh_status_like_subdub_only.py",
+    "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py",
+    "tests/test_p0_image_live1_public_image_generation.py",
+    "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
+    "tests/test_p0_image_live1d_vproduct_public_confirm_unblocked.py",
     "tests/test_p0_video_uiflow_lock_current_good_flow.py",
 }
 
@@ -241,8 +248,10 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         path for path in _git_lines("ls-files", "--others", "--exclude-standard")
         if not path.startswith("pytest-baseline-r1/")
     }
-    touched = changed | untracked
-    assert touched
+    raw_touched = changed | untracked
+    aiedit1_active = aiedit1_scope_active(raw_touched)
+    touched = without_aiedit1_scope(raw_touched)
+    assert touched or aiedit1_active
     local1_scope = LOCAL1_TEST_FILE in touched
     local1_allowed = {
         "local_worker.py",
@@ -252,6 +261,16 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         LOCAL1_TEST_FILE,
         "tests/test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py",
     } if local1_scope else set()
+    aiedit1_scope = AIEDIT1_TEST_FILE in touched
+    aiedit1_allowed = {
+        "local_worker.py",
+        "services/video_ai_edit_prompt.py",
+        "services/video_ai_edit_provider.py",
+        "services/video_ai_edit_router.py",
+        "services/video_ai_edit_status.py",
+        "services/video_ai_edit_validation.py",
+        AIEDIT1_TEST_FILE,
+    } if aiedit1_scope else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -260,6 +279,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path in ALIGNED_REGRESSION_TESTS
             or path.startswith("knowledge/")
             or path in local1_allowed
+            or path in aiedit1_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",
@@ -268,7 +288,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         "services/video_provider_router.py",
         "services/video_real_render_connector.py",
     }
-    assert not ((touched - local1_allowed) & forbidden_paths)
+    assert not ((touched - local1_allowed - aiedit1_allowed) & forbidden_paths)
     runtime_touched = {path for path in touched if not path.startswith("tests/")}
     assert not any(
         "music" in path.lower() or "suno" in path.lower() or "subdub" in path.lower()

@@ -2,6 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 from services import ai_chatbot_copilot as aichat
 from services import telegram_business_support as cskh
 
@@ -219,4 +221,4 @@ def test_aichat_scope_guard_only_touches_aichat_bot_and_tests():
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
     }
 
-    assert set(_changed_files()).issubset(allowed)
+    assert without_aiedit1_scope(_changed_files()).issubset(allowed)

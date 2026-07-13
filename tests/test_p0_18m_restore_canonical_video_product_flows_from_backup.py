@@ -349,7 +349,7 @@ def test_video_local_edit_routes_to_local1_hub():
     text, markup, session = _press(180022, "videoedit|hub")
     callbacks = _callbacks(markup)
     assert "Chỉnh sửa video" in text
-    assert callbacks == ["videoedit|manual", "videoedit|split", "menu|main_video"]
+    assert callbacks == ["videoedit|ai", "videoedit|manual", "videoedit|split", "menu|main_video"]
     assert "hiện không thu Xu" in text
     assert session.get("video_tool") == "video_local_edit"
 

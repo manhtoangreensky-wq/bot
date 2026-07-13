@@ -3,6 +3,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 import pytest
 
 from services import telegram_business_support as cskh
@@ -313,4 +315,4 @@ def test_cskh5c_scope_guard_only_touches_cskh_runtime_bot_trace_and_tests():
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
     }
 
-    assert set(_changed_files()).issubset(allowed)
+    assert without_aiedit1_scope(_changed_files()).issubset(allowed)

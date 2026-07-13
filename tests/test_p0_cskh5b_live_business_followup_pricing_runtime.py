@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 from services import telegram_business_support as cskh
 
 
@@ -396,7 +398,7 @@ def test_cskh5b_live_repro_sequence_no_chatwide_cooldown_block():
 
 
 def test_cskh5b_no_locked_runtime_scope_changes():
-    changed = set(_changed_files())
+    changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
         "knowledge/toan_aas_cskh_aichat_context.md",

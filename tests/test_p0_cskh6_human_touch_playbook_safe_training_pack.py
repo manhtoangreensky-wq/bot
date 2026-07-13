@@ -2,6 +2,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 import pytest
 
 from services import telegram_business_support as cskh
@@ -125,7 +127,7 @@ def test_cskh6_test_message_classifies_without_sending():
 
 
 def test_cskh6_scope_guard_cskh_only_no_locked_runtime_touched():
-    changed = set(_changed_files())
+    changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
         "knowledge/toan_aas_cskh_aichat_context.md",

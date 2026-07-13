@@ -105,6 +105,7 @@ from services import video_product_profiles as video_profiles
 from services import video_project_queue
 from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import profile_router, video_local_editing, video_local_validation, video_smart_splitter
+from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
 from services import video_prompt_vault
 from services import video_profile_context_engine
 from services import video_prompt_continuity as video_continuity
@@ -42183,6 +42184,7 @@ def update_local_worker_job(job_id, status: str, worker_id: str = "", error_shor
     if not job:
         raise ValueError("local worker job not found")
     now = now_text()
+    detail_limit = 4000 if str(job.get("job_type") or "") == "video_ai_edit" else 500
     started_at = job.get("started_at") or (now if status == "running" else "")
     finished_at = job.get("finished_at") or (now if status in {"succeeded", "failed", "cancelled"} else "")
     conn = db_connect()
@@ -42195,7 +42197,7 @@ def update_local_worker_job(job_id, status: str, worker_id: str = "", error_shor
             (
                 status,
                 str(worker_id or job.get("worker_id") or "")[:120],
-                str(error_short or "")[:500],
+                str(error_short or "")[:detail_limit],
                 str(output_file_id or job.get("output_file_id") or "")[:500],
                 str(output_url or job.get("output_url") or "")[:1000],
                 started_at,
@@ -65030,15 +65032,25 @@ VIDEO_EDITOR_STRUCTURED_FIELDS = {
     "logo_source",
     "subtitle_source",
     "split_ranges",
+    "ai_route",
+    "ai_suggestions",
+    "ai_settings",
+    "preserve_controls",
+    "prompt_payload",
+    "provider_admission",
 }
 VIDEO_EDITOR_TEXT_FIELDS = {
     "source_file_id", "source_file_name", "source_mime_type", "requested_action",
     "preset", "ratio", "method", "overlay_text", "selected_tool", "split_mode",
     "pending_field", "operation", "last_error", "source_display_name",
+    "user_intent", "selected_ai_profile", "execution_lane", "intensity",
+    "target_aspect_ratio", "text_preference", "camera_motion_preference",
+    "provider_name", "model", "interface", "submit_source", "prompt_hash",
 }
 VIDEO_EDITOR_NUMBER_FIELDS = {
     "source_file_size", "source_duration", "source_duration_ms", "job_id",
     "split_part_count", "split_segment_ms", "delivered_count",
+    "target_duration_seconds", "price_xu",
 }
 
 
@@ -65060,7 +65072,10 @@ def set_video_editor_pending(user_id, step: str, **fields) -> dict:
             payload[key] = safe_int(value, 0)
         elif key == "sharpen":
             payload[key] = bool(value)
-        elif key in {"allow_gaps", "coverage_required", "inspection_complete"}:
+        elif key in {
+            "allow_gaps", "coverage_required", "inspection_complete",
+            "public_user_confirmed", "preserve_source_audio",
+        }:
             payload[key] = bool(value)
         elif key in VIDEO_EDITOR_STRUCTURED_FIELDS:
             try:
@@ -65230,17 +65245,18 @@ def video_edit_hub_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🛠 <b>Edit video</b>\n\n"
-            "Edit an uploaded video locally or split it into ordered clips. Processing starts only after your final confirmation."
+            "Edit locally, split into ordered clips, or prepare an AI transformation. Processing starts only after your final confirmation."
         )
     return (
         "🛠 <b>Chỉnh sửa video</b>\n\n"
-        "Chọn công cụ anh/chị cần. Hệ thống chỉ xử lý video sau bước xác nhận cuối cùng và hiện không thu Xu."
+        "Chọn công cụ anh/chị cần. Hệ thống chỉ xử lý video sau bước xác nhận cuối cùng. Công cụ local hiện không thu Xu; AI tạo sinh chỉ mở khi có giá và nguồn xử lý hợp lệ."
     )
 
 
 def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✨ Chỉnh sửa bằng AI" if is_vi else "✨ AI editing", callback_data="videoedit|ai")],
         [InlineKeyboardButton("✂️ Chỉnh sửa thủ công" if is_vi else "✂️ Manual editing", callback_data="videoedit|manual")],
         [InlineKeyboardButton("🧩 Cắt video nhiều đoạn" if is_vi else "🧩 Split into clips", callback_data="videoedit|split")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video")],
@@ -65284,6 +65300,386 @@ def video_edit_info_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|hub")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
+
+
+def video_ai_edit_intro_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✨ <b>AI video editing</b>\n\nUpload one MP4, MOV, MKV, or WebM video. "
+            "Choose the intended transformation, review the prompt and quote, then confirm. "
+            "No processing source is called before final confirmation and no Xu is charged before a valid result is delivered."
+        )
+    return (
+        "✨ <b>Chỉnh sửa video bằng AI</b>\n\n"
+        "Gửi một video MP4, MOV, MKV hoặc WebM. Sau khi kiểm tra video, hệ thống sẽ gợi ý 3–5 hướng chỉnh sửa phù hợp, cho anh/chị chọn mức biến đổi và nội dung cần giữ nguyên.\n\n"
+        "Hệ thống không gọi nguồn xử lý trước bước xác nhận cuối cùng và không trừ Xu trước khi video kết quả hợp lệ đã được gửi."
+    )
+
+
+def video_ai_edit_intro_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Gửi video", callback_data="videoedit|ai_upload")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|hub")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_ai_edit_upload_text(lang: str = "vi") -> str:
+    return (
+        "📎 <b>Gửi video cần chỉnh sửa bằng AI</b>\n\n"
+        "Hỗ trợ MP4, MOV, MKV và WebM, tối đa 50 MB. Hệ thống sẽ đọc thời lượng, độ phân giải, FPS, hướng khung hình và âm thanh trước khi cho chọn phong cách.\n\n"
+        "Chưa tạo tác vụ, chưa gọi nguồn xử lý và chưa trừ Xu."
+    )
+
+
+def video_ai_edit_upload_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_ai_edit_source_summary_text(state: dict, lang: str = "vi") -> str:
+    metadata = dict((state or {}).get("source_metadata") or {})
+    width, height = safe_int(metadata.get("width"), 0), safe_int(metadata.get("height"), 0)
+    orientation = "Dọc" if height > width else "Ngang" if width > height else "Vuông"
+    audio = "Có" if metadata.get("has_audio") else "Không"
+    return (
+        "🎞 <b>Video đã được kiểm tra</b>\n\n"
+        f"• Tên: {html.escape(str((state or {}).get('source_display_name') or 'video'))}\n"
+        f"• Thời lượng: <b>{_video_local_duration_text(safe_int(metadata.get('duration_ms'), 0))}</b>\n"
+        f"• Kích thước: <b>{width}×{height}</b> · {orientation}\n"
+        f"• FPS: <b>{float(metadata.get('fps') or 0):.2f}</b>\n"
+        f"• Âm thanh gốc: <b>{audio}</b>\n\n"
+        "Anh/chị muốn video sau chỉnh sửa nổi bật theo hướng nào?"
+    )
+
+
+def video_ai_edit_source_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Mô tả mong muốn", callback_data="videoedit|ai_intent")],
+        [InlineKeyboardButton("📎 Gửi video khác", callback_data="videoedit|ai_upload")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_upload")],
+    ])
+
+
+def video_ai_edit_intent_text(lang: str = "vi") -> str:
+    return (
+        "✍️ <b>Mô tả kết quả mong muốn</b>\n\n"
+        "Ví dụ: <i>làm video người nói chuyên nghiệp, giữ nguyên khuôn mặt và giọng gốc</i>; hoặc <i>biến walkthrough căn phòng thành nội thất điện ảnh nhưng giữ nguyên cửa, tường và bố cục</i>.\n\n"
+        "Hệ thống chỉ dùng nội dung này để lập kế hoạch và gợi ý, chưa gọi nguồn xử lý và chưa trừ Xu."
+    )
+
+
+def video_ai_edit_intent_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_source")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_ai_edit_suggestions_text(state: dict, lang: str = "vi") -> str:
+    suggestions = list((state or {}).get("ai_suggestions") or [])[:5]
+    lines = ["💡 <b>Gợi ý chỉnh sửa phù hợp</b>", ""]
+    for index, item in enumerate(suggestions, start=1):
+        lines.extend([
+            f"<b>{index}. {html.escape(str(item.get('title') or 'Hướng chỉnh sửa'))}</b>",
+            html.escape(str(item.get("result") or "")),
+            f"• Mức đề xuất: {html.escape(str(item.get('estimated_intensity') or 'Vừa'))}",
+            f"• Giữ nguyên: {html.escape(str(item.get('preserve_summary') or 'chủ thể chính'))}",
+            f"• Có phương án local: {'Có' if item.get('local_fallback_available') else 'Không'}",
+            "",
+        ])
+    if not suggestions:
+        lines.append("Chưa đủ thông tin để gợi ý. Anh/chị hãy mô tả rõ chủ thể và kết quả mong muốn.")
+    lines.append("Chọn một hướng để tùy chỉnh chi tiết. Hệ thống chưa tạo tác vụ và chưa trừ Xu.")
+    return "\n".join(lines)
+
+
+def video_ai_edit_suggestions_keyboard(state: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    suggestions = list((state or {}).get("ai_suggestions") or [])[:5]
+    rows = []
+    for index, item in enumerate(suggestions):
+        title = re.sub(r"^[^\wÀ-ỹ]+\s*", "", str(item.get("title") or f"Gợi ý {index + 1}"))
+        rows.append([InlineKeyboardButton(f"{index + 1}. {title[:44]}", callback_data=f"videoedit|ai_pick|{index}")])
+    rows.extend([
+        [InlineKeyboardButton("✍️ Đổi mô tả", callback_data="videoedit|ai_intent")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_source")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _video_ai_edit_lane_label(lane: str) -> str:
+    return "Nâng cấp cục bộ" if str(lane or "") == "local" else "Biến đổi tạo sinh"
+
+
+def video_ai_edit_settings_text(state: dict, lang: str = "vi") -> str:
+    route = dict((state or {}).get("ai_route") or {})
+    controls = dict((state or {}).get("preserve_controls") or route.get("preserve_controls") or {})
+    intensity = str((state or {}).get("intensity") or route.get("intensity") or "medium")
+    preserved = [
+        label for key, label in (
+            ("preserve_identity", "khuôn mặt/nhận diện"),
+            ("preserve_subject", "chủ thể"),
+            ("preserve_outfit", "trang phục"),
+            ("preserve_product_logo", "sản phẩm/logo"),
+            ("preserve_composition", "bố cục"),
+            ("preserve_architecture", "kiến trúc/phòng"),
+            ("preserve_original_motion", "chuyển động gốc"),
+            ("preserve_source_audio", "âm thanh gốc"),
+        ) if controls.get(key)
+    ]
+    return (
+        "🎛 <b>Tùy chỉnh phong cách</b>\n\n"
+        f"• Hồ sơ: <b>{html.escape(str(route.get('profile_title') or '-'))}</b>\n"
+        f"• Cách xử lý: <b>{_video_ai_edit_lane_label(str((state or {}).get('execution_lane') or route.get('execution_lane')))}</b>\n"
+        f"• Mức biến đổi: <b>{html.escape(video_ai_edit_router.INTENSITY_LABELS.get(intensity, 'Vừa'))}</b>\n"
+        f"• Giữ nguyên: {html.escape(', '.join(preserved) or 'chủ thể chính')}\n"
+        f"• Tỉ lệ: <b>{html.escape(str((state or {}).get('target_aspect_ratio') or route.get('target_aspect_ratio') or 'giữ nguồn'))}</b>\n"
+        f"• Thời lượng đích: <b>{safe_int((state or {}).get('target_duration_seconds') or route.get('target_duration_seconds'), 0)} giây</b>\n"
+        f"• Chữ/logo/phụ đề: {html.escape(str((state or {}).get('text_preference') or 'không tự thêm'))}\n"
+        f"• Camera/chuyển động: {html.escape(str((state or {}).get('camera_motion_preference') or 'giữ chuyển động gốc'))}\n\n"
+        "Khi xong, bấm <b>Xem prompt</b>."
+    )
+
+
+def video_ai_edit_settings_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💪 Mức biến đổi", callback_data="videoedit|ai_intensity"), InlineKeyboardButton("🔒 Nội dung giữ nguyên", callback_data="videoedit|ai_preserve")],
+        [InlineKeyboardButton("📐 Tỉ lệ", callback_data="videoedit|ai_aspect"), InlineKeyboardButton("⏱ Thời lượng", callback_data="videoedit|ai_duration")],
+        [InlineKeyboardButton("🔠 Chữ/logo/phụ đề", callback_data="videoedit|ai_text"), InlineKeyboardButton("🎥 Camera/chuyển động", callback_data="videoedit|ai_motion")],
+        [InlineKeyboardButton("🧾 Xem prompt", callback_data="videoedit|ai_review")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_suggestions")],
+    ])
+
+
+def video_ai_edit_intensity_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Nhẹ", callback_data="videoedit|ai_set_intensity|light"), InlineKeyboardButton("Vừa", callback_data="videoedit|ai_set_intensity|medium")],
+        [InlineKeyboardButton("Mạnh", callback_data="videoedit|ai_set_intensity|strong"), InlineKeyboardButton("Biến đổi sáng tạo", callback_data="videoedit|ai_set_intensity|creative")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")],
+    ])
+
+
+VIDEO_AI_EDIT_PRESERVE_LABELS = (
+    ("preserve_identity", "Giữ khuôn mặt"),
+    ("preserve_subject", "Giữ người/chủ thể"),
+    ("preserve_outfit", "Giữ trang phục"),
+    ("preserve_product_logo", "Giữ sản phẩm/logo"),
+    ("preserve_composition", "Giữ bố cục"),
+    ("preserve_architecture", "Giữ kiến trúc/phòng"),
+    ("preserve_original_motion", "Giữ chuyển động gốc"),
+    ("preserve_source_audio", "Giữ âm thanh gốc"),
+    ("replace_background", "Thay nền"),
+    ("allow_full_scene_transformation", "Cho phép đổi toàn cảnh"),
+)
+
+
+def video_ai_edit_preserve_text(state: dict, lang: str = "vi") -> str:
+    controls = dict((state or {}).get("preserve_controls") or {})
+    lines = ["🔒 <b>Chọn nội dung cần giữ nguyên</b>", ""]
+    for key, label in VIDEO_AI_EDIT_PRESERVE_LABELS:
+        lines.append(f"{'✅' if controls.get(key) else '⬜'} {label}")
+    lines.extend(["", "Thay nền và biến đổi toàn cảnh chỉ bật khi anh/chị chọn rõ."])
+    return "\n".join(lines)
+
+
+def video_ai_edit_preserve_keyboard(state: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    controls = dict((state or {}).get("preserve_controls") or {})
+    rows = []
+    for index in range(0, len(VIDEO_AI_EDIT_PRESERVE_LABELS), 2):
+        row = []
+        for key, label in VIDEO_AI_EDIT_PRESERVE_LABELS[index:index + 2]:
+            row.append(InlineKeyboardButton(f"{'✅' if controls.get(key) else '⬜'} {label}", callback_data=f"videoedit|ai_toggle|{key}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_ai_edit_aspect_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Giữ nguồn", callback_data="videoedit|ai_set_aspect|keep"), InlineKeyboardButton("9:16", callback_data="videoedit|ai_set_aspect|9x16")],
+        [InlineKeyboardButton("16:9", callback_data="videoedit|ai_set_aspect|16x9"), InlineKeyboardButton("1:1", callback_data="videoedit|ai_set_aspect|1x1"), InlineKeyboardButton("4:5", callback_data="videoedit|ai_set_aspect|4x5")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")],
+    ])
+
+
+def video_ai_edit_duration_keyboard(state: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    source_seconds = max(1, safe_int((state.get("source_metadata") or {}).get("duration"), 0))
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Giữ thời lượng nguồn", callback_data=f"videoedit|ai_set_duration|{source_seconds}"), InlineKeyboardButton("8 giây", callback_data="videoedit|ai_set_duration|8")],
+        [InlineKeyboardButton("✍️ Nhập số giây", callback_data="videoedit|ai_custom_duration")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")],
+    ])
+
+
+def video_ai_edit_text_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Không tự thêm", callback_data="videoedit|ai_set_text|none")],
+        [InlineKeyboardButton("Giữ chữ/logo gốc", callback_data="videoedit|ai_set_text|preserve"), InlineKeyboardButton("Làm nổi phụ đề có sẵn", callback_data="videoedit|ai_set_text|emphasize")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")],
+    ])
+
+
+def video_ai_edit_motion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Giữ chuyển động gốc", callback_data="videoedit|ai_set_motion|preserve")],
+        [InlineKeyboardButton("Mượt và ổn định", callback_data="videoedit|ai_set_motion|smooth"), InlineKeyboardButton("Năng động có kiểm soát", callback_data="videoedit|ai_set_motion|dynamic")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")],
+    ])
+
+
+def video_ai_edit_prompt_text(state: dict, lang: str = "vi") -> str:
+    route = dict((state or {}).get("ai_route") or {})
+    prompt = dict((state or {}).get("prompt_payload") or {})
+    return (
+        "🧾 <b>Xem trước kế hoạch chỉnh sửa</b>\n\n"
+        f"• Hồ sơ: <b>{html.escape(str(route.get('profile_title') or '-'))}</b>\n"
+        f"• Cách xử lý: <b>{_video_ai_edit_lane_label(str((state or {}).get('execution_lane') or route.get('execution_lane')))}</b>\n"
+        f"• Tóm tắt: {html.escape(str(route.get('profile', {}).get('visual_objective') or 'Nâng cấp video theo yêu cầu'))}\n\n"
+        f"<b>Prompt chuyên nghiệp</b>\n<code>{html.escape(str(prompt.get('prompt') or '')[:2500])}</code>\n\n"
+        f"<b>Điều cần tránh</b>\n<code>{html.escape(str(prompt.get('negative_prompt') or '')[:1400])}</code>\n\n"
+        "Hệ thống chưa tạo tác vụ, chưa gọi nguồn xử lý và chưa trừ Xu."
+    )
+
+
+def video_ai_edit_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ Xem báo giá", callback_data="videoedit|ai_invoice")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_settings")],
+    ])
+
+
+def video_ai_edit_invoice_snapshot(state: dict) -> dict:
+    lane = str((state or {}).get("execution_lane") or (state.get("ai_route") or {}).get("execution_lane") or "local")
+    if lane == "local":
+        policy = video_ai_edit_provider.submit_source_policy(
+            video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            lane="local",
+            env=os.environ,
+        )
+        return {
+            "ready": bool(policy.get("allowed")),
+            "reason": "local_enhancement_ready" if policy.get("allowed") else str(policy.get("reason") or "local_ai_edit_unavailable"),
+            "price_xu": 0,
+            "pricing_source": "free_local_tool",
+            "selected_provider": "local_ffmpeg",
+            "selected_model": "local_enhancement",
+            "selected_interface": "local_ffmpeg",
+        }
+    policy = video_ai_edit_provider.submit_source_policy(
+        video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        public_user_confirmed=True,
+        lane="generative",
+        env=os.environ,
+    )
+    if policy.get("allowed"):
+        limits = video_ai_edit_validation.ai_edit_limits(os.environ)
+        duration = safe_int((state or {}).get("target_duration_seconds"), 0)
+        if duration > safe_int(limits.get("generative_duration_limit_seconds"), 8):
+            return {
+                "ready": False,
+                "reason": "duration_limit_action_required",
+                "price_xu": 0,
+                "duration_limit_seconds": limits.get("generative_duration_limit_seconds"),
+            }
+    return {
+        "ready": bool(policy.get("allowed")),
+        "reason": str(policy.get("reason") or ""),
+        "price_xu": safe_int(policy.get("price_xu"), 0),
+        "pricing_source": "VIDEO_AI_EDIT_PRICE_XU" if policy.get("allowed") else "quote_unavailable",
+        "selected_provider": str(policy.get("selected_provider") or ""),
+        "selected_model": str(policy.get("selected_model") or ""),
+        "selected_interface": str(policy.get("selected_interface") or ""),
+        "fallback_provider": str(policy.get("fallback_provider") or ""),
+    }
+
+
+def video_ai_edit_invoice_text(state: dict, invoice: dict, lang: str = "vi") -> str:
+    route = dict((state or {}).get("ai_route") or {})
+    lane = str((state or {}).get("execution_lane") or route.get("execution_lane") or "local")
+    price = safe_int(invoice.get("price_xu"), 0)
+    lines = [
+        "🧾 <b>Xác nhận chỉnh sửa video</b>", "",
+        f"• Hồ sơ: <b>{html.escape(str(route.get('profile_title') or '-'))}</b>",
+        f"• Cách xử lý: <b>{_video_ai_edit_lane_label(lane)}</b>",
+        f"• Tỉ lệ: <b>{html.escape(str((state or {}).get('target_aspect_ratio') or '-'))}</b>",
+        f"• Thời lượng: <b>{safe_int((state or {}).get('target_duration_seconds'), 0)} giây</b>",
+        f"• Giá: <b>{price} Xu</b>" if invoice.get("ready") else "• Giá: <b>Chưa có báo giá hợp lệ</b>",
+        "",
+    ]
+    if invoice.get("ready"):
+        lines.extend([
+            "Bấm <b>Xác nhận chỉnh sửa</b> để tạo đúng một tác vụ. Hệ thống chỉ trừ Xu sau khi video MP4 hợp lệ đã được gửi thành công.",
+        ])
+    else:
+        reason = str(invoice.get("reason") or "")
+        public = {
+            "ai_edit_price_unconfigured": "Giá chỉnh sửa AI chưa được cấu hình nên hệ thống không tạo tác vụ.",
+            "ai_edit_video_to_video_provider_unavailable": "Nguồn biến đổi video chưa sẵn sàng nên hệ thống không tạo tác vụ.",
+            "ai_edit_public_disabled": "Tính năng tạo sinh chưa được mở công khai.",
+            "ai_edit_generative_disabled": "Tính năng biến đổi tạo sinh chưa được mở.",
+            "ai_edit_public_maintenance": "Tính năng đang tạm dừng công khai.",
+            "duration_limit_action_required": f"Thời lượng tạo sinh tối đa hiện tại là {safe_int(invoice.get('duration_limit_seconds'), 8)} giây. Hãy chọn 8 giây hoặc chuyển sang nâng cấp cục bộ.",
+        }.get(reason, "Hệ thống chưa đủ điều kiện tạo video AI lúc này.")
+        lines.extend([public, "Hệ thống chưa tạo tác vụ và chưa trừ Xu. Có thể dùng phương án nâng cấp cục bộ ngay."])
+    return "\n".join(lines)
+
+
+def video_ai_edit_invoice_keyboard(invoice: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    if invoice.get("ready"):
+        rows.append([InlineKeyboardButton("✅ Xác nhận chỉnh sửa", callback_data="videoedit|ai_confirm")])
+    else:
+        rows.append([InlineKeyboardButton("🧼 Dùng nâng cấp cục bộ", callback_data="videoedit|ai_use_local")])
+    rows.extend([
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|ai_prompt")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_ai_edit_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data=f"videoedit|ai_status|{int(job_id)}")],
+        [InlineKeyboardButton("⬅️ Chỉnh sửa bằng AI", callback_data="videoedit|ai"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_ai_edit_route_from_state(state: dict, selected_profile: str = "") -> dict:
+    """Rebuild the deterministic edit route after an explicit UI choice."""
+    current = dict(state or {})
+    route = video_ai_edit_router.route_ai_edit_intent(
+        str(current.get("user_intent") or ""),
+        selected_profile=str(selected_profile or current.get("selected_ai_profile") or ""),
+        source_metadata=dict(current.get("source_metadata") or {}),
+        uploaded_asset_type=str((current.get("source_metadata") or {}).get("content_hint") or ""),
+        preserve_controls=dict(current.get("preserve_controls") or {}),
+        intensity=str(current.get("intensity") or "medium"),
+        target_aspect_ratio=str(current.get("target_aspect_ratio") or ""),
+        target_duration_seconds=safe_int(current.get("target_duration_seconds"), 0),
+    )
+    if (current.get("provider_admission") or {}).get("local_override"):
+        route["execution_lane"] = "local"
+    return route
+
+
+def video_ai_edit_prompt_from_state(state: dict, route: dict | None = None) -> dict:
+    current = dict(state or {})
+    selected_route = dict(route or current.get("ai_route") or {})
+    return video_ai_edit_prompt.build_professional_prompt(
+        selected_route,
+        user_request=str(current.get("user_intent") or ""),
+        source_metadata=dict(current.get("source_metadata") or {}),
+        settings={
+            "intensity": str(current.get("intensity") or selected_route.get("intensity") or "medium"),
+            "target_aspect_ratio": str(current.get("target_aspect_ratio") or selected_route.get("target_aspect_ratio") or "keep"),
+            "target_duration_seconds": safe_int(current.get("target_duration_seconds") or selected_route.get("target_duration_seconds"), 0),
+            "text_preference": str(current.get("text_preference") or "do not add unrequested text"),
+            "camera_motion_preference": str(current.get("camera_motion_preference") or "preserve source motion"),
+        },
+    )
 
 
 def video_local_tool_text(tool: str, lang: str = "vi") -> str:
@@ -99431,6 +99827,87 @@ async def cmd_video_local_job_debug(update: Update, context: ContextTypes.DEFAUL
         f"• Cleanup: <code>{html.escape(cleanup)}</code>",
         f"• Failure reason: <code>{html.escape(failure)}</code>",
         f"• Charged amount: <code>{safe_int(progress.get('charge'), safe_int(job.get('xu_cost'), 0))} Xu</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+def _last_video_ai_edit_job() -> dict:
+    for job in list_local_worker_jobs(100):
+        if str(job.get("job_type") or "") == "video_ai_edit":
+            return job
+    return {}
+
+
+async def cmd_video_ai_edit_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    feature = video_ai_edit_provider.feature_snapshot(os.environ)
+    payload = video_ai_edit_status.admin_status_payload(feature, last_job=_last_video_ai_edit_job())
+    limits = video_ai_edit_validation.ai_edit_limits(os.environ)
+    provider_lines = []
+    for item in payload.get("providers") or []:
+        provider_lines.append(
+            f"• {html.escape(str(item.get('provider_name') or '-'))}: "
+            f"configured=<code>{'yes' if item.get('configured') else 'no'}</code> · "
+            f"model=<code>{html.escape(str(item.get('model') or '-'))}</code> · "
+            f"interface=<code>{html.escape(str(item.get('interface') or '-'))}</code>"
+        )
+    if not provider_lines:
+        provider_lines.append("• Providers: <code>none configured</code>")
+    lines = [
+        "✨ <b>VIDEO AI EDIT STATUS</b>", "",
+        f"• Public enabled: <code>{'yes' if payload.get('public_enabled') else 'no'}</code>",
+        f"• Local lane enabled: <code>{'yes' if payload.get('local_lane_enabled') else 'no'}</code>",
+        f"• Generative lane enabled: <code>{'yes' if payload.get('generative_lane_enabled') else 'no'}</code>",
+        f"• Video-to-video capability: <code>{'yes' if payload.get('provider_capability_available') else 'no'}</code>",
+        f"• Public freeze: <code>{'yes' if payload.get('public_maintenance_freeze') else 'no'}</code>",
+        f"• Hidden submit freeze: <code>{'yes' if payload.get('hidden_submit_freeze') else 'no'}</code>",
+        f"• Pricing configured: <code>{'yes' if payload.get('pricing_configured') else 'no'}</code>",
+        f"• Price: <code>{safe_int(payload.get('price_xu'), 0)} Xu</code>",
+        f"• Upload limit: <code>{safe_int(limits.get('upload_limit_bytes'), 0) // (1024 * 1024)} MB</code>",
+        f"• Local duration limit: <code>{safe_int(limits.get('local_duration_limit_seconds'), 0)} seconds</code>",
+        f"• Generative duration limit: <code>{safe_int(limits.get('generative_duration_limit_seconds'), 0)} seconds</code>",
+        "",
+        *provider_lines,
+        "",
+        f"• Last job: <code>{html.escape(str(payload.get('last_job_id') or '-'))}</code>",
+        f"• Last result: <code>{html.escape(str(payload.get('last_job_result') or '-'))}</code>",
+        f"• Last provider status: <code>{html.escape(str(payload.get('last_provider_status') or '-'))}</code>",
+        f"• Last failure: <code>{html.escape(_video_local_safe_failure_reason(str(payload.get('last_failure_reason') or '')))}</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_video_ai_edit_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text(LOCAL_RENDER_ADMIN_ONLY_MESSAGE)
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /video_ai_edit_job_debug <JOB_ID>")
+    job = get_local_worker_job(context.args[0])
+    if not job or str(job.get("job_type") or "") != "video_ai_edit":
+        return await update.message.reply_text("Không tìm thấy tác vụ AI Video Editing này.")
+    payload = video_ai_edit_status.job_debug_payload(job)
+    metadata = dict(payload.get("source_metadata") or {})
+    constraints = ", ".join(str(item) for item in payload.get("preserve_constraints") or []) or "-"
+    lines = [
+        "🧾 <b>VIDEO AI EDIT JOB DEBUG</b>", "",
+        f"• Job: <code>#{safe_int(payload.get('job_id'), 0)}</code>",
+        f"• Status: <code>{html.escape(str(payload.get('status') or '-'))}</code>",
+        f"• Profile: <code>{html.escape(str(payload.get('profile') or '-'))}</code>",
+        f"• Intent: <code>{html.escape(str(payload.get('intent') or '-'))}</code>",
+        f"• Source: <code>{safe_int(metadata.get('width'), 0)}x{safe_int(metadata.get('height'), 0)} · {float(metadata.get('duration') or 0):.1f}s</code>",
+        f"• Preserve: <code>{html.escape(constraints[:700])}</code>",
+        f"• Prompt hash: <code>{html.escape(str(payload.get('prompt_hash') or '-')[:80])}</code>",
+        f"• Provider/model/interface: <code>{html.escape(str(payload.get('provider') or '-'))} / {html.escape(str(payload.get('model') or '-'))} / {html.escape(str(payload.get('interface') or '-'))}</code>",
+        f"• Submit source: <code>{html.escape(str(payload.get('submit_source') or '-'))}</code>",
+        f"• Task ID: <code>{html.escape(str(payload.get('task_id') or '-'))}</code>",
+        f"• Poll count: <code>{safe_int(payload.get('poll_count'), 0)}</code>",
+        f"• Result URL present: <code>{'yes' if payload.get('result_url_present') else 'no'}</code>",
+        f"• Validation: <code>{html.escape(str(payload.get('validation') or '-'))}</code>",
+        f"• Delivery: <code>{html.escape(str(payload.get('delivery') or '-'))}</code>",
+        f"• Charge: <code>{html.escape(str(payload.get('charge_status') or '-'))}</code>",
+        f"• Cleanup: <code>{html.escape(str(payload.get('cleanup') or '-'))}</code>",
+        f"• Failure: <code>{html.escape(_video_local_safe_failure_reason(str(payload.get('failure_reason') or '')))}</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -192593,6 +193070,185 @@ def count_active_video_local_jobs(user_id) -> int:
         conn.close()
 
 
+def count_active_video_ai_edit_jobs(user_id) -> int:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM local_worker_jobs WHERE user_id=? AND job_type='video_ai_edit' AND status IN ('queued','running')",
+            (str(user_id or ""),),
+        ).fetchone()
+        return int((row or [0])[0] or 0)
+    except sqlite3.OperationalError:
+        return 0
+    finally:
+        conn.close()
+
+
+def video_ai_edit_job_progress(job: dict) -> dict:
+    return video_ai_edit_status.parse_progress((job or {}).get("error_short"))
+
+
+def _persist_video_ai_edit_progress(job_id: int, progress: dict) -> None:
+    payload = json.dumps(progress, ensure_ascii=False, separators=(",", ":"))
+    conn = db_connect()
+    try:
+        conn.execute(
+            "UPDATE local_worker_jobs SET error_short=?, updated_at=? WHERE id=? AND job_type='video_ai_edit'",
+            (payload[:4000], now_text(), int(job_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def handle_video_ai_edit_worker_job_update(previous_job: dict, updated_job: dict) -> None:
+    """Apply deferred AIEDIT charge exactly once after worker delivery truth."""
+    if not updated_job or str(updated_job.get("job_type") or "") != "video_ai_edit":
+        return
+    previous_status = str((previous_job or {}).get("status") or "").lower()
+    status = str(updated_job.get("status") or "").lower()
+    if previous_status in {"succeeded", "failed", "cancelled"}:
+        return
+    progress = video_ai_edit_job_progress(updated_job)
+    try:
+        payload = json.loads(str(updated_job.get("input_file_id") or "") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    delivered = bool(
+        status == "succeeded"
+        and progress.get("stage") == "delivered"
+        and progress.get("validation") == "passed"
+        and progress.get("delivery") == "sent"
+        and str(progress.get("delivery_message_id") or "").strip()
+        and str(updated_job.get("output_file_id") or "").strip()
+    )
+    if not delivered:
+        progress["charge"] = 0
+        progress["charge_status"] = "not_charged"
+        _persist_video_ai_edit_progress(safe_int(updated_job.get("id"), 0), progress)
+        return
+    price = max(0, safe_int(payload.get("price_xu"), safe_int(updated_job.get("xu_cost"), 0)))
+    quoted = max(0, safe_int(payload.get("quoted_price_xu"), price))
+    if price != quoted or price != safe_int(updated_job.get("xu_cost"), price):
+        progress.update({"charge": 0, "charge_status": "quote_mismatch_no_charge", "reason": "ai_edit_quote_mismatch"})
+        _persist_video_ai_edit_progress(safe_int(updated_job.get("id"), 0), progress)
+        return
+    if price <= 0:
+        progress.update({"charge": 0, "charge_status": "free_local_tool"})
+        _persist_video_ai_edit_progress(safe_int(updated_job.get("id"), 0), progress)
+        return
+    charge = spend_fixed_credit_info(
+        updated_job.get("user_id"),
+        price,
+        "video_ai_edit_final_delivery",
+        f"AI Video Editing job #{updated_job.get('id')} delivered",
+        apply_member_discount_flag=False,
+    )
+    charged = safe_int(charge.get("final_cost"), price) if charge.get("ok") else 0
+    progress.update({
+        "charge": charged,
+        "charge_status": "charged_after_delivery" if charge.get("ok") else "delivery_complete_charge_failed",
+        "charge_idempotency_key": f"video_ai_edit_final_delivery:{updated_job.get('id')}:{price}",
+    })
+    _persist_video_ai_edit_progress(safe_int(updated_job.get("id"), 0), progress)
+
+
+async def submit_video_ai_edit_job(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict) -> bool:
+    query = update.callback_query
+    message = update.message or (query.message if query else None)
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
+    state = dict(state or {})
+    lane = str(state.get("execution_lane") or (state.get("ai_route") or {}).get("execution_lane") or "local")
+    if (
+        str(state.get("step") or "") != "ai_invoice"
+        or not state.get("inspection_complete")
+        or not str(state.get("source_file_id") or "").strip()
+    ):
+        if query:
+            await query.answer("Vui lòng đi đúng các bước trước khi xác nhận.", show_alert=True)
+        return True
+    invoice = video_ai_edit_invoice_snapshot(state)
+    if not invoice.get("ready"):
+        if query:
+            await safe_edit_or_send(
+                query,
+                video_ai_edit_invoice_text(state, invoice, lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_edit_invoice_keyboard(invoice, lang),
+            )
+        return True
+    if count_active_video_ai_edit_jobs(uid) >= 1:
+        text = "⚠️ Anh/chị đang có một video AI được xử lý. Vui lòng chờ kết quả trước khi tạo tác vụ mới. Hệ thống chưa trừ Xu."
+        if query:
+            await safe_edit_or_send(query, text, reply_markup=video_ai_edit_invoice_keyboard(invoice, lang))
+        return True
+    if not video_editor_worker_ready():
+        text = "⚠️ Hệ thống xử lý video chưa sẵn sàng. Chưa tạo tác vụ và chưa trừ Xu."
+        if query:
+            await safe_edit_or_send(query, text, reply_markup=video_ai_edit_invoice_keyboard(invoice, lang))
+        return True
+    prompt_payload = dict(state.get("prompt_payload") or {})
+    route = dict(state.get("ai_route") or {})
+    price = safe_int(invoice.get("price_xu"), 0)
+    payload = {
+        "aiedit1_contract": 1,
+        "user_id": str(uid),
+        "chat_id": str(message.chat_id),
+        "source_file_id": str(state.get("source_file_id") or ""),
+        "source_file_name": str(state.get("source_file_name") or "video.mp4")[:180],
+        "source_file_size": safe_int(state.get("source_file_size"), 0),
+        "source_metadata": dict(state.get("source_metadata") or {}),
+        "user_intent": str(state.get("user_intent") or "")[:1200],
+        "profile_id": str(route.get("profile_id") or ""),
+        "profile_title": str(route.get("profile_title") or "")[:180],
+        "intensity": str(state.get("intensity") or route.get("intensity") or "medium"),
+        "preserve_constraints": list(route.get("preserve_constraints") or []),
+        "preserve_controls": dict(state.get("preserve_controls") or route.get("preserve_controls") or {}),
+        "preserve_source_audio": bool((state.get("preserve_controls") or {}).get("preserve_source_audio", True)),
+        "target_aspect_ratio": str(state.get("target_aspect_ratio") or route.get("target_aspect_ratio") or "9:16"),
+        "target_duration_seconds": safe_int(state.get("target_duration_seconds") or route.get("target_duration_seconds"), 0),
+        "professional_prompt": str(prompt_payload.get("prompt") or "")[:12_000],
+        "negative_prompt": str(prompt_payload.get("negative_prompt") or "")[:8_000],
+        "prompt_hash": str(prompt_payload.get("prompt_hash") or ""),
+        "local_preprocess_plan": dict(route.get("local_preprocess_plan") or {}),
+        "execution_lane": lane,
+        "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+        "public_user_confirmed": True,
+        "provider_name": str(invoice.get("selected_provider") or "local_ffmpeg"),
+        "model": str(invoice.get("selected_model") or "local_enhancement"),
+        "interface": str(invoice.get("selected_interface") or "local_ffmpeg"),
+        "fallback_provider": str(invoice.get("fallback_provider") or ""),
+        "price_xu": price,
+        "quoted_price_xu": price,
+        "charge_policy": "after_valid_mp4_delivery",
+        "provider_call": lane == "generative",
+        "max_render_seconds": min(
+            LOCAL_WORKER_MAX_JOB_SECONDS,
+            max(30, min(3600, safe_int(os.getenv("VIDEO_AI_EDIT_MAX_WAIT_SECONDS"), 900))) + 300,
+        ),
+    }
+    job_id = create_local_worker_job(
+        user_id=uid,
+        command="video_aiedit1",
+        job_type="video_ai_edit",
+        provider=str(payload["provider_name"]),
+        input_file_id=json.dumps(payload, ensure_ascii=False),
+        xu_cost=price,
+        admin_only=False,
+    )
+    clear_video_editor_pending(uid)
+    text = (
+        "✅ <b>Đã nhận yêu cầu chỉnh sửa video</b>\n\n"
+        "Hệ thống đang kiểm tra và xử lý video. Chỉ khi video MP4 hợp lệ được gửi thành công, hệ thống mới ghi phí theo báo giá.\n\n"
+        f"• Mã xử lý: <code>#{job_id}</code>\n"
+        f"• Giá đã xác nhận: <b>{price} Xu</b>"
+    )
+    if query:
+        await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_ai_edit_status_keyboard(job_id, lang))
+    return True
+
+
 async def submit_local_video_editor_job(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict) -> bool:
     query = update.callback_query
     message = update.message or (query.message if query else None)
@@ -192680,7 +193336,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     uid = update.effective_user.id
     state = dict(get_video_editor_pending(uid) or {})
     step = str(state.get("step") or "")
-    if step not in {"await_video", "await_concat", "await_logo", "await_srt"}:
+    if step not in {"await_video", "await_concat", "await_logo", "await_srt", "await_ai_video"}:
         return False
     lang = get_user_language(uid) or "vi"
     if step == "await_logo":
@@ -192736,6 +193392,32 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     source["source_duration"] = int(round(float(metadata.get("duration") or 0)))
     source["source_duration_ms"] = int(metadata.get("duration_ms") or 0)
     source["source_display_name"] = video_local_validation.safe_display_filename(str(source.get("source_file_name") or "video.mp4"))
+    if step == "await_ai_video":
+        metadata = dict(metadata)
+        width, height = safe_int(metadata.get("width"), 0), safe_int(metadata.get("height"), 0)
+        metadata["orientation"] = "portrait" if height > width else "landscape" if width > height else "square"
+        controls = dict(video_ai_edit_router.DEFAULT_PRESERVE_CONTROLS)
+        current = set_video_editor_pending(
+            uid,
+            "ai_source_summary",
+            **source,
+            selected_tool="ai_edit",
+            source_metadata=metadata,
+            preserve_controls=controls,
+            ai_settings={},
+            intensity="medium",
+            target_aspect_ratio="9:16" if height > width else "16:9" if width > height else "1:1",
+            target_duration_seconds=max(1, int(round(float(metadata.get("duration") or 0)))),
+            text_preference="không tự thêm",
+            camera_motion_preference="giữ chuyển động gốc",
+            inspection_complete=True,
+        )
+        await update.message.reply_text(
+            video_ai_edit_source_summary_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_ai_edit_source_summary_keyboard(lang),
+        )
+        return True
     if step == "await_concat":
         items = list(state.get("concat_sources") or [])
         if len(items) >= 9:
@@ -192783,6 +193465,8 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
     state = dict(get_video_editor_pending(uid) or {})
     step = str(state.get("step") or "")
     if step not in {
+        "await_ai_intent",
+        "await_ai_duration",
         "await_trim_edges",
         "await_trim_range",
         "await_text_overlay",
@@ -192795,6 +193479,54 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
     if not raw_text or raw_text.startswith("/"):
         return False
     lang = get_user_language(uid) or "vi"
+    if step == "await_ai_intent":
+        if len(raw_text) < 8:
+            await update.message.reply_text(
+                "⚠️ Vui lòng mô tả rõ hơn chủ thể cần giữ nguyên và kết quả mong muốn.",
+                reply_markup=video_ai_edit_intent_keyboard(lang),
+            )
+            return True
+        route = video_ai_edit_router.route_ai_edit_intent(
+            raw_text,
+            source_metadata=dict(state.get("source_metadata") or {}),
+            uploaded_asset_type=str((state.get("source_metadata") or {}).get("content_hint") or ""),
+            preserve_controls=dict(state.get("preserve_controls") or {}),
+            intensity=str(state.get("intensity") or "medium"),
+            target_aspect_ratio=str(state.get("target_aspect_ratio") or ""),
+            target_duration_seconds=safe_int(state.get("target_duration_seconds"), 0),
+        )
+        current = update_video_editor_pending(
+            uid,
+            "ai_suggestions",
+            user_intent=raw_text,
+            ai_route=route,
+            ai_suggestions=list(route.get("suggestions") or []),
+            preserve_controls=dict(route.get("preserve_controls") or {}),
+            intensity=str(route.get("intensity") or "medium"),
+            target_aspect_ratio=str(route.get("target_aspect_ratio") or state.get("target_aspect_ratio") or "9:16"),
+            target_duration_seconds=safe_int(route.get("target_duration_seconds") or state.get("target_duration_seconds"), 0),
+        )
+        await update.message.reply_text(
+            video_ai_edit_suggestions_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_ai_edit_suggestions_keyboard(current, lang),
+        )
+        return True
+    if step == "await_ai_duration":
+        if not re.fullmatch(r"\d{1,4}", raw_text):
+            await update.message.reply_text("⚠️ Vui lòng nhập số giây, ví dụ: 8.", reply_markup=video_ai_edit_duration_keyboard(state, lang))
+            return True
+        seconds = safe_int(raw_text, 0)
+        source_seconds = max(1, safe_int((state.get("source_metadata") or {}).get("duration"), 0))
+        if seconds < 1 or seconds > source_seconds:
+            await update.message.reply_text(
+                f"⚠️ Thời lượng cần từ 1 đến {source_seconds} giây. Hệ thống không tự kéo dài video nguồn.",
+                reply_markup=video_ai_edit_duration_keyboard(state, lang),
+            )
+            return True
+        current = update_video_editor_pending(uid, "ai_settings", target_duration_seconds=seconds)
+        await update.message.reply_text(video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        return True
     source_duration_ms = safe_int(
         (state.get("source_metadata") or {}).get("duration_ms") or state.get("source_duration_ms"),
         0,
@@ -193050,9 +193782,182 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     if raw_action in {"manual_info", "split_info"}:
         raw_action = "manual" if raw_action == "manual_info" else "split"
     elif raw_action == "ai_info":
-        clear_video_editor_pending(uid)
-        return await safe_edit_or_send(query, video_edit_hub_text(lang), parse_mode="HTML", reply_markup=video_edit_hub_keyboard(lang))
+        raw_action = "ai"
     action = video_editor_normalize_action(raw_action)
+    if action == "ai":
+        clear_video_editor_pending(uid)
+        set_video_route_session(uid, "video_ai_edit", "ai_intro", product_id="video_ai_edit")
+        set_video_editor_pending(uid, "ai_intro", selected_tool="ai_edit")
+        return await safe_edit_or_send(query, video_ai_edit_intro_text(lang), parse_mode="HTML", reply_markup=video_ai_edit_intro_keyboard(lang))
+    if action == "ai_upload":
+        clear_video_editor_pending(uid)
+        set_video_editor_pending(uid, "await_ai_video", selected_tool="ai_edit")
+        return await safe_edit_or_send(query, video_ai_edit_upload_text(lang), parse_mode="HTML", reply_markup=video_ai_edit_upload_keyboard(lang))
+    if action == "ai_status":
+        job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        job = get_local_worker_job(job_id)
+        if (
+            not job
+            or str(job.get("job_type") or "") != "video_ai_edit"
+            or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid))
+        ):
+            return await query.answer("Không tìm thấy tác vụ chỉnh sửa video này.", show_alert=True)
+        return await safe_edit_or_send(
+            query,
+            video_ai_edit_status.public_status_text(job, video_ai_edit_job_progress(job)),
+            parse_mode="HTML",
+            reply_markup=video_ai_edit_status_keyboard(job_id, lang),
+        )
+    if action.startswith("ai_"):
+        state = dict(get_video_editor_pending(uid) or {})
+        has_source = bool(state.get("source_file_id") and state.get("inspection_complete"))
+        if not has_source:
+            set_video_editor_pending(uid, "await_ai_video", selected_tool="ai_edit")
+            return await safe_edit_or_send(query, video_ai_edit_upload_text(lang), parse_mode="HTML", reply_markup=video_ai_edit_upload_keyboard(lang))
+        if action == "ai_source":
+            current = update_video_editor_pending(uid, "ai_source_summary")
+            return await safe_edit_or_send(query, video_ai_edit_source_summary_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_source_summary_keyboard(lang))
+        if action == "ai_intent":
+            update_video_editor_pending(uid, "await_ai_intent")
+            return await safe_edit_or_send(query, video_ai_edit_intent_text(lang), parse_mode="HTML", reply_markup=video_ai_edit_intent_keyboard(lang))
+        if action == "ai_suggestions":
+            if not state.get("ai_suggestions") and state.get("user_intent"):
+                route = video_ai_edit_route_from_state(state)
+                state = update_video_editor_pending(
+                    uid,
+                    "ai_suggestions",
+                    ai_route=route,
+                    ai_suggestions=list(route.get("suggestions") or []),
+                    preserve_controls=dict(route.get("preserve_controls") or {}),
+                )
+            elif state.get("ai_suggestions"):
+                state = update_video_editor_pending(uid, "ai_suggestions")
+            else:
+                state = update_video_editor_pending(uid, "ai_source_summary")
+                return await safe_edit_or_send(query, video_ai_edit_source_summary_text(state, lang), parse_mode="HTML", reply_markup=video_ai_edit_source_summary_keyboard(lang))
+            return await safe_edit_or_send(query, video_ai_edit_suggestions_text(state, lang), parse_mode="HTML", reply_markup=video_ai_edit_suggestions_keyboard(state, lang))
+        if action == "ai_pick":
+            suggestions = list(state.get("ai_suggestions") or [])[:5]
+            index = safe_int(parts[2] if len(parts) > 2 else -1, -1)
+            if index < 0 or index >= len(suggestions):
+                return await query.answer("Gợi ý này không còn hợp lệ. Vui lòng chọn lại.", show_alert=True)
+            selected_profile = str((suggestions[index] or {}).get("profile_id") or "")
+            route = video_ai_edit_route_from_state(state, selected_profile)
+            current = update_video_editor_pending(
+                uid,
+                "ai_settings",
+                selected_ai_profile=selected_profile,
+                ai_route=route,
+                preserve_controls=dict(route.get("preserve_controls") or {}),
+                execution_lane=str(route.get("execution_lane") or "local"),
+                intensity=str(route.get("intensity") or "medium"),
+                provider_admission={},
+            )
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action == "ai_settings":
+            if not state.get("ai_route"):
+                return await safe_edit_or_send(query, video_ai_edit_suggestions_text(state, lang), parse_mode="HTML", reply_markup=video_ai_edit_suggestions_keyboard(state, lang))
+            current = update_video_editor_pending(uid, "ai_settings")
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action == "ai_intensity":
+            update_video_editor_pending(uid, "ai_intensity")
+            return await safe_edit_or_send(query, "💪 <b>Chọn mức biến đổi</b>\n\nMức mạnh hơn thay đổi hình ảnh nhiều hơn nhưng vẫn tuân thủ các mục anh/chị chọn giữ nguyên.", parse_mode="HTML", reply_markup=video_ai_edit_intensity_keyboard(lang))
+        if action == "ai_set_intensity":
+            value = str(parts[2] if len(parts) > 2 else "medium")
+            if value not in video_ai_edit_router.INTENSITY_LABELS:
+                return await query.answer("Mức biến đổi chưa hợp lệ.", show_alert=True)
+            state["intensity"] = value
+            route = video_ai_edit_route_from_state(state)
+            current = update_video_editor_pending(uid, "ai_settings", intensity=value, ai_route=route, execution_lane=str(route.get("execution_lane") or "local"))
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action == "ai_preserve":
+            current = update_video_editor_pending(uid, "ai_preserve")
+            return await safe_edit_or_send(query, video_ai_edit_preserve_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_preserve_keyboard(current, lang))
+        if action == "ai_toggle":
+            key = str(parts[2] if len(parts) > 2 else "")
+            allowed = {item[0] for item in VIDEO_AI_EDIT_PRESERVE_LABELS}
+            if key not in allowed:
+                return await query.answer("Lựa chọn giữ nguyên chưa hợp lệ.", show_alert=True)
+            controls = dict(state.get("preserve_controls") or video_ai_edit_router.DEFAULT_PRESERVE_CONTROLS)
+            controls[key] = not bool(controls.get(key))
+            state["preserve_controls"] = controls
+            route = video_ai_edit_route_from_state(state)
+            current = update_video_editor_pending(uid, "ai_preserve", preserve_controls=controls, ai_route=route)
+            return await safe_edit_or_send(query, video_ai_edit_preserve_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_preserve_keyboard(current, lang))
+        if action == "ai_aspect":
+            update_video_editor_pending(uid, "ai_aspect")
+            return await safe_edit_or_send(query, "📐 <b>Chọn tỉ lệ video kết quả</b>", parse_mode="HTML", reply_markup=video_ai_edit_aspect_keyboard(lang))
+        if action == "ai_set_aspect":
+            value = str(parts[2] if len(parts) > 2 else "keep").replace("x", ":")
+            if value not in {"keep", "9:16", "16:9", "1:1", "4:5"}:
+                return await query.answer("Tỉ lệ chưa hợp lệ.", show_alert=True)
+            state["target_aspect_ratio"] = value
+            route = video_ai_edit_route_from_state(state)
+            current = update_video_editor_pending(uid, "ai_settings", target_aspect_ratio=value, ai_route=route)
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action == "ai_duration":
+            update_video_editor_pending(uid, "ai_duration")
+            return await safe_edit_or_send(query, "⏱ <b>Chọn thời lượng kết quả</b>\n\nHệ thống không tự kéo dài quá video nguồn.", parse_mode="HTML", reply_markup=video_ai_edit_duration_keyboard(state, lang))
+        if action == "ai_custom_duration":
+            update_video_editor_pending(uid, "await_ai_duration")
+            return await safe_edit_or_send(query, "✍️ Nhập số giây cần giữ trong video kết quả.", reply_markup=video_ai_edit_duration_keyboard(state, lang))
+        if action == "ai_set_duration":
+            seconds = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+            source_seconds = max(1, safe_int((state.get("source_metadata") or {}).get("duration"), 0))
+            if seconds < 1 or seconds > source_seconds:
+                return await query.answer(f"Thời lượng cần từ 1 đến {source_seconds} giây.", show_alert=True)
+            state["target_duration_seconds"] = seconds
+            route = video_ai_edit_route_from_state(state)
+            current = update_video_editor_pending(uid, "ai_settings", target_duration_seconds=seconds, ai_route=route)
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action == "ai_text":
+            update_video_editor_pending(uid, "ai_text")
+            return await safe_edit_or_send(query, "🔠 <b>Chọn cách xử lý chữ, logo và phụ đề</b>", parse_mode="HTML", reply_markup=video_ai_edit_text_keyboard(lang))
+        if action == "ai_set_text":
+            labels = {"none": "không tự thêm", "preserve": "giữ chữ/logo gốc", "emphasize": "làm nổi phụ đề có sẵn"}
+            value = str(parts[2] if len(parts) > 2 else "none")
+            if value not in labels:
+                return await query.answer("Lựa chọn chữ chưa hợp lệ.", show_alert=True)
+            current = update_video_editor_pending(uid, "ai_settings", text_preference=labels[value])
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action == "ai_motion":
+            update_video_editor_pending(uid, "ai_motion")
+            return await safe_edit_or_send(query, "🎥 <b>Chọn cách xử lý camera và chuyển động</b>", parse_mode="HTML", reply_markup=video_ai_edit_motion_keyboard(lang))
+        if action == "ai_set_motion":
+            labels = {"preserve": "giữ chuyển động gốc", "smooth": "mượt và ổn định", "dynamic": "năng động có kiểm soát"}
+            value = str(parts[2] if len(parts) > 2 else "preserve")
+            if value not in labels:
+                return await query.answer("Lựa chọn chuyển động chưa hợp lệ.", show_alert=True)
+            current = update_video_editor_pending(uid, "ai_settings", camera_motion_preference=labels[value])
+            return await safe_edit_or_send(query, video_ai_edit_settings_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_settings_keyboard(lang))
+        if action in {"ai_review", "ai_prompt"}:
+            route = dict(state.get("ai_route") or {})
+            if not route:
+                return await safe_edit_or_send(query, video_ai_edit_suggestions_text(state, lang), parse_mode="HTML", reply_markup=video_ai_edit_suggestions_keyboard(state, lang))
+            prompt = video_ai_edit_prompt_from_state(state, route)
+            current = update_video_editor_pending(uid, "ai_prompt", ai_route=route, prompt_payload=prompt, prompt_hash=str(prompt.get("prompt_hash") or ""))
+            return await safe_edit_or_send(query, video_ai_edit_prompt_text(current, lang), parse_mode="HTML", reply_markup=video_ai_edit_prompt_keyboard(lang))
+        if action == "ai_invoice":
+            if not state.get("prompt_payload"):
+                prompt = video_ai_edit_prompt_from_state(state)
+                state = update_video_editor_pending(uid, "ai_prompt", prompt_payload=prompt, prompt_hash=str(prompt.get("prompt_hash") or ""))
+            invoice = video_ai_edit_invoice_snapshot(state)
+            current = update_video_editor_pending(uid, "ai_invoice", provider_admission=invoice, price_xu=safe_int(invoice.get("price_xu"), 0))
+            return await safe_edit_or_send(query, video_ai_edit_invoice_text(current, invoice, lang), parse_mode="HTML", reply_markup=video_ai_edit_invoice_keyboard(invoice, lang))
+        if action == "ai_use_local":
+            route = dict(state.get("ai_route") or {})
+            if not (route.get("profile") or {}).get("local_fallback_options"):
+                return await query.answer("Hướng này chưa có phương án cục bộ an toàn.", show_alert=True)
+            route["execution_lane"] = "local"
+            admission = {"local_override": True}
+            state = update_video_editor_pending(uid, "ai_prompt", execution_lane="local", ai_route=route, provider_admission=admission)
+            prompt = video_ai_edit_prompt_from_state(state, route)
+            state = update_video_editor_pending(uid, "ai_prompt", prompt_payload=prompt, prompt_hash=str(prompt.get("prompt_hash") or ""))
+            invoice = video_ai_edit_invoice_snapshot(state)
+            current = update_video_editor_pending(uid, "ai_invoice", provider_admission={**admission, **invoice}, price_xu=safe_int(invoice.get("price_xu"), 0))
+            return await safe_edit_or_send(query, video_ai_edit_invoice_text(current, invoice, lang), parse_mode="HTML", reply_markup=video_ai_edit_invoice_keyboard(invoice, lang))
+        if action == "ai_confirm":
+            return await submit_video_ai_edit_job(update, context, state)
     if action == "status":
         job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
         job = get_local_worker_job(job_id)
@@ -194725,6 +195630,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("local_job", cmd_local_job))
     tg_app.add_handler(CommandHandler("video_local_status", admin_internal_command(cmd_video_local_status)))
     tg_app.add_handler(CommandHandler("video_local_job_debug", admin_internal_command(cmd_video_local_job_debug)))
+    tg_app.add_handler(CommandHandler("video_ai_edit_status", admin_internal_command(cmd_video_ai_edit_status)))
+    tg_app.add_handler(CommandHandler("video_ai_edit_job_debug", admin_internal_command(cmd_video_ai_edit_job_debug)))
     tg_app.add_handler(CommandHandler("render_center", cmd_render_center))
     tg_app.add_handler(CommandHandler("voiceover", cmd_voiceover))
     tg_app.add_handler(CommandHandler("tts", cmd_voiceover))
@@ -196176,7 +197083,7 @@ async def internal_worker_job_update(request: Request):
             job_id,
             status=status,
             worker_id=worker_id,
-            error_short=str(payload.get("error_short") or "")[:500],
+            error_short=str(payload.get("error_short") or "")[:4000],
             output_file_id=str(payload.get("output_file_id") or "")[:500],
             output_url=str(payload.get("output_url") or "")[:1000],
         )
@@ -196184,6 +197091,7 @@ async def internal_worker_job_update(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
     handle_frame_video_worker_job_update(previous_job, job)
     handle_paid_video_preview_worker_job_update(previous_job, job)
+    handle_video_ai_edit_worker_job_update(previous_job, job)
     handle_social_link_import_worker_job_update(previous_job, job)
     return {"ok": True, "job": job}
 
