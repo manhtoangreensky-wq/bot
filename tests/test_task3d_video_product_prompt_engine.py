@@ -1560,11 +1560,11 @@ def test_scene_count_screen_has_required_buttons_and_no_skip():
     state = {"selected_video_tier": "basic"}
     labels = _labels(bot.video_finalization_scene_count_keyboard(state, "vi"))
     assert labels == [
-        "1 cảnh ≈ 6s = 300 Xu",
-        "3 cảnh ≈ 18s = 810 Xu",
-        "5 cảnh ≈ 30s = 1.350 Xu",
-        "10 cảnh ≈ 60s = 2.550 Xu",
-        "20 cảnh ≈ 120s = 4.800 Xu",
+        "1 cảnh ≈ 8s = 300 Xu",
+        "3 cảnh ≈ 24s = 810 Xu",
+        "5 cảnh ≈ 40s = 1.350 Xu",
+        "10 cảnh ≈ 80s = 2.550 Xu",
+        "20 cảnh ≈ 160s = 4.800 Xu",
         "✍️ Tự chọn",
         "⬅️ Quay lại",
         "🏠 Menu chính",
@@ -1575,12 +1575,12 @@ def test_scene_count_screen_has_required_buttons_and_no_skip():
 
 @pytest.mark.parametrize(
     ("scene_count", "duration"),
-    ((1, 6), (3, 18), (5, 30), (10, 60), (20, 120)),
+    ((1, 8), (3, 24), (5, 40), (10, 80), (20, 160)),
 )
 def test_scene_count_maps_to_estimated_duration(scene_count, duration):
     fields = bot.task3d_scene_count_fields(scene_count)
     assert fields["selected_scene_count"] == scene_count
-    assert fields["estimated_scene_seconds"] == 6
+    assert fields["estimated_scene_seconds"] == 8
     assert fields["estimated_duration_seconds"] == duration
     assert fields["duration_mode"] == "scene_based"
     assert "khoảng" in fields["duration_note"]
@@ -1777,7 +1777,7 @@ def test_package_200_is_one_scene_only_and_has_no_multi_scene_buttons():
     state = {"selected_video_tier": "low"}
     labels = _labels(bot.video_finalization_scene_count_keyboard(state, "vi"))
     callbacks = _callbacks(bot.video_finalization_scene_count_keyboard(state, "vi"))
-    assert labels == ["1 cảnh ≈ 6s = 200 Xu", "🔷 Nâng lên 300 Xu", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["1 cảnh ≈ 8s = 200 Xu", "🔷 Nâng lên 300 Xu", "⬅️ Quay lại", "🏠 Menu chính"]
     assert callbacks == ["vfinal|scene_count|1", "vfinal|upgrade_300", "vfinal|back", "vfinal|main"]
     assert "vfinal|scene_custom" not in callbacks
 
@@ -1882,9 +1882,9 @@ def test_package_and_confirmation_show_estimated_scene_count():
             "video_tier": "basic",
             "base_cost": 810,
             "selected_scene_count": 3,
-            "estimated_scene_seconds": 6,
-            "estimated_duration_seconds": 18,
-            "duration_seconds": 18,
+            "estimated_scene_seconds": 8,
+            "estimated_duration_seconds": 24,
+            "duration_seconds": 24,
             "scene_count": 3,
         },
     }
@@ -1895,11 +1895,11 @@ def test_package_and_confirmation_show_estimated_scene_count():
     assert "Số cảnh: <b>3 cảnh</b>" not in package_text
     assert "300 × 90% = 270 Xu/cảnh; 270 × 3 = <b>810 Xu</b>" in scene_text
     assert "Số cảnh: <b>3 cảnh</b>" in invoice_text
-    assert "Thời lượng ước tính: <b>khoảng 18 giây</b>" in invoice_text
+    assert "Thời lượng ước tính: <b>khoảng 24 giây</b>" in invoice_text
     assert "Chiết khấu cảnh: <b>10%</b>" in invoice_text
     assert "3 cảnh × 300 Xu × 90% = <b>810 Xu</b>" in invoice_text
     assert "Tổng: <b>810 Xu</b>" in invoice_text
-    assert "Thời lượng: <b>18 giây</b>" not in invoice_text
+    assert "Thời lượng: <b>24 giây</b>" not in invoice_text
 
 
 def test_prompt_image_button_stays_in_video_flow():

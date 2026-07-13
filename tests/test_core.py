@@ -5654,13 +5654,15 @@ def test_help_video_guide_has_current_flow_order():
     guide_video = bot.guide_section_text("video_ai")
     expected_steps = [
         "Mở mục <b>Tạo video</b>",
-        "Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có",
-        "Gửi mô tả video",
-        "Chọn gói video",
-        "Chọn số cảnh",
+        "Chọn chủ đề hoặc nguồn video",
+        "Chọn số cảnh trước",
+        "Chọn profile và ngữ cảnh",
+        "Bổ sung yêu cầu chi tiết",
+        "Kiểm tra kế hoạch và prompt riêng",
+        "Chọn gói chất lượng video",
         "Xem tổng chi phí",
-        "Hệ thống xử lý",
-        "Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng",
+        "Hệ thống tạo, kiểm tra từng cảnh",
+        "Add-on được thực hiện sau khi ghép",
     ]
     positions = [guide_video.index(step) for step in expected_steps]
     assert positions == sorted(positions)
@@ -5676,11 +5678,11 @@ def test_help_video_guide_has_package_200_rules():
 def test_help_video_guide_has_scene_discount_example():
     guide_video = bot.guide_section_text("video_ai")
     for expected in [
-        "1 cảnh khoảng 6 giây",
-        "3 cảnh khoảng 18 giây",
-        "5 cảnh khoảng 30 giây",
-        "10 cảnh khoảng 60 giây",
-        "20 cảnh khoảng 120 giây",
+        "1 cảnh khoảng 8 giây",
+        "3 cảnh khoảng 24 giây",
+        "5 cảnh khoảng 40 giây",
+        "10 cảnh khoảng 80 giây",
+        "20 cảnh khoảng 160 giây",
         "2-9 cảnh: giảm 10%",
         "10-19 cảnh: giảm 15%",
         "20 cảnh: giảm 20%",

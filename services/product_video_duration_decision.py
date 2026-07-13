@@ -175,7 +175,7 @@ def public_contract_lines(config: dict[str, Any] | None = None) -> list[str]:
     price = scene_price(1, cfg)
     return [
         "🎬 Video AI ngắn",
-        "• 1 cảnh = 1 clip AI khoảng 6-8s.",
+        "• 1 cảnh = 1 clip AI khoảng 8s.",
         f"• Giá gốc {price['list_price']} Xu.",
         f"• Ưu đãi đến hết năm {price['promo_price']} Xu.",
         "• Không hứa thời lượng chính xác khi provider chưa chứng minh video dài thật.",

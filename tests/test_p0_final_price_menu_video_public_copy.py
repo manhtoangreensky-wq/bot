@@ -190,7 +190,7 @@ def test_video_200_tier_selection_discards_stale_multiscene_state(monkeypatch):
     assert current["selected_scene_count"] == 1
     assert current["source_payload"]["selected_scene_count"] == 1
     assert current["video_project"]["selected_scene_count"] == 1
-    assert "1 cảnh ≈ 6s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
+    assert "1 cảnh ≈ 8s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
     assert "đã hết lượt" not in query.outputs[-1]["text"]
     bot.clear_video_finalization_state(user_id)
 
@@ -248,7 +248,7 @@ def test_video_200_invoice_back_to_package_200_detail():
     current = bot.get_video_finalization_state(user_id)
     assert current["step"] == "scene_count"
     assert current["selected_video_tier"] == "low"
-    assert "1 cảnh ≈ 6s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
+    assert "1 cảnh ≈ 8s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
     assert not bot.get_video_addon_state(user_id)
     bot.clear_video_finalization_state(user_id)
 

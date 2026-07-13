@@ -151,7 +151,7 @@ def test_duration2_scene_mode_1_scene_8s_promo_200():
 def test_duration2_scene_mode_no_false_18s():
     text = "\n".join(duration2.public_contract_lines(duration2.load_duration_decision()))
     assert "18s" not in text
-    assert "6-8s" in text
+    assert "8s" in text
 
 
 def test_duration2_scene_mode_2_3_scenes_hidden_until_concat_pass():
@@ -258,6 +258,19 @@ def test_duration2_scope_locks_no_forbidden_runtime_changes():
                 "services/video_project_queue.py",
                 "services/video_provider_router.py",
                 "tests/test_p0_video_r18s13_canonical_public_hidden_freeze_truth.py",
+            }
+        )
+    if _current_branch().startswith("hotfix/p0-video-scene-duration-copy-"):
+        allowed.update(
+            {
+                "docs/public/TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.md",
+                "docs/public/huong-dan-su-dung-toan-aas.md",
+                "services/pricing_guide_content.py",
+                "tests/test_core.py",
+                "tests/test_lock_audio_translation_public_guards_18s.py",
+                "tests/test_p0_final_price_menu_video_public_copy.py",
+                "tests/test_p0_video_scene_duration_public_copy_8s_160s.py",
+                "tests/test_task3d_video_product_prompt_engine.py",
             }
         )
     assert changed <= allowed

@@ -182,9 +182,9 @@ def test_preview_6_seconds_not_changed():
     assert bot.VOICE_TTS_PREVIEW_MAX_SECONDS == 6
 
 
-def test_scene_6_seconds_not_changed():
-    assert bot.TASK3D_SCENE_SECONDS == 6
-    assert "1 cảnh ≈ 6 giây" in bot.video_finalization_scene_count_text({"selected_video_tier": "basic"}, "vi")
+def test_product_video_scene_uses_canonical_eight_seconds():
+    assert bot.TASK3D_SCENE_SECONDS == 8
+    assert "1 cảnh khoảng <b>8 giây</b>" in bot.video_finalization_scene_count_text({"selected_video_tier": "basic"}, "vi")
 
 
 def test_no_public_15_second_product_default_remaining():
