@@ -80,7 +80,13 @@ def test_pipeline_synthesizes_once_and_passes_original_audio_choice():
 
     async def synthesize(segments, **_kwargs):
         calls["tts"].append(list(segments))
-        return {"provider": "fixture", "chunks": [{"start": 0, "end": 3, "audio_bytes": b"tts"}]}
+        return {
+            "provider": "fixture",
+            "chunks": [
+                {**segment, "audio_bytes": f"tts-{index}".encode(), "audio_duration": 1.0}
+                for index, segment in enumerate(segments, start=1)
+            ],
+        }
 
     async def render(_source, **kwargs):
         calls["render"].append(dict(kwargs))
