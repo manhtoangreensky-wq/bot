@@ -313,19 +313,30 @@ def product_video_worker_compatibility(
         heartbeat_fresh = bool(heartbeat_age is not None and heartbeat_age <= ttl)
         lease_valid = bool(lease_dt and lease_dt > current_dt)
         generation_id = str(item.get("generation_id") or item.get("worker_generation_id") or "").strip()
+        raw_worker_sha = str(item.get("worker_sha") or "").strip()
+        worker_git_head_sha = str(item.get("worker_git_head_sha") or "").strip()
+        worker_sha_source = str(item.get("worker_sha_source") or "worker_claim_payload").strip()
+        authoritative_git_sha = (
+            ""
+            if worker_sha_source == "unknown"
+            else str(
+                worker_git_head_sha
+                or item.get("git_sha")
+                or item.get("worker_git_sha")
+                or raw_worker_sha
+                or ""
+            ).strip()
+        )
         normalized.append(
             {
                 **item,
                 "worker_instance_id": str(item.get("worker_instance_id") or item.get("worker_id") or "").strip(),
                 "generation_id": generation_id,
                 "service_mode": service_mode,
-                "git_sha": str(
-                    item.get("git_sha")
-                    or item.get("worker_git_head_sha")
-                    or item.get("worker_git_sha")
-                    or item.get("worker_sha")
-                    or ""
-                ).strip(),
+                "git_sha": authoritative_git_sha,
+                "worker_git_head_sha": worker_git_head_sha,
+                "raw_worker_sha": raw_worker_sha,
+                "worker_sha_source": worker_sha_source,
                 "runtime_target_sha": str(item.get("runtime_target_sha") or "").strip(),
                 "capability_version": str(
                     item.get("capability_version") or item.get("worker_capability_version") or ""
@@ -413,13 +424,28 @@ def product_video_worker_compatibility(
     compatible = bool(connected and caller_generation_match and service_mode_match and capability_match and sha_match)
     heartbeat_at = str(selected.get("heartbeat_at") or "")
     heartbeat_age = selected.get("heartbeat_age_seconds")
-    stale_sha_ignored = bool(selected.get("git_sha") and not connected)
+    raw_worker_sha = str(selected.get("raw_worker_sha") or "")
+    worker_git_head_sha = str(selected.get("worker_git_head_sha") or git_sha)
+    heartbeat_sha_source_bug = bool(
+        connected
+        and runtime_value
+        and worker_git_head_sha
+        and raw_worker_sha
+        and (runtime_value.startswith(worker_git_head_sha) or worker_git_head_sha.startswith(runtime_value))
+        and not (raw_worker_sha.startswith(worker_git_head_sha) or worker_git_head_sha.startswith(raw_worker_sha))
+    )
+    stale_sha_ignored = bool(
+        (selected.get("git_sha") and not connected)
+        or heartbeat_sha_source_bug
+        or (selected.get("worker_sha_source") == "unknown" and raw_worker_sha)
+    )
     return {
         "runtime_sha": runtime_value,
         "runtime_target_sha": runtime_target_sha,
         "worker_sha": git_sha,
         "git_sha": git_sha,
-        "worker_git_head_sha": git_sha,
+        "worker_git_head_sha": worker_git_head_sha,
+        "raw_worker_sha": raw_worker_sha,
         "worker_sha_source": str(selected.get("worker_sha_source") or "worker_claim_payload") if connected else "unknown",
         "worker_cwd": str(selected.get("worker_cwd") or "") if connected else "",
         "worker_id": sanitize_worker_id(str(selected.get("worker_id") or selected.get("worker_instance_id") or "")) if selected else "",
@@ -468,6 +494,7 @@ def product_video_worker_compatibility(
         "worker_sha_matches_runtime": sha_match,
         "heartbeat_record_selected_by": "latest_active_owner_product_video_generation",
         "heartbeat_records_considered": len(normalized),
+        "heartbeat_sha_source_bug": heartbeat_sha_source_bug,
         "stale_worker_sha_ignored": stale_sha_ignored,
     }
 

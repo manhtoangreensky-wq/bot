@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -107,44 +108,67 @@ WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).
 FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 
 
+def worker_git_head_info(cwd: str | None = None) -> dict[str, str]:
+    process_cwd = os.path.abspath(str(cwd or os.getcwd()))
+    candidates = [process_cwd]
+    script_cwd = os.path.abspath(SCRIPT_DIR)
+    if script_cwd not in candidates:
+        candidates.append(script_cwd)
+    for candidate in candidates:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=candidate,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except Exception:
+            continue
+        git_sha = str(result.stdout or "").strip()[:40]
+        if result.returncode == 0 and re.fullmatch(r"[0-9A-Fa-f]{7,40}", git_sha):
+            return {
+                "worker_sha": git_sha,
+                "worker_git_sha": git_sha,
+                "worker_git_head_sha": git_sha,
+                "worker_sha_source": "git_rev_parse_head",
+                "worker_cwd": process_cwd,
+            }
+    return {
+        "worker_sha": "",
+        "worker_git_sha": "",
+        "worker_git_head_sha": "",
+        "worker_sha_source": "unknown",
+        "worker_cwd": process_cwd,
+    }
+
+
 def worker_git_sha() -> str:
-    for name in ("RAILWAY_GIT_COMMIT_SHA", "GIT_COMMIT_SHA", "SOURCE_VERSION", "APP_BUILD_SHA"):
-        value = str(os.environ.get(name) or "").strip()
-        if value:
-            return value[:40]
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=SCRIPT_DIR,
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        if result.returncode == 0:
-            return str(result.stdout or "").strip()[:40]
-    except Exception:
-        return ""
-    return ""
+    return str(worker_git_head_info().get("worker_git_head_sha") or "")[:40]
 
 
 def worker_identity_payload(service_mode: str, capabilities: list[str] | None = None) -> dict[str, object]:
-    git_sha = worker_git_sha()
+    git_info = worker_git_head_info()
+    git_sha = str(git_info.get("worker_git_head_sha") or "")[:40]
+    heartbeat_updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     lease_expires_at = time.strftime(
         "%Y-%m-%d %H:%M:%S",
         time.localtime(time.time() + WORKER_HEARTBEAT_LEASE_SECONDS),
     )
     capability_list = list(capabilities or [])
     return {
+        **git_info,
+        "worker_id": WORKER_ID,
         "worker_instance_id": WORKER_INSTANCE_ID,
         "generation_id": WORKER_GENERATION_ID,
         "worker_generation_id": WORKER_GENERATION_ID,
         "worker_service_mode": str(service_mode or "general"),
         "service_mode": str(service_mode or "general"),
-        "worker_git_sha": git_sha,
-        "worker_git_head_sha": git_sha,
         "git_sha": git_sha,
         "runtime_target_sha": git_sha,
+        "heartbeat_at": heartbeat_updated_at,
+        "heartbeat_updated_at": heartbeat_updated_at,
         "worker_capability_version": (
             PRODUCT_VIDEO_CANONICAL_CAPABILITY
             if PRODUCT_VIDEO_CANONICAL_CAPABILITY in capability_list
