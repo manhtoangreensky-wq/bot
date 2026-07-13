@@ -103,7 +103,7 @@ def test_video_menu_each_button_routes_to_matching_flow():
         ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film")),
         ("vdownload|start", "Tải video từ link", ()),
         ("vprofile|menu", "Studio Profile AI", ("vprofile|select|architecture_exterior", "vprofile|select|ugc_social_creator")),
-        ("videoedit|hub", "Chỉnh sửa video", ("videoedit|manual_info", "videoedit|ai_info", "videoedit|split_info")),
+        ("videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split")),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):
         _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=callback == "vproduct|open|video_trend")
@@ -196,7 +196,7 @@ def test_download_video_link_route():
 
 
 def test_local_video_edit_route():
-    _assert_route(918811, "videoedit|hub", "Chỉnh sửa video", ("videoedit|manual_info", "videoedit|ai_info", "videoedit|split_info"))
+    _assert_route(918811, "videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split"))
 
 
 def test_video_open_same_product_keeps_existing_draft():

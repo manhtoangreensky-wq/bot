@@ -19,6 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 from services.multiscene_video_pipeline import (
     SceneSpec,
@@ -33,6 +34,27 @@ from services.video_real_render_connector import (
     original_prompt_from_job,
     real_video_llm_func_from_job,
 )
+from services.video_local_editing import (
+    LocalVideoEditError,
+    default_manual_edit_plan,
+    execute_manual_edit,
+    execute_split_plan,
+)
+from services.video_local_validation import (
+    MAX_UPLOAD_BYTES,
+    LocalVideoValidationError,
+    cleanup_job_workspace,
+    create_job_workspace,
+    delivery_file_allowed,
+    enforce_workspace_limit,
+    find_ffprobe,
+    safe_display_filename,
+    validate_extension,
+    ALLOWED_LOGO_EXTENSIONS,
+    ALLOWED_SOURCE_EXTENSIONS,
+    ALLOWED_SUBTITLE_EXTENSIONS,
+)
+from services.video_smart_splitter import SplitRange
 
 
 def load_dotenv(path: str) -> None:
@@ -128,6 +150,7 @@ def send_heartbeat() -> None:
     payload = {
         "worker_id": LOCAL_WORKER_ID,
         "ffmpeg_path": LOCAL_FFMPEG_PATH,
+        "ffprobe_path": find_ffprobe(ffmpeg_path=LOCAL_FFMPEG_PATH),
         "comfy_enabled": LOCAL_COMFY_ENABLED,
     }
     http_json("POST", "/internal/worker/heartbeat", payload, timeout=15)
@@ -355,7 +378,13 @@ def run_frame_video_ffmpeg(image_paths: list[str], output_path: str, width: int,
         raise RuntimeError(first_line(result.stderr or result.stdout) or "ffmpeg_concat_failed")
 
 
-def telegram_send_video(chat_id: str, video_path: str, caption: str = "", reply_markup: dict | None = None) -> str:
+def telegram_send_video(
+    chat_id: str,
+    video_path: str,
+    caption: str = "",
+    reply_markup: dict | None = None,
+    filename: str = "",
+) -> str:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
     boundary = "----TOANAASLocalWorkerBoundary"
@@ -370,7 +399,10 @@ def telegram_send_video(chat_id: str, video_path: str, caption: str = "", reply_
     body = bytearray()
     for key, value in fields.items():
         body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
-    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"video\"; filename=\"toan_aas_frame_video.mp4\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8"))
+    safe_filename = safe_display_filename(filename or os.path.basename(video_path), "toan_aas_video.mp4")
+    if not safe_filename.lower().endswith(".mp4"):
+        safe_filename = "toan_aas_video.mp4"
+    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"video\"; filename=\"{safe_filename}\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8"))
     body.extend(video_bytes)
     body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
     request = urllib.request.Request(
@@ -450,43 +482,266 @@ def video_editor_filter(payload: dict) -> tuple[str, bool]:
     return ",".join(part for part in filters if part), False
 
 
+def _local1_progress(job_id, stage: str, *, processed: int = 0, total: int = 1, delivered: int = 0, detail: str = "") -> None:
+    payload = {
+        "local1": 1,
+        "stage": str(stage or "processing_video")[:40],
+        "processed": max(0, int(processed or 0)),
+        "total": max(1, int(total or 1)),
+        "delivered": max(0, int(delivered or 0)),
+        "detail": first_line(detail)[:120],
+        "charge": 0,
+    }
+    update_job(job_id, "running", json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
+
+def _local1_download_asset(
+    file_id: str,
+    file_name: str,
+    workspace: Path,
+    allowed: set[str],
+    stem: str,
+    *,
+    max_bytes: int = MAX_UPLOAD_BYTES,
+) -> str:
+    safe_name = validate_extension(file_name, allowed)
+    suffix = Path(safe_name).suffix.lower()
+    target = workspace / f"{stem}{suffix}"
+    telegram_download_file(str(file_id or ""), str(target), max_bytes=max(1, int(max_bytes)))
+    enforce_workspace_limit(workspace)
+    return str(target)
+
+
+def _legacy_local1_plan(payload: dict, source_path: str) -> dict:
+    plan = default_manual_edit_plan(source_path)
+    ratio = str(payload.get("ratio") or "").strip()
+    if ratio in {"16:9", "9:16", "1:1", "4:5"}:
+        plan["crop_or_fit"] = {"aspect_ratio": ratio, "mode": "fit" if str(payload.get("method") or "") == "blur" else "crop"}
+    preset_map = {
+        "video_clear": "bright_clear",
+        "video_tiktok_pop": "high_contrast",
+        "video_cinematic": "light_cinematic",
+        "video_soft_clean": "keep",
+    }
+    plan["color_preset"] = preset_map.get(str(payload.get("preset") or ""), "keep")
+    if str(payload.get("overlay_text") or "").strip():
+        plan["text_overlay"] = {
+            "content": str(payload.get("overlay_text") or "")[:260],
+            "position": "bottom",
+            "start_ms": 0,
+            "end_ms": int(payload.get("source_duration_ms") or 0) or int(payload.get("source_duration") or 0) * 1000,
+            "font_size": 42,
+            "outline": 2,
+            "font_path": LOCAL_FFMPEG_FONT_PATH,
+        }
+    return plan
+
+
 def run_video_local_edit(job: dict) -> None:
     job_id = job.get("id")
+    workspace: Path | None = None
+    terminal_status = "failed"
+    terminal_detail = "failed_no_charge"
+    output_file_ids: list[str] = []
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         source_file_id = str(payload.get("source_file_id") or "")
         chat_id = str(payload.get("chat_id") or "")
         if not source_file_id or not chat_id:
-            update_job(job_id, "failed", "video_local_edit_missing_input")
-            return
-        if not LOCAL_FFMPEG_PATH or not os.path.exists(LOCAL_FFMPEG_PATH):
-            update_job(job_id, "failed", "LOCAL_FFMPEG_PATH missing")
-            return
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = os.path.join(tmpdir, "video_editor_input.mp4")
-            output_path = os.path.join(tmpdir, "toan_aas_video_editor.mp4")
-            telegram_download_file(source_file_id, input_path, max_bytes=50 * 1024 * 1024)
-            filter_value, is_complex = video_editor_filter(payload)
-            command = [LOCAL_FFMPEG_PATH, "-y", "-i", input_path]
-            if is_complex:
-                command.extend(["-filter_complex", filter_value, "-map", "[v]", "-map", "0:a?"])
-            else:
-                command.extend(["-vf", filter_value, "-map", "0:v:0", "-map", "0:a?"])
-            command.extend([
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-                "-max_muxing_queue_size", "2048", output_path,
-            ])
-            timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(60, int(payload.get("max_render_seconds") or 300)))
-            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
-            if result.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
-                raise RuntimeError(first_line(result.stderr or result.stdout) or "video_local_edit_ffmpeg_failed")
-            output_file_id = telegram_send_video(chat_id, output_path, str(payload.get("caption") or ""))
-        update_job(job_id, "succeeded", "local video edit sent", output_file_id=output_file_id)
-    except subprocess.TimeoutExpired:
-        update_job(job_id, "failed", "video_local_edit_timeout")
+            raise LocalVideoEditError("video_local_edit_missing_input")
+        ffmpeg = local_ffmpeg_path()
+        ffprobe = find_ffprobe(ffmpeg_path=ffmpeg)
+        if not ffmpeg or not (os.path.exists(ffmpeg) or shutil.which(ffmpeg)):
+            raise LocalVideoEditError("ffmpeg_missing")
+        if not ffprobe:
+            raise LocalVideoEditError("ffprobe_missing")
+        workspace = create_job_workspace(f"job_{job_id}")
+        _local1_progress(job_id, "inspecting_input")
+        source_path = _local1_download_asset(
+            source_file_id,
+            str(payload.get("source_file_name") or "video.mp4"),
+            workspace,
+            ALLOWED_SOURCE_EXTENSIONS,
+            "source",
+        )
+        mode = str(payload.get("local1_mode") or "manual").strip().lower()
+        timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(30, int(payload.get("max_render_seconds") or 600)))
+        if mode == "split":
+            raw_ranges = [item for item in payload.get("split_ranges") or [] if isinstance(item, dict)]
+            ranges = [
+                SplitRange(
+                    index=int(item.get("index") or index),
+                    start_ms=int(item.get("start_ms") or 0),
+                    end_ms=int(item.get("end_ms") or 0),
+                )
+                for index, item in enumerate(raw_ranges, start=1)
+            ]
+
+            def on_split_progress(status: dict) -> None:
+                _local1_progress(
+                    job_id,
+                    str(status.get("stage") or "processing_video"),
+                    processed=int(status.get("processed") or 0),
+                    total=int(status.get("total") or len(ranges) or 1),
+                    delivered=0,
+                )
+
+            result = execute_split_plan(
+                source_path,
+                ranges,
+                workspace=workspace,
+                coverage_required=bool(payload.get("coverage_required", True)),
+                ffmpeg_path=ffmpeg,
+                ffprobe_path=ffprobe,
+                timeout=timeout,
+                progress=on_split_progress,
+            )
+            outputs = list(result.get("outputs") or [])
+            total = len(outputs)
+            for index, item in enumerate(outputs, start=1):
+                output_path = str(item.get("path") or "")
+                if not delivery_file_allowed(output_path, workspace=workspace):
+                    raise LocalVideoEditError("forbidden_delivery_artifact")
+                _local1_progress(job_id, "delivering", processed=total, total=total, delivered=index - 1)
+                duration_seconds = max(0.0, float(item.get("duration_ms") or 0) / 1000)
+                output_file_ids.append(telegram_send_video(
+                    chat_id,
+                    output_path,
+                    f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · 0 Xu",
+                    filename=os.path.basename(output_path),
+                ))
+            terminal_detail = json.dumps({
+                "local1": 1,
+                "stage": "delivered",
+                "operation": "split",
+                "processed": total,
+                "total": total,
+                "delivered": total,
+                "validation": "passed",
+                "charge": 0,
+                "cleanup": "done",
+            }, ensure_ascii=False, separators=(",", ":"))
+        else:
+            raw_plan = dict(payload.get("manual_edit_plan") or {})
+            plan = raw_plan or _legacy_local1_plan(payload, source_path)
+            plan["input_video"] = source_path
+            concat_paths: list[str] = []
+            for index, source in enumerate(payload.get("concat_sources") or [], start=1):
+                if not isinstance(source, dict) or not source.get("file_id"):
+                    continue
+                concat_paths.append(_local1_download_asset(
+                    str(source.get("file_id") or ""),
+                    str(source.get("file_name") or f"concat_{index}.mp4"),
+                    workspace,
+                    ALLOWED_SOURCE_EXTENSIONS,
+                    f"concat_{index:03d}",
+                ))
+            plan["concat_inputs"] = concat_paths
+            logo_source = dict(payload.get("logo_source") or {})
+            if logo_source.get("file_id"):
+                logo_path = _local1_download_asset(
+                    str(logo_source.get("file_id") or ""),
+                    str(logo_source.get("file_name") or "logo.png"),
+                    workspace,
+                    ALLOWED_LOGO_EXTENSIONS,
+                    "logo",
+                    max_bytes=10 * 1024 * 1024,
+                )
+                logo_config = dict(plan.get("logo_overlay") or {})
+                logo_config["path"] = logo_path
+                plan["logo_overlay"] = logo_config
+            subtitle_source = dict(payload.get("subtitle_source") or {})
+            if subtitle_source.get("file_id"):
+                plan["subtitle_file"] = _local1_download_asset(
+                    str(subtitle_source.get("file_id") or ""),
+                    str(subtitle_source.get("file_name") or "subtitle.srt"),
+                    workspace,
+                    ALLOWED_SUBTITLE_EXTENSIONS,
+                    "subtitle",
+                    max_bytes=5 * 1024 * 1024,
+                )
+            output_path = workspace / f"toan_aas_video_edit_{job_id}.mp4"
+
+            def on_manual_progress(status: dict) -> None:
+                _local1_progress(
+                    job_id,
+                    str(status.get("stage") or "processing_video"),
+                    processed=int(status.get("processed") or 0),
+                    total=int(status.get("total") or 1),
+                )
+
+            result = execute_manual_edit(
+                plan,
+                output_path=str(output_path),
+                workspace=workspace,
+                ffmpeg_path=ffmpeg,
+                ffprobe_path=ffprobe,
+                timeout=timeout,
+                progress=on_manual_progress,
+            )
+            if not result.get("ok") or not delivery_file_allowed(output_path, workspace=workspace):
+                raise LocalVideoEditError("output_validation_failed")
+            _local1_progress(job_id, "delivering", processed=1, total=1)
+            output_file_ids.append(telegram_send_video(
+                chat_id,
+                str(output_path),
+                "✅ Video đã chỉnh sửa xong · 0 Xu",
+                filename=output_path.name,
+            ))
+            terminal_detail = json.dumps({
+                "local1": 1,
+                "stage": "delivered",
+                "operation": "manual",
+                "processed": 1,
+                "total": 1,
+                "delivered": 1,
+                "validation": "passed",
+                "charge": 0,
+                "cleanup": "done",
+            }, ensure_ascii=False, separators=(",", ":"))
+        terminal_status = "succeeded"
+    except (LocalVideoEditError, LocalVideoValidationError) as exc:
+        terminal_detail = json.dumps({
+            "local1": 1,
+            "stage": "failed_no_charge",
+            "reason": str(getattr(exc, "reason", str(exc)))[:160],
+            "charge": 0,
+            "cleanup": "done",
+        }, ensure_ascii=False, separators=(",", ":"))
     except Exception as exc:
-        update_job(job_id, "failed", f"video_local_edit:{type(exc).__name__}:{first_line(str(exc))}")
+        terminal_detail = json.dumps({
+            "local1": 1,
+            "stage": "failed_no_charge",
+            "reason": f"{type(exc).__name__}:{first_line(str(exc))}"[:160],
+            "charge": 0,
+            "cleanup": "done",
+        }, ensure_ascii=False, separators=(",", ":"))
+    finally:
+        cleanup = cleanup_job_workspace(workspace) if workspace else {"ok": True, "removed": False}
+        if not cleanup.get("ok"):
+            if terminal_status == "succeeded" and output_file_ids:
+                try:
+                    delivered_detail = json.loads(terminal_detail)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    delivered_detail = {"local1": 1, "stage": "delivered", "charge": 0}
+                delivered_detail["cleanup"] = "failed"
+                delivered_detail["cleanup_reason"] = str(cleanup.get("reason") or "cleanup_failed")[:120]
+                terminal_detail = json.dumps(delivered_detail, ensure_ascii=False, separators=(",", ":"))
+            else:
+                terminal_status = "failed"
+                terminal_detail = json.dumps({
+                    "local1": 1,
+                    "stage": "failed_no_charge",
+                    "reason": str(cleanup.get("reason") or "cleanup_failed")[:160],
+                    "charge": 0,
+                    "cleanup": "failed",
+                }, ensure_ascii=False, separators=(",", ":"))
+        update_job(
+            job_id,
+            terminal_status,
+            terminal_detail,
+            output_file_id=",".join(item for item in output_file_ids if item)[:500],
+        )
 
 
 def run_social_link_import(job: dict) -> None:

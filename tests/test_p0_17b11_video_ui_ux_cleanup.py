@@ -150,12 +150,9 @@ def test_video_numeric_buttons_8_four_by_four():
 def test_video_local_edit_buttons_have_handlers():
     markup = bot.task3d_product_intro_keyboard("video_local_edit", "vi")
     callbacks = _callbacks(markup)
-    assert "videoedit|upload" in callbacks
-    assert "videoedit|cut" in callbacks
-    assert "videoedit|resize" in callbacks
-    assert "videoedit|compress" in callbacks
-    source = inspect.getsource(bot.handle_video_editor_callback)
-    assert "compress" in source and "upload" in source and "video_editor_normalize_action" in source
+    assert callbacks == ["videoedit|manual", "videoedit|split", "menu|main_video"]
+    assert bot.handle_video_editor_callback.__name__ == "handle_video_editor_callback"
+    assert "submit_local_video_editor_job" in bot.handle_video_editor_callback.__code__.co_names
 
 
 def test_video_local_edit_cut_requires_upload_not_red_error():
@@ -187,20 +184,7 @@ def test_video_local_edit_compress_requires_upload_not_red_error():
     assert "chưa trừ Xu" in text
     assert GENERIC_RED_ERROR not in text
 
-    bot.set_video_editor_pending(
-        user_id,
-        "menu",
-        source_file_id="telegram-file-id",
-        source_file_name="demo.mp4",
-        source_mime_type="video/mp4",
-        requested_action="compress",
-    )
-    query = _press_videoedit(user_id, "videoedit|compress")
-    text = _last_text(query)
-    assert "TOAN AAS chưa xử lý được tác vụ chỉnh sửa này lúc này" in text
-    assert "chưa trừ Xu" in text
-    assert GENERIC_RED_ERROR not in text
-    assert _callbacks(_last_markup(query)) == ["menu|main_video", "menu|main"]
+    assert _callbacks(_last_markup(query)) == ["videoedit|manual", "menu|main"]
 
 
 def test_video_visible_buttons_do_not_throw_generic_red_error():
@@ -217,6 +201,14 @@ def test_video_visible_buttons_do_not_throw_generic_red_error():
         elif callback.startswith("vdownload|"):
             query = _FakeQuery(user_id, callback)
             asyncio.run(bot.handle_video_downloader_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+            assert GENERIC_RED_ERROR not in _last_text(query)
+        elif callback.startswith("vprofile|"):
+            query = _FakeQuery(user_id, callback)
+            asyncio.run(bot.handle_video_profile_studio_callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+            assert GENERIC_RED_ERROR not in _last_text(query)
+        elif callback.startswith("videoedit|"):
+            query = _FakeQuery(user_id, callback)
+            asyncio.run(bot.handle_video_editor_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
             assert GENERIC_RED_ERROR not in _last_text(query)
         else:
             assert callback == "menu|main"

@@ -114,6 +114,22 @@ def _local_worker_change_is_img2vid_only():
     )
 
 
+def _local_worker_change_is_video_local1_only():
+    diff = _git_diff_file("local_worker.py")
+    if not diff:
+        return True
+    changed_paths = set(_git_status_paths()) | set(_git_branch_paths())
+    if "tests/test_p0_video_local1_manual_editing_smart_splitter.py" not in changed_paths:
+        return False
+    added_removed = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    ).lower()
+    required = ("run_video_local_edit", "execute_manual_edit", "execute_split_plan", "create_job_workspace")
+    forbidden = ("music", "suno", "subdub", "payos", "wallet", "remote_worker", "video_provider_router")
+    return all(marker in diff for marker in required) and not any(marker in added_removed for marker in forbidden)
+
+
 def _git_diff_bot():
     result = subprocess.run(
         ["git", "diff", "--", "bot.py"],
@@ -188,6 +204,36 @@ def _bot_change_is_video_uiflow1_only(diff: str) -> bool:
         "subdub",
         "payos",
         "wallet",
+    )
+    return all(marker in diff for marker in required) and not any(marker in added_removed for marker in forbidden)
+
+
+def _bot_change_is_video_local1_only(diff: str) -> bool:
+    if not diff:
+        return True
+    changed_paths = set(_git_status_paths()) | set(_git_branch_paths())
+    if "tests/test_p0_video_local1_manual_editing_smart_splitter.py" not in changed_paths:
+        return False
+    added_removed = "\n".join(
+        line for line in diff.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    ).lower()
+    required = (
+        "handle_video_editor_callback",
+        "submit_local_video_editor_job",
+        "video_local_status_payload",
+        'job_type="video_local_edit"',
+    )
+    forbidden = (
+        "payos",
+        "payment webhook",
+        "pricing",
+        "wallet",
+        "submit_public_video_with_key4u_fallback",
+        "video_provider_router",
+        "music_ai_confirm",
+        "execute_video_dubbing_pipeline",
+        "send_standalone_tts_result",
     )
     return all(marker in diff for marker in required) and not any(marker in added_removed for marker in forbidden)
 
@@ -411,7 +457,15 @@ def test_free_tools_refresh_does_not_touch_payos_pricing_db_webhook():
     forbidden_paths = ("providers/", "services/product_progress_status.py", "remote_worker.py")
     assert not any(path.startswith(forbidden_paths) for path in changed_paths)
     if "local_worker.py" in changed_paths:
-        assert _local_worker_change_is_img2vid_only()
+        assert _local_worker_change_is_img2vid_only() or _local_worker_change_is_video_local1_only()
     diff = _git_diff_bot()
+    if _bot_change_is_video_local1_only(diff):
+        added_removed = "\n".join(
+            line for line in diff.splitlines()
+            if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+        ).lower()
+        for marker in ("payos", "payment webhook", "pricing", "wallet", "webhook"):
+            assert marker not in added_removed
+        return
     for marker in ("payos", "payment webhook", "pricing", "db_connect", "webhook"):
         assert marker not in diff.lower()

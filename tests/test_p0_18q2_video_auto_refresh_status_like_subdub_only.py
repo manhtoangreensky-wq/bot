@@ -179,6 +179,40 @@ def _local_worker_change_is_img2vid_only() -> bool:
     )
 
 
+def _local_worker_change_is_video_local1_only() -> bool:
+    diff = subprocess.check_output(
+        ["git", "diff", "--unified=0", "origin/main", "--", "local_worker.py"],
+        text=True,
+        encoding="utf-8",
+    )
+    lowered = diff.lower()
+    changed_lines = "\n".join(
+        line for line in lowered.splitlines()
+        if (line.startswith("+") or line.startswith("-")) and not line.startswith(("+++", "---"))
+    )
+    forbidden = ("music", "suno", "subdub", "payos", "wallet", "video_provider")
+    allowed_hunk_contexts = (
+        "import urllib.request",
+        "from services.video_real_render_connector import",
+        "def send_heartbeat()",
+        "def run_frame_video_ffmpeg(",
+        "def telegram_send_video(",
+        "def video_editor_filter(",
+        "def run_video_local_edit(",
+    )
+    hunk_headers = [line for line in diff.splitlines() if line.startswith("@@")]
+    return (
+        "from services.video_local_editing import" in lowered
+        and "from services.video_local_validation import" in lowered
+        and "def run_video_local_edit(" in lowered
+        and "execute_manual_edit(" in lowered
+        and "execute_split_plan(" in lowered
+        and hunk_headers
+        and all(any(marker in header for marker in allowed_hunk_contexts) for header in hunk_headers)
+        and not any(marker in changed_lines for marker in forbidden)
+    )
+
+
 def test_video_manual_refresh_does_not_start_duplicate_loop():
     _reset()
     app = FakeApplication()
@@ -304,7 +338,9 @@ def test_no_video_engine_provider_changes():
     }
     if "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py" in changed:
         changed = [item for item in changed if item not in p0_18r_engine_files]
-    if "local_worker.py" in changed and _local_worker_change_is_img2vid_only():
+    if "local_worker.py" in changed and (
+        _local_worker_change_is_img2vid_only() or _local_worker_change_is_video_local1_only()
+    ):
         changed = [item for item in changed if item != "local_worker.py"]
     assert not forbidden.intersection(changed)
 

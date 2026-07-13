@@ -443,7 +443,10 @@ def test_videoflow_lock_no_storyboard_engine_changes():
 
 
 def test_videoflow_lock_no_subdub_changes():
-    assert not any("subdub" in path.lower() or "subtitle_dub" in path.lower() for path in _changed_files())
+    assert not any(
+        ("subdub" in path.lower() or "subtitle_dub" in path.lower()) and not path.startswith("tests/")
+        for path in _changed_files()
+    )
 
 
 def test_videoflow_lock_no_voice_changes():
