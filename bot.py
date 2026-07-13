@@ -105,6 +105,7 @@ from services import video_product_profiles as video_profiles
 from services import video_project_queue
 from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import profile_router, video_local_editing, video_local_validation, video_smart_splitter
+from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
 from services import video_prompt_vault
 from services import video_profile_context_engine
@@ -65148,7 +65149,10 @@ def video_profile_studio_menu_text(lang: str = "vi") -> str:
 
 
 def video_profile_studio_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    rows = []
+    rows = [[InlineKeyboardButton(
+        "🏗 Studio Kiến trúc" if normalize_user_language(lang) == "vi" else "🏗 Architecture Studio",
+        callback_data="archprofile|menu",
+    )]]
     options = list(profile_router.STUDIO_PROFILE_OPTIONS)
     for index in range(0, len(options), 2):
         row = []
@@ -65239,6 +65243,379 @@ def video_profile_studio_preview_keyboard(lang: str = "vi") -> InlineKeyboardMar
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
+
+
+ARCHITECTURE_PROFILE_SESSION_KEY = "architecture_profile_studio"
+
+
+def architecture_profile_session(context) -> dict:
+    user_data = getattr(context, "user_data", None)
+    state = dict(user_data.get(ARCHITECTURE_PROFILE_SESSION_KEY) or {}) if isinstance(user_data, dict) else {}
+    state["answers"] = dict(state.get("answers") or {})
+    state["references"] = [dict(item) for item in (state.get("references") or []) if isinstance(item, dict)]
+    state["question_history"] = [str(item) for item in (state.get("question_history") or []) if str(item or "").strip()][-20:]
+    state["draft"] = dict(state.get("draft") or {})
+    return state
+
+
+def save_architecture_profile_session(context, state: dict) -> dict:
+    clean = dict(state or {})
+    clean["answers"] = dict(clean.get("answers") or {})
+    clean["references"] = [dict(item) for item in (clean.get("references") or []) if isinstance(item, dict)][:20]
+    clean["question_history"] = [str(item) for item in (clean.get("question_history") or []) if str(item or "").strip()][-20:]
+    clean["draft"] = dict(clean.get("draft") or {})
+    clean["provider_called"] = False
+    clean["job_created"] = False
+    clean["outbox_created"] = False
+    clean["xu_charged"] = 0
+    user_data = getattr(context, "user_data", None)
+    if not isinstance(user_data, dict):
+        user_data = {}
+        try:
+            context.user_data = user_data
+        except (AttributeError, TypeError):
+            return clean
+    user_data[ARCHITECTURE_PROFILE_SESSION_KEY] = clean
+    return clean
+
+
+def architecture_profile_menu_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🏗 <b>Architecture Studio</b>\n\nChoose a project type. TOAN AAS will ask only the missing details and prepare a professional image or video prompt.\n\n"
+            "This studio only prepares a free draft. It does not create a file or deduct Xu."
+        )
+    return (
+        "🏗 <b>Studio Kiến trúc</b>\n\n"
+        "Chọn loại dự án. TOAN AAS sẽ hỏi những thông tin cần thiết và tạo prompt kiến trúc chuyên nghiệp cho ảnh hoặc video.\n\n"
+        "Màn này chỉ chuẩn bị bản nháp miễn phí, chưa tạo file và chưa trừ Xu."
+    )
+
+
+def architecture_profile_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    options = list(architecture_profile_router.ARCHITECTURE_PROFILE_MENU)
+    for index in range(0, len(options) - 1, 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"archprofile|select|{profile_id}")
+            for profile_id, label in options[index:index + 2]
+        ])
+    auto_id, auto_label = options[-1]
+    rows.append([InlineKeyboardButton(auto_label, callback_data=f"archprofile|select|{auto_id}")])
+    rows.append([
+        InlineKeyboardButton("💾 Tiếp tục bản nháp", callback_data="archprofile|resume"),
+        InlineKeyboardButton("🗑 Xóa bản nháp", callback_data="archprofile|delete_draft"),
+    ])
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vprofile|menu"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def architecture_question_label(field_name: str) -> str:
+    labels = {
+        "user_text": "Mô tả dự án",
+        "project_type": "Loại công trình",
+        "space_type": "Không gian",
+        "floor_count": "Số tầng",
+        "facade_width": "Chiều rộng mặt tiền",
+        "dimensions": "Kích thước đã biết",
+        "style": "Phong cách",
+        "palette": "Màu chủ đạo",
+        "materials": "Vật liệu",
+        "lighting": "Ánh sáng",
+        "preserve_requirements": "Yêu cầu cần giữ",
+        "preserved_furniture": "Đồ vật cần giữ",
+        "renovation_scope": "Mức cải tạo",
+        "listing_goal": "Mục tiêu bất động sản",
+        "target_customer": "Khách hàng mục tiêu",
+        "requested_output": "Loại đầu ra",
+        "truth_mode": "Mức giữ hiện trạng",
+        "presentation_style": "Phong cách trình bày",
+        "start_point": "Điểm bắt đầu",
+        "room_order": "Thứ tự không gian",
+        "camera_speed": "Tốc độ camera",
+        "duration": "Thời lượng",
+        "aspect_ratio": "Tỉ lệ",
+        "before_after": "Chuyển cảnh trước/sau",
+        "preserve_camera": "Giữ đường camera",
+        "priority_space": "Không gian ưu tiên",
+        "layout_change_allowed": "Quyền thay bố trí",
+    }
+    return labels.get(str(field_name or ""), str(field_name or "Thông tin dự án"))
+
+
+def architecture_question_text(state: dict, lang: str = "vi") -> str:
+    field_name = str(state.get("current_field") or "user_text")
+    profile_id = str(state.get("profile_id") or "")
+    if field_name == "user_text":
+        question = "Anh/chị mô tả ngắn dự án và kết quả mong muốn là gì?"
+    else:
+        questions = dict(architecture_profile_router.questions_for_profile(profile_id))
+        question = questions.get(field_name) or "Anh/chị bổ sung thông tin này giúp TOAN AAS nhé?"
+    existing = str((state.get("answers") or {}).get(field_name) or "").strip()
+    current = f"\n\n<b>Đang lưu:</b> {html.escape(existing[:300])}" if existing else ""
+    ref_count = len(state.get("references") or [])
+    return (
+        f"🏗 <b>{html.escape(architecture_question_label(field_name))}</b>\n\n"
+        f"{html.escape(question)}{current}\n\n"
+        f"Tư liệu đã nhận: <b>{ref_count}</b>. Anh/chị có thể trả lời ngắn; TOAN AAS giữ nguyên câu trả lời và chỉ hỏi từng câu một."
+    )
+
+
+def architecture_question_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📎 Thêm tư liệu", callback_data="archprofile|assets"),
+            InlineKeyboardButton("✅ Lập bản nháp", callback_data="archprofile|build"),
+        ],
+        [
+            InlineKeyboardButton("⏭ Chưa rõ", callback_data="archprofile|skip"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|back_question"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def architecture_asset_menu_text() -> str:
+    return (
+        "📎 <b>Thêm tư liệu tham chiếu</b>\n\n"
+        "Chọn đúng loại tư liệu rồi gửi file. Hệ thống chỉ kiểm tra định dạng và lưu tham chiếu trong phiên; không phân tích ảnh/video bằng dịch vụ AI."
+    )
+
+
+def architecture_asset_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛋 Ảnh nội thất", callback_data="archprofile|asset_type|interior_photo"), InlineKeyboardButton("🏛 Ảnh ngoại thất", callback_data="archprofile|asset_type|exterior_photo")],
+        [InlineKeyboardButton("⬜ Ảnh phòng trống", callback_data="archprofile|asset_type|empty_room"), InlineKeyboardButton("🗺 Mặt bằng", callback_data="archprofile|asset_type|floorplan")],
+        [InlineKeyboardButton("✏️ Bản phác thảo", callback_data="archprofile|asset_type|sketch"), InlineKeyboardButton("🧱 Vật liệu", callback_data="archprofile|asset_type|material_reference")],
+        [InlineKeyboardButton("🪑 Nội thất/phong cách", callback_data="archprofile|asset_type|furniture_reference"), InlineKeyboardButton("🎬 Walkthrough có sẵn", callback_data="archprofile|asset_type|walkthrough_reference")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|back_assets"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def architecture_asset_wait_text(asset_type: str) -> str:
+    label = {
+        "interior_photo": "ảnh nội thất", "exterior_photo": "ảnh ngoại thất",
+        "empty_room": "ảnh phòng trống", "floorplan": "ảnh/PDF mặt bằng",
+        "sketch": "bản phác thảo", "material_reference": "ảnh vật liệu",
+        "furniture_reference": "ảnh nội thất/phong cách",
+        "walkthrough_reference": "video walkthrough MP4/MOV",
+    }.get(asset_type, "tư liệu tham chiếu")
+    return (
+        f"📎 Gửi <b>{html.escape(label)}</b> trong tin nhắn tiếp theo.\n\n"
+        "Hỗ trợ JPG/JPEG/PNG/WebP; PDF chỉ cho mặt bằng; MP4/MOV chỉ cho walkthrough. Hệ thống chưa gọi AI và chưa trừ Xu."
+    )
+
+
+def architecture_route_input(state: dict) -> dict:
+    answers = dict(state.get("answers") or {})
+    for key in ("materials", "preserve_requirements"):
+        value = answers.get(key)
+        if isinstance(value, str) and value.strip():
+            answers[key] = [value.strip()]
+    palette = answers.pop("palette", None)
+    if palette:
+        answers["color_palette"] = [palette] if isinstance(palette, str) else palette
+    duration = answers.get("duration")
+    if isinstance(duration, str):
+        match = re.search(r"\d+", duration)
+        answers["duration"] = int(match.group()) if match else 0
+    return {
+        **answers,
+        "explicit_profile": "" if state.get("auto_profile") else str(state.get("profile_id") or ""),
+        "reference_assets": list(state.get("references") or []),
+        "language": "vi",
+    }
+
+
+def architecture_build_draft(state: dict, user_id: int = 0) -> dict:
+    route = architecture_profile_router.route_architecture_profile(architecture_route_input(state))
+    architecture_profile_status.record_route(user_id, route)
+    return route
+
+
+def architecture_profile_title(profile_id: str) -> str:
+    profiles, _errors = architecture_profile_router.load_architecture_profiles(strict=False)
+    return str((profiles.get(profile_id) or {}).get("title_vi") or profile_id or "Studio Kiến trúc")
+
+
+def architecture_preview_text(state: dict, *, full: bool = False) -> str:
+    draft = dict(state.get("draft") or {})
+    answers = dict(state.get("answers") or {})
+    output = str(draft.get("recommended_output") or "image")
+    prompt = str(draft.get("professional_video_prompt") if output == "video" else draft.get("professional_image_prompt") or "").strip()
+    negative = str(draft.get("negative_prompt") or "").strip()
+    preserve = [str(item) for item in (draft.get("preserve_constraints") or []) if str(item or "").strip()]
+    scenes = [dict(item) for item in (draft.get("scene_plan") or []) if isinstance(item, dict)]
+    scene_lines = []
+    for item in scenes[:20 if full else 5]:
+        scene_lines.append(
+            f"• Cảnh {int(item.get('index') or len(scene_lines) + 1)}: {html.escape(str(item.get('space') or item.get('visual_focus') or 'Kế hoạch cảnh')[:180])} · {int(item.get('duration_seconds') or 0)}s"
+        )
+    if len(scenes) > len(scene_lines):
+        scene_lines.append(f"• … và {len(scenes) - len(scene_lines)} cảnh khác")
+    truth_label = str(draft.get("real_estate_truth_label") or "").strip()
+    prompt_limit = 3500 if full else 1100
+    negative_limit = 900 if full else 260
+    refs = len(state.get("references") or [])
+    return (
+        f"🏗 <b>Bản nháp kiến trúc</b>\n\n"
+        f"• Loại dự án: <b>{html.escape(architecture_profile_title(str(draft.get('profile_id') or '')))}</b>\n"
+        f"• Không gian/công trình: {html.escape(str(answers.get('space_type') or answers.get('project_type') or 'Chưa nêu'))}\n"
+        f"• Phong cách: {html.escape(str(answers.get('style') or 'Theo mặc định an toàn'))}\n"
+        f"• Màu/vật liệu: {html.escape(str(answers.get('palette') or answers.get('color_palette') or 'Chưa nêu'))} · {html.escape(str(answers.get('materials') or 'Chưa nêu'))}\n"
+        f"• Yêu cầu cần giữ: {html.escape('; '.join(preserve[:6]) or 'Giữ đúng ràng buộc khách hàng')}\n"
+        f"• Loại đầu ra: {'Video walkthrough' if output == 'video' else 'Ảnh kiến trúc'}\n"
+        f"• Tỉ lệ: {html.escape(str(answers.get('aspect_ratio') or '16:9'))}"
+        + (f" · Thời lượng: {html.escape(str(answers.get('duration') or 'theo kế hoạch'))}" if output == "video" else "")
+        + f"\n• Tư liệu tham chiếu: {refs}"
+        + (f"\n• Phân loại: <b>{html.escape(truth_label)}</b>" if truth_label else "")
+        + "\n\n<b>Kế hoạch cảnh</b>\n" + ("\n".join(scene_lines) if scene_lines else "• Không cần kế hoạch cảnh cho ảnh tĩnh")
+        + f"\n\n<b>Prompt chuyên nghiệp</b>\n{html.escape(prompt[:prompt_limit])}"
+        + f"\n\n<b>Điều cần tránh</b>\n{html.escape(negative[:negative_limit])}"
+        + "\n\nBản nháp này miễn phí. Hệ thống chưa tạo file, chưa gọi nguồn xử lý và chưa trừ Xu."
+    )
+
+
+def architecture_preview_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Dùng prompt này", callback_data="archprofile|output"), InlineKeyboardButton("✏️ Chỉnh yêu cầu", callback_data="archprofile|edit")],
+        [InlineKeyboardButton("📋 Xem đầy đủ", callback_data="archprofile|full"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|back_preview")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def architecture_output_text() -> str:
+    return (
+        "✅ <b>Chọn bước tiếp theo</b>\n\n"
+        "Prompt và kế hoạch đã sẵn sàng. Khi chuyển sang công cụ Ảnh hoặc Video, công cụ đích sẽ tự báo giá và chỉ xử lý sau xác nhận cuối."
+    )
+
+
+def architecture_output_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Tạo ảnh kiến trúc", callback_data="archprofile|handoff_image"), InlineKeyboardButton("🎬 Tạo video walkthrough", callback_data="archprofile|handoff_video")],
+        [InlineKeyboardButton("📝 Sao chép prompt", callback_data="archprofile|copy_prompt"), InlineKeyboardButton("📋 Xem kế hoạch cảnh", callback_data="archprofile|scene_plan")],
+        [InlineKeyboardButton("💾 Lưu bản nháp", callback_data="archprofile|save_draft")],
+        [InlineKeyboardButton("✏️ Chỉnh lại yêu cầu", callback_data="archprofile|edit"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|back_output")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def architecture_scene_plan_text(state: dict) -> str:
+    scenes = [dict(item) for item in ((state.get("draft") or {}).get("scene_plan") or []) if isinstance(item, dict)]
+    lines = ["📋 <b>Kế hoạch cảnh walkthrough</b>", ""]
+    for item in scenes:
+        lines.append(
+            f"{int(item.get('index') or len(lines))}. <b>{html.escape(str(item.get('space') or 'Cảnh'))}</b> · {int(item.get('duration_seconds') or 0)}s\n"
+            f"   {html.escape(str(item.get('camera_motion') or 'camera ổn định'))} → {html.escape(str(item.get('transition') or 'chuyển tự nhiên'))}"
+        )
+    if not scenes:
+        lines.append("Ảnh tĩnh không cần kế hoạch walkthrough.")
+    return "\n".join(lines)
+
+
+def architecture_prepare_image_handoff(user_id: int, state: dict) -> dict:
+    draft = dict(state.get("draft") or {})
+    prompt = str(draft.get("professional_image_prompt") or "").strip()
+    flow = set_quick_image_flow(
+        user_id,
+        "prepared_prompt",
+        selected_topic=architecture_profile_title(str(draft.get("profile_id") or "")),
+        original_request=str((state.get("answers") or {}).get("user_text") or "ảnh kiến trúc"),
+        prompt=prompt,
+        negative_prompt=str(draft.get("negative_prompt") or ""),
+        prompt_source="architecture_profile",
+        architecture_profile_id=str(draft.get("profile_id") or ""),
+        architecture_reference_assets=list(state.get("references") or []),
+        suggested_ratio=str((state.get("answers") or {}).get("aspect_ratio") or "16:9"),
+        ratio_back_target="prepared_prompt",
+    )
+    return flow
+
+
+def architecture_prepare_video_handoff(user_id: int, state: dict) -> dict:
+    draft = dict(state.get("draft") or {})
+    session = get_video_session(user_id)
+    session.update({
+        "product_id": "video_ai_real",
+        "entry_flow": "architecture_profile",
+        "current_flow": "architecture_profile",
+        "current_screen": "architecture_profile_handoff",
+        "return_to": "archprofile|output",
+    })
+    session_draft = dict(session.get("draft") or {})
+    session_draft.update({
+        "architecture_profile_id": str(draft.get("profile_id") or ""),
+        "architecture_video_prompt": str(draft.get("professional_video_prompt") or ""),
+        "architecture_negative_prompt": str(draft.get("negative_prompt") or ""),
+        "architecture_scene_plan": list(draft.get("scene_plan") or []),
+        "architecture_reference_assets": list(state.get("references") or []),
+        "aspect_ratio": str((state.get("answers") or {}).get("aspect_ratio") or "16:9"),
+        "duration": (state.get("answers") or {}).get("duration") or 0,
+        "profile_studio_provider_called": False,
+    })
+    session["draft"] = session_draft
+    session["screen_stack"] = [*(session.get("screen_stack") or []), "architecture_profile_handoff"][-VIDEO_SESSION_STACK_LIMIT:]
+    return save_video_session(user_id, session)
+
+
+def architecture_media_candidate(update: Update, asset_type: str) -> dict:
+    message = update.message
+    if not message:
+        return {}
+    if getattr(message, "photo", None):
+        item = message.photo[-1]
+        return {"file_id": item.file_id, "file_name": "architecture_reference.jpg", "mime_type": "image/jpeg", "file_size": int(item.file_size or 0)}
+    document = getattr(message, "document", None)
+    if document:
+        return {
+            "file_id": document.file_id,
+            "file_name": str(document.file_name or "reference"),
+            "mime_type": str(document.mime_type or mimetypes.guess_type(str(document.file_name or ""))[0] or "application/octet-stream"),
+            "file_size": int(document.file_size or 0),
+        }
+    video = getattr(message, "video", None)
+    if video:
+        return {
+            "file_id": video.file_id,
+            "file_name": str(getattr(video, "file_name", "") or "walkthrough.mp4"),
+            "mime_type": str(getattr(video, "mime_type", "") or "video/mp4"),
+            "file_size": int(video.file_size or 0),
+            "duration": int(video.duration or 0),
+        }
+    return {}
+
+
+async def handle_architecture_profile_pending_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    state = architecture_profile_session(context)
+    if str(state.get("step") or "") != "await_reference":
+        return False
+    asset_type = str(state.get("asset_type") or "")
+    candidate = architecture_media_candidate(update, asset_type)
+    result = architecture_profile_status.validate_reference_asset(candidate, asset_type=asset_type)
+    if not result.get("ok"):
+        await update.message.reply_text(
+            "⚠️ Tư liệu chưa hợp lệ. Anh/chị kiểm tra đúng loại file, dung lượng và gửi lại; hệ thống chưa xử lý và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text("vi", "common.back"), callback_data="archprofile|back_assets")]]),
+        )
+        return True
+    references = list(state.get("references") or [])
+    references.append(dict(result.get("asset") or {}))
+    state["references"] = references
+    state["step"] = str(state.get("asset_return_step") or "await_answer")
+    state.pop("asset_type", None)
+    save_architecture_profile_session(context, state)
+    await update.message.reply_text(
+        f"✅ Đã lưu tư liệu tham chiếu trong phiên ({len(references)} file). Hệ thống chỉ lưu metadata an toàn, chưa gọi AI và chưa trừ Xu.",
+        parse_mode="HTML",
+        reply_markup=architecture_question_keyboard("vi") if state["step"] == "await_answer" else architecture_preview_keyboard("vi"),
+    )
+    return True
 
 
 def video_edit_hub_text(lang: str = "vi") -> str:
@@ -66242,8 +66619,9 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🧠 AI Profile Studio",
         "entry_callback": "vprofile|menu",
         "handler": "handle_video_profile_studio_callback",
-        "expected_children": tuple(
-            f"vprofile|select|{item['selection_id']}" for item in profile_router.STUDIO_PROFILE_OPTIONS
+        "expected_children": (
+            "archprofile|menu",
+            *(f"vprofile|select|{item['selection_id']}" for item in profile_router.STUDIO_PROFILE_OPTIONS),
         ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
@@ -66681,6 +67059,8 @@ def video_route_expected_handler(callback: str) -> str:
         return "handle_video_downloader_callback"
     if str(callback or "").startswith("vprofile|"):
         return "handle_video_profile_studio_callback"
+    if str(callback or "").startswith("archprofile|"):
+        return "handle_architecture_profile_callback"
     if str(callback or "").startswith("videoedit|"):
         return "handle_video_editor_callback"
     return ""
@@ -67075,7 +67455,7 @@ def video_semantics_audit_payload() -> dict:
 
 
 def video_callback_audit_payload() -> dict:
-    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "vdownload|", "vprofile|", "videoedit|")
+    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "vdownload|", "vprofile|", "archprofile|", "videoedit|")
     rows = []
     for tool_id in VIDEO_PUBLIC_ROUTE_MATRIX:
         if tool_id in {"prompt_library", "video_downloader"}:
@@ -68873,14 +69253,19 @@ def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
     return task3d_public_copy(product_id, lang)
 
 
-def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def task3d_product_intro_keyboard(
+    product_id: str,
+    lang: str = "vi",
+    *,
+    parent_callback_override: str = "",
+) -> InlineKeyboardMarkup:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     if str(product_id or "") == "frame_video_local":
         return ivf.frame_video_unified_menu_keyboard(lang)
     if str(product_id or "") == "video_local_edit":
         return video_edit_hub_keyboard(lang)
     is_vi = normalize_user_language(lang) == "vi"
-    parent_callback = str(product.get("parent_menu_callback") or "menu|main_video")
+    parent_callback = str(parent_callback_override or product.get("parent_menu_callback") or "menu|main_video")
     menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
     rows_by_product = {
         "video_trend": [
@@ -76387,8 +76772,16 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 parse_mode="HTML",
                 reply_markup=video_edit_hub_keyboard(lang),
             )
-        parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
         current_session = get_video_session(uid)
+        architecture_handoff = (
+            str(current_session.get("entry_flow") or "") == "architecture_profile"
+            and bool((current_session.get("draft") or {}).get("architecture_profile_id"))
+        )
+        parent_callback = (
+            "archprofile|output"
+            if architecture_handoff
+            else str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
+        )
         if str(current_session.get("product_id") or "") != str(value):
             clear_video_session(uid)
         first_step = video_flow_first_step(value)
@@ -76411,7 +76804,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             query,
             task3d_product_intro_text(value, lang),
             parse_mode="HTML",
-            reply_markup=task3d_product_intro_keyboard(value, lang),
+            reply_markup=task3d_product_intro_keyboard(
+                value,
+                lang,
+                parent_callback_override=parent_callback if architecture_handoff else "",
+            ),
         )
     session = get_video_session(uid)
     product_id = str(session.get("product_id") or "")
@@ -175708,6 +176105,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_upload(update, context):
         return
 
+    if await handle_architecture_profile_pending_media(update, context):
+        return
+
     if await handle_image_menu_pending_photo(update, context):
         return
 
@@ -175808,6 +176208,9 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
         return
 
     if await handle_doc_tool_pending_upload(update, context):
+        return
+
+    if await handle_architecture_profile_pending_media(update, context):
         return
 
     if await handle_developing_video_pending_image(update, context):
@@ -193666,6 +194069,320 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
         return True
 
 
+def architecture_state_next_question(state: dict) -> dict:
+    current = dict(state or {})
+    profile_id = str(current.get("profile_id") or "")
+    if not profile_id:
+        probe = architecture_profile_router.route_architecture_profile(architecture_route_input(current))
+        profile_id = str(probe.get("profile_id") or "interior_design")
+        current["profile_id"] = profile_id
+    next_item = architecture_profile_router.next_missing_question(profile_id, dict(current.get("answers") or {}))
+    current["current_field"] = str(next_item.get("field") or "")
+    current["step"] = "await_answer" if current["current_field"] else "preview"
+    return current
+
+
+def architecture_finalize_state(state: dict, user_id: int) -> dict:
+    current = dict(state or {})
+    draft = architecture_build_draft(current, user_id)
+    current["profile_id"] = str(draft.get("profile_id") or current.get("profile_id") or "interior_design")
+    current["draft"] = draft
+    current["step"] = "preview"
+    current["last_form_field"] = str(current.get("current_field") or (current.get("question_history") or ["user_text"])[-1])
+    return current
+
+
+async def handle_architecture_profile_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    state = architecture_profile_session(context)
+    if str(state.get("step") or "") != "await_answer":
+        return False
+    text = str(update.message.text or "").strip()
+    if not text or text.startswith("/"):
+        return False
+    field_name = str(state.get("current_field") or "user_text")
+    answers = dict(state.get("answers") or {})
+    answers[field_name] = text[:1000]
+    history = list(state.get("question_history") or [])
+    if not history or history[-1] != field_name:
+        history.append(field_name)
+    state["answers"] = answers
+    state["question_history"] = history
+    state["last_form_field"] = field_name
+    if field_name == "user_text" and state.get("auto_profile"):
+        probe = architecture_profile_router.route_architecture_profile(architecture_route_input(state))
+        state["profile_id"] = str(probe.get("profile_id") or "interior_design")
+    state = architecture_state_next_question(state)
+    if state.get("step") == "preview":
+        state = architecture_finalize_state(state, update.effective_user.id)
+        save_architecture_profile_session(context, state)
+        return bool(await update.message.reply_text(
+            architecture_preview_text(state),
+            parse_mode="HTML",
+            reply_markup=architecture_preview_keyboard(get_user_language(update.effective_user.id) or "vi"),
+        ))
+    save_architecture_profile_session(context, state)
+    await update.message.reply_text(
+        architecture_question_text(state, get_user_language(update.effective_user.id) or "vi"),
+        parse_mode="HTML",
+        reply_markup=architecture_question_keyboard(get_user_language(update.effective_user.id) or "vi"),
+    )
+    return True
+
+
+async def handle_architecture_profile_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "menu"
+    state = architecture_profile_session(context)
+
+    if action == "menu":
+        state = {"step": "menu", "answers": {}, "references": [], "question_history": [], "draft": {}}
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_profile_menu_text(lang), parse_mode="HTML", reply_markup=architecture_profile_menu_keyboard(lang))
+
+    if action == "select":
+        selected = parts[2] if len(parts) > 2 else "auto"
+        valid_ids = set(architecture_profile_router.ARCHITECTURE_PROFILE_IDS)
+        if selected != "auto" and selected not in valid_ids:
+            return await safe_edit_or_send(query, architecture_profile_menu_text(lang), parse_mode="HTML", reply_markup=architecture_profile_menu_keyboard(lang))
+        state = {
+            "step": "await_answer",
+            "profile_id": "" if selected == "auto" else selected,
+            "auto_profile": selected == "auto",
+            "current_field": "user_text",
+            "last_form_field": "user_text",
+            "answers": {},
+            "references": [],
+            "question_history": [],
+            "draft": {},
+        }
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_question_text(state, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+
+    if action == "back_question":
+        history = list(state.get("question_history") or [])
+        current_field = str(state.get("current_field") or "")
+        if history:
+            previous = history.pop()
+            state["question_history"] = history
+            state["current_field"] = previous
+            state["last_form_field"] = previous
+            state["step"] = "await_answer"
+            save_architecture_profile_session(context, state)
+            return await safe_edit_or_send(query, architecture_question_text(state, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+        if current_field != "user_text" and state.get("profile_id"):
+            state["current_field"] = "user_text"
+            state["step"] = "await_answer"
+            save_architecture_profile_session(context, state)
+            return await safe_edit_or_send(query, architecture_question_text(state, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+        state = {"step": "menu", "answers": {}, "references": [], "question_history": [], "draft": {}}
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_profile_menu_text(lang), parse_mode="HTML", reply_markup=architecture_profile_menu_keyboard(lang))
+
+    if action == "skip":
+        field_name = str(state.get("current_field") or "user_text")
+        answers = dict(state.get("answers") or {})
+        answers[field_name] = "Chưa cung cấp; không được tự suy đoán"
+        history = list(state.get("question_history") or [])
+        if not history or history[-1] != field_name:
+            history.append(field_name)
+        state["answers"] = answers
+        state["question_history"] = history
+        if field_name == "user_text" and state.get("auto_profile"):
+            state["profile_id"] = "interior_design"
+        state = architecture_state_next_question(state)
+        if state.get("step") == "preview":
+            state = architecture_finalize_state(state, uid)
+            save_architecture_profile_session(context, state)
+            return await safe_edit_or_send(query, architecture_preview_text(state), parse_mode="HTML", reply_markup=architecture_preview_keyboard(lang))
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_question_text(state, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+
+    if action == "build":
+        state = architecture_finalize_state(state, uid)
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_preview_text(state), parse_mode="HTML", reply_markup=architecture_preview_keyboard(lang))
+
+    if action == "assets":
+        state["asset_return_step"] = str(state.get("step") or "await_answer")
+        state["step"] = "asset_menu"
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_asset_menu_text(), parse_mode="HTML", reply_markup=architecture_asset_menu_keyboard(lang))
+
+    if action == "asset_type":
+        asset_type = parts[2] if len(parts) > 2 else ""
+        allowed = {"interior_photo", "exterior_photo", "empty_room", "floorplan", "sketch", "material_reference", "furniture_reference", "walkthrough_reference"}
+        if asset_type not in allowed:
+            return await safe_edit_or_send(query, architecture_asset_menu_text(), parse_mode="HTML", reply_markup=architecture_asset_menu_keyboard(lang))
+        state["step"] = "await_reference"
+        state["asset_type"] = asset_type
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(
+            query,
+            architecture_asset_wait_text(asset_type),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|back_assets"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+
+    if action == "back_assets":
+        return_step = str(state.get("asset_return_step") or "await_answer")
+        state["step"] = return_step
+        state.pop("asset_type", None)
+        save_architecture_profile_session(context, state)
+        if return_step == "preview":
+            return await safe_edit_or_send(query, architecture_preview_text(state), parse_mode="HTML", reply_markup=architecture_preview_keyboard(lang))
+        return await safe_edit_or_send(query, architecture_question_text(state, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+
+    if action in {"edit", "back_preview"}:
+        state["step"] = "await_answer"
+        state["current_field"] = str(state.get("last_form_field") or "user_text")
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_question_text(state, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+
+    if action == "full":
+        return await safe_edit_or_send(query, architecture_preview_text(state, full=True), parse_mode="HTML", reply_markup=architecture_preview_keyboard(lang))
+
+    if action == "output":
+        state["step"] = "output"
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_output_text(), parse_mode="HTML", reply_markup=architecture_output_keyboard(lang))
+
+    if action == "back_output":
+        state["step"] = "preview"
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(query, architecture_preview_text(state), parse_mode="HTML", reply_markup=architecture_preview_keyboard(lang))
+
+    if action == "scene_plan":
+        return await safe_edit_or_send(query, architecture_scene_plan_text(state), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|output")]]))
+
+    if action == "copy_prompt":
+        draft = dict(state.get("draft") or {})
+        output = str(draft.get("recommended_output") or "image")
+        prompt = str(draft.get("professional_video_prompt") if output == "video" else draft.get("professional_image_prompt") or "")
+        return await safe_edit_or_send(
+            query,
+            "📝 <b>Prompt đã chuẩn bị</b>\n\n<code>" + html.escape(prompt[:3500]) + "</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|output")]]),
+        )
+
+    if action == "save_draft":
+        architecture_profile_status.save_draft(uid, state)
+        return await safe_edit_or_send(
+            query,
+            architecture_output_text() + "\n\n💾 Bản nháp đã được lưu.",
+            parse_mode="HTML",
+            reply_markup=architecture_output_keyboard(lang),
+        )
+
+    if action == "resume":
+        saved = architecture_profile_status.load_draft(uid)
+        if not saved:
+            return await safe_edit_or_send(
+                query,
+                architecture_profile_menu_text(lang) + "\n\nℹ️ Chưa có bản nháp kiến trúc đã lưu.",
+                parse_mode="HTML",
+                reply_markup=architecture_profile_menu_keyboard(lang),
+            )
+        saved["step"] = "preview" if saved.get("draft") else "await_answer"
+        save_architecture_profile_session(context, saved)
+        if saved["step"] == "preview":
+            return await safe_edit_or_send(query, architecture_preview_text(saved), parse_mode="HTML", reply_markup=architecture_preview_keyboard(lang))
+        return await safe_edit_or_send(query, architecture_question_text(saved, lang), parse_mode="HTML", reply_markup=architecture_question_keyboard(lang))
+
+    if action == "delete_draft":
+        deleted = architecture_profile_status.delete_draft(uid)
+        note = "Đã xóa bản nháp đã lưu." if deleted else "Chưa có bản nháp đã lưu."
+        return await safe_edit_or_send(
+            query,
+            architecture_profile_menu_text(lang) + f"\n\n🗑 {note}",
+            parse_mode="HTML",
+            reply_markup=architecture_profile_menu_keyboard(lang),
+        )
+
+    if action == "handoff_image":
+        flow = architecture_prepare_image_handoff(uid, state)
+        state["destination_handoff_status"] = "image_prefill_ready"
+        architecture_profile_status.record_handoff(uid, "image_prefill_ready")
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(flow, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(lang, back_callback="archprofile|output", back_label="⬅️ Studio Kiến trúc"),
+        )
+
+    if action == "handoff_video":
+        architecture_prepare_video_handoff(uid, state)
+        state["destination_handoff_status"] = "video_prefill_ready"
+        architecture_profile_status.record_handoff(uid, "video_prefill_ready")
+        save_architecture_profile_session(context, state)
+        return await safe_edit_or_send(
+            query,
+            "🎬 <b>Bản nháp đã chuyển sang công cụ Video</b>\n\nPrompt, kế hoạch cảnh, tỉ lệ, thời lượng và tư liệu đã được giữ. Công cụ Video sẽ báo giá và chỉ xử lý sau xác nhận cuối.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎬 Mở công cụ Video AI", callback_data="vproduct|open|video_ai_real")],
+                [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|output"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            ]),
+        )
+
+    return await safe_edit_or_send(query, architecture_profile_menu_text(lang), parse_mode="HTML", reply_markup=architecture_profile_menu_keyboard(lang))
+
+
+async def cmd_architecture_profile_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    summary = architecture_profile_router.architecture_catalog_summary()
+    payload = architecture_profile_status.status_payload(
+        profile_count=int(summary.get("profile_count") or 0),
+        profile_json_loaded=bool(summary.get("ok")),
+        router_ready=bool(summary.get("ok")),
+    )
+    lines = [
+        "🏗 <b>ARCHITECTURE PROFILE STATUS</b>", "",
+        f"• Studio enabled: <code>{'yes' if payload['profile_studio_enabled'] else 'no'}</code>",
+        f"• Profiles: <code>{payload['architecture_profile_count']}</code>",
+        f"• Profile JSON loaded: <code>{'yes' if payload['profile_json_loaded'] else 'no'}</code>",
+        f"• Router ready: <code>{'yes' if payload['router_ready'] else 'no'}</code>",
+        f"• Image handoff ready: <code>{'yes' if payload['image_handoff_ready'] else 'no'}</code>",
+        f"• Video handoff ready: <code>{'yes' if payload['video_handoff_ready'] else 'no'}</code>",
+        f"• Reference upload: <code>{'yes' if payload['reference_upload_enabled'] else 'no'}</code>",
+        f"• Active drafts: <code>{payload['active_drafts_count']}</code>",
+        f"• Last route: <code>{html.escape(str(payload['last_route_profile']))}</code> ({payload['last_route_confidence']:.3f})",
+        f"• Last validation error: <code>{html.escape(str(payload['last_validation_error']))}</code>",
+        "• Provider calls from studio: <code>no</code>",
+    ]
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_architecture_profile_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await update.effective_message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    target_id = safe_int((context.args or [update.effective_user.id])[0], update.effective_user.id)
+    payload = architecture_profile_status.debug_payload(target_id)
+    lines = [
+        "🔎 <b>ARCHITECTURE PROFILE DEBUG</b>", "",
+        f"• User: <code>{target_id}</code>",
+        f"• Profile: <code>{html.escape(str(payload.get('profile_id') or '-'))}</code>",
+        f"• Confidence: <code>{float(payload.get('confidence') or 0):.3f}</code>",
+        f"• Signals: <code>{html.escape(', '.join(map(str, payload.get('matched_signals') or [])) or '-')}</code>",
+        f"• Missing fields: <code>{html.escape(', '.join(map(str, payload.get('missing_fields') or [])) or '-')}</code>",
+        f"• Preserve constraints: <code>{len(payload.get('preserve_constraints') or [])}</code>",
+        f"• Prompt present: <code>{'yes' if payload.get('prompt_present') else 'no'}</code>",
+        f"• Negative prompt present: <code>{'yes' if payload.get('negative_prompt_present') else 'no'}</code>",
+        f"• Scene count: <code>{int(payload.get('scene_count') or 0)}</code>",
+        f"• Requested output: <code>{html.escape(str(payload.get('requested_output') or '-'))}</code>",
+        f"• Handoff: <code>{html.escape(str(payload.get('destination_handoff_status') or '-'))}</code>",
+        "• Provider task created by studio: <code>no</code>",
+        "• Charge created by studio: <code>no</code>",
+    ]
+    await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
 async def handle_video_profile_studio_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
@@ -194263,6 +194980,8 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
         return
     if await handle_video_dubbing_pending_upload(update, context):
         return
+    if await handle_architecture_profile_pending_media(update, context):
+        return
     if await handle_video_product_pending_media(update, context):
         return
     if await handle_translation_media_pending_upload(update, context):
@@ -194809,6 +195528,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_frame_video_pending_text(update, context):
+        return
+
+    if await handle_architecture_profile_pending_text(update, context):
         return
 
     if await handle_video_profile_studio_pending_text(update, context):
@@ -196202,6 +196924,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_member_help", cmd_admin_member_help))
     tg_app.add_handler(CommandHandler("admin_payment_help", cmd_admin_payment_help))
     tg_app.add_handler(CommandHandler("admin_tools_help", cmd_admin_tools_help))
+    tg_app.add_handler(CommandHandler("architecture_profile_status", cmd_architecture_profile_status))
+    tg_app.add_handler(CommandHandler("architecture_profile_debug", cmd_architecture_profile_debug))
     tg_app.add_handler(CommandHandler("profile_user", cmd_profile_user))
     tg_app.add_handler(CommandHandler("member_user", cmd_member_user))
     tg_app.add_handler(CommandHandler("ledger_user", cmd_ledger_user))
@@ -196244,6 +196968,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_prompt_library_callback, pattern=r"^vpromptlib\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_architecture_profile_callback, pattern=r"^archprofile\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_guided_callback, pattern=r"^trendg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))

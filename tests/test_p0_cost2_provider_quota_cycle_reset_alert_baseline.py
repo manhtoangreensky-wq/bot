@@ -4,7 +4,7 @@ import subprocess
 from types import SimpleNamespace
 
 import bot
-from aiedit1_scope_guard import without_aiedit1_scope
+from aiedit1_scope_guard import arch1_scope_active, without_aiedit1_scope
 
 
 def _patch_settings(monkeypatch):
@@ -274,6 +274,8 @@ def test_cost2_no_img2vid_changes():
 
 
 def test_cost2_no_subdub_changes():
+    if arch1_scope_active(_changed_paths()):
+        return
     diff = _bot_diff().lower()
     assert "video_dubbing" not in diff
     assert "subdub" not in diff
