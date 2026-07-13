@@ -18,6 +18,7 @@ TEST_FILE = "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py"
 LOCAL1_TEST_FILE = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
 AIEDIT1_TEST_FILE = "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py"
 ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
+SCENE1_TEST_FILE = "tests/test_p0_video_scene1_semantic_story_planner_addon_aware_flow.py"
 ARCH1_SERVICE_FILES = {
     "services/architecture_profile_router.py",
     "services/architecture_prompt_builder.py",
@@ -220,12 +221,12 @@ def test_profile_studio_back_routes_to_exact_previous_screen() -> None:
     helpers = _source_between("VIDEO_PROFILE_STUDIO_SESSION_KEY", "def video_edit_hub_text")
     callback = _source_between("async def handle_video_profile_studio_callback", "async def handle_video_editor_callback")
     assert 'callback_data="menu|main_video"' in helpers
-    assert 'callback_data="vprofile|back_question"' in helpers
-    assert 'callback_data="vprofile|back_preview"' in helpers
-    assert 'if action == "back_question"' in callback
-    assert 'if action in {"edit", "back_preview"}' in callback
+    assert 'callback_data="vprofile|back"' in helpers
+    assert "def video_profile_studio_pop_step" in helpers
+    assert 'if action == "back"' in callback
+    assert "video_profile_studio_pop_step(context, state)" in callback
     assert '"step": "menu"' in callback
-    assert '"step": "await_brief"' in callback
+    assert '"scene_count",\n    "profile"' in helpers
 
 
 def test_studio_is_session_draft_only_without_submit_job_outbox_or_charge() -> None:
@@ -289,6 +290,16 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         }
     ) if arch1_scope else set()
+    scene1_scope = SCENE1_TEST_FILE in touched
+    scene1_allowed = {
+        "services/video_addon_planner.py",
+        "services/video_scene_continuity.py",
+        "services/video_scene_transition_planner.py",
+        "services/video_prompt_pattern_library.py",
+        "services/video_semantic_scene_planner.py",
+        "services/video_scene_prompt_builder.py",
+        SCENE1_TEST_FILE,
+    } if scene1_scope else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -299,6 +310,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path in local1_allowed
             or path in aiedit1_allowed
             or path in arch1_allowed
+            or path in scene1_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",

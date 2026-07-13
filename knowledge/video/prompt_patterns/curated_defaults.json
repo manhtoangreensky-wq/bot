@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "patterns": [
+    {
+      "pattern_id": "semantic_arc_general_v1",
+      "profile": "general",
+      "scene_counts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+      "duration": "8_seconds_per_scene",
+      "scene_roles": ["setup", "development", "payoff", "conclusion"],
+      "transition_pattern": ["match cut", "cut on action", "sound bridge"],
+      "add_on_plan": "content_inputs_before_prompt_post_addons_after_concat",
+      "prompt_template_version": "scene-semantic-1.0.0",
+      "version": "1.0.0",
+      "evaluation_score": 1.0,
+      "admin_approved": true,
+      "source_type": "curated_default",
+      "anonymized": true,
+      "customer_consent": false,
+      "contains_private_assets": false,
+      "status": "active"
+    }
+  ]
+}
