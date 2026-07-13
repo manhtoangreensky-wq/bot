@@ -273,6 +273,14 @@ def test_duration2_scope_locks_no_forbidden_runtime_changes():
                 "tests/test_task3d_video_product_prompt_engine.py",
             }
         )
+    if _current_branch().startswith("hotfix/p0-video-scene2-"):
+        allowed.update(
+            {
+                "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py",
+                "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
+                "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_removal.py",
+            }
+        )
     assert changed <= allowed
     joined = " ".join(changed).lower()
     for forbidden in ("music", "suno", "subdub", "payos", "wallet", "pricing_matrix", "video_image_to_video_flow"):

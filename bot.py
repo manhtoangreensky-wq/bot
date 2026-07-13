@@ -65089,6 +65089,93 @@ VIDEO_SCENE1_CANONICAL_STEPS = (
     "final_confirmation",
 )
 
+# Public Product Video uses this semantic order. Internal input screens such as
+# custom text entry and reference upload are children of these canonical steps.
+VIDEO_SCENE2_CANONICAL_STEPS = (
+    "subject",
+    "scene_count",
+    "profile",
+    "profile_context",
+    "requirements",
+    "content_addons",
+    "scene_plan",
+    "prompt_review",
+    "postproduction_addons",
+    "quality_price",
+    "final_report",
+    "final_confirm",
+)
+
+VIDEO_SCENE2_PUBLIC_PRODUCTS = frozenset({
+    "video_trend",
+    "video_ai_real",
+    "script_image_video",
+    "self_shot_scene_change",
+    "video_idea",
+    "storyboard_prompt",
+    "multi_scene_film",
+})
+
+VIDEO_SCENE2_LEGACY_PRICE_KEYS = frozenset({
+    "b14_quality_xu",
+    "quality_xu",
+    "selected_tier",
+    "selected_package",
+    "package_id",
+    "tier_id",
+    "b14_invoice",
+    "b14_invoice_return_step",
+    "b14_project_id",
+    "b14_scene_count",
+    "b14_scene_count_selected",
+})
+
+VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
+    "count_custom": {"scene_count"},
+    "count": {"scene_count", "await_count_custom"},
+    "select": {"profile"},
+    "context": {"profile_context"},
+    "context_custom": {"profile_context"},
+    "requirements_skip": {"requirements"},
+    "assets": {"reference_assets"},
+    "content": {"content_addons"},
+    "build": {"content_addons"},
+    "prompts": {"scene_plan"},
+    "edit_scene": {"scene_plan"},
+    "regen_scene": {"scene_plan"},
+    "reorder": {"scene_plan"},
+    "transition": {"scene_plan"},
+    "change_count": {"scene_plan"},
+    "post": {"prompt_preview"},
+    "post_toggle": {"post_addons"},
+    "quality": {"post_addons"},
+    "tier": {"quality"},
+    "handoff": {"final_report"},
+    "invoice_back": {"final_confirmation"},
+}
+
+VIDEO_SCENE2_LEGACY_PLANNING_CALLBACKS = frozenset({
+    "b14_profiles",
+    "b14_profile",
+    "b14_profile_back",
+    "b14_creative_screen",
+    "b14_creative_field",
+    "b14_creative_set",
+    "b14_creative_default",
+    "b14_creative_done",
+    "b14_storyboard_screen",
+    "storyboard_confirm",
+    "b14_addons",
+    "b14_addon_done",
+    "b14_aspect_screen",
+    "b14_aspect",
+    "b14_quality_screen",
+    "b14_quality",
+    "b14_scene_count_screen",
+    "b14_scene_count",
+    "b14_scene_custom",
+})
+
 
 def video_profile_studio_state(context) -> dict:
     user_data = getattr(context, "user_data", None)
@@ -65099,6 +65186,10 @@ def video_profile_studio_state(context) -> dict:
     state["content_addons"] = dict(state.get("content_addons") or {})
     state["post_addons"] = dict(state.get("post_addons") or {})
     state["plan"] = dict(state.get("plan") or {})
+    state.setdefault("provider_called", False)
+    state.setdefault("job_created", False)
+    state.setdefault("outbox_created", False)
+    state.setdefault("xu_charged", 0)
     return state
 
 
@@ -65123,6 +65214,30 @@ def video_profile_studio_pop_step(context, state: dict) -> dict:
     history = list(state.get("history") or [])
     step = history.pop() if history else "menu"
     return save_video_profile_studio_state(context, {**state, "step": step, "history": history})
+
+
+def video_scene2_action_allowed(state: dict, action: str) -> bool:
+    expected = VIDEO_SCENE2_ACTION_EXPECTED_STEPS.get(str(action or ""))
+    return expected is None or str((state or {}).get("step") or "") in expected
+
+
+def video_scene2_reconcile_state(context, state: dict) -> dict:
+    state = dict(state or {})
+    if not str(state.get("subject") or "").strip():
+        return video_profile_studio_step(context, state, "await_subject", push=False)
+    scene_count = safe_int(state.get("scene_count"), 0)
+    if scene_count < 1 or scene_count > 20:
+        return video_profile_studio_step(context, state, "scene_count", push=False, scene_count=0)
+    step = str(state.get("step") or "")
+    valid_steps = set(VIDEO_SCENE1_CANONICAL_STEPS) | {
+        "menu", "await_subject", "await_count_custom", "await_context",
+        "reference_assets", "await_scene_edit", "await_scene_regen", "await_reorder",
+    }
+    if step not in valid_steps or step in {"menu", "subject", "await_subject"}:
+        return video_profile_studio_step(context, state, "scene_count", push=False)
+    if step not in {"scene_count", "await_count_custom", "profile"} and not str(state.get("selection_id") or ""):
+        return video_profile_studio_step(context, state, "profile", push=False)
+    return save_video_profile_studio_state(context, state)
 
 
 def video_profile_studio_option(selection_id: str) -> dict:
@@ -65475,7 +65590,6 @@ def video_profile_scene1_review_keyboard(lang: str = "vi") -> InlineKeyboardMark
         [InlineKeyboardButton("✏️ Sửa một cảnh", callback_data="vprofile|edit_scene"), InlineKeyboardButton("🔄 Viết lại prompt cảnh", callback_data="vprofile|regen_scene")],
         [InlineKeyboardButton("↕️ Đổi thứ tự cảnh", callback_data="vprofile|reorder"), InlineKeyboardButton("🔗 Đổi chuyển tiếp", callback_data="vprofile|transition")],
         [InlineKeyboardButton("🔢 Đổi số cảnh", callback_data="vprofile|change_count")],
-        [InlineKeyboardButton("✅ Chọn add-on hậu kỳ", callback_data="vprofile|post")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vprofile|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -67648,6 +67762,153 @@ def start_shared_video_profile_step(user_id, product_id: str, *, origin_step: st
     draft.update(route_fields)
     session["draft"] = draft
     return save_video_session(user_id, session)
+
+
+def video_scene2_clear_legacy_price_state(session: dict) -> dict:
+    clean = dict(session or {})
+    clean["package_id"] = ""
+    clean["invoice_id"] = ""
+    draft = dict(clean.get("draft") or {})
+    for key in VIDEO_SCENE2_LEGACY_PRICE_KEYS:
+        draft.pop(key, None)
+    draft["provider_called"] = False
+    draft["job_created"] = False
+    draft["outbox_created"] = False
+    draft["xu_charged"] = 0
+    clean["draft"] = draft
+    return clean
+
+
+def start_public_video_scene2_state(
+    context,
+    user_id: int,
+    product_id: str,
+    *,
+    origin_step: str = "intro",
+    **fields,
+) -> dict:
+    product_id = str(product_id or "")
+    topic = str(fields.get("topic") or fields.get("subject") or "").strip()[:1600]
+    filtered_fields = {
+        key: value
+        for key, value in fields.items()
+        if key not in VIDEO_SCENE2_LEGACY_PRICE_KEYS and key not in {"subject", "quality_xu"}
+    }
+    route_fields = video_route_session_fields(product_id, "scene_count") if product_id in VIDEO_PUBLIC_ROUTE_MATRIX else {}
+    route_fields.update(filtered_fields)
+    route_fields.update({
+        "topic": topic,
+        "scene2_origin_step": str(origin_step or "intro"),
+        "scene2_canonical_entry": True,
+        "provider_called": False,
+        "job_created": False,
+        "outbox_created": False,
+        "xu_charged": 0,
+    })
+
+    session = default_video_session(user_id)
+    session.update({
+        "product_id": product_id,
+        "current_step": "scene2_scene_count" if topic else "scene2_subject",
+        "previous_step": "scene2_subject" if topic else "",
+        "topic": topic,
+        "return_to": str(route_fields.get("parent_menu_callback") or "menu|main_video"),
+        "entry_flow": "scene2_public_planner",
+        "current_flow": "scene2_public_planner",
+        "package_id": "",
+        "invoice_id": "",
+    })
+    session["draft"] = dict(route_fields)
+    session = video_scene2_clear_legacy_price_state(session)
+    save_video_session(user_id, session)
+
+    assets = {
+        "source_product_id": product_id,
+        "origin_step": str(origin_step or "intro"),
+        "source_media_ref": str(filtered_fields.get("source_media_ref") or ""),
+        "source_media_refs": list(filtered_fields.get("source_media_refs") or []),
+        "media_type": str(filtered_fields.get("media_type") or ""),
+        "media_description": str(filtered_fields.get("media_description") or ""),
+        "storyboard_image_scenes": list(filtered_fields.get("storyboard_image_scenes") or []),
+        "final_video_scenes": list(filtered_fields.get("final_video_scenes") or []),
+        "architecture_reference_assets": list(filtered_fields.get("architecture_reference_assets") or []),
+    }
+    state = {
+        "step": "scene_count" if topic else "await_subject",
+        "history": ["await_subject"] if topic else ["menu"],
+        "subject": topic,
+        "scene_count": 0,
+        "selection_id": "",
+        "profile_context": "",
+        "requirements": {},
+        "assets": assets,
+        "content_addons": {"cta": True, "aspect_ratio": str(filtered_fields.get("aspect_ratio") or "9:16"), "transition_style": "tự nhiên"},
+        "post_addons": {},
+        "plan": {},
+        "quality_xu": 0,
+        "source_product_id": product_id,
+        "origin_step": str(origin_step or "intro"),
+        "source_fields": dict(filtered_fields),
+        "provider_called": False,
+        "job_created": False,
+        "outbox_created": False,
+        "xu_charged": 0,
+    }
+    return save_video_profile_studio_state(context, state)
+
+
+async def start_public_video_scene2_step(
+    target,
+    context,
+    user_id: int,
+    product_id: str,
+    *,
+    lang: str = "vi",
+    origin_step: str = "intro",
+    **fields,
+):
+    if str(product_id or "") not in VIDEO_SCENE2_PUBLIC_PRODUCTS:
+        session = start_shared_video_profile_step(
+            user_id,
+            product_id,
+            origin_step=origin_step,
+            **fields,
+        )
+        return await safe_edit_or_send(
+            target,
+            video_b14_profile_selection_text(session, user_id, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_profile_selection_keyboard(lang),
+        )
+    state = start_public_video_scene2_state(
+        context,
+        user_id,
+        product_id,
+        origin_step=origin_step,
+        **fields,
+    )
+    return await video_profile_scene1_render(target, state, lang)
+
+
+def video_scene2_recover_legacy_state(context, user_id: int, product_id: str, session: dict) -> dict:
+    state = video_profile_studio_state(context)
+    if (
+        str(state.get("source_product_id") or "") == str(product_id or "")
+        and str(state.get("subject") or "").strip()
+    ):
+        save_video_session(user_id, video_scene2_clear_legacy_price_state(session))
+        return video_scene2_reconcile_state(context, state)
+    draft = dict((session or {}).get("draft") or {})
+    return start_public_video_scene2_state(
+        context,
+        user_id,
+        product_id,
+        origin_step=str((session or {}).get("current_step") or "legacy_callback"),
+        topic=str((session or {}).get("topic") or draft.get("topic") or ""),
+        source_media_ref=draft.get("source_media_ref") or (session or {}).get("source_media_ref") or "",
+        source_media_refs=list(draft.get("source_media_refs") or []),
+        input_collected=bool(draft.get("input_collected")),
+    )
 
 
 def video_post_profile_step(product_id: str, session: dict | None = None) -> str:
@@ -77284,6 +77545,26 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             str(current_session.get("entry_flow") or "") == "architecture_profile"
             and bool((current_session.get("draft") or {}).get("architecture_profile_id"))
         )
+        if architecture_handoff and value == "video_ai_real":
+            architecture_draft = dict(current_session.get("draft") or {})
+            architecture_profile_id = str(architecture_draft.get("architecture_profile_id") or "")
+            return await start_public_video_scene2_step(
+                query,
+                context,
+                uid,
+                value,
+                lang=lang,
+                origin_step="architecture_profile_legacy_handoff",
+                topic=str(current_session.get("topic") or architecture_profile_title(architecture_profile_id) or "Video kiến trúc"),
+                architecture_profile_id=architecture_profile_id,
+                architecture_video_prompt=str(architecture_draft.get("architecture_video_prompt") or ""),
+                architecture_negative_prompt=str(architecture_draft.get("architecture_negative_prompt") or ""),
+                architecture_scene_plan=list(architecture_draft.get("architecture_scene_plan") or []),
+                architecture_reference_assets=list(architecture_draft.get("architecture_reference_assets") or []),
+                aspect_ratio=str(architecture_draft.get("aspect_ratio") or "16:9"),
+                duration=architecture_draft.get("duration") or 0,
+                input_collected=True,
+            )
         parent_callback = (
             "archprofile|output"
             if architecture_handoff
@@ -77355,6 +77636,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if action == "legacy":
             await query.answer()
         return await safe_edit_or_send(query, "⌛ Phiên video đã hết hạn. Bot chưa trừ Xu.", reply_markup=main_video_keyboard(lang))
+    if (
+        product_id in VIDEO_SCENE2_PUBLIC_PRODUCTS
+        and action in VIDEO_SCENE2_LEGACY_PLANNING_CALLBACKS
+        and not bool((session.get("draft") or {}).get("scene1_planning_handoff"))
+    ):
+        state = video_scene2_recover_legacy_state(context, uid, product_id, session)
+        return await video_profile_scene1_render(query, state, lang)
     if action == "legacy":
         route = TASK3D_LEGACY_ROUTES.get(value or product_id)
         if not route:
@@ -77504,9 +77792,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 video_microflow_missing_input_text(lang),
                 reply_markup=video_microflow_keyboard(origin_step, product_id, lang),
             )
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step=origin_step,
             source_media_ref=recent.get("file_id"),
             source_media_refs=[recent.get("file_id")],
@@ -77514,12 +77805,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             media_description=("Ảnh gần nhất" if source_type == "image" else "Video gần nhất"),
             topic=("Ảnh tham khảo gần nhất" if source_type == "image" else "Video mẫu gần nhất"),
             input_collected=True,
-        )
-        return await safe_edit_or_send(
-            query,
-            video_b14_profile_selection_text(session, uid, lang),
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(lang),
         )
     if action == "media_delete_last":
         draft = dict(session.get("draft") or {})
@@ -77534,9 +77819,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not refs:
             return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_keyboard(str(session.get("current_step") or ""), product_id, lang))
         current_step = str(session.get("current_step") or "collect_input")
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step=current_step,
             source_media_ref=refs[0],
             source_media_refs=refs,
@@ -77545,7 +77833,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             topic=f"Bộ ảnh người dùng cung cấp ({len(refs)} ảnh)",
             input_collected=True,
         )
-        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
     if action == "microflow_choose":
         draft = dict(session.get("draft") or {})
         options = list(draft.get("microflow_options") or [])
@@ -77594,9 +77881,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             "selfshot": "selected_direction",
             "film": "selected_film_story",
         }.get(kind, "selected_microflow_option")
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step=str(session.get("current_step") or "intro"),
             topic=str(selected.get("title") or topic),
             selected_microflow_kind=kind,
@@ -77605,7 +77895,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             free_generation=True,
             **{field_name: selected},
         )
-        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
     if action in {"microflow_custom_topic", "microflow_edit"}:
         draft = dict(session.get("draft") or {})
         kind = str(draft.get("microflow_kind") or "")
@@ -77652,9 +77941,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if product_id == "self_shot_scene_change" and not (draft.get("source_media_refs") or draft.get("source_media_ref")):
             session = task3d_session_step(uid, "awaiting_self_shot_video", topic=topic, selected_direction=topic, provider_called=False, xu_charged=0)
             return await task3d_render_step(query, uid, session, lang)
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step=str(session.get("current_step") or "intro"),
             topic=topic,
             selected_microflow_kind=kind,
@@ -77662,7 +77954,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             suggestion_used=True,
             free_generation=True,
         )
-        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
     if action == "idea_develop" and product_id == "video_idea":
         selected = video_microflow_selected_option(session)
         target_product = value if value in VIDEO_PRODUCT_REGISTRY else "video_ai_real"
@@ -77708,9 +77999,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "storyboard_continue_profile" and product_id == "storyboard_prompt":
         draft = dict(session.get("draft") or {})
         topic = str(draft.get("microflow_topic") or session.get("topic") or "Storyboard đã xác nhận")
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step="storyboard_final_video_scenes",
             topic=topic,
             storyboard_image_scenes=list(draft.get("storyboard_image_scenes") or []),
@@ -77719,7 +78013,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             suggestion_used=True,
             free_generation=True,
         )
-        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
     if action in {"image_prompt_set_use", "image_prompt_set_create"} and product_id in {"frame_video_local", "video_ai_real"}:
         draft = dict(session.get("draft") or {})
         selected = dict(draft.get("selected_image_prompt_set") or video_microflow_selected_option(session))
@@ -77756,20 +78049,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
     if action in {"ideas", "ideas_refresh", "industry", "style_first"} and video_flow_requires_intro_profile(product_id) and not (session.get("draft") or {}).get("b14_profile_id"):
         sample_topic = TASK3D_SAMPLE_TOPICS.get(product_id) or "ý tưởng video ngắn dễ xem"
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step="intro",
             entry_choice=action,
             topic=sample_topic,
             input_collected=True,
             free_generation=True,
-        )
-        return await safe_edit_or_send(
-            query,
-            video_b14_profile_selection_text(session, uid, lang),
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(lang),
         )
     if action == "entry_media" and video_flow_requires_intro_profile(product_id):
         if product_id == "video_ai_real":
@@ -77805,9 +78095,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value == "recent":
             recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
             if recent.get("file_id"):
-                session = start_shared_video_profile_step(
+                return await start_public_video_scene2_step(
+                    query,
+                    context,
                     uid,
                     product_id,
+                    lang=lang,
                     origin_step="intro",
                     entry_choice="recent_video",
                     source_media_ref=recent.get("file_id"),
@@ -77816,12 +78109,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     media_description="Video gần nhất",
                     topic="Video gần nhất của anh/chị",
                     input_collected=True,
-                )
-                return await safe_edit_or_send(
-                    query,
-                    video_b14_profile_selection_text(session, uid, lang),
-                    parse_mode="HTML",
-                    reply_markup=video_b14_profile_selection_keyboard(lang),
                 )
         session = task3d_session_step(
             uid,
@@ -78187,21 +78474,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected = ideas[max(0, min(len(ideas) - 1, safe_int(value, 0)))] if ideas else {}
         bundle = task3d_trend_output_from_source(selected)
         topic = str(bundle.get("user_topic") or selected.get("title") or "Video theo trend")
-        session = start_shared_video_profile_step(
+        return await start_public_video_scene2_step(
+            query,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step="trend_ideas",
             topic=topic,
             selected_trend_source=selected,
             prepared_prompt_bundle=bundle,
             input_collected=True,
             free_generation=True,
-        )
-        return await safe_edit_or_send(
-            query,
-            video_b14_profile_selection_text(session, uid, lang),
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(lang),
         )
     if action in {"ideas", "ideas_refresh"}:
         session = task3d_session_step(
@@ -79316,6 +79600,14 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         return False
     uid = update.effective_user.id
     session = get_video_session(uid)
+    if (
+        str(session.get("product_id") or "") in VIDEO_SCENE2_PUBLIC_PRODUCTS
+        and str(session.get("current_step") or "") in {"b14_scene_custom", "waiting_scene_count"}
+        and not bool((session.get("draft") or {}).get("scene1_planning_handoff"))
+    ):
+        state = video_scene2_recover_legacy_state(context, uid, str(session.get("product_id") or ""), session)
+        await video_profile_scene1_render(update.message, state, get_user_language(uid) or "vi")
+        return True
     if str(session.get("current_step") or "") == "prompt_image_logo_input":
         logo_text = logo_watermark_clean_text(update.message.text)
         if not logo_text:
@@ -79560,9 +79852,12 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 "enabled": True,
             }
             bundle = task3d_trend_output_from_source(source, text)
-            session = start_shared_video_profile_step(
+            await start_public_video_scene2_step(
+                update.message,
+                context,
                 uid,
                 "video_trend",
+                lang=lang,
                 origin_step="trend_manual_input",
                 topic=text,
                 selected_trend_source=source,
@@ -79570,7 +79865,6 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 input_collected=True,
                 free_generation=True,
             )
-            await update.message.reply_text(video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
             return True
         direct_profile_steps = {
             "awaiting_prompt_text": "video_ai_real",
@@ -79582,15 +79876,17 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         }
         if current_step in direct_profile_steps:
             product_id = direct_profile_steps[current_step]
-            session = start_shared_video_profile_step(
+            await start_public_video_scene2_step(
+                update.message,
+                context,
                 uid,
                 product_id,
+                lang=lang,
                 origin_step=current_step,
                 topic=text,
                 input_collected=True,
                 free_generation=True,
             )
-            await update.message.reply_text(video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
             return True
         suggestion_steps = {
             "prompt_suggestion_topic": ("suggest_prompt", "prompt", "video_ai_real"),
@@ -79680,9 +79976,12 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         }
         bundle = task3d_trend_output_from_source(source, text)
         origin_step = current_step if current_step in {"trend_industry", "trend_video_suggest", "collect_input", "trend_ideas"} else "intro"
-        session = start_shared_video_profile_step(
+        await start_public_video_scene2_step(
+            update.message,
+            context,
             uid,
             product_id,
+            lang=get_user_language(uid) or "vi",
             origin_step=origin_step,
             topic=text,
             selected_trend_source=source,
@@ -79690,29 +79989,22 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             input_collected=True,
             free_generation=True,
         )
-        await update.message.reply_text(
-            video_b14_profile_selection_text(session, uid, get_user_language(uid) or "vi"),
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(get_user_language(uid) or "vi"),
-        )
         return True
     if input_purpose == "detail" and product_id == "image_to_video":
         session = task3d_advance_guided_flow(uid, session, "detail", media_description=text, detail_skipped=False)
     elif product_id == "image_to_video":
         session = task3d_advance_guided_flow(uid, session, "detail", topic=text, media_description=text, detail_from_primary_text=True)
     elif video_flow_requires_intro_profile(product_id) and not (session.get("draft") or {}).get("b14_profile_id"):
-        session = start_shared_video_profile_step(
+        await start_public_video_scene2_step(
+            update.message,
+            context,
             uid,
             product_id,
+            lang=get_user_language(uid) or "vi",
             origin_step="collect_input",
             topic=text,
             input_collected=True,
             free_generation=True,
-        )
-        await update.message.reply_text(
-            video_b14_profile_selection_text(session, uid, get_user_language(uid) or "vi"),
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(get_user_language(uid) or "vi"),
         )
         return True
     else:
@@ -79840,9 +80132,12 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             )
             await update.message.reply_text(video_microflow_text(current_step, product_id, session, lang), parse_mode="HTML", reply_markup=video_microflow_media_keyboard(lang))
             return True
-        session = start_shared_video_profile_step(
+        await start_public_video_scene2_step(
+            update.message,
+            context,
             uid,
             product_id,
+            lang=lang,
             origin_step=current_step,
             source_media_ref=refs[0] if refs else "",
             source_media_refs=refs,
@@ -79850,11 +80145,6 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             media_description=("Ảnh tham khảo người dùng cung cấp" if media_type == "image" else "Video người dùng cung cấp"),
             topic=("Ảnh tham khảo người dùng cung cấp" if media_type == "image" else "Video người dùng cung cấp"),
             input_collected=True,
-        )
-        await update.message.reply_text(
-            f"✅ Đã lưu {'ảnh' if media_type == 'image' else 'video'} trong phiên.\n\n{video_b14_profile_selection_text(session, uid, lang)}",
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(lang),
         )
         return True
     if str(session.get("current_step") or "") == "asset_intake":
@@ -79950,9 +80240,12 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         refs.append(file_id)
     refs = refs[:4]
     if video_flow_requires_intro_profile(product_id) and not draft.get("b14_profile_id"):
-        session = start_shared_video_profile_step(
+        await start_public_video_scene2_step(
+            update.message,
+            context,
             uid,
             product_id,
+            lang=get_user_language(uid) or "vi",
             origin_step="collect_input",
             source_media_ref=refs[0] if refs else "",
             source_media_refs=refs,
@@ -79960,12 +80253,6 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             media_description=f"{len(refs)} ảnh/video người dùng cung cấp",
             topic=f"Media người dùng cung cấp ({len(refs)} file)",
             input_collected=True,
-        )
-        lang = get_user_language(uid) or "vi"
-        await update.message.reply_text(
-            f"✅ Đã lưu {len(refs)} file trong phiên.\n\n{video_b14_profile_selection_text(session, uid, lang)}",
-            parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(lang),
         )
         return True
     next_step = task3d_next_guided_step(product_id)
@@ -193106,18 +193393,31 @@ async def handle_architecture_profile_callback(update: Update, context: ContextT
         )
 
     if action == "handoff_video":
-        architecture_prepare_video_handoff(uid, state)
+        prepared_session = architecture_prepare_video_handoff(uid, state)
+        prepared_draft = dict(prepared_session.get("draft") or {})
+        architecture_draft = dict(state.get("draft") or {})
+        answers = dict(state.get("answers") or {})
+        profile_id = str(architecture_draft.get("profile_id") or "")
+        subject = str(answers.get("user_text") or architecture_profile_title(profile_id) or "Video kiến trúc").strip()
         state["destination_handoff_status"] = "video_prefill_ready"
         architecture_profile_status.record_handoff(uid, "video_prefill_ready")
         save_architecture_profile_session(context, state)
-        return await safe_edit_or_send(
+        return await start_public_video_scene2_step(
             query,
-            "🎬 <b>Bản nháp đã chuyển sang công cụ Video</b>\n\nPrompt, kế hoạch cảnh, tỉ lệ, thời lượng và tư liệu đã được giữ. Công cụ Video sẽ báo giá và chỉ xử lý sau xác nhận cuối.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎬 Mở công cụ Video AI", callback_data="vproduct|open|video_ai_real")],
-                [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="archprofile|output"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-            ]),
+            context,
+            uid,
+            "video_ai_real",
+            lang=lang,
+            origin_step="architecture_profile_output",
+            topic=subject,
+            architecture_profile_id=profile_id,
+            architecture_video_prompt=str(prepared_draft.get("architecture_video_prompt") or ""),
+            architecture_negative_prompt=str(prepared_draft.get("architecture_negative_prompt") or ""),
+            architecture_scene_plan=list(prepared_draft.get("architecture_scene_plan") or []),
+            architecture_reference_assets=list(prepared_draft.get("architecture_reference_assets") or []),
+            aspect_ratio=str(prepared_draft.get("aspect_ratio") or "16:9"),
+            duration=prepared_draft.get("duration") or 0,
+            input_collected=True,
         )
 
     return await safe_edit_or_send(query, architecture_profile_menu_text(lang), parse_mode="HTML", reply_markup=architecture_profile_menu_keyboard(lang))
@@ -193296,10 +193596,19 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             reply_markup=video_profile_studio_menu_keyboard(lang),
         )
     if action == "start":
-        state = video_profile_studio_step(context, state, "await_subject")
+        state = save_video_profile_studio_state(context, {
+            "step": "await_subject", "history": ["menu"], "subject": "", "scene_count": 0,
+            "selection_id": "", "profile_context": "", "requirements": {}, "assets": {},
+            "content_addons": {"cta": True, "aspect_ratio": "9:16", "transition_style": "tự nhiên"},
+            "post_addons": {}, "plan": {}, "quality_xu": 0,
+            "provider_called": False, "job_created": False, "outbox_created": False, "xu_charged": 0,
+        })
         return await safe_edit_or_send(query, video_profile_scene1_subject_text(lang), parse_mode="HTML", reply_markup=video_profile_scene1_subject_keyboard(lang))
     if action == "back":
         state = video_profile_studio_pop_step(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if not video_scene2_action_allowed(state, action):
+        state = video_scene2_reconcile_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
     if action == "count_custom":
         state = video_profile_studio_step(context, state, "await_count_custom")
@@ -193310,7 +193619,18 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vprofile|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
     if action == "count":
-        count = max(1, min(20, safe_int(parts[2] if len(parts) > 2 else 1, 1)))
+        count = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        if not str(state.get("subject") or "").strip():
+            state = video_profile_studio_step(context, state, "await_subject", push=False)
+            return await video_profile_scene1_render(query, state, lang)
+        if count < 1 or count > 20:
+            state = video_profile_studio_step(context, state, "scene_count", push=False)
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Số cảnh hợp lệ là 1–20. Hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n" + video_profile_scene1_count_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_profile_scene1_count_keyboard(lang),
+            )
         if state.get("rebuild_scene_count") and state.get("selection_id"):
             state["scene_count"] = count
             try:
@@ -193323,8 +193643,11 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "select":
         selection_id = parts[2] if len(parts) > 2 else ""
+        if not str(state.get("subject") or "").strip():
+            state = video_profile_studio_step(context, state, "await_subject", push=False)
+            return await video_profile_scene1_render(query, state, lang)
         if safe_int(state.get("scene_count"), 0) < 1:
-            state = video_profile_studio_step(context, state, "scene_count")
+            state = video_profile_studio_step(context, state, "scene_count", push=False)
             return await video_profile_scene1_render(query, state, lang)
         if not video_profile_studio_option(selection_id):
             state = video_profile_studio_step(context, state, "profile")
@@ -193333,6 +193656,9 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "context":
         suggestions = video_profile_scene1_context_suggestions(state)
+        if not suggestions:
+            state = video_profile_studio_step(context, state, "profile", push=False)
+            return await video_profile_scene1_render(query, state, lang)
         index = max(1, min(len(suggestions), safe_int(parts[2] if len(parts) > 2 else 1, 1)))
         state = video_profile_studio_step(context, state, "requirements", profile_context=suggestions[index - 1])
         return await video_profile_scene1_render(query, state, lang)
@@ -193355,7 +193681,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             "add_later": choice == "later",
             "preserve_constraints": list((state.get("requirements") or {}).get("preserve_constraints") or []),
         }
-        state = video_profile_studio_step(context, state, "content_addons", assets=assets)
+        state = video_profile_studio_step(context, state, "content_addons", push=False, assets=assets)
         return await video_profile_scene1_render(query, state, lang)
     if action == "content":
         key = parts[2] if len(parts) > 2 else ""

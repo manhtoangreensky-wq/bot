@@ -6,6 +6,9 @@ from types import SimpleNamespace
 import bot
 
 
+_CONTEXTS = {}
+
+
 class FakeMessage:
     chat_id = 190000
 
@@ -45,7 +48,9 @@ def _labels(markup):
 
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    context = _CONTEXTS.setdefault(user_id, SimpleNamespace(user_data={}))
+    handler = bot.handle_video_profile_studio_callback if callback.startswith("vprofile|") else bot.handle_video_product_callback
+    asyncio.run(handler(SimpleNamespace(callback_query=query), context))
     assert query.edits
     edit = query.edits[-1]
     return edit["text"], edit.get("reply_markup"), bot.get_video_session(user_id)
@@ -53,7 +58,16 @@ def _press(user_id: int, callback: str):
 
 def _open(user_id: int, product_id: str):
     bot.clear_video_session(user_id)
+    _CONTEXTS[user_id] = SimpleNamespace(user_data={})
     return _press(user_id, f"vproduct|open|{product_id}")
+
+
+def _scene2_state(user_id: int):
+    return bot.video_profile_studio_state(_CONTEXTS[user_id])
+
+
+def _scene2_profile_id():
+    return str(bot.profile_router.STUDIO_PROFILE_OPTIONS[0]["selection_id"])
 
 
 def _changed_files():
@@ -99,10 +113,8 @@ def test_uiflow1_hot_trend_flow_locked():
     assert "✍️ Tự nhập trend/ý tưởng" in labels
     assert "vproduct|trend_today" in callbacks
     assert "vproduct|trend_custom" in callbacks
-    assert bot.VIDEO_STEP_BACK_MATRIX["video_trend"]["profile_select"] == "trend_ideas"
-    assert bot.VIDEO_STEP_BACK_MATRIX["video_trend"]["idea_suggestions"] == "profile_select"
-    assert bot.VIDEO_STEP_BACK_MATRIX["video_trend"]["asset_intake"] == "idea_suggestions"
-    assert bot.VIDEO_STEP_BACK_MATRIX["video_trend"]["storyboard_preview"] == "b14_creative_controls"
+    assert "video_trend" in bot.VIDEO_SCENE2_PUBLIC_PRODUCTS
+    assert bot.VIDEO_SCENE2_CANONICAL_STEPS[:3] == ("subject", "scene_count", "profile")
 
 
 def test_uiflow1_img2vid_untouched():
@@ -124,16 +136,17 @@ def test_uiflow1_realistic_video_prompt_suggestion_no_jump_to_style():
 
     _press(user_id, "vproduct|microflow_choose|0")
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "profile_select"
+    assert session["current_step"] == "scene2_scene_count"
+    assert _scene2_state(user_id)["step"] == "scene_count"
+    assert not session.get("package_id")
+    assert "b14_quality_xu" not in session["draft"]
     assert session["draft"]["provider_called"] is False
     assert session["draft"]["xu_charged"] == 0
 
-    text, markup, session = _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    assert session["current_step"] == "idea_suggestions"
-    assert "Gợi ý ý tưởng cho" in text
-    assert "Phim ngắn / trailer" in text
-    assert "Tùy chỉnh phong cách video" not in text
-    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+    text, markup, _session = _press(user_id, "vprofile|count|2")
+    assert _scene2_state(user_id)["step"] == "profile"
+    assert "Chọn profile phù hợp" in text
+    assert f"vprofile|select|{_scene2_profile_id()}" in _callbacks(markup)
 
 
 def test_uiflow1_realistic_video_prompt_flow_reaches_add_materials_then_review():
@@ -142,48 +155,33 @@ def test_uiflow1_realistic_video_prompt_flow_reaches_add_materials_then_review()
     _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
     _press(user_id, "vproduct|suggest_prompt|video_ai_real")
     _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    text, markup, session = _press(user_id, "vproduct|b14_idea_select|0")
-    assert session["current_step"] == "asset_intake"
-    assert "Muốn video sát ý hơn" in text
-    assert "📷 Tôi có ảnh sẵn" not in _labels(markup)
-    for expected in (
-        "🖼 Tạo ảnh AI trước",
-        "📚 Gợi ý bố cục ảnh",
-        "🎨 Dùng prompt ảnh từ storyboard",
-        "⏭ Bỏ qua",
-        "✅ Xong phần tư liệu",
-    ):
-        assert expected in _labels(markup)
+    _press(user_id, "vprofile|count|2")
+    _press(user_id, f"vprofile|select|{_scene2_profile_id()}")
+    _press(user_id, "vprofile|context|1")
+    text, markup, _session = _press(user_id, "vprofile|requirements_skip")
+    assert _scene2_state(user_id)["step"] == "reference_assets"
+    assert "Tư liệu nhận diện" in text
+    assert "vprofile|assets|none" in _callbacks(markup)
 
-    text, _markup, session = _press(user_id, "vproduct|b14_profile_back")
-    assert session["current_step"] == "idea_suggestions"
-    assert "Gợi ý ý tưởng cho" in text
-
-    _press(user_id, "vproduct|b14_idea_select|0")
-    _press(user_id, "vproduct|asset_skip")
-    text, _markup, session = _press(user_id, "vproduct|asset_skip_confirm")
-    assert session["current_step"] == "b14_creative_controls"
-    assert "Tùy chỉnh phong cách video" in text
-
-    text, _markup, session = _press(user_id, "vproduct|b14_creative_done")
-    assert session["current_step"] == "storyboard_preview"
-    assert "Storyboard" in text
+    _press(user_id, "vprofile|assets|none")
+    text, _markup, _session = _press(user_id, "vprofile|build")
+    assert _scene2_state(user_id)["step"] == "scene_plan"
+    assert "Kế hoạch" in text or "cảnh" in text
 
 
 def test_uiflow1_each_video_type_routes_to_profile_specific_suggestion():
-    profile_ids = [profile_id for _label, profile_id in bot.VIDEO_B14_3_PROFILE_BUTTONS]
+    profile_ids = [str(item["selection_id"]) for item in bot.profile_router.STUDIO_PROFILE_OPTIONS]
     for index, profile_id in enumerate(profile_ids, start=1):
         user_id = 190100 + index
         _open(user_id, "video_ai_real")
         _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
         _press(user_id, "vproduct|suggest_prompt|video_ai_real")
         _press(user_id, "vproduct|microflow_choose|0")
-        text, markup, session = _press(user_id, f"vproduct|b14_profile|{profile_id}")
-        assert session["current_step"] == "idea_suggestions"
-        assert "Gợi ý ý tưởng cho" in text
-        assert bot.video_b14_profile_button_label(profile_id).split(" ", 1)[-1] in text
-        assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+        _press(user_id, "vprofile|count|2")
+        text, markup, _session = _press(user_id, f"vprofile|select|{profile_id}")
+        assert _scene2_state(user_id)["step"] == "profile_context"
+        assert "hướng nội dung theo profile" in text
+        assert "vprofile|context|1" in _callbacks(markup)
 
 
 def test_uiflow1_non_img2vid_products_reach_add_materials_after_profile_suggestion():
@@ -200,11 +198,11 @@ def test_uiflow1_non_img2vid_products_reach_add_materials_after_profile_suggesti
             _press(user_id, parent)
         _press(user_id, suggestion)
         _press(user_id, "vproduct|microflow_choose|0")
-        _press(user_id, "vproduct|b14_profile|product_review")
-        text, _markup, session = _press(user_id, "vproduct|b14_idea_select|0")
+        text, markup, session = _press(user_id, "vprofile|count|2")
         assert session["product_id"] == product_id
-        assert session["current_step"] == "asset_intake"
-        assert "Muốn video sát ý hơn" in text
+        assert _scene2_state(user_id)["step"] == "profile"
+        assert "Chọn profile phù hợp" in text
+        assert f"vprofile|select|{_scene2_profile_id()}" in _callbacks(markup)
         assert session["draft"]["provider_called"] is False
         assert session["draft"]["xu_charged"] == 0
 
@@ -226,20 +224,19 @@ def test_uiflow1_storyboard_requires_asset_step_before_b14_review():
 
     _press(user_id, "vproduct|storyboard_use")
     _press(user_id, "vproduct|storyboard_video_duration|5")
-    _press(user_id, "vproduct|storyboard_continue_profile")
-    _press(user_id, "vproduct|b14_profile|storytelling")
-    text, _markup, session = _press(user_id, "vproduct|b14_idea_select|0")
-    assert session["current_step"] == "asset_intake"
-    assert "Muốn video sát ý hơn" in text
+    text, markup, session = _press(user_id, "vproduct|storyboard_continue_profile")
+    assert session["current_step"] == "scene2_scene_count"
+    assert _scene2_state(user_id)["step"] == "scene_count"
+    assert "Gói hiện tại" not in text
+    assert "vprofile|count|2" in _callbacks(markup)
 
 
 def test_uiflow1_back_matrix_for_aligned_products():
-    for product_id in bot.VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS:
-        matrix = bot.VIDEO_STEP_BACK_MATRIX[product_id]
-        assert matrix["idea_suggestions"] == "profile_select"
-        assert matrix["asset_intake"] == "idea_suggestions"
-        assert matrix["b14_creative_controls"] == "asset_intake"
-        assert matrix["storyboard_preview"] == "b14_creative_controls"
+    assert bot.VIDEO_SCENE2_CANONICAL_STEPS == (
+        "subject", "scene_count", "profile", "profile_context", "requirements",
+        "content_addons", "scene_plan", "prompt_review", "postproduction_addons",
+        "quality_price", "final_report", "final_confirm",
+    )
 
 
 def test_uiflow1_no_provider_submit_or_charge_from_planning_callbacks():
@@ -249,11 +246,12 @@ def test_uiflow1_no_provider_submit_or_charge_from_planning_callbacks():
         "vproduct|ai_prompt_menu|video_ai_real",
         "vproduct|suggest_prompt|video_ai_real",
         "vproduct|microflow_choose|0",
-        "vproduct|b14_profile|product_review",
-        "vproduct|b14_idea_select|0",
-        "vproduct|asset_skip",
-        "vproduct|asset_skip_confirm",
-        "vproduct|b14_creative_done",
+        "vprofile|count|2",
+        f"vprofile|select|{_scene2_profile_id()}",
+        "vprofile|context|1",
+        "vprofile|requirements_skip",
+        "vprofile|assets|none",
+        "vprofile|build",
     ):
         _press(user_id, callback)
         session = bot.get_video_session(user_id)
