@@ -74,6 +74,14 @@ PRODUCT_VIDEO_DISPATCH_OUTBOX_STATES = (
     "completed",
     "terminal_failed",
 )
+PRODUCT_VIDEO_PREMATURE_DISPATCH_FAILURE_REASONS = frozenset(
+    {
+        "dispatch_not_started_dispatch_outbox_job_not_claimable",
+        "dispatch_not_started_processing_job_has_no_claimable_scene",
+        "dispatch_not_started_video_job_claim_conflict",
+        "dispatch_not_started_dispatch_outbox_ack_conflict",
+    }
+)
 
 _PRODUCT_VIDEO_WATCHDOG_SCHEDULER_STATE: dict[str, Any] = {
     "watchdog_enabled": True,
@@ -1824,6 +1832,23 @@ def product_video_dispatch_outbox_debug_contract(
         "dispatch_outbox_due": due,
         "dispatch_outbox_retry_seconds_remaining": retry_seconds_remaining,
         "dispatch_outbox_attempt_count": _as_int(item.get("attempt_count"), 0),
+        "dispatch_claim_attempt_count": _as_int(
+            truth.get("dispatch_claim_attempt_count") or item.get("dispatch_claim_attempt_count"),
+            0,
+        ),
+        "dispatch_claim_failure_count": _as_int(
+            truth.get("dispatch_claim_failure_count") or item.get("dispatch_claim_failure_count"),
+            0,
+        ),
+        "dispatch_first_due_claim_attempted": bool(
+            truth.get("dispatch_first_due_claim_attempted")
+            or item.get("dispatch_first_due_claim_attempted")
+        ),
+        "dispatch_terminal_transition_source": str(
+            truth.get("dispatch_terminal_transition_source")
+            or item.get("dispatch_terminal_transition_source")
+            or ""
+        ),
         "dispatch_outbox_retry_count": _as_int(item.get("attempt_count"), 0),
         "dispatch_outbox_retry_reason": str(item.get("last_error") or ""),
         "dispatch_outbox_last_attempt_at": str(item.get("last_attempt_at") or ""),
@@ -1835,6 +1860,68 @@ def product_video_dispatch_outbox_debug_contract(
         "dispatch_outbox_last_error": str(item.get("last_error") or ""),
         "dispatch_outbox_terminal_reason": str(item.get("terminal_reason") or ""),
         "dispatch_outbox_exact_claim_block_reason": exact_reason,
+    }
+
+
+def product_video_dispatch_status_authority(
+    job: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    outbox: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Resolve pre-submit Product Video status from durable dispatch truth."""
+    job = dict(job or {})
+    result = dict(result or {})
+    outbox = dict(outbox or {})
+    outbox_status = str(outbox.get("dispatch_status") or result.get("dispatch_outbox_status") or "").strip().lower()
+    provider_task_alive = bool(
+        result.get("provider_task_alive")
+        or str(result.get("provider_task_id") or result.get("provider_video_id") or "").strip()
+        or any(
+            _product_video_scene_task_identity(item)
+            for item in (result.get("scene_tasks") or result.get("provider_scene_tasks") or [])
+            if isinstance(item, dict)
+        )
+    )
+    delivered = bool(
+        result.get("final_delivered")
+        or result.get("delivered")
+        or result.get("telegram_delivery_succeeded")
+        or result.get("video_delivery_message_id")
+    )
+    job_failed = str(job.get("status") or "").strip().lower() == "failed"
+    terminal = bool(
+        outbox_status == "terminal_failed"
+        or str(result.get("terminal_state") or "").strip().lower() == "failed_no_charge"
+        or job_failed
+    )
+    if delivered:
+        canonical = "success"
+        public_stage = "delivered"
+        source = "final_delivery"
+    elif terminal:
+        canonical = "failed_no_charge"
+        public_stage = "failed_no_charge"
+        source = "dispatch_terminal"
+    elif provider_task_alive:
+        canonical = "processing"
+        public_stage = "processing"
+        source = "provider_task"
+    elif outbox_status in {"leased", "acknowledged"}:
+        canonical = "processing"
+        public_stage = "processing"
+        source = "dispatch_claimed"
+    else:
+        canonical = "queued"
+        public_stage = "preparing"
+        source = "dispatch_outbox"
+    return {
+        "dispatch_status_authority": source,
+        "dispatch_canonical_status": canonical,
+        "dispatch_public_stage": public_stage,
+        "dispatch_status_consistent": not bool(
+            canonical == "failed_no_charge"
+            and str(result.get("aggregate_status") or "").strip().lower() == "processing_scenes"
+        ),
     }
 
 
@@ -2327,8 +2414,13 @@ def product_video_dispatch_outbox_diagnostic(
         "valid_provider_task_count": _as_int(watchdog.get("valid_provider_task_count"), 0),
         "valid_scene_clip_count": _as_int(watchdog.get("valid_scene_clip_count"), 0),
         "zero_task_watchdog_triggered": bool(watchdog.get("zero_task_watchdog_triggered")),
+        "dispatch_claim_attempt_count": _as_int(result.get("dispatch_claim_attempt_count"), 0),
+        "dispatch_claim_failure_count": _as_int(result.get("dispatch_claim_failure_count"), 0),
+        "dispatch_first_due_claim_attempted": bool(result.get("dispatch_first_due_claim_attempted")),
+        "dispatch_terminal_transition_source": str(result.get("dispatch_terminal_transition_source") or ""),
         **route_contract,
     }
+    diagnostic.update(product_video_dispatch_status_authority(job, result, outbox))
     diagnostic.update(
         product_video_dispatch_outbox_debug_contract(
             outbox,
@@ -2512,7 +2604,7 @@ def retry_product_video_dispatch_outbox(
     current = product_video_outbox_time_text(current_dt)
     previous = conn.execute(
         """SELECT o.available_at,o.last_error,o.attempt_count,o.job_id,o.project_id,
-                  j.max_attempts,j.result_json
+                  j.max_attempts,j.result_json,o.dispatch_status,o.lease_owner,o.last_attempt_at
              FROM video_dispatch_outbox o
              JOIN video_jobs j ON j.id=o.job_id
             WHERE o.outbox_id=?""",
@@ -2526,6 +2618,23 @@ def retry_product_video_dispatch_outbox(
     previous_result = _json_loads(str((previous[6] if previous else "") or ""), {})
     if not isinstance(previous_result, dict):
         previous_result = {}
+    outbox_status = str((previous[7] if previous else "") or "").strip().lower()
+    lease_owner = str((previous[8] if previous else "") or "").strip()
+    lease_claim_recorded = bool(
+        previous
+        and outbox_status == "leased"
+        and lease_owner == str(worker_id or "")[:120]
+        and attempt_count > 0
+    )
+    recorded_failure_count = max(
+        _as_int(previous_result.get("dispatch_claim_failure_count"), 0),
+        max(0, attempt_count - 1) if lease_claim_recorded else 0,
+    )
+    claim_failure_count = recorded_failure_count + (1 if lease_claim_recorded else 0)
+    claim_attempt_count = max(
+        _as_int(previous_result.get("dispatch_claim_attempt_count"), 0),
+        attempt_count if lease_claim_recorded else 0,
+    )
     has_provider_task = bool(
         str(previous_result.get("provider_task_id") or previous_result.get("provider_video_id") or "").strip()
         or any(
@@ -2534,7 +2643,26 @@ def retry_product_video_dispatch_outbox(
             if isinstance(item, dict)
         )
     )
-    if previous and attempt_count >= max_attempts and not has_provider_task:
+    previous_result.update(
+        {
+            "dispatch_claim_attempt_count": claim_attempt_count,
+            "dispatch_claim_failure_count": claim_failure_count,
+            "dispatch_first_due_claim_attempted": bool(claim_attempt_count > 0),
+            "dispatch_last_claim_failure_reason": normalized_error if lease_claim_recorded else "",
+            "dispatch_last_claim_failure_at": current if lease_claim_recorded else "",
+            "dispatch_retry_exhausted": bool(
+                lease_claim_recorded and claim_failure_count >= max_attempts
+            ),
+            "dispatch_outbox_retry_reason": normalized_error,
+            "dispatch_outbox_retry_count": claim_failure_count,
+        }
+    )
+    if (
+        previous
+        and lease_claim_recorded
+        and claim_failure_count >= max_attempts
+        and not has_provider_task
+    ):
         terminal_reason = f"dispatch_not_started_{normalized_error}"
         previous_result.update(
             {
@@ -2549,6 +2677,10 @@ def retry_product_video_dispatch_outbox(
                 "provider_http_request_sent": False,
                 "provider_router_called": False,
                 "router_skip_reason": normalized_error,
+                "provider_submit_allowed": False,
+                "provider_submit_block_reason": terminal_reason,
+                "dispatch_terminal_transition_source": "dispatch_claim_retry_exhausted",
+                "dispatch_terminal_failure_reason": terminal_reason,
                 "charge": 0,
                 "charged_xu": 0,
             }
@@ -2597,8 +2729,306 @@ def retry_product_video_dispatch_outbox(
             str(worker_id or "")[:120],
         ),
     )
+    if cursor.rowcount == 1 and previous and not has_provider_task:
+        scene_count = max(
+            1,
+            _as_int(
+                previous_result.get("scene_count")
+                or previous_result.get("scenes_total")
+                or previous_result.get("scene_tasks_total"),
+                1,
+            ),
+        )
+        scene_tasks: list[dict[str, Any]] = []
+        for offset, item in enumerate(previous_result.get("scene_tasks") or [], start=1):
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            if not _product_video_scene_task_identity(row):
+                row.update(
+                    {
+                        "scene_index": max(1, _as_int(row.get("scene_index"), offset)),
+                        "status": "queued_waiting_for_dispatch",
+                        "current_scene_status": "queued_waiting_for_dispatch",
+                        "continue_polling": True,
+                    }
+                )
+            scene_tasks.append(row)
+        previous_result.update(
+            {
+                "status": "queued",
+                "canonical_status": "queued_waiting_for_dispatch",
+                "terminal_state": "",
+                "final_decision": "continue_polling",
+                "terminal": False,
+                "continue_polling": True,
+                "next_poll_scheduled": True,
+                "dispatch_outbox_status": "retry_wait",
+                "dispatch_outbox_available_at": available,
+                "dispatch_outbox_claimable": False,
+                "dispatch_outbox_claim_block_reason": "outbox_not_due",
+                "provider_router_called": False,
+                "router_skip_reason": f"outbox_not_claimable_{normalized_error}",
+                "scene_status_by_scene": {
+                    str(index): "queued_waiting_for_dispatch"
+                    for index in range(1, scene_count + 1)
+                },
+                "scene_tasks": scene_tasks,
+                "charge": 0,
+                "charged_xu": 0,
+            }
+        )
+        conn.execute(
+            """UPDATE video_jobs
+                  SET status='queued',result_json=?,last_error=?,progress_percent=10,
+                      progress_message='queued_waiting_for_dispatch',locked_by='',locked_at=NULL,
+                      lease_expires_at=NULL,completed_at=NULL,updated_at=?
+                WHERE id=?""",
+            (_json_dumps(previous_result), normalized_error, current, int(previous[3])),
+        )
+        conn.execute(
+            """UPDATE video_projects
+                  SET status='queued_for_worker',video_terminal_state='',error_log='',updated_at=?
+                WHERE project_id=?""",
+            (current, int(previous[4])),
+        )
+        conn.execute(
+            "UPDATE video_scenes SET scene_status='pending' WHERE project_id=? AND scene_status!='done'",
+            (int(previous[4]),),
+        )
     conn.commit()
     return cursor.rowcount == 1
+
+
+def product_video_premature_dispatch_failure_state(
+    job: dict[str, Any] | None,
+    project: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    outbox: dict[str, Any] | None,
+    *,
+    worker_compatible: bool = True,
+) -> dict[str, Any]:
+    """Classify the narrow no-submit terminal failure that may be reopened once."""
+    job = dict(job or {})
+    project = dict(project or {})
+    result = dict(result or {})
+    outbox = dict(outbox or {})
+    reason = str(
+        result.get("dispatch_terminal_failure_reason")
+        or result.get("dispatch_outbox_terminal_reason")
+        or outbox.get("terminal_reason")
+        or job.get("last_error")
+        or project.get("error_log")
+        or ""
+    ).strip()
+    submit_source = str(
+        result.get("submit_source")
+        or result.get("provider_submit_source")
+        or result.get("original_submit_source")
+        or ""
+    ).strip()
+    public_confirmed = bool(
+        result.get("public_user_confirmed")
+        or result.get("user_final_confirmed")
+        or result.get("invoice_confirmed")
+    )
+    scene_tasks = [
+        dict(item)
+        for item in (result.get("scene_tasks") or result.get("provider_scene_tasks") or [])
+        if isinstance(item, dict)
+    ]
+    provider_task_exists = bool(
+        str(result.get("provider_task_id") or result.get("provider_video_id") or "").strip()
+        or any(_product_video_scene_task_identity(item) for item in scene_tasks)
+    )
+    provider_attempted = bool(
+        result.get("provider_submit_called")
+        or result.get("provider_http_request_sent")
+        or _as_int(result.get("provider_http_status"), 0) > 0
+        or any(
+            bool(item.get("provider_http_request_sent"))
+            or _as_int(item.get("provider_http_status") or item.get("submit_http_status"), 0) > 0
+            for item in (result.get("provider_attempts") or [])
+            if isinstance(item, dict)
+        )
+    )
+    charged = bool(
+        _as_int(result.get("charged_xu") or result.get("charge"), 0) > 0
+        or result.get("wallet_charge_recorded")
+    )
+    recoverable_reason = bool(reason in PRODUCT_VIDEO_PREMATURE_DISPATCH_FAILURE_REASONS)
+    already_recovered = bool(result.get("premature_dispatch_recovery_used"))
+    recoverable = bool(
+        str(job.get("status") or "").strip().lower() == "failed"
+        and str(outbox.get("dispatch_status") or "").strip().lower() == "terminal_failed"
+        and submit_source == "public_user_final_confirm"
+        and public_confirmed
+        and worker_compatible
+        and recoverable_reason
+        and not provider_attempted
+        and not provider_task_exists
+        and not charged
+        and not already_recovered
+    )
+    return {
+        "premature_dispatch_failure_recoverable": recoverable,
+        "premature_dispatch_failure_reason": reason,
+        "premature_dispatch_failure_reason_allowed": recoverable_reason,
+        "premature_dispatch_recovery_used": already_recovered,
+        "premature_dispatch_public_confirmed": public_confirmed,
+        "premature_dispatch_worker_compatible": bool(worker_compatible),
+        "premature_dispatch_provider_attempted": provider_attempted,
+        "premature_dispatch_provider_task_exists": provider_task_exists,
+        "premature_dispatch_charge_recorded": charged,
+        "premature_dispatch_recovery_block_reason": "" if recoverable else (
+            "recovery_already_used"
+            if already_recovered
+            else "genuine_provider_terminal_failure"
+            if provider_attempted or provider_task_exists
+            else "wallet_charge_already_recorded"
+            if charged
+            else "worker_incompatible"
+            if not worker_compatible
+            else "failure_reason_not_recoverable"
+            if not recoverable_reason
+            else "public_final_confirm_missing"
+        ),
+    }
+
+
+def recover_product_video_premature_dispatch_failure(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    now: datetime | None = None,
+    worker_compatible: bool = True,
+) -> dict[str, Any]:
+    """Reopen one historical pre-router failure without creating a provider task."""
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    project = get_video_project(conn, int(job.get("project_id") or 0)) if job else {}
+    result = _json_loads(str(job.get("result_json") or ""), {}) if job else {}
+    if not isinstance(result, dict):
+        result = {}
+    outbox = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+    state = product_video_premature_dispatch_failure_state(
+        job,
+        project,
+        result,
+        outbox,
+        worker_compatible=worker_compatible,
+    )
+    if not state.get("premature_dispatch_failure_recoverable"):
+        return {**state, "premature_dispatch_recovered": False}
+    current = product_video_outbox_time_text(now)
+    scene_count = max(
+        1,
+        _as_int(result.get("scene_count") or result.get("scenes_total") or project.get("scene_count"), 1),
+    )
+    scene_tasks: list[dict[str, Any]] = []
+    for offset, item in enumerate(result.get("scene_tasks") or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row.update(
+            {
+                "scene_index": max(1, _as_int(row.get("scene_index"), offset)),
+                "status": "queued_waiting_for_dispatch",
+                "current_scene_status": "queued_waiting_for_dispatch",
+                "continue_polling": True,
+                "next_poll_at": "",
+            }
+        )
+        scene_tasks.append(row)
+    original_reason = str(state.get("premature_dispatch_failure_reason") or "")
+    result.update(
+        {
+            "status": "queued",
+            "canonical_status": "queued_waiting_for_dispatch",
+            "terminal_state": "",
+            "final_decision": "continue_polling",
+            "terminal": False,
+            "continue_polling": True,
+            "next_poll_scheduled": True,
+            "dispatch_outbox_status": "retry_wait",
+            "dispatch_outbox_available_at": current,
+            "dispatch_outbox_due": True,
+            "dispatch_outbox_claimable": True,
+            "dispatch_outbox_claim_block_reason": "",
+            "dispatch_claim_attempt_count_before_recovery": _as_int(
+                result.get("dispatch_claim_attempt_count") or outbox.get("attempt_count"),
+                0,
+            ),
+            "dispatch_claim_attempt_count": 0,
+            "dispatch_claim_failure_count": 0,
+            "dispatch_retry_exhausted": False,
+            "dispatch_terminal_transition_source": "",
+            "dispatch_terminal_failure_reason": "",
+            "premature_dispatch_recovery_used": True,
+            "premature_dispatch_recovery_count": 1,
+            "premature_dispatch_recovered_at": current,
+            "premature_dispatch_recovered_reason": original_reason,
+            "premature_dispatch_recovery_source": "zero_task_watchdog_before_claim",
+            "provider_submit_allowed": False,
+            "provider_submit_block_reason": "outbox_due_awaiting_claim",
+            "provider_router_called": False,
+            "router_skip_reason": "outbox_due_awaiting_claim",
+            "worker_claim_result": "premature_terminal_recovered_for_due_claim",
+            "worker_claim_block_reason": "",
+            "scene_status_by_scene": {
+                str(index): "queued_waiting_for_dispatch"
+                for index in range(1, scene_count + 1)
+            },
+            "scene_tasks": scene_tasks,
+            "charge": 0,
+            "charged_xu": 0,
+            "wallet_charge_recorded": False,
+        }
+    )
+    claimed_recovery = conn.execute(
+        """UPDATE video_jobs
+              SET status='queued',result_json=?,last_error='',progress_percent=10,
+                  progress_message='queued_waiting_for_dispatch',locked_by='',locked_at=NULL,
+                  lease_expires_at=NULL,completed_at=NULL,updated_at=?
+            WHERE id=? AND status='failed'""",
+        (_json_dumps(result), current, int(job_id)),
+    )
+    if claimed_recovery.rowcount != 1:
+        conn.commit()
+        return {
+            **state,
+            "premature_dispatch_recovered": False,
+            "premature_dispatch_recovery_block_reason": "recovery_claim_lost",
+        }
+    conn.execute(
+        """UPDATE video_projects
+              SET status='queued_for_worker',video_terminal_state='',video_terminal_locked_at=NULL,
+                  error_log='',completed_at=NULL,updated_at=?
+            WHERE project_id=?""",
+        (current, int(project.get("project_id") or 0)),
+    )
+    conn.execute(
+        """UPDATE video_dispatch_outbox
+              SET dispatch_status='retry_wait',available_at=?,attempt_count=0,last_attempt_at=NULL,
+                  lease_owner='',lease_expires_at=NULL,acknowledged_at=NULL,completed_at=NULL,
+                  last_error='premature_dispatch_failure_recovered',terminal_reason='',updated_at=?
+            WHERE outbox_id=? AND dispatch_status='terminal_failed'""",
+        (current, current, int(outbox.get("outbox_id") or 0)),
+    )
+    conn.execute(
+        "UPDATE video_scenes SET scene_status='pending' WHERE project_id=? AND scene_status!='done'",
+        (int(project.get("project_id") or 0),),
+    )
+    conn.commit()
+    recovered_job = get_video_render_job(conn, int(job_id))
+    recovered_outbox = get_product_video_dispatch_outbox(conn, job_id=int(job_id))
+    return {
+        **state,
+        "premature_dispatch_recovered": True,
+        "job_status_after_recovery": str(recovered_job.get("status") or ""),
+        "outbox_status_after_recovery": str(recovered_outbox.get("dispatch_status") or ""),
+        "outbox_id": _as_int(recovered_outbox.get("outbox_id"), 0),
+    }
 
 
 def enqueue_video_render_job(
@@ -4520,9 +4950,9 @@ def sweep_product_video_zero_task_watchdog(
         f"""SELECT j.id,j.project_id
               FROM video_jobs j
               JOIN video_projects p ON p.project_id=j.project_id
-             WHERE j.job_type=? AND j.status IN ('queued','processing')
+             WHERE j.job_type=? AND j.status IN ('queued','processing','failed')
                AND COALESCE(p.is_confirmed,0)=1
-               AND p.status IN ('queued_for_worker','processing'){extra}
+               AND p.status IN ('queued_for_worker','processing','failed'){extra}
              ORDER BY j.created_at ASC,j.id ASC
              LIMIT ?""",
         params,
@@ -4548,6 +4978,25 @@ def sweep_product_video_zero_task_watchdog(
         result = _json_loads(str(job.get("result_json") or ""), {})
         if not isinstance(result, dict):
             result = {}
+        if str(job.get("status") or "").strip().lower() == "failed":
+            recovery = recover_product_video_premature_dispatch_failure(
+                conn,
+                job_id=int(job["id"]),
+                now=current_dt,
+                worker_compatible=bool(
+                    result.get("worker_compatible")
+                    or result.get("admission_worker_version_compatible")
+                    or result.get("worker_connected")
+                ),
+            )
+            if not recovery.get("premature_dispatch_recovered"):
+                continue
+            report["recovered"] += 1
+            job = get_video_render_job(conn, int(row[0]))
+            project = get_video_project(conn, int(row[1]))
+            result = _json_loads(str(job.get("result_json") or ""), {})
+            if not isinstance(result, dict):
+                result = {}
         result.update(canonical_product_video_route_contract(project, result))
         preliminary = product_video_zero_task_watchdog_state(job, result, now=current_dt)
         if not preliminary.get("zero_task_progress_guard"):
@@ -4665,7 +5114,89 @@ def sweep_product_video_zero_task_watchdog(
         active_lease = bool(outbox_lease_active or scene_lease_active)
         recovery_action = ""
         terminal_reason = ""
-        if not candidates:
+        claim_attempt_count = max(
+            _as_int(result.get("dispatch_claim_attempt_count"), 0),
+            _as_int(outbox.get("attempt_count"), 0),
+        )
+        max_claim_attempts = max(1, _as_int(job.get("max_attempts"), 3))
+        claim_retries_exhausted = bool(
+            result.get("dispatch_retry_exhausted")
+            or (
+                claim_attempt_count >= max_claim_attempts
+                and bool(outbox.get("last_attempt_at"))
+            )
+        )
+        if not candidates and not active_lease and not claim_retries_exhausted:
+            if not outbox:
+                outbox = ensure_product_video_dispatch_outbox(
+                    conn,
+                    job_id=int(job["id"]),
+                    project_id=int(project["project_id"]),
+                    scene_indexes=list(range(1, max(1, _as_int(result.get("scene_count"), 1)) + 1)),
+                    now=current_dt,
+                )
+            wait_reason = str(
+                eligibility.get("provider_submit_block_reason")
+                or eligibility.get("provider_submit_block_reason_at_candidate_resolver")
+                or eligibility.get("blocker")
+                or "no_eligible_provider_before_scene_dispatch"
+            )
+            result.update(
+                {
+                    **watchdog,
+                    **worker_scan,
+                    "status": "queued",
+                    "canonical_status": "queued_waiting_for_dispatch",
+                    "terminal_state": "",
+                    "final_decision": "retry_dispatch",
+                    "terminal": False,
+                    "continue_polling": True,
+                    "next_poll_scheduled": True,
+                    "zero_task_watchdog_checked_at": current,
+                    "zero_task_recovery_action": "await_due_claim_retry",
+                    "zero_task_terminal_reason": "",
+                    "provider_submit_allowed": False,
+                    "provider_submit_block_reason": wait_reason,
+                    "provider_router_called": False,
+                    "router_skip_reason": f"outbox_not_claimable_{wait_reason}",
+                    "dispatch_claim_attempt_count": claim_attempt_count,
+                    "dispatch_claim_failure_count": max(
+                        _as_int(result.get("dispatch_claim_failure_count"), 0),
+                        claim_attempt_count,
+                    ),
+                    "dispatch_retry_exhausted": False,
+                    "dispatch_terminal_transition_source": "",
+                    "dispatch_outbox_present": bool(outbox),
+                    "dispatch_outbox_status": str(outbox.get("dispatch_status") or "pending"),
+                    "charge": 0,
+                    "charged_xu": 0,
+                }
+            )
+            conn.execute(
+                """UPDATE video_jobs
+                      SET status='queued',result_json=?,progress_percent=10,
+                          progress_message='queued_waiting_for_dispatch',locked_by='',locked_at=NULL,
+                          lease_expires_at=NULL,completed_at=NULL,updated_at=?
+                    WHERE id=?""",
+                (_json_dumps(result), current, int(job["id"])),
+            )
+            conn.execute(
+                "UPDATE video_projects SET status='queued_for_worker',video_terminal_state='',updated_at=? WHERE project_id=?",
+                (current, int(project["project_id"])),
+            )
+            conn.commit()
+            report["details"].append(
+                {
+                    "job_id": int(job["id"]),
+                    "project_id": int(project["project_id"]),
+                    "action": "await_due_claim_retry",
+                    "reason": wait_reason,
+                    "claim_attempt_count": claim_attempt_count,
+                    "max_claim_attempts": max_claim_attempts,
+                }
+            )
+            continue
+        if not candidates and not active_lease:
             if not outbox:
                 outbox = ensure_product_video_dispatch_outbox(
                     conn,
@@ -4705,6 +5236,13 @@ def sweep_product_video_zero_task_watchdog(
                     "no_charge_verified": _as_int(result.get("charged_xu") or result.get("charge"), 0) == 0,
                     "worker_claim_result": "blocked_no_eligible_provider",
                     "worker_claim_block_reason": terminal_reason,
+                    "dispatch_claim_attempt_count": claim_attempt_count,
+                    "dispatch_claim_failure_count": max(
+                        _as_int(result.get("dispatch_claim_failure_count"), 0),
+                        claim_attempt_count,
+                    ),
+                    "dispatch_retry_exhausted": True,
+                    "dispatch_terminal_transition_source": "dispatch_claim_retry_exhausted",
                     "dispatch_outbox_present": bool(outbox),
                     "dispatch_outbox_status": "terminal_failed" if outbox else "",
                 },

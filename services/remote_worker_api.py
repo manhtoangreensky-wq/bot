@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from services import video_project_queue, video_provider_router
-from services.video_provider_catalog import model_metadata_from_resolution, resolve_product_video_model
+from services.video_provider_catalog import (
+    model_interface_contract,
+    model_metadata_from_resolution,
+    resolve_product_video_model,
+    selected_model_for_provider,
+)
 
 
 SECRET_KEY_MARKERS = (
@@ -773,6 +778,32 @@ def _product_video_public_confirmed_for_owner_worker(project: dict) -> bool:
         and flags["source"] == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE
         and flags["render_mode"] == RENDER_MODE_REAL
         and flags["provider_call"]
+    )
+
+
+def _product_video_result_confirmed_for_owner_worker(project: dict, result: dict | None = None) -> bool:
+    """Use durable final-confirm truth when old project JSON omitted confirm fields."""
+    result = dict(result or {})
+    flags = _product_video_safety_flags(project)
+    source = str(
+        result.get("submit_source")
+        or result.get("provider_submit_source")
+        or result.get("original_submit_source")
+        or ""
+    ).strip()
+    confirmed = bool(
+        result.get("public_user_confirmed")
+        or result.get("user_final_confirmed")
+        or result.get("invoice_confirmed")
+    )
+    return bool(
+        confirmed
+        and source == "public_user_final_confirm"
+        and (flags["source"] == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE or result.get("source") == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
+        and (flags["render_mode"] == RENDER_MODE_REAL or str(result.get("render_mode") or "") == RENDER_MODE_REAL)
+        and (flags["provider_call"] or _safe_bool(result.get("provider_call")))
+        and not flags["test_pattern"]
+        and not flags["fake_renderer_allowed"]
     )
 
 
@@ -2064,15 +2095,51 @@ def _product_video_runtime_eligibility(
         if isinstance(contract_chain, str)
         else [str(item or "").strip() for item in (contract_chain or []) if str(item or "").strip()]
     )
+    selected_probation_model = str(
+        selected_model_for_provider(result, selected_probation_provider)
+        or result.get("selected_model")
+        or ("veo3.1-fast" if selected_probation_provider == "shopaikey_video" else "")
+    ).strip()
+    selected_probation_interface = str(
+        result.get("selected_provider_interface")
+        or result.get("provider_interface")
+        or "text_to_video"
+    ).strip()
+    selected_probation_contract = (
+        model_interface_contract(selected_probation_provider, selected_probation_model)
+        if selected_probation_provider and selected_probation_model
+        else {}
+    )
+    selected_probation_contract_valid = bool(
+        selected_probation_contract
+        and str(selected_probation_contract.get("contract_validation_status") or "").strip().lower() == "ok"
+        and not selected_probation_contract.get("submit_skipped_due_to_contract")
+    )
     if (
         selected_probation_provider
         and str(result.get("admission_mode") or "") == video_project_queue.PRODUCT_VIDEO_PROBATION_ADMISSION_MODE
+        and selected_probation_contract_valid
         and selected_probation_provider not in contract_chain
     ):
         contract_chain.insert(0, selected_probation_provider)
     persisted_hard_blocks = result.get("provider_hard_block_reason_by_provider")
     if not isinstance(persisted_hard_blocks, dict):
         persisted_hard_blocks = {}
+    else:
+        persisted_hard_blocks = dict(persisted_hard_blocks)
+    if selected_probation_provider:
+        selected_persisted_reason = str(persisted_hard_blocks.get(selected_probation_provider) or "").strip()
+        if selected_probation_contract_valid and selected_persisted_reason == "provider_model_interface_contract_invalid":
+            persisted_hard_blocks.pop(selected_probation_provider, None)
+        elif not selected_probation_contract_valid:
+            contract_reason = str(
+                selected_probation_contract.get("contract_block_reason")
+                or "provider_model_interface_contract_invalid"
+            ).strip()
+            persisted_hard_blocks[selected_probation_provider] = (
+                f"model_contract_invalid_{selected_probation_provider}_{selected_probation_model or 'missing'}_"
+                f"{selected_probation_interface or 'missing'}:{contract_reason}"
+            )
     persisted_freeze_truth = result.get("product_video_freeze_truth")
     if not isinstance(persisted_freeze_truth, dict):
         persisted_freeze_truth = {}
@@ -2171,6 +2238,13 @@ def _product_video_runtime_eligibility(
             evaluated.get("probation_reject_reason")
             or lock_truth.get("probation_lock_reject_reason")
             or ""
+        ),
+        "selected_probation_contract_provider": selected_probation_provider,
+        "selected_probation_contract_model": selected_probation_model,
+        "selected_probation_contract_interface": selected_probation_interface,
+        "selected_probation_contract_valid": selected_probation_contract_valid,
+        "selected_probation_contract_reject_reason": "" if selected_probation_contract_valid else str(
+            persisted_hard_blocks.get(selected_probation_provider) or ""
         ),
     }
 
@@ -2370,14 +2444,26 @@ def _claim_video_render_candidate(
                     continue
                 elif dispatch_outbox.get("dispatch_status") in {"pending", "retry_wait", "leased"}:
                     continue
+                result_payload = video_project_queue._json_loads(job.get("result_json"), {})
+                if not isinstance(result_payload, dict):
+                    result_payload = {}
+                public_confirmed_dispatch_recovery = bool(
+                    dispatch_outbox_claim
+                    and owner_product_video_only
+                    and _product_video_result_confirmed_for_owner_worker(project, result_payload)
+                )
                 if _product_video_is_claimable(
                     project,
                     owner_only=bool(owner_product_video_only),
                     public_enabled=bool(public_enabled),
-                ):
-                    result_payload = video_project_queue._json_loads(job.get("result_json"), {})
-                    if not isinstance(result_payload, dict):
-                        result_payload = {}
+                ) or public_confirmed_dispatch_recovery:
+                    if public_confirmed_dispatch_recovery:
+                        result_payload.update(
+                            {
+                                "durable_public_confirm_truth_used_for_claim": True,
+                                "durable_public_confirm_truth_source": "job_result_json",
+                            }
+                        )
                     scene_task_rows = [
                         dict(item)
                         for item in (result_payload.get("scene_tasks") or result_payload.get("provider_scene_tasks") or [])
@@ -2454,19 +2540,24 @@ def _claim_video_render_candidate(
                             }
                         )
                         if not runtime_candidates and not has_existing_provider_task and not has_existing_scene_clip:
-                            blocker = "no_eligible_provider_before_scene_dispatch"
+                            blocker = str(
+                                runtime_eligibility.get("provider_submit_block_reason")
+                                or runtime_eligibility.get("blocker")
+                                or "no_eligible_provider_before_scene_dispatch"
+                            )
                             result_payload.update(
                                 {
-                                    "admission_result": "blocked",
+                                    "admission_result": "retry_wait",
                                     "admission_block_reason": blocker,
+                                    "router_skip_reason": blocker,
                                     "router_skipped_reason": blocker,
                                     "provider_submit_allowed": False,
                                     "provider_submit_block_reason": blocker,
-                                    "terminal_state": "failed_no_charge",
-                                    "final_decision": "failed_no_charge",
-                                    "zero_task_terminal_reason": blocker,
-                                    "continue_polling": False,
-                                    "next_poll_scheduled": False,
+                                    "terminal_state": "",
+                                    "final_decision": "retry_dispatch",
+                                    "zero_task_terminal_reason": "",
+                                    "continue_polling": True,
+                                    "next_poll_scheduled": True,
                                     "provider_http_request_sent": False,
                                     "provider_http_status": 0,
                                     "fallback_allowed": False,
@@ -2479,32 +2570,16 @@ def _claim_video_render_candidate(
                             )
                             conn.execute(
                                 """UPDATE video_jobs
-                                      SET status='failed',result_json=?,last_error=?,progress_percent=10,
-                                          progress_message=?,completed_at=COALESCE(completed_at,?),updated_at=?
+                                      SET result_json=?,last_error=?,progress_percent=10,
+                                          progress_message='queued_waiting_for_dispatch',updated_at=?
                                     WHERE id=?""",
                                 (
                                     video_project_queue._json_dumps(result_payload),
                                     blocker,
-                                    blocker,
-                                    current,
                                     current,
                                     int(job["id"]),
                                 ),
                             )
-                            conn.execute(
-                                """UPDATE video_projects
-                                      SET status='failed',video_terminal_state='failed_no_charge',error_log=?,updated_at=?
-                                    WHERE project_id=?""",
-                                (blocker, current, int(job["project_id"])),
-                            )
-                            if dispatch_outbox.get("outbox_id"):
-                                conn.execute(
-                                    """UPDATE video_dispatch_outbox
-                                          SET dispatch_status='terminal_failed',terminal_reason=?,last_error=?,
-                                              lease_owner='',lease_expires_at=NULL,updated_at=?
-                                        WHERE outbox_id=?""",
-                                    (blocker, blocker, current, int(dispatch_outbox["outbox_id"])),
-                                )
                             continue
                     claim_state = video_project_queue.product_video_processing_scene_claim_state(
                         job,
@@ -2516,6 +2591,29 @@ def _claim_video_render_candidate(
                     if claim_state.get("failed_no_charge"):
                         result_payload.update(claim_state)
                         blocker = str(claim_state.get("zero_task_terminal_reason") or "no_eligible_provider_before_scene_dispatch")
+                        if dispatch_outbox_claim and not has_existing_provider_task and not has_existing_scene_clip:
+                            result_payload.update(
+                                {
+                                    "terminal_state": "",
+                                    "final_decision": "retry_dispatch",
+                                    "zero_task_terminal_reason": "",
+                                    "continue_polling": True,
+                                    "next_poll_scheduled": True,
+                                    "provider_submit_allowed": False,
+                                    "provider_submit_block_reason": blocker,
+                                    "router_skip_reason": blocker,
+                                }
+                            )
+                            conn.execute(
+                                "UPDATE video_jobs SET result_json=?,last_error=?,progress_percent=10,progress_message='queued_waiting_for_dispatch',updated_at=? WHERE id=?",
+                                (
+                                    video_project_queue._json_dumps(result_payload),
+                                    blocker,
+                                    current,
+                                    int(job["id"]),
+                                ),
+                            )
+                            continue
                         conn.execute(
                             "UPDATE video_jobs SET status='failed', result_json=?, last_error=?, progress_percent=?, progress_message=?, completed_at=?, updated_at=? WHERE id=?",
                             (
