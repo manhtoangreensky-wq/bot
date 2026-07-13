@@ -94132,6 +94132,7 @@ def video_public_status_text() -> str:
         f"• owner last claim/idle: <code>{html.escape(str(product_worker.get('last_claim_at') or '-'))}/{html.escape(str(product_worker.get('last_idle_claim_at') or '-'))}</code>",
         f"• owner heartbeat refresh source: <code>{html.escape(str(product_worker.get('heartbeat_refresh_source') or '-'))}</code>",
         f"• heartbeat selected by: <code>{html.escape(str(product_worker.get('heartbeat_record_selected_by') or '-'))}</code>",
+        f"• heartbeat SHA source bug: <code>{video_public_bool_label(product_worker.get('heartbeat_sha_source_bug'))}</code>",
         f"• stale worker SHA ignored: <code>{video_public_bool_label(product_worker.get('stale_worker_sha_ignored'))}</code>",
         f"• owner capability version: <code>{html.escape(str(product_worker.get('worker_capability_version') or '-'))}</code>",
         f"• owner admission blocker: <code>{html.escape(str(product_worker.get('worker_admission_block_reason') or '-'))}</code>",
