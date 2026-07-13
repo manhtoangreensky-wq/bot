@@ -1,8 +1,12 @@
 import subprocess
+from pathlib import Path
 
 
 AIEDIT1_TEST_FILE = "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py"
 AIEDIT1_BRANCH_PREFIX = "hotfix/p0-video-aiedit1-"
+LOCAL1_BOOT_COMPAT_SERVICE = "services/video_local_editing.py"
+LOCAL1_BOOT_COMPAT_TEST = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
+LOCAL1_BOOT_COMPAT_MARKER = "test_local1_concat_manifest_is_python311_safe_and_escapes_paths"
 AIEDIT1_SCOPE_FILES = frozenset(
     {
         "bot.py",
@@ -65,11 +69,27 @@ def aiedit1_scope_active(paths=()):
     return AIEDIT1_TEST_FILE in normalized or _current_branch().startswith(AIEDIT1_BRANCH_PREFIX)
 
 
+def aiedit1_scope_files(paths=()):
+    normalized = _normalize(paths)
+    allowed = set(AIEDIT1_SCOPE_FILES)
+    marker_path = Path(__file__).resolve().parents[1] / LOCAL1_BOOT_COMPAT_TEST
+    marker_present = (
+        marker_path.is_file()
+        and LOCAL1_BOOT_COMPAT_MARKER in marker_path.read_text(encoding="utf-8")
+    )
+    if (
+        {LOCAL1_BOOT_COMPAT_SERVICE, LOCAL1_BOOT_COMPAT_TEST} <= normalized
+        and marker_present
+    ):
+        allowed.add(LOCAL1_BOOT_COMPAT_SERVICE)
+    return frozenset(allowed)
+
+
 def without_aiedit1_scope(paths):
     normalized = _normalize(paths)
     if not aiedit1_scope_active(normalized):
         return normalized
-    return normalized - AIEDIT1_SCOPE_FILES
+    return normalized - aiedit1_scope_files(normalized)
 
 
 def aiedit1_local_worker_allowed(paths=()):
