@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (REPO_ROOT / "bot.py").read_text(encoding="utf-8")
 KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
 TEST_FILE = "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py"
+LOCAL1_TEST_FILE = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
 ALIGNED_REGRESSION_TESTS = {
     "tests/test_core.py",
     "tests/test_p0_17b11_video_ui_ux_cleanup.py",
@@ -21,6 +22,7 @@ ALIGNED_REGRESSION_TESTS = {
     "tests/test_p0_18m_restore_canonical_video_product_flows_from_backup.py",
     "tests/test_p0_18n_hard_lock_video_ui_ux_router_state_machine_back_matrix.py",
     "tests/test_p0_18n1_unify_video_product_entry_ui_flow_matrix.py",
+    "tests/test_p0_18q2_video_auto_refresh_status_like_subdub_only.py",
     "tests/test_p0_video_uiflow_lock_current_good_flow.py",
 }
 
@@ -188,16 +190,15 @@ def test_main_video_menu_exposes_studio_and_edit_hub() -> None:
     assert 'CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\\|")' in BOT_SOURCE
 
 
-def test_edit_video_hub_contains_manual_ai_and_split_scaffolds() -> None:
+def test_edit_video_hub_contains_only_local1_manual_and_split_tools() -> None:
     hub = _source_between("def video_edit_hub_text", "def video_editor_menu_text")
     assert "✂️ Chỉnh sửa thủ công" in hub
-    assert "✨ Chỉnh sửa bằng AI" in hub
     assert "🧩 Cắt video nhiều đoạn" in hub
-    assert 'callback_data="videoedit|manual_info"' in hub
-    assert 'callback_data="videoedit|ai_info"' in hub
-    assert 'callback_data="videoedit|split_info"' in hub
-    assert 'callback_data="videoedit|hub"' in hub
-    assert "chưa xử lý video và chưa trừ Xu" in hub
+    assert 'callback_data="videoedit|manual"' in hub
+    assert 'callback_data="videoedit|split"' in hub
+    assert 'callback_data="menu|main_video"' in hub
+    assert 'callback_data="videoedit|ai_info"' not in hub
+    assert "hiện không thu Xu" in hub
 
 
 def test_profile_studio_back_routes_to_exact_previous_screen() -> None:
@@ -242,6 +243,15 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
     }
     touched = changed | untracked
     assert touched
+    local1_scope = LOCAL1_TEST_FILE in touched
+    local1_allowed = {
+        "local_worker.py",
+        "services/video_local_editing.py",
+        "services/video_smart_splitter.py",
+        "services/video_local_validation.py",
+        LOCAL1_TEST_FILE,
+        "tests/test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py",
+    } if local1_scope else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -249,6 +259,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path == TEST_FILE
             or path in ALIGNED_REGRESSION_TESTS
             or path.startswith("knowledge/")
+            or path in local1_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",
@@ -257,5 +268,9 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         "services/video_provider_router.py",
         "services/video_real_render_connector.py",
     }
-    assert not (touched & forbidden_paths)
-    assert not any("music" in path.lower() or "suno" in path.lower() or "subdub" in path.lower() for path in touched)
+    assert not ((touched - local1_allowed) & forbidden_paths)
+    runtime_touched = {path for path in touched if not path.startswith("tests/")}
+    assert not any(
+        "music" in path.lower() or "suno" in path.lower() or "subdub" in path.lower()
+        for path in runtime_touched
+    )

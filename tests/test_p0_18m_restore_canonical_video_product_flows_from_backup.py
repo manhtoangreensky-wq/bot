@@ -345,14 +345,12 @@ def test_video_prompt_vault_use_prompt_routes_back_to_video():
     assert session.get("product_id") in bot.VIDEO_PRODUCT_REGISTRY
 
 
-def test_video_local_edit_routes_to_scaffold_hub():
+def test_video_local_edit_routes_to_local1_hub():
     text, markup, session = _press(180022, "videoedit|hub")
     callbacks = _callbacks(markup)
     assert "Chỉnh sửa video" in text
-    assert "videoedit|manual_info" in callbacks
-    assert "videoedit|ai_info" in callbacks
-    assert "videoedit|split_info" in callbacks
-    assert "chưa xử lý video" in text
+    assert callbacks == ["videoedit|manual", "videoedit|split", "menu|main_video"]
+    assert "hiện không thu Xu" in text
     assert session.get("video_tool") == "video_local_edit"
 
 
