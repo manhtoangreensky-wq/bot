@@ -97,7 +97,7 @@ from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
-from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
+from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
 from services.video_provider_base import VideoPollResult, mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -1151,6 +1151,7 @@ STORAGE_CLEANUP_AUTO_ENABLED = env_flag("STORAGE_CLEANUP_AUTO_ENABLED", "false")
 STORAGE_CLEANUP_MAX_SCAN_FILES = max(100, env_int("STORAGE_CLEANUP_MAX_SCAN_FILES", 10000))
 STORAGE_CLEANUP_MAX_DELETE_FILES = max(1, env_int("STORAGE_CLEANUP_MAX_DELETE_FILES", 500))
 STORAGE_CLEANUP_CONFIRM_TOKEN = "CONFIRM_TTL"
+STORAGE_DAILY_MAINTENANCE_ENABLED = env_flag("STORAGE_DAILY_MAINTENANCE_ENABLED", "true")
 STORAGE_WEEKLY_MAINTENANCE_ENABLED = env_flag("STORAGE_WEEKLY_MAINTENANCE_ENABLED", "true")
 STORAGE_WEEKLY_BASE_DIR = _env("STORAGE_WEEKLY_BASE_DIR", "/data" if is_railway_runtime() else "files")
 STORAGE_WEEKLY_MAINTENANCE_DAY = _env("STORAGE_WEEKLY_MAINTENANCE_DAY", "sunday").strip().lower() or "sunday"
@@ -89384,25 +89385,146 @@ async def storage_weekly_maintenance_loop():
     await asyncio.sleep(60)
     while True:
         try:
-            if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
-                payload = await asyncio.to_thread(storage_weekly_status_payload)
-                if payload.get("due"):
-                    report = await asyncio.to_thread(run_storage_weekly_report, confirm=True)
+            if STORAGE_DAILY_MAINTENANCE_ENABLED:
+                daily_config = await asyncio.to_thread(storage_maintenance_config)
+                daily_status = await asyncio.to_thread(storage_maintenance_service.maintenance_status, daily_config)
+                if daily_status.get("daily_due") and daily_status.get("last_daily_run", {}).get("key") != daily_status.get("daily_current_key"):
+                    daily_report = await asyncio.to_thread(storage_maintenance_service.run_daily, daily_config, execute=True)
                     logger.info(
-                        "storage_weekly_maintenance | status=%s reason=%s week=%s freed=%s migrated=%s archived=%s ttl_deleted=%s",
+                        "storage_daily_maintenance | status=%s deleted=%s bytes=%s protected=%s",
+                        daily_report.status,
+                        daily_report.deleted_files,
+                        daily_report.deleted_bytes,
+                        daily_report.protected_files,
+                    )
+            if STORAGE_WEEKLY_MAINTENANCE_ENABLED:
+                weekly_config = await asyncio.to_thread(storage_maintenance_config)
+                weekly_status = await asyncio.to_thread(storage_maintenance_service.maintenance_status, weekly_config)
+                if weekly_status.get("weekly_due") and weekly_status.get("last_weekly_run", {}).get("key") != weekly_status.get("weekly_current_key"):
+                    report = await asyncio.to_thread(storage_maintenance_service.run_weekly, weekly_config, keep_backups=5, execute=True)
+                    logger.info(
+                        "storage_weekly_maintenance | status=%s deleted=%s bytes=%s protected=%s",
                         report.status,
-                        report.reason,
-                        report.week_key,
-                        report.bytes_freed,
-                        report.files_migrated,
-                        report.backups_archived_to_vps,
-                        report.temp_cache_deleted,
+                        report.deleted_files,
+                        report.deleted_bytes,
+                        report.protected_files,
                     )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("storage weekly maintenance skipped: %s", type(exc).__name__)
         await asyncio.sleep(300)
+
+
+def storage_maintenance_config():
+    backend = storage_maintenance_service.RAILWAY if is_railway_runtime() else storage_maintenance_service.VPS
+    config = storage_maintenance_service.config_from_env(backend=backend)
+    try:
+        protected = storage_cleanup_protected_paths()
+        running = storage_migration_running_paths()
+        config.protected_paths = tuple(sorted(set(config.protected_paths) | set(protected)))
+        config.running_paths = tuple(sorted(set(config.running_paths) | set(running)))
+        config.undelivered_paths = tuple(sorted(set(config.undelivered_paths) | set(protected)))
+    except Exception:
+        logger.warning("storage maintenance protected path snapshot unavailable")
+    return config
+
+
+def storage_maintenance_status_lines(payload: dict) -> list[str]:
+    last_daily = payload.get("last_daily_run") or {}
+    last_weekly = payload.get("last_weekly_run") or {}
+    return [
+        "<b>STORAGE MAINTENANCE STATUS</b>",
+        "",
+        f"- Backend: <code>{safe_html(payload.get('backend') or '-')}</code>",
+        f"- Root: <code>{safe_html(payload.get('storage_root') or '-')}</code>",
+        f"- Backup root: <code>{safe_html(payload.get('backup_root') or '-')}</code>",
+        f"- Daily: <code>{safe_html(payload.get('daily_schedule') or '-')}</code> / next <code>{safe_html(payload.get('daily_next_run') or '-')}</code>",
+        f"- Weekly: <code>{safe_html(payload.get('weekly_schedule') or '-')}</code> / next <code>{safe_html(payload.get('weekly_next_run') or '-')}</code>",
+        f"- Lock active: <code>{'yes' if payload.get('lock_active') else 'no'}</code>",
+        f"- Last daily: <code>{safe_html(last_daily.get('status') or '-')}</code> / <code>{safe_html(last_daily.get('key') or '-')}</code>",
+        f"- Last weekly: <code>{safe_html(last_weekly.get('status') or '-')}</code> / <code>{safe_html(last_weekly.get('key') or '-')}</code>",
+        "",
+        "Preview commands: <code>/storage_daily_cleanup_preview</code> and <code>/storage_weekly_cleanup_preview</code>.",
+    ]
+
+
+def storage_maintenance_report_lines(report, *, mode: str = "preview") -> list[str]:
+    payload = report.to_dict() if hasattr(report, "to_dict") else dict(report or {})
+    backup = payload.get("backup") or {}
+    lines = [
+        f"<b>STORAGE {str(payload.get('mode') or '').upper()} {mode.upper()}</b>",
+        "",
+        f"- Backend: <code>{safe_html(payload.get('backend') or '-')}</code>",
+        f"- Status: <code>{safe_html(payload.get('status') or '-')}</code>",
+        f"- Candidates: <code>{int(payload.get('candidate_files') or 0)}</code> / <code>{format_storage_bytes(payload.get('candidate_bytes') or 0)}</code>",
+        f"- Protected: <code>{int(payload.get('protected_files') or 0)}</code> / <code>{format_storage_bytes(payload.get('protected_bytes') or 0)}</code>",
+        f"- Deleted: <code>{int(payload.get('deleted_files') or 0)}</code> / <code>{format_storage_bytes(payload.get('deleted_bytes') or 0)}</code>",
+        f"- Backup valid/invalid/retained/candidates: <code>{int(backup.get('valid') or 0)}</code> / <code>{int(backup.get('invalid') or 0)}</code> / <code>{int(backup.get('retained') or 0)}</code> / <code>{int(backup.get('delete_candidates') or 0)}</code>",
+        f"- Next run: <code>{safe_html(payload.get('next_run') or '-')}</code>",
+    ]
+    errors = [str(item)[:120] for item in (payload.get("errors") or [])[:8]]
+    if errors:
+        lines.extend(["", "Warnings:"])
+        lines.extend(f"- <code>{safe_html(item)}</code>" for item in errors)
+    if bool(payload.get("dry_run")):
+        lines.extend(["", "No files changed. Execute only after reviewing this preview."])
+    return lines
+
+
+async def cmd_storage_maintenance_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    config = await asyncio.to_thread(storage_maintenance_config)
+    payload = await asyncio.to_thread(storage_maintenance_service.maintenance_status, config)
+    await reply_html_lines(update, storage_maintenance_status_lines(payload), limit=3900)
+
+
+async def cmd_storage_daily_cleanup_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    config = await asyncio.to_thread(storage_maintenance_config)
+    report = await asyncio.to_thread(storage_maintenance_service.run_daily, config, execute=False)
+    await reply_html_lines(update, storage_maintenance_report_lines(report), limit=3900)
+
+
+async def cmd_storage_daily_cleanup_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = {str(item).strip().lower() for item in (getattr(context, "args", []) or [])}
+    config = await asyncio.to_thread(storage_maintenance_config)
+    if "confirm" not in args:
+        report = await asyncio.to_thread(storage_maintenance_service.run_daily, config, execute=False)
+        return await reply_html_lines(update, storage_maintenance_report_lines(report, mode="confirm_missing"), limit=3900)
+    report = await asyncio.to_thread(storage_maintenance_service.run_daily, config, execute=True)
+    await reply_html_lines(update, storage_maintenance_report_lines(report, mode="execute"), limit=3900)
+
+
+async def cmd_storage_weekly_cleanup_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    config = await asyncio.to_thread(storage_maintenance_config)
+    report = await asyncio.to_thread(storage_maintenance_service.run_weekly, config, keep_backups=5, execute=False)
+    await reply_html_lines(update, storage_maintenance_report_lines(report), limit=3900)
+
+
+async def cmd_storage_weekly_cleanup_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = [str(item).strip().lower() for item in (getattr(context, "args", []) or [])]
+    keep = 5
+    for item in args:
+        if item.startswith("keep="):
+            try:
+                keep = max(1, min(50, int(item.split("=", 1)[1])))
+            except ValueError:
+                keep = 5
+    config = await asyncio.to_thread(storage_maintenance_config)
+    if "confirm" not in args:
+        report = await asyncio.to_thread(storage_maintenance_service.run_weekly, config, keep_backups=keep, execute=False)
+        return await reply_html_lines(update, storage_maintenance_report_lines(report, mode="confirm_missing"), limit=3900)
+    report = await asyncio.to_thread(storage_maintenance_service.run_weekly, config, keep_backups=keep, execute=True)
+    await reply_html_lines(update, storage_maintenance_report_lines(report, mode="execute"), limit=3900)
 
 
 def store_uploaded_worker_artifact(uploaded_path: str, *, job_id: int | str) -> dict:
@@ -194805,6 +194927,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("storage_weekly_status", cmd_storage_weekly_status))
     tg_app.add_handler(CommandHandler("storage_weekly_run_preview", cmd_storage_weekly_run_preview))
     tg_app.add_handler(CommandHandler("storage_weekly_run", cmd_storage_weekly_run))
+    tg_app.add_handler(CommandHandler("storage_maintenance_status", cmd_storage_maintenance_status))
+    tg_app.add_handler(CommandHandler("storage_daily_cleanup_preview", cmd_storage_daily_cleanup_preview))
+    tg_app.add_handler(CommandHandler("storage_daily_cleanup_run", cmd_storage_daily_cleanup_run))
+    tg_app.add_handler(CommandHandler("storage_weekly_cleanup_preview", cmd_storage_weekly_cleanup_preview))
+    tg_app.add_handler(CommandHandler("storage_weekly_cleanup_run", cmd_storage_weekly_cleanup_run))
     tg_app.add_handler(CommandHandler("storage_asset_refs", cmd_storage_asset_refs))
     tg_app.add_handler(CommandHandler("db_status", cmd_db_status))
     tg_app.add_handler(CommandHandler("security_log", cmd_security_log))
