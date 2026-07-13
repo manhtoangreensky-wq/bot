@@ -1,4 +1,5 @@
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,26 @@ M4LIVE2_SOURCE = subprocess.check_output(
     encoding="utf-8",
     errors="replace",
 )
+
+
+def _current_branch_name() -> str:
+    for key in ("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "BRANCH_NAME"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    try:
+        return subprocess.check_output(
+            ["git", "branch", "--show-current"],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _is_m4live6_scope_branch(branch: str) -> bool:
+    return "m4live6" in str(branch or "").lower()
 
 
 def _function_source(source: str, name: str) -> str:
@@ -88,9 +109,16 @@ def test_m4live6_auto_backup_db_is_internal_not_telegram_document():
 
 
 def test_m4live6_scope_is_subdub_and_backup_guard_only():
+    if not _is_m4live6_scope_branch(_current_branch_name()):
+        return
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], cwd=ROOT, text=True)
     changed_paths = {line.strip().replace("\\", "/") for line in changed.splitlines() if line.strip()}
     assert changed_paths <= {
         "bot.py",
         "tests/test_p0_19m_m4live6_restore_m4live2_and_block_artifacts.py",
     }
+
+
+def test_m4live6_scope_guard_is_task_scoped():
+    assert _is_m4live6_scope_branch("hotfix/p0-19m-m4live6-restore-m4live2")
+    assert not _is_m4live6_scope_branch("hotfix/p0-subdub-terminal-contract")

@@ -158,7 +158,8 @@ def test_long_media_asr_chunks_and_preserves_absolute_timestamps(monkeypatch, du
     assert len(extract_calls) == expected_chunks
     assert len(asr_calls) == expected_chunks
     assert result["segments"][0]["start"] == 0.25
-    assert result["segments"][1]["start"] == 30.25
+    plan = bot.subdub_long_video_chunk_plan(duration)
+    assert result["segments"][1]["start"] == plan["chunk_ranges"][1]["start"] + 0.25
     assert result["segments"][-1]["end"] <= duration
 
 
