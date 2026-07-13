@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import bot
+from aiedit1_scope_guard import aiedit1_local_worker_allowed
 
 
 USER_ID = 232614
@@ -478,5 +479,9 @@ def _local_worker_change_is_img2vid_only() -> bool:
 def test_current_download_engine_not_rewritten():
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True).splitlines()
     assert "providers/key4u_provider.py" not in changed
-    assert "local_worker.py" not in changed or _local_worker_change_is_img2vid_only()
+    assert (
+        "local_worker.py" not in changed
+        or _local_worker_change_is_img2vid_only()
+        or aiedit1_local_worker_allowed(changed)
+    )
     assert "remote_worker.py" not in changed

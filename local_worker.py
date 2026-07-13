@@ -55,6 +55,7 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
+from services import video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_local_validation
 
 
 def load_dotenv(path: str) -> None:
@@ -168,12 +169,19 @@ def poll_video_render_job() -> dict | None:
     return data.get("job") if data.get("ok") else None
 
 
-def update_job(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "") -> None:
+def update_job(
+    job_id,
+    status: str,
+    error_short: str = "",
+    output_url: str = "",
+    output_file_id: str = "",
+    detail_limit: int = 500,
+) -> None:
     payload = {
         "job_id": job_id,
         "status": status,
         "worker_id": LOCAL_WORKER_ID,
-        "error_short": str(error_short or "")[:500],
+        "error_short": str(error_short or "")[: max(500, min(4000, int(detail_limit or 500)))],
         "output_url": str(output_url or "")[:1000],
         "output_file_id": str(output_file_id or "")[:500],
     }
@@ -378,13 +386,13 @@ def run_frame_video_ffmpeg(image_paths: list[str], output_path: str, width: int,
         raise RuntimeError(first_line(result.stderr or result.stdout) or "ffmpeg_concat_failed")
 
 
-def telegram_send_video(
+def telegram_send_video_receipt(
     chat_id: str,
     video_path: str,
     caption: str = "",
     reply_markup: dict | None = None,
     filename: str = "",
-) -> str:
+) -> dict:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
     boundary = "----TOANAASLocalWorkerBoundary"
@@ -415,8 +423,32 @@ def telegram_send_video(
         data = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
     if not data.get("ok"):
         raise RuntimeError("telegram_send_video_failed")
-    videos = (data.get("result") or {}).get("video") or {}
-    return str(videos.get("file_id") or "")
+    result = data.get("result") or {}
+    videos = result.get("video") or {}
+    return {
+        "sent": True,
+        "file_id": str(videos.get("file_id") or ""),
+        "message_id": str(result.get("message_id") or ""),
+    }
+
+
+def telegram_send_video(
+    chat_id: str,
+    video_path: str,
+    caption: str = "",
+    reply_markup: dict | None = None,
+    filename: str = "",
+) -> str:
+    return str(
+        telegram_send_video_receipt(
+            chat_id,
+            video_path,
+            caption,
+            reply_markup=reply_markup,
+            filename=filename,
+        ).get("file_id")
+        or ""
+    )
 
 
 VIDEO_EDITOR_PRESET_FILTERS = {
@@ -741,6 +773,287 @@ def run_video_local_edit(job: dict) -> None:
             terminal_status,
             terminal_detail,
             output_file_id=",".join(item for item in output_file_ids if item)[:500],
+        )
+
+
+def _aiedit_progress(job_id, stage: str, **fields) -> None:
+    payload = {"aiedit1": 1, "stage": stage, **fields}
+    update_job(
+        job_id,
+        "running",
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        detail_limit=4000,
+    )
+
+
+def _aiedit_local_plan(payload: dict, source_path: str) -> dict:
+    raw = dict(payload.get("local_preprocess_plan") or {})
+    plan = default_manual_edit_plan(source_path)
+    plan["input_video"] = source_path
+    metadata = dict(payload.get("source_metadata") or {})
+    plan["trim"] = {
+        "start_ms": 0,
+        "end_ms": int(metadata.get("duration_ms") or int(float(metadata.get("duration") or 0) * 1000)),
+    }
+    crop = dict(plan.get("crop_or_fit") or {})
+    target_aspect = str(raw.get("crop_or_fit", {}).get("aspect_ratio") or payload.get("target_aspect_ratio") or "keep")
+    crop.update({"aspect_ratio": target_aspect, "mode": str(raw.get("crop_or_fit", {}).get("mode") or "fit")})
+    plan["crop_or_fit"] = crop
+    plan["color_preset"] = str(raw.get("color_preset") or "keep")
+    plan["sharpen"] = bool(raw.get("sharpen"))
+    plan["audio_normalize"] = bool(raw.get("audio_normalize"))
+    return plan
+
+
+def _aiedit_ready_provider_configs(payload: dict) -> list:
+    requested = str(payload.get("provider_name") or "").strip()
+    configs = [
+        item
+        for item in video_ai_edit_provider.configured_provider_chain(os.environ)
+        if video_ai_edit_provider.validate_provider_config(item).get("ok")
+    ]
+    if requested:
+        configs.sort(key=lambda item: 0 if item.provider_name == requested else 1)
+    return configs
+
+
+def _aiedit_submit_and_wait(job_id, payload: dict, config, source_path: str) -> dict:
+    _aiedit_progress(job_id, "submitting_edit", provider_status="submitting", poll_count=0)
+    submitted = video_ai_edit_provider.submit_video_edit(
+        config,
+        source_video_path=source_path,
+        prompt=str(payload.get("professional_prompt") or ""),
+        negative_prompt=str(payload.get("negative_prompt") or ""),
+        aspect_ratio=str(payload.get("target_aspect_ratio") or "9:16"),
+        duration_seconds=int(payload.get("target_duration_seconds") or 0),
+        job_id=str(job_id),
+        submit_source=str(payload.get("submit_source") or ""),
+        public_user_confirmed=bool(payload.get("public_user_confirmed")),
+    )
+    task_id = str(submitted.get("provider_task_id") or "")
+    if submitted.get("result_url_present"):
+        return {**submitted, "poll_count": 0}
+
+    def on_poll(status: dict) -> None:
+        _aiedit_progress(
+            job_id,
+            "ai_processing",
+            provider_task_id=task_id,
+            provider_status=str(status.get("status") or "running"),
+            poll_count=int(status.get("poll_count") or 0),
+            result_url_present=bool(status.get("result_url_present")),
+        )
+
+    return video_ai_edit_provider.wait_for_result(
+        config,
+        task_id,
+        progress=on_poll,
+    )
+
+
+def run_video_ai_edit(job: dict) -> None:
+    """Execute one confirmed AI edit without touching Product Video workers."""
+    job_id = job.get("id")
+    workspace: Path | None = None
+    terminal_status = "failed"
+    terminal: dict = {
+        "aiedit1": 1,
+        "stage": "failed_no_charge",
+        "reason": "ai_edit_worker_failed",
+        "charge": 0,
+        "charge_status": "not_charged",
+        "cleanup": "pending",
+    }
+    output_file_id = ""
+    result_url = ""
+    try:
+        payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        if not isinstance(payload, dict) or not payload.get("aiedit1_contract"):
+            raise video_ai_edit_validation.AiEditValidationError("ai_edit_contract_missing")
+        lane = str(payload.get("execution_lane") or "local").strip().lower()
+        policy = video_ai_edit_provider.submit_source_policy(
+            str(payload.get("submit_source") or ""),
+            public_user_confirmed=bool(payload.get("public_user_confirmed")),
+            lane=lane,
+            env=os.environ,
+        )
+        if not policy.get("allowed"):
+            raise video_ai_edit_provider.AiEditProviderError(str(policy.get("reason") or "ai_edit_submit_blocked"))
+        source_file_id = str(payload.get("source_file_id") or "")
+        chat_id = str(payload.get("chat_id") or "")
+        if not source_file_id or not chat_id:
+            raise video_ai_edit_validation.AiEditValidationError("ai_edit_missing_input")
+        ffmpeg = local_ffmpeg_path()
+        ffprobe = find_ffprobe(ffmpeg_path=ffmpeg)
+        if not ffmpeg or not (os.path.exists(ffmpeg) or shutil.which(ffmpeg)):
+            raise video_ai_edit_validation.AiEditValidationError("ffmpeg_missing")
+        if not ffprobe:
+            raise video_ai_edit_validation.AiEditValidationError("ffprobe_missing")
+        workspace = create_job_workspace(f"aiedit_{job_id}")
+        _aiedit_progress(job_id, "inspecting_video", charge=0)
+        source_path = _local1_download_asset(
+            source_file_id,
+            str(payload.get("source_file_name") or "source.mp4"),
+            workspace,
+            ALLOWED_SOURCE_EXTENSIONS,
+            "source",
+            max_bytes=video_ai_edit_validation.ai_edit_limits(os.environ)["upload_limit_bytes"],
+        )
+        source_probe = video_local_validation.probe_video_file(source_path, ffprobe_path=ffprobe)
+        source_validation = video_ai_edit_validation.validate_input_metadata(
+            source_probe,
+            file_size=os.path.getsize(source_path),
+            lane=lane,
+            target_duration_seconds=int(payload.get("target_duration_seconds") or 0),
+            env=os.environ,
+        )
+        if not source_validation.get("ok"):
+            raise video_ai_edit_validation.AiEditValidationError(str(source_validation.get("reason") or "invalid_video"))
+        _aiedit_progress(job_id, "preparing_style", charge=0)
+        output_path = workspace / video_ai_edit_validation.safe_output_name(job_id)
+        provider_name = "local_ffmpeg"
+        model = "local_enhancement"
+        poll_count = 0
+        provider_task_id = ""
+        fallback_count = 0
+        if lane == "local":
+            plan = _aiedit_local_plan(payload, source_path)
+            result = execute_manual_edit(
+                plan,
+                output_path=str(output_path),
+                workspace=workspace,
+                ffmpeg_path=ffmpeg,
+                ffprobe_path=ffprobe,
+                timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 600)),
+                progress=lambda status: _aiedit_progress(
+                    job_id,
+                    "ai_processing",
+                    provider_status="local_processing",
+                    local_processed=int(status.get("processed") or 0),
+                    local_total=max(1, int(status.get("total") or 1)),
+                ),
+            )
+            if not result.get("ok"):
+                raise video_ai_edit_validation.AiEditValidationError("local_enhancement_failed")
+        else:
+            ready = _aiedit_ready_provider_configs(payload)
+            if not ready:
+                raise video_ai_edit_provider.AiEditProviderError("ai_edit_video_to_video_provider_unavailable")
+            preprocessed_path = workspace / "provider_input.mp4"
+            video_ai_edit_validation.preprocess_source_video(
+                source_path,
+                str(preprocessed_path),
+                workspace=workspace,
+                ffmpeg_path=ffmpeg,
+                ffprobe_path=ffprobe,
+                target_duration_seconds=int(payload.get("target_duration_seconds") or 0),
+                preserve_audio=bool(payload.get("preserve_source_audio", True)),
+                env=os.environ,
+                timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 600)),
+            )
+            primary = ready[0]
+            provider_name, model = primary.provider_name, primary.model
+            try:
+                provider_result = _aiedit_submit_and_wait(job_id, payload, primary, str(preprocessed_path))
+            except video_ai_edit_provider.AiEditProviderError as primary_error:
+                fallback = ready[1] if len(ready) > 1 else None
+                decision = video_ai_edit_provider.controlled_fallback_decision(
+                    public_confirm_provenance=bool(payload.get("public_user_confirmed")),
+                    primary_status="failed" if primary_error.reason not in {"provider_poll_timeout"} else "timeout_waiting",
+                    primary_task_alive=False,
+                    fallback_count=0,
+                    candidate=fallback,
+                )
+                if not decision.get("allowed"):
+                    raise
+                fallback_count = 1
+                provider_name, model = fallback.provider_name, fallback.model
+                provider_result = _aiedit_submit_and_wait(job_id, payload, fallback, str(preprocessed_path))
+            provider_task_id = str(provider_result.get("provider_task_id") or "")
+            poll_count = int(provider_result.get("poll_count") or 0)
+            result_url = str(provider_result.get("result_url") or "")
+            if not result_url:
+                raise video_ai_edit_provider.AiEditProviderError("provider_result_url_missing")
+            _aiedit_progress(
+                job_id,
+                "downloading_result",
+                provider_task_id=provider_task_id,
+                provider_status="completed",
+                poll_count=poll_count,
+                result_url_present=True,
+            )
+            video_ai_edit_provider.download_result(result_url, str(output_path))
+        _aiedit_progress(
+            job_id,
+            "validating_result",
+            provider_task_id=provider_task_id,
+            provider_status="completed" if lane == "generative" else "local_completed",
+            poll_count=poll_count,
+            result_url_present=bool(result_url),
+        )
+        validation = video_ai_edit_validation.validate_final_edited_mp4(
+            output_path,
+            source_path=source_path,
+            workspace=workspace,
+            requested_duration_seconds=int(payload.get("target_duration_seconds") or 0),
+            ffprobe_path=ffprobe,
+        )
+        if not validation.get("ok"):
+            raise video_ai_edit_validation.AiEditValidationError(str(validation.get("reason") or "output_validation_failed"))
+        _aiedit_progress(
+            job_id,
+            "delivering_result",
+            provider_task_id=provider_task_id,
+            provider_status="completed",
+            poll_count=poll_count,
+            result_url_present=bool(result_url),
+            validation="passed",
+        )
+        receipt = telegram_send_video_receipt(
+            chat_id,
+            str(output_path),
+            "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi gửi kết quả hợp lệ.",
+            filename=output_path.name,
+        )
+        if not receipt.get("sent") or not receipt.get("file_id") or not receipt.get("message_id"):
+            raise video_ai_edit_validation.AiEditValidationError("delivery_failed")
+        output_file_id = str(receipt.get("file_id") or "")
+        terminal_status = "succeeded"
+        terminal = {
+            "aiedit1": 1,
+            "stage": "delivered",
+            "lane": lane,
+            "provider": provider_name,
+            "model": model,
+            "provider_task_id": provider_task_id,
+            "provider_status": "completed",
+            "poll_count": poll_count,
+            "fallback_count": fallback_count,
+            "result_url_present": bool(result_url),
+            "validation": "passed",
+            "artifact_size": int(validation.get("artifact_size") or 0),
+            "delivery": "sent",
+            "delivery_message_id": str(receipt.get("message_id") or ""),
+            "charge": 0,
+            "charge_status": "pending_post_delivery" if int(payload.get("price_xu") or 0) > 0 else "free_local_tool",
+            "cleanup": "pending",
+        }
+    except (video_ai_edit_provider.AiEditProviderError, video_ai_edit_validation.AiEditValidationError) as exc:
+        terminal["reason"] = str(getattr(exc, "reason", str(exc)))[:160]
+    except Exception as exc:
+        terminal["reason"] = f"{type(exc).__name__}:{first_line(str(exc))}"[:160]
+    finally:
+        cleanup = cleanup_job_workspace(workspace) if workspace else {"ok": True, "removed": False}
+        terminal["cleanup"] = "done" if cleanup.get("ok") else "failed"
+        if not cleanup.get("ok") and terminal_status != "succeeded":
+            terminal["reason"] = str(cleanup.get("reason") or terminal.get("reason") or "cleanup_failed")[:160]
+        update_job(
+            job_id,
+            terminal_status,
+            json.dumps(terminal, ensure_ascii=False, separators=(",", ":")),
+            output_url=result_url,
+            output_file_id=output_file_id,
+            detail_limit=4000,
         )
 
 
@@ -1132,6 +1445,9 @@ def process_job(job: dict) -> None:
         return
     if job_type == "video_local_edit":
         run_video_local_edit(job)
+        return
+    if job_type == "video_ai_edit":
+        run_video_ai_edit(job)
         return
     if job_type == "social_link_import":
         run_social_link_import(job)

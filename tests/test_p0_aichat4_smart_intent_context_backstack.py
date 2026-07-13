@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 from services import ai_chatbot_copilot as aichat
 from services import telegram_business_support as cskh
 
@@ -185,7 +187,7 @@ def test_aichat_back_stack_does_not_cross_to_paid_or_unrelated_routes():
 
 
 def test_no_real_provider_calls_or_forbidden_runtime_scope():
-    changed = set(_changed_files())
+    changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
         "services/aas_shared_knowledge.py",

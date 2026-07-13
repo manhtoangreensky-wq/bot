@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 from services import ai_chatbot_copilot as aichat
 from services import telegram_business_support as cskh
 
@@ -154,7 +156,7 @@ def test_trace_text_exposes_flow_and_provider_submit_reason():
 
 
 def test_aichat6_no_real_provider_calls_or_forbidden_runtime_scope():
-    changed = set(_changed_files())
+    changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
         "services/ai_chatbot_copilot.py",

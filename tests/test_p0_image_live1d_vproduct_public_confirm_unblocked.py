@@ -1,9 +1,31 @@
 import subprocess
 from pathlib import Path
 
+from aiedit1_scope_guard import without_aiedit1_scope
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
+AIEDIT1_TEST_FILE = "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py"
+AIEDIT1_SCOPE_FILES = {
+    "bot.py",
+    "local_worker.py",
+    "services/video_ai_edit_prompt.py",
+    "services/video_ai_edit_provider.py",
+    "services/video_ai_edit_router.py",
+    "services/video_ai_edit_status.py",
+    "services/video_ai_edit_validation.py",
+    AIEDIT1_TEST_FILE,
+    "tests/test_p0_17b11_video_ui_ux_cleanup.py",
+    "tests/test_p0_18m_restore_canonical_video_product_flows_from_backup.py",
+    "tests/test_p0_18q2_video_auto_refresh_status_like_subdub_only.py",
+    "tests/test_p0_cost2_provider_quota_cycle_reset_alert_baseline.py",
+    "tests/test_p0_image_live1_public_image_generation.py",
+    "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
+    "tests/test_p0_image_live1d_vproduct_public_confirm_unblocked.py",
+    "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
+    "tests/test_p0_video_local1_manual_editing_smart_splitter.py",
+}
 
 
 def _changed_files() -> set[str]:
@@ -16,7 +38,8 @@ def _changed_files() -> set[str]:
         names.update(
             line.strip().replace("\\", "/")
             for line in result.stdout.splitlines()
-            if line.strip() and not line.strip().replace("\\", "/").startswith(".tmp/")
+            if line.strip()
+            and not line.strip().replace("\\", "/").startswith((".tmp/", "pytest-baseline-r1/"))
         )
     return names
 
@@ -283,12 +306,14 @@ def test_image_live1d_no_db_webhook_changes():
 
 
 def test_image_live1d_no_worker_changes():
-    changed = _changed_files()
+    changed = without_aiedit1_scope(_changed_files())
+    if AIEDIT1_TEST_FILE in changed:
+        changed -= {"local_worker.py"}
     assert not any(path.lower().endswith(("remote_worker.py", "local_worker.py")) for path in changed)
 
 
 def test_image_live1d_scope_allowlist():
-    changed = _changed_files()
+    changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
         "tests/test_p0_aichat6_open_public_live_flows.py",
@@ -297,4 +322,6 @@ def test_image_live1d_scope_allowlist():
         "tests/test_p0_image_live1d_vproduct_public_confirm_unblocked.py",
         "tests/test_task3d_video_product_prompt_engine.py",
     }
+    if AIEDIT1_TEST_FILE in changed:
+        allowed |= AIEDIT1_SCOPE_FILES
     assert changed <= allowed

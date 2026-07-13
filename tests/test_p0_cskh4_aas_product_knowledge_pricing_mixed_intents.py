@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from services import telegram_business_support as cskh
+from tests.aiedit1_scope_guard import without_aiedit1_scope
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -375,7 +376,8 @@ def test_cskh4_no_payos_pricing_db_destructive_changes():
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh5b_live_business_followup_pricing_runtime.py",
     }
-    changed = " ".join(path for path in _changed_files() if path not in allowed).lower()
+    changed_files = without_aiedit1_scope(_changed_files())
+    changed = " ".join(path for path in changed_files if path not in allowed).lower()
     for forbidden in ("payos", "pricing", "migration", "db"):
         assert forbidden not in changed
 

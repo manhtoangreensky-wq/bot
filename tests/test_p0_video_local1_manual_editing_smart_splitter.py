@@ -134,7 +134,7 @@ def test_local1_no_processing_before_confirm() -> None:
 
 def test_local1_no_provider_submit() -> None:
     callback = _between(BOT_SOURCE, "async def handle_video_editor_callback", "async def handle_video_upload_callback")
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     for forbidden in ("ShopAIKey", "Key4U", "video_provider_router", "provider.submit", "submit_provider"):
         assert forbidden not in callback
         assert forbidden not in worker
@@ -345,13 +345,13 @@ def test_local1_outputs_named_in_order() -> None:
 
 
 def test_local1_parts_delivered_in_order() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert "for index, item in enumerate(outputs, start=1)" in worker
     assert "Phần {index}/{total}" in worker
 
 
 def test_local1_only_mp4_delivered() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert "delivery_file_allowed(output_path, workspace=workspace)" in worker
     assert "toan_aas_video_edit_{job_id}.mp4" in worker
 
@@ -460,31 +460,31 @@ def test_local1_mute_removes_audio_stream(tmp_path: Path) -> None:
 
 
 def test_local1_progress_monotonic() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     positions = [worker.index(f'"{stage}"') for stage in ("inspecting_input", "delivering", "delivered")]
     assert positions == sorted(positions)
     assert "percentage" not in _between(BOT_SOURCE, "def video_editor_job_status_text", "VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS")
 
 
 def test_local1_split_progress_part_count() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert 'processed=int(status.get("processed") or 0)' in worker
     assert 'total=int(status.get("total") or len(ranges) or 1)' in worker
 
 
 def test_local1_no_success_before_delivery() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert worker.index("telegram_send_video(") < worker.index('terminal_status = "succeeded"')
 
 
 def test_local1_single_terminal_outcome() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     finally_block = worker.split("finally:", 1)[1]
     assert finally_block.count("update_job(") == 1
 
 
 def test_local1_cleanup_failure_does_not_reverse_completed_delivery() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     finally_block = worker.split("finally:", 1)[1]
     assert 'terminal_status == "succeeded" and output_file_ids' in finally_block
     assert 'delivered_detail["cleanup"] = "failed"' in finally_block
@@ -492,13 +492,13 @@ def test_local1_cleanup_failure_does_not_reverse_completed_delivery() -> None:
 
 
 def test_local1_no_duplicate_delivery() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert "retry" not in worker.lower()
     assert worker.count("for index, item in enumerate(outputs, start=1)") == 1
 
 
 def test_local1_failure_reports_no_charge() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert '"stage": "failed_no_charge"' in worker
     assert worker.count('"charge": 0') >= 3
 
@@ -607,7 +607,7 @@ def test_local1_no_charge_before_delivery() -> None:
 
 
 def test_local1_failure_charge_zero() -> None:
-    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def run_social_link_import")
+    worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
     assert '"charge": 0' in worker
     assert "refund" not in worker.lower()
 

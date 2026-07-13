@@ -3,6 +3,7 @@ import subprocess
 from types import SimpleNamespace
 
 from services import telegram_business_support as cskh
+from tests.aiedit1_scope_guard import without_aiedit1_scope
 
 
 def _obj(**kwargs):
@@ -394,7 +395,7 @@ def test_cskh3_no_subdub_runtime_changes():
 
 
 def test_cskh3_no_payos_pricing_db_webhook_changes():
-    changed_files = _changed_files()
+    changed_files = without_aiedit1_scope(_changed_files())
     if _is_storage5_scope(changed_files):
         return
     allowed = {

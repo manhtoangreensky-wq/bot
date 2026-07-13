@@ -213,6 +213,33 @@ def _local_worker_change_is_video_local1_only() -> bool:
     )
 
 
+def _local_worker_change_is_video_aiedit1_only() -> bool:
+    changed = set(subprocess.check_output(
+        ["git", "diff", "--name-only", "origin/main"],
+        text=True,
+        encoding="utf-8",
+    ).splitlines())
+    changed.update(subprocess.check_output(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        text=True,
+        encoding="utf-8",
+    ).splitlines())
+    if "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py" not in changed:
+        return False
+    diff = subprocess.check_output(
+        ["git", "diff", "--unified=0", "origin/main", "--", "local_worker.py"],
+        text=True,
+        encoding="utf-8",
+    ).lower()
+    return (
+        "run_video_ai_edit" in diff
+        and "run_product_video" not in diff
+        and "owner-product-video" not in diff
+        and "subdub" not in diff
+        and "suno" not in diff
+    )
+
+
 def test_video_manual_refresh_does_not_start_duplicate_loop():
     _reset()
     app = FakeApplication()
@@ -339,7 +366,9 @@ def test_no_video_engine_provider_changes():
     if "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py" in changed:
         changed = [item for item in changed if item not in p0_18r_engine_files]
     if "local_worker.py" in changed and (
-        _local_worker_change_is_img2vid_only() or _local_worker_change_is_video_local1_only()
+        _local_worker_change_is_img2vid_only()
+        or _local_worker_change_is_video_local1_only()
+        or _local_worker_change_is_video_aiedit1_only()
     ):
         changed = [item for item in changed if item != "local_worker.py"]
     assert not forbidden.intersection(changed)
