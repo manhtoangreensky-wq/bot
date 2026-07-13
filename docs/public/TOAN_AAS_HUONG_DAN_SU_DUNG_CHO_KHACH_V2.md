@@ -187,13 +187,15 @@ Dùng khi: anh/chị muốn tạo video từ mô tả, ảnh có sẵn hoặc co
 
 Quy trình tạo video:
 1. Mở mục Tạo video.
-2. Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có.
-3. Gửi mô tả video: chủ thể, chuyển động, bối cảnh, ánh sáng, tỉ lệ, thời lượng và cảm xúc.
-4. Chọn gói video.
-5. Chọn số cảnh nếu muốn làm video dài hơn.
-6. Xem tổng chi phí, kiểm tra nội dung và xác nhận.
-7. Hệ thống xử lý và gửi video về bot khi hoàn tất.
-8. Sau khi có video, anh/chị có thể dùng thêm Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng nếu cần.
+2. Chọn chủ đề hoặc nguồn video và gửi ý tưởng chính.
+3. Chọn số cảnh trước để hệ thống phân bổ đúng số ý; hỗ trợ 1-20 cảnh.
+4. Chọn profile và ngữ cảnh phù hợp.
+5. Bổ sung yêu cầu chi tiết và các add-on ảnh hưởng nội dung, bố cục hoặc lời thoại.
+6. Kiểm tra kế hoạch và prompt riêng của từng cảnh.
+7. Chọn gói chất lượng video.
+8. Xem tổng chi phí, kiểm tra nội dung và xác nhận cuối.
+9. Hệ thống tạo, kiểm tra từng cảnh rồi ghép video.
+10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.
 
 Bảng giá video theo gói:
 • Trải nghiệm — 200 Xu.
@@ -209,11 +211,11 @@ Bảng giá video theo gói:
 Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.
 
 Cách tính theo cảnh:
-• 1 cảnh khoảng 6 giây.
-• 3 cảnh khoảng 18 giây.
-• 5 cảnh khoảng 30 giây.
-• 10 cảnh khoảng 60 giây.
-• 20 cảnh khoảng 120 giây.
+• 1 cảnh khoảng 8 giây.
+• 3 cảnh khoảng 24 giây.
+• 5 cảnh khoảng 40 giây.
+• 10 cảnh khoảng 80 giây.
+• 20 cảnh khoảng 160 giây.
 
 Ưu đãi theo số cảnh:
 • 1 cảnh: giá gốc.

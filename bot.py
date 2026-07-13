@@ -28404,7 +28404,7 @@ def ai_film_series_blueprint_data():
             "episode_count": "3-5 tập để test retention và dễ sản xuất hàng loạt",
             "episode_duration": "60-80 giây",
             "scene_count": "8-10 cảnh",
-            "scene_duration": "6-8 giây/cảnh",
+            "scene_duration": "8 giây/cảnh",
             "episode_arc": [
                 "Cảnh 1: hook mạnh trong 1-3 giây đầu.",
                 "Cảnh 2-3: bối cảnh và nhân vật.",
@@ -43433,9 +43433,9 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
         }
     elif lang == "en":
         notes = {
-            "low": "1 scene, about 6 seconds; fixed 200 Xu starter package with no add-ons",
+            "low": "1 scene, about 8 seconds; fixed 200 Xu starter package with no add-ons",
             **{
-                key: "each standard scene is about 6 seconds; the next step shows scene discount, formula and total Xu"
+                key: "each standard scene is about 8 seconds; the next step shows scene discount, formula and total Xu"
                 for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
             },
         }
@@ -43453,9 +43453,9 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
         }
     else:
         notes = {
-            "low": "1 cảnh, khoảng 6 giây; gói trải nghiệm cố định 200 Xu, không công cụ bổ sung",
+            "low": "1 cảnh, khoảng 8 giây; gói trải nghiệm cố định 200 Xu, không công cụ bổ sung",
             **{
-                key: "mỗi cảnh chuẩn khoảng 6 giây; bước sau hiển thị chiết khấu cảnh, công thức và tổng Xu"
+                key: "mỗi cảnh chuẩn khoảng 8 giây; bước sau hiển thị chiết khấu cảnh, công thức và tổng Xu"
                 for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
             },
         }
@@ -62933,13 +62933,15 @@ CUSTOMER_GUIDE_SECTIONS = [
             "🎬 <b>HƯỚNG DẪN TẠO VIDEO AI</b>\n\n"
             "<b>Quy trình tạo video:</b>\n"
             "1. Mở mục <b>Tạo video</b>.\n"
-            "2. Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có.\n"
-            "3. Gửi mô tả video: chủ thể, chuyển động, bối cảnh, ánh sáng, tỉ lệ, thời lượng và cảm xúc.\n"
-            "4. Chọn gói video.\n"
-            "5. Chọn số cảnh nếu muốn làm video dài hơn.\n"
-            "6. Xem tổng chi phí, kiểm tra nội dung và xác nhận.\n"
-            "7. Hệ thống xử lý và gửi video về bot khi hoàn tất.\n"
-            "8. Sau khi có video, bạn có thể dùng thêm Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng nếu cần.\n\n"
+            "2. Chọn chủ đề hoặc nguồn video và gửi ý tưởng chính.\n"
+            "3. Chọn số cảnh trước để hệ thống phân bổ đúng số ý; hỗ trợ 1-20 cảnh.\n"
+            "4. Chọn profile và ngữ cảnh phù hợp.\n"
+            "5. Bổ sung yêu cầu chi tiết và các add-on ảnh hưởng nội dung, bố cục hoặc lời thoại.\n"
+            "6. Kiểm tra kế hoạch và prompt riêng của từng cảnh.\n"
+            "7. Chọn gói chất lượng video.\n"
+            "8. Xem tổng chi phí, kiểm tra nội dung và xác nhận cuối.\n"
+            "9. Hệ thống tạo, kiểm tra từng cảnh rồi ghép video.\n"
+            "10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.\n\n"
             "<b>Bảng giá video theo gói:</b>\n"
             "• 🟢 Trải nghiệm — 200 Xu\n"
             "• 🔷 Cơ bản — 300 Xu\n"
@@ -62953,11 +62955,11 @@ CUSTOMER_GUIDE_SECTIONS = [
             "<b>Gói 200 Xu dùng khi nào?</b>\n"
             "Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.\n\n"
             "<b>Cách tính theo cảnh:</b>\n"
-            "• 1 cảnh khoảng 6 giây\n"
-            "• 3 cảnh khoảng 18 giây\n"
-            "• 5 cảnh khoảng 30 giây\n"
-            "• 10 cảnh khoảng 60 giây\n"
-            "• 20 cảnh khoảng 120 giây\n\n"
+            "• 1 cảnh khoảng 8 giây\n"
+            "• 3 cảnh khoảng 24 giây\n"
+            "• 5 cảnh khoảng 40 giây\n"
+            "• 10 cảnh khoảng 80 giây\n"
+            "• 20 cảnh khoảng 160 giây\n\n"
             "<b>Ưu đãi theo số cảnh:</b>\n"
             "• 1 cảnh: giá gốc\n"
             "• 2-9 cảnh: giảm 10%\n"
@@ -63410,8 +63412,8 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
         ),
         "video_ai": (
             "🎬 <b>AI Video Guide</b>\n\n"
-            "Choose the video path, send the idea or source image, choose a package, review the total cost and confirm before processing.\n\n"
-            "Video tiers: 200, 300, 400, 500, 600, 800, 1000, 1200 and 1500 Xu. Each scene is about 6 seconds; multi-scene orders can receive the displayed scene discount.\n\n"
+            "Choose the topic or source, select the scene count first, then choose the profile, review the per-scene plan and pick a quality package before final confirmation.\n\n"
+            "Video tiers: 200, 300, 400, 500, 600, 800, 1000, 1200 and 1500 Xu. Each scene is about 8 seconds; Product Video supports 1-20 planned scenes (up to about 160 seconds).\n\n"
             "If video generation is unavailable, TOAN AAS does not process the paid step or wrongly charge Xu."
         ),
         "audio": (
@@ -88188,8 +88190,8 @@ def help_text_for_user(user_id) -> str:
         "• Bảng giá ảnh: Tiết kiệm 50 Xu, Chuẩn 150 Xu, Chuẩn + bảo hành 200 Xu, Phổ thông 300 Xu, Phổ thông + bảo hành 400 Xu, Cao 500 Xu, Cao + bảo hành 600 Xu.\n\n"
         "<b>3. Video AI</b>\n"
         "• Chọn tạo video từ mô tả hoặc từ ảnh đã có.\n"
-        "• Gửi mô tả video, chọn gói, chọn số cảnh, xem tổng chi phí rồi xác nhận.\n"
-        "• 1 cảnh khoảng 6 giây. 3 cảnh khoảng 18 giây, 5 cảnh khoảng 30 giây, 10 cảnh khoảng 60 giây, 20 cảnh khoảng 120 giây.\n"
+        "• Gửi chủ đề, chọn số cảnh trước, chọn profile/ngữ cảnh, kiểm tra prompt từng cảnh rồi mới chọn gói và xác nhận.\n"
+        "• 1 cảnh khoảng 8 giây. 3 cảnh khoảng 24 giây, 5 cảnh khoảng 40 giây, 10 cảnh khoảng 80 giây, 20 cảnh khoảng 160 giây.\n"
         "• Bảng giá video: Trải nghiệm 200 Xu, Cơ bản 300 Xu, Phổ thông 400 Xu, Nâng cao 500 Xu, Bán hàng 600 Xu, Cao cấp 800 Xu, Chuyên nghiệp 1000 Xu, Pro Plus 1200 Xu, Premium 1500 Xu.\n"
         "• Ví dụ giảm theo cảnh: gói Cơ bản 300 Xu/cảnh, 3 cảnh được giảm 10% còn 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.\n\n"
         "<b>4. Âm thanh</b>\n"
@@ -154721,7 +154723,7 @@ def public_pricing_context() -> dict:
         if not payload:
             continue
         cost = int(payload.get("cost") or 0)
-        note = "1 cảnh / khoảng 6 giây; màn số cảnh sẽ hiển thị tổng Xu"
+        note = "1 cảnh / khoảng 8 giây; màn số cảnh sẽ hiển thị tổng Xu"
         if tier == "low":
             note = "gói trải nghiệm để test ý tưởng nhanh hoặc tạo bản nháp ngắn"
         elif tier == "premium":
@@ -155430,7 +155432,7 @@ def pricing_video_lines() -> list[str]:
     rows = [
         "🎬 <b>GIÁ VIDEO AI</b>",
         "",
-        "Giá gói là giá cho <b>1 cảnh chuẩn, khoảng 6 giây</b>. Màn chọn số cảnh sẽ hiển thị công thức và tổng Xu.",
+        "Giá gói là giá cho <b>1 cảnh chuẩn, khoảng 8 giây</b>. Màn chọn số cảnh sẽ hiển thị công thức và tổng Xu.",
         "Bot luôn hiển thị hóa đơn cuối cùng và hỏi xác nhận trước khi trừ Xu.",
         "",
     ]
@@ -155440,7 +155442,7 @@ def pricing_video_lines() -> list[str]:
             continue
         else:
             if tier == "low":
-                extra = "1 cảnh / khoảng 6 giây; tổng đúng 200 Xu; không công cụ bổ sung"
+                extra = "1 cảnh / khoảng 8 giây; tổng đúng 200 Xu; không công cụ bổ sung"
             else:
                 extra = "giá mỗi cảnh chuẩn; chọn nhiều cảnh để xem chiết khấu và tổng Xu"
             rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(extra)}")
