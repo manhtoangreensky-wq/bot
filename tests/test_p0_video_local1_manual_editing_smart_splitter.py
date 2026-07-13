@@ -165,6 +165,22 @@ def test_local1_concat_multiple_videos() -> None:
     assert "anullsrc" in source
 
 
+def test_local1_concat_manifest_is_python311_safe_and_escapes_paths() -> None:
+    runtime_bytes = (ROOT / "runtime.txt").read_bytes()
+    runtime_text = (
+        runtime_bytes.decode("utf-16")
+        if runtime_bytes.startswith((b"\xff\xfe", b"\xfe\xff"))
+        else runtime_bytes.decode("utf-8-sig")
+    )
+    assert runtime_text.strip().startswith("python-3.11")
+    entry = editing._ffconcat_manifest_entry(Path("C:/work/O'Brien/clip.mp4"))
+    assert entry == "file 'C:/work/O'\\''Brien/clip.mp4'\n"
+
+    source = inspect.getsource(editing._normalize_concat_inputs)
+    assert "_ffconcat_manifest_entry(item)" in source
+    assert "replace(chr(39)" not in source
+
+
 def test_local1_aspect_ratio_9_16(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     plan["crop_or_fit"] = {"aspect_ratio": "9:16", "mode": "crop"}

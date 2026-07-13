@@ -451,6 +451,12 @@ def _run_checked(command: list[str], *, timeout: int) -> None:
         raise LocalVideoEditError(f"ffmpeg_failed:{detail[:300] or result.returncode}")
 
 
+def _ffconcat_manifest_entry(path: str | Path) -> str:
+    normalized_path = str(path).replace("\\", "/")
+    escaped_path = normalized_path.replace("'", "'\\''")
+    return f"file '{escaped_path}'\n"
+
+
 def _normalize_concat_inputs(
     sources: list[str],
     *,
@@ -478,7 +484,10 @@ def _normalize_concat_inputs(
         _run_checked(command, timeout=timeout)
         normalized.append(target)
     manifest = workspace / "concat_inputs.txt"
-    manifest.write_text("".join(f"file '{str(item).replace('\\', '/').replace(chr(39), chr(39) + '\\' + chr(39) + chr(39))}'\n" for item in normalized), encoding="utf-8")
+    manifest.write_text(
+        "".join(_ffconcat_manifest_entry(item) for item in normalized),
+        encoding="utf-8",
+    )
     concat_output = workspace / "concat_source.mp4"
     _run_checked(
         [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", str(manifest), "-c", "copy", "-movflags", "+faststart", str(concat_output)],

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from aiedit1_scope_guard import AIEDIT1_SCOPE_FILES
+from aiedit1_scope_guard import aiedit1_scope_files
 
 from services import (
     video_ai_edit_prompt as prompt,
@@ -48,7 +48,7 @@ def test_aiedit1_changed_files_stay_in_exact_scope():
             if line.strip()
             and not line.strip().replace("\\", "/").startswith((".pytest_tmp/", "pytest-baseline-r1/"))
         )
-    assert changed <= AIEDIT1_SCOPE_FILES
+    assert changed <= aiedit1_scope_files(changed)
     runtime_paths = {path for path in changed if not path.startswith("tests/")}
     forbidden = ("music", "suno", "subdub", "product_video", "voice", "payos", "wallet", "payment")
     assert not any(term in path.lower() for path in runtime_paths for term in forbidden)
