@@ -110,7 +110,8 @@ def test_videoflow_lock_main_video_menu_buttons_snapshot():
         [("🎥 Tự quay & đổi cảnh AI", "vproduct|open|self_shot_scene_change"), ("🎬 Phim AI nhiều cảnh", "vproduct|open|multi_scene_film")],
         [("🧠 Ý tưởng video", "vproduct|open|video_idea"), ("🎬 Storyboard + Prompt", "vproduct|open|storyboard_prompt")],
         [("📚 Kho prompt video", "vpromptlib|start"), ("📥 Tải video từ link", "vdownload|start")],
-        [("🛠 Chỉnh sửa video local", "vproduct|open|video_local_edit"), ("🏠 Menu chính", "menu|main")],
+        [("🧠 Studio Profile AI", "vprofile|menu"), ("🛠 Chỉnh sửa video", "videoedit|hub")],
+        [("🏠 Menu chính", "menu|main")],
     ]
 
 
@@ -164,7 +165,7 @@ def test_videoflow_lock_no_dead_video_callbacks():
         bot.video_asset_intake_keyboard("vi"),
     ):
         callbacks.extend(_callbacks(markup))
-    allowed_prefixes = ("vproduct|", "menu|", "vpromptlib|", "vdownload|")
+    allowed_prefixes = ("vproduct|", "menu|", "vpromptlib|", "vdownload|", "vprofile|", "videoedit|")
     assert callbacks
     assert all(callback.startswith(allowed_prefixes) for callback in callbacks)
     assert "def handle_video_product_callback" in Path(ROOT / "bot.py").read_text(encoding="utf-8")

@@ -1,0 +1,27 @@
+{
+  "profile_id": "real_estate_property",
+  "title_vi": "Bất động sản và giới thiệu địa điểm",
+  "aliases": ["bất động sản", "nhà đất", "đăng tin nhà", "property listing", "real estate", "property tour", "hotel tour", "showroom tour"],
+  "intent_keywords": ["căn hộ", "villa", "biệt thự", "mặt bằng", "cho thuê", "bán nhà", "listing", "amenities", "tiện ích", "địa điểm", "tour"],
+  "suitable_outputs": ["video", "image", "listing_reel", "property_walkthrough"],
+  "subjects": ["bất động sản", "không gian sống", "tiện ích", "vị trí", "địa điểm kinh doanh"],
+  "environments": ["khu dân cư", "căn hộ", "biệt thự", "khách sạn", "showroom", "nhà hàng"],
+  "visual_styles": ["premium real estate", "bright natural", "clean editorial", "cinematic property tour"],
+  "materials": ["vật liệu thực tế của tài sản", "kính", "gỗ", "đá", "cảnh quan"],
+  "lighting": ["clean daylight", "warm interior practicals", "golden hour exterior"],
+  "camera": ["wide establishing", "smooth walkthrough", "amenity detail", "exterior approach", "final hero view"],
+  "motion": ["slow fly-through", "room reveal", "amenity sequence", "location-to-property transition"],
+  "scene_templates": [
+    {"role": "location", "title": "Vị trí", "prompt": "Giới thiệu bối cảnh vị trí chỉ từ dữ liệu khách cung cấp."},
+    {"role": "exterior", "title": "Ngoại thất", "prompt": "Thể hiện lối vào và diện mạo thật của tài sản."},
+    {"role": "interior", "title": "Không gian chính", "prompt": "Đi qua khu vực quan trọng với camera ổn định."},
+    {"role": "amenity", "title": "Tiện ích", "prompt": "Nêu tiện ích có dữ liệu xác thực."},
+    {"role": "cta", "title": "Giá trị và CTA", "prompt": "Kết bằng lợi ích và CTA, không tự bịa giá hay địa chỉ."}
+  ],
+  "negative_prompt": ["invented address", "invented price", "invented area", "fake amenity", "warped room", "misleading scale", "unreadable listing text"],
+  "clarifying_questions": ["Đây là loại bất động sản/địa điểm nào, khách cần nhấn mạnh khu vực nào và dữ liệu vị trí/diện tích nào đã được xác nhận?", "Video dùng để bán, cho thuê, đặt phòng hay giới thiệu thương hiệu?"],
+  "image_prompt_template": "Accurate property presentation for: {user_request}. Preserve the supplied architecture, furniture, materials and verified listing facts. Do not invent address, price, size or amenities.",
+  "video_prompt_template": "Plan a premium property tour for: {user_request}. Sequence location, exterior, interior, verified amenities and CTA across {scene_count} scenes, {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["keep rooms bright but realistic", "use minimal lower thirds", "avoid speed ramps that distort space", "verify every listing claim"],
+  "source_reference_ids": ["AQNp3hWK..."]
+}

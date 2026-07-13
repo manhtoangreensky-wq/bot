@@ -1,0 +1,26 @@
+{
+  "profile_id": "cinematic_vfx",
+  "title_vi": "VFX điện ảnh và biến đổi cảnh",
+  "aliases": ["VFX", "hiệu ứng điện ảnh", "cinematic transformation", "fantasy effect", "biến đổi cảnh", "AI edit", "visual effects"],
+  "intent_keywords": ["phép thuật", "cháy", "nổ", "portal", "biến hình", "fantasy", "sci-fi", "before after", "camera transformation", "scene replacement"],
+  "suitable_outputs": ["video", "edit", "vfx_shot", "before_after"],
+  "subjects": ["người", "sản phẩm", "phương tiện", "không gian gốc", "hiệu ứng"],
+  "environments": ["footage thực", "fantasy world", "sci-fi set", "cinematic environment"],
+  "visual_styles": ["photoreal cinematic", "fantasy VFX", "sci-fi", "dark dramatic", "epic transformation"],
+  "materials": ["interactive light", "smoke", "particles", "energy", "debris", "environment materials"],
+  "lighting": ["motivated cinematic light", "interactive effect light", "volumetric atmosphere", "matched source exposure"],
+  "camera": ["match source camera", "slow push", "orbit reveal", "impact handheld", "match cut"],
+  "motion": ["three-beat transformation", "subject-preserving scene change", "particle reveal", "camera bridge"],
+  "scene_templates": [
+    {"role": "source", "title": "Cảnh gốc", "prompt": "Khóa chủ thể, trang phục, hành động và camera gốc."},
+    {"role": "transition", "title": "Chuyển đổi", "prompt": "Một hiệu ứng có nguyên nhân thị giác và ánh sáng tương tác."},
+    {"role": "reveal", "title": "Thế giới mới", "prompt": "Lộ cảnh mới nhưng giữ nhận dạng và quỹ đạo chuyển động."},
+    {"role": "settle", "title": "Kết cảnh", "prompt": "Ổn định bố cục để người xem đọc được kết quả."}
+  ],
+  "negative_prompt": ["identity drift", "random costume", "broken anatomy", "effect without interaction", "camera discontinuity", "lighting mismatch", "unlicensed character imitation"],
+  "clarifying_questions": ["Anh/chị muốn giữ nguyên chủ thể/hành động nào và biến đổi sang thế giới hoặc hiệu ứng gì?", "Footage gốc là người, sản phẩm hay không gian; camera đang đứng yên hay chuyển động?"],
+  "image_prompt_template": "Cinematic VFX keyframe for: {user_request}. Preserve supplied subject identity, pose, objects and colors. Physically integrated effects, motivated lighting, original visual direction.",
+  "video_prompt_template": "Design a coherent {scene_count}-scene VFX transformation for: {user_request}. Lock source subject and camera continuity, define transition beats and final reveal. {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["match source motion and lens", "use effect light on subject", "add sound cue only in post plan", "review first and last frame continuity"],
+  "source_reference_ids": ["AQM0Pnhl...", "AQMyZIud...", "AQOzWGkF..."]
+}

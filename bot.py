@@ -104,6 +104,7 @@ from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
 from services import video_project_queue
 from services import knowledge_vault, knowledge_vault_sync, vault_importer
+from services import profile_router
 from services import video_prompt_vault
 from services import video_profile_context_engine
 from services import video_prompt_continuity as video_continuity
@@ -65061,15 +65062,200 @@ def recent_video_editor_source(user_id) -> dict:
     }
 
 
+VIDEO_PROFILE_STUDIO_SESSION_KEY = "video_profile_studio"
+
+
+def video_profile_studio_option(selection_id: str) -> dict:
+    selection_id = str(selection_id or "").strip()
+    for item in profile_router.STUDIO_PROFILE_OPTIONS:
+        if str(item.get("selection_id") or "") == selection_id:
+            return dict(item)
+    return {}
+
+
+def video_profile_studio_menu_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🧠 <b>AI Profile Studio</b>\n\n"
+            "Choose the production profile closest to your intended video. TOAN AAS will prepare a prompt and scene-plan preview in this session only.\n\n"
+            "No file has been created and no Xu has been deducted."
+        )
+    return (
+        "🧠 <b>Studio Profile AI</b>\n\n"
+        "Chọn hồ sơ gần nhất với video anh/chị muốn làm. TOAN AAS sẽ hỏi đúng trọng tâm rồi chuẩn bị bản xem trước gồm prompt và kế hoạch cảnh.\n\n"
+        "Màn này chỉ lập kế hoạch trong phiên, chưa tạo file và chưa trừ Xu."
+    )
+
+
+def video_profile_studio_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    options = list(profile_router.STUDIO_PROFILE_OPTIONS)
+    for index in range(0, len(options), 2):
+        row = []
+        for item in options[index:index + 2]:
+            row.append(InlineKeyboardButton(
+                str(item.get("label_vi") or item.get("selection_id") or "Profile"),
+                callback_data=f"vprofile|select|{item.get('selection_id')}",
+            ))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_profile_studio_question_text(selection_id: str, lang: str = "vi") -> str:
+    option = video_profile_studio_option(selection_id)
+    profile = profile_router.profile_for_selection(selection_id)
+    label = str(option.get("label_vi") or profile.get("title_vi") or "Studio Profile AI")
+    questions = [str(value or "").strip() for value in profile.get("clarifying_questions") or [] if str(value or "").strip()]
+    question = questions[0] if questions else "Anh/chị muốn làm video về chủ thể nào và cần người xem ghi nhớ điều gì?"
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"🧠 <b>{html.escape(label)}</b>\n\n"
+            f"{html.escape(question)}\n\n"
+            "Describe the subject, desired result, colors/materials that must be preserved, and any available reference assets."
+        )
+    return (
+        f"🧠 <b>{html.escape(label)}</b>\n\n"
+        f"{html.escape(question)}\n\n"
+        "Anh/chị mô tả chủ thể, kết quả mong muốn, màu/vật liệu cần giữ và tư liệu đang có. "
+        "TOAN AAS sẽ dùng nguyên các ràng buộc này để lập bản xem trước."
+    )
+
+
+def video_profile_studio_question_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vprofile|back_question")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_profile_studio_preview_text(draft: dict, lang: str = "vi") -> str:
+    profile_id = str(draft.get("selected_profile_id") or "")
+    profile = profile_router.profile_for_selection(profile_id)
+    title = str(profile.get("title_vi") or profile_id or "Studio Profile AI")
+    prompt = str(draft.get("professional_prompt") or "").strip()
+    scene_plan = [item for item in draft.get("scene_plan") or [] if isinstance(item, dict)]
+    scene_lines = []
+    for index, scene in enumerate(scene_plan[:20], start=1):
+        scene_index = int(scene.get("scene_index") or index)
+        scene_title = str(scene.get("title") or f"Cảnh {scene_index}").strip()
+        scene_prompt = str(scene.get("prompt") or "").strip()
+        duration_seconds = int(scene.get("duration_seconds") or 0)
+        suffix = f" · {duration_seconds}s" if duration_seconds > 0 else ""
+        scene_lines.append(
+            f"{scene_index}. <b>{html.escape(scene_title)}</b>{html.escape(suffix)}: {html.escape(scene_prompt[:260])}"
+        )
+    if not scene_lines:
+        scene_lines.append("1. <b>Cảnh mở đầu</b>: Giữ đúng chủ thể và yêu cầu anh/chị đã mô tả.")
+    clarification = str(draft.get("clarification_question") or "").strip()
+    clarification_text = f"\n\n<b>Cần làm rõ thêm:</b> {html.escape(clarification)}" if clarification else ""
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"🧠 <b>Profile preview: {html.escape(title)}</b>\n\n"
+            f"<b>Prompt draft</b>\n{html.escape(prompt[:1400])}\n\n"
+            f"<b>Scene plan</b>\n" + "\n".join(scene_lines) + clarification_text +
+            "\n\nThis draft is stored only in the current session. No file has been created and no Xu has been deducted."
+        )
+    return (
+        f"🧠 <b>Bản xem trước: {html.escape(title)}</b>\n\n"
+        f"<b>Prompt đề xuất</b>\n{html.escape(prompt[:1400])}\n\n"
+        f"<b>Kế hoạch cảnh</b>\n" + "\n".join(scene_lines) + clarification_text +
+        "\n\nBản nháp chỉ được lưu trong phiên hiện tại. Hệ thống chưa tạo file và chưa trừ Xu."
+    )
+
+
+def video_profile_studio_preview_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", callback_data="vprofile|edit"),
+            InlineKeyboardButton("🔄 Chọn hồ sơ khác" if is_vi else "🔄 Choose another", callback_data="vprofile|menu"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vprofile|back_preview"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_edit_hub_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🛠 <b>Edit video</b>\n\n"
+            "Choose the editing direction you need. These entries currently provide a clean overview only; "
+            "no video is processed and no Xu is deducted."
+        )
+    return (
+        "🛠 <b>Chỉnh sửa video</b>\n\n"
+        "Chọn hướng chỉnh sửa anh/chị cần. Các mục bên dưới hiện chỉ giới thiệu phạm vi của mô-đun tiếp theo, "
+        "chưa xử lý video và chưa trừ Xu."
+    )
+
+
+def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✂️ Chỉnh sửa thủ công" if is_vi else "✂️ Manual editing", callback_data="videoedit|manual_info")],
+        [InlineKeyboardButton("✨ Chỉnh sửa bằng AI" if is_vi else "✨ AI editing", callback_data="videoedit|ai_info")],
+        [InlineKeyboardButton("🧩 Cắt video nhiều đoạn" if is_vi else "🧩 Split into clips", callback_data="videoedit|split_info")],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_edit_info_text(kind: str, lang: str = "vi") -> str:
+    kind = str(kind or "").strip().lower()
+    is_vi = normalize_user_language(lang) == "vi"
+    if kind == "manual_info":
+        title = "✂️ Chỉnh sửa thủ công" if is_vi else "✂️ Manual editing"
+        detail = (
+            "Cắt, đổi tỉ lệ, chỉnh màu, thêm chữ và chuẩn hóa video theo lựa chọn rõ ràng."
+            if is_vi else
+            "Trim, reframe, color, add text, and normalize a video with explicit choices."
+        )
+    elif kind == "ai_info":
+        title = "✨ Chỉnh sửa bằng AI" if is_vi else "✨ AI editing"
+        detail = (
+            "Phân tích yêu cầu chỉnh sửa và đề xuất kế hoạch thay đổi trước khi xử lý."
+            if is_vi else
+            "Analyze an editing request and preview the proposed changes before processing."
+        )
+    else:
+        title = "🧩 Cắt video nhiều đoạn" if is_vi else "🧩 Split into clips"
+        detail = (
+            "Chọn các mốc cần giữ để tách một video thành nhiều đoạn có thứ tự rõ ràng."
+            if is_vi else
+            "Choose the sections to keep and split one video into clearly ordered clips."
+        )
+    status = (
+        "Tính năng đang được chuẩn bị cho mô-đun tiếp theo. Hệ thống chưa xử lý video và chưa trừ Xu."
+        if is_vi else
+        "This feature is being prepared for the next module. No video has been processed and no Xu has been deducted."
+    )
+    return f"{title}\n\n{detail}\n\n{status}"
+
+
+def video_edit_info_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|hub")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
 def video_editor_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🛠 <b>Local Video Editor</b>\n\n"
+            "🛠 <b>Video Editor</b>\n\n"
             "Send a short video to prepare color, crop/ratio, vertical 9:16, text watermark or basic sharpen edits.\n\n"
             "Choose the edit you want. TOAN AAS will ask for the video if needed and confirms before any paid processing."
         )
     return (
-        "🛠 <b>Chỉnh sửa video local</b>\n\n"
+        "🛠 <b>Chỉnh sửa video</b>\n\n"
         "Gửi video ngắn để chuẩn bị cắt, đổi tỉ lệ, làm dọc 9:16, thêm chữ/watermark hoặc tăng nét cơ bản.\n\n"
         "Anh/chị chọn thao tác cần làm. TOAN AAS sẽ hỏi video nếu chưa có và chỉ xử lý sau bước xác nhận rõ ràng."
     )
@@ -65089,7 +65275,7 @@ def video_editor_public_guard_text(lang: str = "vi") -> str:
             "You can return to the video menu or try another tool first."
         )
     return (
-        "🛠 Chỉnh sửa video local\n\n"
+        "🛠 Chỉnh sửa video\n\n"
         "TOAN AAS chưa xử lý được tác vụ chỉnh sửa này lúc này. Hệ thống chưa trừ Xu. "
         "Anh/chị có thể quay lại menu video hoặc thử công cụ khác trước."
     )
@@ -65196,7 +65382,8 @@ VIDEO_PUBLIC_MENU_ROWS = (
     ("self_shot_scene_change", "multi_scene_film"),
     ("video_idea", "storyboard_prompt"),
     ("prompt_library", "video_downloader"),
-    ("video_local_edit", "main_menu"),
+    ("profile_studio", "video_local_edit"),
+    ("main_menu",),
 )
 
 
@@ -65368,13 +65555,31 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "job_reachable": False,
         "product_id": "",
     },
+    "profile_studio": {
+        "label_vi": "🧠 Studio Profile AI",
+        "label_en": "🧠 AI Profile Studio",
+        "label_zh": "🧠 AI Profile Studio",
+        "entry_callback": "vprofile|menu",
+        "handler": "handle_video_profile_studio_callback",
+        "expected_children": tuple(
+            f"vprofile|select|{item['selection_id']}" for item in profile_router.STUDIO_PROFILE_OPTIONS
+        ),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "planning",
+        "flow_type": "profile_preview",
+        "first_step": "tool_home",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "",
+    },
     "video_local_edit": {
-        "label_vi": "🛠 Chỉnh sửa video local",
-        "label_en": "🛠 Local video editor",
-        "label_zh": "🛠 本地视频编辑",
-        "entry_callback": "vproduct|open|video_local_edit",
-        "handler": "handle_video_product_callback",
-        "expected_children": ("videoedit|color", "videoedit|crop"),
+        "label_vi": "🛠 Chỉnh sửa video",
+        "label_en": "🛠 Edit video",
+        "label_zh": "🛠 编辑视频",
+        "entry_callback": "videoedit|hub",
+        "handler": "handle_video_editor_callback",
+        "expected_children": ("videoedit|manual_info", "videoedit|ai_info", "videoedit|split_info"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "helper",
@@ -65793,6 +65998,10 @@ def video_route_expected_handler(callback: str) -> str:
         return "handle_video_prompt_library_callback"
     if str(callback or "").startswith("vdownload|"):
         return "handle_video_downloader_callback"
+    if str(callback or "").startswith("vprofile|"):
+        return "handle_video_profile_studio_callback"
+    if str(callback or "").startswith("videoedit|"):
+        return "handle_video_editor_callback"
     return ""
 
 
@@ -66029,7 +66238,7 @@ def video_placeholder_audit_rows() -> list[dict]:
         ("storyboard_prompt", "Storyboard + Prompt", task3d_product_intro_text("storyboard_prompt", "vi")),
         ("prompt_library", "Kho prompt video", video_prompt_library_text("vi")),
         ("prompt_library_idea", "Kho prompt video / ý tưởng", video_prompt_library_category_text("idea", prompt_items, "vi")),
-        ("video_local_edit", "Chỉnh sửa video local", video_editor_menu_text("vi")),
+        ("video_local_edit", "Chỉnh sửa video", video_editor_menu_text("vi")),
         ("video_ai_real", "Video AI chân thật", task3d_product_intro_text("video_ai_real", "vi")),
     ]
     rows = []
@@ -66185,7 +66394,7 @@ def video_semantics_audit_payload() -> dict:
 
 
 def video_callback_audit_payload() -> dict:
-    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "vdownload|", "videoedit|")
+    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "vdownload|", "vprofile|", "videoedit|")
     rows = []
     for tool_id in VIDEO_PUBLIC_ROUTE_MATRIX:
         if tool_id in {"prompt_library", "video_downloader"}:
@@ -66873,7 +67082,7 @@ TASK3D_LEGACY_ROUTES = {
     "self_shot_scene_change": "selfscene|start",
     "video_reference": "videoref|hub",
     "audio_addons": "menu|main_music_video",
-    "video_local_edit": "videoedit|menu",
+    "video_local_edit": "videoedit|hub",
 }
 TASK3D_FREE_PRODUCT_IDS = {
     "video_trend", "video_idea", "storyboard_prompt", "motion_prompt", "video_reference",
@@ -67088,8 +67297,8 @@ TASK3D_PUBLIC_COPY = {
         "Chọn nhạc, voice hoặc hiệu ứng âm thanh cho video hiện tại. Các lựa chọn có phí sẽ được báo riêng theo quy trình audio hiện có."
     ),
     "video_local_edit": (
-        "🛠 <b>Chỉnh sửa video local</b>\n\n"
-        "Trim, crop, resize, nén hoặc ghép video bằng công cụ xử lý video nội bộ. Bot sẽ hỏi lựa chọn và xác nhận trước khi xử lý."
+        "🛠 <b>Chỉnh sửa video</b>\n\n"
+        "Chọn chỉnh sửa thủ công, chỉnh sửa bằng AI hoặc cắt video nhiều đoạn. Các mục hiện chỉ giới thiệu mô-đun tiếp theo; hệ thống chưa xử lý và chưa trừ Xu."
     ),
 }
 
@@ -67977,6 +68186,8 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     if str(product_id or "") == "frame_video_local":
         return ivf.frame_video_unified_menu_keyboard(lang)
+    if str(product_id or "") == "video_local_edit":
+        return video_edit_hub_keyboard(lang)
     is_vi = normalize_user_language(lang) == "vi"
     parent_callback = str(product.get("parent_menu_callback") or "menu|main_video")
     menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
@@ -75479,13 +75690,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             )
         if value == "video_local_edit":
             set_video_route_session(uid, value, "tool_home", product_id=value)
-            source = recent_video_editor_source(uid)
-            set_video_editor_pending(uid, "menu", **source)
             return await safe_edit_or_send(
                 query,
-                video_editor_menu_text(lang),
+                video_edit_hub_text(lang),
                 parse_mode="HTML",
-                reply_markup=video_editor_menu_keyboard(lang),
+                reply_markup=video_edit_hub_keyboard(lang),
             )
         parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
         current_session = get_video_session(uid)
@@ -139524,7 +139733,7 @@ def video_finalization_source_label(source: str, lang: str = "vi") -> str:
         "motion_prompt": "Prompt / Chuyển động",
         "video_reference": "Video mẫu / Kênh mẫu",
         "audio_addons": "Nhạc / Voice / SFX",
-        "video_local_edit": "Chỉnh sửa video local",
+        "video_local_edit": "Chỉnh sửa video",
         "videoidea": "Ý tưởng quảng cáo / điện ảnh",
         "longvideo": "Kịch bản video dài",
         "storypack": "Storyboard + Prompt điện ảnh",
@@ -191474,7 +191683,7 @@ def video_upload_received_keyboard(user_id, lang: str = "vi") -> InlineKeyboardM
         ("🧠 Tạo ý tưởng video" if vi else "🧠 Create video ideas", "video_upload|ideas"),
         ("🎥 Prompt / chuyển động" if vi else "🎥 Prompt / motion", "video_upload|motion"),
         ("✨ Nâng cấp video" if vi else "✨ Enhance video", "video_upload|enhance"),
-        ("🛠 Chỉnh sửa video local" if vi else "🛠 Local video editor", "videoedit|menu"),
+        ("🛠 Chỉnh sửa video" if vi else "🛠 Edit video", "videoedit|hub"),
         ("💾 Lưu video tham khảo" if vi else "💾 Save reference video", "video_upload|save"),
     ]
     if is_admin_user(user_id):
@@ -191630,6 +191839,120 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
     return await submit_local_video_editor_job(update, context, state)
 
 
+async def handle_video_profile_studio_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    state = dict(context.user_data.get(VIDEO_PROFILE_STUDIO_SESSION_KEY) or {})
+    if str(state.get("step") or "") != "await_brief":
+        return False
+    user_text = str(update.message.text or "").strip()
+    if not user_text or user_text.startswith("/"):
+        return False
+    selection_id = str(state.get("selection_id") or "")
+    if not video_profile_studio_option(selection_id):
+        context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {"step": "menu"}
+        await update.message.reply_text(
+            video_profile_studio_menu_text(get_user_language(update.effective_user.id) or "vi"),
+            parse_mode="HTML",
+            reply_markup=video_profile_studio_menu_keyboard(get_user_language(update.effective_user.id) or "vi"),
+        )
+        return True
+    draft = profile_router.route_profile(
+        user_text[:1600],
+        selected_profile=selection_id,
+        requested_output="video",
+        uploaded_asset_type="",
+        language=get_user_language(update.effective_user.id) or "vi",
+        aspect_ratio="9:16",
+        duration=24,
+        scene_count=3,
+    ).to_dict()
+    context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {
+        **state,
+        "step": "preview",
+        "user_text": user_text[:1600],
+        "draft": draft,
+    }
+    lang = get_user_language(update.effective_user.id) or "vi"
+    await update.message.reply_text(
+        video_profile_studio_preview_text(draft, lang),
+        parse_mode="HTML",
+        reply_markup=video_profile_studio_preview_keyboard(lang),
+    )
+    return True
+
+
+async def handle_video_profile_studio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "menu"
+    state = dict(context.user_data.get(VIDEO_PROFILE_STUDIO_SESSION_KEY) or {})
+    if action == "menu":
+        set_video_route_session(uid, "profile_studio", "tool_home", product_id="")
+        context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {"step": "menu"}
+        return await safe_edit_or_send(
+            query,
+            video_profile_studio_menu_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_profile_studio_menu_keyboard(lang),
+        )
+    if action == "select":
+        selection_id = parts[2] if len(parts) > 2 else ""
+        if not video_profile_studio_option(selection_id):
+            context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {"step": "menu"}
+            return await safe_edit_or_send(
+                query,
+                video_profile_studio_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_profile_studio_menu_keyboard(lang),
+            )
+        context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {
+            "step": "await_brief",
+            "selection_id": selection_id,
+            "draft": {},
+        }
+        return await safe_edit_or_send(
+            query,
+            video_profile_studio_question_text(selection_id, lang),
+            parse_mode="HTML",
+            reply_markup=video_profile_studio_question_keyboard(lang),
+        )
+    if action == "back_question":
+        context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {"step": "menu"}
+        return await safe_edit_or_send(
+            query,
+            video_profile_studio_menu_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_profile_studio_menu_keyboard(lang),
+        )
+    if action in {"edit", "back_preview"}:
+        selection_id = str(state.get("selection_id") or "")
+        if not video_profile_studio_option(selection_id):
+            context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {"step": "menu"}
+            return await safe_edit_or_send(
+                query,
+                video_profile_studio_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_profile_studio_menu_keyboard(lang),
+            )
+        context.user_data[VIDEO_PROFILE_STUDIO_SESSION_KEY] = {**state, "step": "await_brief"}
+        return await safe_edit_or_send(
+            query,
+            video_profile_studio_question_text(selection_id, lang),
+            parse_mode="HTML",
+            reply_markup=video_profile_studio_question_keyboard(lang),
+        )
+    return await safe_edit_or_send(
+        query,
+        video_profile_studio_menu_text(lang),
+        parse_mode="HTML",
+        reply_markup=video_profile_studio_menu_keyboard(lang),
+    )
+
+
 async def handle_video_editor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -191637,6 +191960,11 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     raw_action = parts[1] if len(parts) > 1 else "menu"
+    if raw_action in {"hub", "menu"}:
+        set_video_route_session(uid, "video_local_edit", "tool_home", product_id="video_local_edit")
+        return await safe_edit_or_send(query, video_edit_hub_text(lang), parse_mode="HTML", reply_markup=video_edit_hub_keyboard(lang))
+    if raw_action in {"manual_info", "ai_info", "split_info"}:
+        return await safe_edit_or_send(query, video_edit_info_text(raw_action, lang), parse_mode=None, reply_markup=video_edit_info_keyboard(lang))
     action = video_editor_normalize_action(raw_action)
     if action == "menu":
         source = recent_video_editor_source(uid)
@@ -192323,6 +192651,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_frame_video_pending_text(update, context):
+        return
+
+    if await handle_video_profile_studio_pending_text(update, context):
         return
 
     if await handle_video_product_pending_text(update, context):
@@ -193751,6 +194082,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_prompt_library_callback, pattern=r"^vpromptlib\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_guided_callback, pattern=r"^trendg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\|"))

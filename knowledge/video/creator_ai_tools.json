@@ -1,0 +1,15 @@
+{
+  "store_id": "creator_ai_tools",
+  "title_vi": "Creator hướng dẫn công cụ AI",
+  "description": "Cấu trúc nội dung khám phá, review và hướng dẫn công cụ mà không sao chép nhận diện nguồn.",
+  "production_patterns": [
+    "Mở bằng vấn đề cụ thể rồi mới giới thiệu nhóm giải pháp.",
+    "Demo một thao tác thật theo thứ tự input, action, output.",
+    "Nêu giới hạn, đối tượng phù hợp và tiêu chí chọn thay vì chỉ khen.",
+    "Kết thúc bằng checklist hoặc bước tiếp theo rõ ràng."
+  ],
+  "workflow": ["xác định pain point", "chọn use case", "demo từng bước", "so sánh", "nêu giới hạn", "tóm tắt"],
+  "prompt_concepts": ["tool review", "screen tutorial", "workflow comparison", "AI content stack", "translation/copy workflow"],
+  "safety_notes": ["Không bịa tính năng hoặc giá.", "Không dùng logo/nhận diện của creator nguồn."],
+  "source_reference_ids": ["AQNCUL6g...", "AQNLl3x8..."]
+}

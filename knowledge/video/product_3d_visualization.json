@@ -1,0 +1,15 @@
+{
+  "store_id": "product_3d_visualization",
+  "title_vi": "Sản phẩm và trực quan hóa 3D",
+  "description": "Mẫu capture vật thể, cải thiện hình ảnh và dựng showcase sản phẩm.",
+  "production_patterns": [
+    "Capture đủ góc với ánh sáng đều trước khi dựng mô hình.",
+    "Giữ đúng hình dáng, tỷ lệ, màu và vật liệu của sản phẩm khách hàng.",
+    "Showcase gồm hero reveal, macro vật liệu, thao tác hoặc exploded view nếu có dữ liệu.",
+    "Nền và camera phục vụ sản phẩm, không che nhãn hoặc chi tiết chính."
+  ],
+  "workflow": ["asset audit", "object capture", "mesh/material cleanup", "lighting rig", "camera shot list", "render", "product accuracy review"],
+  "prompt_concepts": ["turntable", "macro material", "studio hero shot", "exploded view", "product accuracy"],
+  "negative_patterns": ["invented branding", "wrong geometry", "warped label", "material mismatch", "floating object"],
+  "source_reference_ids": ["AQN3OSLT..."]
+}

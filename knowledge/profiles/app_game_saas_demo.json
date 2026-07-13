@@ -1,0 +1,27 @@
+{
+  "profile_id": "app_game_saas_demo",
+  "title_vi": "App, game, website và SaaS demo",
+  "aliases": ["app demo", "game demo", "SaaS demo", "website demo", "coding workflow", "automation", "ứng dụng", "phần mềm", "screen tutorial"],
+  "intent_keywords": ["app", "game", "website", "dashboard", "SaaS", "code", "coding", "automation", "UI", "UX", "feature", "onboarding", "workflow"],
+  "suitable_outputs": ["video", "image", "screen_demo", "feature_walkthrough", "launch_teaser"],
+  "subjects": ["giao diện ứng dụng", "website", "gameplay", "automation flow", "tính năng phần mềm"],
+  "environments": ["desktop screen", "mobile screen", "browser", "game viewport", "clean device mockup"],
+  "visual_styles": ["clean product demo", "developer tutorial", "launch teaser", "UI walkthrough"],
+  "materials": ["real screenshots", "screen recording", "UI assets", "icons supplied by customer"],
+  "lighting": ["clean neutral background", "subtle device reflections", "high contrast readable UI"],
+  "camera": ["screen-first framing", "device close-up", "cursor focus", "feature zoom", "before-after workflow"],
+  "motion": ["cursor path", "step reveal", "UI transition", "feature zoom", "input-to-output sequence"],
+  "scene_templates": [
+    {"role": "problem", "title": "Vấn đề", "prompt": "Nêu tác vụ người dùng đang mất thời gian."},
+    {"role": "input", "title": "Đầu vào", "prompt": "Cho thấy dữ liệu hoặc thao tác khởi đầu thật."},
+    {"role": "workflow", "title": "Quy trình", "prompt": "Demo các bước UI theo đúng thứ tự."},
+    {"role": "result", "title": "Kết quả", "prompt": "Hiện output thật và lợi ích có thể kiểm chứng."},
+    {"role": "cta", "title": "Bước tiếp theo", "prompt": "CTA gọn, không bịa tính năng hoặc giá."}
+  ],
+  "negative_prompt": ["invented feature", "fake metric", "unreadable UI", "random cursor", "wrong brand", "fabricated pricing", "broken screen text"],
+  "clarifying_questions": ["Anh/chị muốn demo app, game, website hay SaaS; tính năng và hành trình người dùng nào là trọng tâm?", "Có screen recording/screenshot thật và CTA nào cần giữ không?"],
+  "image_prompt_template": "Product UI key visual for: {user_request}. Use supplied interface and brand assets only. Clear hierarchy, readable screens, no invented feature, metric or pricing.",
+  "video_prompt_template": "Plan a {scene_count}-scene app/game/SaaS demo for: {user_request}. Show problem, real input, ordered UI workflow, verified output and CTA. {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["zoom only to relevant controls", "keep cursor path readable", "mask sensitive data", "use captions for steps", "show real output"],
+  "source_reference_ids": ["AQODG4cE...", "AQNRwCpB...", "AQOudhj...", "AQNhB43C..."]
+}

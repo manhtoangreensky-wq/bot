@@ -2688,7 +2688,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🎬 Storyboard + Prompt",
         "📚 Kho prompt video",
         "📥 Tải video từ link",
-        "🛠 Chỉnh sửa video local",
+        "🧠 Studio Profile AI",
+        "🛠 Chỉnh sửa video",
         "🏠 Menu chính",
     ]
     assert "🎬 Tạo video nhanh" not in video_labels
@@ -7077,8 +7078,9 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     assert bot.rotating_suggestions(["a", "b", "c", "d"], 2, 3) == ["c", "d", "a"]
 
     main_rows = bot.main_video_keyboard("vi").inline_keyboard
-    assert [button.callback_data for button in main_rows[-1]] == ["vproduct|open|video_local_edit", "menu|main"]
-    assert len(main_rows[-1]) == 2
+    assert [button.callback_data for button in main_rows[-2]] == ["vprofile|menu", "videoedit|hub"]
+    assert [button.callback_data for button in main_rows[-1]] == ["menu|main"]
+    assert len(main_rows[-1]) == 1
 
     ai_rows = bot.video_ai_true_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in ai_rows[-1]] == ["menu|main_video", "menu|main"]

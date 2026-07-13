@@ -40,12 +40,17 @@ def _labels(markup):
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
     update = SimpleNamespace(callback_query=query)
+    context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
-        asyncio.run(bot.handle_video_product_callback(update, SimpleNamespace()))
+        asyncio.run(bot.handle_video_product_callback(update, context))
     elif callback.startswith("vpromptlib|"):
-        asyncio.run(bot.handle_video_prompt_library_callback(update, SimpleNamespace()))
+        asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
-        asyncio.run(bot.handle_video_downloader_callback(update, SimpleNamespace()))
+        asyncio.run(bot.handle_video_downloader_callback(update, context))
+    elif callback.startswith("vprofile|"):
+        asyncio.run(bot.handle_video_profile_studio_callback(update, context))
+    elif callback.startswith("videoedit|"):
+        asyncio.run(bot.handle_video_editor_callback(update, context))
     else:
         raise AssertionError(f"unsupported callback {callback}")
     assert query.edits
@@ -79,7 +84,8 @@ def test_video_menu_current_buttons_unchanged():
         "🎬 Storyboard + Prompt",
         "📚 Kho prompt video",
         "📥 Tải video từ link",
-        "🛠 Chỉnh sửa video local",
+        "🧠 Studio Profile AI",
+        "🛠 Chỉnh sửa video",
         "🏠 Menu chính",
     ]
 
@@ -96,7 +102,8 @@ def test_video_menu_each_button_routes_to_matching_flow():
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
         ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film")),
         ("vdownload|start", "Tải video từ link", ()),
-        ("vproduct|open|video_local_edit", "Chỉnh sửa video local", ("videoedit|color", "videoedit|crop")),
+        ("vprofile|menu", "Studio Profile AI", ("vprofile|select|architecture_exterior", "vprofile|select|ugc_social_creator")),
+        ("videoedit|hub", "Chỉnh sửa video", ("videoedit|manual_info", "videoedit|ai_info", "videoedit|split_info")),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):
         _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=callback == "vproduct|open|video_trend")
@@ -189,7 +196,7 @@ def test_download_video_link_route():
 
 
 def test_local_video_edit_route():
-    _assert_route(918811, "vproduct|open|video_local_edit", "Chỉnh sửa video local", ("videoedit|color", "videoedit|crop"))
+    _assert_route(918811, "videoedit|hub", "Chỉnh sửa video", ("videoedit|manual_info", "videoedit|ai_info", "videoedit|split_info"))
 
 
 def test_video_open_same_product_keeps_existing_draft():
@@ -263,7 +270,8 @@ def test_video_public_ui_no_technical_words():
         ("vproduct|open|self_shot_scene_change", "self scene"),
         ("vproduct|open|multi_scene_film", "multiscene"),
         ("vdownload|start", "download"),
-        ("vproduct|open|video_local_edit", "local edit"),
+        ("vprofile|menu", "profile studio"),
+        ("videoedit|hub", "edit video"),
     ], start=1):
         text, _markup, _query = _press(918900 + index, callback)
         texts.append(text)

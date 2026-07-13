@@ -48,7 +48,7 @@ def _rows(markup):
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
     update = SimpleNamespace(callback_query=query)
-    context = SimpleNamespace()
+    context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
     elif callback.startswith("framevideo|"):
@@ -57,6 +57,10 @@ def _press(user_id: int, callback: str):
         asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
         asyncio.run(bot.handle_video_downloader_callback(update, context))
+    elif callback.startswith("vprofile|"):
+        asyncio.run(bot.handle_video_profile_studio_callback(update, context))
+    elif callback.startswith("videoedit|"):
+        asyncio.run(bot.handle_video_editor_callback(update, context))
     else:
         raise AssertionError(f"unsupported callback {callback}")
     assert query.edits
@@ -86,7 +90,8 @@ def test_video_menu_layout_preserved():
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
         ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
         ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
+        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
+        ["🏠 Menu chính"],
     ]
 
 
@@ -334,8 +339,9 @@ def test_multiscene_guard_clean_if_engine_not_ready():
 
 
 def test_local_edit_back_video_menu():
-    text, markup, session = _open(181822, "video_local_edit")
-    assert "Chỉnh sửa video local" in text
+    bot.clear_video_session(181822)
+    text, markup, session = _press(181822, "videoedit|hub")
+    assert "Chỉnh sửa video" in text
     assert session["video_tool"] == "video_local_edit"
     assert "menu|main_video" in _callbacks(markup)
 

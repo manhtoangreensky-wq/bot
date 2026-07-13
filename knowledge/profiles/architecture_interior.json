@@ -1,0 +1,26 @@
+{
+  "profile_id": "architecture_interior",
+  "title_vi": "Kiến trúc, nội thất và cải tạo không gian",
+  "aliases": ["kiến trúc", "ngoại thất", "nội thất", "cải tạo không gian", "thiết kế phòng", "architecture", "exterior", "interior", "renovation", "walkthrough kiến trúc"],
+  "intent_keywords": ["mặt tiền", "facade", "phòng khách", "phòng ngủ", "nhà", "biệt thự", "building", "room", "empty room", "floor plan", "vật liệu", "walkthrough"],
+  "suitable_outputs": ["image", "video", "edit", "walkthrough", "before_after"],
+  "subjects": ["công trình", "mặt tiền", "không gian nội thất", "đồ nội thất", "cảnh quan"],
+  "environments": ["khu đất", "đường phố", "phòng trống", "nhà ở", "không gian thương mại"],
+  "visual_styles": ["architectural visualization", "photorealistic", "minimal contemporary", "warm premium", "cinematic walkthrough"],
+  "materials": ["gỗ", "đá", "kính", "kim loại", "bê tông", "vải"],
+  "lighting": ["daylight physically plausible", "golden hour exterior", "warm practical interior", "balanced window exposure"],
+  "camera": ["two-point perspective", "24mm wide without distortion", "eye-level walkthrough", "slow dolly", "detail close-up"],
+  "motion": ["slow entrance reveal", "room-to-room walkthrough", "before-after match cut", "gentle orbit around facade"],
+  "scene_templates": [
+    {"role": "context", "title": "Bối cảnh", "prompt": "Giới thiệu công trình hoặc phòng và ràng buộc phải giữ."},
+    {"role": "design", "title": "Giải pháp thiết kế", "prompt": "Thể hiện bố cục, vật liệu, màu và ánh sáng đã chọn."},
+    {"role": "detail", "title": "Chi tiết", "prompt": "Cận cảnh vật liệu và điểm nhấn có tính xây dựng."},
+    {"role": "reveal", "title": "Toàn cảnh hoàn thiện", "prompt": "Kết thúc bằng góc tổng thể nhất quán với các cảnh trước."}
+  ],
+  "negative_prompt": ["warped walls", "impossible stairs", "floating furniture", "bent windows", "fisheye distortion", "invented dimensions", "invented address", "material inconsistency"],
+  "clarifying_questions": ["Anh/chị muốn làm ngoại thất, nội thất, cải tạo hay walkthrough; và cần giữ nguyên những vật liệu/màu nào?", "Không gian dùng cho mục đích gì và tỉ lệ đầu ra mong muốn là gì?"],
+  "image_prompt_template": "Architectural visualization for: {user_request}. Preserve all stated dimensions, objects, colors and materials. Physically plausible structure, balanced composition, realistic lighting, no invented address or measurements.",
+  "video_prompt_template": "Create a coherent architectural {scene_count}-scene plan for: {user_request}. Use stable geometry, physically plausible camera movement and consistent materials. Output ratio {aspect_ratio}, total duration {duration_seconds}s.",
+  "editing_recommendations": ["correct vertical lines", "match exposure between rooms", "use restrained transitions", "keep material colors accurate"],
+  "source_reference_ids": ["AQMyZIud...", "AQPQ-ndn...", "AQNp3hWK..."]
+}

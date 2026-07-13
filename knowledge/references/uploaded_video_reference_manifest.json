@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "privacy_policy": "Store reusable production patterns only. Do not copy source branding, creator identity, faces, logos or proprietary wording.",
+  "references": [
+    {"reference_id": "AQM0Pnhl...", "classification": "AI scene/camera/video transformation", "stores": ["video_ai_edit_vfx"]},
+    {"reference_id": "AQNCUL6g...", "classification": "AI tools discovery/review", "stores": ["creator_ai_tools"]},
+    {"reference_id": "AQODG4cE...", "classification": "coding and automation workflow", "stores": ["profile:app_game_saas_demo"]},
+    {"reference_id": "AQNRwCpB...", "classification": "prompt/coding automation", "stores": ["profile:app_game_saas_demo"]},
+    {"reference_id": "AQMyZIud...", "classification": "before/after visual editing for products and spaces", "stores": ["video_ai_edit_vfx", "profile:architecture_interior"]},
+    {"reference_id": "AQMZQfPV...", "classification": "productivity and habit tracker content", "stores": ["creator_productivity"]},
+    {"reference_id": "AQN3OSLT...", "classification": "object capture, 3D modeling and enhancement", "stores": ["product_3d_visualization", "profile:product_3d_showcase"]},
+    {"reference_id": "AQMa1djk...", "classification": "typography, sound design and editing technique", "stores": ["video_manual_editing"]},
+    {"reference_id": "AQNLl3x8...", "classification": "AI content, video, copywriting and translation tools", "stores": ["creator_ai_tools"]},
+    {"reference_id": "AQOzWGkF...", "classification": "normal video transformed into cinematic fantasy VFX", "stores": ["video_ai_edit_vfx", "profile:cinematic_vfx"]},
+    {"reference_id": "AQNNdUUe...", "classification": "color grading and color harmony", "stores": ["video_manual_editing"]},
+    {"reference_id": "AQPnuyfM...", "classification": "motion capture, rigging and character animation", "stores": ["animation_motion_3d", "profile:animation_character"]},
+    {"reference_id": "AQOudhj...", "classification": "AI coding and game/app assets", "stores": ["profile:app_game_saas_demo"]},
+    {"reference_id": "AQP9EzHP...", "classification": "manual talking-head edit, captions and timeline", "stores": ["video_manual_editing", "profile:creator_tutorial_ugc"]},
+    {"reference_id": "AQPMATLT...", "classification": "virtual fashion model and lookbook", "stores": ["profile:fashion_virtual_model"]},
+    {"reference_id": "AQNhB43C...", "classification": "AI app/game generation", "stores": ["profile:app_game_saas_demo"]},
+    {"reference_id": "AQPQ-ndn...", "classification": "empty room to designed interior", "stores": ["profile:architecture_interior"]},
+    {"reference_id": "AQNp3hWK...", "classification": "architecture walkthrough and render reveal", "stores": ["profile:architecture_interior", "profile:real_estate_property"]}
+  ]
+}

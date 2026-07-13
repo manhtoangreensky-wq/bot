@@ -1,0 +1,26 @@
+{
+  "profile_id": "fashion_virtual_model",
+  "title_vi": "Thời trang và người mẫu ảo",
+  "aliases": ["thời trang", "lookbook", "người mẫu ảo", "virtual model", "fashion", "outfit", "runway", "catalog thời trang"],
+  "intent_keywords": ["váy", "áo", "quần", "phụ kiện", "collection", "fabric", "garment", "pose", "styling", "editorial"],
+  "suitable_outputs": ["image", "video", "lookbook", "virtual_try_on", "fashion_reel"],
+  "subjects": ["trang phục", "người mẫu", "phụ kiện", "chất liệu vải"],
+  "environments": ["studio", "runway", "street fashion", "editorial set", "minimal set"],
+  "visual_styles": ["editorial fashion", "clean catalog", "high-fashion", "street lookbook", "luxury minimal"],
+  "materials": ["fabric supplied by customer", "leather", "denim", "silk", "knit", "metal accessories"],
+  "lighting": ["softbox studio", "hard editorial light", "golden street light", "clean catalog light"],
+  "camera": ["full-body front", "three-quarter pose", "fabric macro", "walk-in shot", "turnaround"],
+  "motion": ["natural walk", "pose transition", "fabric movement", "accessory detail reveal"],
+  "scene_templates": [
+    {"role": "hook", "title": "Hero look", "prompt": "Mở bằng outfit rõ toàn thân và đúng màu/chất liệu."},
+    {"role": "detail", "title": "Chi tiết", "prompt": "Cận vải, đường may hoặc phụ kiện."},
+    {"role": "motion", "title": "Chuyển động", "prompt": "Cho thấy phom dáng khi người mẫu di chuyển tự nhiên."},
+    {"role": "final", "title": "Final pose", "prompt": "Kết bằng pose sạch và CTA ngắn nếu có."}
+  ],
+  "negative_prompt": ["garment drift", "wrong logo", "invented pattern", "extra fingers", "body distortion", "fabric melting", "outfit color shift"],
+  "clarifying_questions": ["Anh/chị cần lookbook catalog, editorial hay video social; trang phục/màu/chất liệu nào phải giữ chính xác?", "Có ảnh người mẫu hoặc sản phẩm tham chiếu không?"],
+  "image_prompt_template": "Fashion lookbook for: {user_request}. Preserve garment cut, color, pattern, material and customer-provided identity. Professional pose, accurate fabric, no invented branding.",
+  "video_prompt_template": "Create a {scene_count}-scene fashion lookbook for: {user_request}. Keep garment and model identity consistent, show hero look, detail and motion. {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["cut on pose or beat", "keep skin tone natural", "show fabric detail before CTA", "avoid long text overlays"],
+  "source_reference_ids": ["AQPMATLT..."]
+}

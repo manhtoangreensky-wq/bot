@@ -82,7 +82,8 @@ def test_video_main_menu_two_columns():
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
         ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
         ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
+        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
+        ["🏠 Menu chính"],
     ]
 
 
@@ -124,8 +125,8 @@ def test_video_main_menu_has_downloader():
 def test_video_main_menu_has_local_edit():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "🛠 Chỉnh sửa video local" in labels
-    assert "vproduct|open|video_local_edit" in callbacks
+    assert "🛠 Chỉnh sửa video" in labels
+    assert "videoedit|hub" in callbacks
 
 
 def test_video_numeric_buttons_1_to_5_single_row():
