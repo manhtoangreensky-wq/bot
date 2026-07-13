@@ -182398,7 +182398,11 @@ async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: s
         )
         message_id = str(getattr(rendered, "message_id", "") or getattr(getattr(query, "message", None), "message_id", "") or "")
         if message_id:
-            update_subtitle_dub_pipeline_job(job_key, status_panel_message_id=message_id)
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                status_panel_message_id=message_id,
+                status_panel_chat_id=str(getattr(getattr(query, "message", None), "chat_id", "") or ""),
+            )
     except Exception as exc:
         update_subtitle_dub_pipeline_job(
             job_key,
@@ -182408,6 +182412,212 @@ async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: s
             last_runtime_error_reason=sanitize_log_text(type(exc).__name__)[:120],
         )
         logger.warning("subtitle/dub progress update skipped | %s", sanitize_log_text(str(exc))[:120])
+
+def subdub_confirmed_video_delivery_message_id(result: dict | None = None, job: dict | None = None) -> str:
+    """Return delivery evidence only when it belongs to a real final video."""
+    current_job = dict(job or {})
+    current_result = dict(result or {})
+    has_final_video = bool(
+        truthy_value(current_result.get("has_video"), False)
+        or truthy_value(current_result.get("final_mp4_delivered"), False)
+        or truthy_value(current_job.get("final_mp4_delivered"), False)
+    )
+    if not has_final_video:
+        return ""
+    return str(
+        current_result.get("video_delivery_message_id")
+        or current_result.get("final_video_message_id")
+        or current_result.get("subdub_final_video_message_id")
+        or current_result.get("telegram_message_id")
+        or current_job.get("video_delivery_message_id")
+        or current_job.get("final_video_message_id")
+        or current_job.get("subdub_final_video_message_id")
+        or ""
+    ).strip()
+
+async def subdub_finalize_delivered_panel(
+    query,
+    context,
+    job_key: str,
+    job_id: str,
+    lang: str,
+    result: dict | None = None,
+    rendered_text: str = "",
+) -> object | None:
+    """Finalize the original progress panel after confirmed MP4 delivery."""
+    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
+    delivery_message_id = subdub_confirmed_video_delivery_message_id(result, job)
+    if not job_key or not job or not delivery_message_id:
+        return None
+
+    panel_message_id = str(job.get("status_panel_message_id") or "").strip()
+    panel_chat_id = str(
+        job.get("status_panel_chat_id")
+        or job.get("chat_id")
+        or getattr(getattr(query, "message", None), "chat_id", "")
+        or ""
+    ).strip()
+    delivered_text = rendered_text or subdub_progress_text("delivered", job_id, lang)
+    update_subtitle_dub_pipeline_job(
+        job_key,
+        status="completed",
+        terminal_state="delivered",
+        lifecycle_state="delivered",
+        current_stage="delivered",
+        progress_stage="delivered",
+        progress_percent=100,
+        completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+        panel_finalized=True,
+        panel_final_percent=100,
+        status_panel_terminalized=True,
+        refresh_stopped_after_terminal=True,
+        terminal_public_outcome_type="success",
+        terminal_public_outcome_sent=True,
+        public_error_sent=False,
+        public_failure_sent=False,
+        public_error_sent_count=0,
+        delivery_success=True,
+        delivery_succeeded=True,
+        final_mp4_delivered=True,
+        output_sent=True,
+        video_delivery_message_id=delivery_message_id,
+        final_video_message_id=delivery_message_id,
+        subdub_final_video_message_id=delivery_message_id,
+    )
+
+    bot_client = getattr(context, "bot", None)
+    if bot_client is None and query is not None:
+        try:
+            bot_client = query.get_bot()
+        except Exception:
+            bot_client = None
+    if panel_message_id and panel_chat_id and bot_client is not None:
+        try:
+            rendered = await bot_client.edit_message_text(
+                chat_id=int(panel_chat_id) if panel_chat_id.lstrip("-").isdigit() else panel_chat_id,
+                message_id=int(panel_message_id) if panel_message_id.isdigit() else panel_message_id,
+                text=delivered_text,
+                parse_mode="HTML",
+                reply_markup=subdub_progress_keyboard(job_id, lang),
+            )
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                panel_final_message_id=panel_message_id,
+                status_panel_terminal_edit_method="stored_message_id",
+                status_panel_terminal_edit_succeeded=True,
+                status_panel_edit_failed=False,
+            )
+            return rendered
+        except Exception as exc:
+            already_final = "message is not modified" in str(exc).strip().lower()
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                panel_final_message_id=panel_message_id,
+                status_panel_terminal_edit_method="stored_message_id",
+                status_panel_terminal_edit_succeeded=already_final,
+                status_panel_edit_failed=not already_final,
+                status_panel_terminal_edit_error="" if already_final else sanitize_log_text(type(exc).__name__)[:120],
+            )
+            if already_final:
+                return getattr(query, "message", None)
+            logger.warning("subtitle/dub terminal panel edit skipped | %s", sanitize_log_text(str(exc))[:120])
+            return None
+
+    try:
+        rendered = await safe_edit_or_send(
+            query,
+            delivered_text,
+            parse_mode="HTML",
+            reply_markup=subdub_progress_keyboard(job_id, lang),
+        )
+        fallback_message_id = str(getattr(rendered, "message_id", "") or "").strip()
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            panel_final_message_id=fallback_message_id,
+            status_panel_terminal_edit_method="query_fallback",
+            status_panel_terminal_edit_succeeded=bool(fallback_message_id),
+        )
+        return rendered
+    except Exception as exc:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            status_panel_terminal_edit_method="query_fallback",
+            status_panel_terminal_edit_succeeded=False,
+            status_panel_edit_failed=True,
+            status_panel_terminal_edit_error=sanitize_log_text(type(exc).__name__)[:120],
+        )
+        logger.warning("subtitle/dub terminal panel fallback skipped | %s", sanitize_log_text(str(exc))[:120])
+        return None
+
+def subdub_receipt_send_is_uncertain(error: Exception) -> bool:
+    token = str(error or "").strip().lower()
+    return any(part in token for part in ("timeout", "timed out", "readtimeout", "networkerror"))
+
+async def subdub_send_success_receipt_once(
+    message,
+    job_key: str,
+    receipt_text: str,
+    reply_markup=None,
+) -> object | None:
+    """Send one receipt, and only after a final MP4 has a Telegram message id."""
+    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
+    delivery_message_id = subdub_confirmed_video_delivery_message_id({}, job)
+    existing_receipt_id = str(job.get("subdub_success_message_id") or job.get("receipt_message_id") or "").strip()
+    if not message or not job_key or not delivery_message_id:
+        return None
+    if existing_receipt_id or truthy_value(job.get("receipt_sent_once"), False):
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            receipt_sent_once=True,
+            duplicate_receipt_prevented=True,
+            receipt_message_id=existing_receipt_id,
+        )
+        return None
+
+    update_subtitle_dub_pipeline_job(
+        job_key,
+        receipt_send_attempted=True,
+        receipt_send_attempted_at=time.time(),
+        receipt_send_state="sending",
+    )
+    try:
+        sent_receipt = await message.reply_text(
+            receipt_text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    except Exception as exc:
+        uncertain = subdub_receipt_send_is_uncertain(exc)
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            receipt_send_state="unknown" if uncertain else "failed",
+            receipt_send_uncertain=uncertain,
+            receipt_send_failed=not uncertain,
+            receipt_sent_once=uncertain,
+            receipt_send_error=sanitize_log_text(type(exc).__name__)[:120],
+        )
+        return None
+
+    receipt_message_id = str(getattr(sent_receipt, "message_id", "") or "").strip()
+    if not receipt_message_id:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            receipt_send_state="failed",
+            receipt_send_failed=True,
+            receipt_send_error="missing_receipt_message_id",
+        )
+        return None
+    update_subtitle_dub_pipeline_job(
+        job_key,
+        subdub_success_message_id=receipt_message_id,
+        receipt_message_id=receipt_message_id,
+        receipt_sent_once=True,
+        receipt_send_state="sent",
+        receipt_send_failed=False,
+        receipt_send_uncertain=False,
+        success_sent_count=max(1, int((SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}).get("success_sent_count") or 0)),
+    )
+    return sent_receipt
 
 def video_dubbing_job_status_text(job: dict | None = None, lang: str = "vi") -> str:
     job = dict(job or {})
@@ -192053,60 +192263,40 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     cost_line_reason="partial_audio_no_full_video_charge",
                 )
             return None
-        if result.get("has_video") and str(result.get("telegram_message_id") or result.get("video_delivery_message_id") or "").strip():
+        confirmed_video_message_id = subdub_confirmed_video_delivery_message_id(
+            result,
+            SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key),
+        )
+        if confirmed_video_message_id:
             completed_job_id = str(
                 result.get("job_id")
                 or latest_pipeline_job.get("job_id")
                 or latest_pipeline_job.get("internal_job_id")
                 or ""
             )
-            await safe_edit_or_send(
+            await subdub_finalize_delivered_panel(
                 query,
+                context,
+                pipeline_job_key,
+                completed_job_id,
+                lang,
+                result,
                 subdub_progress_text("delivered", completed_job_id, lang),
-                parse_mode="HTML",
-                reply_markup=subdub_progress_keyboard(completed_job_id, lang),
             )
-            if pipeline_job_key:
-                update_subtitle_dub_pipeline_job(
-                    pipeline_job_key,
-                    status="completed",
-                    terminal_state="delivered",
-                    lifecycle_state="delivered",
-                    current_stage="delivered",
-                    progress_stage="delivered",
-                    progress_percent=100,
-                    completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
-                    panel_finalized=True,
-                    panel_final_percent=100,
-                    status_panel_terminalized=True,
-                    refresh_stopped_after_terminal=True,
-                    terminal_public_outcome_type="success",
-                    terminal_public_outcome_sent=True,
-                    public_error_sent=False,
-                    public_failure_sent=False,
-                    public_error_sent_count=0,
-                    delivery_success=True,
-                    delivery_succeeded=True,
-                    final_mp4_delivered=True,
-                    video_delivery_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
-                )
         receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
-        sent_receipt = await query.message.reply_text(
+        sent_receipt = await subdub_send_success_receipt_once(
+            query.message,
+            pipeline_job_key,
             receipt_text,
-            parse_mode="HTML",
-            reply_markup=video_dubbing_receipt_keyboard(lang, origin, completed_state),
+            video_dubbing_receipt_keyboard(lang, origin, completed_state),
         )
-        if pipeline_job_key:
-            receipt_message_id = str(getattr(sent_receipt, "message_id", "") or "")
-            if receipt_message_id:
-                update_subtitle_dub_pipeline_job(
-                    pipeline_job_key,
-                    subdub_success_message_id=receipt_message_id,
-                    success_sent_count=max(1, int((SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {}).get("success_sent_count") or 0)),
-                    success_cost_line=subdub_success_cost_line(result.get("charged") or 0, lang),
-                    cost_line_rendered="Chi phí:" in receipt_text or "Cost:" in receipt_text,
-                    cost_line_reason="after_delivery" if result.get("telegram_message_id") or result.get("video_delivery_message_id") or result.get("audio_delivery_message_id") or result.get("srt_delivery_message_id") else "receipt_sent",
-                )
+        if pipeline_job_key and sent_receipt is not None:
+            update_subtitle_dub_pipeline_job(
+                pipeline_job_key,
+                success_cost_line=subdub_success_cost_line(result.get("charged") or 0, lang),
+                cost_line_rendered="Chi phí:" in receipt_text or "Cost:" in receipt_text,
+                cost_line_reason="after_delivery",
+            )
         return sent_receipt
     return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
 
