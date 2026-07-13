@@ -28,6 +28,10 @@ from services.architecture_video_prompt_builder import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (REPO_ROOT / "bot.py").read_text(encoding="utf-8")
 TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
+SCENE2_TEST_FILE = "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_removal.py"
+SCENE2_UIFLOW_TEST_FILE = "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py"
+SCENE2_UIFLOW_LOCK_TEST_FILE = "tests/test_p0_video_uiflow_lock_current_good_flow.py"
+SCENE2_DURATION_TEST_FILE = "tests/test_p0_video_duration2_scene_or_seconds_pricing_decision.py"
 
 
 def _git_lines(*args: str) -> set[str]:
@@ -350,13 +354,17 @@ def test_arch1_realestate_truth_guards_and_labels() -> None:
 
 def test_arch1_destination_handoff_prefill_source_contract() -> None:
     source = _architecture_source()
+    handoff_source = BOT_SOURCE.split('if action == "handoff_video":', 1)[1].split(
+        "async def cmd_architecture_profile_status", 1
+    )[0]
     assert 'prompt_source="architecture_profile"' in source
     assert 'architecture_profile_id=' in source
     assert 'architecture_reference_assets=' in source
     assert '"architecture_video_prompt"' in source
     assert '"architecture_scene_plan"' in source
     assert '"return_to": "archprofile|output"' in source
-    assert 'callback_data="vproduct|open|video_ai_real"' in BOT_SOURCE
+    assert 'callback_data="archprofile|handoff_video"' in source
+    assert "return await start_public_video_scene2_step(" in handoff_source
     assert 'callback_data="archprofile|output"' in source
     assert 'parent_callback_override=parent_callback if architecture_handoff else ""' in BOT_SOURCE
     assert '"archprofile|output"\n            if architecture_handoff' in BOT_SOURCE
@@ -452,6 +460,15 @@ def test_arch1_scope_lock() -> None:
         "tests/test_p0_cskh1_telegram_business_auto_support_bot.py",
         "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
     }
+    if SCENE2_TEST_FILE in touched:
+        allowed_tests.update(
+            {
+                SCENE2_TEST_FILE,
+                SCENE2_UIFLOW_TEST_FILE,
+                SCENE2_UIFLOW_LOCK_TEST_FILE,
+                SCENE2_DURATION_TEST_FILE,
+            }
+        )
     allowed_profiles = {
         "knowledge/profiles/architecture_exterior.json",
         "knowledge/profiles/interior_design.json",
@@ -476,9 +493,15 @@ def test_arch1_scope_lock() -> None:
 def test_arch1_old_scope_guards_are_aligned_narrowly() -> None:
     from tests.aiedit1_scope_guard import arch1_scope_active
 
-    changed = _git_lines("diff", "--name-only", "origin/main")
-    assert arch1_scope_active(changed) is True
-    assert arch1_scope_active(changed | {"services/video_provider_router.py"}) is False
+    touched = _git_lines("diff", "--name-only", "origin/main") | {
+        item for item in _git_lines("ls-files", "--others", "--exclude-standard")
+        if not item.startswith("pytest-baseline-r1/")
+    }
+    if SCENE2_TEST_FILE in touched:
+        assert arch1_scope_active(touched) is False
+    else:
+        assert arch1_scope_active(touched) is True
+    assert arch1_scope_active(touched | {"services/video_provider_router.py"}) is False
 
 
 def test_arch1_no_real_provider_calls() -> None:

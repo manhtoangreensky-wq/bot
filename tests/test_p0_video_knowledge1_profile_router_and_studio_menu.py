@@ -19,6 +19,10 @@ LOCAL1_TEST_FILE = "tests/test_p0_video_local1_manual_editing_smart_splitter.py"
 AIEDIT1_TEST_FILE = "tests/test_p0_video_aiedit1_blackbox_special_effects_transformation.py"
 ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
 SCENE1_TEST_FILE = "tests/test_p0_video_scene1_semantic_story_planner_addon_aware_flow.py"
+SCENE2_TEST_FILE = "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_removal.py"
+SCENE2_UIFLOW_TEST_FILE = "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py"
+SCENE2_UIFLOW_LOCK_TEST_FILE = "tests/test_p0_video_uiflow_lock_current_good_flow.py"
+SCENE2_DURATION_TEST_FILE = "tests/test_p0_video_duration2_scene_or_seconds_pricing_decision.py"
 ARCH1_SERVICE_FILES = {
     "services/architecture_profile_router.py",
     "services/architecture_prompt_builder.py",
@@ -300,6 +304,12 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         "services/video_scene_prompt_builder.py",
         SCENE1_TEST_FILE,
     } if scene1_scope else set()
+    scene2_allowed = {
+        SCENE2_TEST_FILE,
+        SCENE2_UIFLOW_TEST_FILE,
+        SCENE2_UIFLOW_LOCK_TEST_FILE,
+        SCENE2_DURATION_TEST_FILE,
+    } if SCENE2_TEST_FILE in touched else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -311,6 +321,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path in aiedit1_allowed
             or path in arch1_allowed
             or path in scene1_allowed
+            or path in scene2_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",

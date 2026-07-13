@@ -7,6 +7,7 @@ import bot
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_CONTEXTS = {}
 
 
 class FakeMessage:
@@ -52,7 +53,9 @@ def _callbacks(markup):
 
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    context = _CONTEXTS.setdefault(user_id, SimpleNamespace(user_data={}))
+    handler = bot.handle_video_profile_studio_callback if callback.startswith("vprofile|") else bot.handle_video_product_callback
+    asyncio.run(handler(SimpleNamespace(callback_query=query), context))
     assert query.edits
     edit = query.edits[-1]
     return edit["text"], edit.get("reply_markup"), bot.get_video_session(user_id)
@@ -60,19 +63,46 @@ def _press(user_id: int, callback: str):
 
 def _open(user_id: int, product_id: str):
     bot.clear_video_session(user_id)
+    _CONTEXTS[user_id] = SimpleNamespace(user_data={})
     return _press(user_id, f"vproduct|open|{product_id}")
 
 
-def _run_prompt_to_review(user_id: int):
+def _scene2_state(user_id: int):
+    return bot.video_profile_studio_state(_CONTEXTS[user_id])
+
+
+def _profile_id(selection_id: str = "cinematic_vfx"):
+    available = {
+        str(item["selection_id"])
+        for item in bot.profile_router.STUDIO_PROFILE_OPTIONS
+    }
+    return selection_id if selection_id in available else sorted(available)[0]
+
+
+def _start_prompt_scene2(user_id: int):
     _open(user_id, "video_ai_real")
     _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
     _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    _press(user_id, "vproduct|b14_idea_select|0")
-    _press(user_id, "vproduct|asset_skip")
-    _press(user_id, "vproduct|asset_skip_confirm")
-    return _press(user_id, "vproduct|b14_creative_done")
+    return _press(user_id, "vproduct|microflow_choose|0")
+
+
+def _advance_to_requirements(user_id: int, profile_id: str = "cinematic_vfx"):
+    _start_prompt_scene2(user_id)
+    _press(user_id, "vprofile|count|2")
+    _press(user_id, f"vprofile|select|{_profile_id(profile_id)}")
+    return _press(user_id, "vprofile|context|1")
+
+
+def _advance_to_content_addons(user_id: int, profile_id: str = "cinematic_vfx"):
+    _advance_to_requirements(user_id, profile_id)
+    _press(user_id, "vprofile|requirements_skip")
+    return _press(user_id, "vprofile|assets|none")
+
+
+def _run_prompt_to_review(user_id: int):
+    _advance_to_content_addons(user_id)
+    _press(user_id, "vprofile|build")
+    return _press(user_id, "vprofile|prompts")
 
 
 def _changed_files() -> set[str]:
@@ -180,16 +210,22 @@ def test_videoflow_lock_prompt_to_video_sequence():
     _press(user_id, "vproduct|suggest_prompt|video_ai_real")
     assert bot.get_video_session(user_id)["current_step"] == "suggest_prompt"
     _press(user_id, "vproduct|microflow_choose|0")
-    assert bot.get_video_session(user_id)["current_step"] == "profile_select"
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    assert bot.get_video_session(user_id)["current_step"] == "idea_suggestions"
-    _press(user_id, "vproduct|b14_idea_select|0")
-    assert bot.get_video_session(user_id)["current_step"] == "asset_intake"
-    _press(user_id, "vproduct|asset_skip")
-    _press(user_id, "vproduct|asset_skip_confirm")
-    assert bot.get_video_session(user_id)["current_step"] == "b14_creative_controls"
-    _press(user_id, "vproduct|b14_creative_done")
-    assert bot.get_video_session(user_id)["current_step"] == "storyboard_preview"
+    assert bot.get_video_session(user_id)["current_step"] == "scene2_scene_count"
+    assert _scene2_state(user_id)["step"] == "scene_count"
+    _press(user_id, "vprofile|count|2")
+    assert _scene2_state(user_id)["step"] == "profile"
+    _press(user_id, f"vprofile|select|{_profile_id()}")
+    assert _scene2_state(user_id)["step"] == "profile_context"
+    _press(user_id, "vprofile|context|1")
+    assert _scene2_state(user_id)["step"] == "requirements"
+    _press(user_id, "vprofile|requirements_skip")
+    assert _scene2_state(user_id)["step"] == "reference_assets"
+    _press(user_id, "vprofile|assets|none")
+    assert _scene2_state(user_id)["step"] == "content_addons"
+    _press(user_id, "vprofile|build")
+    assert _scene2_state(user_id)["step"] == "scene_plan"
+    _press(user_id, "vprofile|prompts")
+    assert _scene2_state(user_id)["step"] == "prompt_preview"
 
 
 def test_videoflow_lock_image_to_video_sequence():
@@ -214,103 +250,78 @@ def test_videoflow_lock_video_reference_sequence():
 
 def test_videoflow_lock_type_selection_sequence():
     user_id = 191104
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    text, _markup, session = _press(user_id, "vproduct|b14_profile|product_review")
-    assert session["current_step"] == "idea_suggestions"
-    assert "Gợi ý ý tưởng cho" in text
-    assert "Review sản phẩm" in text
+    _start_prompt_scene2(user_id)
+    _press(user_id, "vprofile|count|2")
+    text, _markup, _session = _press(user_id, f"vprofile|select|{_profile_id('product_3d_showcase')}")
+    assert _scene2_state(user_id)["step"] == "profile_context"
+    assert "hướng nội dung theo profile" in text
 
 
 def test_videoflow_lock_short_film_trailer_sequence():
     user_id = 191105
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    text, _markup, session = _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    assert session["current_step"] == "idea_suggestions"
-    assert "Phim ngắn / trailer" in text
+    _start_prompt_scene2(user_id)
+    _press(user_id, "vprofile|count|2")
+    text, _markup, _session = _press(user_id, f"vprofile|select|{_profile_id('cinematic_vfx')}")
+    assert _scene2_state(user_id)["step"] == "profile_context"
+    assert "hướng nội dung theo profile" in text
 
 
 def test_videoflow_lock_add_materials_not_skipped():
     user_id = 191106
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    text, _markup, session = _press(user_id, "vproduct|b14_idea_select|0")
-    assert session["current_step"] == "asset_intake"
-    assert "Muốn video sát ý hơn" in text
+    _advance_to_requirements(user_id)
+    text, _markup, _session = _press(user_id, "vprofile|requirements_skip")
+    assert _scene2_state(user_id)["step"] == "reference_assets"
+    assert "Tư liệu nhận diện" in text
 
 
 def test_videoflow_lock_review_before_confirm():
     text, markup, session = _run_prompt_to_review(191107)
-    assert session["current_step"] == "storyboard_preview"
-    assert "Storyboard" in text
-    assert "vproduct|storyboard_confirm" in _callbacks(markup)
+    assert _scene2_state(191107)["step"] == "prompt_preview"
+    assert "Prompt" in text
+    assert "vprofile|post" in _callbacks(markup)
 
 
 def test_videoflow_lock_back_from_type_suggestion():
     user_id = 191201
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "suggest_prompt"
-    assert "Gợi ý prompt video" in text
+    _start_prompt_scene2(user_id)
+    _press(user_id, "vprofile|count|2")
+    text, _markup, _session = _press(user_id, "vprofile|back")
+    assert _scene2_state(user_id)["step"] == "scene_count"
+    assert "Chọn số cảnh" in text
 
 
 def test_videoflow_lock_back_from_profile_suggestion():
     user_id = 191202
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "profile_select"
-    assert "Chọn loại video" in text
+    _start_prompt_scene2(user_id)
+    _press(user_id, "vprofile|count|2")
+    _press(user_id, f"vprofile|select|{_profile_id()}")
+    text, _markup, _session = _press(user_id, "vprofile|back")
+    assert _scene2_state(user_id)["step"] == "profile"
+    assert "Chọn profile phù hợp" in text
 
 
 def test_videoflow_lock_back_from_style_customization():
     user_id = 191203
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    _press(user_id, "vproduct|b14_idea_select|0")
-    _press(user_id, "vproduct|asset_skip")
-    _press(user_id, "vproduct|asset_skip_confirm")
-    text, _markup, session = _press(user_id, "vproduct|asset_intro")
-    assert session["current_step"] == "asset_intake"
-    assert "Muốn video sát ý hơn" in text
+    _advance_to_content_addons(user_id)
+    text, _markup, _session = _press(user_id, "vprofile|back")
+    assert _scene2_state(user_id)["step"] == "requirements"
+    assert "Yêu cầu cần giữ nguyên" in text
 
 
 def test_videoflow_lock_back_from_add_materials():
     user_id = 191204
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    _press(user_id, "vproduct|b14_idea_select|0")
-    text, _markup, session = _press(user_id, "vproduct|b14_profile_back")
-    assert session["current_step"] == "idea_suggestions"
-    assert "Gợi ý ý tưởng cho" in text
+    _advance_to_content_addons(user_id)
+    text, _markup, _session = _press(user_id, "vprofile|back")
+    assert _scene2_state(user_id)["step"] == "requirements"
+    assert "Yêu cầu cần giữ nguyên" in text
 
 
 def test_videoflow_lock_back_from_review():
     text, _markup, session = _run_prompt_to_review(191205)
-    assert session["current_step"] == "storyboard_preview"
-    text, _markup, session = _press(191205, "vproduct|b14_creative_screen")
-    assert session["current_step"] == "b14_creative_controls"
-    assert "Tùy chỉnh phong cách video" in text
+    assert _scene2_state(191205)["step"] == "prompt_preview"
+    text, _markup, _session = _press(191205, "vprofile|back")
+    assert _scene2_state(191205)["step"] == "scene_plan"
+    assert "Kế hoạch" in text or "cảnh" in text
 
 
 def test_videoflow_lock_menu_video_returns_video_menu():
@@ -347,31 +358,20 @@ def test_videoflow_lock_add_materials_all_buttons_present():
 
 def test_videoflow_lock_add_materials_skip_explicit_only():
     user_id = 191301
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    _press(user_id, "vproduct|b14_idea_select|0")
-    text, markup, session = _press(user_id, "vproduct|asset_done")
-    assert session["current_step"] == "asset_intake"
-    assert any("Tiếp tục không ảnh" in label for label in _labels(markup))
-    assert "bỏ qua ảnh tư liệu" in text.lower()
+    _advance_to_requirements(user_id)
+    text, markup, _session = _press(user_id, "vprofile|requirements_skip")
+    assert _scene2_state(user_id)["step"] == "reference_assets"
+    assert "vprofile|assets|none" in _callbacks(markup)
+    assert "Tư liệu nhận diện" in text
 
 
 def test_videoflow_lock_add_materials_done_goes_review():
     user_id = 191302
-    _open(user_id, "video_ai_real")
-    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _press(user_id, "vproduct|microflow_choose|0")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    _press(user_id, "vproduct|b14_idea_select|0")
-    _press(user_id, "vproduct|asset_skip")
-    _press(user_id, "vproduct|asset_skip_confirm")
-    text, _markup, session = _press(user_id, "vproduct|b14_creative_done")
-    assert session["current_step"] == "storyboard_preview"
-    assert "Storyboard" in text
+    _advance_to_content_addons(user_id)
+    _press(user_id, "vprofile|build")
+    text, _markup, _session = _press(user_id, "vprofile|prompts")
+    assert _scene2_state(user_id)["step"] == "prompt_preview"
+    assert "Prompt" in text
 
 
 def test_videoflow_lock_add_materials_back_exact():
@@ -403,11 +403,13 @@ def test_videoflow_lock_no_provider_submit_from_planning_callbacks():
         "vproduct|ai_prompt_menu|video_ai_real",
         "vproduct|suggest_prompt|video_ai_real",
         "vproduct|microflow_choose|0",
-        "vproduct|b14_profile|cinematic_trailer",
-        "vproduct|b14_idea_select|0",
-        "vproduct|asset_skip",
-        "vproduct|asset_skip_confirm",
-        "vproduct|b14_creative_done",
+        "vprofile|count|2",
+        f"vprofile|select|{_profile_id()}",
+        "vprofile|context|1",
+        "vprofile|requirements_skip",
+        "vprofile|assets|none",
+        "vprofile|build",
+        "vprofile|prompts",
     ):
         _press(user_id, callback)
         _assert_no_provider_or_charge(bot.get_video_session(user_id))
