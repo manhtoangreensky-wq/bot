@@ -181689,6 +181689,10 @@ def subtitle_dub_pipeline_job_key(user_id, chat_id, state: dict | None = None) -
     active_flow = str(state.get("active_flow") or mode or "pipeline")
     return "|".join((str(user_id or 0), str(chat_id or user_id or 0), source[:160], active_flow[:80]))
 
+def subdub_runtime_pipeline_identity(user_id, chat_id, state: dict | None = None) -> tuple[dict, str]:
+    normalized_state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
+    return normalized_state, subtitle_dub_pipeline_job_key(user_id, chat_id, normalized_state)
+
 def subdub_job_timestamp(value, default: float = 0.0) -> float:
     try:
         return float(value or default)
@@ -186874,7 +186878,7 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
             )
             delayed_labels.append(f"[{label}]")
         filters.append(
-            f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:duration=longest:dropout_transition=0,"
+            f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:duration=longest:dropout_transition=0:normalize=0,"
             f"apad=whole_dur={max(0.1, timeline_end):.3f},"
             f"atrim=duration={max(0.1, timeline_end):.3f}[mix]"
         )
@@ -188672,8 +188676,7 @@ async def execute_video_dubbing_pipeline(
 ) -> dict:
     uid = query.from_user.id
     chat_id = getattr(query.message, "chat_id", uid)
-    state = subdub_blackboxes.normalize_standalone_video_lane_entry_state(state)
-    job_key = subtitle_dub_pipeline_job_key(uid, chat_id, state)
+    state, job_key = subdub_runtime_pipeline_identity(uid, chat_id, state)
     acquired, job = acquire_subtitle_dub_pipeline_job(
         job_key,
         user_id=uid,
@@ -188694,6 +188697,7 @@ async def execute_video_dubbing_pipeline(
                 "deduped": True,
                 "mode": mode,
                 "job_id": str(job.get("job_id") or ""),
+                "pipeline_job_key": job_key,
                 "terminal_state": terminal or "delivered",
                 "text": "Kết quả đã gửi phía trên.",
                 "state": state,
@@ -188705,6 +188709,7 @@ async def execute_video_dubbing_pipeline(
             "status": "STILL_PROCESSING",
             "mode": mode,
             "job_id": str(job.get("job_id") or ""),
+            "pipeline_job_key": job_key,
             "terminal_state": terminal,
             "text": "TOAN AAS đang xử lý, anh/chị kiểm tra lại sau.",
             "state": state,
@@ -188727,6 +188732,7 @@ async def execute_video_dubbing_pipeline(
             lang,
             admin_interactive_confirm=admin_interactive_confirm,
         )
+        result["pipeline_job_key"] = job_key
         artifacts = dict(result.get("workspace_artifacts") or {})
         input_save = {key: value for key, value in dict(result.get("input_save") or {}).items() if key != "source_bytes"}
         result_state = dict(result.get("state") or {})
@@ -188940,6 +188946,7 @@ async def execute_video_dubbing_pipeline(
             )
             recovered["late_error_suppressed"] = True
             recovered["text"] = "Kết quả đã được gửi phía trên."
+            recovered["pipeline_job_key"] = job_key
             return recovered
         update_subtitle_dub_pipeline_job(job_key, status="failed", terminal_state="failed_no_charge")
         raise
@@ -192244,7 +192251,11 @@ async def handle_video_dubbing_callback(
             parse_mode="HTML",
             reply_markup=subdub_progress_keyboard("", lang),
         )
-        pipeline_job_key = subtitle_dub_pipeline_job_key(uid, getattr(query.message, "chat_id", uid), state)
+        _pipeline_state, pipeline_job_key = subdub_runtime_pipeline_identity(
+            uid,
+            getattr(query.message, "chat_id", uid),
+            state,
+        )
         try:
             async def _run_video_dubbing_pipeline():
                 return await execute_video_dubbing_pipeline(
@@ -192269,6 +192280,7 @@ async def handle_video_dubbing_callback(
             result = dict(engine_result.get("runner_result") or {})
             if not engine_result.get("ok") and not result:
                 result = {"ok": False, "guard": True, "text": engine_result.get("message") or video_dubbing_guard_text(mode, state, lang, admin=False)}
+            pipeline_job_key = str(result.get("pipeline_job_key") or pipeline_job_key)
         except Exception as exc:
             logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
             if _subdub_background:
