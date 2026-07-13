@@ -1,0 +1,15 @@
+{
+  "store_id": "creator_productivity",
+  "title_vi": "Creator năng suất và thói quen",
+  "description": "Cấu trúc nội dung biến mục tiêu hoặc thói quen thành câu chuyện dễ theo dõi.",
+  "production_patterns": [
+    "Hook bằng một trở ngại thực tế hoặc kết quả đo được.",
+    "Hiển thị hệ thống theo từng bước nhỏ và trạng thái trước/sau.",
+    "Dùng screen capture, checklist hoặc tracker làm bằng chứng trực quan.",
+    "CTA hướng tới thử một bước nhỏ thay vì lời hứa quá mức."
+  ],
+  "workflow": ["mục tiêu", "trở ngại", "hệ thống", "demo tracker", "kết quả", "bước tiếp theo"],
+  "prompt_concepts": ["habit tracker", "productivity workflow", "before-after routine", "daily system tutorial"],
+  "negative_patterns": ["fake metrics", "guaranteed outcome", "cluttered dashboard", "unreadable screen text"],
+  "source_reference_ids": ["AQMZQfPV..."]
+}

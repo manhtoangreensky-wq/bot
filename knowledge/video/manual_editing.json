@@ -1,0 +1,15 @@
+{
+  "store_id": "video_manual_editing",
+  "title_vi": "Chỉnh sửa video thủ công",
+  "description": "Kỹ thuật dựng có chủ đích, không phụ thuộc nhà cung cấp AI.",
+  "production_patterns": [
+    "Dùng typography theo cấp bậc: hook, ý chính, chú thích.",
+    "Cắt theo nhịp lời hoặc hành động thay vì cắt ngẫu nhiên.",
+    "Color grade theo một bảng màu chủ đạo và giữ màu da tự nhiên.",
+    "Talking-head ưu tiên jump cut sạch, caption dễ đọc và B-roll đúng ngữ cảnh."
+  ],
+  "workflow": ["phân tích mục tiêu", "chọn nhịp dựng", "dựng hình", "caption/typography", "âm thanh", "màu", "kiểm tra đầu ra"],
+  "prompt_concepts": ["caption hierarchy", "sound cue map", "color harmony", "timeline pacing"],
+  "safety_notes": ["Không nhận bản dựng tạm làm kết quả cuối.", "Không làm sai nội dung gốc khi cắt ngắn."],
+  "source_reference_ids": ["AQMa1djk...", "AQNNdUUe...", "AQP9EzHP..."]
+}

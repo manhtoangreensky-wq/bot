@@ -44,7 +44,7 @@ def _rows(markup):
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
     update = SimpleNamespace(callback_query=query)
-    context = SimpleNamespace()
+    context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
     elif callback.startswith("framevideo|"):
@@ -53,6 +53,10 @@ def _press(user_id: int, callback: str):
         asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
         asyncio.run(bot.handle_video_downloader_callback(update, context))
+    elif callback.startswith("vprofile|"):
+        asyncio.run(bot.handle_video_profile_studio_callback(update, context))
+    elif callback.startswith("videoedit|"):
+        asyncio.run(bot.handle_video_editor_callback(update, context))
     else:
         raise AssertionError(f"unsupported callback {callback}")
     assert query.edits
@@ -72,7 +76,8 @@ def test_video_menu_layout_preserved_after_p0_18m():
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
         ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
         ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
+        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
+        ["🏠 Menu chính"],
     ]
 
 
@@ -340,13 +345,14 @@ def test_video_prompt_vault_use_prompt_routes_back_to_video():
     assert session.get("product_id") in bot.VIDEO_PRODUCT_REGISTRY
 
 
-def test_video_local_edit_routes_real_tools_or_clean_guard():
-    text, markup, session = _press(180022, "vproduct|open|video_local_edit")
+def test_video_local_edit_routes_to_scaffold_hub():
+    text, markup, session = _press(180022, "videoedit|hub")
     callbacks = _callbacks(markup)
-    assert "Chỉnh sửa video local" in text
-    assert "videoedit|color" in callbacks
-    assert "videoedit|crop" in callbacks
-    assert "đang được chuẩn bị" not in text
+    assert "Chỉnh sửa video" in text
+    assert "videoedit|manual_info" in callbacks
+    assert "videoedit|ai_info" in callbacks
+    assert "videoedit|split_info" in callbacks
+    assert "chưa xử lý video" in text
     assert session.get("video_tool") == "video_local_edit"
 
 

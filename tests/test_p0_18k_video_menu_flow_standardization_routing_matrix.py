@@ -54,13 +54,17 @@ def _rows(markup):
 def _press(user_id: int, callback: str):
     query = FakeQuery(user_id, callback)
     update = SimpleNamespace(callback_query=query)
-    context = SimpleNamespace()
+    context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
     elif callback.startswith("vpromptlib|"):
         asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
         asyncio.run(bot.handle_video_downloader_callback(update, context))
+    elif callback.startswith("vprofile|"):
+        asyncio.run(bot.handle_video_profile_studio_callback(update, context))
+    elif callback.startswith("videoedit|"):
+        asyncio.run(bot.handle_video_editor_callback(update, context))
     else:
         raise AssertionError(f"unsupported video callback {callback}")
     assert query.edits
@@ -74,7 +78,8 @@ def test_video_menu_layout_groups_primary_products_above_helpers():
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
         ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
         ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
+        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
+        ["🏠 Menu chính"],
     ]
 
 
@@ -84,7 +89,7 @@ def test_video_route_matrix_matches_public_menu_buttons():
     matrix_callbacks = [row["entry_callback"] for row in payload["rows"]]
     menu_callbacks = [callback for callback in _callbacks(bot.main_video_keyboard("vi")) if callback != "menu|main"]
     assert matrix_callbacks == menu_callbacks
-    assert len(matrix_callbacks) == 11
+    assert len(matrix_callbacks) == 12
     assert len(set(matrix_callbacks)) == len(matrix_callbacks)
 
 
@@ -293,7 +298,7 @@ def test_self_shot_route_preserves_draft():
 
 def test_local_edit_missing_worker_public_copy_clean():
     text = bot.video_editor_public_guard_text("vi")
-    assert "Chỉnh sửa video local" in text
+    assert "Chỉnh sửa video" in text
     assert bot.video_public_text_forbidden_words(text) == []
 
 

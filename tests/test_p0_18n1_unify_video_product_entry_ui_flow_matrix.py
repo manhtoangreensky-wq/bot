@@ -112,7 +112,8 @@ def test_video_menu_layout_preserved():
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
         ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
         ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
+        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
+        ["🏠 Menu chính"],
     ]
 
 

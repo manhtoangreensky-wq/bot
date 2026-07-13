@@ -1,0 +1,26 @@
+{
+  "profile_id": "product_3d_showcase",
+  "title_vi": "Sản phẩm và 3D showcase",
+  "aliases": ["sản phẩm 3D", "3D showcase", "product visualization", "object capture", "turntable", "product render", "packshot"],
+  "intent_keywords": ["sản phẩm", "chai", "hộp", "thiết bị", "furniture", "model 3D", "scan vật thể", "macro", "exploded view", "hero shot"],
+  "suitable_outputs": ["image", "video", "turntable", "product_demo", "3d_showcase"],
+  "subjects": ["sản phẩm khách hàng", "bao bì", "chi tiết cơ khí", "vật liệu", "phụ kiện"],
+  "environments": ["studio", "brand set", "minimal stage", "contextual use scene"],
+  "visual_styles": ["premium studio", "clean commercial", "technical showcase", "cinematic product"],
+  "materials": ["customer-supplied material", "glass", "metal", "plastic", "paper", "fabric", "wood"],
+  "lighting": ["three-point product light", "edge highlight", "soft reflection control", "material-revealing macro light"],
+  "camera": ["hero three-quarter", "macro detail", "turntable", "top-down", "exploded view"],
+  "motion": ["slow orbit", "controlled rotation", "detail push-in", "assembly reveal", "use-case motion"],
+  "scene_templates": [
+    {"role": "hero", "title": "Hero reveal", "prompt": "Hiện sản phẩm rõ hình dáng, màu, nhãn và tỷ lệ."},
+    {"role": "detail", "title": "Vật liệu/chi tiết", "prompt": "Macro đúng vật liệu và chức năng."},
+    {"role": "feature", "title": "Tính năng", "prompt": "Trình bày một tính năng có dữ liệu xác nhận."},
+    {"role": "final", "title": "Packshot", "prompt": "Kết bằng packshot sạch, không tự thêm thương hiệu."}
+  ],
+  "negative_prompt": ["warped label", "invented logo", "wrong geometry", "wrong color", "floating product", "material mismatch", "fake feature"],
+  "clarifying_questions": ["Sản phẩm nào phải giữ chính xác hình dáng/nhãn/màu và cần showcase tính năng nào?", "Anh/chị có ảnh nhiều góc, model 3D hay chỉ một ảnh sản phẩm?"],
+  "image_prompt_template": "Accurate product visualization for: {user_request}. Preserve supplied geometry, label, colors and materials. Premium controlled light, no invented brand or feature.",
+  "video_prompt_template": "Create a {scene_count}-scene product showcase for: {user_request}. Hero reveal, material detail, verified feature and final packshot. {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["match product color", "avoid fast motion blur on labels", "use macro only when source supports detail", "verify every feature claim"],
+  "source_reference_ids": ["AQN3OSLT..."]
+}
