@@ -502,6 +502,26 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         f"vprofile|suggest|{index}" for index in range(1, 6)
     ]
 
+    microflow_namespace = _keyboard_namespace(
+        "video_scene3_keyboard",
+        "video_microflow_option_display_limit",
+        "video_microflow_select_label",
+        "video_microflow_options_keyboard",
+    )
+    microflow_markup = microflow_namespace["video_microflow_options_keyboard"](
+        "video_ai_real",
+        options=[{}] * 5,
+        kind="prompt",
+    )
+    assert [button.text for button in microflow_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
+    assert [button.callback_data for button in microflow_markup.inline_keyboard[0]] == [
+        f"vproduct|microflow_choose|{index}" for index in range(5)
+    ]
+    assert [[button.text for button in row] for row in microflow_markup.inline_keyboard[1:3]] == [
+        ["🔄 Gợi ý lại", "✍️ Nhập chủ đề riêng"],
+        ["⬅️ Quay lại", "🏠 Menu chính"],
+    ]
+
     profile_markup = namespace["video_scene3_profile_keyboard"](state)
     public_profile_callbacks = [
         button.callback_data
