@@ -70743,19 +70743,17 @@ def video_microflow_options_keyboard(product_id: str, lang: str = "vi", options:
     else:
         refresh_label = "🔄 Gợi ý lại"
         edit_label = "✍️ Nhập chủ đề riêng"
-    buttons = [
+    option_buttons = [
         (video_microflow_select_label(kind, idx), f"vproduct|microflow_choose|{idx}")
         for idx in range(display_limit)
     ]
-    buttons.extend([
-        (refresh_label, "vproduct|microflow_regenerate"),
-        (edit_label, "vproduct|microflow_custom_topic"),
-        (ui_text(lang, "common.back"), "vproduct|back"),
-        (ui_text(lang, "common.main_menu"), "menu|main"),
-    ])
-    if len(buttons) % 2:
-        buttons.append(("📖 Xem hướng dẫn", "menu|guide_video_ai"))
-    return video_scene3_keyboard([buttons[index:index + 2] for index in range(0, len(buttons), 2)])
+    rows = [
+        option_buttons,
+        [(refresh_label, "vproduct|microflow_regenerate"), (edit_label, "vproduct|microflow_custom_topic")],
+        [(ui_text(lang, "common.back"), "vproduct|back"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [("📖 Xem hướng dẫn", "menu|guide_video_ai")],
+    ]
+    return video_scene3_keyboard(rows)
 
 
 def video_idea_development_text(session: dict | None = None, lang: str = "vi") -> str:
