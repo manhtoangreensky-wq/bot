@@ -23,6 +23,7 @@ SCENE2_TEST_FILE = "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_
 SCENE2_UIFLOW_TEST_FILE = "tests/test_p0_video_uiflow1_align_video_ai_flows_to_hot_trend.py"
 SCENE2_UIFLOW_LOCK_TEST_FILE = "tests/test_p0_video_uiflow_lock_current_good_flow.py"
 SCENE2_DURATION_TEST_FILE = "tests/test_p0_video_duration2_scene_or_seconds_pricing_decision.py"
+SCENE3_TEST_FILE = "tests/test_p0_video_scene3_restore_full_flow.py"
 ARCH1_SERVICE_FILES = {
     "services/architecture_profile_router.py",
     "services/architecture_prompt_builder.py",
@@ -202,35 +203,41 @@ def test_vietnamese_and_english_aliases(user_text: str, expected: str) -> None:
 
 def test_main_video_menu_exposes_studio_and_edit_hub() -> None:
     assert len(profile_router.STUDIO_PROFILE_OPTIONS) == 14
-    assert '("profile_studio", "video_local_edit")' in BOT_SOURCE
-    assert '"label_vi": "🧠 Studio Profile AI"' in BOT_SOURCE
+    assert '("profile_studio", "video_idea")' in BOT_SOURCE
+    assert '("video_local_edit", "prompt_library")' in BOT_SOURCE
+    assert '"label_vi": "🎯 Studio Profile AI"' in BOT_SOURCE
     assert '"entry_callback": "vprofile|menu"' in BOT_SOURCE
     assert '"label_vi": "🛠 Chỉnh sửa video"' in BOT_SOURCE
     assert '"entry_callback": "videoedit|hub"' in BOT_SOURCE
     assert 'CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\\|")' in BOT_SOURCE
 
 
-def test_edit_video_hub_contains_only_local1_manual_and_split_tools() -> None:
+def test_edit_video_hub_restores_only_tools_with_real_existing_handlers() -> None:
     hub = _source_between("def video_edit_hub_text", "def video_editor_menu_text")
+    assert "✨ Chỉnh sửa bằng AI" in hub
     assert "✂️ Chỉnh sửa thủ công" in hub
     assert "🧩 Cắt video nhiều đoạn" in hub
-    assert 'callback_data="videoedit|manual"' in hub
-    assert 'callback_data="videoedit|split"' in hub
-    assert 'callback_data="menu|main_video"' in hub
-    assert 'callback_data="videoedit|ai_info"' not in hub
-    assert "hiện không thu Xu" in hub
+    assert '("videoedit|manual")' not in hub
+    for callback in (
+        '"videoedit|ai"', '"videoedit|manual"', '"videoedit|split"',
+        '"videoedit|quick|concat"', '"videoedit|quick|aspect"',
+        '"videoedit|quick|compress"', '"videoedit|quick|audio"',
+        '"videoedit|quick|subtitle"', '"menu|main_video"',
+    ):
+        assert callback in hub
+    assert "Công cụ local hiện không thu Xu" in hub
 
 
 def test_profile_studio_back_routes_to_exact_previous_screen() -> None:
     helpers = _source_between("VIDEO_PROFILE_STUDIO_SESSION_KEY", "def video_edit_hub_text")
     callback = _source_between("async def handle_video_profile_studio_callback", "async def handle_video_editor_callback")
-    assert 'callback_data="menu|main_video"' in helpers
-    assert 'callback_data="vprofile|back"' in helpers
+    assert '("⬅️ Menu video" if is_vi else "⬅️ Video menu", "menu|main_video")' in helpers
+    assert '[("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")]' in helpers
     assert "def video_profile_studio_pop_step" in helpers
     assert 'if action == "back"' in callback
     assert "video_profile_studio_pop_step(context, state)" in callback
     assert '"step": "menu"' in callback
-    assert '"scene_count",\n    "profile"' in helpers
+    assert "VIDEO_SCENE1_CANONICAL_STEPS = video_scene3_flow.CANONICAL_STEPS" in helpers
 
 
 def test_studio_is_session_draft_only_without_submit_job_outbox_or_charge() -> None:
@@ -310,6 +317,10 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         SCENE2_UIFLOW_LOCK_TEST_FILE,
         SCENE2_DURATION_TEST_FILE,
     } if SCENE2_TEST_FILE in touched else set()
+    scene3_allowed = {
+        "services/video_scene3_flow.py",
+        SCENE3_TEST_FILE,
+    } if SCENE3_TEST_FILE in touched else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -322,6 +333,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path in arch1_allowed
             or path in scene1_allowed
             or path in scene2_allowed
+            or path in scene3_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",
