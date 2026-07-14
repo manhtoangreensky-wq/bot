@@ -84,7 +84,6 @@ def test_video_menu_current_buttons_unchanged():
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Video dài tập",
-        "🎯 Studio Profile AI",
         "🎞 Storyboard",
         "💡 Ý tưởng video",
         "🛠 Chỉnh sửa video",
@@ -105,7 +104,6 @@ def test_video_menu_each_button_routes_to_matching_flow():
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
         ("longvideo|public_guard", "Video dài tập", ()),
         ("vdownload|start", "Tải video từ liên kết", ()),
-        ("vprofile|menu", "Studio Profile AI", ("vprofile|select|architecture_exterior", "vprofile|select|ugc_social_creator")),
         ("videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split")),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):

@@ -82,9 +82,8 @@ def test_video_menu_layout_groups_primary_products_above_helpers():
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
-        ["🎯 Studio Profile AI", "🎞 Storyboard"],
-        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
-        ["📥 Tải video từ liên kết"],
+        ["🎞 Storyboard", "💡 Ý tưởng video"],
+        ["🛠 Chỉnh sửa video", "📥 Tải video từ liên kết"],
         ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
@@ -95,7 +94,7 @@ def test_video_route_matrix_matches_public_menu_buttons():
     matrix_callbacks = [row["entry_callback"] for row in payload["rows"]]
     menu_callbacks = [callback for callback in _callbacks(bot.main_video_keyboard("vi")) if callback != "menu|main"]
     assert matrix_callbacks == menu_callbacks
-    assert len(matrix_callbacks) == 12
+    assert len(matrix_callbacks) == 11
     assert len(set(matrix_callbacks)) == len(matrix_callbacks)
 
 
