@@ -320,6 +320,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
     scene3_allowed = {
         "services/video_scene3_flow.py",
         SCENE3_TEST_FILE,
+        "tests/test_p0_video_scene3boot1_bot_syntax_and_caption_render.py",
     } if SCENE3_TEST_FILE in touched else set()
     for path in touched:
         assert (

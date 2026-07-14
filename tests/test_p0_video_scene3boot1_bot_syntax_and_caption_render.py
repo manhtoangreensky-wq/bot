@@ -151,5 +151,6 @@ def test_material_screen_renders_special_quotes_and_keeps_callback_data_unchange
         "vprofile|material_prev", "vprofile|material_next",
         "vprofile|material_edit", "vprofile|material_remove",
         "vprofile|material_restore", "vprofile|material_done",
+        "vprofile|material_skip",
         "vprofile|back", "menu|main",
     ]
