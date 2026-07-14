@@ -112,7 +112,7 @@ def _planned(scene_count: int = 3) -> dict:
 
 def test_scene3_canonical_order_and_back_stack_are_complete():
     assert video_scene3_flow.CANONICAL_STEPS == (
-        "subject", "scene_count", "content_type", "technical_profile", "suggestion",
+        "subject", "scene_count", "technical_profile", "suggestion",
         "requirements", "materials", "creative_controls", "content_addons", "scene_plan",
         "image_strategy", "image_prompts", "video_prompts", "full_review", "post_addons",
         "aspect_ratio", "quality", "final_report", "final_confirmation",
@@ -122,7 +122,7 @@ def test_scene3_canonical_order_and_back_stack_are_complete():
     assert video_scene3_flow.BACK_STEP["subject"] == "menu"
 
 
-def test_scene3_restores_twelve_content_types_and_fourteen_separate_profiles():
+def test_scene3_keeps_content_taxonomy_internal_and_exposes_fourteen_profiles():
     assert len(video_scene3_flow.CONTENT_TYPES) == 12
     assert len({item["id"] for item in video_scene3_flow.CONTENT_TYPES}) == 12
     assert len(video_scene3_flow.TECHNICAL_PROFILES) == 14
@@ -134,6 +134,8 @@ def test_scene3_restores_twelve_content_types_and_fourteen_separate_profiles():
     state.update({"content_type": "fashion_lookbook", "technical_profile": "fashion_lookbook"})
     assert state["content_type"] == "fashion_lookbook"
     assert state["technical_profile"] == "fashion_lookbook"
+    assert "content_type" not in video_scene3_flow.CANONICAL_STEPS
+    assert video_scene3_flow.content_type_for_profile("fashion_lookbook", state) == "fashion_lookbook"
 
 
 def test_content_type_and_profile_suggestions_are_deterministic_and_optional():
@@ -342,26 +344,30 @@ def test_public_planning_copy_hides_internal_enums():
     assert "hoàn tất câu chuyện" in public
 
 
-def test_two_column_keyboard_contract_rejects_orphans_duplicates_and_fillers():
-    rows = video_scene3_flow.validate_two_column_rows([
-        [("Một", "scene3|one"), ("Hai", "scene3|two")],
+def test_adaptive_keyboard_contract_allows_one_to_five_and_rejects_invalid_rows():
+    rows = video_scene3_flow.validate_adaptive_rows([
+        [("Một", "scene3|one")],
+        [(str(index), f"scene3|pick|{index}") for index in range(1, 6)],
         [("Quay lại", "scene3|back"), ("Menu chính", "scene3|main")],
     ])
-    assert all(len(row) == 2 for row in rows)
+    assert [len(row) for row in rows] == [1, 5, 2]
     with pytest.raises(ValueError):
-        video_scene3_flow.validate_two_column_rows([[("Một", "scene3|one")]])
+        video_scene3_flow.validate_adaptive_rows([[]])
     with pytest.raises(ValueError):
-        video_scene3_flow.validate_two_column_rows([
+        video_scene3_flow.validate_adaptive_rows([
+            [(str(index), f"scene3|pick|{index}") for index in range(1, 7)]
+        ])
+    with pytest.raises(ValueError):
+        video_scene3_flow.validate_adaptive_rows([
             [("Một", "scene3|same"), ("Hai", "scene3|two")],
             [("Ba", "scene3|same"), ("Bốn", "scene3|four")],
         ])
 
 
-def test_actual_scene3_and_local_editor_keyboards_have_two_unique_real_buttons_per_row():
+def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_buttons():
     scene3_names = (
         "video_scene3_keyboard",
         "video_scene3_nav_rows",
-        "video_scene3_content_type_keyboard",
         "video_scene3_profile_keyboard",
         "video_scene3_suggestion_keyboard",
         "video_scene3_requirements_keyboard",
@@ -416,7 +422,6 @@ def test_actual_scene3_and_local_editor_keyboards_have_two_unique_real_buttons_p
     state = _planned(2)
     state["show_all_technical_profiles"] = True
     markups = [
-        namespace["video_scene3_content_type_keyboard"](),
         namespace["video_scene3_profile_keyboard"](state),
         namespace["video_scene3_suggestion_keyboard"](),
         namespace["video_scene3_requirements_keyboard"](state),
@@ -484,12 +489,52 @@ def test_actual_scene3_and_local_editor_keyboards_have_two_unique_real_buttons_p
     for markup_index, markup in enumerate(markups):
         callbacks = []
         for row in markup.inline_keyboard:
-            assert len(row) == 2, (markup_index, [button.text for button in row])
+            assert 1 <= len(row) <= 5, (markup_index, [button.text for button in row])
             for button in row:
                 assert str(button.text).strip()
                 assert str(button.callback_data).strip()
                 callbacks.append(button.callback_data)
         assert len(callbacks) == len(set(callbacks)), (markup_index, callbacks)
+
+    suggestion_markup = namespace["video_scene3_suggestion_keyboard"]()
+    assert [button.text for button in suggestion_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
+    assert [button.callback_data for button in suggestion_markup.inline_keyboard[0]] == [
+        f"vprofile|suggest|{index}" for index in range(1, 6)
+    ]
+
+    profile_markup = namespace["video_scene3_profile_keyboard"](state)
+    public_profile_callbacks = [
+        button.callback_data
+        for row in profile_markup.inline_keyboard
+        for button in row
+        if button.callback_data.startswith("vprofile|select|")
+    ]
+    assert len(public_profile_callbacks) == 14
+    assert len(public_profile_callbacks) == len(set(public_profile_callbacks))
+    assert "vprofile|profile_none" not in {
+        button.callback_data for row in profile_markup.inline_keyboard for button in row
+    }
+
+    optional_callbacks = set()
+    for markup in (
+        namespace["video_scene3_suggestion_keyboard"](),
+        namespace["video_scene3_requirements_keyboard"](state),
+        namespace["video_scene3_materials_keyboard"](),
+        namespace["video_scene3_creative_keyboard"](state),
+        namespace["video_scene3_content_addon_keyboard"](state),
+        namespace["video_scene3_post_keyboard"](state),
+    ):
+        optional_callbacks.update(
+            button.callback_data for row in markup.inline_keyboard for button in row
+        )
+    assert {
+        "vprofile|suggest_skip",
+        "vprofile|req_none",
+        "vprofile|material_skip",
+        "vprofile|creative_skip",
+        "vprofile|content_skip",
+        "vprofile|post_skip",
+    } <= optional_callbacks
 
     handler_source = _function_source("handle_video_editor_callback")
     assert "logo_scale" not in namespace["video_local_logo_keyboard"]().inline_keyboard[3][1].callback_data
@@ -662,6 +707,36 @@ def test_bot_source_uses_scene3_order_menu_order_and_final_confirm_boundary():
     assert "create_video_project" not in handler
     assert '"vproduct|b14_confirm"' in BOT_SOURCE
     assert '"vprofile|handoff"' in BOT_SOURCE
+    assert "def video_scene3_content_type_text" not in BOT_SOURCE
+    assert "def video_scene3_content_type_keyboard" not in BOT_SOURCE
+    assert '"content_type": (video_scene3_profile_text(state), video_scene3_profile_keyboard(state))' in BOT_SOURCE
+
+
+def test_changed_scene3_bot_functions_compile_in_isolation():
+    names = (
+        "video_scene2_reconcile_state",
+        "video_scene3_keyboard",
+        "video_scene3_profile_text",
+        "video_scene3_profile_keyboard",
+        "video_scene3_suggestion_text",
+        "video_scene3_suggestion_keyboard",
+        "video_scene3_requirements_keyboard",
+        "video_scene3_materials_keyboard",
+        "video_scene3_creative_keyboard",
+        "video_scene3_content_addon_keyboard",
+        "video_scene3_scene_plan_text",
+        "video_scene3_full_review_text",
+        "video_scene3_post_keyboard",
+        "video_scene3_final_text",
+        "handle_video_profile_studio_pending_text",
+        "handle_video_profile_studio_callback",
+        "video_profile_scene1_render",
+    )
+    for name in names:
+        source = _function_source(name)
+        if f"async def {name}(" in BOT_SOURCE:
+            source = "async " + source
+        compile("from __future__ import annotations\n" + source, f"<scene3ux1:{name}>", "exec")
 
 
 def test_callback_registration_has_one_authoritative_final_confirm_and_no_legacy_override():
@@ -692,7 +767,7 @@ def test_callback_registration_has_one_authoritative_final_confirm_and_no_legacy
     guard_position = profile_handler.index("if not video_scene2_action_allowed(state, action):")
     for guarded_action in (
         'if action == "count":',
-        'if action == "ctype":',
+        'if action in {"ctype", "ctype_suggest", "ctype_accept", "ctype_restore", "ctype_view"}:',
         'if action == "select":',
         'if action == "suggest":',
         'if action == "handoff":',
@@ -802,6 +877,11 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         "save_video_profile_studio_state": save_state,
         "video_profile_studio_step": step_state,
         "video_profile_studio_pop_step": pop_state,
+        "video_profile_studio_option": lambda selection_id: (
+            {"selection_id": selection_id}
+            if selection_id in dict(video_scene3_flow.TECHNICAL_PROFILES)
+            else {}
+        ),
         "video_scene2_action_allowed": lambda _state, _action: True,
         "video_scene2_reconcile_state": lambda _context, state: state,
         "video_profile_scene1_render": render,
@@ -858,24 +938,32 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         return state
 
     async def run_flow():
-        state = await advance_with_exact_back("vprofile|count|2", "content_type", "scene_count")
+        state = await advance_with_exact_back("vprofile|count|2", "technical_profile", "scene_count")
         assert state["scene_count"] == 2
         assert state["quality_xu"] == 0
-        state = await advance_with_exact_back("vprofile|ctype|storytelling", "technical_profile", "content_type")
-        state = await advance_with_exact_back("vprofile|profile_none", "suggestion", "technical_profile")
+        internal_type = state["content_type"]
+        state = await run_action("vprofile|ctype|fashion_lookbook")
+        assert state["step"] == "technical_profile"
+        assert state["content_type"] == internal_type
+        state = await run_action("vprofile|profile_none")
+        assert state["step"] == "technical_profile"
+        assert not state.get("technical_profile")
+        state = await advance_with_exact_back("vprofile|select|architecture_interior", "suggestion", "technical_profile")
+        assert state["content_type"] == "real_estate_fpv"
         assert len(state["suggestions"]) == 5
-        state = await advance_with_exact_back("vprofile|suggest|1", "requirements", "suggestion")
+        state = await advance_with_exact_back("vprofile|suggest_skip", "requirements", "suggestion")
+        assert state["selected_suggestion"] == {}
         for callback, expected_step, previous_step in (
-            ("vprofile|req_done", "materials", "requirements"),
-            ("vprofile|material_done", "creative_controls", "materials"),
-            ("vprofile|creative_done", "content_addons", "creative_controls"),
-            ("vprofile|content_done", "scene_plan", "content_addons"),
+            ("vprofile|req_none", "materials", "requirements"),
+            ("vprofile|material_skip", "creative_controls", "materials"),
+            ("vprofile|creative_skip", "content_addons", "creative_controls"),
+            ("vprofile|content_skip", "scene_plan", "content_addons"),
             ("vprofile|scene_done", "image_strategy", "scene_plan"),
             ("vprofile|image_strategy_done", "image_prompts", "image_strategy"),
             ("vprofile|image_prompt_done", "video_prompts", "image_prompts"),
             ("vprofile|video_prompt_done", "full_review", "video_prompts"),
             ("vprofile|review_done", "post_addons", "full_review"),
-            ("vprofile|post_done", "aspect_ratio", "post_addons"),
+            ("vprofile|post_skip", "aspect_ratio", "post_addons"),
             ("vprofile|ratio|16x9", "quality", "aspect_ratio"),
             ("vprofile|tier|300", "final_report", "quality"),
         ):
@@ -888,7 +976,7 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
                 "xu_charged": 0,
                 "wallet_mutations": 0,
             }
-            if callback == "vprofile|post_done":
+            if callback == "vprofile|post_skip":
                 for scene_index in range(1, state["scene_count"] + 1):
                     state = video_scene3_flow.approve_prompt(state, kind="image", scene_index=scene_index)
                     state = video_scene3_flow.approve_prompt(state, kind="video", scene_index=scene_index)
@@ -913,5 +1001,5 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
     assert final_state["scene_count"] == 2
     assert final_state["quality_xu"] == 300
     assert invoice_seen and invoice_seen[-1]["final_confirmed"] is False
-    assert "content_type" in rendered_steps
+    assert "content_type" not in rendered_steps
     assert "quality" in rendered_steps

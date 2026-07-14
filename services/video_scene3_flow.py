@@ -20,7 +20,6 @@ MAX_SCENES = 20
 CANONICAL_STEPS = (
     "subject",
     "scene_count",
-    "content_type",
     "technical_profile",
     "suggestion",
     "requirements",
@@ -42,8 +41,7 @@ CANONICAL_STEPS = (
 BACK_STEP = {
     "subject": "menu",
     "scene_count": "subject",
-    "content_type": "scene_count",
-    "technical_profile": "content_type",
+    "technical_profile": "scene_count",
     "suggestion": "technical_profile",
     "requirements": "suggestion",
     "materials": "requirements",
@@ -109,6 +107,25 @@ TECHNICAL_PROFILE_RELEVANCE = {
     "food_asmr": ("product_3d_showcase", "ugc_social_creator", "cinematic_vfx", "tutorial_explainer"),
     "lofi_audio_visualizer": ("animation_2d_3d", "cinematic_vfx", "character", "architecture_interior"),
     "cinematic_trailer": ("cinematic_vfx", "character", "animation_2d_3d", "product_3d_showcase"),
+}
+
+# Content types remain internal planning metadata.  The public flow exposes the
+# 14 concrete profiles only, then derives this taxonomy for prompt templates.
+PROFILE_CONTENT_TYPE = {
+    "architecture_exterior": "real_estate_fpv",
+    "architecture_interior": "real_estate_fpv",
+    "space_renovation": "real_estate_fpv",
+    "real_estate_property": "real_estate_fpv",
+    "architecture_walkthrough": "real_estate_fpv",
+    "cinematic_vfx": "cinematic_trailer",
+    "animation_2d_3d": "storytelling",
+    "character": "storytelling",
+    "fashion_lookbook": "fashion_lookbook",
+    "product_3d_showcase": "product_review",
+    "app_game_demo": "product_review",
+    "website_saas_demo": "educational",
+    "tutorial_explainer": "educational",
+    "ugc_social_creator": "ugc_affiliate",
 }
 
 REQUIREMENT_CATEGORIES = (
@@ -524,6 +541,15 @@ def content_type(content_type_id: str) -> dict[str, str]:
     return next((dict(item) for item in CONTENT_TYPES if item["id"] == str(content_type_id or "")), {})
 
 
+def content_type_for_profile(profile_id: str, state: dict[str, Any] | None = None) -> str:
+    """Derive internal story taxonomy from the selected public profile."""
+
+    mapped = str(PROFILE_CONTENT_TYPE.get(str(profile_id or "")) or "")
+    if mapped:
+        return mapped
+    return suggested_content_type(dict(state or {}))
+
+
 def suggested_content_type(state: dict[str, Any]) -> str:
     """Choose a deterministic approved content type without external inference."""
 
@@ -673,23 +699,37 @@ def cycle_creative_quick_preset(state: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
-def validate_two_column_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple[str, str]]]:
-    """Validate the public two-column keyboard contract without Telegram imports."""
+def validate_adaptive_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple[str, str]]]:
+    """Validate compact public rows without forcing every screen into two columns."""
 
     normalized: list[list[tuple[str, str]]] = []
     callbacks: set[str] = set()
     for row in rows:
-        if len(row) != 2:
-            raise ValueError("video_scene3_keyboard_requires_exactly_two_buttons_per_row")
+        if not 1 <= len(row) <= 5:
+            raise ValueError("video_scene3_keyboard_requires_one_to_five_buttons_per_row")
         clean_row: list[tuple[str, str]] = []
         for label, callback in row:
             clean_label = str(label or "").strip()
             clean_callback = str(callback or "").strip()
-            if not clean_label or not clean_callback or clean_callback in callbacks:
+            if (
+                not clean_label
+                or not clean_callback
+                or len(clean_callback.encode("utf-8")) > 64
+                or clean_callback in callbacks
+            ):
                 raise ValueError("video_scene3_keyboard_duplicate_or_empty_button")
             callbacks.add(clean_callback)
             clean_row.append((clean_label, clean_callback))
         normalized.append(clean_row)
+    return normalized
+
+
+def validate_two_column_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple[str, str]]]:
+    """Legacy validator retained for non-SCENE3 callers and old contract tests."""
+
+    normalized = validate_adaptive_rows(rows)
+    if any(len(row) != 2 for row in normalized):
+        raise ValueError("video_scene3_keyboard_requires_exactly_two_buttons_per_row")
     return normalized
 
 
