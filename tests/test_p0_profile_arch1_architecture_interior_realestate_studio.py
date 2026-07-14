@@ -469,6 +469,16 @@ def test_arch1_scope_lock() -> None:
                 SCENE2_DURATION_TEST_FILE,
             }
         )
+    scene3_test = "tests/test_p0_video_scene3_restore_full_flow.py"
+    if scene3_test in touched:
+        allowed_runtime.add("services/video_scene3_flow.py")
+        allowed_tests.update(
+            {
+                scene3_test,
+                "tests/test_p0_video_scene1_semantic_story_planner_addon_aware_flow.py",
+                "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_removal.py",
+            }
+        )
     allowed_profiles = {
         "knowledge/profiles/architecture_exterior.json",
         "knowledge/profiles/interior_design.json",

@@ -111,7 +111,7 @@ def test_scene2_actual_product_video_handler_subject_then_scene_then_profile():
     assert "b14_quality_xu" not in session["draft"]
 
     _edit, _session, state = _press_profile(user_id, context, "vprofile|count|2")
-    assert state["step"] == "profile"
+    assert state["step"] == "content_type"
     assert state["scene_count"] == 2
     assert state["quality_xu"] == 0
     _assert_planning_has_no_side_effect(user_id, context)
@@ -136,7 +136,7 @@ def test_scene2_knowledge1_real_handler_and_boundaries():
         assert "1–20" in edit["text"]
 
     _edit, _session, state = _press_profile(user_id, context, "vprofile|count|20")
-    assert state["step"] == "profile"
+    assert state["step"] == "content_type"
     assert state["scene_count"] == 20
     _assert_planning_has_no_side_effect(user_id, context)
 
@@ -230,38 +230,50 @@ def test_scene2_exact_forward_order_and_back_stack_before_final_confirm():
     )
 
     _press_profile(user_id, context, "vprofile|count|2")
-    assert bot.video_profile_studio_state(context)["step"] == "profile"
+    assert bot.video_profile_studio_state(context)["step"] == "content_type"
     _press_profile(user_id, context, "vprofile|back")
     assert bot.video_profile_studio_state(context)["step"] == "scene_count"
     _press_profile(user_id, context, "vprofile|count|2")
 
-    _press_profile(user_id, context, f"vprofile|select|{_first_profile_id()}")
-    assert bot.video_profile_studio_state(context)["step"] == "profile_context"
+    _press_profile(user_id, context, "vprofile|ctype|storytelling")
+    assert bot.video_profile_studio_state(context)["step"] == "technical_profile"
     _press_profile(user_id, context, "vprofile|back")
-    assert bot.video_profile_studio_state(context)["step"] == "profile"
+    assert bot.video_profile_studio_state(context)["step"] == "content_type"
+    _press_profile(user_id, context, "vprofile|ctype|storytelling")
+
+    _press_profile(user_id, context, f"vprofile|select|{_first_profile_id()}")
+    assert bot.video_profile_studio_state(context)["step"] == "suggestion"
+    _press_profile(user_id, context, "vprofile|back")
+    assert bot.video_profile_studio_state(context)["step"] == "technical_profile"
     _press_profile(user_id, context, f"vprofile|select|{_first_profile_id()}")
 
-    _press_profile(user_id, context, "vprofile|context|1")
+    _press_profile(user_id, context, "vprofile|suggest|1")
     assert bot.video_profile_studio_state(context)["step"] == "requirements"
-    _press_profile(user_id, context, "vprofile|requirements_skip")
-    assert bot.video_profile_studio_state(context)["step"] == "reference_assets"
-    _press_profile(user_id, context, "vprofile|assets|none")
+    _press_profile(user_id, context, "vprofile|req_done")
+    assert bot.video_profile_studio_state(context)["step"] == "materials"
+    _press_profile(user_id, context, "vprofile|material_done")
+    assert bot.video_profile_studio_state(context)["step"] == "creative_controls"
+    _press_profile(user_id, context, "vprofile|creative_done")
     assert bot.video_profile_studio_state(context)["step"] == "content_addons"
     _press_profile(user_id, context, "vprofile|back")
-    assert bot.video_profile_studio_state(context)["step"] == "requirements"
-    _press_profile(user_id, context, "vprofile|requirements_skip")
-    _press_profile(user_id, context, "vprofile|assets|none")
+    assert bot.video_profile_studio_state(context)["step"] == "creative_controls"
+    _press_profile(user_id, context, "vprofile|creative_done")
 
-    _press_profile(user_id, context, "vprofile|build")
+    _press_profile(user_id, context, "vprofile|content_done")
     assert bot.video_profile_studio_state(context)["step"] == "scene_plan"
-    edit, _session, state = _press_profile(user_id, context, "vprofile|post")
-    assert state["step"] == "scene_plan"
-    assert "vprofile|post" not in _callbacks(edit["reply_markup"])
-    _press_profile(user_id, context, "vprofile|prompts")
-    assert bot.video_profile_studio_state(context)["step"] == "prompt_preview"
-    _press_profile(user_id, context, "vprofile|post")
+    _press_profile(user_id, context, "vprofile|scene_done")
+    assert bot.video_profile_studio_state(context)["step"] == "image_strategy"
+    _press_profile(user_id, context, "vprofile|image_strategy_done")
+    assert bot.video_profile_studio_state(context)["step"] == "image_prompts"
+    _press_profile(user_id, context, "vprofile|image_prompt_done")
+    assert bot.video_profile_studio_state(context)["step"] == "video_prompts"
+    _press_profile(user_id, context, "vprofile|video_prompt_done")
+    assert bot.video_profile_studio_state(context)["step"] == "full_review"
+    _press_profile(user_id, context, "vprofile|review_done")
     assert bot.video_profile_studio_state(context)["step"] == "post_addons"
-    _press_profile(user_id, context, "vprofile|quality")
+    _press_profile(user_id, context, "vprofile|post_done")
+    assert bot.video_profile_studio_state(context)["step"] == "aspect_ratio"
+    _press_profile(user_id, context, "vprofile|ratio|9x16")
     assert bot.video_profile_studio_state(context)["step"] == "quality"
     _press_profile(user_id, context, "vprofile|tier|300")
     assert bot.video_profile_studio_state(context)["step"] == "final_report"
@@ -277,9 +289,10 @@ def test_scene2_exact_forward_order_and_back_stack_before_final_confirm():
 
 def test_scene2_contract_owns_all_product_planners_but_not_img2vid_or_aiedit():
     assert bot.VIDEO_SCENE2_CANONICAL_STEPS == (
-        "subject", "scene_count", "profile", "profile_context", "requirements",
-        "content_addons", "scene_plan", "prompt_review", "postproduction_addons",
-        "quality_price", "final_report", "final_confirm",
+        "subject", "scene_count", "content_type", "technical_profile", "suggestion",
+        "requirements", "materials", "creative_controls", "content_addons", "scene_plan",
+        "image_strategy", "image_prompts", "video_prompts", "full_review", "post_addons",
+        "aspect_ratio", "quality", "final_report", "final_confirmation",
     )
     assert bot.VIDEO_SCENE2_PUBLIC_PRODUCTS == {
         "video_trend", "video_ai_real", "script_image_video", "self_shot_scene_change",
