@@ -24,6 +24,7 @@ SCENE2_UIFLOW_TEST_FILE = "tests/test_p0_video_uiflow1_align_video_ai_flows_to_h
 SCENE2_UIFLOW_LOCK_TEST_FILE = "tests/test_p0_video_uiflow_lock_current_good_flow.py"
 SCENE2_DURATION_TEST_FILE = "tests/test_p0_video_duration2_scene_or_seconds_pricing_decision.py"
 SCENE3_TEST_FILE = "tests/test_p0_video_scene3_restore_full_flow.py"
+SCENE3UX2_TEST_FILE = "tests/test_p0_video_scene3ux2_guided_style_addon_position_flow.py"
 ARCH1_SERVICE_FILES = {
     "services/architecture_profile_router.py",
     "services/architecture_prompt_builder.py",
@@ -320,6 +321,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
     scene3_allowed = {
         "services/video_scene3_flow.py",
         SCENE3_TEST_FILE,
+        SCENE3UX2_TEST_FILE,
         "tests/test_p0_video_scene3boot1_bot_syntax_and_caption_render.py",
     } if SCENE3_TEST_FILE in touched else set()
     for path in touched:

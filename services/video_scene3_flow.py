@@ -184,6 +184,65 @@ CREATIVE_QUICK_PRESETS = (
     ("Sang trọng tối giản", {"visual_style": "sang trọng tối giản", "motion": "chuyển động chậm có kiểm soát", "camera": "mở lộ sản phẩm", "pacing": "chậm và tinh tế"}),
 )
 
+CREATIVE_SUGGESTIONS: dict[str, tuple[str, ...]] = {
+    "context": (
+        "Mở bằng vấn đề người xem đang gặp, phát triển bằng hành động và kết bằng kết quả rõ ràng",
+        "Mở bằng khoảnh khắc đời thật, theo chủ thể qua từng nhịp rồi khép lại tự nhiên",
+        "Mở bằng kết quả nổi bật, quay lại nguyên nhân và trở về thành quả ở cảnh cuối",
+        "Mở bằng câu hỏi ngắn, mỗi cảnh trả lời trọn một ý và kết bằng lời mời hành động",
+        "Mở bằng tương phản trước và sau, giữ mạch thay đổi liên tục giữa các cảnh",
+    ),
+    "colors": (
+        "Tự nhiên sáng, màu trung tính, da người và sản phẩm chân thật",
+        "Xanh ngọc và trắng sạch, tương phản gọn, cảm giác hiện đại",
+        "Vàng ấm và nâu gỗ, ánh sáng gần gũi, cảm giác đáng tin",
+        "Đen và vàng điện ảnh, nền sâu, điểm sáng sang trọng",
+        "Pastel dịu, bão hòa thấp, ánh sáng mềm và tinh tế",
+    ),
+    "visual_style": (
+        "Chân thật tự nhiên, chi tiết rõ, phù hợp nội dung đời thường",
+        "Điện ảnh cảm xúc, chiều sâu tốt, ánh sáng có chủ đích",
+        "Quảng cáo sạch, chủ thể nổi bật, lợi ích sản phẩm dễ nhìn",
+        "Sang trọng tối giản, ít chi tiết thừa, bố cục cao cấp",
+        "Năng động mạng xã hội, mở đầu bắt mắt nhưng vẫn giữ nội dung rõ",
+    ),
+    "motion": (
+        "Chuyển động nhẹ và ổn định, chủ thể luôn rõ",
+        "Theo chủ thể mượt, hoàn tất hành động trước khi chuyển cảnh",
+        "Tiến gần chi tiết rồi mở rộng để thấy toàn cảnh",
+        "Chuyển động theo nhịp nội dung, không cắt giữa hành động",
+        "Ít chuyển động, ưu tiên vẻ sang trọng và khả năng quan sát",
+    ),
+    "camera": (
+        "Góc ngang tầm mắt, tự nhiên và dễ gần",
+        "Cận chi tiết rồi chuyển sang trung cảnh để thấy ngữ cảnh",
+        "Toàn cảnh mở đầu, trung cảnh phát triển, cận cảnh kết thúc",
+        "Theo sau chủ thể với khoảng cách ổn định",
+        "Góc thấp nhẹ để tạo cảm giác nổi bật nhưng không méo hình",
+    ),
+    "pacing": (
+        "Nhịp vừa, mỗi cảnh đủ mở đầu, phát triển và kết thúc",
+        "Mở nhanh để giữ chú ý, phần giữa rõ ràng, cảnh cuối chậm lại",
+        "Chậm và cảm xúc, ưu tiên quan sát chi tiết",
+        "Theo nhịp lời dẫn, không cắt giữa câu hoặc giữa hành động",
+        "Dồn nhịp có kiểm soát, kết mỗi cảnh bằng một điểm chuyển tự nhiên",
+    ),
+    "emotion": (
+        "Gần gũi và đáng tin",
+        "Tò mò rồi thỏa mãn khi thấy kết quả",
+        "Sang trọng, bình tĩnh và tinh tế",
+        "Tươi vui, tích cực và giàu năng lượng",
+        "Cảm xúc chân thành, kết thúc ấm áp",
+    ),
+    "negative": (
+        "Không đổi khuôn mặt, trang phục, sản phẩm hoặc màu thương hiệu",
+        "Không méo tay, méo chữ, sai logo hoặc thêm vật thể ngoài yêu cầu",
+        "Không rung giật, nhấp nháy, đổi ánh sáng vô lý hoặc cắt giữa chuyển động",
+        "Không che chủ thể bằng chữ, phụ đề, logo hoặc dấu bản quyền",
+        "Không nhồi nhiều ý trong một cảnh và không chuyển bối cảnh đột ngột",
+    ),
+}
+
 CONTENT_ADDONS = (
     ("voiceover", "🎙 Lời dẫn/lời thoại"),
     ("captions", "💬 Phụ đề/chữ hiển thị"),
@@ -196,6 +255,65 @@ CONTENT_ADDONS = (
     ("transition_style", "🔗 Kiểu chuyển cảnh"),
     ("target_duration", "⏳ Thời lượng mục tiêu"),
 )
+
+CONTENT_ADDON_SUGGESTIONS: dict[str, tuple[str, ...]] = {
+    "voiceover": (
+        "Lời dẫn ngắn, mỗi cảnh một câu trọn ý và vừa trong khoảng 8 giây",
+        "Lời kể tự nhiên, mở vấn đề rồi dẫn người xem tới kết quả",
+        "Giọng giới thiệu rõ lợi ích, cảnh cuối có lời mời hành động",
+        "Lời dẫn cảm xúc, có khoảng nghỉ tự nhiên giữa các cảnh",
+        "Chỉ dùng lời ở các cảnh cần thiết, ưu tiên hình ảnh tự kể chuyện",
+    ),
+    "captions": (
+        "Phụ đề tối đa 2 dòng, ngắn gọn và chừa vùng an toàn phía dưới",
+        "Chỉ hiện từ khóa chính, không che mặt hoặc sản phẩm",
+        "Mỗi cảnh một câu ngắn, đồng bộ với lời dẫn",
+        "Phụ đề dễ đọc trên điện thoại, tương phản rõ với nền",
+        "Không dùng phụ đề ở cảnh chỉ cần âm thanh và hình ảnh",
+    ),
+    "cta": (
+        "Đặt lời kêu gọi hành động ở cảnh cuối sau khi đã cho thấy kết quả",
+        "Mời người xem nhắn tin để nhận tư vấn",
+        "Mời người xem xem thêm thông tin hoặc sản phẩm",
+        "Mời người xem lưu video và theo dõi phần tiếp theo",
+        "Kết nhẹ bằng tên thương hiệu, không dùng lời thúc ép",
+    ),
+    "scene_text": (
+        "Mỗi cảnh một tiêu đề ngắn từ 3 đến 7 từ",
+        "Chỉ hiện số bước hoặc tên khu vực ở đầu cảnh",
+        "Dùng chữ để nhấn một lợi ích chính, không lặp lời dẫn",
+        "Cảnh mở đầu có tiêu đề, cảnh cuối có kết luận",
+        "Không thêm chữ nếu hình ảnh đã truyền đạt đủ ý",
+    ),
+    "preserve_source_audio": (
+        "Giữ âm thanh gốc rõ, chỉ hạ nhẹ khi có lời dẫn",
+        "Ưu tiên tiếng môi trường tự nhiên của từng cảnh",
+        "Giữ tiếng nói gốc, giảm tạp âm ở phần không cần thiết",
+        "Giữ âm thanh gốc ở cảnh hành động, tắt ở cảnh chuyển",
+        "Chỉ dùng âm thanh gốc khi chất lượng đủ rõ",
+    ),
+    "music_mood": (
+        "Nhạc nhẹ, hiện đại, tăng dần theo mạch nội dung",
+        "Nhạc sang trọng tối giản, không lấn lời nói",
+        "Nhạc tích cực, nhịp vừa, phù hợp video bán hàng",
+        "Nhạc cảm xúc, mở nhẹ và kết ấm",
+        "Không dùng nhạc; ưu tiên lời nói và âm thanh gốc",
+    ),
+    "transition_style": (
+        "Chuyển tự nhiên theo trạng thái kết của cảnh trước",
+        "Nối theo cùng hướng chuyển động của chủ thể",
+        "Chuyển mềm bằng bố cục hoặc màu sắc tương đồng",
+        "Cắt gọn sau khi hành động và camera đã hoàn tất",
+        "Dùng chuyển cảnh tối giản, không thêm hiệu ứng gây rối",
+    ),
+    "target_duration": (
+        "Giữ đủ khoảng 8 giây cho mỗi cảnh",
+        "Ưu tiên kết thúc trọn ý, không kéo dài cảnh chỉ để đủ thời lượng",
+        "Lời dẫn phải kết thúc trước điểm chuyển cảnh",
+        "Cảnh hành động được dùng đủ thời gian để hoàn tất chuyển động",
+        "Cảnh tĩnh có thể ngắn hơn nếu ý đã hoàn chỉnh",
+    ),
+}
 
 POST_ADDONS = (
     ("logo_image", "🏷 Logo hình ảnh"),
@@ -210,6 +328,46 @@ POST_ADDONS = (
     ("audio_balance", "🎚 Cân bằng âm thanh"),
     ("mp4_export", "📦 Xuất MP4"),
 )
+
+# Keep the legacy data contract intact while presenting a smaller public menu.
+# A picture watermark duplicates the logo flow, and MP4 is the mandatory final
+# output rather than an optional add-on.
+PUBLIC_POST_ADDONS = tuple(
+    item for item in POST_ADDONS if item[0] not in {"watermark_image", "mp4_export"}
+)
+
+AUDIO_POST_ADDONS = frozenset({"voice", "dubbing", "music", "sfx"})
+AUDIO_VOLUME_LEVELS = (20, 40, 60, 80, 100)
+VOICE_CHOICES: dict[str, dict[str, Any]] = {
+    "default_female": {
+        "voice_type": "female",
+        "voice_source": "approved_default",
+        "custom_voice_required": False,
+    },
+    "default_male": {
+        "voice_type": "male",
+        "voice_source": "approved_default",
+        "custom_voice_required": False,
+    },
+    "custom_voice": {
+        "voice_type": "custom_voice",
+        "voice_source": "user_or_saved_asset",
+        "custom_voice_required": True,
+    },
+}
+MUSIC_SOURCE_CHOICES: dict[str, dict[str, Any]] = {
+    "choose_existing": {
+        "source": "approved_library_or_user_asset",
+        "paid_generation": False,
+        "generation_planned_only": False,
+    },
+    "create_new": {
+        "source": "planned_generation",
+        "paid_generation": True,
+        "generation_planned_only": True,
+    },
+}
+MUSIC_VOCAL_MODES = frozenset({"instrumental", "with_lyrics"})
 
 POST_ADDON_DEFAULTS: dict[str, dict[str, Any]] = {
     "logo_image": {
@@ -272,6 +430,8 @@ POST_ADDON_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "music": {
         "source": "not_selected",
+        "vocal_mode": "instrumental",
+        "music_request": "",
         "volume_percent": 20,
         "trim_mode": "fit_video",
         "fade_in": True,
@@ -465,6 +625,9 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "final_confirmed": False,
         "provider_called": False,
         "image_provider_called": False,
+        "music_provider_calls": 0,
+        "voice_provider_calls": 0,
+        "files_generated": 0,
         "job_created": False,
         "outbox_created": False,
         "xu_charged": 0,
@@ -512,6 +675,9 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     base["scene_count"] = max(0, min(MAX_SCENES, int(base.get("scene_count") or 0)))
     base["provider_called"] = False
     base["image_provider_called"] = False
+    base["music_provider_calls"] = 0
+    base["voice_provider_calls"] = 0
+    base["files_generated"] = 0
     base["job_created"] = False
     base["outbox_created"] = False
     base["xu_charged"] = 0
@@ -586,7 +752,7 @@ def post_addon_suggestions(state: dict[str, Any]) -> list[str]:
     """Return optional post-production suggestions without enabling anything."""
 
     state = normalize_state(state)
-    suggestions: list[str] = ["mp4_export"]
+    suggestions: list[str] = []
     content_addons = dict(state.get("content_affecting_addons") or {})
     assets = [dict(item) for item in (state.get("reference_assets") or {}).get("items") or [] if isinstance(item, dict)]
     if any(str(item.get("type") or "") == "logo" for item in assets):
@@ -612,6 +778,251 @@ def technical_profile_label(profile_id: str) -> str:
 
 def post_addon_default(key: str) -> dict[str, Any]:
     return deepcopy(POST_ADDON_DEFAULTS.get(str(key or ""), {}))
+
+
+def creative_suggestions(state: dict[str, Any], key: str) -> list[str]:
+    """Return five approved local suggestions without any provider call."""
+
+    normalize_state(state)
+    return [str(item) for item in CREATIVE_SUGGESTIONS.get(str(key or ""), ())][:5]
+
+
+def content_addon_suggestions(state: dict[str, Any], key: str) -> list[str]:
+    """Return approved planning suggestions for one content-affecting option."""
+
+    normalize_state(state)
+    return [str(item) for item in CONTENT_ADDON_SUGGESTIONS.get(str(key or ""), ())][:5]
+
+
+def configure_content_safe_zone(
+    state: dict[str, Any],
+    key: str,
+    *,
+    position: str,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    """Persist a planning-only logo/copyright safe zone with an exact position."""
+
+    key = str(key or "")
+    position = str(position or "")
+    if key not in {"logo_safe_zone", "watermark_safe_zone"}:
+        return normalize_state(state)
+    if enabled and position not in dict(LOGO_POSITIONS):
+        return normalize_state(state)
+    value = {
+        "position": position if enabled else "",
+        "planning_only": True,
+        "applied_to_mp4": False,
+    }
+    return set_entry(state, "content_affecting_addons", key, value, enabled=enabled)
+
+
+def configure_post_position(state: dict[str, Any], key: str, position: str) -> dict[str, Any]:
+    """Set an overlay position in the plan without claiming it was rendered."""
+
+    key = str(key or "")
+    position = str(position or "")
+    if key not in {"logo_image", "watermark_text", "watermark_image", "subtitles", "text_overlay"}:
+        return normalize_state(state)
+    if position not in dict(LOGO_POSITIONS):
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get(key) or {})
+    config = dict(current.get("value") or {}) if isinstance(current.get("value"), dict) else post_addon_default(key)
+    config.update({"position": position, "applied_to_mp4": False})
+    return set_entry(updated, "postproduction_addons", key, config, enabled=True)
+
+
+def configure_post_asset(
+    state: dict[str, Any],
+    key: str,
+    *,
+    file_id: str,
+    file_unique_id: str = "",
+    mime_type: str = "",
+) -> dict[str, Any]:
+    """Store a Telegram image reference for logo/image watermark planning only."""
+
+    key = str(key or "")
+    if key not in {"logo_image", "watermark_image"} or not str(file_id or "").strip():
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get(key) or {})
+    config = post_addon_default(key)
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    config.update({
+        "source": "user_asset",
+        "asset_file_id": str(file_id),
+        "asset_file_unique_id": str(file_unique_id or ""),
+        "asset_mime_type": str(mime_type or "image/jpeg"),
+        "applied_to_mp4": False,
+    })
+    safe_zone_key = "logo_safe_zone" if key == "logo_image" else "watermark_safe_zone"
+    safe_zone = dict((updated.get("content_affecting_addons") or {}).get(safe_zone_key) or {})
+    safe_value = dict(safe_zone.get("value") or {}) if isinstance(safe_zone.get("value"), dict) else {}
+    safe_position = str(safe_value.get("position") or "")
+    if safe_zone.get("enabled") and safe_position in dict(LOGO_POSITIONS):
+        config["position"] = safe_position
+    return set_entry(updated, "postproduction_addons", key, config, enabled=True)
+
+
+def configure_watermark_text(state: dict[str, Any], text: str) -> dict[str, Any]:
+    """Store copyright text distinctly from image-logo input."""
+
+    value = str(text or "").strip()
+    if not value:
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get("watermark_text") or {})
+    config = post_addon_default("watermark_text")
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    config.update({"text": value[:300], "applied_to_mp4": False})
+    safe_zone = dict((updated.get("content_affecting_addons") or {}).get("watermark_safe_zone") or {})
+    safe_value = dict(safe_zone.get("value") or {}) if isinstance(safe_zone.get("value"), dict) else {}
+    safe_position = str(safe_value.get("position") or "")
+    if safe_zone.get("enabled") and safe_position in dict(LOGO_POSITIONS):
+        config["position"] = safe_position
+    return set_entry(updated, "postproduction_addons", "watermark_text", config, enabled=True)
+
+
+def configure_audio_volume(state: dict[str, Any], key: str, volume_percent: int) -> dict[str, Any]:
+    """Set one planning-only audio level without executing any audio engine."""
+
+    key = str(key or "")
+    if key not in AUDIO_POST_ADDONS:
+        return normalize_state(state)
+    try:
+        volume = int(volume_percent)
+    except (TypeError, ValueError):
+        return normalize_state(state)
+    if volume not in AUDIO_VOLUME_LEVELS:
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get(key) or {})
+    config = post_addon_default(key)
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    config.update({"volume_percent": volume, "applied_to_mp4": False})
+    return set_entry(updated, "postproduction_addons", key, config, enabled=True)
+
+
+def personal_voice_asset(state: dict[str, Any], user_id: int) -> dict[str, Any]:
+    """Return the latest valid voice reference owned by the current Telegram user."""
+
+    owner_id = int(user_id or 0)
+    if owner_id <= 0:
+        return {}
+    items = [
+        dict(item)
+        for item in (normalize_state(state).get("reference_assets") or {}).get("items") or []
+        if isinstance(item, dict)
+    ]
+    for item in reversed(items):
+        if str(item.get("type") or "") != "voice_audio":
+            continue
+        if str(item.get("media_kind") or "") != "audio":
+            continue
+        if int(item.get("owner_user_id") or 0) != owner_id:
+            continue
+        if not str(item.get("file_id") or "").strip():
+            continue
+        return item
+    return {}
+
+
+def configure_voice_choice(state: dict[str, Any], choice: str, *, user_id: int = 0) -> dict[str, Any]:
+    """Choose female, male, or personal voice for the post-production plan."""
+
+    choice = str(choice or "")
+    patch = VOICE_CHOICES.get(choice)
+    if not patch:
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get("voice") or {})
+    config = post_addon_default("voice")
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    for field in (
+        "asset_file_id", "asset_file_unique_id", "asset_mime_type",
+        "asset_owner_user_id", "asset_source_message_id", "custom_voice_asset_present",
+    ):
+        config.pop(field, None)
+    if choice == "custom_voice":
+        asset = personal_voice_asset(updated, user_id)
+        if not asset:
+            return updated
+        config.update({
+            "asset_file_id": str(asset.get("file_id") or ""),
+            "asset_file_unique_id": str(asset.get("file_unique_id") or ""),
+            "asset_mime_type": str(asset.get("mime_type") or "audio/ogg"),
+            "asset_owner_user_id": int(asset.get("owner_user_id") or 0),
+            "asset_source_message_id": int(asset.get("source_message_id") or 0),
+            "custom_voice_asset_present": True,
+        })
+    config.update(deepcopy(patch))
+    config.update({"voice_choice": choice, "applied_to_mp4": False})
+    return set_entry(updated, "postproduction_addons", "voice", config, enabled=True)
+
+
+def configure_music_source(state: dict[str, Any], source_choice: str) -> dict[str, Any]:
+    """Plan existing or newly generated music without making a provider call."""
+
+    source_choice = str(source_choice or "")
+    patch = MUSIC_SOURCE_CHOICES.get(source_choice)
+    if not patch:
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get("music") or {})
+    config = post_addon_default("music")
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    config.update(deepcopy(patch))
+    config.update({"music_source_choice": source_choice, "applied_to_mp4": False})
+    return set_entry(updated, "postproduction_addons", "music", config, enabled=True)
+
+
+def configure_music_vocal_mode(state: dict[str, Any], vocal_mode: str) -> dict[str, Any]:
+    """Plan instrumental or lyric music while preserving the selected source."""
+
+    vocal_mode = str(vocal_mode or "")
+    if vocal_mode not in MUSIC_VOCAL_MODES:
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get("music") or {})
+    config = post_addon_default("music")
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    config.update({"vocal_mode": vocal_mode, "applied_to_mp4": False})
+    source_selected = str(config.get("source") or "not_selected") != "not_selected"
+    return set_entry(
+        updated,
+        "postproduction_addons",
+        "music",
+        config,
+        enabled=bool(current.get("enabled") or source_selected),
+    )
+
+
+def configure_post_note(state: dict[str, Any], key: str, text: str) -> dict[str, Any]:
+    """Store editable audio/post copy without claiming an output was generated."""
+
+    key = str(key or "")
+    value = str(text or "").strip()
+    if key not in dict(POST_ADDONS) or not value:
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict((updated.get("postproduction_addons") or {}).get(key) or {})
+    config = post_addon_default(key)
+    if isinstance(current.get("value"), dict):
+        config.update(dict(current.get("value") or {}))
+    field = {"voice": "script_note", "music": "music_request"}.get(key, "user_note")
+    config.update({field: value[:1600]})
+    if "applied_to_mp4" in config:
+        config["applied_to_mp4"] = False
+    enabled = bool(current.get("enabled")) if key in {"voice", "music"} else True
+    return set_entry(updated, "postproduction_addons", key, config, enabled=enabled)
 
 
 def normalize_material_type(value: str) -> str:
@@ -897,14 +1308,24 @@ def planner_content_addons(state: dict[str, Any]) -> dict[str, Any]:
     updated = normalize_state(state)
     entries = dict(updated.get("content_affecting_addons") or {})
     aspect = str(updated.get("aspect_ratio") or "9:16")
+
+    def _safe_zone_position(key: str, default: str) -> str:
+        item = dict(entries.get(key) or {})
+        value = item.get("value")
+        if isinstance(value, dict):
+            position = str(value.get("position") or "")
+        else:
+            position = str(value or "")
+        return position if position in dict(LOGO_POSITIONS) else default
+
     result: dict[str, Any] = {
         "voiceover": bool(entries["voiceover"].get("enabled")),
         "dialogue": bool(entries["voiceover"].get("enabled")),
         "captions": bool(entries["captions"].get("enabled")),
         "subtitle_required": bool(entries["captions"].get("enabled")),
         "cta": bool(entries["cta"].get("enabled")),
-        "logo_safe_zone": "top_right" if entries["logo_safe_zone"].get("enabled") else "none",
-        "watermark_safe_zone": "bottom_right" if entries["watermark_safe_zone"].get("enabled") else "none",
+        "logo_safe_zone": _safe_zone_position("logo_safe_zone", "top_right") if entries["logo_safe_zone"].get("enabled") else "none",
+        "watermark_safe_zone": _safe_zone_position("watermark_safe_zone", "bottom_right") if entries["watermark_safe_zone"].get("enabled") else "none",
         "preserve_source_audio": bool(entries["preserve_source_audio"].get("enabled")),
         "aspect_ratio": aspect,
         "music_mood": str(entries["music_mood"].get("value") or "theo mạch cảm xúc của nội dung"),
@@ -922,7 +1343,9 @@ def planner_post_addons(state: dict[str, Any]) -> dict[str, bool]:
         "dubbing_mix": bool(entries["voice"].get("enabled") or entries["dubbing"].get("enabled")),
         "music_mix": bool(entries["music"].get("enabled")),
         "final_audio_mix": bool(entries["audio_balance"].get("enabled")),
-        "output_packaging": bool(entries["mp4_export"].get("enabled")),
+        # Product Video always requires a validated MP4 final; this is not an
+        # optional public add-on and therefore does not need a checkbox.
+        "output_packaging": True,
     }
 
 
@@ -1279,4 +1702,15 @@ def preconfirm_side_effects(state: dict[str, Any]) -> dict[str, int | bool]:
         "outbox_created": bool(state.get("outbox_created")),
         "xu_charged": int(state.get("xu_charged") or 0),
         "wallet_mutations": int(state.get("wallet_mutations") or 0),
+    }
+
+
+def preconfirm_audio_side_effects(state: dict[str, Any]) -> dict[str, int]:
+    """Expose explicit no-engine/no-file counters for the planning-only audio UI."""
+
+    state = normalize_state(state)
+    return {
+        "music_provider_calls": int(state.get("music_provider_calls") or 0),
+        "voice_provider_calls": int(state.get("voice_provider_calls") or 0),
+        "files_generated": int(state.get("files_generated") or 0),
     }

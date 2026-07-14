@@ -470,16 +470,19 @@ def test_arch1_scope_lock() -> None:
             }
         )
     scene3_test = "tests/test_p0_video_scene3_restore_full_flow.py"
+    scene3ux2_test = "tests/test_p0_video_scene3ux2_guided_style_addon_position_flow.py"
     if scene3_test in touched:
         allowed_runtime.add("services/video_scene3_flow.py")
         allowed_tests.update(
             {
                 scene3_test,
+                scene3ux2_test,
                 "tests/test_p0_video_scene1_semantic_story_planner_addon_aware_flow.py",
-                "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_removal.py",
-                "tests/test_p0_video_scene3boot1_bot_syntax_and_caption_render.py",
-            }
-        )
+                    "tests/test_p0_video_scene2_public_entry_order_legacy_bypass_removal.py",
+                    "tests/test_p0_video_scene3boot1_bot_syntax_and_caption_render.py",
+                    "tests/conftest.py",
+                }
+            )
     allowed_profiles = {
         "knowledge/profiles/architecture_exterior.json",
         "knowledge/profiles/interior_design.json",
@@ -508,7 +511,7 @@ def test_arch1_old_scope_guards_are_aligned_narrowly() -> None:
         item for item in _git_lines("ls-files", "--others", "--exclude-standard")
         if not item.startswith("pytest-baseline-r1/")
     }
-    if SCENE2_TEST_FILE in touched:
+    if SCENE2_TEST_FILE in touched or "tests/test_p0_video_scene3ux2_guided_style_addon_position_flow.py" in touched:
         assert arch1_scope_active(touched) is False
     else:
         assert arch1_scope_active(touched) is True
