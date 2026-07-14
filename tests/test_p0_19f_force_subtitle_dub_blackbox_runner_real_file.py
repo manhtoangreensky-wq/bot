@@ -142,11 +142,25 @@ def _patch_engine_ready(
 def _patch_send(monkeypatch, *, empty=False):
     async def fake_send(_message, **kwargs):
         if empty:
-            return {"documents": 0, "audio": 0, "video": 0}
+            return {
+                "documents": 0,
+                "audio": 0,
+                "video": 0,
+                "final_mp4_delivered": False,
+                "telegram_message_id": "",
+                "video_delivery_message_id": "",
+            }
+        video_delivered = bool(kwargs.get("video_bytes"))
+        message_id = "p019f-telegram-video-1" if video_delivered else ""
         return {
             "documents": 1 if kwargs.get("subtitle_items") else 0,
             "audio": 1 if kwargs.get("audio_bytes") else 0,
-            "video": 1 if kwargs.get("video_bytes") else 0,
+            "video": 1 if video_delivered else 0,
+            "final_mp4_delivered": video_delivered,
+            "final_mp4_exists": video_delivered,
+            "final_mp4_validated": video_delivered,
+            "telegram_message_id": message_id,
+            "video_delivery_message_id": message_id,
         }
 
     monkeypatch.setattr(bot, "send_public_subtitle_dub_final_outputs", fake_send)
@@ -638,11 +652,8 @@ def test_no_fake_mp4_success(monkeypatch, tmp_path):
         admin_interactive_confirm=True,
     ))
 
-    assert result["ok"] is True
-    assert result["partial_result"] is True
-    assert result["has_audio"] is True
-    assert result["has_video"] is False
-    assert result["charged"] == 0
+    assert result["ok"] is False
+    assert result["status"] == "FINAL_VIDEO_NOT_CREATED"
+    assert result["pipeline_attempted"] is True
     assert charge_calls == []
-    assert saved_jobs[-1]["status"] == "partial"
-    assert saved_jobs[-1]["final_mp4_exists"] is False
+    assert not any(job.get("status") in {"completed", "partial"} for job in saved_jobs)
