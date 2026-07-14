@@ -65896,9 +65896,19 @@ def video_scene3_materials_text(state: dict) -> str:
     detail_lines = []
     for index, item in enumerate(material_rows[:12], 1):
         material_type = video_scene3_flow.normalize_material_type(str(item.get("type") or ""))
+        caption_text = str(
+            item.get("caption")
+            or item.get("file_name")
+            or ""
+        ).strip()
+        caption_suffix = (
+            f" · {html.escape(caption_text[:90])}"
+            if caption_text
+            else ""
+        )
         detail_lines.append(
             f"{index}. {labels.get(material_type, 'Tư liệu')}"
-            f"{f' · {html.escape(str(item.get('caption') or item.get('file_name') or '')[:90])}' if str(item.get('caption') or item.get('file_name') or '').strip() else ''}"
+            f"{caption_suffix}"
         )
     active_index = max(1, min(len(material_rows), safe_int(state.get("active_material_index"), len(material_rows) or 1))) if material_rows else 0
     details = "\n".join(detail_lines) or "Chưa có tệp nào."
