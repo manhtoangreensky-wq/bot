@@ -21,7 +21,7 @@ def test_main_menu_vi_labels_are_natural_and_balanced():
     assert "🎧 Studio âm thanh" in labels
     assert "🎙 Voice Studio" not in labels
     assert "🎵 Music Studio" not in labels
-    assert "🌐 Dịch / Phụ đề / Lồng tiếng Studio" in labels
+    assert "🌐 Dịch thuật" in labels
     assert "🌐 Trung tâm" in labels
     assert "🎙 Voice / Nhạc" not in labels
     assert "🌐 Hub" not in labels
