@@ -79,11 +79,11 @@ def test_video_main_menu_two_columns():
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
-        ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
-        ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
-        ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
-        ["🏠 Menu chính"],
+        ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
+        ["🎯 Studio Profile AI", "🎞 Storyboard"],
+        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
+        ["📥 Tải video từ liên kết"],
+        ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
 
@@ -118,7 +118,7 @@ def test_video_main_menu_has_merge_image_video():
 def test_video_main_menu_has_downloader():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "📥 Tải video từ link" in labels
+    assert "📥 Tải video từ liên kết" in labels
     assert "vdownload|start" in callbacks
 
 

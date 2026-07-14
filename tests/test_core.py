@@ -1996,7 +1996,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "vproduct|open|video_ai_real" in video_callbacks
     assert "vproduct|open|frame_video_local" in video_callbacks
     assert "vproduct|open|self_shot_scene_change" in video_callbacks
-    assert "vproduct|open|multi_scene_film" in video_callbacks
+    assert "longvideo|public_guard" in video_callbacks
     assert "vproduct|open|video_trend" in video_callbacks
     assert 'callback_data="framevideo|start"' in source
     video_labels = {
@@ -2004,9 +2004,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         for row in bot.main_video_keyboard("vi").inline_keyboard
         for button in row
     }
-    assert "🧠 Ý tưởng video" in video_labels
+    assert "💡 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
-    assert "📚 Kho prompt video" in video_labels
+    assert "📚 Kho prompt video" not in video_labels
+    assert "videoidea|start" in video_callbacks
     assert "🎥 Prompt / Chuyển động" not in video_labels
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
@@ -2683,14 +2684,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🧩 Kịch bản → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
-        "🎬 Phim AI nhiều cảnh",
-        "🧠 Ý tưởng video",
-        "🎬 Storyboard + Prompt",
-        "📚 Kho prompt video",
-        "📥 Tải video từ link",
-        "🧠 Studio Profile AI",
+        "🎬 Video dài tập",
+        "🎯 Studio Profile AI",
+        "🎞 Storyboard",
+        "💡 Ý tưởng video",
         "🛠 Chỉnh sửa video",
+        "📥 Tải video từ liên kết",
         "🏠 Menu chính",
+        "📖 Hướng dẫn video",
     ]
     assert "🎬 Tạo video nhanh" not in video_labels
     assert "🖼➡️🎬 Tạo video AI từ ảnh" not in video_labels
@@ -4956,10 +4957,10 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert "🎞 Ghép ảnh thành video" in video_labels
     assert "🎬 Video AI chân thật" in video_labels
     assert "🎥 Tự quay & đổi cảnh AI" in video_labels
-    assert "🎬 Phim AI nhiều cảnh" in video_labels
-    assert "🎬 Storyboard + Prompt" in video_labels
+    assert "🎬 Video dài tập" in video_labels
+    assert "🎞 Storyboard" in video_labels
     assert "🔥 Video theo trend" in video_labels
-    assert "🧠 Ý tưởng video" in video_labels
+    assert "💡 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
 
     init_source = source_between(source, "def init_db():", "def get_user_language")
@@ -6923,12 +6924,12 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         for row in bot.video_idea_menu_keyboard("vi").inline_keyboard
         for button in row
     ]
-    assert "🧠 Ý tưởng video" in video_menu_buttons
+    assert "💡 Ý tưởng video" in video_menu_buttons
     assert "📢 Concept quảng cáo" not in video_menu_buttons
     assert "📢 Ý tưởng quảng cáo" in idea_buttons
     assert "🔥 Ý tưởng theo xu hướng" not in idea_buttons
     assert "🎬 Ý tưởng điện ảnh / kể chuyện" in idea_buttons
-    assert "videoidea|kind|ad" in idea_callbacks
+    assert "videoidea|catalog|sales" in idea_callbacks
     assert "videoidea|kind|trend" not in idea_callbacks
     assert 'CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\\|")' in source
     assert 'CallbackQueryHandler(handle_prompt_video_callback, pattern=r"^promptvideo\\|")' in source
@@ -7577,7 +7578,7 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
     assert "Prompt ảnh khung chính" in image_prompt["text"]
 
     public_long_guard = asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
-    assert "Phim AI nhiều cảnh đang phát triển" in public_long_guard["text"]
+    assert "Video dài tập 1–2 giờ đang phát triển" in public_long_guard["text"]
     assert "chưa trừ Xu" in public_long_guard["text"]
     monkeypatch.setattr(bot, "is_admin_user", lambda check_uid: check_uid == uid)
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
@@ -7622,9 +7623,9 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     source = bot_source_text()
     labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     callbacks = [button.callback_data for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert "🎬 Phim AI nhiều cảnh" in labels
-    assert "🎬 Storyboard + Prompt" in labels
-    assert "vproduct|open|multi_scene_film" in callbacks
+    assert "🎬 Video dài tập" in labels
+    assert "🎞 Storyboard" in labels
+    assert "longvideo|public_guard" in callbacks
     assert "vproduct|open|storyboard_prompt" in callbacks
     assert 'CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\\|")' in source
     assert 'CommandHandler("long_video_status", cmd_long_video_status)' in source
@@ -7652,7 +7653,7 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     }
     story_text = bot.storyboard_pack_result_text(story_state, "vi")
     for expected in [
-        "Storyboard + Prompt điện ảnh",
+        "Storyboard",
         "3 hướng prompt có thể dùng",
         "Shot 1",
         "Prompt ảnh",
@@ -7848,7 +7849,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
 
     main_labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert "🌐 Dịch/Lồng tiếng video" not in main_labels
-    assert "📥 Tải video từ link" in main_labels
+    assert "📥 Tải video từ liên kết" in main_labels
     assert "🎞 Video mẫu → Video AI" in [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "🎞 Video mẫu → Video AI" not in main_labels
 

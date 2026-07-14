@@ -18,7 +18,7 @@ def test_video_main_menu_contract_locked():
     assert "storyboard_prompt" in product_ids
     assert "Video theo trend" in bot.VIDEO_PRODUCT_REGISTRY["video_trend"]["public_label"]
     assert "Video AI chân thật" in bot.VIDEO_PRODUCT_REGISTRY["video_ai_real"]["public_label"]
-    assert "Storyboard + Prompt" in bot.VIDEO_PRODUCT_REGISTRY["storyboard_prompt"]["public_label"]
+    assert bot.VIDEO_PRODUCT_REGISTRY["storyboard_prompt"]["public_label"] == "🎞 Storyboard"
 
 
 def test_video_suggestion_contract_from_p0_18n5_locked():

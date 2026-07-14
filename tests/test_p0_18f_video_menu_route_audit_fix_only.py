@@ -43,6 +43,8 @@ def _press(user_id: int, callback: str):
     context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
+    elif callback.startswith("videoidea|"):
+        asyncio.run(bot.handle_video_idea_callback(update, context))
     elif callback.startswith("vpromptlib|"):
         asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
@@ -51,6 +53,8 @@ def _press(user_id: int, callback: str):
         asyncio.run(bot.handle_video_profile_studio_callback(update, context))
     elif callback.startswith("videoedit|"):
         asyncio.run(bot.handle_video_editor_callback(update, context))
+    elif callback.startswith("longvideo|"):
+        asyncio.run(bot.handle_long_video_callback(update, context))
     else:
         raise AssertionError(f"unsupported callback {callback}")
     assert query.edits
@@ -79,29 +83,28 @@ def test_video_menu_current_buttons_unchanged():
         "🧩 Kịch bản → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
-        "🎬 Phim AI nhiều cảnh",
-        "🧠 Ý tưởng video",
-        "🎬 Storyboard + Prompt",
-        "📚 Kho prompt video",
-        "📥 Tải video từ link",
-        "🧠 Studio Profile AI",
+        "🎬 Video dài tập",
+        "🎯 Studio Profile AI",
+        "🎞 Storyboard",
+        "💡 Ý tưởng video",
         "🛠 Chỉnh sửa video",
+        "📥 Tải video từ liên kết",
         "🏠 Menu chính",
+        "📖 Hướng dẫn video",
     ]
 
 
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
         ("vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom")),
-        ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|idea_quick|video_idea", "vproduct|input_text|video_idea")),
-        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt")),
-        ("vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|image")),
+        ("videoidea|start", "Ý tưởng video", ("videoidea|explore", "vpromptlib|start", "videoidea|source_start")),
+        ("vproduct|open|storyboard_prompt", "Storyboard", ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt")),
         ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|ai_prompt_menu|video_ai_real", "vproduct|ai_image_menu|video_ai_real", "vproduct|ai_video_menu|video_ai_real")),
         ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_existing|script_image_video", "vproduct|script_ideas|script_image_video", "vproduct|script_manual|script_image_video")),
         ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("framevideo|start", "framevideo|ai_first")),
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
-        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film")),
-        ("vdownload|start", "Tải video từ link", ()),
+        ("longvideo|public_guard", "Video dài tập", ()),
+        ("vdownload|start", "Tải video từ liên kết", ()),
         ("vprofile|menu", "Studio Profile AI", ("vprofile|select|architecture_exterior", "vprofile|select|ugc_social_creator")),
         ("videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split")),
     ]
@@ -110,7 +113,7 @@ def test_video_menu_each_button_routes_to_matching_flow():
 
 
 def test_video_menu_back_from_each_flow_returns_video_menu():
-    callbacks = [callback for callback in _callbacks(bot.main_video_keyboard("vi")) if callback != "menu|main"]
+    callbacks = [callback for callback in _callbacks(bot.main_video_keyboard("vi")) if not callback.startswith("menu|")]
     for index, callback in enumerate(callbacks, start=1):
         text, markup, _query = _press(918700 + index, callback)
         assert "menu|main_video" in _callbacks(markup) or "vproduct|back" in _callbacks(markup), text
@@ -137,9 +140,9 @@ def test_video_trend_route():
 def test_video_idea_route():
     _assert_route(
         918802,
-        "vproduct|open|video_idea",
+        "videoidea|start",
         "Ý tưởng video",
-        ("vproduct|idea_quick|video_idea", "vproduct|input_text|video_idea"),
+        ("videoidea|explore", "vpromptlib|start", "videoidea|source_start"),
     )
 
 
@@ -147,13 +150,13 @@ def test_video_storyboard_prompt_route():
     _assert_route(
         918803,
         "vproduct|open|storyboard_prompt",
-        "Storyboard + Prompt",
+        "Storyboard",
         ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt"),
     )
 
 
 def test_video_prompt_library_route():
-    _assert_route(918804, "vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|cinematic"))
+    _assert_route(918804, "vpromptlib|start", "Kho mẫu ý tưởng và câu lệnh", ("vpromptlib|idea", "vpromptlib|cinematic"))
 
 
 def test_realistic_ai_video_route():
@@ -181,9 +184,9 @@ def test_self_shot_scene_change_route():
 def test_multiscene_video_route():
     _assert_route(
         918809,
-        "vproduct|open|multi_scene_film",
-        "Phim AI nhiều cảnh",
-        ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film"),
+        "longvideo|public_guard",
+        "Video dài tập",
+        (),
     )
 
 
@@ -199,14 +202,17 @@ def test_local_video_edit_route():
     _assert_route(918811, "videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split"))
 
 
-def test_video_open_same_product_keeps_existing_draft():
+def test_legacy_video_idea_callback_redirects_to_canonical_hub_without_side_effects():
     user_id = 918812
     bot.clear_video_session(user_id)
     bot.task3d_session_step(user_id, "result", product_id="video_idea", topic="mèo cam mập đi công viên", return_to="menu|main_video")
     _press(user_id, "vproduct|open|video_idea")
     session = bot.get_video_session(user_id)
-    assert session.get("topic") == "mèo cam mập đi công viên"
-    assert session.get("product_id") == "video_idea"
+    assert session.get("video_tool") == "video_idea"
+    assert session.get("provider_called") is False
+    assert session.get("job_created") is False
+    assert session.get("outbox_created") is False
+    assert session.get("xu_charged") == 0
 
 
 def test_video_invoice_back_to_addons_or_previous_step():

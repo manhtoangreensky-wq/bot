@@ -346,7 +346,7 @@ def test_video_flow_menu_unchanged():
     assert "🔥 Video theo trend" in flattened
     assert "🎬 Video AI chân thật" in flattened
     assert "🧩 Kịch bản → Video" in flattened
-    assert "🎬 Storyboard + Prompt" in flattened
+    assert "🎞 Storyboard" in flattened
 
 
 def test_no_video_engine_provider_changes():

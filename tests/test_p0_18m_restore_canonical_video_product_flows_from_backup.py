@@ -47,6 +47,8 @@ def _press(user_id: int, callback: str):
     context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
+    elif callback.startswith("videoidea|"):
+        asyncio.run(bot.handle_video_idea_callback(update, context))
     elif callback.startswith("framevideo|"):
         asyncio.run(bot.handle_frame_video_callback(update, context))
     elif callback.startswith("vpromptlib|"):
@@ -57,6 +59,8 @@ def _press(user_id: int, callback: str):
         asyncio.run(bot.handle_video_profile_studio_callback(update, context))
     elif callback.startswith("videoedit|"):
         asyncio.run(bot.handle_video_editor_callback(update, context))
+    elif callback.startswith("longvideo|"):
+        asyncio.run(bot.handle_long_video_callback(update, context))
     else:
         raise AssertionError(f"unsupported callback {callback}")
     assert query.edits
@@ -73,11 +77,11 @@ def test_video_menu_layout_preserved_after_p0_18m():
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
-        ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
-        ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
-        ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
-        ["🏠 Menu chính"],
+        ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
+        ["🎯 Studio Profile AI", "🎞 Storyboard"],
+        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
+        ["📥 Tải video từ liên kết"],
+        ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
 
@@ -277,11 +281,10 @@ def test_script_to_video_can_continue_to_storyboard_or_render():
 def test_multiscene_flow_restored():
     text, markup, session = _press(180016, "vproduct|open|multi_scene_film")
     callbacks = _callbacks(markup)
-    assert "Phim AI nhiều cảnh" in text
-    assert "vproduct|film_manual|multi_scene_film" in callbacks
-    assert "vproduct|film_story|multi_scene_film" in callbacks
-    assert session.get("current_step") == "intro"
-    assert session.get("product_id") == "multi_scene_film"
+    assert "Video dài tập" in text
+    assert "đang phát triển" in text
+    assert callbacks == ["menu|main_video", "menu|main"]
+    assert not session
 
 
 def test_multiscene_addon_package_confirm_order():
@@ -311,7 +314,7 @@ def test_self_shot_back_routing_preserved():
 def test_storyboard_prompt_does_not_auto_render():
     text, markup, session = _press(180019, "vproduct|open|storyboard_prompt")
     callbacks = _callbacks(markup)
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
     assert "vproduct|storyboard_manual|storyboard_prompt" in callbacks
     assert "vproduct|storyboard_suggest|storyboard_prompt" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
@@ -339,7 +342,7 @@ def test_video_prompt_vault_routes_real_search():
 def test_video_prompt_vault_use_prompt_routes_back_to_video():
     _press(180021, "vpromptlib|idea")
     text, markup, session = _press(180021, "vpromptlib|use|idea|1")
-    assert "Đã dùng prompt từ Kho prompt video" in text
+    assert "Đã dùng câu lệnh từ Kho mẫu ý tưởng" in text
     assert "vproduct|prompt_image" in _callbacks(markup)
     assert session.get("return_to") == "menu|main_video"
     assert session.get("product_id") in bot.VIDEO_PRODUCT_REGISTRY
