@@ -23,17 +23,18 @@ def _literal_assignment(name: str, next_name: str):
     return ast.literal_eval(block.split("=", 1)[1].strip())
 
 
-def test_public_video_menu_has_new_names_swapped_idea_storyboard_and_full_width_downloader():
+def test_public_video_menu_hides_profile_studio_and_keeps_compact_two_button_rows():
     rows = _literal_assignment("VIDEO_PUBLIC_MENU_ROWS", "VIDEO_PUBLIC_ROUTE_MATRIX")
     assert rows == (
         ("video_trend", "video_ai_real"),
         ("script_image_video", "frame_video_local"),
         ("self_shot_scene_change", "multi_scene_film"),
-        ("profile_studio", "storyboard_prompt"),
-        ("video_idea", "video_local_edit"),
-        ("video_downloader",),
+        ("storyboard_prompt", "video_idea"),
+        ("video_local_edit", "video_downloader"),
         ("main_menu", "video_guide"),
     )
+    assert all(len(row) == 2 for row in rows)
+    assert all("profile_studio" not in row for row in rows)
     assert "(\"video_local_edit\", \"prompt_library\")" not in BOT_SOURCE
     matrix = _between("VIDEO_PUBLIC_ROUTE_MATRIX = {", "\n\n\ndef video_public_route_for_tool")
     assert '"label_vi": "🎬 Video dài tập"' in matrix

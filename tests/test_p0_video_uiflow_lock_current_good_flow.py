@@ -138,9 +138,8 @@ def test_videoflow_lock_main_video_menu_buttons_snapshot():
         [("🔥 Video theo trend", "vproduct|open|video_trend"), ("🎬 Video AI chân thật", "vproduct|open|video_ai_real")],
         [("🧩 Kịch bản → Video", "vproduct|open|script_image_video"), ("🎞 Ghép ảnh thành video", "vproduct|open|frame_video_local")],
         [("🎥 Tự quay & đổi cảnh AI", "vproduct|open|self_shot_scene_change"), ("🎬 Video dài tập", "longvideo|public_guard")],
-        [("🎯 Studio Profile AI", "vprofile|menu"), ("🎞 Storyboard", "vproduct|open|storyboard_prompt")],
-        [("💡 Ý tưởng video", "videoidea|start"), ("🛠 Chỉnh sửa video", "videoedit|hub")],
-        [("📥 Tải video từ liên kết", "vdownload|start")],
+        [("🎞 Storyboard", "vproduct|open|storyboard_prompt"), ("💡 Ý tưởng video", "videoidea|start")],
+        [("🛠 Chỉnh sửa video", "videoedit|hub"), ("📥 Tải video từ liên kết", "vdownload|start")],
         [("🏠 Menu chính", "menu|main"), ("📖 Hướng dẫn video", "menu|guide_video_ai")],
     ]
 

@@ -80,9 +80,8 @@ def test_video_main_menu_two_columns():
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
-        ["🎯 Studio Profile AI", "🎞 Storyboard"],
-        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
-        ["📥 Tải video từ liên kết"],
+        ["🎞 Storyboard", "💡 Ý tưởng video"],
+        ["🛠 Chỉnh sửa video", "📥 Tải video từ liên kết"],
         ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 

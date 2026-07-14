@@ -2685,7 +2685,6 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Video dài tập",
-        "🎯 Studio Profile AI",
         "🎞 Storyboard",
         "💡 Ý tưởng video",
         "🛠 Chỉnh sửa video",

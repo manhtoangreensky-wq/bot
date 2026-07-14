@@ -732,9 +732,8 @@ def test_bot_source_uses_scene3_order_menu_order_and_final_confirm_boundary():
         '("video_trend", "video_ai_real")',
         '("script_image_video", "frame_video_local")',
         '("self_shot_scene_change", "multi_scene_film")',
-        '("profile_studio", "storyboard_prompt")',
-        '("video_idea", "video_local_edit")',
-        '("video_downloader",)',
+        '("storyboard_prompt", "video_idea")',
+        '("video_local_edit", "video_downloader")',
         '("main_menu", "video_guide")',
     )
     menu_block = BOT_SOURCE[BOT_SOURCE.index("VIDEO_PUBLIC_MENU_ROWS = ("):BOT_SOURCE.index("VIDEO_PUBLIC_ROUTE_MATRIX = {")]

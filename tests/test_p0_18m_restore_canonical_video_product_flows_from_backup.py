@@ -78,9 +78,8 @@ def test_video_menu_layout_preserved_after_p0_18m():
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
-        ["🎯 Studio Profile AI", "🎞 Storyboard"],
-        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
-        ["📥 Tải video từ liên kết"],
+        ["🎞 Storyboard", "💡 Ý tưởng video"],
+        ["🛠 Chỉnh sửa video", "📥 Tải video từ liên kết"],
         ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
