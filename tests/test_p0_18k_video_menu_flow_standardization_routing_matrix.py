@@ -57,6 +57,8 @@ def _press(user_id: int, callback: str):
     context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
+    elif callback.startswith("videoidea|"):
+        asyncio.run(bot.handle_video_idea_callback(update, context))
     elif callback.startswith("vpromptlib|"):
         asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
@@ -65,6 +67,10 @@ def _press(user_id: int, callback: str):
         asyncio.run(bot.handle_video_profile_studio_callback(update, context))
     elif callback.startswith("videoedit|"):
         asyncio.run(bot.handle_video_editor_callback(update, context))
+    elif callback.startswith("longvideo|"):
+        asyncio.run(bot.handle_long_video_callback(update, context))
+    elif callback.startswith("menu|"):
+        asyncio.run(bot.handle_menu_callback(update, context))
     else:
         raise AssertionError(f"unsupported video callback {callback}")
     assert query.edits
@@ -75,11 +81,11 @@ def test_video_menu_layout_groups_primary_products_above_helpers():
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
-        ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
-        ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
-        ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
-        ["🏠 Menu chính"],
+        ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
+        ["🎯 Studio Profile AI", "🎞 Storyboard"],
+        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
+        ["📥 Tải video từ liên kết"],
+        ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
 
@@ -106,6 +112,15 @@ def test_video_route_entry_context_is_saved_per_button():
         user_id = 180000 + index
         text, markup, session = _press(user_id, route["entry_callback"])
         callbacks = _callbacks(markup)
+        if route["video_tool"] == "multi_scene_film":
+            assert "đang phát triển" in text
+            assert not session
+            assert callbacks == ["menu|main_video", "menu|main"]
+            continue
+        if route["video_tool"] == "video_guide":
+            assert "video" in text.lower()
+            assert "menu|main_video" in callbacks
+            continue
         assert route["label"].split(" ", 1)[-1].split("→", 1)[0].strip()[:8] in text
         assert session.get("product_area") == "video"
         assert session.get("video_tool") == route["video_tool"]
@@ -125,7 +140,7 @@ def test_video_prompt_and_storyboard_are_prompt_flows_not_auto_render():
     assert route["job_reachable"] is False
     text, markup, session = _press(180101, route["entry_callback"])
     callbacks = _callbacks(markup)
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
     assert "vproduct|storyboard_manual|storyboard_prompt" in callbacks
     assert "vproduct|storyboard_suggest|storyboard_prompt" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
@@ -218,7 +233,7 @@ def test_menu_main_button_returns_main_menu(monkeypatch):
 def test_storyboard_prompt_does_not_jump_profile_flow():
     text, markup, session = _press(181104, "vproduct|open|storyboard_prompt")
     callbacks = _callbacks(markup)
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
     assert session.get("video_tool") == "storyboard_prompt"
     assert not any("b14_profile" in callback for callback in callbacks)
     assert "vproduct|storyboard_manual|storyboard_prompt" in callbacks
@@ -230,7 +245,7 @@ def test_storyboard_prompt_back_matrix():
     assert route["back_target"] == "menu|main_video"
     text, markup, _session = _press(181105, route["entry_callback"])
     assert "menu|main_video" in _callbacks(markup)
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
 
 
 def test_storyboard_prompt_can_save_to_prompt_vault():
@@ -263,13 +278,15 @@ def test_video_ai_logo_watermark_does_not_call_admin_test_path():
 
 def test_multiscene_product_does_not_show_admin_test_public_copy():
     text, _markup, _session = _press(181107, "vproduct|open|multi_scene_film")
-    assert "Phim AI nhiều cảnh" in text
+    assert "Video dài tập" in text
     assert bot.video_public_text_forbidden_words(text) == []
 
 
 def test_multiscene_product_uses_product_route_not_admin_smoke():
     route = bot.video_public_route_for_tool("multi_scene_film")
-    assert route["entry_callback"] == "vproduct|open|multi_scene_film"
+    assert route["entry_callback"] == "longvideo|public_guard"
+    assert route["flow_type"] == "development_guard"
+    assert route["job_reachable"] is False
     assert "admin" not in route["entry_callback"].lower()
     assert "smoke" not in route["entry_callback"].lower()
 

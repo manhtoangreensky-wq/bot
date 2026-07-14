@@ -43,19 +43,23 @@ def test_video_menu_hides_prompt_motion_public():
     assert "vproduct|open|motion_prompt" not in _callbacks(bot.main_video_keyboard("vi"))
 
 
-def test_video_menu_has_prompt_library():
+def test_video_idea_hub_integrates_prompt_library_without_duplicate_main_button():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "📚 Kho prompt video" in labels
-    assert "vpromptlib|start" in callbacks
-    assert "Kho prompt video" in bot.video_prompt_library_text("vi")
+    assert "📚 Kho prompt video" not in labels
+    assert "📚 Kho câu lệnh video" not in labels
+    assert "vpromptlib|start" not in callbacks
+    assert "videoidea|start" in callbacks
+    assert "vpromptlib|start" in _callbacks(bot.video_idea_menu_keyboard("vi"))
+    assert "Kho mẫu ý tưởng và câu lệnh" in bot.video_prompt_library_text("vi")
 
 
 def test_video_menu_has_video_downloader():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "📥 Tải video từ link" in labels
+    assert "📥 Tải video từ liên kết" in labels
     assert "vdownload|start" in callbacks
+    assert _rows(bot.main_video_keyboard("vi"))[-2] == ["📥 Tải video từ liên kết"]
 
 
 def test_video_downloader_not_in_translation_dub_studio():

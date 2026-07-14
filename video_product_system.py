@@ -101,13 +101,13 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         template="tiktok_hook", next_steps=("generate_plan", "export_prompt_pack", "render_video"),
     ),
     "video_idea": _product(
-        "video_idea", "🧠 Ý tưởng video",
+        "video_idea", "💡 Ý tưởng video",
         "Tạo 5–10 ý tưởng, hook và format theo chủ đề, sản phẩm và nền tảng.",
         "topic|product|platform", "idea_pack", "free_planning", PUBLIC_VIDEO_PACKAGES,
         template="youtube_short_script", next_steps=("generate_ideas", "export_prompt_pack", "render_video"),
     ),
     "storyboard_prompt": _product(
-        "storyboard_prompt", "🎞 Storyboard + Prompt",
+        "storyboard_prompt", "🎞 Storyboard",
         "Tạo storyboard 6/9/12/16 panel, prompt ảnh/video từng shot và batch multishot 2 shot.",
         "topic|story|product|reference", "storyboard_table|image_prompts|video_prompts|prompt_pack", "free_planning_paid_render",
         PUBLIC_VIDEO_PACKAGES, template="seedance_multishot", max_duration=96,
@@ -148,7 +148,7 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         next_steps=("collect_source", "preserve_subject", "scene_plan", "choose_package"),
     ),
     "multi_scene_film": _product(
-        "multi_scene_film", "🎬 Phim AI nhiều cảnh",
+        "multi_scene_film", "🎬 Video dài tập",
         "Lập kế hoạch phim/quảng cáo nhiều cảnh và render theo từng scene khi gói phù hợp.",
         "story|product|script", "scene_plan|prompt_pack|optional_scene_renders", "free_planning_paid_higher_tier_render",
         PUBLIC_VIDEO_PACKAGES, provider=True, template="cinematic_story", max_duration=120,

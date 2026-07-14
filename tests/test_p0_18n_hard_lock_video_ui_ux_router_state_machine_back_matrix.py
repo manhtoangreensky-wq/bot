@@ -51,6 +51,8 @@ def _press(user_id: int, callback: str):
     context = SimpleNamespace(user_data={})
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
+    elif callback.startswith("videoidea|"):
+        asyncio.run(bot.handle_video_idea_callback(update, context))
     elif callback.startswith("framevideo|"):
         asyncio.run(bot.handle_frame_video_callback(update, context))
     elif callback.startswith("vpromptlib|"):
@@ -87,11 +89,11 @@ def test_video_menu_layout_preserved():
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
-        ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
-        ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
-        ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
-        ["🏠 Menu chính"],
+        ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
+        ["🎯 Studio Profile AI", "🎞 Storyboard"],
+        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
+        ["📥 Tải video từ liên kết"],
+        ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
 
@@ -275,7 +277,7 @@ def test_frame_video_step_back_matrix():
 
 def test_storyboard_prompt_intro_first():
     text, markup, session = _open(181815, "storyboard_prompt")
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
     assert "Chọn loại video" not in text
     assert session["current_step"] == "intro"
     assert "vproduct|storyboard_manual|storyboard_prompt" in _callbacks(markup)
@@ -286,7 +288,7 @@ def test_storyboard_does_not_auto_render():
     assert session["draft"]["provider_called"] is False
     assert session["draft"]["xu_charged"] == 0
     assert "vproduct|b14_confirm" not in _callbacks(markup)
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
 
 
 def test_storyboard_back_matrix():
@@ -300,11 +302,11 @@ def test_storyboard_back_matrix():
     assert "Chọn loại video" in text
 
 
-def test_prompt_vault_list_back_video_menu():
+def test_prompt_vault_list_back_video_idea_hub():
     text, markup, session = _press(181818, "vpromptlib|start")
-    assert "Kho prompt video" in text
+    assert "Kho mẫu ý tưởng và câu lệnh" in text
     assert session["video_tool"] == "prompt_library"
-    assert "menu|main_video" in _callbacks(markup)
+    assert "videoidea|start" in _callbacks(markup)
 
 
 def test_prompt_vault_use_prompt_returns_origin():
@@ -325,10 +327,10 @@ def test_self_shot_flow_stack_preserved():
 
 def test_multiscene_ui_flow_starts_intro_or_type():
     text, markup, session = _open(181821, "multi_scene_film")
-    assert "Phim AI nhiều cảnh" in text
-    assert "Chọn loại video" not in text
-    assert session["current_step"] == "intro"
-    assert "vproduct|film_manual|multi_scene_film" in _callbacks(markup)
+    assert "Video dài tập" in text
+    assert "đang phát triển" in text
+    assert not session
+    assert _callbacks(markup) == ["menu|main_video", "menu|main"]
 
 
 def test_multiscene_guard_clean_if_engine_not_ready():

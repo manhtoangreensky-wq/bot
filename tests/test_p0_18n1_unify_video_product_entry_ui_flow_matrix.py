@@ -64,6 +64,8 @@ def _press(user_id: int, callback: str):
     context = SimpleNamespace()
     if callback.startswith("vproduct|"):
         asyncio.run(bot.handle_video_product_callback(update, context))
+    elif callback.startswith("videoidea|"):
+        asyncio.run(bot.handle_video_idea_callback(update, context))
     elif callback.startswith("vpromptlib|"):
         asyncio.run(bot.handle_video_prompt_library_callback(update, context))
     elif callback.startswith("vdownload|"):
@@ -109,11 +111,11 @@ def test_video_menu_layout_preserved():
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
-        ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
-        ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
-        ["📚 Kho prompt video", "📥 Tải video từ link"],
-        ["🧠 Studio Profile AI", "🛠 Chỉnh sửa video"],
-        ["🏠 Menu chính"],
+        ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
+        ["🎯 Studio Profile AI", "🎞 Storyboard"],
+        ["💡 Ý tưởng video", "🛠 Chỉnh sửa video"],
+        ["📥 Tải video từ liên kết"],
+        ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 
 
@@ -274,42 +276,32 @@ def test_self_shot_session_preserved():
 
 def test_multiscene_intro_first_not_profile_first():
     text, markup, session = _open(181915, "multi_scene_film")
-    assert "Phim AI nhiều cảnh" in text
-    assert session["current_step"] == "intro"
+    assert "Video dài tập" in text
+    assert "đang phát triển" in text
+    assert not session
     assert "vproduct|b14_profile|cinematic_trailer" not in _callbacks(markup)
 
 
 def test_multiscene_intro_then_profile():
     user_id = 181916
-    _open(user_id, "multi_scene_film")
-    text, markup, session = _press(user_id, "vproduct|film_manual|multi_scene_film")
-    assert session["current_step"] == "film_manual_topic"
-    text, markup, session = _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
-    assert session["current_step"] == "profile_select"
-    assert "Chọn loại video" in text
-    assert "vproduct|b14_profile|cinematic_trailer" in _callbacks(markup)
+    text, markup, session = _open(user_id, "multi_scene_film")
+    assert "đang phát triển" in text
+    assert "vproduct|film_manual|multi_scene_film" not in _callbacks(markup)
+    assert not session
 
 
 def test_multiscene_profile_then_scene_count_or_outline():
-    user_id = 181917
-    _open(user_id, "multi_scene_film")
-    _press(user_id, "vproduct|film_manual|multi_scene_film")
-    _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
-    text, markup, session = _press(user_id, "vproduct|b14_profile|cinematic_trailer")
-    assert session["current_step"] == "idea_suggestions"
-    assert "Gợi ý" in text
-    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+    route = bot.video_public_route_for_tool("multi_scene_film")
+    assert route["flow_type"] == "development_guard"
+    assert route["invoice_reachable"] is False
+    assert route["job_reachable"] is False
 
 
 def test_multiscene_engine_not_touched():
     user_id = 181918
     _open(user_id, "multi_scene_film")
-    _press(user_id, "vproduct|film_manual|multi_scene_film")
-    _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
-    _press(user_id, "vproduct|b14_profile|cinematic_trailer")
     session = bot.get_video_session(user_id)
-    assert session["draft"]["provider_called"] is False
-    assert session["draft"]["xu_charged"] == 0
+    assert not session
 
 
 def test_idea_intro_first_not_profile_first():
@@ -350,7 +342,7 @@ def test_idea_does_not_jump_assets():
 
 def test_storyboard_intro_first_not_profile_first():
     text, markup, session = _open(181923, "storyboard_prompt")
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
     assert session["current_step"] == "intro"
     assert "vproduct|b14_profile|storytelling" not in _callbacks(markup)
 
@@ -416,7 +408,7 @@ def test_frame_video_back_menu_video():
 
 def test_prompt_vault_direct_search_no_profile_required():
     text, markup, session = _press(181930, "vpromptlib|start")
-    assert "Kho prompt video" in text
+    assert "Kho mẫu ý tưởng và câu lệnh" in text
     assert session["video_tool"] == "prompt_library"
     assert "vproduct|b14_profile|storytelling" not in _callbacks(markup)
 
@@ -459,6 +451,6 @@ def test_video_flow_audit_back_audit_placeholder_audit_pass():
     assert flow["ok"] is True
     by_label = {row["public_label"]: row for row in flow["rows"]}
     assert by_label["🎬 Video AI chân thật"]["first_step"] == "intro"
-    assert by_label["🎬 Phim AI nhiều cảnh"]["profile_step_position"] == "after_product_intro_input"
+    assert by_label["🎬 Video dài tập"]["profile_step_position"] == "not_required"
     assert bot.video_back_audit_payload()["ok"] is True
     assert bot.video_placeholder_audit_payload()["ok"] is True

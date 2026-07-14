@@ -115,7 +115,7 @@ def test_multiscene_long_video_guard_for_user_and_admin(monkeypatch):
         )
     )
     assert result["status"] == "LONG_VIDEO_GUARDED"
-    assert "Phim AI nhiều cảnh" in result["message"]
+    assert "Video dài tập" in result["message"]
     assert "chưa trừ Xu" in result["message"]
 
 

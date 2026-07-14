@@ -107,7 +107,7 @@ from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import profile_router, video_local_editing, video_local_validation, video_smart_splitter
 from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
-from services import video_prompt_vault
+from services import video_idea_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import video_addon_planner, video_scene3_flow, video_scene_prompt_builder, video_semantic_scene_planner
 from services import video_prompt_continuity as video_continuity
@@ -45402,7 +45402,7 @@ VIDEO_MULTISCENE_JOB_SETTING_PREFIX = "video_multiscene_job:"
 VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 MULTISCENE_BLACKBOX_BACKGROUND_TASKS: set[asyncio.Task] = set()
 MULTISCENE_BLACKBOX_PUBLIC_GUARD_TEXT = "Video nhiều cảnh đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
-MULTISCENE_LONG_VIDEO_GUARD_TEXT = "Phim AI nhiều cảnh đang phát triển / đang hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+MULTISCENE_LONG_VIDEO_GUARD_TEXT = "Video dài tập 1–2 giờ đang phát triển. TOAN AAS chưa xử lý và chưa trừ Xu."
 
 def multiscene_blackbox_max_concurrent() -> int:
     return max(1, safe_int(os.getenv("MULTISCENE_VIDEO_MAX_CONCURRENT"), 1))
@@ -65090,7 +65090,6 @@ VIDEO_SCENE2_PUBLIC_PRODUCTS = frozenset({
     "self_shot_scene_change",
     "video_idea",
     "storyboard_prompt",
-    "multi_scene_film",
 })
 
 VIDEO_SCENE2_LEGACY_PRICE_KEYS = frozenset({
@@ -68254,9 +68253,9 @@ VIDEO_PUBLIC_MENU_ROWS = (
     ("video_trend", "video_ai_real"),
     ("script_image_video", "frame_video_local"),
     ("self_shot_scene_change", "multi_scene_film"),
-    ("profile_studio", "video_idea"),
-    ("storyboard_prompt", "video_downloader"),
-    ("video_local_edit", "prompt_library"),
+    ("profile_studio", "storyboard_prompt"),
+    ("video_idea", "video_local_edit"),
+    ("video_downloader",),
     ("main_menu", "video_guide"),
 )
 
@@ -68350,28 +68349,35 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "product_id": "self_shot_scene_change",
     },
     "multi_scene_film": {
-        "label_vi": "🎬 Phim AI nhiều cảnh",
-        "label_en": "🎬 Multi-scene AI film",
+        "label_vi": "🎬 Video dài tập",
+        "label_en": "🎬 Long-form episodic video",
         "label_zh": "🎬 多场景 AI 影片",
-        "entry_callback": "vproduct|open|multi_scene_film",
-        "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film", "vproduct|film_script|multi_scene_film"),
+        "entry_callback": "longvideo|public_guard",
+        "handler": "handle_long_video_callback",
+        "expected_children": (),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
-        "category": "video_product",
-        "flow_type": "intro_then_profile",
+        "category": "long_video_developing",
+        "flow_type": "development_guard",
         "first_step": "intro",
-        "invoice_reachable": True,
-        "job_reachable": True,
+        "invoice_reachable": False,
+        "job_reachable": False,
         "product_id": "multi_scene_film",
     },
     "video_idea": {
         "label_vi": "💡 Ý tưởng video",
         "label_en": "🧠 Video ideas",
         "label_zh": "🧠 视频创意",
-        "entry_callback": "vproduct|open|video_idea",
-        "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|idea_quick|video_idea", "vproduct|input_text|video_idea"),
+        "entry_callback": "videoidea|start",
+        "handler": "handle_video_idea_callback",
+        "expected_children": (
+            "videoidea|explore",
+            "vpromptlib|start",
+            "videoidea|catalog|sales",
+            "videoidea|catalog|story",
+            "videoidea|source_start",
+            "videoidea|kind|custom",
+        ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "planning",
@@ -68382,8 +68388,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "product_id": "video_idea",
     },
     "storyboard_prompt": {
-        "label_vi": "🎞 Bảng phân cảnh + câu lệnh",
-        "label_en": "🎬 Storyboard + Prompt",
+        "label_vi": "🎞 Storyboard",
+        "label_en": "🎞 Storyboard",
         "label_zh": "🎬 分镜 + Prompt",
         "entry_callback": "vproduct|open|storyboard_prompt",
         "handler": "handle_video_product_callback",
@@ -68398,7 +68404,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "product_id": "storyboard_prompt",
     },
     "prompt_library": {
-        "label_vi": "📚 Kho câu lệnh video",
+        "label_vi": "📚 Kho mẫu ý tưởng và câu lệnh",
         "label_en": "📚 Video prompt library",
         "label_zh": "📚 视频 Prompt 库",
         "entry_callback": "vpromptlib|start",
@@ -68495,7 +68501,6 @@ VIDEO_INTRO_THEN_PROFILE_PRODUCTS = frozenset({
     "self_shot_scene_change",
     "video_idea",
     "storyboard_prompt",
-    "multi_scene_film",
     "frame_video_local",
 })
 
@@ -68528,7 +68533,6 @@ VIDEO_UIFLOW1_CANONICAL_PROFILE_PRODUCTS = frozenset({
     "script_image_video",
     "self_shot_scene_change",
     "storyboard_prompt",
-    "multi_scene_film",
 })
 
 
@@ -68910,6 +68914,10 @@ def video_route_expected_handler(callback: str) -> str:
         return "handle_architecture_profile_callback"
     if str(callback or "").startswith("videoedit|"):
         return "handle_video_editor_callback"
+    if str(callback or "").startswith("longvideo|"):
+        return "handle_long_video_callback"
+    if str(callback or "").startswith("videoidea|"):
+        return "handle_video_idea_callback"
     return ""
 
 
@@ -69280,10 +69288,10 @@ def video_placeholder_audit_rows() -> list[dict]:
         ("frame_video_ai_first", "Tạo ảnh AI trước", ivf.frame_video_ai_first_guard_text("vi")),
         ("frame_video_layout", "Gợi ý bố cục ảnh", ivf.frame_video_layout_helper_text("vi")),
         ("script_image_video", "Kịch bản → Video", task3d_product_intro_text("script_image_video", "vi")),
-        ("multi_scene_film", "Phim AI nhiều cảnh", task3d_product_intro_text("multi_scene_film", "vi")),
-        ("storyboard_prompt", "Storyboard + Prompt", task3d_product_intro_text("storyboard_prompt", "vi")),
-        ("prompt_library", "Kho prompt video", video_prompt_library_text("vi")),
-        ("prompt_library_idea", "Kho prompt video / ý tưởng", video_prompt_library_category_text("idea", prompt_items, "vi")),
+        ("multi_scene_film", "Video dài tập", task3d_product_intro_text("multi_scene_film", "vi")),
+        ("storyboard_prompt", "Storyboard", task3d_product_intro_text("storyboard_prompt", "vi")),
+        ("prompt_library", "Kho mẫu ý tưởng và câu lệnh", video_prompt_library_text("vi")),
+        ("prompt_library_idea", "Kho mẫu / ý tưởng", video_prompt_library_category_text("idea", prompt_items, "vi")),
         ("video_local_edit", "Chỉnh sửa video", video_editor_menu_text("vi")),
         ("video_ai_real", "Video AI chân thật", task3d_product_intro_text("video_ai_real", "vi")),
     ]
@@ -69350,8 +69358,8 @@ def video_flow_audit_rows() -> list[dict]:
             ),
             "next_step_after_profile": video_post_profile_step(tool_id) if video_flow_requires_intro_profile(tool_id) else ("profile_next" if tool_id in VIDEO_PROFILE_FIRST_PRODUCTS else ""),
             "is_placeholder": bool(placeholder.get("is_placeholder")),
-            "requires_provider": bool(tool_id in {"video_ai_real", "multi_scene_film", "script_image_video", "video_trend", "storyboard_prompt"}),
-            "requires_worker": bool(tool_id in {"frame_video_local", "video_local_edit", "multi_scene_film", "script_image_video", "video_trend"}),
+            "requires_provider": bool(tool_id in {"video_ai_real", "script_image_video", "video_trend", "storyboard_prompt"}),
+            "requires_worker": bool(tool_id in {"frame_video_local", "video_local_edit", "script_image_video", "video_trend"}),
             "readiness": "route_connected" if row.get("ok") and not placeholder.get("is_placeholder") else "needs_review",
             "last_blocker": ", ".join(placeholder.get("matches") or placeholder.get("forbidden_public_words") or []),
             "public_label": row.get("label"),
@@ -69410,7 +69418,7 @@ def video_semantics_audit_payload() -> dict:
         {
             "name": "no_prompt_vault_inside_video_ai_entry",
             "ok": "vpromptlib|start" not in ai_intro_callbacks and "📚 Dùng prompt từ kho" not in ai_intro_labels,
-            "detail": "Kho prompt video chỉ ở menu Video chính, không nằm trong flow con.",
+            "detail": "Kho mẫu chỉ nằm trong hub Ý tưởng video, không lặp ở menu Video chính hay flow con.",
         },
         {
             "name": "video_ai_suggestions_live_inside_subflows",
@@ -69429,18 +69437,23 @@ def video_semantics_audit_payload() -> dict:
             "detail": "Kịch bản là chữ/thoại/phân cảnh; Storyboard là chuỗi hình/prompt nối tiếp.",
         },
         {
-            "name": "video_idea_only_quick_or_manual",
-            "ok": idea_callbacks == {"vproduct|idea_quick|video_idea", "vproduct|input_text|video_idea"}
-            and "vproduct|idea_industry|video_idea" not in idea_callbacks
-            and "vproduct|idea_trend|video_idea" not in idea_callbacks,
-            "detail": "Ý tưởng video chỉ còn Gợi ý nhanh và Tự nhập chủ đề.",
+            "name": "video_idea_unifies_catalog_templates_media_and_custom",
+            "ok": idea_callbacks == {
+                "videoidea|explore",
+                "vpromptlib|start",
+                "videoidea|catalog|sales",
+                "videoidea|catalog|story",
+                "videoidea|source_start",
+                "videoidea|kind|custom",
+            },
+            "detail": "Ý tưởng video là cửa vào duy nhất cho kho mẫu, khám phá, tư liệu có sẵn và tự nhập.",
         },
     ]
     return {"ok": all(item.get("ok") for item in checks), "checks": checks, "semantics": dict(VIDEO_PRODUCT_SEMANTICS)}
 
 
 def video_callback_audit_payload() -> dict:
-    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "vdownload|", "vprofile|", "archprofile|", "videoedit|")
+    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "videoidea|", "longvideo|", "vdownload|", "vprofile|", "archprofile|", "videoedit|")
     rows = []
     for tool_id in VIDEO_PUBLIC_ROUTE_MATRIX:
         if tool_id in {"prompt_library", "video_downloader"}:
@@ -69534,7 +69547,7 @@ def video_microflow_audit_payload() -> dict:
         {
             "name": "no_inner_prompt_vault_buttons",
             "ok": "📚 Dùng prompt từ kho" not in labels and "vpromptlib|start" not in callbacks,
-            "detail": "Flow con không nhét Kho prompt video.",
+            "detail": "Flow con không lặp Kho mẫu ý tưởng và câu lệnh.",
         },
         {
             "name": "suggestions_have_multiple_selectable_options",
@@ -69981,14 +69994,15 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def video_prompt_library_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "📚 <b>Video prompt library</b>\n\n"
-            "Choose the prompt type you want to draft. This tool only helps with prompts, scripts, camera angles and motion ideas. "
+            "📚 <b>Idea templates and prompts</b>\n\n"
+            "This library is now part of Video Ideas. Choose a template for prompts, scripts, camera angles or motion. "
             "It does not process real video and does not charge Xu.\n\n"
             "No file/media upload is required on this screen."
         )
     return (
-        "📚 <b>Kho prompt video</b>\n\n"
-        "Chọn loại prompt bạn muốn tạo. Công cụ này chỉ hỗ trợ gợi ý prompt, kịch bản, góc quay và chuyển động. "
+        "📚 <b>Kho mẫu ý tưởng và câu lệnh</b>\n\n"
+        "Kho này đã nằm trong Ý tưởng video. Chọn mẫu để tham khảo câu lệnh, kịch bản, góc quay hoặc chuyển động, "
+        "sau đó anh/chị vẫn có thể sửa để tạo phiên bản riêng. "
         "Chưa xử lý video thật và không trừ Xu.\n\n"
         "Không cần gửi file/media ở bước này."
     )
@@ -70007,7 +70021,7 @@ def video_prompt_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_v6_keyboard(
         buttons,
         lang,
-        back=("⬅️ Menu video" if is_vi else "⬅️ Video menu", "menu|main_video"),
+        back=("⬅️ Ý tưởng video" if is_vi else "⬅️ Video ideas", "videoidea|start"),
     )
 
 
@@ -70036,7 +70050,7 @@ def video_prompt_library_category_label(action: str, lang: str = "vi") -> str:
         "cinematic": "Cinematic",
         "reels": "TikTok/Reels",
     }
-    return labels.get(str(action or ""), "Kho prompt video")
+    return labels.get(str(action or ""), "Kho mẫu ý tưởng và câu lệnh")
 
 
 def video_prompt_library_search(action: str, limit: int = 5) -> list[dict]:
@@ -70124,7 +70138,7 @@ def video_prompt_library_category_keyboard(action: str, items: list[dict] | None
     if current_row:
         rows.append(current_row)
     rows.append([
-        InlineKeyboardButton("⬅️ Kho prompt video" if normalize_user_language(lang) == "vi" else "⬅️ Prompt library", callback_data="vpromptlib|start"),
+        InlineKeyboardButton("⬅️ Kho mẫu" if normalize_user_language(lang) == "vi" else "⬅️ Templates", callback_data="vpromptlib|start"),
         InlineKeyboardButton("🏠 Menu chính" if normalize_user_language(lang) == "vi" else "🏠 Main menu", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -70301,7 +70315,7 @@ TASK3D_PUBLIC_COPY = {
         "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu. Chỉ khi anh/chị xác nhận tạo file, TOAN AAS mới xử lý và tính Xu."
     ),
     "storyboard_prompt": (
-        "🎞 <b>Bảng phân cảnh + câu lệnh</b>\n\n"
+        "🎞 <b>Storyboard</b>\n\n"
         "TOAN AAS sẽ tạo chuỗi cảnh bằng hình ảnh và câu lệnh AI nối tiếp để kể một câu chuyện hoàn chỉnh.\n\n"
         "Phù hợp khi anh/chị muốn tạo nhiều ảnh cùng chủ đề rồi ghép/hoạt ảnh thành video.\n\n"
         "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu. Chỉ khi anh/chị xác nhận tạo file, TOAN AAS mới xử lý."
@@ -70339,7 +70353,7 @@ TASK3D_PUBLIC_COPY = {
         "Màn này chưa xử lý video và chưa trừ Xu."
     ),
     "multi_scene_film": (
-        "🎬 <b>Phim AI nhiều cảnh</b>\n\n"
+        "🎬 <b>Video dài tập</b>\n\n"
         "TOAN AAS sẽ lập dàn cảnh, chia cảnh, tạo bảng phân cảnh và câu lệnh AI cho từng cảnh để chuẩn bị dựng phim/video dài hơn.\n\n"
         "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
     ),
@@ -70861,7 +70875,7 @@ def video_microflow_build_options(kind: str, topic: str, product_id: str = "", s
     if kind == "video_idea":
         paths = [
             ("Kịch bản → Video", "Kịch bản chữ có hook, phân cảnh và CTA."),
-            ("Bảng phân cảnh + câu lệnh", "Chuỗi khung hình/câu lệnh nối tiếp để hình dung từng cảnh."),
+            ("Storyboard", "Chuỗi khung hình/câu lệnh nối tiếp để hình dung từng cảnh."),
             ("Video AI chân thật", "Prompt/ảnh/video mẫu để tạo video ngắn chân thật."),
             ("Ghép ảnh thành video", "Bộ ảnh/prompt ảnh rồi ghép thành video."),
             ("Phim nhiều cảnh", "Cốt truyện nhiều cảnh, phù hợp video dài hơn."),
@@ -71134,7 +71148,7 @@ def video_idea_development_text(session: dict | None = None, lang: str = "vi") -
 
 def video_idea_development_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧩 Kịch bản → Video", callback_data="vproduct|idea_develop|script_image_video"), InlineKeyboardButton("🎬 Bảng phân cảnh + câu lệnh", callback_data="vproduct|idea_develop|storyboard_prompt")],
+        [InlineKeyboardButton("🧩 Kịch bản → Video", callback_data="vproduct|idea_develop|script_image_video"), InlineKeyboardButton("🎞 Storyboard", callback_data="vproduct|idea_develop|storyboard_prompt")],
         [InlineKeyboardButton("🎞 Video AI chân thật", callback_data="vproduct|idea_develop|video_ai_real"), InlineKeyboardButton("🖼 Ghép ảnh thành video", callback_data="vproduct|idea_develop|frame_video_local")],
         [InlineKeyboardButton("🎥 Phim nhiều cảnh", callback_data="vproduct|idea_develop|multi_scene_film"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
@@ -71323,7 +71337,7 @@ def task3d_product_intro_keyboard(
 
 
 VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE = "Công cụ này đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
-VIDEO_B14_MULTISCENE_PUBLIC_MESSAGE = "Phim AI nhiều cảnh đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+VIDEO_B14_MULTISCENE_PUBLIC_MESSAGE = "Video dài tập 1–2 giờ đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_ASSET_RECOMMENDATION_VI = (
     "Muốn video sát ý hơn, anh/chị nên gửi ảnh nhân vật, sản phẩm, đồ vật, bối cảnh, logo hoặc ảnh storyboard mẫu. "
     "Nếu bỏ qua, TOAN AAS sẽ tự dựng bằng text prompt nên độ giống nhân vật/sản phẩm có thể thấp hơn."
@@ -71332,7 +71346,7 @@ VIDEO_B14_2_ASSET_SKIP_WARNING_VI = (
     "Anh/chị đang bỏ qua ảnh tư liệu. Video vẫn tạo được, nhưng nếu cần giống sản phẩm/nhân vật/bối cảnh thật thì nên gửi ảnh trước."
 )
 VIDEO_B14_2_WORKER_NOT_READY_VI = "Hệ thống dựng video nền chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu."
-VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Phim AI nhiều cảnh đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
+VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Video dài tập 1–2 giờ đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 cảnh / 8 giây. Tư liệu miễn phí đã gửi như logo, ảnh, voice hoặc nhạc được giữ; add-on có phí không áp dụng."
 VIDEO_B14_2_QUALITY_OPTIONS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
 VIDEO_B14_2_SCENE_OPTIONS = (1, 3, 5, 10, 20)
@@ -78725,7 +78739,7 @@ async def handle_video_prompt_library_callback(update: Update, context: ContextT
         )
         return await safe_edit_or_send(
             query,
-            "✅ <b>Đã dùng prompt từ Kho prompt video</b>\n\n" + task3d_result_text(session, lang),
+            "✅ <b>Đã dùng câu lệnh từ Kho mẫu ý tưởng</b>\n\n" + task3d_result_text(session, lang),
             parse_mode="HTML",
             reply_markup=task3d_result_keyboard(product_id, lang),
         )
@@ -78774,6 +78788,26 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "open":
         if value not in VIDEO_PRODUCT_REGISTRY:
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
+        if value == "video_idea":
+            # Keep old Telegram messages usable without reopening the retired
+            # duplicate idea flow. The canonical public entry is videoidea|start.
+            set_video_route_session(uid, "video_idea", "tool_home", product_id="video_idea")
+            return await safe_edit_or_send(
+                query,
+                video_idea_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_idea_menu_keyboard(lang),
+            )
+        if value == "multi_scene_film":
+            clear_video_session(uid)
+            return await safe_edit_or_send(
+                query,
+                MULTISCENE_LONG_VIDEO_GUARD_TEXT,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
         if value in {"image_to_video"}:
             if value in VIDEO_PUBLIC_ROUTE_MATRIX:
                 set_video_route_session(uid, value, "tool_home", product_id=value)
@@ -79733,11 +79767,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         item = task3d_prompt_vault_item_from_session(session, bundle, lang)
         result = TASK3D_PROMPT_VAULT.add(item)
         if result.get("ok"):
-            message = "✅ Đã lưu vào Kho prompt video. TOAN AAS chưa tạo file thật và chưa trừ Xu."
+            message = "✅ Đã lưu vào Kho mẫu ý tưởng và câu lệnh. TOAN AAS chưa tạo file thật và chưa trừ Xu."
         elif result.get("reason") == "duplicate_prompt_id":
-            message = "✅ Bộ prompt này đã có trong Kho prompt video. TOAN AAS chưa tạo file thật và chưa trừ Xu."
+            message = "✅ Bộ câu lệnh này đã có trong Kho mẫu ý tưởng. TOAN AAS chưa tạo file thật và chưa trừ Xu."
         else:
-            message = "⚠️ Chưa lưu được Kho prompt video lần này. TOAN AAS chưa tạo file thật và chưa trừ Xu."
+            message = "⚠️ Chưa lưu được Kho mẫu ý tưởng lần này. TOAN AAS chưa tạo file thật và chưa trừ Xu."
         return await safe_edit_or_send(query, message, reply_markup=task3d_result_keyboard(product_id, lang))
     if action in {"trend_today", "trend_more"}:
         draft = dict(session.get("draft") or {})
@@ -82501,7 +82535,7 @@ def video_ai_true_text(lang: str = "vi") -> str:
             "Start from a prompt, image or reference video. TOAN AAS creates the plan first; it only processes and charges Xu after you confirm real generation."
             f"{warning}"
         )
-    warning = "" if enabled else "\n\n🎬 Video AI chân thật đang được kiểm tra để đảm bảo chất lượng. TOAN AAS chưa trừ Xu. Anh/chị có thể dùng Video theo trend hoặc Storyboard + Prompt trước."
+    warning = "" if enabled else "\n\n🎬 Video AI chân thật đang được kiểm tra để đảm bảo chất lượng. TOAN AAS chưa trừ Xu. Anh/chị có thể dùng Video theo trend hoặc Storyboard trước."
     return (
         "🎬 <b>Video AI chân thật</b>\n\n"
         "Tạo video AI ngắn theo prompt, ảnh hoặc video tham khảo.\n\n"
@@ -85562,7 +85596,7 @@ async def cmd_long_video_status(update: Update, context: ContextTypes.DEFAULT_TY
         project_id = int((latest or {}).get("id") or 0)
     if not project_id:
         text = (
-            "ℹ️ Chưa có project video dài nào trong hệ thống. Hãy tạo kế hoạch bằng 🎬 Phim AI nhiều cảnh trước."
+            "ℹ️ Chưa có project video dài nào trong hệ thống. Hãy tạo kế hoạch bằng 🎬 Video dài tập trước."
             if normalize_user_language(lang) == "vi"
             else "ℹ️ No long video project found yet. Create one from Multi-scene AI story film first."
         )
@@ -85837,7 +85871,7 @@ def storyboard_pack_start_text(lang: str = "vi") -> str:
             "Planning only. No provider call and no Xu charged."
         )
     return (
-        "🎞 <b>Storyboard + Prompt điện ảnh</b>\n\n"
+        "🎞 <b>Storyboard</b>\n\n"
         "TOAN AAS sẽ dựng kế hoạch video theo từng cảnh:\n"
         "• hook mở đầu\n• shot list\n• góc máy\n• chuyển động\n• ánh sáng\n"
         "• prompt ảnh\n• prompt video\n• negative prompt\n• caption/voice gợi ý\n• nhạc/SFX gợi ý\n\n"
@@ -86176,7 +86210,7 @@ def storyboard_pack_result_text(state: dict, lang: str = "vi") -> str:
     concept = payload.get("concept") or {}
     lines = [
         "🎞 <b>Storyboard chi tiết</b>",
-        "<i>Storyboard + Prompt điện ảnh</i>",
+        "<i>Kế hoạch từng cảnh, câu lệnh ảnh và câu lệnh video</i>",
         "",
         f"Chủ đề: <code>{html.escape(payload['topic'])}</code>",
         f"Mẫu: <b>{html.escape(payload['template'])}</b>",
@@ -86414,32 +86448,239 @@ def storyboard_pack_guard_text(action: str, lang: str = "vi") -> str:
 def video_idea_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🧠 <b>Video ideas</b>\n\n"
-            "Choose an idea direction. TOAN AAS brainstorms 10 ideas across sales, review, education, viral, affiliate, customer service and automation, then routes the selected idea to storyboard or realistic video.\n\n"
-            "Planning only. No processing starts and no Xu deducted."
+            "💡 <b>Video Ideas</b>\n\n"
+            "Explore curated formats, open the integrated template library, start from existing media, or write a custom direction. "
+            "You can choose the duration, edit the brief, review image/video prompt seeds, then continue in the matching video product.\n\n"
+            "Planning only. No job, provider call or Xu deduction starts here."
         )
     return (
-        "🧠 <b>Ý tưởng video</b>\n\n"
-        "Bạn muốn tạo ý tưởng theo hướng nào?\n\n"
-        "1. 📢 Ý tưởng quảng cáo\n"
-        "Tạo concept bán hàng, hook, storyboard, caption và CTA.\n\n"
-        "2. 🎬 Ý tưởng điện ảnh / kể chuyện\n"
-        "Tạo concept cinematic, bối cảnh, mạch cảm xúc và prompt ảnh/video.\n\n"
-        "TOAN AAS sẽ brainstorm 10 ý tưởng theo nhóm: sales, review, education, viral, affiliate, CSKH và automation; sau đó route sang storyboard hoặc Video AI chân thật.\n\n"
-        "Bước này chỉ tạo ý tưởng, kịch bản và prompt. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
+        "💡 <b>Ý tưởng video</b>\n\n"
+        "Khám phá mẫu theo mục tiêu và ngành, mở kho câu lệnh đã tích hợp, bắt đầu từ ảnh/video có sẵn hoặc tự viết hướng riêng.\n\n"
+        "Sau khi chọn ý tưởng, anh/chị có thể chọn thời lượng, xem câu lệnh ảnh/video, thêm yêu cầu riêng rồi chuyển nhanh sang đúng sản phẩm Video. Ý tưởng vẫn được chỉnh để mỗi video có nội dung riêng.\n\n"
+        "Bước này chỉ lập kế hoạch. Hệ thống chưa tạo file, chưa tạo tác vụ và chưa trừ Xu."
     )
 
 def video_idea_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("📢 Ý tưởng quảng cáo" if is_vi else "📢 Advertising idea", "videoidea|kind|ad"),
-            ("🎬 Ý tưởng điện ảnh / kể chuyện" if is_vi else "🎬 Cinematic / story idea", "videoidea|kind|cinema"),
-            ("✍️ Nhập ý tưởng riêng" if is_vi else "✍️ Custom idea", "videoidea|kind|custom"),
+            ("🔎 Khám phá ý tưởng" if is_vi else "🔎 Explore ideas", "videoidea|explore"),
+            ("📚 Kho mẫu & câu lệnh" if is_vi else "📚 Templates & prompts", "vpromptlib|start"),
+            ("📢 Ý tưởng quảng cáo" if is_vi else "📢 Advertising idea", "videoidea|catalog|sales"),
+            ("🎬 Ý tưởng điện ảnh / kể chuyện" if is_vi else "🎬 Cinematic / story idea", "videoidea|catalog|story"),
+            ("🖼 Từ ảnh/video có sẵn" if is_vi else "🖼 From existing media", "videoidea|source_start"),
+            ("✍️ Tự nhập & chỉnh nhanh" if is_vi else "✍️ Custom and quick edit", "videoidea|kind|custom"),
         ],
         lang,
         back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
     )
+
+
+def video_idea_catalog_categories_text(lang: str = "vi") -> str:
+    lines = [
+        "🔎 <b>Khám phá ý tưởng video</b>",
+        "",
+        "Chọn nhóm gần với mục tiêu nhất. Mỗi mẫu có sẵn hướng mở đầu, loại hình, profile phù hợp, câu lệnh ảnh/video và sản phẩm nên dùng.",
+        "",
+    ]
+    for index, (_key, label) in enumerate(video_idea_catalog.list_categories(), 1):
+        lines.append(f"{index}. {html.escape(label)}")
+    lines.extend(["", "Tất cả chỉ là bản kế hoạch có thể sửa. Hệ thống chưa tạo file và chưa trừ Xu."])
+    return "\n".join(lines)
+
+
+def video_idea_catalog_categories_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    items = video_idea_catalog.list_categories()
+    for index in range(0, len(items), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"videoidea|catalog|{key}")
+            for key, label in items[index:index + 2]
+        ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Ý tưởng video", callback_data="videoidea|start"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_idea_catalog_options(state: dict | None = None) -> list[dict]:
+    state = state or {}
+    return video_idea_catalog.ideas_for_category(
+        str(state.get("catalog_category") or "sales"),
+        offset=safe_int(state.get("catalog_offset"), 0),
+        limit=5,
+    )
+
+
+def video_idea_catalog_options_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    category = str(state.get("catalog_category") or "sales")
+    label = dict(video_idea_catalog.list_categories()).get(category, "Ý tưởng video")
+    lines = [
+        f"💡 <b>{html.escape(label)}</b>",
+        "",
+        "Chọn một hướng bằng nút số. Anh/chị sẽ chọn thời lượng và nguồn tư liệu ở bước kế tiếp.",
+        "",
+    ]
+    for index, item in enumerate(video_idea_catalog_options(state), 1):
+        lines.append(f"{index}. <b>{html.escape(str(item.get('title') or ''))}</b>\n{html.escape(str(item.get('summary') or ''))}")
+    lines.extend(["", "Chưa tạo file, chưa gọi hệ thống dựng và chưa trừ Xu."])
+    return "\n\n".join(lines)
+
+
+def video_idea_catalog_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(str(index), callback_data=f"videoidea|catalog_choose|{index}") for index in range(1, 6)],
+        [
+            InlineKeyboardButton("🔄 Đổi gợi ý", callback_data="videoidea|catalog_refresh"),
+            InlineKeyboardButton("✍️ Tự nhập", callback_data="videoidea|kind|custom"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Chọn nhóm", callback_data="videoidea|explore"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_idea_catalog_detail_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    idea = video_idea_catalog.idea_by_id(str(state.get("catalog_idea_id") or "")) or state
+    profile_label = video_scene3_flow.technical_profile_label(str(idea.get("recommended_profile_id") or ""))
+    return (
+        f"💡 <b>{html.escape(str(idea.get('title') or 'Ý tưởng video'))}</b>\n\n"
+        f"• Hướng mở đầu: {html.escape(str(idea.get('hook') or ''))}\n"
+        f"• Mục tiêu: {html.escape(str(idea.get('objective') or ''))}\n"
+        f"• Gợi ý profile: {html.escape(profile_label)}\n"
+        f"• Phong cách: {html.escape(str(idea.get('style') or ''))}\n\n"
+        "Chọn thời lượng dự kiến. Mỗi cảnh khoảng 8 giây và phải là một ý/hành động hoàn chỉnh; hệ thống không cắt cơ học một câu lệnh dài thành nhiều đoạn.\n\n"
+        "Chưa tạo video và chưa trừ Xu."
+    )
+
+
+def video_idea_catalog_duration_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    values = list(video_idea_catalog.DURATION_OPTIONS)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{value} giây", callback_data=f"videoidea|catalog_duration|{value}") for value in values[:3]],
+        [InlineKeyboardButton(f"{value} giây", callback_data=f"videoidea|catalog_duration|{value}") for value in values[3:]],
+        [
+            InlineKeyboardButton("⬅️ Chọn ý tưởng", callback_data="videoidea|catalog_back_options"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+VIDEO_IDEA_SOURCE_LABELS = {
+    "text_prompt": "Dùng ý tưởng/câu lệnh",
+    "reference_image": "Dùng ảnh có sẵn",
+    "reference_video": "Dùng video mẫu",
+    "image_prompt": "Tạo câu lệnh ảnh trước",
+}
+
+
+def video_idea_source_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    title = str(state.get("title") or state.get("selected_topic") or "ý tưởng riêng")
+    duration = safe_int(state.get("duration_seconds"), 0)
+    timing = f"\n• Thời lượng đã chọn: {duration} giây" if duration else ""
+    return (
+        "🧰 <b>Chọn nguyên liệu bắt đầu</b>\n\n"
+        f"• Ý tưởng: {html.escape(title)}{timing}\n\n"
+        "Anh/chị có thể dùng câu lệnh có sẵn, đưa ảnh/video tham khảo hoặc lập câu lệnh ảnh trước. File chỉ được yêu cầu trong flow sản phẩm sau; màn này chưa tải lên hay xử lý file."
+    )
+
+
+def video_idea_source_keyboard(lang: str = "vi", *, back_callback: str = "videoidea|catalog_back_detail") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍️ Dùng câu lệnh", callback_data="videoidea|catalog_source|text_prompt"),
+            InlineKeyboardButton("🖼 Có ảnh sẵn", callback_data="videoidea|catalog_source|reference_image"),
+        ],
+        [
+            InlineKeyboardButton("🎥 Có video mẫu", callback_data="videoidea|catalog_source|reference_video"),
+            InlineKeyboardButton("✨ Tạo câu lệnh ảnh", callback_data="videoidea|catalog_source|image_prompt"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_idea_catalog_result_text(plan: dict | None = None, lang: str = "vi") -> str:
+    plan = plan or {}
+    duration = safe_int(plan.get("duration_seconds"), 16)
+    scenes = safe_int(plan.get("scene_count"), max(1, duration // 8))
+    source = VIDEO_IDEA_SOURCE_LABELS.get(str(plan.get("source_mode") or "text_prompt"), "Tự nhập")
+    profile_label = video_scene3_flow.technical_profile_label(str(plan.get("recommended_profile_id") or ""))
+    note = str(plan.get("custom_note") or "").strip()
+    note_line = f"\n• Điều chỉnh riêng: {html.escape(note)}" if note else ""
+    return (
+        f"✅ <b>Kế hoạch ý tưởng: {html.escape(str(plan.get('title') or plan.get('selected_topic') or 'Video riêng'))}</b>\n\n"
+        f"• Thời lượng: {duration} giây · {scenes} cảnh\n"
+        f"• Nguồn bắt đầu: {html.escape(source)}\n"
+        f"• Profile gợi ý: {html.escape(profile_label)}\n"
+        f"• Mục tiêu: {html.escape(str(plan.get('objective') or ''))}{note_line}\n\n"
+        f"<b>Câu lệnh ảnh gợi ý</b>\n<code>{html.escape(str(plan.get('image_prompt_final') or plan.get('image_prompt_seed') or 'Tạo keyframe nhất quán cho từng cảnh.'))}</code>\n\n"
+        f"<b>Câu lệnh video gợi ý</b>\n<code>{html.escape(str(plan.get('video_prompt_final') or plan.get('video_prompt_seed') or 'Mỗi cảnh hoàn thành một ý và nối mượt sang cảnh tiếp theo.'))}</code>\n\n"
+        "Anh/chị có thể chỉnh nhanh hoặc chuyển sang đúng sản phẩm để tiếp tục chọn profile, tư liệu, câu lệnh và chất lượng. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
+    )
+
+
+def video_idea_catalog_result_keyboard(plan: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
+    plan = plan or {}
+    product_id = str(plan.get("recommended_product_id") or "video_ai_real")
+    if product_id not in VIDEO_PRODUCT_REGISTRY:
+        product_id = "video_ai_real"
+    product_label = str(VIDEO_PRODUCT_REGISTRY[product_id].get("public_label") or video_public_menu_label(product_id, lang))
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🚀 Tiếp tục: {product_label}", callback_data=f"videoidea|handoff|{product_id}")],
+        [
+            InlineKeyboardButton("🧩 Chọn sản phẩm khác", callback_data="videoidea|routes"),
+            InlineKeyboardButton("✍️ Chỉnh nhanh", callback_data="videoidea|catalog_edit"),
+        ],
+        [
+            InlineKeyboardButton("🖼 Xem câu lệnh ảnh", callback_data="videoidea|catalog_image_prompt"),
+            InlineKeyboardButton("🎬 Xem câu lệnh video", callback_data="videoidea|catalog_video_prompt"),
+        ],
+        [
+            InlineKeyboardButton("💾 Lưu kế hoạch", callback_data="videoidea|save"),
+            InlineKeyboardButton("🔄 Chọn ý tưởng khác", callback_data="videoidea|explore"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Chọn nguồn", callback_data="videoidea|catalog_back_source"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_idea_route_choice_text(plan: dict | None = None, lang: str = "vi") -> str:
+    title = html.escape(str((plan or {}).get("title") or (plan or {}).get("selected_topic") or "ý tưởng đã chọn"))
+    return (
+        f"🚀 <b>Chọn sản phẩm để tiếp tục</b>\n\nÝ tưởng: {title}\n\n"
+        "TOAN AAS sẽ mang theo chủ đề, thời lượng, số cảnh và câu lệnh gợi ý. Anh/chị vẫn được xem và sửa trước xác nhận cuối."
+    )
+
+
+def video_idea_route_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎬 Video AI chân thật", callback_data="videoidea|handoff|video_ai_real"),
+            InlineKeyboardButton("🧩 Kịch bản → Video", callback_data="videoidea|handoff|script_image_video"),
+        ],
+        [
+            InlineKeyboardButton("🎞 Storyboard", callback_data="videoidea|handoff|storyboard_prompt"),
+            InlineKeyboardButton("🔥 Video theo trend", callback_data="videoidea|handoff|video_trend"),
+        ],
+        [
+            InlineKeyboardButton("🎥 Tự quay & đổi cảnh AI", callback_data="videoidea|handoff|self_shot_scene_change"),
+            InlineKeyboardButton("🎬 Video dài tập", callback_data="videoidea|handoff|multi_scene_film"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Kế hoạch", callback_data="videoidea|catalog_result"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
 
 def video_idea_product_type_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -87378,6 +87619,49 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
         return True
     if flow == "videoidea":
         kind = str(pending.get("idea_kind") or "custom")
+        if step == "catalog_source_topic":
+            source_mode = str(pending.get("source_mode") or "text_prompt")
+            idea = {
+                "idea_id": "custom_media_idea",
+                "catalog_idea_id": "custom_media_idea",
+                "category": "custom",
+                "catalog_category": "custom",
+                "title": text,
+                "selected_topic": text,
+                "product": text,
+                "summary": "Phát triển từ tư liệu hoặc yêu cầu riêng của khách hàng.",
+                "hook": "Mở bằng chi tiết rõ nhất trong tư liệu hoặc yêu cầu đã gửi.",
+                "objective": "Tạo một video riêng, bám đúng nội dung và tư liệu của khách hàng.",
+                "recommended_product_id": "self_shot_scene_change" if source_mode == "reference_video" else ("storyboard_prompt" if source_mode in {"reference_image", "image_prompt"} else "video_ai_real"),
+                "recommended_profile_id": "ugc_social_creator" if source_mode == "reference_video" else "cinematic_vfx",
+                "style": "bám sát tư liệu và yêu cầu riêng",
+                "image_prompt_seed": f"Tạo keyframe nhất quán cho {text}; giữ đúng chủ thể, sản phẩm, bối cảnh và vùng chữ an toàn.",
+                "video_prompt_seed": f"Dựng {text} thành các cảnh trọn ý; giữ nhận diện và nối trạng thái cuối cảnh trước sang cảnh sau.",
+                "source_mode": source_mode,
+                "provider_called": False,
+                "image_provider_called": False,
+                "job_created": False,
+                "outbox_created": False,
+                "wallet_mutations": 0,
+                "xu_charged": 0,
+            }
+            restore_developing_video_pending(uid, "videoidea", idea, "catalog_detail")
+            await update.message.reply_text(
+                video_idea_catalog_detail_text(idea, lang),
+                parse_mode="HTML",
+                reply_markup=video_idea_catalog_duration_keyboard(lang),
+            )
+            return True
+        if step == "catalog_edit":
+            plan = video_idea_catalog.apply_custom_note(dict(pending), text)
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "videoidea", plan)
+            await safe_reply_long_html(
+                update.message,
+                video_idea_catalog_result_text(plan, lang),
+                reply_markup=video_idea_catalog_result_keyboard(plan, lang),
+            )
+            return True
         if step == "product_type_custom":
             set_developing_video_pending(uid, "videoidea", "topic", idea_kind="ad", product_type=text)
             await update.message.reply_text(video_idea_product_description_text(text, lang), parse_mode="HTML", reply_markup=video_idea_product_description_keyboard(lang))
@@ -87406,12 +87690,36 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
                 plan = save_developing_video_plan(uid, "videoidea", state)
                 await update.message.reply_text(video_idea_choices_text(plan, lang), parse_mode="HTML", reply_markup=video_idea_choice_keyboard(lang, plan.get("idea_kind")))
                 return True
-            state = dict(pending)
-            state["selected_topic"] = text
-            state["idea_choice"] = "1"
-            clear_developing_video_pending(uid)
-            plan = save_developing_video_plan(uid, "videoidea", state)
-            await safe_reply_long_html(update.message, video_idea_result_text(plan, 1, lang), reply_markup=video_idea_result_keyboard(lang))
+            state = {
+                **dict(pending),
+                "idea_id": "custom_text_idea",
+                "catalog_idea_id": "custom_text_idea",
+                "catalog_category": "custom",
+                "title": text,
+                "selected_topic": text,
+                "product": text,
+                "summary": "Ý tưởng riêng do khách hàng mô tả.",
+                "hook": "Mở bằng chi tiết quan trọng nhất trong yêu cầu.",
+                "objective": "Phát triển nội dung riêng theo đúng mục tiêu khách hàng.",
+                "recommended_product_id": "video_ai_real",
+                "recommended_profile_id": "cinematic_vfx",
+                "style": "tùy chỉnh theo yêu cầu riêng",
+                "image_prompt_seed": f"Tạo keyframe cho {text}; bố cục rõ, nhận diện nhất quán và có vùng an toàn cho chữ/logo.",
+                "video_prompt_seed": f"Chia {text} thành từng cảnh trọn ý, mỗi cảnh hoàn tất một hành động và nối mượt sang cảnh tiếp theo.",
+                "source_mode": "text_prompt",
+                "provider_called": False,
+                "image_provider_called": False,
+                "job_created": False,
+                "outbox_created": False,
+                "wallet_mutations": 0,
+                "xu_charged": 0,
+            }
+            restore_developing_video_pending(uid, "videoidea", state, "catalog_detail")
+            await update.message.reply_text(
+                video_idea_catalog_detail_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_idea_catalog_duration_keyboard(lang),
+            )
             return True
         if step == "cinema_custom":
             state = dict(pending)
@@ -88432,7 +88740,7 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
-    if not is_admin_user(uid):
+    if action == "public_guard" or not is_admin_user(uid):
         clear_developing_video_pending(uid)
         return await safe_edit_query_message(
             query,
@@ -88788,7 +89096,272 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
     value = parts[2] if len(parts) > 2 else ""
     if action == "start":
         clear_developing_video_pending(uid)
+        set_video_route_session(uid, "video_idea", "tool_home", product_id="video_idea")
         return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+    if action == "explore":
+        clear_developing_video_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            video_idea_catalog_categories_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_categories_keyboard(lang),
+        )
+    if action == "catalog":
+        category = value if value in dict(video_idea_catalog.list_categories()) else "sales"
+        state = {
+            "catalog_category": category,
+            "catalog_offset": 0,
+            "provider_called": False,
+            "image_provider_called": False,
+            "job_created": False,
+            "outbox_created": False,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        }
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_options")
+        return await safe_edit_or_send(
+            query,
+            video_idea_catalog_options_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_options_keyboard(lang),
+        )
+    if action == "catalog_refresh":
+        state = dict(get_developing_video_pending(uid) or {})
+        if not state.get("catalog_category"):
+            return await safe_edit_or_send(
+                query,
+                video_idea_catalog_categories_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_idea_catalog_categories_keyboard(lang),
+            )
+        state["catalog_offset"] = safe_int(state.get("catalog_offset"), 0) + 5
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_options")
+        return await safe_edit_or_send(
+            query,
+            video_idea_catalog_options_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_options_keyboard(lang),
+        )
+    if action == "catalog_choose":
+        state = dict(get_developing_video_pending(uid) or {})
+        options = video_idea_catalog_options(state)
+        index = max(1, min(5, safe_int(value, 1)))
+        idea = options[index - 1] if index <= len(options) else {}
+        if not idea:
+            return await safe_edit_or_send(
+                query,
+                video_idea_catalog_options_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_idea_catalog_options_keyboard(lang),
+            )
+        state.update(idea)
+        state["catalog_idea_id"] = str(idea.get("idea_id") or "")
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_detail")
+        return await safe_edit_or_send(
+            query,
+            video_idea_catalog_detail_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_duration_keyboard(lang),
+        )
+    if action == "catalog_back_options":
+        state = dict(get_developing_video_pending(uid) or get_latest_developing_video_plan(uid, "videoidea") or {})
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_options")
+        return await safe_edit_or_send(
+            query,
+            video_idea_catalog_options_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_options_keyboard(lang),
+        )
+    if action == "catalog_back_detail":
+        state = dict(get_developing_video_pending(uid) or get_latest_developing_video_plan(uid, "videoidea") or {})
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_detail")
+        return await safe_edit_or_send(
+            query,
+            video_idea_catalog_detail_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_duration_keyboard(lang),
+        )
+    if action == "catalog_duration":
+        state = dict(get_developing_video_pending(uid) or {})
+        duration = safe_int(value, 16)
+        if duration not in video_idea_catalog.DURATION_OPTIONS:
+            duration = 16
+        idea = video_idea_catalog.idea_by_id(str(state.get("catalog_idea_id") or "")) or state
+        plan = video_idea_catalog.build_plan(
+            idea,
+            duration_seconds=duration,
+            source_mode=str(state.get("source_mode") or "text_prompt"),
+            custom_note=str(state.get("custom_note") or ""),
+        )
+        plan.update({
+            "catalog_category": state.get("catalog_category") or idea.get("category") or "",
+            "catalog_offset": safe_int(state.get("catalog_offset"), 0),
+            "catalog_idea_id": state.get("catalog_idea_id") or idea.get("idea_id") or "",
+        })
+        if state.get("source_mode"):
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "videoidea", plan)
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_catalog_result_text(plan, lang),
+                reply_markup=video_idea_catalog_result_keyboard(plan, lang),
+            )
+        restore_developing_video_pending(uid, "videoidea", plan, "catalog_source")
+        return await safe_edit_or_send(
+            query,
+            video_idea_source_text(plan, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_source_keyboard(lang),
+        )
+    if action == "source_start":
+        clear_developing_video_pending(uid)
+        state = {
+            "title": "Ý tưởng từ tư liệu của anh/chị",
+            "selected_topic": "Ý tưởng từ tư liệu của anh/chị",
+            "provider_called": False,
+            "image_provider_called": False,
+            "job_created": False,
+            "outbox_created": False,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        }
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_source_first")
+        return await safe_edit_or_send(
+            query,
+            video_idea_source_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_source_keyboard(lang, back_callback="videoidea|start"),
+        )
+    if action == "catalog_source":
+        state = dict(get_developing_video_pending(uid) or get_latest_developing_video_plan(uid, "videoidea") or {})
+        source_mode = value if value in VIDEO_IDEA_SOURCE_LABELS else "text_prompt"
+        if not state.get("catalog_idea_id") and str(state.get("idea_kind") or "") != "catalog":
+            state["source_mode"] = source_mode
+            restore_developing_video_pending(uid, "videoidea", state, "catalog_source_topic")
+            return await safe_edit_or_send(
+                query,
+                "✍️ <b>Mô tả video anh/chị muốn làm</b>\n\nHãy gửi một câu ngắn về chủ thể, mục tiêu hoặc nội dung trong ảnh/video. TOAN AAS sẽ dựng bản kế hoạch để anh/chị chọn thời lượng và sửa tiếp.\n\nChưa tải file, chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Chọn nguồn", callback_data="videoidea|source_start"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ]]),
+            )
+        idea = video_idea_catalog.idea_by_id(str(state.get("catalog_idea_id") or "")) or state
+        plan = video_idea_catalog.build_plan(
+            idea,
+            duration_seconds=safe_int(state.get("duration_seconds"), 16),
+            source_mode=source_mode,
+            custom_note=str(state.get("custom_note") or ""),
+        )
+        plan.update({
+            "catalog_category": state.get("catalog_category") or idea.get("category") or "",
+            "catalog_offset": safe_int(state.get("catalog_offset"), 0),
+            "catalog_idea_id": state.get("catalog_idea_id") or idea.get("idea_id") or "",
+        })
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "videoidea", plan)
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_catalog_result_text(plan, lang),
+            reply_markup=video_idea_catalog_result_keyboard(plan, lang),
+        )
+    if action == "catalog_back_source":
+        plan = dict(get_latest_developing_video_plan(uid, "videoidea") or get_developing_video_pending(uid) or {})
+        restore_developing_video_pending(uid, "videoidea", plan, "catalog_source")
+        return await safe_edit_or_send(
+            query,
+            video_idea_source_text(plan, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_source_keyboard(lang),
+        )
+    if action == "catalog_result":
+        plan = dict(get_latest_developing_video_plan(uid, "videoidea") or {})
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_catalog_result_text(plan, lang),
+            reply_markup=video_idea_catalog_result_keyboard(plan, lang),
+        )
+    if action == "catalog_edit":
+        plan = dict(get_latest_developing_video_plan(uid, "videoidea") or {})
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        restore_developing_video_pending(uid, "videoidea", plan, "catalog_edit")
+        return await safe_edit_or_send(
+            query,
+            "✍️ <b>Chỉnh nhanh ý tưởng</b>\n\nGửi yêu cầu muốn thêm, bớt hoặc thay đổi. Ví dụ: đổi sang buổi tối, nhấn mạnh sản phẩm, giữ gương mặt nhân vật, kết bằng lời mời nhẹ.\n\nHệ thống chỉ cập nhật kế hoạch, chưa tạo file và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Kế hoạch", callback_data="videoidea|catalog_result"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ]]),
+        )
+    if action in {"catalog_image_prompt", "catalog_video_prompt"}:
+        plan = dict(get_latest_developing_video_plan(uid, "videoidea") or {})
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        field = "image_prompt_final" if action == "catalog_image_prompt" else "video_prompt_final"
+        fallback_field = "image_prompt_seed" if action == "catalog_image_prompt" else "video_prompt_seed"
+        title = "Câu lệnh ảnh gợi ý" if action == "catalog_image_prompt" else "Câu lệnh video gợi ý"
+        return await safe_edit_or_send(
+            query,
+            f"{'🖼' if action == 'catalog_image_prompt' else '🎬'} <b>{title}</b>\n\n<code>{html.escape(str(plan.get(field) or plan.get(fallback_field) or 'Chưa có câu lệnh.'))}</code>\n\nĐây là bản nháp có thể sửa trong flow sản phẩm. Chưa tạo file và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_result_keyboard(plan, lang),
+        )
+    if action == "routes":
+        plan = dict(get_latest_developing_video_plan(uid, "videoidea") or {})
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            video_idea_route_choice_text(plan, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_route_choice_keyboard(lang),
+        )
+    if action == "handoff":
+        plan = dict(get_latest_developing_video_plan(uid, "videoidea") or {})
+        target_product = value if value in VIDEO_PRODUCT_REGISTRY else "video_ai_real"
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        if target_product == "multi_scene_film":
+            return await safe_edit_or_send(
+                query,
+                MULTISCENE_LONG_VIDEO_GUARD_TEXT,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Chọn sản phẩm khác", callback_data="videoidea|routes"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ]]),
+            )
+        route_fields = video_route_session_fields(target_product, "intro")
+        session = task3d_session_step(
+            uid,
+            "intro",
+            product_id=target_product,
+            topic=str(plan.get("title") or plan.get("selected_topic") or "ý tưởng video"),
+            selected_video_idea=dict(plan),
+            selected_scene_count=safe_int(plan.get("scene_count"), 2),
+            duration_seconds=safe_int(plan.get("duration_seconds"), 16),
+            image_prompt_seed=str(plan.get("image_prompt_final") or plan.get("image_prompt_seed") or ""),
+            video_prompt_seed=str(plan.get("video_prompt_final") or plan.get("video_prompt_seed") or ""),
+            preserve_selected_idea=True,
+            input_collected=True,
+            provider_called=False,
+            xu_charged=0,
+            **route_fields,
+        )
+        session.update(route_fields)
+        session["product_id"] = target_product
+        session["return_to"] = "videoidea|catalog_result"
+        save_video_session(uid, session)
+        return await safe_edit_or_send(
+            query,
+            task3d_product_intro_text(target_product, lang),
+            parse_mode="HTML",
+            reply_markup=task3d_product_intro_keyboard(target_product, lang),
+        )
     if action == "kind":
         kind = value if value in {"ad", "cinema", "custom"} else "custom"
         if kind == "ad":
@@ -89013,9 +89586,15 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
         return await safe_edit_or_send_long_html(query, video_idea_followup_text(action, plan, lang), reply_markup=video_idea_result_keyboard(lang))
     if action == "save":
+        if plan and (str(plan.get("idea_kind") or "") == "catalog" or plan.get("catalog_idea_id")):
+            return await safe_edit_or_send(
+                query,
+                "💾 TOAN AAS đã lưu kế hoạch ý tưởng trong phiên hiện tại. Hệ thống chưa tạo tác vụ, chưa gọi dịch vụ dựng và chưa trừ Xu.",
+                reply_markup=video_idea_catalog_result_keyboard(plan, lang),
+            )
         return await safe_edit_or_send(
             query,
-            "💾 TOAN AAS đã lưu ý tưởng trong phiên hiện tại. Bot chưa gọi API và chưa trừ Xu."
+            "💾 TOAN AAS đã lưu ý tưởng trong phiên hiện tại. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
             else "💾 Idea saved in this session. No API call and no Xu deducted.",
             reply_markup=video_idea_result_keyboard(lang),
@@ -143358,13 +143937,13 @@ def video_finalization_source_label(source: str, lang: str = "vi") -> str:
     labels_vi = {
         "video_trend": "Video theo trend",
         "video_idea": "Ý tưởng video",
-        "storyboard_prompt": "Storyboard + Prompt",
+        "storyboard_prompt": "Storyboard",
         "script_image_video": "Kịch bản → Ảnh → Video",
         "video_ai_real": "Video AI chân thật",
         "image_to_video": "Ảnh → Video",
         "frame_video_local": "Ghép ảnh thành video",
         "self_shot_scene_change": "Tự quay & đổi cảnh AI",
-        "multi_scene_film": "Phim AI nhiều cảnh",
+        "multi_scene_film": "Video dài tập",
         "motion_prompt": "Prompt / Chuyển động",
         "video_reference": "Video mẫu / Kênh mẫu",
         "audio_addons": "Nhạc / Voice / SFX",

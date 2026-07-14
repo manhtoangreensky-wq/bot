@@ -188,7 +188,7 @@ def test_idea_development_path_routes_to_selected_product_flow():
     text, markup, session = _press(user_id, "vproduct|idea_develop|storyboard_prompt")
     assert session["product_id"] == "storyboard_prompt"
     assert session["current_step"] == "intro"
-    assert "Storyboard + Prompt" in text
+    assert "Storyboard" in text
     assert "vproduct|storyboard_suggest|storyboard_prompt" in _callbacks(markup)
 
 
