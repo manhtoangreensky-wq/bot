@@ -65150,22 +65150,34 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "material_done": {"materials"},
     "material_skip": {"materials"},
     "creative": {"creative_controls"},
+    "creative_suggest": {"creative_detail"},
+    "creative_pick": {"creative_suggestions"},
+    "creative_custom": {"creative_detail", "creative_suggestions"},
+    "creative_detail_done": {"creative_detail", "creative_suggestions"},
     "creative_quick": {"creative_controls"},
     "creative_default": {"creative_controls"},
     "creative_view": {"creative_controls"},
     "creative_edit": {"creative_controls"},
-    "creative_remove": {"creative_controls"},
-    "creative_restore": {"creative_controls"},
+    "creative_remove": {"creative_controls", "creative_detail"},
+    "creative_restore": {"creative_controls", "creative_detail"},
     "creative_disable_all": {"creative_controls"},
     "creative_done": {"creative_controls"},
     "creative_skip": {"creative_controls"},
     "content": {"content_addons"},
+    "content_enable": {"content_detail"},
+    "content_suggest_item": {"content_detail"},
+    "content_pick": {"content_suggestions"},
+    "content_custom": {"content_detail", "content_suggestions"},
+    "content_position": {"content_detail"},
+    "content_position_set": {"content_position"},
+    "content_position_done": {"content_position"},
+    "content_detail_done": {"content_detail", "content_suggestions"},
     "content_view": {"content_addons"},
     "content_suggest": {"content_addons"},
     "content_accept_suggestion": {"content_addons"},
     "content_edit": {"content_addons"},
-    "content_remove": {"content_addons"},
-    "content_restore": {"content_addons"},
+    "content_remove": {"content_addons", "content_detail"},
+    "content_restore": {"content_addons", "content_detail"},
     "content_disable_all": {"content_addons"},
     "content_done": {"content_addons"},
     "content_skip": {"content_addons"},
@@ -65221,6 +65233,17 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "post_enable": {"post_detail"},
     "post_preset": {"post_detail"},
     "post_preview_toggle": {"post_detail"},
+    "post_asset": {"post_detail"},
+    "post_text": {"post_detail"},
+    "post_position": {"post_detail"},
+    "post_position_set": {"post_position"},
+    "post_position_done": {"post_position"},
+    "post_volume": {"post_detail"},
+    "post_volume_set": {"post_volume"},
+    "post_volume_done": {"post_volume"},
+    "post_voice_choice": {"post_detail"},
+    "post_music_source": {"post_detail"},
+    "post_music_mode": {"post_detail"},
     "post_detail_done": {"post_detail"},
     "post_edit": {"post_addons", "post_detail"},
     "post_remove": {"post_addons", "post_detail"},
@@ -65232,6 +65255,7 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "post_skip": {"post_addons"},
     "ratio": {"aspect_ratio"},
     "quality_info": {"quality"},
+    "quality_info_done": {"quality_guide"},
     "tier": {"quality"},
     "handoff": {"final_report"},
     "final_view": {"final_report"},
@@ -65322,7 +65346,9 @@ def video_scene2_reconcile_state(context, state: dict) -> dict:
         "await_requirement", "await_creative", "await_content_addon", "await_material_upload", "await_material_caption",
         "await_scene_edit", "await_scene_regen", "await_reorder",
         "await_image_prompt", "await_image_negative", "await_video_prompt", "await_video_negative",
-        "await_post_config", "scene_detail", "transition_picker", "logo_position", "post_detail",
+        "await_post_config", "await_post_text", "await_post_asset_upload",
+        "creative_detail", "creative_suggestions", "content_detail", "content_suggestions", "content_position",
+        "scene_detail", "transition_picker", "logo_position", "post_detail", "post_position", "post_volume", "quality_guide",
     }
     if step not in valid_steps or step in {"menu", "subject", "await_subject"}:
         return video_profile_studio_step(context, state, "scene_count", push=False)
@@ -65630,10 +65656,16 @@ def video_profile_scene1_post_keyboard(state: dict, lang: str = "vi") -> InlineK
 
 
 def video_profile_scene1_quality_text(state: dict, lang: str = "vi") -> str:
+    scene_count = int(state.get("scene_count") or 1)
     return (
         "⭐ <b>Chọn chất lượng gần cuối</b>\n\n"
-        f"Kế hoạch đã có <b>{int(state.get('scene_count') or 1)} cảnh</b>, câu lệnh riêng và tùy chọn bổ sung. Bây giờ chọn gói hiện có để hệ thống tính đúng hóa đơn.\n\n"
-        "Không thay đổi công thức giá. Màn này chưa tạo video và chưa trừ Xu."
+        f"Kế hoạch đã có <b>{scene_count} cảnh</b> · khoảng <b>{scene_count * 8} giây</b>. Mỗi cảnh dùng một clip ngắn khoảng 8 giây rồi mới ghép thành video cuối.\n\n"
+        "• <b>200–300:</b> thử nhanh hoặc cân bằng cho nội dung phổ thông.\n"
+        "• <b>400–500:</b> giữ chủ thể, bố cục và chi tiết tốt hơn.\n"
+        "• <b>600–800:</b> ưu tiên ánh sáng, vật liệu và chuyển động phức tạp.\n"
+        "• <b>1000–1500:</b> kiểm soát nhiều thành phần và ưu tiên đường dựng chất lượng cao.\n\n"
+        "Hệ thống tự chọn công nghệ phù hợp theo gói và tình trạng sẵn sàng; không làm thay đổi giá sau khi xác nhận. "
+        "Màn này chưa tạo video và chưa trừ Xu."
     )
 
 
@@ -65686,6 +65718,7 @@ VIDEO_SCENE3_CONFIG_FIELD_LABELS = {
     "language": "ngôn ngữ",
     "voice_source": "giọng",
     "voice_type": "loại giọng",
+    "voice_choice": "lựa chọn giọng",
     "script_note": "lời đọc",
     "preview_requested": "nghe thử",
     "volume_percent": "âm lượng",
@@ -65704,6 +65737,9 @@ VIDEO_SCENE3_CONFIG_FIELD_LABELS = {
     "ducking": "hạ nhạc khi có lời",
     "trim_mode": "cắt/ghép theo",
     "paid_generation": "tạo nhạc có phí",
+    "music_source_choice": "cách lấy nhạc",
+    "vocal_mode": "kiểu nhạc",
+    "music_request": "yêu cầu nhạc/lời",
     "normalize": "chuẩn hóa âm lượng",
     "voice_priority": "ưu tiên lời nói",
     "validation_required": "kiểm tra file",
@@ -65730,6 +65766,16 @@ VIDEO_SCENE3_CONFIG_VALUE_LABELS = {
     "male": "giọng nam",
     "user_voice": "tệp giọng đã gửi",
     "saved_voice": "giọng đã lưu",
+    "custom_voice": "giọng riêng",
+    "user_or_saved_asset": "giọng riêng đã gửi hoặc đã lưu",
+    "default_female": "giọng nữ mặc định",
+    "default_male": "giọng nam mặc định",
+    "choose_existing": "chọn nhạc có sẵn",
+    "create_new": "tạo nhạc mới",
+    "approved_library_or_user_asset": "nhạc có sẵn hoặc tệp đã gửi",
+    "planned_generation": "lập kế hoạch tạo nhạc mới",
+    "instrumental": "không lời",
+    "with_lyrics": "có lời",
     "vi": "Tiếng Việt",
     "en": "Tiếng Anh",
     "ja": "Tiếng Nhật",
@@ -65928,7 +65974,7 @@ def video_scene3_creative_text(state: dict) -> str:
     quick_name = str(state.get("creative_quick_name") or "Chưa chọn")
     return (
         "🎨 <b>Tùy chỉnh phong cách</b>\n\n"
-        "Mỗi mục có gợi ý, tự nhập, sửa và xóa. Có thể đổi nhanh một bộ phong cách đã duyệt hoặc dùng mặc định theo mẫu chuyên ngành.\n\n"
+        "Chọn một mục để xem 5 gợi ý phù hợp hoặc tự nhập nội dung riêng. Có thể dùng nhanh một bộ phong cách đã duyệt.\n\n"
         f"• Bộ phong cách nhanh: <b>{html.escape(quick_name)}</b>\n"
         f"• Hiện tại: {html.escape(video_scene3_summary(state.get('creative_controls') or {}, video_scene3_flow.CREATIVE_CONTROLS))}"
     )
@@ -65946,11 +65992,72 @@ def video_scene3_creative_keyboard(state: dict) -> InlineKeyboardMarkup:
         rows.append(row)
     rows.extend([
         [("⚡ Đổi phong cách nhanh", "vprofile|creative_quick"), ("💡 Dùng mặc định theo mẫu", "vprofile|creative_default")],
-        [("👁 Xem tóm tắt", "vprofile|creative_view"), ("📎 Thêm tư liệu", "vprofile|creative_materials")],
-        [("✍️ Sửa mục đang chọn", "vprofile|creative_edit"), ("🗑 Xóa mục đang chọn", "vprofile|creative_remove")],
-        [("↩️ Khôi phục mục trước", "vprofile|creative_restore"), ("🚫 Xóa toàn bộ", "vprofile|creative_disable_all")],
+        [("🚫 Xóa toàn bộ phong cách", "vprofile|creative_disable_all")],
         [("✅ Xong phong cách", "vprofile|creative_done"), ("⏭ Bỏ qua tùy chỉnh", "vprofile|creative_skip")],
         *video_scene3_nav_rows(),
+    ])
+    return video_scene3_keyboard(rows)
+
+
+VIDEO_SCENE3_CREATIVE_HELP = {
+    "context": "Chọn cách mở đầu, phát triển và kết thúc mạch nội dung.",
+    "colors": "Chọn bảng màu và cảm giác ánh sáng cần giữ xuyên suốt.",
+    "visual_style": "Chọn diện mạo chung của toàn bộ video.",
+    "motion": "Chọn cách chủ thể và khung hình chuyển động.",
+    "camera": "Chọn góc nhìn chính để hình ảnh nhất quán.",
+    "pacing": "Chọn nhịp kể; mỗi cảnh vẫn phải kết thúc trọn ý.",
+    "emotion": "Chọn cảm xúc người xem cần nhận được.",
+    "negative": "Ghi rõ những lỗi và thay đổi tuyệt đối không được xuất hiện.",
+}
+
+
+def video_scene3_creative_detail_text(state: dict) -> str:
+    key = str(state.get("active_creative") or "")
+    label = dict(video_scene3_flow.CREATIVE_CONTROLS).get(key, "Mục phong cách")
+    entry = dict((state.get("creative_controls") or {}).get(key) or {})
+    value = str(entry.get("value") or "").strip()
+    return (
+        f"🎨 <b>{html.escape(label)}</b>\n\n"
+        f"{html.escape(VIDEO_SCENE3_CREATIVE_HELP.get(key, 'Chọn gợi ý hoặc tự nhập nội dung riêng.'))}\n\n"
+        f"• Hiện tại: <b>{html.escape(value[:600] if entry.get('enabled') and value else 'Chưa chọn')}</b>\n\n"
+        "Chọn <b>Gợi ý</b> để xem 5 phương án có sẵn, hoặc <b>Tự nhập</b> để viết theo ý riêng."
+    )
+
+
+def video_scene3_creative_detail_keyboard(state: dict) -> InlineKeyboardMarkup:
+    key = str(state.get("active_creative") or "")
+    entry = dict((state.get("creative_controls") or {}).get(key) or {})
+    rows = [
+        [("💡 Xem 5 gợi ý", "vprofile|creative_suggest"), ("✍️ Tự nhập", "vprofile|creative_custom")],
+    ]
+    if entry.get("enabled"):
+        rows.append([("🗑 Xóa mục này", "vprofile|creative_remove"), ("↩️ Khôi phục", "vprofile|creative_restore")])
+    else:
+        rows.append([("↩️ Khôi phục", "vprofile|creative_restore")])
+    rows.append([("⬅️ Danh sách phong cách", "vprofile|creative_detail_done"), ("🏠 Menu chính", "menu|main")])
+    return video_scene3_keyboard(rows)
+
+
+def video_scene3_creative_suggestions_text(state: dict) -> str:
+    key = str(state.get("active_creative") or "")
+    label = dict(video_scene3_flow.CREATIVE_CONTROLS).get(key, "Mục phong cách")
+    suggestions = video_scene3_flow.creative_suggestions(state, key)
+    lines = [f"💡 <b>Gợi ý: {html.escape(label)}</b>", ""]
+    for index, suggestion in enumerate(suggestions, 1):
+        lines.append(f"<b>{index}.</b> {html.escape(suggestion)}")
+    lines.extend(["", "Chọn một số hoặc tự nhập nội dung riêng. Các gợi ý chỉ lập kế hoạch, chưa tạo file và chưa trừ Xu."])
+    return "\n".join(lines)
+
+
+def video_scene3_creative_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
+    count = len(video_scene3_flow.creative_suggestions(state, str(state.get("active_creative") or "")))
+    number_row = [(str(index), f"vprofile|creative_pick|{index}") for index in range(1, count + 1)]
+    rows = []
+    if number_row:
+        rows.append(number_row)
+    rows.extend([
+        [("✍️ Tự nhập", "vprofile|creative_custom"), ("⬅️ Về mục này", "vprofile|creative_detail_done")],
+        [("🏠 Menu chính", "menu|main")],
     ])
     return video_scene3_keyboard(rows)
 
@@ -65961,8 +66068,8 @@ def video_scene3_content_addon_text(state: dict) -> str:
     suggestion_line = f"\n• Gợi ý chưa áp dụng: {html.escape(', '.join(suggested))}" if suggested else ""
     return (
         "🧩 <b>Tùy chọn ảnh hưởng nội dung</b>\n\n"
-        "Các mục này được chọn trước khi viết câu lệnh cuối vì có thể ảnh hưởng bố cục, lời nói và thời lượng. "
-        "Chúng chỉ được thực thi sau khi các clip đã ghép. Tất cả tùy chọn bắt đầu ở trạng thái tắt.\n\n"
+        "Chọn từng mục để xem gợi ý, tự nhập hoặc chọn vị trí. Các mục này chỉ giúp lập bố cục, lời nói và thời lượng; "
+        "chúng chỉ được thực thi sau khi các clip đã ghép. Tất cả bắt đầu ở trạng thái tắt.\n\n"
         f"• Đang bật: {html.escape(video_scene3_summary(state.get('content_affecting_addons') or {}, video_scene3_flow.CONTENT_ADDONS))}"
         f"{suggestion_line}"
     )
@@ -65980,13 +66087,107 @@ def video_scene3_content_addon_keyboard(state: dict) -> InlineKeyboardMarkup:
         rows.append(row)
     rows.extend([
         [("💡 Gợi ý tùy chọn", "vprofile|content_suggest"), ("✅ Dùng gợi ý", "vprofile|content_accept_suggestion")],
-        [("👁 Xem ảnh hưởng", "vprofile|content_view"), ("✍️ Sửa mục đã chọn", "vprofile|content_edit")],
-        [("🗑 Xóa/tắt một mục", "vprofile|content_remove"), ("↩️ Khôi phục mục trước", "vprofile|content_restore")],
         [("🚫 Tắt toàn bộ", "vprofile|content_disable_all"), ("✅ Lập kế hoạch cảnh", "vprofile|content_done")],
         [("⏭ Không dùng tùy chọn", "vprofile|content_skip")],
         *video_scene3_nav_rows(),
     ])
     return video_scene3_keyboard(rows)
+
+
+VIDEO_SCENE3_CONTENT_HELP = {
+    "voiceover": "Nội dung lời dẫn ảnh hưởng trực tiếp tới độ dài và nhịp của từng cảnh.",
+    "captions": "Phụ đề cần vùng trống dễ đọc và không được che chủ thể.",
+    "cta": "Lời kêu gọi hành động nên xuất hiện sau khi nội dung đã kết thúc trọn vẹn.",
+    "scene_text": "Chữ riêng theo cảnh phải ngắn và không lặp nguyên lời dẫn.",
+    "logo_safe_zone": "Chọn vị trí cần chừa trống để logo hình ảnh không che mặt hoặc sản phẩm.",
+    "watermark_safe_zone": "Chọn vị trí cần chừa trống cho dòng chữ bản quyền.",
+    "preserve_source_audio": "Quyết định cảnh nào cần giữ tiếng nói hoặc âm thanh môi trường gốc.",
+    "music_mood": "Nhịp và cảm xúc nhạc giúp kế hoạch cảnh có khoảng trống phù hợp.",
+    "transition_style": "Chuyển cảnh chỉ xảy ra sau khi ý, hành động và camera đã hoàn tất.",
+    "target_duration": "Thời lượng phải phục vụ ý cảnh, không kéo dài hoặc cắt cụt nội dung.",
+}
+
+
+def video_scene3_content_value_text(entry: dict) -> str:
+    value = entry.get("value")
+    if isinstance(value, dict):
+        position = str(value.get("position") or "")
+        return video_scene3_flow.logo_position_label(position) if position else "Chưa chọn vị trí"
+    return str(value or "").strip() or "Chưa có nội dung"
+
+
+def video_scene3_content_detail_text(state: dict) -> str:
+    key = str(state.get("active_content_addon") or "")
+    label = dict(video_scene3_flow.CONTENT_ADDONS).get(key, "Tùy chọn nội dung")
+    entry = dict((state.get("content_affecting_addons") or {}).get(key) or {})
+    return (
+        f"🧩 <b>{html.escape(label)}</b>\n\n"
+        f"{html.escape(VIDEO_SCENE3_CONTENT_HELP.get(key, 'Tùy chọn này chỉ ảnh hưởng kế hoạch nội dung.'))}\n\n"
+        f"• Trạng thái: <b>{'Đang dùng' if entry.get('enabled') else 'Đang tắt'}</b>\n"
+        f"• Thiết lập: <b>{html.escape(video_scene3_content_value_text(entry)[:800])}</b>\n\n"
+        "Có thể dùng gợi ý hoặc tự nhập. Riêng vùng logo và dấu bản quyền được chỉnh bằng vị trí cụ thể."
+    )
+
+
+def video_scene3_content_detail_keyboard(state: dict) -> InlineKeyboardMarkup:
+    key = str(state.get("active_content_addon") or "")
+    entry = dict((state.get("content_affecting_addons") or {}).get(key) or {})
+    toggle_label = "🚫 Tắt mục này" if entry.get("enabled") else "✅ Bật mục này"
+    rows = []
+    if key in {"logo_safe_zone", "watermark_safe_zone"}:
+        rows.append([("📍 Chọn vị trí", "vprofile|content_position"), (toggle_label, "vprofile|content_enable")])
+    else:
+        rows.append([("💡 Xem 5 gợi ý", "vprofile|content_suggest_item"), ("✍️ Tự nhập", "vprofile|content_custom")])
+        rows.append([(toggle_label, "vprofile|content_enable"), ("↩️ Khôi phục", "vprofile|content_restore")])
+    if key in {"logo_safe_zone", "watermark_safe_zone"}:
+        rows.append([("↩️ Khôi phục", "vprofile|content_restore"), ("🗑 Xóa thiết lập", "vprofile|content_remove")])
+    rows.append([("⬅️ Danh sách tùy chọn", "vprofile|content_detail_done"), ("🏠 Menu chính", "menu|main")])
+    return video_scene3_keyboard(rows)
+
+
+def video_scene3_content_suggestions_text(state: dict) -> str:
+    key = str(state.get("active_content_addon") or "")
+    label = dict(video_scene3_flow.CONTENT_ADDONS).get(key, "Tùy chọn nội dung")
+    suggestions = video_scene3_flow.content_addon_suggestions(state, key)
+    lines = [f"💡 <b>Gợi ý: {html.escape(label)}</b>", ""]
+    for index, suggestion in enumerate(suggestions, 1):
+        lines.append(f"<b>{index}.</b> {html.escape(suggestion)}")
+    lines.extend(["", "Chọn một số hoặc tự nhập. Đây mới là nội dung kế hoạch, chưa thực thi hậu kỳ."])
+    return "\n".join(lines)
+
+
+def video_scene3_content_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
+    count = len(video_scene3_flow.content_addon_suggestions(state, str(state.get("active_content_addon") or "")))
+    number_row = [(str(index), f"vprofile|content_pick|{index}") for index in range(1, count + 1)]
+    rows = []
+    if number_row:
+        rows.append(number_row)
+    rows.extend([
+        [("✍️ Tự nhập", "vprofile|content_custom"), ("⬅️ Về mục này", "vprofile|content_detail_done")],
+        [("🏠 Menu chính", "menu|main")],
+    ])
+    return video_scene3_keyboard(rows)
+
+
+def video_scene3_content_position_text(state: dict) -> str:
+    key = str(state.get("active_content_addon") or "")
+    label = dict(video_scene3_flow.CONTENT_ADDONS).get(key, "Vùng an toàn")
+    entry = dict((state.get("content_affecting_addons") or {}).get(key) or {})
+    value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+    return (
+        f"📍 <b>{html.escape(label)}</b>\n\n"
+        f"• Vị trí đang chọn: <b>{html.escape(video_scene3_flow.logo_position_label(str(value.get('position') or '')))}</b>\n\n"
+        "Hệ thống sẽ chừa vùng này khi lập bố cục từng cảnh. Đây chưa phải logo hoặc dấu bản quyền đã gắn vào MP4."
+    )
+
+
+def video_scene3_content_position_keyboard() -> InlineKeyboardMarkup:
+    values = list(video_scene3_flow.LOGO_POSITIONS)
+    return video_scene3_keyboard([
+        [(label, f"vprofile|content_position_set|{key}") for key, label in values[:3]],
+        [(label, f"vprofile|content_position_set|{key}") for key, label in values[3:]],
+        [("⬅️ Về mục này", "vprofile|content_position_done"), ("🏠 Menu chính", "menu|main")],
+    ])
 
 
 def video_scene3_scene_plan_text(state: dict) -> str:
@@ -66227,13 +66428,16 @@ def video_scene3_full_review_keyboard() -> InlineKeyboardMarkup:
 
 
 def video_scene3_post_text(state: dict) -> str:
-    labels = dict(video_scene3_flow.POST_ADDONS)
-    suggested = [labels.get(str(key), str(key)) for key in state.get("post_addon_suggestion") or []]
+    labels = dict(video_scene3_flow.PUBLIC_POST_ADDONS)
+    suggested = [labels[str(key)] for key in state.get("post_addon_suggestion") or [] if str(key) in labels]
     suggestion_line = f"\n• Gợi ý chưa áp dụng: {html.escape(', '.join(suggested))}" if suggested else ""
     return (
         "🎛 <b>Tùy chọn hậu kỳ</b>\n\n"
-        "Các mục bắt đầu ở trạng thái tắt và chỉ là cấu hình kế hoạch. Hệ thống không nói đã gắn logo, phụ đề, lồng tiếng hay nhạc nếu file MP4 cuối chưa thực thi thật.\n\n"
-        f"• Đang bật: {html.escape(video_scene3_summary(state.get('postproduction_addons') or {}, video_scene3_flow.POST_ADDONS))}"
+        "Chọn từng mục để thiết lập. <b>Logo</b> dùng ảnh; <b>dấu bản quyền</b> dùng chữ. "
+        "Các mục có âm thanh đều cho chỉnh âm lượng. Nhạc có thể chọn từ nguồn có sẵn hoặc lập kế hoạch tạo mới, có lời hoặc không lời. "
+        "Video cuối luôn là MP4 nên không cần chọn mục xuất file riêng.\n\n"
+        "Các tùy chọn chỉ là kế hoạch cho đến khi hậu kỳ thật và kiểm tra video cuối hoàn tất.\n\n"
+        f"• Đang bật: {html.escape(video_scene3_summary(state.get('postproduction_addons') or {}, video_scene3_flow.PUBLIC_POST_ADDONS))}"
         f"{suggestion_line}"
     )
 
@@ -66241,7 +66445,7 @@ def video_scene3_post_text(state: dict) -> str:
 def video_scene3_post_keyboard(state: dict) -> InlineKeyboardMarkup:
     entries = dict(state.get("postproduction_addons") or {})
     rows = []
-    values = list(video_scene3_flow.POST_ADDONS)
+    values = list(video_scene3_flow.PUBLIC_POST_ADDONS)
     for index in range(0, len(values), 2):
         row = []
         for key, label in values[index:index + 2]:
@@ -66250,8 +66454,6 @@ def video_scene3_post_keyboard(state: dict) -> InlineKeyboardMarkup:
         rows.append(row)
     rows.extend([
         [("💡 Gợi ý hậu kỳ", "vprofile|post_suggest"), ("✅ Dùng gợi ý", "vprofile|post_accept_suggestion")],
-        [("👁 Xem cấu hình", "vprofile|post_view"), ("✍️ Sửa mục đã chọn", "vprofile|post_edit")],
-        [("🗑 Xóa/tắt một mục", "vprofile|post_remove"), ("↩️ Khôi phục mục trước", "vprofile|post_restore")],
         [("🚫 Tắt toàn bộ", "vprofile|post_disable_all"), ("✅ Xong hậu kỳ", "vprofile|post_done")],
         [("⏭ Không thêm hậu kỳ", "vprofile|post_skip")],
         *video_scene3_nav_rows(),
@@ -66264,54 +66466,184 @@ def video_scene3_post_detail_text(state: dict) -> str:
     labels = dict(video_scene3_flow.POST_ADDONS)
     entry = dict((state.get("postproduction_addons") or {}).get(key) or {})
     value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
-    execution_order = next(
-        (index for index, (candidate, _label) in enumerate(video_scene3_flow.POST_ADDONS, 1) if candidate == key),
-        0,
-    )
     lines = [
         f"🎛 <b>{html.escape(labels.get(key, 'Cấu hình hậu kỳ'))}</b>", "",
         f"• Trạng thái: <b>{'Đã thêm vào kế hoạch' if entry.get('enabled') else 'Đang tắt'}</b>",
-        f"• Mẫu: <b>{html.escape(video_scene3_flow.post_addon_preset_label(key, value))}</b>",
-        f"• Thứ tự dự kiến: <b>{execution_order}/{len(video_scene3_flow.POST_ADDONS)}</b> · sau khi ghép đủ cảnh, trước kiểm tra file cuối",
     ]
-    for field, label in VIDEO_SCENE3_CONFIG_FIELD_LABELS.items():
-        if field not in value or value.get(field) in {None, ""} or field in {"applied_to_mp4", "completed"}:
-            continue
-        lines.append(f"• {html.escape(label.capitalize())}: {html.escape(video_scene3_public_config_value(field, value.get(field)))}")
-    lines.extend([
-        "",
-        "Nút nghe thử chỉ lưu yêu cầu vào kế hoạch; màn này không tạo giọng, nhạc hoặc tệp mới.",
-        "Đây là cấu hình kế hoạch. Hệ thống chỉ được nói đã áp dụng sau khi hậu kỳ thật và kiểm tra file MP4 cuối.",
-    ])
+    if key == "logo_image":
+        lines.extend([
+            f"• Ảnh logo: <b>{'Đã nhận' if value.get('asset_file_id') else 'Chưa gửi'}</b>",
+            f"• Vị trí: <b>{html.escape(video_scene3_flow.logo_position_label(str(value.get('position') or '')))}</b>",
+            "• Kích thước: <b>nhỏ, rộng 12% chiều ngang</b>",
+            "• Giữ đúng tỉ lệ ảnh: <b>Có</b>",
+            "",
+            "Gửi ảnh logo trước, sau đó chọn vị trí. Logo không được kéo méo hoặc che chủ thể chính.",
+        ])
+    elif key == "watermark_text":
+        lines.extend([
+            f"• Nội dung: <b>{html.escape(str(value.get('text') or 'Chưa nhập')[:300])}</b>",
+            f"• Vị trí: <b>{html.escape(video_scene3_flow.logo_position_label(str(value.get('position') or '')))}</b>",
+            f"• Độ trong: <b>{safe_int(value.get('opacity_percent'), 45)}%</b>",
+            "",
+            "Nhập một dòng chữ bản quyền ngắn rồi chọn vị trí. Mục này không yêu cầu gửi ảnh.",
+        ])
+    elif key == "voice":
+        voice_choice = str(value.get("voice_choice") or "")
+        voice_label = video_scene3_public_config_value(
+            "voice_choice",
+            voice_choice or value.get("voice_type") or "not_selected",
+        )
+        lines.extend([
+            f"• Giọng: <b>{html.escape(voice_label)}</b>",
+            f"• Âm lượng: <b>{safe_int(value.get('volume_percent'), 100)}%</b>",
+            f"• Lời đọc: <b>{html.escape(str(value.get('script_note') or 'Chưa nhập')[:500])}</b>",
+            "",
+            "Chọn giọng nữ mặc định, giọng nam mặc định hoặc giọng riêng đã gửi/đã lưu. "
+            "Giọng riêng phải có tư liệu hợp lệ trước khi xử lý thật.",
+        ])
+    elif key == "music":
+        source_label = video_scene3_public_config_value(
+            "music_source_choice",
+            value.get("music_source_choice") or value.get("source") or "not_selected",
+        )
+        mode_label = video_scene3_public_config_value("vocal_mode", value.get("vocal_mode") or "instrumental")
+        lines.extend([
+            f"• Cách lấy nhạc: <b>{html.escape(source_label)}</b>",
+            f"• Kiểu nhạc: <b>{html.escape(mode_label)}</b>",
+            f"• Âm lượng: <b>{safe_int(value.get('volume_percent'), 20)}%</b>",
+            f"• Yêu cầu/lời nhạc: <b>{html.escape(str(value.get('music_request') or 'Chưa nhập')[:500])}</b>",
+            "",
+            "Chọn nhạc có sẵn hoặc lập kế hoạch tạo nhạc mới, sau đó chọn có lời hay không lời. "
+            "Bước này chưa tạo nhạc và chưa phát sinh chi phí.",
+        ])
+    else:
+        lines.append(f"• Mẫu: <b>{html.escape(video_scene3_flow.post_addon_preset_label(key, value))}</b>")
+        for field, label in VIDEO_SCENE3_CONFIG_FIELD_LABELS.items():
+            if field not in value or value.get(field) in {None, ""} or field in {"applied_to_mp4", "completed"}:
+                continue
+            lines.append(f"• {html.escape(label.capitalize())}: {html.escape(video_scene3_public_config_value(field, value.get(field)))}")
+    lines.extend(["", "Đây là cấu hình kế hoạch. Hệ thống chỉ báo đã áp dụng sau khi hậu kỳ thật và kiểm tra video cuối."])
     return "\n".join(lines)[:3900]
 
 
 def video_scene3_post_detail_keyboard(state: dict) -> InlineKeyboardMarkup:
     key = str(state.get("active_post_addon") or "")
     entry = dict((state.get("postproduction_addons") or {}).get(key) or {})
-    enabled_label = "🚫 Tắt mục này" if entry.get("enabled") else "➕ Thêm mục này"
+    enabled_label = "🚫 Tắt mục này" if entry.get("enabled") else "✅ Bật mục này"
+    value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+    if key == "logo_image":
+        upload_label = "🔄 Đổi ảnh logo" if value.get("asset_file_id") else "📎 Gửi ảnh logo"
+        return video_scene3_keyboard([
+            [(upload_label, "vprofile|post_asset"), ("📍 Chọn vị trí", "vprofile|post_position")],
+            [("🚫 Không dùng logo", "vprofile|post_remove"), ("↩️ Khôi phục", "vprofile|post_restore")],
+            [("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done"), ("🏠 Menu chính", "menu|main")],
+        ])
+    if key == "watermark_text":
+        text_label = "✍️ Sửa chữ bản quyền" if str(value.get("text") or "").strip() else "✍️ Nhập chữ bản quyền"
+        return video_scene3_keyboard([
+            [(text_label, "vprofile|post_text"), ("📍 Chọn vị trí", "vprofile|post_position")],
+            [("🚫 Không dùng dấu bản quyền", "vprofile|post_remove"), ("↩️ Khôi phục", "vprofile|post_restore")],
+            [("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done"), ("🏠 Menu chính", "menu|main")],
+        ])
+    if key == "voice":
+        return video_scene3_keyboard([
+            [
+                ("👩 Giọng nữ", "vprofile|post_voice_choice|default_female"),
+                ("👨 Giọng nam", "vprofile|post_voice_choice|default_male"),
+                ("🎙 Giọng riêng", "vprofile|post_voice_choice|custom_voice"),
+            ],
+            [("🔊 Chỉnh âm lượng", "vprofile|post_volume"), ("✍️ Nhập/sửa lời đọc", "vprofile|post_edit")],
+            [("👁 Xem cấu hình", "vprofile|post_view"), ("↩️ Khôi phục", "vprofile|post_restore")],
+            [("🗑 Không dùng giọng đọc", "vprofile|post_remove"), ("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done")],
+            [("📖 Hướng dẫn hậu kỳ", "menu|guide_video_ai"), ("🏠 Menu chính", "menu|main")],
+        ])
+    if key == "music":
+        return video_scene3_keyboard([
+            [("🎼 Chọn nhạc có sẵn", "vprofile|post_music_source|choose_existing"), ("✨ Tạo nhạc mới", "vprofile|post_music_source|create_new")],
+            [("🎹 Không lời", "vprofile|post_music_mode|instrumental"), ("🎤 Có lời", "vprofile|post_music_mode|with_lyrics")],
+            [("🔊 Chỉnh âm lượng", "vprofile|post_volume"), ("✍️ Yêu cầu/lời nhạc", "vprofile|post_edit")],
+            [("👁 Xem cấu hình", "vprofile|post_view"), ("↩️ Khôi phục", "vprofile|post_restore")],
+            [("🗑 Không dùng nhạc", "vprofile|post_remove"), ("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done")],
+            [("📖 Hướng dẫn hậu kỳ", "menu|guide_video_ai"), ("🏠 Menu chính", "menu|main")],
+        ])
     edit_label = {
         "voice": "✍️ Sửa lời đọc",
         "subtitles": "✍️ Sửa nội dung phụ đề",
         "dubbing": "✍️ Sửa ngôn ngữ/giọng",
         "music": "✂️ Sửa cắt/ghép nhạc",
-    }.get(key, "✍️ Sửa ghi chú")
-    rows = [[(enabled_label, "vprofile|post_enable"), ("🔄 Đổi mẫu", "vprofile|post_preset")]]
-    if key == "voice":
-        preview_enabled = bool(((entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}).get("preview_requested"))
-        rows.extend([
-            [(edit_label, "vprofile|post_edit"), ("🔇 Bỏ nghe thử" if preview_enabled else "🔊 Lập kế hoạch nghe thử", "vprofile|post_preview_toggle")],
-            [("👁 Xem cấu hình", "vprofile|post_view"), ("↩️ Khôi phục", "vprofile|post_restore")],
-            [("🗑 Xóa khỏi kế hoạch", "vprofile|post_remove"), ("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done")],
-            [("📖 Hướng dẫn hậu kỳ", "menu|guide_video_ai"), ("🏠 Menu chính", "menu|main")],
-        ])
+    }.get(key, "✍️ Chỉnh nội dung")
+    rows = [[(enabled_label, "vprofile|post_enable"), ("🎛 Chọn mẫu", "vprofile|post_preset")]]
+    if key in video_scene3_flow.AUDIO_POST_ADDONS:
+        rows.append([("🔊 Chỉnh âm lượng", "vprofile|post_volume"), (edit_label, "vprofile|post_edit")])
+        rows.append([("👁 Xem cấu hình", "vprofile|post_view"), ("↩️ Khôi phục", "vprofile|post_restore")])
+        rows.append([("🗑 Xóa khỏi kế hoạch", "vprofile|post_remove"), ("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done")])
     else:
-        rows.extend([
-            [(edit_label, "vprofile|post_edit"), ("👁 Xem cấu hình", "vprofile|post_view")],
-            [("↩️ Khôi phục", "vprofile|post_restore"), ("🗑 Xóa khỏi kế hoạch", "vprofile|post_remove")],
-            [("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done"), ("🏠 Menu chính", "menu|main")],
-        ])
+        rows.append([(edit_label, "vprofile|post_edit"), ("👁 Xem cấu hình", "vprofile|post_view")])
+        rows.append([("↩️ Khôi phục", "vprofile|post_restore"), ("🗑 Xóa khỏi kế hoạch", "vprofile|post_remove")])
+        rows.append([("⬅️ Danh sách hậu kỳ", "vprofile|post_detail_done"), ("🏠 Menu chính", "menu|main")])
+    if key in video_scene3_flow.AUDIO_POST_ADDONS:
+        rows.append([("📖 Hướng dẫn hậu kỳ", "menu|guide_video_ai"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
+
+
+def video_scene3_post_volume_text(state: dict) -> str:
+    key = str(state.get("active_post_addon") or "")
+    label = dict(video_scene3_flow.PUBLIC_POST_ADDONS).get(key, "Âm thanh")
+    entry = dict((state.get("postproduction_addons") or {}).get(key) or {})
+    value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+    default_volume = safe_int(video_scene3_flow.post_addon_default(key).get("volume_percent"), 100)
+    volume = safe_int(value.get("volume_percent"), default_volume)
+    return (
+        f"🔊 <b>Âm lượng: {html.escape(label)}</b>\n\n"
+        f"• Đang chọn: <b>{volume}%</b>\n\n"
+        "Chọn mức nghe phù hợp. Khi có lời nói, nhạc nền nên để thấp hơn để nội dung vẫn rõ. "
+        "Đây chỉ là cấu hình hậu kỳ, chưa tạo hoặc chỉnh sửa tệp âm thanh."
+    )
+
+
+def video_scene3_post_volume_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [(f"{value}%", f"vprofile|post_volume_set|{value}") for value in video_scene3_flow.AUDIO_VOLUME_LEVELS],
+        [("⬅️ Về mục này", "vprofile|post_volume_done"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_scene3_post_input_text(state: dict) -> str:
+    key = str(state.get("active_post_addon") or state.get("input_target") or "")
+    if key == "voice":
+        return "✍️ <b>Nhập lời đọc</b>\n\nGửi lời dẫn cần đọc. Nội dung sẽ được căn theo cảnh ở bước xử lý thật."
+    if key == "music":
+        return (
+            "✍️ <b>Nhập yêu cầu nhạc hoặc lời bài hát</b>\n\n"
+            "Nếu chọn không lời, mô tả phong cách và cảm xúc. Nếu chọn có lời, gửi chủ đề hoặc lời muốn dùng. "
+            "Bước này chỉ lưu kế hoạch, chưa tạo nhạc."
+        )
+    if key == "dubbing":
+        return "✍️ <b>Sửa yêu cầu lồng tiếng</b>\n\nGửi ngôn ngữ, chất giọng hoặc lưu ý căn lời mong muốn."
+    if key == "sfx":
+        return "✍️ <b>Sửa hiệu ứng âm thanh</b>\n\nMô tả hiệu ứng cần dùng và cảnh cần đặt hiệu ứng."
+    return "✍️ <b>Sửa cấu hình hậu kỳ</b>\n\nGửi cấu hình cho mục đang chọn. Đây chỉ là kế hoạch, chưa áp vào video cuối."
+
+
+def video_scene3_post_position_text(state: dict) -> str:
+    key = str(state.get("active_post_addon") or "")
+    label = dict(video_scene3_flow.POST_ADDONS).get(key, "Vị trí hậu kỳ")
+    entry = dict((state.get("postproduction_addons") or {}).get(key) or {})
+    value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+    return (
+        f"📍 <b>Chọn vị trí: {html.escape(label)}</b>\n\n"
+        f"• Hiện tại: <b>{html.escape(video_scene3_flow.logo_position_label(str(value.get('position') or '')))}</b>\n\n"
+        "Chọn vị trí không che mặt, sản phẩm hoặc phụ đề. Đây mới là cấu hình; chưa khẳng định đã gắn vào video cuối."
+    )
+
+
+def video_scene3_post_position_keyboard() -> InlineKeyboardMarkup:
+    values = list(video_scene3_flow.LOGO_POSITIONS)
+    return video_scene3_keyboard([
+        [(label, f"vprofile|post_position_set|{key}") for key, label in values[:3]],
+        [(label, f"vprofile|post_position_set|{key}") for key, label in values[3:]],
+        [("⬅️ Về mục này", "vprofile|post_position_done"), ("🏠 Menu chính", "menu|main")],
+    ])
 
 
 def video_scene3_logo_position_text(state: dict) -> str:
@@ -66332,9 +66664,8 @@ def video_scene3_logo_position_text(state: dict) -> str:
 def video_scene3_logo_position_keyboard() -> InlineKeyboardMarkup:
     values = list(video_scene3_flow.LOGO_POSITIONS)
     return video_scene3_keyboard([
-        [(values[0][1], f"vprofile|logo_position_set|{values[0][0]}"), (values[1][1], f"vprofile|logo_position_set|{values[1][0]}")],
-        [(values[2][1], f"vprofile|logo_position_set|{values[2][0]}"), (values[3][1], f"vprofile|logo_position_set|{values[3][0]}")],
-        [(values[4][1], f"vprofile|logo_position_set|{values[4][0]}"), (values[5][1], f"vprofile|logo_position_set|{values[5][0]}")],
+        [(label, f"vprofile|logo_position_set|{key}") for key, label in values[:3]],
+        [(label, f"vprofile|logo_position_set|{key}") for key, label in values[3:]],
         [("🚫 Không dùng logo", "vprofile|logo_disable"), ("⬅️ Về tư liệu", "vprofile|logo_position_done")],
         [("📖 Cách đặt logo", "vprofile|logo_position_help"), ("🏠 Menu chính", "menu|main")],
     ])
@@ -66364,9 +66695,29 @@ def video_scene3_quality_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             (video_b14_package_button_label(value), f"vprofile|tier|{value}")
             for value in values[index:index + 2]
         ])
-    rows.append([(video_b14_package_button_label(values[-1]), f"vprofile|tier|{values[-1]}"), ("👁 Xem bảng giá", "vprofile|quality_info")])
+    rows.append([(video_b14_package_button_label(values[-1]), f"vprofile|tier|{values[-1]}"), ("📊 So sánh các gói", "vprofile|quality_info")])
     rows.extend(video_scene3_nav_rows())
     return video_scene3_keyboard(rows)
+
+
+def video_scene3_quality_guide_text() -> str:
+    lines = [
+        "📊 <b>So sánh gói chất lượng</b>", "",
+        "Mỗi mức dưới đây áp dụng cho một cảnh khoảng 8 giây. Tên công nghệ xử lý được ẩn; hệ thống tự chọn đường phù hợp khi anh/chị xác nhận cuối.", "",
+    ]
+    for price in VIDEO_B14_2_QUALITY_OPTIONS:
+        icon, name, _descriptions = video_b14_package_tier(price)
+        level, detail = VIDEO_SCENE3_QUALITY_PUBLIC_SPECS.get(price, ("Chất lượng phù hợp", "Tạo và ghép cảnh theo kế hoạch đã duyệt."))
+        lines.append(f"{icon} <b>{price} Xu — {html.escape(name)}</b> · {html.escape(level)}")
+        lines.append(f"↳ {html.escape(detail)}")
+    lines.extend(["", "Thông số là định hướng chọn gói, không phải lời hứa hoàn tất. Chỉ video cuối hợp lệ đã gửi mới được tính Xu."])
+    return "\n".join(lines)[:3900]
+
+
+def video_scene3_quality_guide_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("⬅️ Chọn gói", "vprofile|quality_info_done"), ("🏠 Menu chính", "menu|main")],
+    ])
 
 
 def video_scene3_final_text(state: dict, user_id: int = 0) -> str:
@@ -66379,7 +66730,7 @@ def video_scene3_final_text(state: dict, user_id: int = 0) -> str:
             balance, _name, _username = get_user(user_id)
         except Exception:
             balance = 0
-    post = video_scene3_summary(state.get("postproduction_addons") or {}, video_scene3_flow.POST_ADDONS)
+    post = video_scene3_summary(state.get("postproduction_addons") or {}, video_scene3_flow.PUBLIC_POST_ADDONS)
     return (
         "🧾 <b>Báo cáo tổng hợp trước xác nhận</b>\n\n"
         f"• Ý tưởng: {html.escape(str(state.get('subject') or '')[:260])}\n"
@@ -66607,6 +66958,9 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
         "scene3_postproduction_plan": dict(state.get("postproduction_addons") or {}),
         "final_confirmed": False,
         "provider_called": False,
+        "music_provider_calls": 0,
+        "voice_provider_calls": 0,
+        "files_generated": 0,
         "job_created": False,
         "outbox_created": False,
         "xu_charged": 0,
@@ -66633,7 +66987,9 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "await_image_negative": "🚫 <b>Sửa yêu cầu loại trừ ảnh</b>\n\nGửi các lỗi/hình ảnh không được xuất hiện.",
         "await_video_prompt": "✍️ <b>Sửa câu lệnh video</b>\n\nGửi nội dung mới cho cảnh đang chọn. Hệ thống sẽ lưu thành phiên bản mới.",
         "await_video_negative": "🚫 <b>Sửa yêu cầu loại trừ video</b>\n\nGửi các lỗi/chuyển động không được xuất hiện.",
-        "await_post_config": "✍️ <b>Sửa cấu hình hậu kỳ</b>\n\nGửi cấu hình cho mục đang chọn. Đây chỉ là kế hoạch, không khẳng định đã áp vào MP4.",
+        "await_post_config": video_scene3_post_input_text(state),
+        "await_post_text": "✍️ <b>Nhập chữ bản quyền</b>\n\nGửi một dòng chữ ngắn sẽ xuất hiện trên video. Sau đó anh/chị chọn vị trí hiển thị.",
+        "await_post_asset_upload": "📎 <b>Gửi ảnh logo</b>\n\nGửi ảnh hoặc file PNG/JPG/WEBP. Sau đó anh/chị chọn vị trí; hệ thống giữ đúng tỉ lệ ảnh.",
     }
     renderers = {
         "menu": (video_profile_studio_menu_text(lang), video_profile_studio_menu_keyboard(lang)),
@@ -66648,7 +67004,12 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "requirements": (video_scene3_requirements_text(state), video_scene3_requirements_keyboard(state)),
         "materials": (video_scene3_materials_text(state), video_scene3_materials_keyboard()),
         "creative_controls": (video_scene3_creative_text(state), video_scene3_creative_keyboard(state)),
+        "creative_detail": (video_scene3_creative_detail_text(state), video_scene3_creative_detail_keyboard(state)),
+        "creative_suggestions": (video_scene3_creative_suggestions_text(state), video_scene3_creative_suggestions_keyboard(state)),
         "content_addons": (video_scene3_content_addon_text(state), video_scene3_content_addon_keyboard(state)),
+        "content_detail": (video_scene3_content_detail_text(state), video_scene3_content_detail_keyboard(state)),
+        "content_suggestions": (video_scene3_content_suggestions_text(state), video_scene3_content_suggestions_keyboard(state)),
+        "content_position": (video_scene3_content_position_text(state), video_scene3_content_position_keyboard()),
         "scene_plan": (video_scene3_scene_plan_text(state), video_scene3_scene_plan_keyboard()),
         "scene_detail": (video_scene3_scene_detail_text(state), video_scene3_scene_detail_keyboard()),
         "transition_picker": (video_scene3_transition_text(state), video_scene3_transition_keyboard()),
@@ -66658,9 +67019,12 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "full_review": (video_scene3_full_review_text(state), video_scene3_full_review_keyboard()),
         "post_addons": (video_scene3_post_text(state), video_scene3_post_keyboard(state)),
         "post_detail": (video_scene3_post_detail_text(state), video_scene3_post_detail_keyboard(state)),
+        "post_position": (video_scene3_post_position_text(state), video_scene3_post_position_keyboard()),
+        "post_volume": (video_scene3_post_volume_text(state), video_scene3_post_volume_keyboard()),
         "logo_position": (video_scene3_logo_position_text(state), video_scene3_logo_position_keyboard()),
         "aspect_ratio": (video_scene3_aspect_text(state), video_scene3_aspect_keyboard()),
         "quality": (video_profile_scene1_quality_text(state, lang), video_scene3_quality_keyboard(lang)),
+        "quality_guide": (video_scene3_quality_guide_text(), video_scene3_quality_guide_keyboard()),
         "final_report": (video_scene3_final_text(state, safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)), video_scene3_final_keyboard()),
     }
     if step in pending:
@@ -71024,6 +71388,21 @@ VIDEO_B14_3_PACKAGE_TIERS = {
     1000: ("🎬", "Pro", ("Phim/ads chất lượng cao",)),
     1200: ("🎞", "Studio", ("Cảnh phức tạp hơn",)),
     1500: ("👑", "Max", ("Mức cao nhất hiện tại",)),
+}
+
+# Public descriptions are derived from the checked-in provider/model catalog,
+# but intentionally hide provider and model names. Do not promise a resolution
+# or capability that the final selected route may not deliver.
+VIDEO_SCENE3_QUALITY_PUBLIC_SPECS = {
+    200: ("Thử ý tưởng nhanh", "Chuyển động cơ bản, phù hợp thử mạch nội dung đơn giản."),
+    300: ("Cân bằng và ổn định", "Phù hợp video phổ thông, giới thiệu ngắn và nội dung mạng xã hội."),
+    400: ("Giữ chi tiết tốt hơn", "Ưu tiên sự nhất quán của chủ thể, sản phẩm và bố cục giữa các cảnh."),
+    500: ("Hoàn thiện rõ nét", "Cân bằng hình ảnh, chuyển động và khả năng giữ nội dung cần thiết."),
+    600: ("Chất lượng nâng cao", "Phù hợp ánh sáng, vật liệu và chuyển động có nhiều chi tiết."),
+    800: ("Ưu tiên chất lượng", "Dành cho nội dung cần hình ảnh tinh tế và mạch cảnh được kiểm soát kỹ."),
+    1000: ("Kiểm soát thành phần", "Phù hợp quảng cáo, phim ngắn và cảnh có nhiều yếu tố cần giữ nguyên."),
+    1200: ("Đường dựng chất lượng cao", "Ưu tiên độ ổn định và chi tiết khi công nghệ phù hợp đang sẵn sàng."),
+    1500: ("Mức cao nhất hiện tại", "Ưu tiên đường dựng cao nhất và phương án dự phòng phù hợp khi hệ thống sẵn sàng."),
 }
 VIDEO_B14_3_CREATIVE_CHOICES = {
     "topic_mode": (
@@ -80934,14 +81313,16 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
     if not update.message or not update.effective_user:
         return False
     state = video_profile_studio_state(context)
-    if str(state.get("step") or "") != "await_material_upload":
+    step = str(state.get("step") or "")
+    if step not in {"await_material_upload", "await_post_asset_upload"}:
         return False
-    target = video_scene3_flow.normalize_material_type(str(state.get("input_target") or ""))
+    post_logo_upload = step == "await_post_asset_upload"
+    target = "logo_image" if post_logo_upload else video_scene3_flow.normalize_material_type(str(state.get("input_target") or ""))
     allowed_targets = {
         "character_person", "product_object", "background", "visual_style_reference",
         "storyboard_frames", "logo", "voice_audio", "music",
     }
-    if target not in allowed_targets:
+    if not post_logo_upload and target not in allowed_targets:
         return False
 
     message = update.message
@@ -80971,7 +81352,7 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
         elif mime_type.startswith("audio/"):
             media_kind = "audio"
 
-    wants_image = target in {
+    wants_image = post_logo_upload or target in {
         "character_person", "product_object", "background", "visual_style_reference",
         "storyboard_frames", "logo",
     }
@@ -80991,21 +81372,54 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
             reply_markup=video_scene3_keyboard(video_scene3_nav_rows()),
         )
         return True
+    if post_logo_upload:
+        state = video_scene3_flow.configure_post_asset(
+            state,
+            "logo_image",
+            file_id=file_id,
+            file_unique_id=str(getattr(media, "file_unique_id", "") or ""),
+            mime_type=mime_type,
+        )
+        state = video_scene3_return_to_parent(
+            context,
+            state,
+            "post_position",
+            input_target="",
+            active_post_addon="logo_image",
+        )
+        await message.reply_text(
+            "✅ Đã lưu ảnh logo trong phiên. Vui lòng chọn vị trí hiển thị. Hệ thống chưa tạo file và chưa trừ Xu.\n\n"
+            + video_scene3_post_position_text(state),
+            parse_mode="HTML",
+            reply_markup=video_scene3_post_position_keyboard(),
+        )
+        return True
+    material_return_step = str(state.get("input_return_step") or "")
     assets = dict(state.get("reference_assets") or {})
     items = [dict(item) for item in assets.get("items") or [] if isinstance(item, dict)]
-    existing = next((item for item in items if str(item.get("file_id") or "") == file_id and str(item.get("type") or "") == target), None)
-    if not existing:
-        items.append({
-            "type": target,
-            "media_kind": media_kind,
-            "file_id": file_id,
-            "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
-            "mime_type": mime_type,
-            "file_name": file_name,
-            "source_message_id": safe_int(getattr(message, "message_id", 0), 0),
-            "caption": str(getattr(message, "caption", "") or "")[:500],
-            "provider_uploaded": False,
-        })
+    asset_record = {
+        "type": target,
+        "media_kind": media_kind,
+        "file_id": file_id,
+        "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
+        "mime_type": mime_type,
+        "file_name": file_name,
+        "source_message_id": safe_int(getattr(message, "message_id", 0), 0),
+        "owner_user_id": safe_int(getattr(update.effective_user, "id", 0), 0),
+        "caption": str(getattr(message, "caption", "") or "")[:500],
+        "provider_uploaded": False,
+    }
+    existing_index = next(
+        (
+            index for index, item in enumerate(items)
+            if str(item.get("file_id") or "") == file_id and str(item.get("type") or "") == target
+        ),
+        -1,
+    )
+    if existing_index >= 0:
+        items[existing_index] = asset_record
+    else:
+        items.append(asset_record)
     assets["items"] = items[-40:]
     state.update({"reference_assets": assets, "assets": assets, "active_material_index": len(assets["items"])})
     if target == "logo":
@@ -81021,6 +81435,28 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
             + video_scene3_logo_position_text(state),
             parse_mode="HTML",
             reply_markup=video_scene3_logo_position_keyboard(),
+        )
+        return True
+    if target == "voice_audio" and material_return_step == "post_detail":
+        state = video_scene3_flow.configure_voice_choice(
+            state,
+            "custom_voice",
+            user_id=safe_int(getattr(update.effective_user, "id", 0), 0),
+        )
+        state = video_scene3_return_to_parent(
+            context,
+            state,
+            "post_detail",
+            input_target="",
+            input_return_step="",
+            active_post_addon="voice",
+        )
+        await message.reply_text(
+            "✅ Đã lưu giọng riêng của anh/chị trong phiên và chọn cho kế hoạch hậu kỳ. "
+            "Hệ thống chưa gọi tạo giọng, chưa tạo file và chưa trừ Xu.\n\n"
+            + video_scene3_post_detail_text(state),
+            parse_mode="HTML",
+            reply_markup=video_scene3_post_detail_keyboard(state),
         )
         return True
     state = video_scene3_return_to_parent(context, state, "materials", input_target="")
@@ -195397,7 +195833,7 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
         "await_subject", "await_count_custom", "await_suggestion", "await_requirement",
         "await_material_caption", "await_creative", "await_content_addon", "await_scene_edit", "await_scene_regen",
         "await_reorder", "await_image_prompt", "await_image_negative",
-        "await_video_prompt", "await_video_negative", "await_post_config",
+        "await_video_prompt", "await_video_negative", "await_post_config", "await_post_text",
     }:
         return False
     user_text = str(update.message.text or "").strip()
@@ -195484,14 +195920,30 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
     if step == "await_creative":
         key = str(state.get("input_target") or "context")
         state = video_scene3_flow.set_entry(state, "creative_controls", key, user_text[:1600])
-        state = video_scene3_return_to_parent(context, state, "creative_controls", input_target="", active_creative=key)
-        await update.message.reply_text(video_scene3_creative_text(state), parse_mode="HTML", reply_markup=video_scene3_creative_keyboard(state))
+        state = video_scene3_return_to_parent(context, state, "creative_detail", input_target="", active_creative=key)
+        await update.message.reply_text(video_scene3_creative_detail_text(state), parse_mode="HTML", reply_markup=video_scene3_creative_detail_keyboard(state))
         return True
     if step == "await_content_addon":
         key = str(state.get("input_target") or "voiceover")
         state = video_scene3_flow.set_entry(state, "content_affecting_addons", key, user_text[:1600])
-        state = video_scene3_return_to_parent(context, state, "content_addons", input_target="")
-        await update.message.reply_text(video_scene3_content_addon_text(state), parse_mode="HTML", reply_markup=video_scene3_content_addon_keyboard(state))
+        state = video_scene3_return_to_parent(context, state, "content_detail", input_target="", active_content_addon=key)
+        await update.message.reply_text(video_scene3_content_detail_text(state), parse_mode="HTML", reply_markup=video_scene3_content_detail_keyboard(state))
+        return True
+    if step == "await_post_text":
+        key = str(state.get("input_target") or "watermark_text")
+        if key != "watermark_text":
+            state = video_scene3_return_to_parent(context, state, "post_addons", input_target="")
+            await update.message.reply_text(video_scene3_post_text(state), parse_mode="HTML", reply_markup=video_scene3_post_keyboard(state))
+            return True
+        state = video_scene3_flow.configure_watermark_text(state, user_text[:300])
+        state = video_scene3_return_to_parent(
+            context,
+            state,
+            "post_position",
+            input_target="",
+            active_post_addon="watermark_text",
+        )
+        await update.message.reply_text(video_scene3_post_position_text(state), parse_mode="HTML", reply_markup=video_scene3_post_position_keyboard())
         return True
     if step == "await_scene_edit":
         selected_index = safe_int(state.get("input_target"), 0)
@@ -195565,10 +196017,7 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
         return True
     if step == "await_post_config":
         key = str(state.get("input_target") or "logo_image")
-        current = dict((state.get("postproduction_addons") or {}).get(key) or {})
-        config = dict(current.get("value") or {}) if isinstance(current.get("value"), dict) else video_scene3_flow.post_addon_default(key)
-        config["user_note"] = user_text[:1600]
-        state = video_scene3_flow.set_entry(state, "postproduction_addons", key, config)
+        state = video_scene3_flow.configure_post_note(state, key, user_text)
         parent = str(state.get("input_return_step") or "post_addons")
         state = video_scene3_return_to_parent(context, state, parent, input_target="", input_return_step="")
         if parent == "post_detail":
@@ -195950,7 +196399,31 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action == "creative":
         key = str(parts[2] if len(parts) > 2 else "")
         if key in dict(video_scene3_flow.CREATIVE_CONTROLS):
-            state = video_profile_studio_step(context, state, "await_creative", input_target=key, active_creative=key)
+            state = video_profile_studio_step(context, state, "creative_detail", active_creative=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "creative_suggest":
+        key = str(state.get("active_creative") or "")
+        if video_scene3_flow.creative_suggestions(state, key):
+            state = video_profile_studio_step(context, state, "creative_suggestions")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "creative_pick":
+        key = str(state.get("active_creative") or "")
+        suggestions = video_scene3_flow.creative_suggestions(state, key)
+        selection = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        if 1 <= selection <= len(suggestions):
+            state = video_scene3_flow.set_entry(state, "creative_controls", key, suggestions[selection - 1], enabled=True)
+            state = video_scene3_return_to_parent(context, state, "creative_detail", active_creative=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "creative_custom":
+        key = str(state.get("active_creative") or "")
+        if key in dict(video_scene3_flow.CREATIVE_CONTROLS):
+            if str(state.get("step") or "") == "creative_suggestions":
+                state = video_scene3_return_to_parent(context, state, "creative_detail")
+            state = video_profile_studio_step(context, state, "await_creative", input_target=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "creative_detail_done":
+        parent = "creative_detail" if str(state.get("step") or "") == "creative_suggestions" else "creative_controls"
+        state = video_scene3_return_to_parent(context, state, parent)
         return await video_profile_scene1_render(query, state, lang)
     if action == "creative_quick":
         state = video_scene3_flow.cycle_creative_quick_preset(state)
@@ -195962,11 +196435,14 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
     if action == "creative_view":
+        key = str(state.get("active_creative") or "")
+        if key in dict(video_scene3_flow.CREATIVE_CONTROLS):
+            state = video_profile_studio_step(context, state, "creative_detail")
         return await video_profile_scene1_render(query, state, lang)
     if action == "creative_edit":
         key = str(state.get("active_creative") or "")
         if key in dict(video_scene3_flow.CREATIVE_CONTROLS):
-            state = video_profile_studio_step(context, state, "await_creative", input_target=key)
+            state = video_profile_studio_step(context, state, "creative_detail")
         return await video_profile_scene1_render(query, state, lang)
     if action == "creative_remove":
         key = str(state.get("active_creative") or "")
@@ -195992,11 +196468,69 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = video_profile_studio_step(context, state, "content_addons")
         return await video_profile_scene1_render(query, state, lang)
     if action == "content":
-        key = parts[2] if len(parts) > 2 else ""
+        key = str(parts[2] if len(parts) > 2 else "")
         if key in dict(video_scene3_flow.CONTENT_ADDONS):
-            state = video_scene3_flow.toggle_entry(state, "content_affecting_addons", key)
-            state["active_content_addon"] = key
+            state = video_profile_studio_step(context, state, "content_detail", active_content_addon=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_enable":
+        key = str(state.get("active_content_addon") or "")
+        if key in dict(video_scene3_flow.CONTENT_ADDONS):
+            current = dict((state.get("content_affecting_addons") or {}).get(key) or {})
+            if current.get("enabled"):
+                state = video_scene3_flow.remove_entry(state, "content_affecting_addons", key)
+            elif key in {"logo_safe_zone", "watermark_safe_zone"}:
+                default_position = "top_right" if key == "logo_safe_zone" else "bottom_right"
+                state = video_scene3_flow.configure_content_safe_zone(state, key, position=default_position)
+            else:
+                suggestions = video_scene3_flow.content_addon_suggestions(state, key)
+                state = video_scene3_flow.set_entry(
+                    state,
+                    "content_affecting_addons",
+                    key,
+                    suggestions[0] if suggestions else "Đã chọn",
+                    enabled=True,
+                )
+            state.update({"step": "content_detail", "active_content_addon": key})
             state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_suggest_item":
+        key = str(state.get("active_content_addon") or "")
+        target_step = "content_position" if key in {"logo_safe_zone", "watermark_safe_zone"} else "content_suggestions"
+        state = video_profile_studio_step(context, state, target_step)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_pick":
+        key = str(state.get("active_content_addon") or "")
+        suggestions = video_scene3_flow.content_addon_suggestions(state, key)
+        selection = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        if 1 <= selection <= len(suggestions):
+            state = video_scene3_flow.set_entry(state, "content_affecting_addons", key, suggestions[selection - 1], enabled=True)
+            state = video_scene3_return_to_parent(context, state, "content_detail", active_content_addon=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_custom":
+        key = str(state.get("active_content_addon") or "")
+        if key in dict(video_scene3_flow.CONTENT_ADDONS) and key not in {"logo_safe_zone", "watermark_safe_zone"}:
+            if str(state.get("step") or "") == "content_suggestions":
+                state = video_scene3_return_to_parent(context, state, "content_detail")
+            state = video_profile_studio_step(context, state, "await_content_addon", input_target=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_position":
+        key = str(state.get("active_content_addon") or "")
+        if key in {"logo_safe_zone", "watermark_safe_zone"}:
+            state = video_profile_studio_step(context, state, "content_position")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_position_set":
+        key = str(state.get("active_content_addon") or "")
+        position = str(parts[2] if len(parts) > 2 else "")
+        if key in {"logo_safe_zone", "watermark_safe_zone"} and position in dict(video_scene3_flow.LOGO_POSITIONS):
+            state = video_scene3_flow.configure_content_safe_zone(state, key, position=position)
+            state = video_scene3_return_to_parent(context, state, "content_detail", active_content_addon=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_position_done":
+        state = video_scene3_return_to_parent(context, state, "content_detail")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "content_detail_done":
+        parent = "content_detail" if str(state.get("step") or "") == "content_suggestions" else "content_addons"
+        state = video_scene3_return_to_parent(context, state, parent)
         return await video_profile_scene1_render(query, state, lang)
     if action == "content_suggest":
         state["content_addon_suggestion"] = ["captions", "logo_safe_zone"] if str(state.get("aspect_ratio") or "9:16") == "9:16" else ["voiceover", "captions"]
@@ -196004,15 +196538,27 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "content_accept_suggestion":
         for key in state.get("content_addon_suggestion") or []:
-            state = video_scene3_flow.set_entry(state, "content_affecting_addons", str(key), "Theo gợi ý phù hợp", enabled=True)
+            key = str(key)
+            if key in {"logo_safe_zone", "watermark_safe_zone"}:
+                default_position = "top_right" if key == "logo_safe_zone" else "bottom_right"
+                state = video_scene3_flow.configure_content_safe_zone(state, key, position=default_position)
+            else:
+                suggestions = video_scene3_flow.content_addon_suggestions(state, key)
+                state = video_scene3_flow.set_entry(
+                    state,
+                    "content_affecting_addons",
+                    key,
+                    suggestions[0] if suggestions else "Theo gợi ý phù hợp",
+                    enabled=True,
+                )
         state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
     if action == "content_view":
         return await video_profile_scene1_render(query, state, lang)
     if action == "content_edit":
         key = str(state.get("active_content_addon") or "")
-        if key:
-            state = video_profile_studio_step(context, state, "await_content_addon", input_target=key)
+        if key in dict(video_scene3_flow.CONTENT_ADDONS):
+            state = video_profile_studio_step(context, state, "content_detail")
         return await video_profile_scene1_render(query, state, lang)
     if action == "content_remove":
         key = str(state.get("active_content_addon") or "")
@@ -196216,17 +196762,51 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = video_profile_studio_step(context, state, "post_addons")
         return await video_profile_scene1_render(query, state, lang)
     if action == "post_toggle":
-        key = parts[2] if len(parts) > 2 else ""
-        if key in dict(video_scene3_flow.POST_ADDONS):
+        key = str(parts[2] if len(parts) > 2 else "")
+        if key == "watermark_image":
+            key = "logo_image"
+        if key == "mp4_export":
+            state = video_scene3_return_to_parent(context, state, "post_addons")
+        elif key in dict(video_scene3_flow.PUBLIC_POST_ADDONS):
+            if key == "logo_image":
+                current = dict((state.get("postproduction_addons") or {}).get(key) or {})
+                current_value = dict(current.get("value") or {}) if isinstance(current.get("value"), dict) else {}
+                if not current_value.get("asset_file_id"):
+                    logo_asset = next(
+                        (
+                            dict(item) for item in (state.get("reference_assets") or {}).get("items") or []
+                            if isinstance(item, dict) and str(item.get("type") or "") == "logo" and str(item.get("file_id") or "")
+                        ),
+                        {},
+                    )
+                    if logo_asset:
+                        state = video_scene3_flow.configure_post_asset(
+                            state,
+                            key,
+                            file_id=str(logo_asset.get("file_id") or ""),
+                            file_unique_id=str(logo_asset.get("file_unique_id") or ""),
+                            mime_type=str(logo_asset.get("mime_type") or "image/jpeg"),
+                        )
             state["active_post_addon"] = key
             state = video_profile_studio_step(context, state, "post_detail")
         return await video_profile_scene1_render(query, state, lang)
     if action == "post_enable":
         key = str(state.get("active_post_addon") or "")
-        if key in dict(video_scene3_flow.POST_ADDONS):
+        if key in dict(video_scene3_flow.PUBLIC_POST_ADDONS):
             current = dict((state.get("postproduction_addons") or {}).get(key) or {})
             if current.get("enabled"):
                 state = video_scene3_flow.remove_entry(state, "postproduction_addons", key)
+            elif key == "logo_image" and not dict(current.get("value") or {}).get("asset_file_id"):
+                state = video_profile_studio_step(context, state, "await_post_asset_upload", input_target="logo_image")
+                return await video_profile_scene1_render(query, state, lang)
+            elif key == "watermark_text" and not str(dict(current.get("value") or {}).get("text") or "").strip():
+                state = video_profile_studio_step(context, state, "await_post_text", input_target="watermark_text")
+                return await video_profile_scene1_render(query, state, lang)
+            elif key == "voice":
+                state = video_scene3_flow.configure_voice_choice(state, "default_female", user_id=uid)
+            elif key == "music":
+                state = video_scene3_flow.configure_music_source(state, "choose_existing")
+                state = video_scene3_flow.configure_music_vocal_mode(state, "instrumental")
             else:
                 state = video_scene3_flow.set_entry(
                     state,
@@ -196245,6 +196825,52 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             state.update({"active_post_addon": key, "step": "post_detail"})
             state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
+    if action == "post_voice_choice":
+        choice = str(parts[2] if len(parts) > 2 else "")
+        if str(state.get("active_post_addon") or "") == "voice" and choice in video_scene3_flow.VOICE_CHOICES:
+            if choice == "custom_voice" and not video_scene3_flow.personal_voice_asset(state, uid):
+                state = video_profile_studio_step(
+                    context,
+                    state,
+                    "await_material_upload",
+                    input_target="voice_audio",
+                    input_return_step="post_detail",
+                    active_post_addon="voice",
+                )
+                return await video_profile_scene1_render(query, state, lang)
+            state = video_scene3_flow.configure_voice_choice(state, choice, user_id=uid)
+            state.update({"active_post_addon": "voice", "step": "post_detail"})
+            state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_music_source":
+        source_choice = str(parts[2] if len(parts) > 2 else "")
+        if str(state.get("active_post_addon") or "") == "music" and source_choice in video_scene3_flow.MUSIC_SOURCE_CHOICES:
+            state = video_scene3_flow.configure_music_source(state, source_choice)
+            state.update({"active_post_addon": "music", "step": "post_detail"})
+            state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_music_mode":
+        vocal_mode = str(parts[2] if len(parts) > 2 else "")
+        if str(state.get("active_post_addon") or "") == "music" and vocal_mode in video_scene3_flow.MUSIC_VOCAL_MODES:
+            state = video_scene3_flow.configure_music_vocal_mode(state, vocal_mode)
+            state.update({"active_post_addon": "music", "step": "post_detail"})
+            state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_volume":
+        key = str(state.get("active_post_addon") or "")
+        if key in video_scene3_flow.AUDIO_POST_ADDONS:
+            state = video_profile_studio_step(context, state, "post_volume")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_volume_set":
+        key = str(state.get("active_post_addon") or "")
+        volume = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        if key in video_scene3_flow.AUDIO_POST_ADDONS and volume in video_scene3_flow.AUDIO_VOLUME_LEVELS:
+            state = video_scene3_flow.configure_audio_volume(state, key, volume)
+            state = video_scene3_return_to_parent(context, state, "post_detail", active_post_addon=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_volume_done":
+        state = video_scene3_return_to_parent(context, state, "post_detail")
+        return await video_profile_scene1_render(query, state, lang)
     if action == "post_preview_toggle":
         key = str(state.get("active_post_addon") or "")
         if key == "voice":
@@ -196257,9 +196883,42 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "post_view":
         return await video_profile_scene1_render(query, state, lang)
+    if action == "post_asset":
+        if str(state.get("active_post_addon") or "") == "logo_image":
+            state = video_profile_studio_step(context, state, "await_post_asset_upload", input_target="logo_image")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_text":
+        if str(state.get("active_post_addon") or "") == "watermark_text":
+            state = video_profile_studio_step(context, state, "await_post_text", input_target="watermark_text")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_position":
+        key = str(state.get("active_post_addon") or "")
+        current = dict((state.get("postproduction_addons") or {}).get(key) or {})
+        value = dict(current.get("value") or {}) if isinstance(current.get("value"), dict) else {}
+        if key == "logo_image" and not value.get("asset_file_id"):
+            state = video_profile_studio_step(context, state, "await_post_asset_upload", input_target="logo_image")
+        elif key == "watermark_text" and not str(value.get("text") or "").strip():
+            state = video_profile_studio_step(context, state, "await_post_text", input_target="watermark_text")
+        elif key in {"logo_image", "watermark_text"}:
+            state = video_profile_studio_step(context, state, "post_position")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_position_set":
+        key = str(state.get("active_post_addon") or "")
+        position = str(parts[2] if len(parts) > 2 else "")
+        if key in {"logo_image", "watermark_text"} and position in dict(video_scene3_flow.LOGO_POSITIONS):
+            state = video_scene3_flow.configure_post_position(state, key, position)
+            state = video_scene3_return_to_parent(context, state, "post_detail", active_post_addon=key)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "post_position_done":
+        state = video_scene3_return_to_parent(context, state, "post_detail")
+        return await video_profile_scene1_render(query, state, lang)
     if action == "post_edit":
         key = str(state.get("active_post_addon") or "")
-        if key:
+        if key == "logo_image":
+            state = video_profile_studio_step(context, state, "await_post_asset_upload", input_target=key)
+        elif key == "watermark_text":
+            state = video_profile_studio_step(context, state, "await_post_text", input_target=key)
+        elif key:
             parent = "post_detail" if str(state.get("step") or "") == "post_detail" else "post_addons"
             state = video_profile_studio_step(
                 context,
@@ -196303,7 +196962,24 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action == "post_accept_suggestion":
         suggestions = list(state.get("post_addon_suggestion") or video_scene3_flow.post_addon_suggestions(state))
         for key in suggestions:
-            if key in dict(video_scene3_flow.POST_ADDONS):
+            if key == "logo_image":
+                logo_asset = next(
+                    (
+                        dict(item) for item in (state.get("reference_assets") or {}).get("items") or []
+                        if isinstance(item, dict) and str(item.get("type") or "") == "logo" and str(item.get("file_id") or "")
+                    ),
+                    {},
+                )
+                if logo_asset:
+                    state = video_scene3_flow.configure_post_asset(
+                        state,
+                        key,
+                        file_id=str(logo_asset.get("file_id") or ""),
+                        file_unique_id=str(logo_asset.get("file_unique_id") or ""),
+                        mime_type=str(logo_asset.get("mime_type") or "image/jpeg"),
+                    )
+                    state = video_scene3_flow.configure_post_position(state, key, "top_right")
+            elif key in dict(video_scene3_flow.PUBLIC_POST_ADDONS):
                 state = video_scene3_flow.set_entry(
                     state,
                     "postproduction_addons",
@@ -196333,6 +197009,10 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = video_profile_studio_step(context, state, "quality")
         return await video_profile_scene1_render(query, state, lang)
     if action == "quality_info":
+        state = video_profile_studio_step(context, state, "quality_guide")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "quality_info_done":
+        state = video_scene3_return_to_parent(context, state, "quality")
         return await video_profile_scene1_render(query, state, lang)
     if action == "tier":
         quality = min(VIDEO_B14_2_QUALITY_OPTIONS, key=lambda item: abs(item - safe_int(parts[2] if len(parts) > 2 else 200, 200)))

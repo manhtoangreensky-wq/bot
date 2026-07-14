@@ -321,7 +321,7 @@ def test_post_addon_suggestion_does_not_enable_or_execute_any_addon():
     state["reference_assets"] = {"items": [{"type": "logo", "file_id": "logo-1"}]}
     state = video_scene3_flow.set_entry(state, "content_affecting_addons", "captions", "Theo lời dẫn")
     suggestions = video_scene3_flow.post_addon_suggestions(state)
-    assert suggestions == ["mp4_export", "logo_image", "subtitles"]
+    assert suggestions == ["logo_image", "subtitles"]
     assert all(not item["enabled"] for item in state["postproduction_addons"].values())
     assert all(not config.get("applied_to_mp4") for config in video_scene3_flow.POST_ADDON_DEFAULTS.values() if "applied_to_mp4" in config)
 
@@ -373,7 +373,12 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         "video_scene3_requirements_keyboard",
         "video_scene3_materials_keyboard",
         "video_scene3_creative_keyboard",
+        "video_scene3_creative_detail_keyboard",
+        "video_scene3_creative_suggestions_keyboard",
         "video_scene3_content_addon_keyboard",
+        "video_scene3_content_detail_keyboard",
+        "video_scene3_content_suggestions_keyboard",
+        "video_scene3_content_position_keyboard",
         "video_scene3_scene_plan_keyboard",
         "video_scene3_scene_detail_keyboard",
         "video_scene3_transition_keyboard",
@@ -382,9 +387,11 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         "video_scene3_full_review_keyboard",
         "video_scene3_post_keyboard",
         "video_scene3_post_detail_keyboard",
+        "video_scene3_post_position_keyboard",
         "video_scene3_logo_position_keyboard",
         "video_scene3_aspect_keyboard",
         "video_scene3_quality_keyboard",
+        "video_scene3_quality_guide_keyboard",
         "video_scene3_final_keyboard",
         "video_scene3_invoice_keyboard",
         "video_edit_hub_keyboard",
@@ -427,7 +434,12 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         namespace["video_scene3_requirements_keyboard"](state),
         namespace["video_scene3_materials_keyboard"](),
         namespace["video_scene3_creative_keyboard"](state),
+        namespace["video_scene3_creative_detail_keyboard"]({**state, "active_creative": "visual_style"}),
+        namespace["video_scene3_creative_suggestions_keyboard"]({**state, "active_creative": "visual_style"}),
         namespace["video_scene3_content_addon_keyboard"](state),
+        namespace["video_scene3_content_detail_keyboard"]({**state, "active_content_addon": "captions"}),
+        namespace["video_scene3_content_suggestions_keyboard"]({**state, "active_content_addon": "captions"}),
+        namespace["video_scene3_content_position_keyboard"](),
         namespace["video_scene3_scene_plan_keyboard"](),
         namespace["video_scene3_scene_detail_keyboard"](),
         namespace["video_scene3_transition_keyboard"](),
@@ -437,9 +449,11 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         namespace["video_scene3_full_review_keyboard"](),
         namespace["video_scene3_post_keyboard"](state),
         namespace["video_scene3_post_detail_keyboard"]({**state, "active_post_addon": "voice"}),
+        namespace["video_scene3_post_position_keyboard"](),
         namespace["video_scene3_logo_position_keyboard"](),
         namespace["video_scene3_aspect_keyboard"](),
         namespace["video_scene3_quality_keyboard"](),
+        namespace["video_scene3_quality_guide_keyboard"](),
         namespace["video_scene3_final_keyboard"](),
         namespace["video_scene3_invoice_keyboard"](),
         namespace["video_edit_hub_keyboard"](),
@@ -501,6 +515,10 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
     assert [button.callback_data for button in suggestion_markup.inline_keyboard[0]] == [
         f"vprofile|suggest|{index}" for index in range(1, 6)
     ]
+    creative_markup = namespace["video_scene3_creative_suggestions_keyboard"]({**state, "active_creative": "visual_style"})
+    assert [button.text for button in creative_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
+    content_markup = namespace["video_scene3_content_suggestions_keyboard"]({**state, "active_content_addon": "captions"})
+    assert [button.text for button in content_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
 
     microflow_namespace = _keyboard_namespace(
         "video_scene3_keyboard",
@@ -561,7 +579,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
     assert 'kind in {"logo_position", "logo_opacity"}' in handler_source
 
 
-def test_reachable_video_legacy_and_studio_keyboards_also_keep_exact_two_column_contract():
+def test_reachable_video_legacy_and_studio_keyboards_keep_adaptive_one_to_five_contract():
     names = (
         "video_scene3_keyboard", "video_ui_back_label", "build_2col_keyboard", "video_v6_keyboard",
         "main_video_keyboard", "video_prompt_library_keyboard",
@@ -685,7 +703,7 @@ def test_reachable_video_legacy_and_studio_keyboards_also_keep_exact_two_column_
     for markup_index, markup in enumerate(markups):
         callbacks = []
         for row in markup.inline_keyboard:
-            assert len(row) == 2, (markup_index, [button.text for button in row])
+            assert 1 <= len(row) <= 5, (markup_index, [button.text for button in row])
             callbacks.extend(button.callback_data for button in row)
         assert len(callbacks) == len(set(callbacks)), (markup_index, callbacks)
 

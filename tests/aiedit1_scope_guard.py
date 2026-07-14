@@ -9,6 +9,19 @@ LOCAL1_BOOT_COMPAT_TEST = "tests/test_p0_video_local1_manual_editing_smart_split
 LOCAL1_BOOT_COMPAT_MARKER = "test_local1_concat_manifest_is_python311_safe_and_escapes_paths"
 ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
 ARCH1_SCOPE_MARKER = "test_arch1_scope_lock"
+SCENE3UX2_BRANCH_PREFIX = "hotfix/p0-video-scene3ux2-"
+SCENE3UX2_SCOPE_FILES = frozenset(
+    {
+        "bot.py",
+        "services/video_scene3_flow.py",
+        "tests/aiedit1_scope_guard.py",
+        "tests/conftest.py",
+        "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py",
+        "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
+        "tests/test_p0_video_scene3_restore_full_flow.py",
+        "tests/test_p0_video_scene3ux2_guided_style_addon_position_flow.py",
+    }
+)
 ARCH1_PROFILE_FILES = frozenset(
     {
         "knowledge/profiles/architecture_exterior.json",
@@ -101,7 +114,11 @@ def _current_branch():
 
 def aiedit1_scope_active(paths=()):
     normalized = _normalize(paths)
-    return AIEDIT1_TEST_FILE in normalized or _current_branch().startswith(AIEDIT1_BRANCH_PREFIX)
+    return (
+        AIEDIT1_TEST_FILE in normalized
+        or _current_branch().startswith(AIEDIT1_BRANCH_PREFIX)
+        or _current_branch().startswith(SCENE3UX2_BRANCH_PREFIX)
+    )
 
 
 def arch1_scope_active(paths=()):
@@ -123,6 +140,8 @@ def arch1_scope_active(paths=()):
 def aiedit1_scope_files(paths=()):
     normalized = _normalize(paths)
     allowed = set(AIEDIT1_SCOPE_FILES)
+    if _current_branch().startswith(SCENE3UX2_BRANCH_PREFIX):
+        allowed.update(SCENE3UX2_SCOPE_FILES)
     marker_path = Path(__file__).resolve().parents[1] / LOCAL1_BOOT_COMPAT_TEST
     marker_present = (
         marker_path.is_file()
