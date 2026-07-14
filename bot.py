@@ -64751,7 +64751,7 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch / Phụ đề / Lồng tiếng Studio", callback_data="menu|translate")],
+        [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
         [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
         [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
@@ -64809,7 +64809,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch / Phụ đề / Lồng tiếng Studio", callback_data="menu|translate")],
+            [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
             [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
             [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],

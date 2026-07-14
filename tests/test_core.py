@@ -320,7 +320,7 @@ def test_start_keyboard_callbacks_unchanged():
     assert rows == [
         [("🆓 Công cụ miễn phí", "freehub|main", None), ("👤 Tài khoản", "menu|main_profile", None)],
         [("🖼 Tạo ảnh AI", "menu|main_image", None), ("🎬 Tạo video AI", "menu|main_video", None)],
-        [("🎧 Studio âm thanh", "music_quick|showroom|root", None), ("🌐 Dịch / Phụ đề / Lồng tiếng Studio", "menu|translate", None)],
+        [("🎧 Studio âm thanh", "music_quick|showroom|root", None), ("🌐 Dịch thuật", "menu|translate", None)],
         [("📝 Ghi chú / Tài liệu", "menu|main_memory", None), ("📚 Hướng dẫn", "menu|main_guide", None)],
         [("👨‍💼 Hỗ trợ", "menu|support", None), ("💰 Nạp Xu / Bảng giá", "pricing|main", None)],
         [("💬 Góp ý / Báo lỗi", "feedback|start", None), ("🌐 Trung tâm", None, bot.TOAN_AAS_COMMUNITY_URL)],
@@ -2547,7 +2547,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎧 Studio âm thanh" in start_labels
     assert "🎙 Voice Studio" not in start_labels
     assert "🎵 Music Studio" not in start_labels
-    assert "🌐 Dịch / Phụ đề / Lồng tiếng Studio" in start_labels
+    assert "🌐 Dịch thuật" in start_labels
     assert "🎞 Video" not in start_labels
     assert "👨‍💼 Hỗ trợ" in start_labels
     assert "💰 Nạp Xu / Bảng giá" in start_labels
