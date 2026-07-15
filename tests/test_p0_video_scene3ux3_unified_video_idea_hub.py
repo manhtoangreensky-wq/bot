@@ -43,14 +43,14 @@ def test_public_video_menu_hides_profile_studio_and_keeps_compact_two_button_row
     assert '"entry_callback": "videoidea|start"' in matrix
 
 
-def test_video_ideas_is_the_only_public_entry_for_the_integrated_prompt_vault():
+def test_video_ideas_root_is_reference_only_and_has_one_clear_explore_entry():
     menu = _between("def video_idea_menu_keyboard", "\n\ndef video_idea_catalog_categories_text")
     assert '"videoidea|explore"' in menu
-    assert '"vpromptlib|start"' in menu
-    assert '"videoidea|catalog|sales"' in menu
-    assert '"videoidea|catalog|story"' in menu
-    assert '"videoidea|source_start"' in menu
-    assert '"videoidea|kind|custom"' in menu
+    for removed in (
+        '"vpromptlib|start"', '"videoidea|catalog|sales"', '"videoidea|catalog|story"',
+        '"videoidea|source_start"', '"videoidea|kind|custom"',
+    ):
+        assert removed not in menu
     prompt_menu = _between("def video_prompt_library_keyboard", "\n\ndef video_prompt_library_guard_text")
     assert '("⬅️ Ý tưởng video" if is_vi else "⬅️ Video ideas", "videoidea|start")' in prompt_menu
 
@@ -58,11 +58,13 @@ def test_video_ideas_is_the_only_public_entry_for_the_integrated_prompt_vault():
 def test_catalog_is_broad_profile_aware_and_provider_free():
     status = video_idea_catalog.catalog_status()
     assert status["categories"] == 8
-    assert status["ideas"] >= 24
+    assert status["ideas"] >= 48
     assert status == {
         "categories": 8,
         "ideas": len(video_idea_catalog.IDEAS),
+        "scene_count_options": [1, 2, 3, 5, 10, 20],
         "duration_options": [8, 16, 24, 40, 80, 160],
+        "reference_only": True,
         "provider_called": False,
         "job_created": False,
         "outbox_created": False,
@@ -70,11 +72,12 @@ def test_catalog_is_broad_profile_aware_and_provider_free():
         "xu_charged": 0,
     }
     profile_ids = {item["recommended_profile_id"] for item in video_idea_catalog.IDEAS}
-    assert {
-        "architecture_walkthrough", "space_renovation", "real_estate_property",
-        "cinematic_vfx", "character", "fashion_lookbook", "product_3d_showcase",
-        "app_game_demo", "website_saas_demo", "tutorial_explainer", "ugc_social_creator",
-    }.issubset(profile_ids)
+    assert profile_ids == {
+        "architecture_exterior", "architecture_interior", "architecture_walkthrough",
+        "space_renovation", "real_estate_property", "cinematic_vfx", "animation_2d_3d",
+        "character", "fashion_lookbook", "product_3d_showcase", "app_game_demo",
+        "website_saas_demo", "tutorial_explainer", "ugc_social_creator",
+    }
     source = (ROOT / "services" / "video_idea_catalog.py").read_text(encoding="utf-8").lower()
     for forbidden in ("requests.", "httpx.", "aiohttp.", "create_job(", "debit_wallet", "charge_xu"):
         assert forbidden not in source
@@ -132,14 +135,14 @@ def test_catalog_number_buttons_are_one_compact_row_and_flow_is_editable():
     keyboard = _between("def video_idea_catalog_options_keyboard", "\n\ndef video_idea_catalog_detail_text")
     assert "for index in range(1, 6)" in keyboard
     assert '"videoidea|catalog_refresh"' in keyboard
-    assert '"videoidea|kind|custom"' in keyboard
+    assert '"videoidea|kind|custom"' not in keyboard
     handler = _between("async def handle_video_idea_callback", "\n\ndef menu_text_main_ai")
     for action in (
-        "explore", "catalog", "catalog_refresh", "catalog_choose", "catalog_duration",
-        "source_start", "catalog_source", "catalog_edit", "catalog_image_prompt",
-        "catalog_video_prompt", "routes", "handoff",
+        "explore", "catalog", "catalog_refresh", "catalog_choose", "catalog_scene_count",
+        "catalog_result", "handoff",
     ):
         assert f'"{action}"' in handler
+    assert "video_idea_catalog.build_scene3_handoff_state(plan)" in handler
 
 
 def test_catalog_save_and_legacy_entry_return_to_the_canonical_idea_hub():
@@ -155,12 +158,9 @@ def test_catalog_save_and_legacy_entry_return_to_the_canonical_idea_hub():
 
 def test_handoff_preserves_plan_but_has_no_preconfirm_job_provider_or_wallet_side_effect():
     handoff = _between('    if action == "handoff":', '    if action == "kind":')
-    assert "selected_scene_count" in handoff
-    assert "duration_seconds" in handoff
-    assert "image_prompt_seed" in handoff
-    assert "video_prompt_seed" in handoff
-    assert "provider_called=False" in handoff
-    assert "xu_charged=0" in handoff
+    assert "video_idea_catalog.build_scene3_handoff_state(plan)" in handoff
+    assert "save_video_profile_studio_state(context, state)" in handoff
+    assert "video_profile_scene1_render(query, state, lang)" in handoff
     for forbidden in (
         "create_product_video_job", "enqueue", "provider.submit", "submit_provider",
         "wallet_debit", "charge_wallet", "deduct_xu",

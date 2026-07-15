@@ -115,6 +115,7 @@ def build_semantic_scene_plan(
     requirements: dict[str, Any] | None = None,
     assets: dict[str, Any] | None = None,
     addon_plan: dict[str, Any] | None = None,
+    semantic_beats: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create exactly N complete scene beats; never creates a provider job."""
 
@@ -124,6 +125,7 @@ def build_semantic_scene_plan(
     requirements = dict(requirements or {})
     assets = dict(assets or {})
     addon_plan = dict(addon_plan or {})
+    semantic_beats = [dict(item) for item in semantic_beats or [] if isinstance(item, dict)]
     content_addons = dict(addon_plan.get("content_affecting") or {})
     constraints = dict(addon_plan.get("composition_constraints") or {})
     family = profile_family(profile_id)
@@ -144,20 +146,21 @@ def build_semantic_scene_plan(
     previous: dict[str, Any] | None = None
     for index, position in enumerate(positions, start=1):
         template = family_templates[position]
-        role_base = _clean(template.get("role") or "development")
+        beat = semantic_beats[index - 1] if index <= len(semantic_beats) else {}
+        role_base = _clean(beat.get("role") or template.get("role") or "development")
         role = role_base if count <= len(family_templates) else f"{role_base}_{index:02d}"
-        main_idea = _scene_idea(template, subject_clean, context_clean, index, count)
+        main_idea = _clean(beat.get("main_idea")) or _scene_idea(template, subject_clean, context_clean, index, count)
         if count == 1:
             final_template = family_templates[-1]
             role = "complete_story"
-            main_idea = f"Trình bày trọn vẹn {subject_clean}: thiết lập rõ, hoàn tất hành động chính và khép lại bằng kết quả"
+            main_idea = _clean(beat.get("main_idea")) or f"Trình bày trọn vẹn {subject_clean}: thiết lập rõ, hoàn tất hành động chính và khép lại bằng kết quả"
         start_state = (
             _clean(previous.get("completion_state"))
             if previous
             else f"{subject_clean} ở trạng thái mở đầu rõ ràng trong {context_clean or 'bối cảnh đã chọn'}"
         )
-        action = _clean(template.get("action") or f"Hoàn tất một hành động rõ ràng cho {main_idea}")
-        completion = _clean(template.get("completion") or f"Ý cảnh {index} đã hoàn tất")
+        action = _clean(beat.get("action") or template.get("action") or f"Hoàn tất một hành động rõ ràng cho {main_idea}")
+        completion = _clean(beat.get("completion") or template.get("completion") or f"Ý cảnh {index} đã hoàn tất")
         if count == 1:
             action = f"Thiết lập {subject_clean}, thực hiện trọn hành động chính và đi tới kết quả trong cùng một nhịp hoàn chỉnh"
             completion = _clean(final_template.get("completion") or f"Câu chuyện về {subject_clean} đã kết thúc trọn vẹn")
@@ -175,7 +178,7 @@ def build_semantic_scene_plan(
             "environment": context_clean or (_clean("; ".join(continuity.get("environment") or [])) or "bối cảnh phù hợp profile"),
             "start_state": start_state,
             "primary_action": action,
-            "development": f"Phát triển duy nhất ý cảnh {index}, để hành động diễn ra đủ đầu, giữa và cuối trong {SCENE_SECONDS} giây.",
+            "development": _clean(beat.get("development")) or f"Phát triển duy nhất ý cảnh {index}, để hành động diễn ra đủ đầu, giữa và cuối trong {SCENE_SECONDS} giây.",
             "completion_state": completion,
             "camera": str(requirements.get("camera") or continuity.get("camera_language") or "camera có động cơ và dừng tự nhiên"),
             "lighting": str(requirements.get("lighting") or continuity.get("lighting_state") or "ánh sáng nhất quán"),
@@ -224,6 +227,7 @@ def build_semantic_scene_plan(
         "continuity_contract": continuity,
         "continuity_validation": continuity_result,
         "transitions": transitions,
+        "semantic_beats_source": "curated_idea_catalog" if semantic_beats else "profile_template",
         "scenes": scenes,
         "provider_called": False,
         "job_created": False,
