@@ -417,7 +417,8 @@ def test_videoflow_lock_no_provider_submit_from_planning_callbacks():
 def test_videoflow_lock_hot_trend_untouched():
     rows = _rows(bot.task3d_product_intro_keyboard("video_trend", "vi"))
     assert rows == [
-        [("🔥 Gợi ý trend hot", "vproduct|trend_today"), ("✍️ Tự nhập trend/ý tưởng", "vproduct|trend_custom")],
+        [("🔥 Gợi ý trend hot", "vproduct|trend_today"), ("🗂 Ý tưởng video có sẵn", "vproduct|idea_library|video_trend")],
+        [("✍️ Tự nhập trend", "vproduct|trend_custom"), ("📖 Xem hướng dẫn", "menu|guide_video_ai")],
         [("⬅️ Menu video", "menu|main_video"), ("🏠 Menu chính", "menu|main")],
     ]
     assert bot.VIDEO_STEP_BACK_MATRIX["video_trend"]["asset_intake"] == "idea_suggestions"

@@ -110,7 +110,8 @@ def test_uiflow1_hot_trend_flow_locked():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
     callbacks = _callbacks(bot.task3d_product_intro_keyboard("video_trend", "vi"))
     assert "🔥 Gợi ý trend hot" in labels
-    assert "✍️ Tự nhập trend/ý tưởng" in labels
+    assert "✍️ Tự nhập trend" in labels
+    assert "🗂 Ý tưởng video có sẵn" in labels
     assert "vproduct|trend_today" in callbacks
     assert "vproduct|trend_custom" in callbacks
     assert "video_trend" in bot.VIDEO_SCENE2_PUBLIC_PRODUCTS
