@@ -131504,7 +131504,7 @@ def img2vid_slideshow_confirm_keyboard() -> InlineKeyboardMarkup:
         ],
     ])
 
-def img2vid_ai_count_keyboard() -> InlineKeyboardMarkup:
+def img2vid_ai_count_keyboard(back_callback: str = "framevideo|ai_prepared") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("2 ảnh", callback_data="framevideo|ai_count|2"),
@@ -131514,10 +131514,24 @@ def img2vid_ai_count_keyboard() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("✍️ Nhập số khác", callback_data="framevideo|ai_count_custom")],
         [
-            InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
             InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
         ],
     ])
+
+def img2vid_ai_suggestions(state: dict | None = None, lang: str = "vi") -> list[str]:
+    state = state if isinstance(state, dict) else {}
+    offset = max(0, _safe_int(state.get("ai_suggestion_offset"), 0))
+    return video_v6_rotating_items(quick_image_suggestion_bank(lang), offset, 5)
+
+def img2vid_ai_prompt_from_topic(topic: str = "") -> str:
+    clean_topic = re.sub(r"\s+", " ", str(topic or "").strip())[:500]
+    package = build_image_prompt(
+        clean_topic,
+        style="coherent visual series, consistent subject, consistent palette, clean sequence for a slideshow video",
+        tier="standard",
+    )
+    return str(package.get("prompt") or clean_topic).strip()[:1200]
 
 def img2vid_ai_confirm_text(state: dict | None) -> str:
     state = state if isinstance(state, dict) else {}
@@ -131963,7 +131977,7 @@ def frame_video_collect_text(count: int = 0) -> str:
 def frame_video_collect_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xong", callback_data="framevideo|done"), InlineKeyboardButton("❌ Hủy", callback_data="framevideo|cancel")],
-        [InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
 def frame_video_planning_suggestions(state: dict | None = None, lang: str = "vi") -> dict:
@@ -132893,12 +132907,14 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
         if len(prompt) < 3:
             await update.message.reply_text("⚠️ Prompt hơi ngắn. Anh/chị nhập rõ chủ đề ảnh muốn tạo nhé.")
             return True
-        state["ai_prompt"] = prompt[:1200]
-        state["step"] = "ai_count"
+        state["ai_prompt"] = img2vid_ai_prompt_from_topic(prompt)
+        state["ai_prompt_source"] = "custom"
+        state["step"] = "ai_prepared"
         set_frame_video_state(uid, state)
         await update.message.reply_text(
-            "🔢 Chọn số ảnh AI muốn tạo trước khi ghép video.",
-            reply_markup=img2vid_ai_count_keyboard(),
+            ivf.frame_video_ai_prompt_text(state.get("ai_prompt") or "", get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_prompt_keyboard(get_user_language(uid) or "vi"),
         )
         return True
     if step == "ai_count_custom":
@@ -154050,11 +154066,74 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
     if action == "ai_prompt":
         state["step"] = "ai_prompt"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, "✍️ Nhập prompt/nội dung ảnh muốn tạo.\n\nTOAN AAS sẽ tạo nhiều ảnh cùng chủ đề trước, sau đó anh/chị có thể ghép thành video.", parse_mode=None, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]))
+        return await safe_edit_or_send(
+            query,
+            "✍️ <b>Tự nhập prompt bộ ảnh</b>\n\nMô tả chủ thể, bối cảnh và phong cách muốn giữ xuyên suốt. TOAN AAS sẽ soạn lại thành một bộ ảnh liên quan để ghép video.\n\nVí dụ: bộ ảnh giới thiệu quán cà phê ven biển, ánh sáng bình minh, tông xanh ngọc, từ toàn cảnh đến cận cảnh sản phẩm.",
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_custom_prompt_keyboard(lang),
+        )
+    if action in {"ai_suggest", "ai_refresh"}:
+        if action == "ai_refresh":
+            state["ai_suggestion_offset"] = max(0, _safe_int(state.get("ai_suggestion_offset"), 0)) + 5
+        state["step"] = "ai_suggestions"
+        state["ai_prompt_source"] = "suggestion"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_ai_suggestions_text(img2vid_ai_suggestions(state, lang), lang),
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_suggestions_keyboard(lang),
+        )
+    if action == "ai_pick" and len(parts) > 2:
+        suggestions = img2vid_ai_suggestions(state, lang)
+        index = max(1, min(_safe_int(parts[2], 1), len(suggestions) or 1))
+        topic = suggestions[index - 1] if suggestions else "Bộ ảnh sản phẩm đồng nhất"
+        state["ai_selected_topic"] = topic
+        state["ai_prompt"] = img2vid_ai_prompt_from_topic(topic)
+        state["ai_prompt_source"] = "suggestion"
+        state["step"] = "ai_prepared"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_ai_prompt_text(state.get("ai_prompt") or "", lang),
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_prompt_keyboard(lang, suggestion_source=True),
+        )
+    if action == "ai_prepared":
+        prompt = str(state.get("ai_prompt") or "").strip()
+        if not prompt:
+            state["step"] = "ai_entry"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                ivf.frame_video_ai_first_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=ivf.frame_video_ai_first_keyboard(lang),
+            )
+        state["step"] = "ai_prepared"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_ai_prompt_text(prompt, lang),
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_prompt_keyboard(
+                lang,
+                suggestion_source=str(state.get("ai_prompt_source") or "") == "suggestion",
+            ),
+        )
     if action == "ai_count_menu":
+        if not str(state.get("ai_prompt") or "").strip():
+            state["step"] = "ai_entry"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                ivf.frame_video_ai_first_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=ivf.frame_video_ai_first_keyboard(lang),
+            )
         state["step"] = "ai_count"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, "🔢 Chọn số ảnh AI muốn tạo trước khi ghép video.", parse_mode=None, reply_markup=img2vid_ai_count_keyboard())
+        return await safe_edit_or_send(query, "🔢 Chọn số ảnh AI muốn tạo trước khi ghép video.", parse_mode=None, reply_markup=img2vid_ai_count_keyboard("framevideo|ai_prepared"))
     if action == "ai_count" and len(parts) > 2:
         count = max(1, min(_safe_int(parts[2], 1), IMG2VID_AI_IMAGE_MAX_COUNT))
         state["ai_image_count"] = count
@@ -154176,13 +154255,15 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         if action == "ai_first":
             clear_media_creator_pending_states(uid)
             set_frame_video_state(uid, {
-                "step": "ai_prompt",
+                "step": "ai_entry",
                 "photos": [],
                 "img2vid_lock1": True,
                 "mode": "ai_images_then_slideshow",
                 "image_sources": "generated",
                 "image_generation_requested": True,
                 "source": "img2vid_ai_images",
+                "ai_suggestion_offset": 0,
+                "ai_prompt_source": "",
                 "ratio": "9x16",
                 "duration": "standard",
                 "effect": "fade",
