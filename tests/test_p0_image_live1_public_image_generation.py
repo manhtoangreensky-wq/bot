@@ -1,3 +1,4 @@
+import ast
 import subprocess
 from pathlib import Path
 
@@ -51,6 +52,11 @@ def _section(source: str, start: str, end: str = "") -> str:
         assert end in body
         body = body.split(end, 1)[0]
     return body
+
+
+def _source_slice(source: str, start: str, end: str) -> str:
+    assert start in source and end in source
+    return source[source.index(start):source.index(end)]
 
 
 def test_image_live_final_confirm_routes_to_delivery_first_before_legacy_billing():
@@ -149,10 +155,76 @@ def test_image_public_status_command_is_registered_safe_and_readonly():
     assert 'CommandHandler("image_public_status", cmd_image_public_status)' in BOT_SOURCE
 
 
+def test_quick_image_public_ux_has_two_clear_lanes_and_five_number_row():
+    entry = _section(BOT_SOURCE, "def quick_image_entry_keyboard", "def quick_image_suggestions_text")
+    suggestions = _section(BOT_SOURCE, "def quick_image_suggestions_text", "def quick_image_prepared_prompt_text")
+    prepared = _section(BOT_SOURCE, "def quick_image_prepared_prompt_keyboard", "def quick_image_custom_prompt_text")
+
+    assert "Chọn từ 5 gợi ý" in entry
+    assert "Tự nhập prompt" in entry
+    assert 'callback_data="menu|main_image"' in entry
+    assert "range(1, 6)" in suggestions
+    assert "5 ý tưởng gợi ý tạo ảnh" in suggestions
+    assert "qi_pick_4" not in suggestions  # Buttons are generated from the one compact numeric row.
+    assert "Đổi gợi ý" in suggestions
+    assert "Chọn chủ đề khác" not in prepared
+    assert "Đổi ý tưởng" in prepared
+    assert "qi_back_source" in prepared
+
+
+def test_quick_image_back_stack_and_rotation_follow_current_source():
+    callback = _section(BOT_SOURCE, "async def handle_create_media_callback", "async def cmd_tool_test_workflow_image")
+    flow = _section(callback, 'if action in {"qi_suggest", "qi_refresh"}:', 'if action == "qi_choose_ratio":')
+
+    assert "offset += 5" in flow
+    assert "min(5," in flow
+    assert 'if action == "qi_back_source":' in flow
+    assert 'state.get("prompt_source") == "custom"' in flow
+    assert 'set_quick_image_flow(uid, "custom_prompt"' in flow
+    assert 'set_quick_image_flow(uid, "suggestions"' in flow
+
+
+def test_quick_image_planning_has_no_side_effect_before_final_confirm():
+    callback = _section(BOT_SOURCE, "async def handle_create_media_callback", "async def cmd_tool_test_workflow_image")
+    planning = _section(callback, 'if action == "quick_image":', 'if action.startswith("ia_") or action.startswith("va_"):')
+
+    assert '"provider_submit_source": "public_user_final_confirm"' in planning
+    assert "set_shopaikey_pending_confirmation" in planning
+    for forbidden in (
+        "shopaikey_image_generate(",
+        "create_shopaikey_job(",
+        "spend_fixed_credit_info(",
+        "deduct_dynamic_credit(",
+        "add_credit(",
+    ):
+        assert forbidden not in planning
+
+
+def test_img2vid_public_image_confirm_bypasses_hidden_freeze_but_not_public_guard():
+    helper = _section(BOT_SOURCE, "async def handle_img2vid_lock1_callback", "async def handle_frame_video_callback")
+    confirm = _section(helper, 'if action == "ai_generate_confirm":', 'state["step"] = "seconds"')
+
+    assert "shopaikey_provider_submit_guard(" in confirm
+    assert 'source="public_user_final_confirm"' in confirm
+    assert "confirmed=True" in confirm
+    assert 'shopaikey_public_generation_guard("image")' not in confirm
+    assert confirm.index("shopaikey_provider_submit_guard(") < confirm.index("shopaikey_image_generate(")
+
+
+def test_changed_image_flow_regions_parse_as_python():
+    for start, end in (
+        ("def quick_image_suggestions", "def quick_image_ratio_text"),
+        ("async def handle_img2vid_lock1_callback", "async def handle_frame_video_callback"),
+        ("async def handle_create_media_callback", "async def cmd_tool_test_workflow_image"),
+    ):
+        ast.parse(_source_slice(BOT_SOURCE, start, end))
+
+
 def test_image_live1_no_forbidden_runtime_scope_or_provider_submit_in_tests():
     changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
+        "tests/test_core.py",
         "tests/test_p0_image_live1_public_image_generation.py",
         "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
         "tests/test_p0_image_live1d_vproduct_public_confirm_unblocked.py",

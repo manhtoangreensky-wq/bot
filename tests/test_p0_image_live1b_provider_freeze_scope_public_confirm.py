@@ -176,6 +176,7 @@ def test_no_payos_wallet_payment_destructive_changes():
     changed = without_aiedit1_scope(_changed_files())
     allowed = {
         "bot.py",
+        "tests/test_core.py",
         "tests/test_p0_aichat6_open_public_live_flows.py",
         "tests/test_p0_image_live1_public_image_generation.py",
         "tests/test_p0_image_live1b_provider_freeze_scope_public_confirm.py",
