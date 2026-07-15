@@ -1408,7 +1408,19 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
 
         def _full_scene_tasks(existing_items: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
             by_scene: dict[int, dict[str, Any]] = {}
+            cards_by_scene: dict[int, dict[str, Any]] = {}
+            for fallback_index, raw_card in enumerate(payload.get("scene_cards") or [], start=1):
+                if not isinstance(raw_card, dict):
+                    continue
+                card = dict(raw_card)
+                card_index = max(
+                    1,
+                    min(safe_scene_count, _safe_int(card.get("scene_index"), fallback_index)),
+                )
+                cards_by_scene[card_index] = card
             for idx in range(1, safe_scene_count + 1):
+                card = cards_by_scene.get(idx, {})
+                provider_prompt = str(card.get("provider_prompt") or card.get("video_prompt") or "")
                 by_scene[idx] = {
                     "scene_index": idx,
                     "scene_id": idx,
@@ -1428,6 +1440,11 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     "fallback_count": 0,
                     "provider_wait_elapsed_seconds": 0,
                     "provider_started_at_epoch": "",
+                    "scene_role": str(card.get("role") or ""),
+                    "scene_prompt": provider_prompt,
+                    "provider_prompt": provider_prompt,
+                    "image_prompt": str(card.get("image_prompt") or ""),
+                    "scene_prompt_source": "video_project_scene" if card else "",
                 }
             for item in existing_items or []:
                 if not isinstance(item, dict):
