@@ -21,8 +21,12 @@ def _between(start: str, end: str) -> str:
 
 def test_reference_catalog_has_six_ideas_per_group_and_covers_all_public_profiles():
     counts = Counter(str(item["category"]) for item in video_idea_catalog.IDEAS)
-    assert counts == {key: 6 for key, _label in video_idea_catalog.CATEGORIES}
-    assert len(video_idea_catalog.IDEAS) == 48
+    old_keys = {"sales", "ugc", "education", "story", "space", "lifestyle", "digital", "visual"}
+    new_keys = {"history", "sports", "travel", "industry", "data_news", "self_help", "meme", "asmr"}
+    assert all(counts[key] == 6 for key in old_keys)
+    assert all(counts[key] >= 3 for key in new_keys)
+    assert sum(counts[key] for key in old_keys) == 48
+    assert len(video_idea_catalog.IDEAS) == 72
     catalog_profiles = {str(item["recommended_profile_id"]) for item in video_idea_catalog.IDEAS}
     public_profiles = {key for key, _label in video_scene3_flow.TECHNICAL_PROFILES}
     assert len(public_profiles) == 14
@@ -36,8 +40,8 @@ def test_reference_catalog_has_six_ideas_per_group_and_covers_all_public_profile
 
 
 def test_public_root_removes_duplicate_ad_story_source_and_custom_routes():
-    menu = _between("def video_idea_menu_keyboard", "\n\ndef video_idea_catalog_categories_text")
-    assert menu.count('"videoidea|explore"') == 1
+    menu = _between("def video_idea_menu_keyboard", "\n\ndef _video_idea_dynamic_db")
+    assert menu.count('"videa|page|1"') == 1
     for removed in (
         "Ý tưởng quảng cáo", "Ý tưởng điện ảnh", "Từ ảnh/video có sẵn",
         "Tự nhập & chỉnh nhanh", "vpromptlib|start", "videoidea|source_start",

@@ -44,8 +44,8 @@ def test_public_video_menu_hides_profile_studio_and_keeps_compact_two_button_row
 
 
 def test_video_ideas_root_is_reference_only_and_has_one_clear_explore_entry():
-    menu = _between("def video_idea_menu_keyboard", "\n\ndef video_idea_catalog_categories_text")
-    assert '"videoidea|explore"' in menu
+    menu = _between("def video_idea_menu_keyboard", "\n\ndef _video_idea_dynamic_db")
+    assert '"videa|page|1"' in menu
     for removed in (
         '"vpromptlib|start"', '"videoidea|catalog|sales"', '"videoidea|catalog|story"',
         '"videoidea|source_start"', '"videoidea|kind|custom"',
@@ -57,10 +57,10 @@ def test_video_ideas_root_is_reference_only_and_has_one_clear_explore_entry():
 
 def test_catalog_is_broad_profile_aware_and_provider_free():
     status = video_idea_catalog.catalog_status()
-    assert status["categories"] == 8
-    assert status["ideas"] >= 48
+    assert status["categories"] == 16
+    assert status["ideas"] >= 72
     assert status == {
-        "categories": 8,
+        "categories": 16,
         "ideas": len(video_idea_catalog.IDEAS),
         "scene_count_options": [1, 2, 3, 5, 10, 20],
         "duration_options": [8, 16, 24, 40, 80, 160],

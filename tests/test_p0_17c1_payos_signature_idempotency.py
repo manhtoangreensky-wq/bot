@@ -325,5 +325,14 @@ def test_p0_17c1_static_guard_no_unrelated_files_touched():
         "tests/test_p0_cskh5c_business_self_echo_duplicate_guard.py",
         "tests/test_p0_cskh6_human_touch_playbook_safe_training_pack.py",
         "tests/test_p0_cskh_aichat3_context_brain_retrieval.py",
+        "services/video_idea_catalog.py",
+        "services/video_idea_script_intake.py",
+        "services/video_idea_store.py",
+        "tests/test_p0_video_idea2_dynamic_presets_admin_script_intake.py",
+        "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
+        "tests/test_p0_video_scene3ux3_unified_video_idea_hub.py",
+        "tests/test_p0_video_scene3ux4_reference_only_idea_hub.py",
+        "tests/test_p0_17b7_1_video_menu_cleanup.py",
+        "tests/test_p0_18f_video_menu_route_audit_fix_only.py",
     }
     assert changed <= allowed
