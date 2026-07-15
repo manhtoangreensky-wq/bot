@@ -227,16 +227,18 @@ def test_main_video_menu_hides_studio_but_preserves_internal_route_and_edit_hub(
 
 
 def test_edit_video_hub_restores_only_tools_with_real_existing_handlers() -> None:
-    hub = _source_between("def video_edit_hub_text", "def video_editor_menu_text")
+    hub = _source_between("def video_edit_hub_keyboard", "def video_edit_info_text")
     assert "✨ Chỉnh sửa & nâng cấp bằng AI" in hub
     assert "✂️ Chỉnh sửa thủ công" in hub
-    assert "🎞️ Cắt, ghép & sắp xếp" in hub
+    assert "🧹 Khôi phục chất lượng" in hub
+    assert "❓ Hướng dẫn công cụ này" in hub
     for callback in (
-        '"videoedit|ai"', '"videoedit|manual"', '"videoedit|audio"',
-        '"videoedit|timeline"', '"videoedit|effects"', '"videoedit|restore"',
-        '"videoedit|plan"', '"videoedit|guide"', '"menu|main_video"',
+        '"videoedit|ai"', '"videoedit|manual"', '"videoedit|restore"',
+        '"videoedit|guide"', '"menu|main_video"',
     ):
         assert callback in hub
+    for removed in ('"videoedit|audio"', '"videoedit|timeline"', '"videoedit|effects"', '"videoedit|plan"'):
+        assert removed not in hub
     assert "videoedit|quick|" not in hub
 
 

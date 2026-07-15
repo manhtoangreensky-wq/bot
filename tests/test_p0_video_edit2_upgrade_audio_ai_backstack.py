@@ -23,14 +23,17 @@ def test_edit2_hub_is_compact_and_old_top_level_tools_are_removed() -> None:
     expected = (
         "videoedit|ai",
         "videoedit|manual",
-        "videoedit|audio",
-        "videoedit|timeline",
-        "videoedit|effects",
         "videoedit|restore",
-        "videoedit|plan",
         "videoedit|guide",
     )
     assert all(callback in block for callback in expected)
+    for removed_callback in (
+        "videoedit|audio",
+        "videoedit|timeline",
+        "videoedit|effects",
+        "videoedit|plan",
+    ):
+        assert removed_callback not in block
     assert "Đổi kích thước/tỉ lệ" not in block
     assert "Nén/chuyển MP4" not in block
     assert "Thêm phụ đề SRT" not in block
@@ -40,17 +43,23 @@ def test_edit2_hub_is_compact_and_old_top_level_tools_are_removed() -> None:
 def test_edit2_manual_menu_exposes_only_truthful_operations() -> None:
     block = _between("def video_local_manual_options_keyboard", "def video_local_split_options_text")
     for label in (
+        "Cắt & chia đoạn",
+        "Ghép & sắp xếp",
+        "Chỉnh âm thanh",
+        "Hiệu ứng & chuyển động",
+        "Đổi tốc độ",
+        "Xoay / lật",
         "Cắt đầu/cuối",
         "Bỏ đoạn giữa",
-        "Chia đoạn",
-        "Ghép nhiều video",
-        "Đổi thứ tự video ghép",
-        "Đổi tốc độ",
-        "Xoay",
-        "Lật",
-        "Đặt lại thao tác",
+        "Chia thành nhiều đoạn",
+        "Thêm video để ghép",
+        "Đổi thứ tự",
+        "Xoay video",
+        "Lật video",
     ):
         assert label in block
+    assert "Đặt lại thao tác" not in block
+    assert "videoedit|reset_manual" not in block
     for removed in ("aspect", "resolution", "volume", "srt", "text_overlay", "logo", "color_preset"):
         assert f'videoedit|{removed}' not in block
 
@@ -131,6 +140,7 @@ def test_edit2_effect_timing_and_remove_are_planning_only() -> None:
 def test_edit2_back_stack_is_contextual() -> None:
     source = _between("def video_ai_edit_entry_back", "def _video_ai_edit_lane_label")
     assert '"effects": "videoedit|effects"' in source
+    assert '"manual_effects": "videoedit|manual_effects"' in source
     assert '"restore": "videoedit|restore"' in source
     assert "video_ai_edit_entry_back(state" in source
     local = _between("def video_local_source_summary_keyboard", "def video_local_manual_options_text")
@@ -160,8 +170,10 @@ def test_edit2_legacy_callbacks_are_read_only_before_normalization() -> None:
         "logo",
         "srt",
         "compress",
+        "reset_manual",
+        "cut",
     ):
-        assert f'"{removed}":' in read_only
+        assert f'"{removed}"' in read_only
 
 
 def test_edit2_local_suggestions_are_rule_based_default_off_and_side_effect_free() -> None:

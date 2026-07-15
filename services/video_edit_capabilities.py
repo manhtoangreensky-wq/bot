@@ -121,7 +121,7 @@ CAPABILITIES = (
     _capability(
         "audio_master_volume",
         "Âm lượng tổng",
-        "Chỉnh toàn bộ track âm thanh gốc ở mức 20, 40, 60, 80, 100% hoặc mức tùy chọn.",
+        "Chỉnh toàn bộ âm thanh gốc ở mức 20, 40, 60, 80, 100% hoặc mức tùy chọn.",
         section="audio",
         execution_owner="video_local_editing",
         local_or_provider="local",
@@ -142,10 +142,10 @@ CAPABILITIES = (
             risk_notes="Không được tuyên bố tách stem nếu chưa có track riêng hoặc separator thật.",
         )
         for key, name, description in (
-            ("audio_dialogue", "Giọng nói / đối thoại", "Chỉnh riêng lời nói khi nguồn có track giọng tách biệt."),
-            ("audio_music", "Nhạc nền", "Chỉnh riêng nhạc khi nguồn có track nhạc tách biệt."),
-            ("audio_ambience", "Âm thanh môi trường", "Chỉnh riêng ambience khi nguồn có track môi trường tách biệt."),
-            ("audio_sfx", "Hiệu ứng âm thanh", "Chỉnh riêng SFX khi nguồn có track hiệu ứng tách biệt."),
+            ("audio_dialogue", "Giọng nói / đối thoại", "Chỉnh riêng lời nói khi video có lớp giọng tách biệt."),
+            ("audio_music", "Nhạc nền", "Chỉnh riêng nhạc khi video có lớp nhạc tách biệt."),
+            ("audio_ambience", "Âm thanh môi trường", "Chỉnh riêng âm thanh môi trường khi video có lớp âm thanh tách biệt."),
+            ("audio_sfx", "Hiệu ứng âm thanh", "Chỉnh riêng hiệu ứng khi video có lớp hiệu ứng tách biệt."),
         )
     ),
     _capability(
@@ -287,11 +287,11 @@ def audio_source_truth(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "separate_stems": separate_stems,
         "independently_adjustable": independently_adjustable,
         "public_summary": (
-            "Nguồn có các track âm thanh tách riêng."
+            "Nguồn có các lớp âm thanh tách riêng."
             if independently_adjustable
             else "Nguồn chỉ có âm thanh đã trộn; hệ thống chỉ chỉnh âm lượng tổng."
             if has_audio
-            else "Nguồn không có track âm thanh."
+            else "Nguồn không có âm thanh."
         ),
     }
 
