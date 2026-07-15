@@ -666,6 +666,7 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     ):
         base[field] = dict(base.get(field) or {})
     base["transition_plan"] = [dict(item) for item in base.get("transition_plan") or [] if isinstance(item, dict)]
+    base["idea_scene_beats"] = [dict(item) for item in base.get("idea_scene_beats") or [] if isinstance(item, dict)][:MAX_SCENES]
     base["suggestions"] = [dict(item) for item in base.get("suggestions") or [] if isinstance(item, dict)][:5]
     base["suggestion_history"] = [list(items) for items in base.get("suggestion_history") or [] if isinstance(items, list)][-5:]
     base["content_type_history"] = [str(item) for item in base.get("content_type_history") or [] if content_type(str(item))][-10:]
@@ -1379,6 +1380,7 @@ def build_planning_package(state: dict[str, Any]) -> dict[str, Any]:
         requirements=requirements,
         assets=dict(updated.get("reference_assets") or updated.get("assets") or {}),
         addon_plan=addon_plan,
+        semantic_beats=[dict(item) for item in updated.get("idea_scene_beats") or [] if isinstance(item, dict)],
     )
     package = video_scene_prompt_builder.build_prompt_package(plan)
     return initialize_scene_artifacts(updated, package)
