@@ -44,7 +44,7 @@ def test_canonical_wizard_is_scene_first_and_price_is_near_end():
     assert video_scene3_flow.CANONICAL_STEPS == (
         "subject", "scene_count", "technical_profile", "suggestion",
         "requirements", "materials", "creative_controls", "content_addons", "scene_plan",
-        "image_strategy", "image_prompts", "video_prompts", "full_review", "post_addons",
+        "image_strategy", "image_prompts", "video_prompts", "transitions", "full_review", "post_addons",
         "aspect_ratio", "quality", "final_report", "final_confirmation",
     )
     assert "VIDEO_SCENE1_CANONICAL_STEPS = video_scene3_flow.CANONICAL_STEPS" in BOT_SOURCE

@@ -30,6 +30,7 @@ CANONICAL_STEPS = (
     "image_strategy",
     "image_prompts",
     "video_prompts",
+    "transitions",
     "full_review",
     "post_addons",
     "aspect_ratio",
@@ -51,7 +52,8 @@ BACK_STEP = {
     "image_strategy": "scene_plan",
     "image_prompts": "image_strategy",
     "video_prompts": "image_prompts",
-    "full_review": "video_prompts",
+    "transitions": "video_prompts",
+    "full_review": "transitions",
     "post_addons": "full_review",
     "aspect_ratio": "post_addons",
     "quality": "aspect_ratio",
@@ -131,13 +133,89 @@ PROFILE_CONTENT_TYPE = {
 REQUIREMENT_CATEGORIES = (
     ("identity", "🧍 Nhân vật/nhận diện"),
     ("product", "📦 Sản phẩm"),
-    ("brand_logo", "🏷 Thương hiệu/logo"),
+    ("brand_logo", "🏷 Phong cách thương hiệu"),
     ("colors", "🎨 Màu sắc chủ đạo"),
     ("materials", "🧱 Vật liệu"),
     ("environment", "🏞 Bối cảnh/kiến trúc"),
     ("wardrobe", "👗 Trang phục"),
     ("references", "🖼 Ảnh tham chiếu"),
 )
+
+# Public requirements describe what must remain consistent in generated
+# scenes. Reference images are collected once in the following Materials step,
+# so exposing them here would create the duplicate flow users reported.
+PUBLIC_REQUIREMENT_CATEGORIES = tuple(
+    item for item in REQUIREMENT_CATEGORIES if item[0] != "references"
+)
+
+REQUIREMENT_UPLOAD_TYPES = {
+    "identity": "character_person",
+    "product": "product_object",
+    "brand_logo": "visual_style_reference",
+    "colors": "visual_style_reference",
+    "materials": "product_object",
+    "environment": "background",
+    "wardrobe": "character_person",
+}
+
+REQUIREMENT_SUGGESTION_TEMPLATES: dict[str, tuple[str, ...]] = {
+    "identity": (
+        "Giữ nguyên khuôn mặt, vóc dáng và đặc điểm nhận diện của {subject} trong mọi cảnh.",
+        "Giữ cùng một nhân vật chính, độ tuổi, kiểu tóc và tỉ lệ cơ thể từ đầu đến cuối.",
+        "Bám đúng ảnh nhân vật đã gửi; không tự đổi gương mặt, màu da hoặc đặc điểm riêng.",
+        "Nếu đổi góc máy hoặc ánh sáng, nhận diện của nhân vật vẫn phải nhất quán.",
+        "Không thêm nhân vật thay thế; mọi cảnh tiếp tục đúng chủ thể đã chọn.",
+    ),
+    "product": (
+        "Giữ đúng hình dáng, màu, nhãn, chi tiết và tỉ lệ của sản phẩm trong {subject}.",
+        "Không tự đổi bao bì, chất liệu, nút bấm hoặc đặc điểm nhận biết của sản phẩm.",
+        "Sản phẩm luôn là chủ thể chính, đủ rõ để nhận ra ở cả cận cảnh và toàn cảnh.",
+        "Bám đúng ảnh sản phẩm đã gửi; không tạo chữ hoặc logo giả trên bề mặt.",
+        "Giữ kích thước sản phẩm hợp lý so với tay người, đồ vật và không gian xung quanh.",
+    ),
+    "brand_logo": (
+        "Giữ đúng màu chủ đạo, tinh thần và dấu hiệu nhận diện của thương hiệu trong mọi cảnh.",
+        "Không tự sáng tác tên, biểu tượng hoặc khẩu hiệu thương hiệu chưa được cung cấp.",
+        "Bao bì, bảng hiệu và chi tiết nhận diện phải cùng một hệ thiết kế xuyên suốt.",
+        "Dùng đúng ngôn ngữ hình ảnh của thương hiệu: {profile}; không pha phong cách trái ngược.",
+        "Logo hình ảnh chỉ được nhận ở bước Hậu kỳ; phần này chỉ giữ nhận diện trong nội dung cảnh.",
+    ),
+    "colors": (
+        "Giữ bảng màu chủ đạo nhất quán từ cảnh đầu tới cảnh cuối.",
+        "Màu da, màu sản phẩm và màu thương hiệu phải chân thật, không đổi bất thường.",
+        "Các cảnh khác bối cảnh vẫn dùng chung tông màu và mức tương phản đã chọn.",
+        "Ánh sáng có thể thay đổi theo câu chuyện nhưng không làm sai màu nhận diện.",
+        "Ưu tiên tối đa ba màu chính để video liền mạch và dễ nhìn.",
+    ),
+    "materials": (
+        "Giữ đúng chất liệu, bề mặt, độ bóng và cấu tạo đã mô tả.",
+        "Gỗ, đá, kim loại, vải hoặc kính phải có kết cấu nhất quán giữa các cảnh.",
+        "Không biến đổi vật liệu khi camera đổi góc hoặc khi ánh sáng thay đổi.",
+        "Bám sát ảnh chi tiết đã gửi, đặc biệt ở cận cảnh sản phẩm hoặc kiến trúc.",
+        "Không thêm hoa văn, vết nứt hoặc chi tiết bề mặt ngoài yêu cầu.",
+    ),
+    "environment": (
+        "Giữ logic kiến trúc, vị trí đồ vật và hướng không gian giữa các cảnh.",
+        "Cảnh sau tiếp nối đúng cửa, lối đi, nội thất và hướng di chuyển của cảnh trước.",
+        "Không tự đổi thời tiết, thời điểm hoặc vị trí nếu câu chuyện chưa chuyển bối cảnh.",
+        "Bám đúng ảnh bối cảnh đã gửi; giữ tỉ lệ và cấu trúc không gian hợp lý.",
+        "Mọi thay đổi bối cảnh phải có điểm chuyển rõ và phục vụ đúng mạch nội dung.",
+    ),
+    "wardrobe": (
+        "Giữ nguyên trang phục, phụ kiện và kiểu tóc trừ khi kịch bản yêu cầu thay đổi.",
+        "Màu, chất liệu và họa tiết trang phục không được đổi giữa hai cảnh liên tiếp.",
+        "Trang phục phải phù hợp nhân vật, bối cảnh và hành động trong {subject}.",
+        "Bám đúng ảnh trang phục đã gửi; không thêm chữ hoặc biểu tượng ngoài yêu cầu.",
+        "Nếu có thay trang phục, phải kết thúc một nhịp nội dung rồi mới chuyển sang diện mạo mới.",
+    ),
+    "references": (
+        "Bám sát ảnh tham chiếu đã gửi; không dùng tài sản của người dùng khác.",
+        "Chỉ dùng ảnh tham chiếu thuộc đúng phiên hiện tại.",
+        "Giữ các chi tiết chính đã đánh dấu trong ảnh tham chiếu.",
+        "Không suy diễn logo, chữ hoặc vật thể không có trong ảnh.",
+        "Dùng ảnh làm chuẩn nhận diện, không sao chép nội dung riêng của người khác.",
+    ),
+}
 
 MATERIAL_TYPES = (
     ("ai_image_plan", "✨ Tạo ảnh AI trước"),
@@ -151,6 +229,17 @@ MATERIAL_TYPES = (
     ("logo", "🏷 Gửi logo"),
     ("voice_audio", "🎙 Gửi lời đọc/âm thanh"),
     ("music", "🎵 Gửi nhạc nền"),
+)
+
+# The public Materials screen is a single reference-image intake. AI image
+# planning belongs to Image Strategy/Prompts; logo, voice and music belong to
+# their concrete post-production add-ons.
+PUBLIC_MATERIAL_TYPES = tuple(
+    item for item in MATERIAL_TYPES
+    if item[0] in {
+        "character_person", "product_object", "background",
+        "visual_style_reference", "storyboard_frames",
+    }
 )
 
 MATERIAL_TYPE_ALIASES = {
@@ -243,6 +332,23 @@ CREATIVE_SUGGESTIONS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+PROFILE_CREATIVE_GUIDANCE: dict[str, dict[str, str]] = {
+    "architecture_exterior": {"focus": "giữ đúng tỉ lệ công trình và cảnh quan", "camera": "đường thẳng đứng chuẩn, góc rộng không méo", "visual": "vật liệu và ánh sáng ngoại thất chân thật", "motion": "camera tiến hoặc lia chậm quanh công trình", "avoid": "không cong tường, đổi cửa hoặc sai tầng"},
+    "architecture_interior": {"focus": "giữ đúng bố cục phòng và vị trí nội thất", "camera": "camera ngang tầm mắt, đường dọc thẳng", "visual": "ánh sáng phòng tự nhiên và vật liệu rõ", "motion": "đi máy chậm theo lối di chuyển thật", "avoid": "không đổi đồ đạc hoặc làm sai diện tích"},
+    "space_renovation": {"focus": "làm rõ hiện trạng, thay đổi và thành quả", "camera": "giữ cùng góc trước và sau", "visual": "vật liệu mới rõ nhưng không làm sai kết cấu", "motion": "chuyển đổi có điểm đầu và kết quả rõ", "avoid": "không biến đổi bố cục ngoài phạm vi cải tạo"},
+    "real_estate_property": {"focus": "dẫn người xem theo hành trình xem nhà", "camera": "góc rộng vừa đủ, không kéo méo không gian", "visual": "ánh sáng chân thật, làm rõ tiện ích", "motion": "đi máy ổn định qua từng khu vực", "avoid": "không thêm phòng, nội thất hoặc tầm nhìn không có"},
+    "architecture_walkthrough": {"focus": "giữ một tuyến tham quan liên tục", "camera": "hướng camera khớp lối đi giữa các cảnh", "visual": "không gian nhất quán theo từng phòng", "motion": "chuyển động tiến liên tục, dừng đúng điểm nổi bật", "avoid": "không nhảy vị trí hoặc quay ngược hướng vô lý"},
+    "cinematic_vfx": {"focus": "mỗi hiệu ứng phục vụ một nhịp câu chuyện", "camera": "camera có chủ đích và điểm dừng rõ", "visual": "điện ảnh nhưng chủ thể vẫn dễ nhận ra", "motion": "hiệu ứng hoàn tất trước điểm cắt", "avoid": "không lạm dụng lóe sáng, rung hoặc biến dạng"},
+    "animation_2d_3d": {"focus": "giữ thiết kế nhân vật và thế giới hoạt hình", "camera": "góc máy rõ hình khối và hành động", "visual": "nét, vật liệu và tỉ lệ nhất quán", "motion": "chuyển động có nhịp và hoàn tất tư thế", "avoid": "không đổi model, màu hoặc phong cách giữa cảnh"},
+    "character": {"focus": "giữ nhân vật, cảm xúc và mục tiêu xuyên suốt", "camera": "ưu tiên gương mặt và ngôn ngữ cơ thể", "visual": "nhận diện, trang phục và ánh sáng nhất quán", "motion": "hành động trọn vẹn trước khi chuyển cảnh", "avoid": "không đổi mặt, tay, trang phục hoặc tuổi"},
+    "fashion_lookbook": {"focus": "làm rõ trang phục, phom dáng và thần thái", "camera": "toàn thân, trung cảnh rồi cận chi tiết", "visual": "màu vải và chất liệu trung thực", "motion": "bước đi hoặc tạo dáng hoàn tất tự nhiên", "avoid": "không đổi trang phục, cơ thể hoặc họa tiết"},
+    "product_3d_showcase": {"focus": "mỗi cảnh làm rõ một lợi ích hoặc chi tiết sản phẩm", "camera": "cận chi tiết rồi mở ra toàn sản phẩm", "visual": "bề mặt sạch, màu và nhãn chính xác", "motion": "xoay hoặc mở lộ sản phẩm có kiểm soát", "avoid": "không méo sản phẩm, sai chữ hoặc thêm bộ phận"},
+    "app_game_demo": {"focus": "mỗi cảnh trình bày một thao tác và kết quả", "camera": "khung giao diện dễ đọc, nhấn đúng vùng tương tác", "visual": "giao diện nhất quán và chữ rõ", "motion": "thao tác hoàn tất rồi mới sang bước kế", "avoid": "không tạo màn hình hoặc tính năng không tồn tại"},
+    "website_saas_demo": {"focus": "đi theo vấn đề, thao tác và kết quả trên sản phẩm", "camera": "zoom vừa đủ vào vùng giao diện cần xem", "visual": "giao diện sạch, đúng màu thương hiệu", "motion": "con trỏ và chuyển trang có nhịp rõ", "avoid": "không sửa nội dung, số liệu hoặc chức năng thật"},
+    "tutorial_explainer": {"focus": "mỗi cảnh giải thích trọn một bước", "camera": "ưu tiên vật thể hoặc thao tác đang được hướng dẫn", "visual": "đơn giản, dễ đọc và có thứ tự", "motion": "hoàn tất thao tác trước khi chuyển bước", "avoid": "không bỏ bước, cắt giữa câu hoặc nhồi nhiều ý"},
+    "ugc_social_creator": {"focus": "giữ cảm giác đời thật nhưng thông điệp rõ", "camera": "góc điện thoại tự nhiên, chủ thể luôn nhìn rõ", "visual": "ánh sáng chân thật, ít dàn dựng", "motion": "hành động gần gũi, kết thúc tự nhiên", "avoid": "không diễn quá mức, thay mặt hoặc làm sai sản phẩm"},
+}
+
 CONTENT_ADDONS = (
     ("voiceover", "🎙 Lời dẫn/lời thoại"),
     ("captions", "💬 Phụ đề/chữ hiển thị"),
@@ -254,6 +360,18 @@ CONTENT_ADDONS = (
     ("music_mood", "🎵 Nhịp/cảm xúc nhạc"),
     ("transition_style", "🔗 Kiểu chuyển cảnh"),
     ("target_duration", "⏳ Thời lượng mục tiêu"),
+)
+
+# Logo/watermark are configured with the real asset/text in Post-production;
+# transitions have their own per-boundary step; duration is already fixed by
+# the scene count. Keeping them out of this public list removes three duplicate
+# configuration paths while preserving old session fields internally.
+PUBLIC_CONTENT_ADDONS = tuple(
+    item for item in CONTENT_ADDONS
+    if item[0] in {
+        "voiceover", "captions", "cta", "scene_text",
+        "preserve_source_audio", "music_mood",
+    }
 )
 
 CONTENT_ADDON_SUGGESTIONS: dict[str, tuple[str, ...]] = {
@@ -333,7 +451,8 @@ POST_ADDONS = (
 # A picture watermark duplicates the logo flow, and MP4 is the mandatory final
 # output rather than an optional add-on.
 PUBLIC_POST_ADDONS = tuple(
-    item for item in POST_ADDONS if item[0] not in {"watermark_image", "mp4_export"}
+    item for item in POST_ADDONS
+    if item[0] not in {"watermark_image", "audio_balance", "mp4_export"}
 )
 
 AUDIO_POST_ADDONS = frozenset({"voice", "dubbing", "music", "sfx"})
@@ -782,17 +901,89 @@ def post_addon_default(key: str) -> dict[str, Any]:
 
 
 def creative_suggestions(state: dict[str, Any], key: str) -> list[str]:
-    """Return five approved local suggestions without any provider call."""
+    """Return five local suggestions anchored to the selected public profile."""
 
-    normalize_state(state)
-    return [str(item) for item in CREATIVE_SUGGESTIONS.get(str(key or ""), ())][:5]
+    updated = normalize_state(state)
+    key = str(key or "")
+    profile_id = str(updated.get("technical_profile") or "")
+    guidance = PROFILE_CREATIVE_GUIDANCE.get(profile_id, {})
+    guidance_field = {
+        "camera": "camera",
+        "motion": "motion",
+        "visual_style": "visual",
+        "colors": "visual",
+        "negative": "avoid",
+    }.get(key, "focus")
+    profile_note = str(
+        guidance.get(guidance_field)
+        or guidance.get("focus")
+        or "bám đúng chủ đề và profile đã chọn"
+    )
+    subject = str(updated.get("subject") or "chủ đề đã chọn").strip()
+    return [
+        f"{str(item).rstrip('.')}; {profile_note}; bám đúng chủ đề {subject}."
+        for item in CREATIVE_SUGGESTIONS.get(key, ())
+    ][:5]
 
 
 def content_addon_suggestions(state: dict[str, Any], key: str) -> list[str]:
-    """Return approved planning suggestions for one content-affecting option."""
+    """Return five option-specific suggestions anchored to the selected plan."""
 
-    normalize_state(state)
-    return [str(item) for item in CONTENT_ADDON_SUGGESTIONS.get(str(key or ""), ())][:5]
+    updated = normalize_state(state)
+    profile_id = str(updated.get("technical_profile") or "")
+    guidance = PROFILE_CREATIVE_GUIDANCE.get(profile_id, {})
+    profile_focus = str(
+        guidance.get("focus")
+        or "giữ đúng mục tiêu của profile đã chọn"
+    ).rstrip(".")
+    subject = str(updated.get("subject") or "chủ đề đã chọn").strip()
+    return [
+        f"{str(item).rstrip('.')}; áp dụng cho {subject}, {profile_focus}."
+        for item in CONTENT_ADDON_SUGGESTIONS.get(str(key or ""), ())
+    ][:5]
+
+
+def transition_suggestions(state: dict[str, Any], scene_index: int) -> list[str]:
+    """Pick five relevant transition keys for one exact scene boundary."""
+
+    updated = normalize_state(state)
+    count = max(1, int(updated.get("scene_count") or 1))
+    index = max(1, min(max(1, count - 1), int(scene_index or 1)))
+    profile_id = str(updated.get("technical_profile") or "")
+    scenes = [
+        dict(item)
+        for item in (updated.get("plan") or {}).get("scenes") or []
+        if isinstance(item, dict)
+    ]
+    current = scenes[index - 1] if index <= len(scenes) else {}
+    next_scene = scenes[index] if index < len(scenes) else {}
+    searchable = " ".join(
+        str(value or "").lower()
+        for value in (
+            current.get("main_idea"), current.get("primary_action"), current.get("dialogue_or_voiceover"),
+            next_scene.get("main_idea"), next_scene.get("primary_action"), next_scene.get("dialogue_or_voiceover"),
+        )
+    )
+    if profile_id in {
+        "architecture_exterior", "architecture_interior", "space_renovation",
+        "real_estate_property", "architecture_walkthrough",
+    }:
+        ordered = ["camera pan continuation", "doorway transition", "match cut", "dissolve", "reveal"]
+    elif profile_id in {"cinematic_vfx", "animation_2d_3d", "fashion_lookbook"}:
+        ordered = ["motion match", "cut on action", "match cut", "object wipe", "dissolve"]
+    elif profile_id in {"app_game_demo", "website_saas_demo", "tutorial_explainer"}:
+        ordered = ["match cut", "cut on action", "camera pan continuation", "dissolve", "sound bridge"]
+    else:
+        ordered = ["cut on action", "motion match", "match cut", "dissolve", "sound bridge"]
+    if any(token in searchable for token in ("nói", "lời", "thoại", "giọng")):
+        ordered = ["dialogue bridge", "sound bridge", *ordered]
+    if any(token in searchable for token in ("trước", "sau", "thay đổi", "cải tạo")):
+        ordered = ["before/after morph", *ordered]
+    result: list[str] = []
+    for transition in ordered:
+        if transition in TRANSITIONS and transition not in result:
+            result.append(transition)
+    return result[:5]
 
 
 def configure_content_safe_zone(
@@ -1160,19 +1351,22 @@ def suggested_technical_profile(content_type_id: str, offset: int = 0) -> str:
     return str(options[max(0, int(offset or 0)) % len(options)][0])
 
 
+def requirement_suggestions(state: dict[str, Any], key: str) -> list[str]:
+    """Return five category-specific preservation choices for the current plan."""
+
+    updated = normalize_state(state)
+    subject = str(updated.get("subject") or "chủ thể đã chọn").strip()
+    profile = technical_profile_label(str(updated.get("technical_profile") or ""))
+    templates = REQUIREMENT_SUGGESTION_TEMPLATES.get(str(key or ""), ())
+    return [
+        str(template).format(subject=subject, profile=profile)
+        for template in templates[:5]
+    ]
+
+
 def requirement_suggestion(key: str, state: dict[str, Any]) -> str:
-    subject = str((state or {}).get("subject") or "chủ thể")
-    values = {
-        "identity": f"Giữ nguyên khuôn mặt, vóc dáng và đặc điểm nhận diện của {subject} giữa mọi cảnh.",
-        "product": f"Giữ nguyên hình dáng, màu, nhãn và tỉ lệ sản phẩm trong {subject}.",
-        "brand_logo": "Không tự tạo hoặc sửa logo; chỉ dùng đúng logo người dùng đã gửi.",
-        "colors": "Giữ bảng màu chủ đạo nhất quán từ cảnh đầu tới cảnh cuối.",
-        "materials": "Giữ đúng chất liệu, bề mặt, độ bóng và cấu tạo đã mô tả.",
-        "environment": "Giữ logic kiến trúc, vị trí đồ vật và hướng không gian giữa các cảnh.",
-        "wardrobe": "Giữ nguyên trang phục, phụ kiện và kiểu tóc trừ khi kịch bản yêu cầu thay đổi.",
-        "references": "Bám sát ảnh tham chiếu đã gửi; không dùng tài sản của người dùng khác.",
-    }
-    return values.get(str(key or ""), "Giữ nguyên chi tiết quan trọng giữa mọi cảnh.")
+    suggestions = requirement_suggestions(state, key)
+    return suggestions[0] if suggestions else "Giữ nguyên chi tiết quan trọng giữa mọi cảnh."
 
 
 def creative_defaults(state: dict[str, Any]) -> dict[str, str]:

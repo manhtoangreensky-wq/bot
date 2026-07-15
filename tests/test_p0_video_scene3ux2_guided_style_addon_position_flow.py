@@ -420,14 +420,8 @@ def test_actual_telegram_callback_routes_guided_screens_and_legacy_redirects_wit
 
         state = save_state(context, {**state, "step": "content_addons", "history": ["creative_controls"]})
         state = await run_action("vprofile|content|logo_safe_zone")
-        assert state["step"] == "content_detail"
-        state = await run_action("vprofile|content_position")
-        assert state["step"] == "content_position"
-        state = await run_action("vprofile|content_position_set|bottom_left")
-        assert state["step"] == "content_detail"
-        assert video_scene3_flow.planner_content_addons(state)["logo_safe_zone"] == "bottom_left"
-        state = await run_action("vprofile|content_detail_done")
         assert state["step"] == "content_addons"
+        assert video_scene3_flow.planner_content_addons(state).get("logo_safe_zone") == "none"
         state = await run_action("vprofile|content|captions")
         state = await run_action("vprofile|content_suggest_item")
         assert state["step"] == "content_suggestions"

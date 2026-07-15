@@ -37,9 +37,9 @@ def _materials_text_renderer():
         "safe_int": _safe_int,
         "video_scene3_flow": video_scene3_flow,
     }
-    source = "from __future__ import annotations\n" + _function_source("video_scene3_materials_text")
+    source = "from __future__ import annotations\n" + _function_source("video_scene3_materials_manage_text")
     exec(compile(source, "<scene3-materials-text>", "exec"), namespace)
-    return namespace["video_scene3_materials_text"]
+    return namespace["video_scene3_materials_manage_text"]
 
 
 class _Button:
@@ -53,7 +53,7 @@ class _Markup:
         self.inline_keyboard = inline_keyboard
 
 
-def _materials_keyboard_renderer():
+def _materials_keyboard_renderers():
     namespace = {
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
@@ -63,10 +63,11 @@ def _materials_keyboard_renderer():
         "video_scene3_keyboard",
         "video_scene3_nav_rows",
         "video_scene3_materials_keyboard",
+        "video_scene3_materials_manage_keyboard",
     ):
         source = "from __future__ import annotations\n" + _function_source(name)
         exec(compile(source, f"<scene3-materials-keyboard:{name}>", "exec"), namespace)
-    return namespace["video_scene3_materials_keyboard"]
+    return namespace["video_scene3_materials_keyboard"], namespace["video_scene3_materials_manage_keyboard"]
 
 
 def _state(item: dict) -> dict:
@@ -131,26 +132,30 @@ def test_file_name_is_used_when_caption_is_empty():
 
 def test_material_screen_renders_special_quotes_and_keeps_callback_data_unchanged():
     render_text = _materials_text_renderer()
-    render_keyboard = _materials_keyboard_renderer()
+    render_main_keyboard, render_manage_keyboard = _materials_keyboard_renderers()
     caption = "Cảnh 'sáng' \"ấm\" <đẹp>"
     text = render_text(_state({"type": "background", "caption": caption}))
     assert html.escape(caption) in text
 
-    callbacks = [
+    main_callbacks = [
         button.callback_data
-        for row in render_keyboard().inline_keyboard
+        for row in render_main_keyboard().inline_keyboard
         for button in row
     ]
-    assert callbacks == [
-        "vprofile|material|ai_image_plan", "vprofile|material|layout_ideas",
-        "vprofile|material|storyboard_prompt", "vprofile|material|character_person",
-        "vprofile|material|product_object", "vprofile|material|background",
-        "vprofile|material|visual_style_reference", "vprofile|material|storyboard_frames",
-        "vprofile|material|logo", "vprofile|material|voice_audio",
-        "vprofile|material|music", "vprofile|material_view",
+    assert main_callbacks == [
+        "vprofile|material|character_person", "vprofile|material|product_object",
+        "vprofile|material|background", "vprofile|material|visual_style_reference",
+        "vprofile|material|storyboard_frames", "vprofile|material_view",
+        "vprofile|material_done", "vprofile|material_skip",
+        "vprofile|back", "menu|main",
+    ]
+    manage_callbacks = [
+        button.callback_data
+        for row in render_manage_keyboard().inline_keyboard
+        for button in row
+    ]
+    assert manage_callbacks == [
         "vprofile|material_prev", "vprofile|material_next",
         "vprofile|material_edit", "vprofile|material_remove",
-        "vprofile|material_restore", "vprofile|material_done",
-        "vprofile|material_skip",
-        "vprofile|back", "menu|main",
+        "vprofile|material_restore", "vprofile|material_manage_done", "menu|main",
     ]

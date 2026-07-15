@@ -114,7 +114,7 @@ def test_scene3_canonical_order_and_back_stack_are_complete():
     assert video_scene3_flow.CANONICAL_STEPS == (
         "subject", "scene_count", "technical_profile", "suggestion",
         "requirements", "materials", "creative_controls", "content_addons", "scene_plan",
-        "image_strategy", "image_prompts", "video_prompts", "full_review", "post_addons",
+        "image_strategy", "image_prompts", "video_prompts", "transitions", "full_review", "post_addons",
         "aspect_ratio", "quality", "final_report", "final_confirmation",
     )
     for previous, current in zip(video_scene3_flow.CANONICAL_STEPS, video_scene3_flow.CANONICAL_STEPS[1:]):
@@ -442,7 +442,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         namespace["video_scene3_content_position_keyboard"](),
         namespace["video_scene3_scene_plan_keyboard"](),
         namespace["video_scene3_scene_detail_keyboard"](),
-        namespace["video_scene3_transition_keyboard"](),
+        namespace["video_scene3_transition_keyboard"](state),
         namespace["video_scene3_image_strategy_keyboard"](),
         namespace["video_scene3_prompt_keyboard"]("image"),
         namespace["video_scene3_prompt_keyboard"]("video"),
@@ -998,7 +998,8 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
             ("vprofile|scene_done", "image_strategy", "scene_plan"),
             ("vprofile|image_strategy_done", "image_prompts", "image_strategy"),
             ("vprofile|image_prompt_done", "video_prompts", "image_prompts"),
-            ("vprofile|video_prompt_done", "full_review", "video_prompts"),
+                ("vprofile|video_prompt_done", "transitions", "video_prompts"),
+                ("vprofile|transitions_done", "full_review", "transitions"),
             ("vprofile|review_done", "post_addons", "full_review"),
             ("vprofile|post_skip", "aspect_ratio", "post_addons"),
             ("vprofile|ratio|16x9", "quality", "aspect_ratio"),
