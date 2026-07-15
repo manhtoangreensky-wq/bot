@@ -43,15 +43,15 @@ def test_img2vid_hub_keeps_two_clear_paths_and_stable_rows():
 
 def test_ai_first_starts_with_idea_or_custom_prompt_not_a_text_dead_end():
     markup = ivf.frame_video_ai_first_keyboard("vi")
-    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2]
+    assert [len(row) for row in markup.inline_keyboard] == [2, 2]
     assert _labels(markup) == [
         "💡 Chọn gợi ý",
         "✍️ Tự nhập prompt",
-        "📚 Gợi ý bố cục",
-        "📤 Dùng ảnh có sẵn",
         "⬅️ Ghép ảnh thành video",
         "🏠 Menu chính",
     ]
+    assert "framevideo|layout" not in _callbacks(markup)
+    assert "framevideo|start" not in _callbacks(markup)
 
 
 def test_ai_suggestions_are_five_number_buttons_on_one_row():
