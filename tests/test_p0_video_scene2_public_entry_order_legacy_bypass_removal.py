@@ -262,6 +262,8 @@ def test_scene2_exact_forward_order_and_back_stack_before_final_confirm():
     _press_profile(user_id, context, "vprofile|image_prompt_done")
     assert bot.video_profile_studio_state(context)["step"] == "video_prompts"
     _press_profile(user_id, context, "vprofile|video_prompt_done")
+    assert bot.video_profile_studio_state(context)["step"] == "transitions"
+    _press_profile(user_id, context, "vprofile|transitions_done")
     assert bot.video_profile_studio_state(context)["step"] == "full_review"
     _press_profile(user_id, context, "vprofile|review_done")
     assert bot.video_profile_studio_state(context)["step"] == "post_addons"
@@ -285,7 +287,7 @@ def test_scene2_contract_owns_all_product_planners_but_not_img2vid_or_aiedit():
     assert bot.VIDEO_SCENE2_CANONICAL_STEPS == (
         "subject", "scene_count", "technical_profile", "suggestion",
         "requirements", "materials", "creative_controls", "content_addons", "scene_plan",
-        "image_strategy", "image_prompts", "video_prompts", "full_review", "post_addons",
+        "image_strategy", "image_prompts", "video_prompts", "transitions", "full_review", "post_addons",
         "aspect_ratio", "quality", "final_report", "final_confirmation",
     )
     assert bot.VIDEO_SCENE2_PUBLIC_PRODUCTS == {
