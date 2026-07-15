@@ -53,7 +53,8 @@ def frame_video_ai_first_guard_text(lang: str = "vi") -> str:
         )
     return (
         "✨ <b>Tạo ảnh AI nhanh rồi ghép</b>\n\n"
-        "Nhập prompt và số ảnh. TOAN AAS tạo nhiều ảnh cùng chủ đề, sau đó anh/chị có thể ghép các ảnh đó thành video.\n\n"
+        "Anh/chị có thể chọn một gợi ý dễ dùng hoặc tự mô tả bộ ảnh muốn tạo. "
+        "TOAN AAS sẽ soạn prompt chung, tạo các ảnh liên quan cùng phong cách, rồi mới chuyển sang bước ghép video.\n\n"
         "Bước tạo ảnh tính phí riêng. Bước ghép video tính theo tổng số giây."
     )
 
@@ -61,15 +62,103 @@ def frame_video_ai_first_guard_text(lang: str = "vi") -> str:
 def frame_video_ai_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = _is_vi(lang)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍️ Nhập prompt ảnh" if is_vi else "✍️ Enter image prompt", callback_data="framevideo|ai_prompt")],
         [
-            InlineKeyboardButton("📤 Dùng ảnh có sẵn" if is_vi else "📤 Use existing images", callback_data="framevideo|start"),
-            InlineKeyboardButton("⬅️ Ghép ảnh thành video" if is_vi else "⬅️ Image slideshow video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("💡 Chọn gợi ý" if is_vi else "💡 Choose an idea", callback_data="framevideo|ai_suggest"),
+            InlineKeyboardButton("✍️ Tự nhập prompt" if is_vi else "✍️ Custom prompt", callback_data="framevideo|ai_prompt"),
         ],
         [
+            InlineKeyboardButton("📚 Gợi ý bố cục" if is_vi else "📚 Layout guide", callback_data="framevideo|layout"),
+            InlineKeyboardButton("📤 Dùng ảnh có sẵn" if is_vi else "📤 Use existing images", callback_data="framevideo|start"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Ghép ảnh thành video" if is_vi else "⬅️ Image slideshow video", callback_data="framevideo|hub"),
             InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
         ],
     ])
+
+
+def frame_video_ai_suggestions_text(suggestions: list[str] | None = None, lang: str = "vi") -> str:
+    items = list(suggestions or [])[:5]
+    if not _is_vi(lang):
+        lines = [
+            "💡 <b>Image set ideas</b>",
+            "",
+            "Choose one idea. TOAN AAS will prepare a coherent image-set prompt before asking for the number of images.",
+            "",
+        ]
+    else:
+        lines = [
+            "💡 <b>Gợi ý bộ ảnh để ghép video</b>",
+            "",
+            "Chọn một ý tưởng. TOAN AAS sẽ soạn prompt bộ ảnh đồng nhất trước khi hỏi số ảnh cần tạo.",
+            "",
+        ]
+    lines.extend(f"{index}. {item}" for index, item in enumerate(items, start=1))
+    lines.extend([
+        "",
+        "Màn này chỉ chọn ý tưởng, chưa tạo ảnh và chưa trừ Xu."
+        if _is_vi(lang)
+        else "This screen only selects an idea. No image has been generated and no Xu was charged.",
+    ])
+    return "\n".join(lines)
+
+
+def frame_video_ai_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = _is_vi(lang)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(str(index), callback_data=f"framevideo|ai_pick|{index}")
+            for index in range(1, 6)
+        ],
+        [
+            InlineKeyboardButton("🔄 Đổi gợi ý" if is_vi else "🔄 More ideas", callback_data="framevideo|ai_refresh"),
+            InlineKeyboardButton("✍️ Tự nhập prompt" if is_vi else "✍️ Custom prompt", callback_data="framevideo|ai_prompt"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="framevideo|ai_first"),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
+        ],
+    ])
+
+
+def frame_video_ai_prompt_text(prompt: str = "", lang: str = "vi") -> str:
+    clean = " ".join(str(prompt or "").split())[:1200]
+    if not _is_vi(lang):
+        return (
+            "✨ <b>Image-set prompt</b>\n\n"
+            f"{clean}\n\n"
+            "TOAN AAS will vary composition and camera angle while preserving the same subject and visual style. "
+            "Review the prompt before choosing the image count."
+        )
+    return (
+        "✨ <b>Prompt bộ ảnh</b>\n\n"
+        f"{clean}\n\n"
+        "TOAN AAS sẽ đổi bố cục và góc nhìn giữa các ảnh nhưng giữ cùng chủ thể, màu sắc và phong cách. "
+        "Anh/chị hãy kiểm tra prompt trước khi chọn số ảnh."
+    )
+
+
+def frame_video_ai_prompt_keyboard(lang: str = "vi", *, suggestion_source: bool = False) -> InlineKeyboardMarkup:
+    is_vi = _is_vi(lang)
+    back_callback = "framevideo|ai_suggest" if suggestion_source else "framevideo|ai_first"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔢 Chọn số ảnh" if is_vi else "🔢 Choose image count", callback_data="framevideo|ai_count_menu"),
+            InlineKeyboardButton("✍️ Sửa prompt" if is_vi else "✍️ Edit prompt", callback_data="framevideo|ai_prompt"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=back_callback),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
+        ],
+    ])
+
+
+def frame_video_ai_custom_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = _is_vi(lang)
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="framevideo|ai_first"),
+        InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
+    ]])
 
 
 def frame_video_layout_helper_text(lang: str = "vi") -> str:
