@@ -65325,6 +65325,18 @@ def save_video_profile_studio_state(context, state: dict) -> dict:
     return clean
 
 
+def clear_video_editor_competing_video_states(user_id, context) -> dict:
+    """Remove stale creation-flow owners without touching the active editor plan."""
+    user_data = getattr(context, "user_data", None)
+    scene3_cleared = False
+    if isinstance(user_data, dict):
+        scene3_cleared = user_data.pop(VIDEO_PROFILE_STUDIO_SESSION_KEY, None) is not None
+    return {
+        "scene3_cleared": scene3_cleared,
+        "developing_video_cleared": clear_developing_video_pending(user_id),
+    }
+
+
 def video_profile_studio_step(context, state: dict, step: str, *, push: bool = True, **fields) -> dict:
     current = str(state.get("step") or "menu")
     history = list(state.get("history") or [])
@@ -198780,6 +198792,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     step = str(state.get("step") or "")
     if step not in {"await_video", "await_concat", "await_logo", "await_srt", "await_ai_video"}:
         return False
+    clear_video_editor_competing_video_states(uid, context)
     lang = get_user_language(uid) or "vi"
     if step == "await_logo":
         source = video_editor_aux_source_from_update(update, "logo")
@@ -198993,6 +199006,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
         "await_split_custom",
     }:
         return False
+    clear_video_editor_competing_video_states(uid, context)
     raw_text = str(update.message.text or "").strip()
     if not raw_text or raw_text.startswith("/"):
         return False
@@ -200880,6 +200894,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     parts = str(query.data or "").split("|")
     raw_action = parts[1] if len(parts) > 1 else "menu"
     if raw_action in {"hub", "menu"}:
+        clear_video_editor_competing_video_states(uid, context)
         clear_video_session(uid)
         clear_video_editor_pending(uid)
         set_video_route_session(uid, "video_local_edit", "tool_home", product_id="video_local_edit")
@@ -201062,6 +201077,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
         item = video_edit_capabilities.capability(feature_key)
         if not item.get("enabled") or item.get("section") != "restore":
             return await query.answer("Nâng cấp này chưa sẵn sàng.", show_alert=True)
+        clear_video_editor_competing_video_states(uid, context)
         clear_video_session(uid)
         clear_video_editor_pending(uid)
         set_video_editor_pending(
@@ -201080,6 +201096,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             reply_markup=video_ai_edit_upload_keyboard(lang, back_callback="videoedit|restore"),
         )
     if action == "ai":
+        clear_video_editor_competing_video_states(uid, context)
         clear_video_session(uid)
         clear_video_editor_pending(uid)
         set_video_route_session(uid, "video_ai_edit", "ai_intro", product_id="video_ai_edit")
@@ -201363,6 +201380,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             reply_markup=video_local_upload_keyboard("manual", lang),
         )
     if action == "manual":
+        clear_video_editor_competing_video_states(uid, context)
         clear_video_session(uid)
         clear_video_editor_pending(uid)
         set_video_editor_pending(uid, "tool_home", selected_tool="manual", last_section="manual", entry_context="manual")
@@ -201379,6 +201397,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
         tool = "manual"
     if action == "upload":
         entry_context = "timeline" if requested_entry == "timeline" else "manual" if tool == "manual" else "split"
+        clear_video_editor_competing_video_states(uid, context)
         clear_video_editor_pending(uid)
         set_video_editor_pending(uid, "await_video", selected_tool=tool, entry_context=entry_context, last_section="timeline" if entry_context == "timeline" else "manual")
         return await safe_edit_or_send(
@@ -201701,6 +201720,8 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
         return
     if await handle_pending_admin_tool_test_media(update, context):
         return
+    if await handle_video_editor_pending_upload(update, context):
+        return
     if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_video_scene3_pending_media(update, context):
@@ -201720,8 +201741,6 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
     if await handle_music_guided_pending_media(update, context):
         return
     if await handle_video_finalization_pending_media(update, context):
-        return
-    if await handle_video_editor_pending_upload(update, context):
         return
     if await handle_video_reference_pending_upload(update, context):
         return
@@ -202252,6 +202271,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_text(update, context):
         return
 
+    if await handle_video_editor_pending_text(update, context):
+        return
+
     if await handle_frame_video_pending_text(update, context):
         return
 
@@ -202292,9 +202314,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_public_video_prompt_pending_text(update, context):
-        return
-
-    if await handle_video_editor_pending_text(update, context):
         return
 
     if await handle_image_menu_pending_text(update, context):
