@@ -296,8 +296,10 @@ def test_public_callbacks_are_short_dynamic_and_handoff_only_to_scene3():
     menu = _between("def video_idea_menu_keyboard", "\n\ndef _video_idea_dynamic_db")
     assert '"videa|page|1"' in menu
     dynamic = _between("def _video_idea_dynamic_db", "\n\ndef video_idea_catalog_categories_text")
-    for callback in ("videa|cat|", "videa|preset|", "videa|page|", "videa|mode|a", "videa|mode|m"):
+    for callback in ("videa|cat|", "videa|preset|", "videa|page|", "videa|sc|"):
         assert callback in dynamic
+    assert "videa|mode|a" not in dynamic
+    assert "videa|mode|m" not in dynamic
     handler = _between("async def handle_video_idea_dynamic_callback", "\n\ndef video_idea_admin_main_text")
     assert "video_idea_dynamic_scene3_state(state)" in handler
     assert "video_profile_scene1_render(query, handoff, lang)" in handler

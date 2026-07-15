@@ -163,7 +163,7 @@ def test_video_trend_intro_has_today_trends_button():
 
 def test_video_trend_intro_has_custom_topic_button():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
-    assert "✍️ Tự nhập trend/ý tưởng" in labels
+    assert "✍️ Tự nhập trend" in labels
 
 
 def test_video_idea_copy_plain_vietnamese():
@@ -489,7 +489,7 @@ def test_optional_skip_continues_to_prompt_output():
 
 def test_existing_trend_flow_preserved_with_optional_guidance():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
-    assert {"🔥 Gợi ý trend hot", "✍️ Tự nhập trend/ý tưởng"}.issubset(set(labels))
+    assert {"🔥 Gợi ý trend hot", "✍️ Tự nhập trend", "🗂 Ý tưởng video có sẵn"}.issubset(set(labels))
     assert "📦 Theo sản phẩm/ngành" not in labels
     assert "🎬 Gợi ý video" not in labels
     assert bot.task3d_guided_steps("video_trend") == ("style", "color", "movement", "result")

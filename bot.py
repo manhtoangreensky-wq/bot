@@ -67184,6 +67184,8 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         text_value, keyboard = pending[step], back_only
     else:
         text_value, keyboard = renderers.get(step, renderers["menu"])
+    if len(str(text_value or "")) > 3500:
+        return await safe_edit_or_send_long_html(query, text_value, reply_markup=keyboard)
     return await safe_edit_or_send(query, text_value, parse_mode="HTML", reply_markup=keyboard)
 
 
@@ -70791,7 +70793,7 @@ TASK3D_PUBLIC_COPY = {
     "video_trend": (
         "🔥 <b>Video theo trend</b>\n\n"
         "TOAN AAS sẽ giúp anh/chị tìm hướng video đang dễ thu hút, sau đó mới chọn loại video và triển khai nội dung.\n\n"
-        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
+        "Bước này chỉ chọn và chỉnh nội dung. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
     ),
     "video_idea": (
         "🧠 <b>Ý tưởng video</b>\n\n"
@@ -71488,9 +71490,9 @@ def video_microflow_option_summary(kind: str, option: dict) -> list[str]:
     kind = str(kind or "")
     if kind == "prompt":
         return [
-            f"Prompt: {option.get('prompt')}",
+            f"Nội dung dựng: {option.get('prompt')}",
             f"Bối cảnh: {option.get('context')}",
-            f"Camera/motion: {option.get('camera')} · {option.get('motion')}",
+            f"Góc máy và chuyển động: {option.get('camera')} · {option.get('motion')}",
             f"Phong cách: {option.get('style')}",
             f"Phù hợp: {option.get('fit')}",
         ]
@@ -71555,7 +71557,7 @@ def video_microflow_option_summary(kind: str, option: dict) -> list[str]:
 
 def video_microflow_title(kind: str) -> str:
     titles = {
-        "prompt": "💡 <b>Gợi ý prompt video</b>",
+        "prompt": "💡 <b>Gợi ý nội dung video</b>",
         "image_prompts": "🎨 <b>Gợi ý ảnh/prompt ảnh</b>",
         "video": "🎞 <b>Gợi ý cách làm video</b>",
         "video_idea": "🧠 <b>Gợi ý ý tưởng video</b>",
@@ -71771,6 +71773,7 @@ def task3d_product_intro_keyboard(
     rows_by_product = {
         "video_trend": [
             [("🔥 Gợi ý trend hot", "vproduct|trend_today"), ("🗂 Ý tưởng video có sẵn", "vproduct|idea_library|video_trend")],
+            [("✍️ Tự nhập trend", "vproduct|trend_custom"), ("📖 Xem hướng dẫn", "menu|guide_video_ai")],
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_idea": [
@@ -78971,9 +78974,8 @@ def task3d_trend_ideas_keyboard(session: dict, lang: str = "vi") -> InlineKeyboa
     if number_buttons:
         rows.append(number_buttons)
     rows.extend([
-        [InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|trend_more"), InlineKeyboardButton("🗂 Ý tưởng video có sẵn", callback_data="vproduct|idea_library|video_trend")],
-        [InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")],
-        [InlineKeyboardButton("⬅️ Menu video", callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|trend_more"), InlineKeyboardButton("✍️ Tự nhập trend", callback_data="vproduct|trend_custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -79739,6 +79741,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "microflow_choose":
         draft = dict(session.get("draft") or {})
         options = list(draft.get("microflow_options") or [])
+        if not options:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Bộ gợi ý này đã hết phiên. Anh/chị hãy mở lại để chọn nội dung mới. "
+                "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=task3d_product_intro_keyboard(product_id, lang),
+            )
         index = max(0, min(len(options) - 1, safe_int(value, 0))) if options else 0
         kind = str(draft.get("microflow_kind") or "prompt")
         topic = str(draft.get("microflow_topic") or session.get("topic") or "ý tưởng video")
@@ -80381,6 +80391,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await task3d_render_step(query, uid, session, lang)
     if action == "trend_select":
         ideas = list((session.get("draft") or {}).get("trend_ideas") or [])
+        if not ideas:
+            ideas = TASK3D_TREND_STORE.list_sources(limit=5, offset=0)
+            session = task3d_session_step(
+                uid,
+                "trend_ideas",
+                trend_ideas=ideas,
+                trend_offset=0,
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await task3d_render_step(query, uid, session, lang)
         selected = ideas[max(0, min(len(ideas) - 1, safe_int(value, 0)))] if ideas else {}
         bundle = task3d_trend_output_from_source(selected)
         topic = str(bundle.get("user_topic") or selected.get("title") or "Video theo trend")
@@ -87136,13 +87157,13 @@ def video_idea_menu_text(lang: str = "vi") -> str:
         return (
             "💡 <b>Video Ideas</b>\n\n"
             "Explore a reference library of market and social video formats. Choose an idea and scene count, then open one editable prompt for every scene.\n\n"
-            "Planning only. No job, provider call or Xu deduction starts here."
+            "Nothing is created or charged until you review and confirm the final plan."
         )
     return (
         "💡 <b>Ý tưởng video</b>\n\n"
         "Đây là kho tham khảo tổng hợp các cách làm video bán hàng, mạng xã hội, hướng dẫn, kể chuyện, kiến trúc, đời sống, phần mềm và hình ảnh sáng tạo.\n\n"
         "Chọn một ý tưởng rồi chọn số cảnh. TOAN AAS sẽ phân bổ nội dung thành từng cảnh trọn ý, tạo câu lệnh riêng cho từng cảnh và cho phép xem, sao chép hoặc sửa trước khi sang phần bổ sung.\n\n"
-        "Kho này không tự tạo video. Hệ thống chưa tạo file, chưa tạo tác vụ và chưa trừ Xu."
+        "Kho này chỉ giúp chọn và chỉnh ý tưởng. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
     )
 
 def video_idea_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -87249,7 +87270,7 @@ def video_idea_dynamic_page_text(page: int = 1, lang: str = "vi") -> str:
     lines.extend([
         "",
         f"Trang {selected_page}/{total_pages} · {len(categories)} nhóm · {safe_int(counts.get('presets'), 0)} mẫu đang bật.",
-        "Đây là bước tham khảo và lập kế hoạch; hệ thống chưa tạo file, chưa gọi dịch vụ và chưa trừ Xu.",
+        "Đây là bước tham khảo và chỉnh nội dung; hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
     ])
     return "\n\n".join(lines)
 
@@ -87305,7 +87326,7 @@ def video_idea_dynamic_category_text(category: dict, presets: list[dict]) -> str
         )
     lines.extend([
         "",
-        "Mẫu chỉ nạp kế hoạch có thể sửa. Hệ thống chưa tạo kịch bản bằng dịch vụ bên ngoài, chưa tạo file và chưa trừ Xu.",
+        "Mỗi mẫu đã có sẵn nội dung để anh/chị chọn số cảnh rồi sửa lại. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
     ])
     return "\n\n".join(lines)
 
@@ -87323,10 +87344,7 @@ def video_idea_dynamic_category_keyboard(
             InlineKeyboardButton(str(index), callback_data=f"videa|preset|{int(preset.get('id') or 0)}")
             for index, preset in enumerate(presets, 1)
         ])
-    rows.append([
-        InlineKeyboardButton("💡 Gợi ý khác", callback_data=f"videa|more|{int(category_id)}"),
-        InlineKeyboardButton("✍️ Tự nhập ý tưởng", callback_data=f"videa|custom|{int(category_id)}"),
-    ])
+    rows.append([InlineKeyboardButton("💡 Xem 5 ý tưởng khác", callback_data=f"videa|more|{int(category_id)}")])
     rows.append([
         InlineKeyboardButton("⬅️ Chọn nhóm", callback_data=f"videa|page|{max(1, int(back_page or 1))}"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
@@ -87350,20 +87368,13 @@ def video_idea_dynamic_preset_text(preset: dict) -> str:
         f"• Âm thanh: {html.escape(str(preset.get('audio_plan') or 'Tùy chọn'))}\n"
         f"• Hình ảnh: {html.escape(str(preset.get('visual_plan') or 'Theo nội dung'))}"
         f"{safety_line}\n\n"
-        "Anh/chị muốn chuẩn bị kịch bản theo cách nào? Cả hai cách đều chỉ tạo bản kế hoạch để sửa rồi chuyển vào SCENE3; chưa gọi dịch vụ và chưa trừ Xu."
+        "Chọn số cảnh muốn làm. TOAN AAS sẽ mở ngay nội dung có sẵn của từng cảnh để anh/chị sao chép, sửa và gửi lại trước khi chọn phần bổ sung.\n\n"
+        "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
     )
 
 
 def video_idea_dynamic_preset_keyboard(preset: dict, lang: str = "vi") -> InlineKeyboardMarkup:
-    category_id = int(preset.get("category_id") or 0)
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🪄 AAS hỗ trợ tạo kịch bản", callback_data="videa|mode|a")],
-        [InlineKeyboardButton("✍️ Tôi đã có kịch bản riêng", callback_data="videa|mode|m")],
-        [
-            InlineKeyboardButton("⬅️ Chọn mẫu", callback_data=f"videa|cat|{category_id}"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        ],
-    ])
+    return video_idea_dynamic_scene_count_keyboard(preset, lang)
 
 
 def video_idea_dynamic_scene_count_text(preset: dict) -> str:
@@ -87372,7 +87383,7 @@ def video_idea_dynamic_scene_count_text(preset: dict) -> str:
         "🎬 <b>Chọn số cảnh trước</b>\n\n"
         f"Mẫu này gợi ý <b>{recommended} cảnh</b>. Một cảnh khoảng 8 giây và phải hoàn tất một ý hoặc hành động. "
         "TOAN AAS sẽ viết đúng số cảnh anh/chị chọn, không chia cơ học một đoạn dài.\n\n"
-        "Chưa tạo file, chưa gọi dịch vụ và chưa trừ Xu."
+        "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
     )
 
 
@@ -87383,7 +87394,7 @@ def video_idea_dynamic_scene_count_keyboard(preset: dict, lang: str = "vi") -> I
         [InlineKeyboardButton(f"{value} cảnh", callback_data=f"videa|sc|{value}") for value in values[3:]],
         [InlineKeyboardButton("✍️ Nhập số khác", callback_data="videa|sc|x")],
         [
-            InlineKeyboardButton("⬅️ Chọn cách", callback_data=f"videa|preset|{int(preset.get('id') or 0)}"),
+            InlineKeyboardButton("⬅️ Chọn mẫu", callback_data=f"videa|cat|{int(preset.get('category_id') or 0)}"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -87391,58 +87402,54 @@ def video_idea_dynamic_scene_count_keyboard(preset: dict, lang: str = "vi") -> I
 
 def video_idea_dynamic_preview_text(state: dict) -> str:
     drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
-    source_label = "AAS hỗ trợ lập bản nháp" if state.get("idea_source") == "preset_auto" else "Kịch bản riêng của anh/chị"
+    source_label = str((state.get("idea_preset") or {}).get("title") or "Ý tưởng đã chọn")
     lines = [
-        "📑 <b>Xem trước kịch bản từng cảnh</b>",
+        "📑 <b>Nội dung video theo từng cảnh</b>",
         "",
-        f"• Nguồn: {source_label}",
+        f"• Ý tưởng: {html.escape(source_label)}",
         f"• Số cảnh: {len(drafts)} · khoảng {len(drafts) * 8} giây",
         "",
     ]
+    editable_lines: list[str] = []
     for row in drafts:
         index = safe_int(row.get("scene_index"), 1)
         content = str(row.get("content") or row.get("goal") or "").strip()
-        diagnostic = dict(row.get("diagnostic") or video_idea_script_intake.scene_diagnostic(content))
-        notes: list[str] = []
-        if diagnostic.get("too_long"):
-            notes.append("dài, nên rút gọn")
-        if diagnostic.get("needs_action"):
-            notes.append("nên thêm hành động/kết quả")
-        note = f" <i>({'; '.join(notes)})</i>" if notes else ""
-        lines.append(f"<b>Cảnh {index}:</b> {html.escape(content)}{note}")
+        editable_lines.append(f"<code>{html.escape(f'Cảnh {index}: {content}')}</code>")
     lines.extend([
+        "Nội dung đã được chia sẵn theo từng cảnh. Bấm <b>Sửa nội dung</b>, sao chép phần dưới, chỉnh cảnh cần đổi rồi gửi lại:",
+        "\n\n".join(editable_lines),
         "",
-        "Có thể sửa, thêm, xóa, gộp, tách hoặc đổi thứ tự trước khi duyệt. Duyệt sẽ chuyển sang SCENE3 để xem và sửa câu lệnh ảnh/video, không đi thẳng tới báo giá.",
-        "",
-        "Hệ thống chưa tạo job/outbox/file, chưa gọi provider và chưa trừ Xu.",
+        "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
     ])
     return "\n\n".join(lines)
 
 
 def video_idea_dynamic_preview_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Sửa nội dung", callback_data="videa|edit|full")],
+        [InlineKeyboardButton("✅ Tiếp tục hoàn thiện video", callback_data="videa|approve|1")],
         [
-            InlineKeyboardButton("✍️ Sửa cảnh", callback_data="videa|edit|e"),
-            InlineKeyboardButton("➕ Thêm cảnh", callback_data="videa|edit|a"),
-        ],
-        [
-            InlineKeyboardButton("🗑 Xóa cảnh", callback_data="videa|edit|d"),
-            InlineKeyboardButton("🔗 Gộp 2 cảnh", callback_data="videa|edit|m"),
-        ],
-        [
-            InlineKeyboardButton("✂️ Tách cảnh", callback_data="videa|edit|s"),
-            InlineKeyboardButton("↕️ Đổi thứ tự", callback_data="videa|edit|r"),
-        ],
-        [
-            InlineKeyboardButton("🔄 Lập lại một cảnh", callback_data="videa|regen|1"),
-            InlineKeyboardButton("↩️ Khôi phục bản trước", callback_data="videa|restore|1"),
-        ],
-        [InlineKeyboardButton("✅ Duyệt và mở SCENE3", callback_data="videa|approve|1")],
-        [
-            InlineKeyboardButton("⬅️ Chọn cách khác", callback_data="videa|back|mode"),
+            InlineKeyboardButton("⬅️ Chọn mẫu khác", callback_data="videa|back|preset"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
+
+
+def video_idea_dynamic_edit_text(state: dict) -> str:
+    drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
+    editable_lines: list[str] = []
+    for index, row in enumerate(drafts, 1):
+        scene_number = safe_int(row.get("scene_index"), index)
+        content = str(row.get("content") or row.get("goal") or "").strip()
+        editable_lines.append(f"<code>{html.escape(f'Cảnh {scene_number}: {content}')}</code>")
+    editable = "\n\n".join(editable_lines)
+    return (
+        "✍️ <b>Sửa nội dung từng cảnh</b>\n\n"
+        "Sao chép toàn bộ phần dưới, sửa nội dung cần đổi rồi gửi lại. Giữ tiêu đề "
+        "<b>Cảnh 1, Cảnh 2...</b> để hệ thống nhận đúng từng cảnh.\n\n"
+        f"{editable}\n\n"
+        "Hệ thống chưa bắt đầu tạo video và chưa trừ Xu."
+    )
 
 
 def video_idea_catalog_categories_text(lang: str = "vi") -> str:
@@ -88376,16 +88383,12 @@ async def handle_video_idea_dynamic_pending_text(
             await update.message.reply_text("⚠️ Số cảnh phải từ 1 đến 20. Vui lòng nhập lại một số hợp lệ.")
             return True
         state["scene_count"] = scene_count
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_auto_brief")
-        await update.message.reply_text(
-            "🪄 <b>Thông tin để AAS lập bản nháp</b>\n\n"
-            "Hãy mô tả chủ đề/sản phẩm/nhân vật/địa điểm, mục tiêu, điều phải giữ nguyên và CTA nếu có. "
-            "TOAN AAS sẽ lập đúng số cảnh vừa chọn bằng mẫu nội bộ, không gọi provider.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Dùng nguyên mẫu", callback_data="videa|use|0")],
-                [InlineKeyboardButton("⬅️ Đổi số cảnh", callback_data="videa|mode|a")],
-            ]),
+        state = video_idea_dynamic_build_drafts(state)
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        await safe_reply_long_html(
+            update.message,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
         )
         return True
 
@@ -88454,20 +88457,29 @@ async def handle_video_idea_dynamic_pending_text(
         parts = [part.strip() for part in raw_text.split("|")]
         drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
         try:
-            state = video_idea_dynamic_remember_drafts(state)
-            if mode == "e" and len(parts) >= 2:
+            if mode == "full":
+                result = video_idea_script_intake.split_manual_script(raw_text)
+                if not result.get("ok") or safe_int(result.get("scene_count"), 0) > 20:
+                    raise ValueError("invalid_full_edit")
+                drafts = video_idea_script_intake.manual_scene_drafts(result.get("scenes") or [], preset)
+            elif mode == "e" and len(parts) >= 2:
+                state = video_idea_dynamic_remember_drafts(state)
                 drafts = video_idea_script_intake.edit_scene(drafts, safe_int(parts[0], 0), "|".join(parts[1:]))
             elif mode == "a" and len(parts) >= 2:
+                state = video_idea_dynamic_remember_drafts(state)
                 drafts = video_idea_script_intake.add_scene(
                     drafts,
                     "|".join(parts[1:]),
                     after_index=safe_int(parts[0], 0),
                 )
             elif mode == "d":
+                state = video_idea_dynamic_remember_drafts(state)
                 drafts = video_idea_script_intake.delete_scene(drafts, safe_int(parts[0], 0))
             elif mode == "m":
+                state = video_idea_dynamic_remember_drafts(state)
                 drafts = video_idea_script_intake.merge_scenes(drafts, safe_int(parts[0], 0))
             elif mode == "s" and len(parts) >= 3:
+                state = video_idea_dynamic_remember_drafts(state)
                 drafts = video_idea_script_intake.split_scene(
                     drafts,
                     safe_int(parts[0], 0),
@@ -88475,12 +88487,13 @@ async def handle_video_idea_dynamic_pending_text(
                     "|".join(parts[2:]),
                 )
             elif mode == "r" and len(parts) >= 2:
+                state = video_idea_dynamic_remember_drafts(state)
                 drafts = video_idea_script_intake.move_scene(drafts, safe_int(parts[0], 0), safe_int(parts[1], 0))
             else:
                 raise ValueError("invalid_edit_format")
         except ValueError:
             await update.message.reply_text(
-                "⚠️ Nội dung chưa đúng mẫu hoặc số cảnh không hợp lệ. Vui lòng xem hướng dẫn trên màn và gửi lại; bản nháp cũ vẫn được giữ nguyên."
+                "⚠️ Nội dung chưa đúng mẫu hoặc vượt quá 20 cảnh. Hãy giữ các dòng Cảnh 1, Cảnh 2… rồi gửi lại; nội dung cũ vẫn được giữ nguyên."
             )
             return True
         state.update({"scene_drafts": drafts, "scene_count": len(drafts), "idea2_edit_mode": ""})
@@ -90575,34 +90588,19 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                     back_callback=video_idea_catalog_back_callback(context),
                 ),
             )
-        state = {
-            "idea2": True,
-            "idea_category_id": category_id,
-            "idea_category": category,
-            "idea_source": "preset_auto",
-            "idea_origin_product": video_idea_product_lane_origin(context),
-            "idea_source_media_refs": list(context.user_data.get("video_idea_source_media_refs") or [])[:20],
-            "provider_called": False,
-            "image_provider_called": False,
-            "music_provider_calls": 0,
-            "voice_provider_calls": 0,
-            "files_generated": 0,
-            "job_created": False,
-            "outbox_created": False,
-            "wallet_mutations": 0,
-            "xu_charged": 0,
-        }
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_custom_topic")
-        return await safe_edit_or_send(
+        presets = video_idea_dynamic_presets(category_id, offset=0, limit=5)
+        state = video_idea_dynamic_state(uid)
+        state.update({"idea2": True, "idea_category_id": category_id, "idea_category": category, "preset_offset": 0})
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_presets")
+        return await safe_edit_or_send_long_html(
             query,
-            f"✍️ <b>Tự nhập ý tưởng · {html.escape(str(category.get('public_name') or ''))}</b>\n\n"
-            "Hãy gửi một câu mô tả video muốn làm. TOAN AAS sẽ dùng cấu trúc an toàn của nhóm này để lập bản nháp, sau đó anh/chị chọn số cảnh và sửa từng cảnh.\n\n"
-            "Chưa gọi dịch vụ, chưa tạo file và chưa trừ Xu.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Chọn mẫu", callback_data=f"videa|cat|{category_id}"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-            ]]),
+            video_idea_dynamic_category_text(category, presets),
+            reply_markup=video_idea_dynamic_category_keyboard(
+                category_id,
+                presets,
+                lang,
+                back_page=max(1, safe_int(state.get("catalog_page"), 1)),
+            ),
         )
 
     if action == "preset":
@@ -90625,6 +90623,7 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             "idea_preset_id": preset_id,
             "idea_preset_version": safe_int(preset.get("version"), 1),
             "idea_preset": preset,
+            "idea_source": "preset_auto",
             "subject": str(preset.get("title") or "Ý tưởng video"),
             "idea_origin_product": video_idea_product_lane_origin(context, state),
             "idea_source_media_refs": list(
@@ -90633,11 +90632,10 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 or []
             )[:20],
         })
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_mode")
-        return await safe_edit_or_send(
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count")
+        return await safe_edit_or_send_long_html(
             query,
             video_idea_dynamic_preset_text(preset),
-            parse_mode="HTML",
             reply_markup=video_idea_dynamic_preset_keyboard(preset, lang),
         )
 
@@ -90655,27 +90653,11 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
         )
 
     if action == "mode":
-        mode = value if value in {"a", "m"} else "a"
-        if mode == "m":
-            state.update({"idea_source": "manual_script", "manual_script_raw": "", "scene_drafts": []})
-            restore_developing_video_pending(uid, "videoidea", state, "idea2_manual_script")
-            return await safe_edit_or_send(
-                query,
-                "✍️ <b>Dán kịch bản riêng</b>\n\n"
-                "Ưu tiên ghi rõ Cảnh 1, Cảnh 2… hoặc xuống dòng giữa các đoạn. TOAN AAS sẽ phân cảnh có kiểm tra, không chỉ cắt mù theo dòng; tối đa 20 cảnh.\n\n"
-                "Sau khi nhận, hệ thống sẽ cho anh/chị sửa, thêm, xóa, gộp, tách và đổi thứ tự trước khi vào SCENE3.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("⬅️ Chọn cách", callback_data=f"videa|preset|{int(preset.get('id') or 0)}"),
-                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-                ]]),
-            )
         state.update({"idea_source": "preset_auto", "scene_count": safe_int(preset.get("recommended_scene_count"), 3)})
         restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count")
-        return await safe_edit_or_send(
+        return await safe_edit_or_send_long_html(
             query,
             video_idea_dynamic_scene_count_text(preset),
-            parse_mode="HTML",
             reply_markup=video_idea_dynamic_scene_count_keyboard(preset, lang),
         )
 
@@ -90687,7 +90669,7 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 "✍️ <b>Nhập số cảnh từ 1 đến 20</b>\n\nMỗi cảnh khoảng 8 giây và phải trọn một ý/hành động.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("⬅️ Chọn số cảnh", callback_data="videa|mode|a"),
+                    InlineKeyboardButton("⬅️ Chọn số cảnh", callback_data=f"videa|preset|{int(preset.get('id') or 0)}"),
                     InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
                 ]]),
             )
@@ -90700,21 +90682,12 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 reply_markup=video_idea_dynamic_scene_count_keyboard(preset, lang),
             )
         state["scene_count"] = scene_count
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_auto_brief")
-        return await safe_edit_or_send(
+        state = video_idea_dynamic_build_drafts(state)
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        return await safe_edit_or_send_long_html(
             query,
-            "🪄 <b>Thông tin để AAS lập bản nháp</b>\n\n"
-            "Gửi trong một tin nhắn: chủ đề/sản phẩm/nhân vật/địa điểm, mục tiêu, điều phải giữ nguyên và CTA nếu có. "
-            "Có thể viết tự nhiên; không bắt buộc theo mẫu.\n\n"
-            "Hoặc dùng nguyên mẫu đã chọn. Đây là bộ lập kế hoạch nội bộ, không phải lời khẳng định rằng provider AI đã chạy.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Dùng nguyên mẫu", callback_data="videa|use|0")],
-                [
-                    InlineKeyboardButton("⬅️ Đổi số cảnh", callback_data="videa|mode|a"),
-                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-                ],
-            ]),
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
         )
 
     if action == "use":
@@ -90726,56 +90699,22 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             reply_markup=video_idea_dynamic_preview_keyboard(lang),
         )
 
-    if action == "regen":
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_regenerate")
-        return await safe_edit_or_send(
-            query,
-            "🔄 <b>Lập lại một cảnh từ mẫu</b>\n\nGửi số cảnh cần lập lại. TOAN AAS chỉ dùng bộ lập kế hoạch nội bộ; không gọi provider.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Xem kịch bản", callback_data="videa|back|preview"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-            ]]),
-        )
-
-    if action == "restore":
-        history = [
-            [dict(row) for row in version if isinstance(row, dict)]
-            for version in state.get("scene_draft_versions") or []
-            if isinstance(version, list)
-        ]
-        restored = bool(history)
-        if history:
-            state["scene_drafts"] = history.pop()
-            state["scene_draft_versions"] = history
-            state["scene_count"] = len(state["scene_drafts"])
+    if action in {"regen", "restore"}:
         restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
-        prefix = "↩️ Đã khôi phục bản trước.\n\n" if restored else "ℹ️ Chưa có phiên bản trước để khôi phục.\n\n"
         return await safe_edit_or_send_long_html(
             query,
-            prefix + video_idea_dynamic_preview_text(state),
+            video_idea_dynamic_preview_text(state),
             reply_markup=video_idea_dynamic_preview_keyboard(lang),
         )
 
     if action == "edit":
-        prompts = {
-            "e": "Gửi: <b>số cảnh | nội dung mới</b>",
-            "a": "Gửi: <b>cảnh đứng trước | nội dung cảnh mới</b> (dùng 0 để thêm đầu)",
-            "d": "Gửi <b>số cảnh cần xóa</b>",
-            "m": "Gửi <b>số cảnh đầu</b>; hệ thống sẽ gộp cảnh đó với cảnh kế tiếp.",
-            "s": "Gửi: <b>số cảnh | phần thứ nhất | phần thứ hai</b>",
-            "r": "Gửi: <b>số cảnh hiện tại | vị trí mới</b>",
-        }
-        edit_mode = value if value in prompts else "e"
-        state["idea2_edit_mode"] = edit_mode
+        state["idea2_edit_mode"] = "full"
         restore_developing_video_pending(uid, "videoidea", state, "idea2_edit")
-        return await safe_edit_or_send(
+        return await safe_edit_or_send_long_html(
             query,
-            f"✍️ <b>Chỉnh kịch bản</b>\n\n{prompts[edit_mode]}\n\n"
-            "Thao tác chỉ sửa bản nháp trong phiên, chưa tạo file và chưa trừ Xu.",
-            parse_mode="HTML",
+            video_idea_dynamic_edit_text(state),
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Xem kịch bản", callback_data="videa|back|preview"),
+                InlineKeyboardButton("⬅️ Xem nội dung", callback_data="videa|back|preview"),
                 InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
             ]]),
         )
@@ -90788,12 +90727,26 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 video_idea_dynamic_preview_text(state),
                 reply_markup=video_idea_dynamic_preview_keyboard(lang),
             )
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_mode")
-        return await safe_edit_or_send(
+        if value == "preset":
+            category_id = safe_int(state.get("idea_category_id") or preset.get("category_id"), 0)
+            category = video_idea_dynamic_category(category_id)
+            presets = video_idea_dynamic_presets(category_id, offset=0, limit=5)
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_presets")
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_dynamic_category_text(category, presets),
+                reply_markup=video_idea_dynamic_category_keyboard(
+                    category_id,
+                    presets,
+                    lang,
+                    back_page=max(1, safe_int(state.get("catalog_page"), 1)),
+                ),
+            )
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count")
+        return await safe_edit_or_send_long_html(
             query,
-            video_idea_dynamic_preset_text(preset),
-            parse_mode="HTML",
-            reply_markup=video_idea_dynamic_preset_keyboard(preset, lang),
+            video_idea_dynamic_scene_count_text(preset),
+            reply_markup=video_idea_dynamic_scene_count_keyboard(preset, lang),
         )
 
     if action == "approve":
@@ -90815,7 +90768,7 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             if str(exc) == "self_shot_source_video_required":
                 return await safe_edit_or_send(
                     query,
-                    "⚠️ Tự quay & đổi cảnh AI cần video nguồn trước khi dùng ý tưởng. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    "⚠️ Tự quay & đổi cảnh AI cần video nguồn trước khi dùng ý tưởng. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("⬅️ Gửi video nguồn", callback_data="vproduct|idea_back|self_shot_scene_change"),
                         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
