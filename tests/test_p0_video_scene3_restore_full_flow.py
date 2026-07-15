@@ -43,6 +43,7 @@ def _keyboard_namespace(*names: str) -> dict:
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
         "video_scene3_flow": video_scene3_flow,
+        "video_ai_edit_entry_back": lambda *_args, **_kwargs: "videoedit|ai",
         "ui_text": lambda _lang, key: "⬅️ Quay lại" if key == "common.back" else "🏠 Menu chính",
         "VIDEO_B14_2_QUALITY_OPTIONS": (200, 300, 400, 500, 600, 800, 1000, 1200, 1500),
         "video_b14_package_button_label": lambda value: f"{value} Xu",
@@ -746,7 +747,7 @@ def test_bot_source_uses_scene3_order_menu_order_and_final_confirm_boundary():
     assert '"vprofile|handoff"' in BOT_SOURCE
     assert "def video_scene3_content_type_text" not in BOT_SOURCE
     assert "def video_scene3_content_type_keyboard" not in BOT_SOURCE
-    assert '"content_type": (video_scene3_profile_text(state), video_scene3_profile_keyboard(state))' in BOT_SOURCE
+    assert '"content_type": lambda: (video_scene3_profile_text(state), video_scene3_profile_keyboard(state))' in BOT_SOURCE
 
 
 def test_changed_scene3_bot_functions_compile_in_isolation():

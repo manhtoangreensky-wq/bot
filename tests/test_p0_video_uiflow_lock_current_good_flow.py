@@ -147,7 +147,7 @@ def test_videoflow_lock_main_video_menu_buttons_snapshot():
 def test_videoflow_lock_video_ai_entry_buttons_snapshot():
     assert _rows(bot.task3d_product_intro_keyboard("video_ai_real", "vi")) == [
         [("📝 Prompt → Video AI", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video AI", "vproduct|ai_image_menu|video_ai_real")],
-        [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Phân tích video", "menu|hint_video_status")],
+        [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Phân tích video", "videoref|analyze")],
         [("⬅️ Menu video", "menu|main_video"), ("🏠 Menu chính", "menu|main")],
     ]
 
