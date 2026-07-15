@@ -101,9 +101,12 @@ def test_local1_manual_edit_entry_present() -> None:
 
 def test_local1_split_entry_present() -> None:
     hub = _between(BOT_SOURCE, "def video_edit_hub_keyboard", "def video_edit_info_text")
-    assert "🎞️ Cắt, ghép & sắp xếp" in hub
-    assert '"videoedit|timeline"' in hub
+    assert "🎞️ Cắt, ghép & sắp xếp" not in hub
+    assert '"videoedit|timeline"' not in hub
     assert "videoedit|split" not in hub
+    manual = _between(BOT_SOURCE, "def video_local_manual_options_keyboard", "def video_local_split_options_text")
+    assert "🧩 Chia thành nhiều đoạn" in manual
+    assert '"videoedit|split_from_manual"' in manual
 
 
 def test_local1_exact_back_from_upload() -> None:
@@ -653,7 +656,7 @@ def test_local1_services_do_not_call_real_providers() -> None:
 
 def test_local1_route_matrix_is_canonical() -> None:
     route = _between(BOT_SOURCE, '"video_local_edit": {', "def video_public_route_for_tool")
-    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|audio", "videoedit|timeline")' in route
+    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide")' in route
     assert '"back_target": "menu|main_video"' in route
     assert '"job_reachable": True' in route
 

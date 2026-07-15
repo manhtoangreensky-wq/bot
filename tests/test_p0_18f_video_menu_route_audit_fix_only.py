@@ -110,10 +110,8 @@ def test_video_menu_each_button_routes_to_matching_flow():
             (
                 "videoedit|ai",
                 "videoedit|manual",
-                "videoedit|audio",
-                "videoedit|timeline",
-                "videoedit|effects",
                 "videoedit|restore",
+                "videoedit|guide",
             ),
         ),
     ]
@@ -212,7 +210,7 @@ def test_local_video_edit_route():
         918811,
         "videoedit|hub",
         "Chỉnh sửa / Nâng cấp video",
-        ("videoedit|ai", "videoedit|manual", "videoedit|audio", "videoedit|timeline", "videoedit|effects", "videoedit|restore"),
+        ("videoedit|ai", "videoedit|manual", "videoedit|restore", "videoedit|guide"),
     )
 
 
