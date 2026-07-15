@@ -1333,12 +1333,37 @@ def recommended_handoff_product(plan: dict[str, Any]) -> str:
     return aliases.get(recommended, recommended if recommended in {"video_trend", "video_ai_real", "script_image_video"} else "video_ai_real")
 
 
-def build_scene3_handoff_state(plan: dict[str, Any]) -> dict[str, Any]:
+IDEA_PRODUCT_HANDOFFS = frozenset({
+    "video_trend",
+    "video_ai_real",
+    "script_image_video",
+    "storyboard_prompt",
+    "self_shot_scene_change",
+})
+
+
+def build_scene3_handoff_state(
+    plan: dict[str, Any],
+    *,
+    product_id_override: str = "",
+) -> dict[str, Any]:
     """Turn one reference idea into exact-N editable scene prompts, provider-free."""
 
     source = deepcopy(dict(plan or {}))
     count = max(1, min(20, int(source.get("scene_count") or 1)))
-    product_id = recommended_handoff_product(source)
+    requested_product = str(product_id_override or "").strip()
+    product_id = (
+        requested_product
+        if requested_product in IDEA_PRODUCT_HANDOFFS
+        else recommended_handoff_product(source)
+    )
+    source_media_refs = [
+        str(item).strip()
+        for item in source.get("source_media_refs") or []
+        if str(item or "").strip()
+    ][:20]
+    if product_id == "self_shot_scene_change" and not source_media_refs:
+        raise ValueError("self_shot_source_video_required")
     profile_id = str(source.get("recommended_profile_id") or "tutorial_explainer")
     valid_profiles = {key for key, _label in video_scene3_flow.TECHNICAL_PROFILES}
     if profile_id not in valid_profiles:
@@ -1374,6 +1399,13 @@ def build_scene3_handoff_state(plan: dict[str, Any]) -> dict[str, Any]:
         "idea_return_callback": "videoidea|catalog_result",
         "catalog_idea_id": str(source.get("catalog_idea_id") or source.get("idea_id") or ""),
         "selected_video_idea": source,
+        "source_media_ref": source_media_refs[0] if source_media_refs else "",
+        "source_media_refs": source_media_refs,
+        "source_media_type": "video" if product_id == "self_shot_scene_change" else "",
+        "storyboard_image_required": product_id == "storyboard_prompt",
+        "storyboard_allowed_image_strategies": (
+            ["uploaded_image", "ai_image"] if product_id == "storyboard_prompt" else []
+        ),
         "idea_scene_beats": semantic_beats_for_idea(source, count),
         "idea_planning_brief": {
             "scene_arc": str(source.get("scene_arc") or ""),
@@ -1403,8 +1435,9 @@ def build_scene3_handoff_state(plan: dict[str, Any]) -> dict[str, Any]:
         creative[key] = entry
     state["creative_controls"] = creative
     state = video_scene3_flow.build_planning_package(state)
+    next_step = "image_strategy" if product_id == "storyboard_prompt" else "video_prompts"
     state.update({
-        "step": "video_prompts",
+        "step": next_step,
         "history": ["video_idea_result"],
         "origin": "video_idea_catalog",
         "idea_return_callback": "videoidea|catalog_result",
