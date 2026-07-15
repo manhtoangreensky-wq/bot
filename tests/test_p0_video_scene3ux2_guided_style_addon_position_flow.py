@@ -62,7 +62,7 @@ def test_each_text_content_option_has_five_editable_local_suggestions(key: str):
 
 
 @pytest.mark.parametrize("position", [key for key, _label in video_scene3_flow.LOGO_POSITIONS])
-def test_logo_and_copyright_safe_zones_save_all_six_positions(position: str):
+def test_legacy_content_safe_zones_do_not_duplicate_canonical_post_positions(position: str):
     state = video_scene3_flow.configure_content_safe_zone(
         _state(),
         "logo_safe_zone",
@@ -74,8 +74,8 @@ def test_logo_and_copyright_safe_zones_save_all_six_positions(position: str):
         position=position,
     )
     planner = video_scene3_flow.planner_content_addons(state)
-    assert planner["logo_safe_zone"] == position
-    assert planner["watermark_safe_zone"] == position
+    assert planner["logo_safe_zone"] == "none"
+    assert planner["watermark_safe_zone"] == "none"
     assert state["content_affecting_addons"]["logo_safe_zone"]["value"]["applied_to_mp4"] is False
 
 
@@ -130,7 +130,7 @@ def test_post_inputs_inherit_the_matching_content_safe_zone_without_duplicate_co
 
 @pytest.mark.parametrize("key", sorted(video_scene3_flow.AUDIO_POST_ADDONS))
 def test_every_audio_addon_has_editable_volume_without_engine_side_effects(key: str):
-    assert video_scene3_flow.AUDIO_VOLUME_LEVELS == (20, 40, 60, 80, 100)
+    assert video_scene3_flow.AUDIO_VOLUME_LEVELS == (0, 25, 50, 75, 100, 125, 150, 175, 200)
     state = video_scene3_flow.configure_audio_volume(_state(), key, 60)
     entry = state["postproduction_addons"][key]
     assert entry["enabled"] is True
@@ -179,7 +179,7 @@ def test_voice_choices_cover_default_female_default_male_and_personal_voice(
             }],
         }
     state = video_scene3_flow.configure_voice_choice(state, choice, user_id=123)
-    voice = state["postproduction_addons"]["voice"]
+    voice = state["postproduction_addons"]["dubbing"]
     assert voice["enabled"] is True
     assert voice["value"]["voice_choice"] == choice
     assert voice["value"]["voice_type"] == voice_type
@@ -202,8 +202,8 @@ def test_personal_voice_rejects_missing_or_cross_user_assets_without_enabling_ad
         }],
     }
     result = video_scene3_flow.configure_voice_choice(state, "custom_voice", user_id=123)
-    assert result["postproduction_addons"]["voice"]["enabled"] is False
-    assert result["postproduction_addons"]["voice"]["value"] == ""
+    assert result["postproduction_addons"]["dubbing"]["enabled"] is False
+    assert result["postproduction_addons"]["dubbing"]["value"] == ""
     assert video_scene3_flow.personal_voice_asset(state, 123) == {}
 
 
@@ -243,7 +243,7 @@ def test_audio_addons_default_off_and_public_controls_cover_view_edit_remove_vol
         callbacks = {callback for row in rows for _label, callback in row}
         assert "vprofile|post_volume" in callbacks
         assert "vprofile|post_edit" in callbacks
-        assert "vprofile|post_view" in callbacks or key in {"voice", "music"}
+        assert "vprofile|post_view" in callbacks or key in {"dubbing", "music"}
         assert "vprofile|post_remove" in callbacks
         assert "vprofile|post_detail_done" in callbacks
     volume_namespace = {
@@ -253,9 +253,17 @@ def test_audio_addons_default_off_and_public_controls_cover_view_edit_remove_vol
     }
     exec(compile(_function_source("video_scene3_post_volume_keyboard"), "<audio-volume-keyboard>", "exec"), volume_namespace)
     volume_rows = volume_namespace["video_scene3_post_volume_keyboard"]()
-    assert [callback for _label, callback in volume_rows[0]] == [
-        f"vprofile|post_volume_set|{value}" for value in (20, 40, 60, 80, 100)
+    volume_callbacks = [
+        callback
+        for row in volume_rows
+        for _label, callback in row
+        if callback.startswith("vprofile|post_volume_set|")
     ]
+    assert volume_callbacks == [
+        f"vprofile|post_volume_set|{value}"
+        for value in video_scene3_flow.AUDIO_VOLUME_LEVELS
+    ]
+    assert "vprofile|post_volume_custom" in {callback for row in volume_rows for _label, callback in row}
     assert "vprofile|post_volume_done" in {callback for row in volume_rows for _label, callback in row}
 
 
@@ -424,10 +432,8 @@ def test_actual_telegram_callback_routes_guided_screens_and_legacy_redirects_wit
         assert video_scene3_flow.planner_content_addons(state).get("logo_safe_zone") == "none"
         state = await run_action("vprofile|content|captions")
         state = await run_action("vprofile|content_suggest_item")
-        assert state["step"] == "content_suggestions"
-        state = await run_action("vprofile|content_pick|1")
-        assert state["step"] == "content_detail"
-        assert state["content_affecting_addons"]["captions"]["enabled"] is True
+        assert state["step"] in {"content_addons", "audio_plan"}
+        assert state["content_affecting_addons"]["captions"]["enabled"] is False
 
         state = save_state(context, {
             **state,
@@ -447,15 +453,15 @@ def test_actual_telegram_callback_routes_guided_screens_and_legacy_redirects_wit
         state = await run_action("vprofile|post_enable")
         assert state["postproduction_addons"]["subtitles"]["enabled"] is True
         state = await run_action("vprofile|post_detail_done")
-        state = await run_action("vprofile|post_toggle|voice")
+        state = await run_action("vprofile|post_toggle|dubbing")
         state = await run_action("vprofile|post_voice_choice|custom_voice")
         assert state["step"] == "await_material_upload"
         assert state["input_target"] == "voice_audio"
-        assert state["postproduction_addons"]["voice"]["enabled"] is False
+        assert state["postproduction_addons"]["dubbing"]["enabled"] is False
         state = save_state(context, {
             **state,
             "step": "post_detail",
-            "active_post_addon": "voice",
+            "active_post_addon": "dubbing",
             "reference_assets": {"items": [{
                 "type": "voice_audio",
                 "media_kind": "audio",
@@ -464,24 +470,24 @@ def test_actual_telegram_callback_routes_guided_screens_and_legacy_redirects_wit
             }]},
         })
         state = await run_action("vprofile|post_voice_choice|custom_voice")
-        assert state["postproduction_addons"]["voice"]["value"]["asset_file_id"] == "owned-voice"
+        assert state["postproduction_addons"]["dubbing"]["value"]["asset_file_id"] == "owned-voice"
         state = await run_action("vprofile|post_voice_choice|default_female")
-        assert state["postproduction_addons"]["voice"]["value"]["voice_type"] == "female"
+        assert state["postproduction_addons"]["dubbing"]["value"]["voice_type"] == "female"
         state = await run_action("vprofile|post_volume")
         assert state["step"] == "post_volume"
-        state = await run_action("vprofile|post_volume_set|60")
+        state = await run_action("vprofile|post_volume_set|50")
         assert state["step"] == "post_detail"
-        assert state["postproduction_addons"]["voice"]["value"]["volume_percent"] == 60
+        assert state["postproduction_addons"]["dubbing"]["value"]["volume_percent"] == 50
         state = await run_action("vprofile|post_detail_done")
         state = await run_action("vprofile|post_toggle|music")
         state = await run_action("vprofile|post_music_source|create_new")
         state = await run_action("vprofile|post_music_mode|with_lyrics")
         state = await run_action("vprofile|post_volume")
-        state = await run_action("vprofile|post_volume_set|40")
+        state = await run_action("vprofile|post_volume_set|50")
         music = state["postproduction_addons"]["music"]["value"]
         assert music["music_source_choice"] == "create_new"
         assert music["vocal_mode"] == "with_lyrics"
-        assert music["volume_percent"] == 40
+        assert music["volume_percent"] == 50
         assert music["generation_planned_only"] is True
 
         state = save_state(context, {**state, "step": "quality", "history": ["aspect_ratio"]})
