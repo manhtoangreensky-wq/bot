@@ -25,6 +25,14 @@ SCENE2_UIFLOW_LOCK_TEST_FILE = "tests/test_p0_video_uiflow_lock_current_good_flo
 SCENE2_DURATION_TEST_FILE = "tests/test_p0_video_duration2_scene_or_seconds_pricing_decision.py"
 SCENE3_TEST_FILE = "tests/test_p0_video_scene3_restore_full_flow.py"
 SCENE3UX2_TEST_FILE = "tests/test_p0_video_scene3ux2_guided_style_addon_position_flow.py"
+IDEA2_TEST_FILE = "tests/test_p0_video_idea2_dynamic_presets_admin_script_intake.py"
+SCENE3UX3_TEST_FILE = "tests/test_p0_video_scene3ux3_unified_video_idea_hub.py"
+SCENE3UX4_TEST_FILE = "tests/test_p0_video_scene3ux4_reference_only_idea_hub.py"
+IDEA2_SERVICE_FILES = {
+    "services/video_idea_catalog.py",
+    "services/video_idea_script_intake.py",
+    "services/video_idea_store.py",
+}
 ARCH1_SERVICE_FILES = {
     "services/architecture_profile_router.py",
     "services/architecture_prompt_builder.py",
@@ -34,6 +42,9 @@ ARCH1_SERVICE_FILES = {
 }
 ALIGNED_REGRESSION_TESTS = {
     "tests/test_core.py",
+    "tests/test_p0_17b7_1_video_menu_cleanup.py",
+    "tests/test_p0_17c1_payos_signature_idempotency.py",
+    "tests/test_p0_17c2_payos_auto_topup_limits.py",
     "tests/test_p0_17b11_video_ui_ux_cleanup.py",
     "tests/test_p0_18f_video_menu_route_audit_fix_only.py",
     "tests/test_p0_18k_video_menu_flow_standardization_routing_matrix.py",
@@ -202,10 +213,12 @@ def test_vietnamese_and_english_aliases(user_text: str, expected: str) -> None:
     assert profile_router.route_profile(user_text).selected_profile_id == expected
 
 
-def test_main_video_menu_exposes_studio_and_edit_hub() -> None:
+def test_main_video_menu_hides_studio_but_preserves_internal_route_and_edit_hub() -> None:
     assert len(profile_router.STUDIO_PROFILE_OPTIONS) == 14
-    assert '("profile_studio", "video_idea")' in BOT_SOURCE
-    assert '("video_local_edit", "prompt_library")' in BOT_SOURCE
+    public_rows = _source_between("VIDEO_PUBLIC_MENU_ROWS = (", "VIDEO_PUBLIC_ROUTE_MATRIX = {")
+    assert "profile_studio" not in public_rows
+    assert '("storyboard_prompt", "video_idea")' in public_rows
+    assert '("video_local_edit", "video_downloader")' in public_rows
     assert '"label_vi": "🎯 Studio Profile AI"' in BOT_SOURCE
     assert '"entry_callback": "vprofile|menu"' in BOT_SOURCE
     assert '"label_vi": "🛠 Chỉnh sửa video"' in BOT_SOURCE
@@ -324,6 +337,10 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         SCENE3UX2_TEST_FILE,
         "tests/test_p0_video_scene3boot1_bot_syntax_and_caption_render.py",
     } if SCENE3_TEST_FILE in touched else set()
+    idea2_allowed = (
+        IDEA2_SERVICE_FILES
+        | {IDEA2_TEST_FILE, SCENE3UX3_TEST_FILE, SCENE3UX4_TEST_FILE}
+    ) if IDEA2_TEST_FILE in touched else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -337,6 +354,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path in scene1_allowed
             or path in scene2_allowed
             or path in scene3_allowed
+            or path in idea2_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",

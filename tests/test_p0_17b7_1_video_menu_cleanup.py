@@ -43,14 +43,16 @@ def test_video_menu_hides_prompt_motion_public():
     assert "vproduct|open|motion_prompt" not in _callbacks(bot.main_video_keyboard("vi"))
 
 
-def test_video_idea_hub_integrates_prompt_library_without_duplicate_main_button():
+def test_video_idea_hub_uses_dynamic_catalog_without_duplicate_prompt_library_button():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
     assert "📚 Kho prompt video" not in labels
     assert "📚 Kho câu lệnh video" not in labels
     assert "vpromptlib|start" not in callbacks
     assert "videoidea|start" in callbacks
-    assert "vpromptlib|start" in _callbacks(bot.video_idea_menu_keyboard("vi"))
+    idea_callbacks = _callbacks(bot.video_idea_menu_keyboard("vi"))
+    assert "videa|page|1" in idea_callbacks
+    assert "vpromptlib|start" not in idea_callbacks
     assert "Kho mẫu ý tưởng và câu lệnh" in bot.video_prompt_library_text("vi")
 
 

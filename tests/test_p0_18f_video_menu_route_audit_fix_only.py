@@ -96,7 +96,7 @@ def test_video_menu_current_buttons_unchanged():
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
         ("vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom")),
-        ("videoidea|start", "Ý tưởng video", ("videoidea|explore", "vpromptlib|start", "videoidea|source_start")),
+        ("videoidea|start", "Ý tưởng video", ("videa|page|1",)),
         ("vproduct|open|storyboard_prompt", "Storyboard", ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt")),
         ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|ai_prompt_menu|video_ai_real", "vproduct|ai_image_menu|video_ai_real", "vproduct|ai_video_menu|video_ai_real")),
         ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_existing|script_image_video", "vproduct|script_ideas|script_image_video", "vproduct|script_manual|script_image_video")),
@@ -140,7 +140,7 @@ def test_video_idea_route():
         918802,
         "videoidea|start",
         "Ý tưởng video",
-        ("videoidea|explore", "vpromptlib|start", "videoidea|source_start"),
+        ("videa|page|1",),
     )
 
 

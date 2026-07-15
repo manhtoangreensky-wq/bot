@@ -107,7 +107,7 @@ from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import profile_router, video_local_editing, video_local_validation, video_smart_splitter
 from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
-from services import video_idea_catalog, video_prompt_vault
+from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_prompt_vault
 from services import video_profile_context_engine
 from services import video_addon_planner, video_scene3_flow, video_scene_prompt_builder, video_semantic_scene_planner
 from services import video_prompt_continuity as video_continuity
@@ -5179,6 +5179,11 @@ def init_db():
             except Exception:
                 pass
     video_project_queue.ensure_video_project_queue_schema(conn)
+    video_idea_store.seed_catalog(
+        conn,
+        video_idea_catalog.dynamic_category_seeds(),
+        video_idea_catalog.dynamic_preset_seeds(),
+    )
     conn.commit()
     conn.close()
 
@@ -86622,11 +86627,281 @@ def video_idea_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("🔎 Khám phá ý tưởng" if is_vi else "🔎 Explore ideas", "videoidea|explore"),
+            ("🔎 Khám phá ý tưởng" if is_vi else "🔎 Explore ideas", "videa|page|1"),
         ],
         lang,
         back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
     )
+
+
+def _video_idea_dynamic_db(read_fn):
+    conn = db_connect()
+    try:
+        video_idea_store.seed_catalog(
+            conn,
+            video_idea_catalog.dynamic_category_seeds(),
+            video_idea_catalog.dynamic_preset_seeds(),
+        )
+        conn.commit()
+        return read_fn(conn)
+    finally:
+        conn.close()
+
+
+def video_idea_dynamic_categories(*, active_only: bool = True) -> list[dict]:
+    return _video_idea_dynamic_db(
+        lambda conn: video_idea_store.list_categories(conn, active_only=active_only)
+    )
+
+
+def video_idea_dynamic_category(category_id: int) -> dict:
+    return _video_idea_dynamic_db(
+        lambda conn: video_idea_store.category_by_id(conn, int(category_id))
+    )
+
+
+def video_idea_dynamic_category_key(category_key: str) -> dict:
+    return _video_idea_dynamic_db(
+        lambda conn: video_idea_store.category_by_key(conn, str(category_key or ""))
+    )
+
+
+def video_idea_dynamic_presets(
+    category_id: int,
+    *,
+    active_only: bool = True,
+    offset: int = 0,
+    limit: int = 5,
+) -> list[dict]:
+    return _video_idea_dynamic_db(
+        lambda conn: video_idea_store.list_presets(
+            conn,
+            category_id=int(category_id),
+            active_only=active_only,
+            offset=offset,
+            limit=limit,
+        )
+    )
+
+
+def video_idea_dynamic_preset(preset_id: int) -> dict:
+    return _video_idea_dynamic_db(
+        lambda conn: video_idea_store.preset_by_id(conn, int(preset_id))
+    )
+
+
+def video_idea_dynamic_page_text(page: int = 1, lang: str = "vi") -> str:
+    categories = video_idea_dynamic_categories()
+    counts = _video_idea_dynamic_db(video_idea_store.catalog_counts)
+    page_size = 8
+    total_pages = max(1, (len(categories) + page_size - 1) // page_size)
+    selected_page = max(1, min(int(page or 1), total_pages))
+    start = (selected_page - 1) * page_size
+    visible = categories[start:start + page_size]
+    lines = [
+        "🔎 <b>Khám phá ý tưởng video</b>",
+        "",
+        "Chọn nhóm gần với video anh/chị muốn làm. Mỗi nhóm có mẫu kịch bản, cách chia cảnh, giọng đọc, nhạc và hình ảnh phù hợp để tham khảo.",
+        "",
+    ]
+    for category in visible:
+        lines.append(
+            f"{html.escape(str(category.get('icon') or '💡'))} "
+            f"<b>{html.escape(str(category.get('public_name') or ''))}</b>\n"
+            f"{html.escape(str(category.get('description') or ''))}"
+        )
+    lines.extend([
+        "",
+        f"Trang {selected_page}/{total_pages} · {len(categories)} nhóm · {safe_int(counts.get('presets'), 0)} mẫu đang bật.",
+        "Đây là bước tham khảo và lập kế hoạch; hệ thống chưa tạo file, chưa gọi dịch vụ và chưa trừ Xu.",
+    ])
+    return "\n\n".join(lines)
+
+
+def video_idea_dynamic_page_keyboard(page: int = 1, lang: str = "vi") -> InlineKeyboardMarkup:
+    categories = video_idea_dynamic_categories()
+    page_size = 8
+    total_pages = max(1, (len(categories) + page_size - 1) // page_size)
+    selected_page = max(1, min(int(page or 1), total_pages))
+    start = (selected_page - 1) * page_size
+    visible = categories[start:start + page_size]
+    rows: list[list[InlineKeyboardButton]] = []
+    for index in range(0, len(visible), 2):
+        rows.append([
+            InlineKeyboardButton(
+                f"{category.get('icon') or '💡'} {category.get('short_button_name') or category.get('public_name')}",
+                callback_data=f"videa|cat|{int(category.get('id') or 0)}",
+            )
+            for category in visible[index:index + 2]
+        ])
+    if total_pages > 1:
+        navigation: list[InlineKeyboardButton] = []
+        if selected_page > 1:
+            navigation.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"videa|page|{selected_page - 1}"))
+        if selected_page < total_pages:
+            navigation.append(InlineKeyboardButton("Trang sau ➡️", callback_data=f"videa|page|{selected_page + 1}"))
+        if navigation:
+            rows.append(navigation)
+    rows.append([
+        InlineKeyboardButton("⬅️ Ý tưởng video", callback_data="videoidea|start"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_idea_dynamic_category_text(category: dict, presets: list[dict]) -> str:
+    lines = [
+        f"{html.escape(str(category.get('icon') or '💡'))} <b>{html.escape(str(category.get('public_name') or 'Ý tưởng video'))}</b>",
+        "",
+        html.escape(str(category.get("description") or "")),
+        "",
+        "Chọn một mẫu ý tưởng:",
+    ]
+    for index, preset in enumerate(presets, 1):
+        lines.append(
+            f"{index}. <b>{html.escape(str(preset.get('title') or ''))}</b>\n"
+            f"{html.escape(str(preset.get('description') or ''))}"
+        )
+    lines.extend([
+        "",
+        "Mẫu chỉ nạp kế hoạch có thể sửa. Hệ thống chưa tạo kịch bản bằng dịch vụ bên ngoài, chưa tạo file và chưa trừ Xu.",
+    ])
+    return "\n\n".join(lines)
+
+
+def video_idea_dynamic_category_keyboard(
+    category_id: int,
+    presets: list[dict],
+    lang: str = "vi",
+    *,
+    back_page: int = 1,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if presets:
+        rows.append([
+            InlineKeyboardButton(str(index), callback_data=f"videa|preset|{int(preset.get('id') or 0)}")
+            for index, preset in enumerate(presets, 1)
+        ])
+    rows.append([
+        InlineKeyboardButton("💡 Gợi ý khác", callback_data=f"videa|more|{int(category_id)}"),
+        InlineKeyboardButton("✍️ Tự nhập ý tưởng", callback_data=f"videa|custom|{int(category_id)}"),
+    ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Chọn nhóm", callback_data=f"videa|page|{max(1, int(back_page or 1))}"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_idea_dynamic_preset_text(preset: dict) -> str:
+    scenes = max(1, min(20, safe_int(preset.get("recommended_scene_count"), 3)))
+    duration = scenes * 8
+    profile_label = video_scene3_flow.technical_profile_label(str(preset.get("recommended_profile_id") or ""))
+    safety = str(preset.get("content_safety_note") or "").strip()
+    safety_line = f"\n• Lưu ý nội dung: {html.escape(safety)}" if safety else ""
+    return (
+        f"💡 <b>{html.escape(str(preset.get('title') or 'Ý tưởng video'))}</b>\n\n"
+        f"{html.escape(str(preset.get('description') or ''))}\n\n"
+        f"• Gợi ý: {scenes} cảnh · khoảng {duration} giây\n"
+        f"• Kiểu thể hiện: {html.escape(profile_label)}\n"
+        f"• Giọng đọc: {html.escape(str(preset.get('voice_plan') or 'Tùy chọn'))}\n"
+        f"• Nhạc: {html.escape(str(preset.get('music_plan') or 'Tùy chọn'))}\n"
+        f"• Âm thanh: {html.escape(str(preset.get('audio_plan') or 'Tùy chọn'))}\n"
+        f"• Hình ảnh: {html.escape(str(preset.get('visual_plan') or 'Theo nội dung'))}"
+        f"{safety_line}\n\n"
+        "Anh/chị muốn chuẩn bị kịch bản theo cách nào? Cả hai cách đều chỉ tạo bản kế hoạch để sửa rồi chuyển vào SCENE3; chưa gọi dịch vụ và chưa trừ Xu."
+    )
+
+
+def video_idea_dynamic_preset_keyboard(preset: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    category_id = int(preset.get("category_id") or 0)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🪄 AAS hỗ trợ tạo kịch bản", callback_data="videa|mode|a")],
+        [InlineKeyboardButton("✍️ Tôi đã có kịch bản riêng", callback_data="videa|mode|m")],
+        [
+            InlineKeyboardButton("⬅️ Chọn mẫu", callback_data=f"videa|cat|{category_id}"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_idea_dynamic_scene_count_text(preset: dict) -> str:
+    recommended = max(1, min(20, safe_int(preset.get("recommended_scene_count"), 3)))
+    return (
+        "🎬 <b>Chọn số cảnh trước</b>\n\n"
+        f"Mẫu này gợi ý <b>{recommended} cảnh</b>. Một cảnh khoảng 8 giây và phải hoàn tất một ý hoặc hành động. "
+        "TOAN AAS sẽ viết đúng số cảnh anh/chị chọn, không chia cơ học một đoạn dài.\n\n"
+        "Chưa tạo file, chưa gọi dịch vụ và chưa trừ Xu."
+    )
+
+
+def video_idea_dynamic_scene_count_keyboard(preset: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    values = (1, 2, 3, 5, 10, 20)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{value} cảnh", callback_data=f"videa|sc|{value}") for value in values[:3]],
+        [InlineKeyboardButton(f"{value} cảnh", callback_data=f"videa|sc|{value}") for value in values[3:]],
+        [InlineKeyboardButton("✍️ Nhập số khác", callback_data="videa|sc|x")],
+        [
+            InlineKeyboardButton("⬅️ Chọn cách", callback_data=f"videa|preset|{int(preset.get('id') or 0)}"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_idea_dynamic_preview_text(state: dict) -> str:
+    drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
+    source_label = "AAS hỗ trợ lập bản nháp" if state.get("idea_source") == "preset_auto" else "Kịch bản riêng của anh/chị"
+    lines = [
+        "📑 <b>Xem trước kịch bản từng cảnh</b>",
+        "",
+        f"• Nguồn: {source_label}",
+        f"• Số cảnh: {len(drafts)} · khoảng {len(drafts) * 8} giây",
+        "",
+    ]
+    for row in drafts:
+        index = safe_int(row.get("scene_index"), 1)
+        content = str(row.get("content") or row.get("goal") or "").strip()
+        diagnostic = dict(row.get("diagnostic") or video_idea_script_intake.scene_diagnostic(content))
+        notes: list[str] = []
+        if diagnostic.get("too_long"):
+            notes.append("dài, nên rút gọn")
+        if diagnostic.get("needs_action"):
+            notes.append("nên thêm hành động/kết quả")
+        note = f" <i>({'; '.join(notes)})</i>" if notes else ""
+        lines.append(f"<b>Cảnh {index}:</b> {html.escape(content)}{note}")
+    lines.extend([
+        "",
+        "Có thể sửa, thêm, xóa, gộp, tách hoặc đổi thứ tự trước khi duyệt. Duyệt sẽ chuyển sang SCENE3 để xem và sửa câu lệnh ảnh/video, không đi thẳng tới báo giá.",
+        "",
+        "Hệ thống chưa tạo job/outbox/file, chưa gọi provider và chưa trừ Xu.",
+    ])
+    return "\n\n".join(lines)
+
+
+def video_idea_dynamic_preview_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍️ Sửa cảnh", callback_data="videa|edit|e"),
+            InlineKeyboardButton("➕ Thêm cảnh", callback_data="videa|edit|a"),
+        ],
+        [
+            InlineKeyboardButton("🗑 Xóa cảnh", callback_data="videa|edit|d"),
+            InlineKeyboardButton("🔗 Gộp 2 cảnh", callback_data="videa|edit|m"),
+        ],
+        [
+            InlineKeyboardButton("✂️ Tách cảnh", callback_data="videa|edit|s"),
+            InlineKeyboardButton("↕️ Đổi thứ tự", callback_data="videa|edit|r"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Lập lại một cảnh", callback_data="videa|regen|1"),
+            InlineKeyboardButton("↩️ Khôi phục bản trước", callback_data="videa|restore|1"),
+        ],
+        [InlineKeyboardButton("✅ Duyệt và mở SCENE3", callback_data="videa|approve|1")],
+        [
+            InlineKeyboardButton("⬅️ Chọn cách khác", callback_data="videa|back|mode"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
 
 
 def video_idea_catalog_categories_text(lang: str = "vi") -> str:
@@ -87485,6 +87760,324 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
         )
     return "🎵 <b>Gợi ý âm thanh</b>\n\nGiọng đọc: tự tin, gần gũi, câu ngắn.\nNhạc: cinematic/electronic hiện đại.\nSFX: whoosh, click và reveal hit nhẹ.\n\nTOAN AAS chưa xử lý thật và chưa trừ Xu."
 
+def video_idea_dynamic_remember_drafts(state: dict) -> dict:
+    updated = dict(state or {})
+    history = [
+        [dict(row) for row in version if isinstance(row, dict)]
+        for version in updated.get("scene_draft_versions") or []
+        if isinstance(version, list)
+    ]
+    current = [dict(row) for row in updated.get("scene_drafts") or [] if isinstance(row, dict)]
+    if current:
+        history.append(current)
+    updated["scene_draft_versions"] = history[-5:]
+    return updated
+
+
+async def handle_video_idea_dynamic_pending_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    pending: dict,
+) -> bool:
+    if not pending.get("idea2") or pending.get("flow") != "videoidea":
+        return False
+    uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    raw_text = str(update.message.text or "").strip()[:20000]
+    step = str(pending.get("step") or "")
+    state = dict(pending)
+    preset = dict(state.get("idea_preset") or {})
+
+    if step == "idea2_custom_topic":
+        if not raw_text:
+            return True
+        category_id = safe_int(state.get("idea_category_id"), 0)
+        presets = video_idea_dynamic_presets(category_id, offset=0, limit=1)
+        if not presets:
+            await update.message.reply_text("⚠️ Nhóm này chưa có mẫu đang bật. Vui lòng chọn nhóm khác.")
+            return True
+        preset = dict(presets[0])
+        preset.update({
+            "title": raw_text[:160],
+            "description": f"Ý tưởng riêng trong nhóm {state.get('idea_category', {}).get('public_name') or ''}.",
+        })
+        state.update({
+            "idea_preset": preset,
+            "idea_preset_id": safe_int(preset.get("id"), 0),
+            "idea_preset_version": safe_int(preset.get("version"), 1),
+            "idea_source": "preset_auto",
+            "subject": raw_text[:500],
+            "scene_count": safe_int(preset.get("recommended_scene_count"), 3),
+        })
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count")
+        await update.message.reply_text(
+            video_idea_dynamic_scene_count_text(preset),
+            parse_mode="HTML",
+            reply_markup=video_idea_dynamic_scene_count_keyboard(preset, lang),
+        )
+        return True
+
+    if not preset:
+        await update.message.reply_text(
+            "⚠️ Phiên chọn ý tưởng đã hết hạn. Vui lòng mở lại kho ý tưởng.",
+            reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+        )
+        clear_developing_video_pending(uid)
+        return True
+
+    if step == "idea2_scene_count_custom":
+        scene_count = safe_int(re.sub(r"\D+", "", raw_text), 0)
+        if not 1 <= scene_count <= 20:
+            await update.message.reply_text("⚠️ Số cảnh phải từ 1 đến 20. Vui lòng nhập lại một số hợp lệ.")
+            return True
+        state["scene_count"] = scene_count
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_auto_brief")
+        await update.message.reply_text(
+            "🪄 <b>Thông tin để AAS lập bản nháp</b>\n\n"
+            "Hãy mô tả chủ đề/sản phẩm/nhân vật/địa điểm, mục tiêu, điều phải giữ nguyên và CTA nếu có. "
+            "TOAN AAS sẽ lập đúng số cảnh vừa chọn bằng mẫu nội bộ, không gọi provider.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Dùng nguyên mẫu", callback_data="videa|use|0")],
+                [InlineKeyboardButton("⬅️ Đổi số cảnh", callback_data="videa|mode|a")],
+            ]),
+        )
+        return True
+
+    if step == "idea2_auto_brief":
+        state["subject"] = raw_text[:500] or str(preset.get("title") or "Ý tưởng video")
+        state = video_idea_dynamic_build_drafts(state, brief=raw_text)
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        await safe_reply_long_html(
+            update.message,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
+        )
+        return True
+
+    if step == "idea2_manual_script":
+        result = video_idea_script_intake.split_manual_script(raw_text)
+        if not result.get("ok"):
+            if result.get("reason") == "too_many_scenes":
+                await update.message.reply_text(
+                    f"⚠️ Kịch bản đang có {safe_int(result.get('scene_count'), 0)} cảnh, vượt giới hạn 20. "
+                    "Hãy rút gọn hoặc gửi riêng phần muốn dùng; hệ thống không tự cắt bỏ nội dung."
+                )
+            else:
+                await update.message.reply_text("⚠️ Kịch bản đang trống. Hãy gửi lại nội dung cần phân cảnh.")
+            return True
+        drafts = video_idea_script_intake.manual_scene_drafts(result.get("scenes") or [], preset)
+        state.update({
+            "idea_source": "manual_script",
+            "manual_script_raw": raw_text,
+            "manual_split_method": str(result.get("method") or ""),
+            "scene_count": len(drafts),
+            "scene_drafts": drafts,
+            "scene_draft_versions": [],
+            "subject": str(preset.get("title") or "Kịch bản riêng"),
+        })
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        await safe_reply_long_html(
+            update.message,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
+        )
+        return True
+
+    if step == "idea2_regenerate":
+        scene_index = safe_int(re.sub(r"\D+", "", raw_text), 0)
+        drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
+        if not 1 <= scene_index <= len(drafts):
+            await update.message.reply_text("⚠️ Số cảnh không hợp lệ. Vui lòng nhập lại.")
+            return True
+        state = video_idea_dynamic_remember_drafts(state)
+        replacement = video_idea_script_intake.deterministic_scene_drafts(
+            preset,
+            scene_count=len(drafts),
+            topic=str(state.get("subject") or preset.get("title") or ""),
+            customer_brief=str(state.get("customer_brief") or ""),
+            semantic_beats=video_idea_catalog.semantic_beats_for_idea(preset, len(drafts)),
+        )[scene_index - 1]
+        drafts[scene_index - 1] = replacement
+        state["scene_drafts"] = video_idea_script_intake.renumber_scene_drafts(drafts)
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        await safe_reply_long_html(update.message, video_idea_dynamic_preview_text(state), reply_markup=video_idea_dynamic_preview_keyboard(lang))
+        return True
+
+    if step == "idea2_edit":
+        mode = str(state.get("idea2_edit_mode") or "e")
+        parts = [part.strip() for part in raw_text.split("|")]
+        drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
+        try:
+            state = video_idea_dynamic_remember_drafts(state)
+            if mode == "e" and len(parts) >= 2:
+                drafts = video_idea_script_intake.edit_scene(drafts, safe_int(parts[0], 0), "|".join(parts[1:]))
+            elif mode == "a" and len(parts) >= 2:
+                drafts = video_idea_script_intake.add_scene(
+                    drafts,
+                    "|".join(parts[1:]),
+                    after_index=safe_int(parts[0], 0),
+                )
+            elif mode == "d":
+                drafts = video_idea_script_intake.delete_scene(drafts, safe_int(parts[0], 0))
+            elif mode == "m":
+                drafts = video_idea_script_intake.merge_scenes(drafts, safe_int(parts[0], 0))
+            elif mode == "s" and len(parts) >= 3:
+                drafts = video_idea_script_intake.split_scene(
+                    drafts,
+                    safe_int(parts[0], 0),
+                    parts[1],
+                    "|".join(parts[2:]),
+                )
+            elif mode == "r" and len(parts) >= 2:
+                drafts = video_idea_script_intake.move_scene(drafts, safe_int(parts[0], 0), safe_int(parts[1], 0))
+            else:
+                raise ValueError("invalid_edit_format")
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ Nội dung chưa đúng mẫu hoặc số cảnh không hợp lệ. Vui lòng xem hướng dẫn trên màn và gửi lại; bản nháp cũ vẫn được giữ nguyên."
+            )
+            return True
+        state.update({"scene_drafts": drafts, "scene_count": len(drafts), "idea2_edit_mode": ""})
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        await safe_reply_long_html(
+            update.message,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
+        )
+        return True
+
+    return True
+
+
+async def handle_video_idea_admin_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    pending = dict(context.user_data.get("video_idea_admin_input") or {})
+    if not pending:
+        return False
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        context.user_data.pop("video_idea_admin_input", None)
+        await update.message.reply_text("⛔ Bạn không có quyền dùng chức năng này.")
+        return True
+    raw_text = str(update.message.text or "").strip()[:30000]
+    action = str(pending.get("action") or "")
+    try:
+        if action in {"create_category", "create_preset", "editc", "editp", "import"}:
+            payload = json.loads(raw_text)
+            if not isinstance(payload, dict):
+                raise ValueError("json_object_required")
+        else:
+            payload = {}
+
+        if action == "create_category":
+            normalized = video_idea_store.normalize_category(payload)
+            candidate = {"action": "create_category", "payload": normalized}
+        elif action == "create_preset":
+            category = dict(pending.get("category") or {})
+            normalized = video_idea_store.normalize_preset({
+                **payload,
+                "category_key": str(category.get("category_key") or ""),
+                "scene_duration_sec": payload.get("scene_duration_sec", 8),
+            })
+            candidate = {"action": "create_preset", "payload": normalized}
+        elif action == "editc":
+            entity_id = safe_int(pending.get("entity_id"), 0)
+            before = video_idea_dynamic_category(entity_id)
+            if not before:
+                raise ValueError("category_not_found")
+            normalized = video_idea_store.normalize_category({
+                **before,
+                **payload,
+                "created_by": before.get("created_by") or str(update.effective_user.id),
+            })
+            candidate = {
+                "action": "update_category",
+                "entity_id": entity_id,
+                "payload": normalized,
+            }
+        elif action == "editp":
+            entity_id = safe_int(pending.get("entity_id"), 0)
+            before = video_idea_dynamic_preset(entity_id)
+            if not before:
+                raise ValueError("preset_not_found")
+            normalized = video_idea_store.normalize_preset({
+                **before,
+                **payload,
+                "created_by": before.get("created_by") or str(update.effective_user.id),
+            })
+            candidate = {
+                "action": "update_preset",
+                "entity_id": entity_id,
+                "payload": normalized,
+            }
+        elif action == "ordc":
+            entity_id = safe_int(pending.get("entity_id"), 0)
+            if not video_idea_dynamic_category(entity_id):
+                raise ValueError("category_not_found")
+            candidate = {
+                "action": "update_category",
+                "entity_id": entity_id,
+                "payload": {"sort_order": int(raw_text)},
+            }
+        elif action == "ordp":
+            entity_id = safe_int(pending.get("entity_id"), 0)
+            if not video_idea_dynamic_preset(entity_id):
+                raise ValueError("preset_not_found")
+            candidate = {
+                "action": "update_preset",
+                "entity_id": entity_id,
+                "payload": {"sort_order": int(raw_text)},
+            }
+        elif action == "clone":
+            clone_parts = [item.strip() for item in raw_text.split("|", 1)]
+            if len(clone_parts) != 2:
+                raise ValueError("clone_format_invalid")
+            entity_id = safe_int(pending.get("entity_id"), 0)
+            source = video_idea_dynamic_preset(entity_id)
+            if not source:
+                raise ValueError("preset_not_found")
+            normalized = video_idea_store.normalize_preset({
+                **source,
+                "preset_key": clone_parts[0],
+                "title": clone_parts[1],
+                "is_active": 0,
+                "created_by": str(update.effective_user.id),
+            })
+            duplicate = _video_idea_dynamic_db(
+                lambda conn: video_idea_store.preset_by_key(conn, normalized["preset_key"])
+            )
+            if duplicate:
+                raise ValueError("preset_key_exists")
+            candidate = {
+                "action": "clone_preset",
+                "entity_id": entity_id,
+                "payload": {
+                    "preset_key": normalized["preset_key"],
+                    "title": normalized["title"],
+                },
+            }
+        elif action == "import":
+            validated = video_idea_store.validate_import_payload(payload)
+            candidate = {"action": "import", "payload": {"validated": validated}}
+        else:
+            raise ValueError("unknown_admin_input")
+    except Exception as error:
+        logger.info("video idea admin input rejected: %s", type(error).__name__)
+        await update.message.reply_text(
+            video_idea_admin_error_text(error),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1")]]),
+        )
+        return True
+
+    context.user_data.pop("video_idea_admin_input", None)
+    context.user_data["video_idea_admin_candidate"] = candidate
+    await update.message.reply_text(
+        video_idea_admin_candidate_text(candidate),
+        parse_mode="HTML",
+        reply_markup=video_idea_admin_confirm_keyboard(),
+    )
+    return True
+
+
 async def handle_developing_video_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or not update.effective_user:
         return False
@@ -87492,6 +88085,8 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
     pending = get_developing_video_pending(uid)
     if not pending:
         return False
+    if pending.get("idea2"):
+        return await handle_video_idea_dynamic_pending_text(update, context, dict(pending))
     lang = get_user_language(uid) or "vi"
     text = _short_pending_text(update.message.text, 700)
     if not text:
@@ -89223,6 +89818,832 @@ async def handle_storyboard_pack_callback(update: Update, context: ContextTypes.
         return await safe_edit_or_send(query, text, reply_markup=storyboard_pack_video_guard_keyboard(lang), parse_mode="HTML")
     return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
 
+def video_idea_dynamic_state(user_id: int) -> dict:
+    state = dict(get_developing_video_pending(user_id) or {})
+    return state if state.get("flow") == "videoidea" and state.get("idea2") else {}
+
+
+def video_idea_dynamic_build_drafts(state: dict, *, brief: str = "") -> dict:
+    updated = dict(state or {})
+    preset = dict(updated.get("idea_preset") or {})
+    count = max(1, min(20, safe_int(updated.get("scene_count"), 1)))
+    topic = str(updated.get("subject") or preset.get("title") or "Ý tưởng video")
+    beats = video_idea_catalog.semantic_beats_for_idea(preset, count)
+    updated["scene_drafts"] = video_idea_script_intake.deterministic_scene_drafts(
+        preset,
+        scene_count=count,
+        topic=topic,
+        customer_brief=brief,
+        semantic_beats=beats,
+    )
+    updated["customer_brief"] = str(brief or "").strip()
+    updated["scene_count"] = count
+    return updated
+
+
+def video_idea_dynamic_scene3_state(state: dict) -> dict:
+    source = dict(state or {})
+    preset = dict(source.get("idea_preset") or {})
+    drafts = [dict(item) for item in source.get("scene_drafts") or [] if isinstance(item, dict)]
+    count = max(1, min(20, len(drafts) or safe_int(source.get("scene_count"), 1)))
+    plan = video_idea_catalog.build_plan(
+        preset,
+        scene_count=count,
+        source_mode="text_prompt",
+        custom_note=str(source.get("customer_brief") or ""),
+    )
+    plan.update({
+        "idea_category_id": safe_int(source.get("idea_category_id"), 0),
+        "idea_preset_id": safe_int(source.get("idea_preset_id"), 0),
+        "idea_preset_version": safe_int(source.get("idea_preset_version"), 1),
+        "idea_source": str(source.get("idea_source") or "preset_auto"),
+        "subject": str(source.get("subject") or preset.get("title") or "Ý tưởng video"),
+        "manual_script_raw": str(source.get("manual_script_raw") or ""),
+        "scene_drafts": drafts,
+        "voice_plan": str(preset.get("voice_plan") or ""),
+        "music_plan": str(preset.get("music_plan") or ""),
+        "audio_plan": str(preset.get("audio_plan") or ""),
+        "visual_plan": str(preset.get("visual_plan") or ""),
+        "content_safety_note": str(preset.get("content_safety_note") or ""),
+        "catalog_category": str(preset.get("category_key") or preset.get("category") or ""),
+        "catalog_idea_id": str(preset.get("preset_key") or preset.get("idea_id") or ""),
+    })
+    handoff = video_idea_catalog.build_scene3_handoff_state(plan)
+    handoff.update({
+        "idea_category_id": plan["idea_category_id"],
+        "idea_preset_id": plan["idea_preset_id"],
+        "idea_preset_version": plan["idea_preset_version"],
+        "idea_source": plan["idea_source"],
+        "subject": plan["subject"],
+        "manual_script_raw": plan["manual_script_raw"],
+        "scene_drafts": drafts,
+        "scene_count": count,
+        "voice_plan": plan["voice_plan"],
+        "music_plan": plan["music_plan"],
+        "visual_plan": plan["visual_plan"],
+        "content_safety_note": plan["content_safety_note"],
+        "idea_scene_beats": video_idea_script_intake.semantic_beats_from_drafts(drafts),
+        "origin": "video_idea_dynamic_catalog",
+        "idea_return_callback": f"videa|preset|{plan['idea_preset_id']}",
+        "final_confirmed": False,
+        "provider_called": False,
+        "image_provider_called": False,
+        "music_provider_calls": 0,
+        "voice_provider_calls": 0,
+        "files_generated": 0,
+        "job_created": False,
+        "outbox_created": False,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    })
+    handoff = video_scene3_flow.build_planning_package(handoff)
+    handoff.update({
+        "step": "video_prompts",
+        "origin": "video_idea_dynamic_catalog",
+        "idea_return_callback": f"videa|preset|{plan['idea_preset_id']}",
+        "final_confirmed": False,
+        "provider_called": False,
+        "image_provider_called": False,
+        "music_provider_calls": 0,
+        "voice_provider_calls": 0,
+        "files_generated": 0,
+        "job_created": False,
+        "outbox_created": False,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    })
+    return video_scene3_flow.normalize_state(handoff)
+
+
+async def handle_video_idea_dynamic_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "page"
+    value = parts[2] if len(parts) > 2 else ""
+
+    if action == "page":
+        page = max(1, safe_int(value, 1))
+        clear_developing_video_pending(uid)
+        context.user_data["video_idea_catalog_page"] = page
+        set_video_route_session(uid, "video_idea", "dynamic_categories", product_id="video_idea")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_page_text(page, lang),
+            reply_markup=video_idea_dynamic_page_keyboard(page, lang),
+        )
+
+    if action == "cat":
+        category_id = safe_int(value, 0)
+        catalog_page = max(1, safe_int(context.user_data.get("video_idea_catalog_page"), 1))
+        category = video_idea_dynamic_category(category_id)
+        if not category or not bool(category.get("is_active")):
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_dynamic_page_text(1, lang),
+                reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+            )
+        presets = video_idea_dynamic_presets(category_id, offset=0, limit=5)
+        state = {
+            "idea2": True,
+            "idea_category_id": category_id,
+            "idea_category": category,
+            "catalog_page": catalog_page,
+            "preset_offset": 0,
+            "provider_called": False,
+            "image_provider_called": False,
+            "music_provider_calls": 0,
+            "voice_provider_calls": 0,
+            "files_generated": 0,
+            "job_created": False,
+            "outbox_created": False,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        }
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_presets")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_category_text(category, presets),
+            reply_markup=video_idea_dynamic_category_keyboard(category_id, presets, lang, back_page=catalog_page),
+        )
+
+    if action == "more":
+        category_id = safe_int(value, 0)
+        state = video_idea_dynamic_state(uid)
+        category = video_idea_dynamic_category(category_id)
+        all_presets = video_idea_dynamic_presets(category_id, offset=0, limit=2000)
+        offset = safe_int(state.get("preset_offset"), 0) + 5
+        if offset >= len(all_presets):
+            offset = 0
+        presets = video_idea_dynamic_presets(category_id, offset=offset, limit=5)
+        state.update({"idea2": True, "idea_category_id": category_id, "idea_category": category, "preset_offset": offset})
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_presets")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_category_text(category, presets),
+            reply_markup=video_idea_dynamic_category_keyboard(
+                category_id,
+                presets,
+                lang,
+                back_page=max(1, safe_int(state.get("catalog_page"), 1)),
+            ),
+        )
+
+    if action == "custom":
+        category_id = safe_int(value, 0)
+        category = video_idea_dynamic_category(category_id)
+        if not category:
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_dynamic_page_text(1, lang),
+                reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+            )
+        state = {
+            "idea2": True,
+            "idea_category_id": category_id,
+            "idea_category": category,
+            "idea_source": "preset_auto",
+        }
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_custom_topic")
+        return await safe_edit_or_send(
+            query,
+            f"✍️ <b>Tự nhập ý tưởng · {html.escape(str(category.get('public_name') or ''))}</b>\n\n"
+            "Hãy gửi một câu mô tả video muốn làm. TOAN AAS sẽ dùng cấu trúc an toàn của nhóm này để lập bản nháp, sau đó anh/chị chọn số cảnh và sửa từng cảnh.\n\n"
+            "Chưa gọi dịch vụ, chưa tạo file và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Chọn mẫu", callback_data=f"videa|cat|{category_id}"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ]]),
+        )
+
+    if action == "preset":
+        preset_id = safe_int(value, 0)
+        preset = video_idea_dynamic_preset(preset_id)
+        if not preset or not bool(preset.get("is_active")):
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_dynamic_page_text(1, lang),
+                reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+            )
+        state = video_idea_dynamic_state(uid)
+        state.update({
+            "idea2": True,
+            "idea_category_id": safe_int(preset.get("category_id"), 0),
+            "idea_preset_id": preset_id,
+            "idea_preset_version": safe_int(preset.get("version"), 1),
+            "idea_preset": preset,
+            "subject": str(preset.get("title") or "Ý tưởng video"),
+        })
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_mode")
+        return await safe_edit_or_send(
+            query,
+            video_idea_dynamic_preset_text(preset),
+            parse_mode="HTML",
+            reply_markup=video_idea_dynamic_preset_keyboard(preset, lang),
+        )
+
+    state = video_idea_dynamic_state(uid)
+    preset = dict(state.get("idea_preset") or {})
+    if not state or not preset:
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_page_text(1, lang),
+            reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+        )
+
+    if action == "mode":
+        mode = value if value in {"a", "m"} else "a"
+        if mode == "m":
+            state.update({"idea_source": "manual_script", "manual_script_raw": "", "scene_drafts": []})
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_manual_script")
+            return await safe_edit_or_send(
+                query,
+                "✍️ <b>Dán kịch bản riêng</b>\n\n"
+                "Ưu tiên ghi rõ Cảnh 1, Cảnh 2… hoặc xuống dòng giữa các đoạn. TOAN AAS sẽ phân cảnh có kiểm tra, không chỉ cắt mù theo dòng; tối đa 20 cảnh.\n\n"
+                "Sau khi nhận, hệ thống sẽ cho anh/chị sửa, thêm, xóa, gộp, tách và đổi thứ tự trước khi vào SCENE3.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Chọn cách", callback_data=f"videa|preset|{int(preset.get('id') or 0)}"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ]]),
+            )
+        state.update({"idea_source": "preset_auto", "scene_count": safe_int(preset.get("recommended_scene_count"), 3)})
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count")
+        return await safe_edit_or_send(
+            query,
+            video_idea_dynamic_scene_count_text(preset),
+            parse_mode="HTML",
+            reply_markup=video_idea_dynamic_scene_count_keyboard(preset, lang),
+        )
+
+    if action == "sc":
+        if value == "x":
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_scene_count_custom")
+            return await safe_edit_or_send(
+                query,
+                "✍️ <b>Nhập số cảnh từ 1 đến 20</b>\n\nMỗi cảnh khoảng 8 giây và phải trọn một ý/hành động.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Chọn số cảnh", callback_data="videa|mode|a"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ]]),
+            )
+        scene_count = safe_int(value, 0)
+        if not 1 <= scene_count <= 20:
+            return await safe_edit_or_send(
+                query,
+                video_idea_dynamic_scene_count_text(preset),
+                parse_mode="HTML",
+                reply_markup=video_idea_dynamic_scene_count_keyboard(preset, lang),
+            )
+        state["scene_count"] = scene_count
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_auto_brief")
+        return await safe_edit_or_send(
+            query,
+            "🪄 <b>Thông tin để AAS lập bản nháp</b>\n\n"
+            "Gửi trong một tin nhắn: chủ đề/sản phẩm/nhân vật/địa điểm, mục tiêu, điều phải giữ nguyên và CTA nếu có. "
+            "Có thể viết tự nhiên; không bắt buộc theo mẫu.\n\n"
+            "Hoặc dùng nguyên mẫu đã chọn. Đây là bộ lập kế hoạch nội bộ, không phải lời khẳng định rằng provider AI đã chạy.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Dùng nguyên mẫu", callback_data="videa|use|0")],
+                [
+                    InlineKeyboardButton("⬅️ Đổi số cảnh", callback_data="videa|mode|a"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ],
+            ]),
+        )
+
+    if action == "use":
+        state = video_idea_dynamic_build_drafts(state)
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
+        )
+
+    if action == "regen":
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_regenerate")
+        return await safe_edit_or_send(
+            query,
+            "🔄 <b>Lập lại một cảnh từ mẫu</b>\n\nGửi số cảnh cần lập lại. TOAN AAS chỉ dùng bộ lập kế hoạch nội bộ; không gọi provider.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Xem kịch bản", callback_data="videa|back|preview"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ]]),
+        )
+
+    if action == "restore":
+        history = [
+            [dict(row) for row in version if isinstance(row, dict)]
+            for version in state.get("scene_draft_versions") or []
+            if isinstance(version, list)
+        ]
+        restored = bool(history)
+        if history:
+            state["scene_drafts"] = history.pop()
+            state["scene_draft_versions"] = history
+            state["scene_count"] = len(state["scene_drafts"])
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        prefix = "↩️ Đã khôi phục bản trước.\n\n" if restored else "ℹ️ Chưa có phiên bản trước để khôi phục.\n\n"
+        return await safe_edit_or_send_long_html(
+            query,
+            prefix + video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
+        )
+
+    if action == "edit":
+        prompts = {
+            "e": "Gửi: <b>số cảnh | nội dung mới</b>",
+            "a": "Gửi: <b>cảnh đứng trước | nội dung cảnh mới</b> (dùng 0 để thêm đầu)",
+            "d": "Gửi <b>số cảnh cần xóa</b>",
+            "m": "Gửi <b>số cảnh đầu</b>; hệ thống sẽ gộp cảnh đó với cảnh kế tiếp.",
+            "s": "Gửi: <b>số cảnh | phần thứ nhất | phần thứ hai</b>",
+            "r": "Gửi: <b>số cảnh hiện tại | vị trí mới</b>",
+        }
+        edit_mode = value if value in prompts else "e"
+        state["idea2_edit_mode"] = edit_mode
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_edit")
+        return await safe_edit_or_send(
+            query,
+            f"✍️ <b>Chỉnh kịch bản</b>\n\n{prompts[edit_mode]}\n\n"
+            "Thao tác chỉ sửa bản nháp trong phiên, chưa tạo file và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Xem kịch bản", callback_data="videa|back|preview"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ]]),
+        )
+
+    if action == "back":
+        if value == "preview":
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_dynamic_preview_text(state),
+                reply_markup=video_idea_dynamic_preview_keyboard(lang),
+            )
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_mode")
+        return await safe_edit_or_send(
+            query,
+            video_idea_dynamic_preset_text(preset),
+            parse_mode="HTML",
+            reply_markup=video_idea_dynamic_preset_keyboard(preset, lang),
+        )
+
+    if action == "approve":
+        drafts = [dict(item) for item in state.get("scene_drafts") or [] if isinstance(item, dict)]
+        if not drafts:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Chưa có cảnh để duyệt. Hãy nhập hoặc lập bản nháp trước.",
+                reply_markup=video_idea_dynamic_preset_keyboard(preset, lang),
+            )
+        handoff = video_idea_dynamic_scene3_state(state)
+        save_developing_video_plan(uid, "videoidea", {
+            **state,
+            "final_confirmed": False,
+            "provider_called": False,
+            "image_provider_called": False,
+            "music_provider_calls": 0,
+            "voice_provider_calls": 0,
+            "files_generated": 0,
+            "job_created": False,
+            "outbox_created": False,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        })
+        clear_developing_video_pending(uid)
+        handoff = save_video_profile_studio_state(context, handoff)
+        return await video_profile_scene1_render(query, handoff, lang)
+
+    return await safe_edit_or_send_long_html(
+        query,
+        video_idea_dynamic_page_text(1, lang),
+        reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+    )
+
+
+def video_idea_admin_main_text() -> str:
+    counts = _video_idea_dynamic_db(video_idea_store.catalog_counts)
+    return (
+        "🛠 <b>Quản lý kho ý tưởng video</b>\n\n"
+        f"• Nhóm đang bật: {safe_int(counts.get('categories'), 0)}\n"
+        f"• Preset đang bật: {safe_int(counts.get('presets'), 0)}\n\n"
+        "Thêm/sửa luôn có bước xem trước. Tắt là soft-disable; không xóa cứng dữ liệu production. "
+        "Import/export dùng JSON phiên bản 1 và không chấp nhận khóa hoặc bí mật provider."
+    )
+
+
+def video_idea_admin_main_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📂 Danh mục", callback_data="viadm|cats|1"),
+            InlineKeyboardButton("💡 Preset", callback_data="viadm|pres|1"),
+        ],
+        [
+            InlineKeyboardButton("➕ Thêm danh mục", callback_data="viadm|newc|1"),
+            InlineKeyboardButton("➕ Thêm preset", callback_data="viadm|pickc|1"),
+        ],
+        [
+            InlineKeyboardButton("📤 Export JSON", callback_data="viadm|export|1"),
+            InlineKeyboardButton("📥 Import JSON", callback_data="viadm|import|1"),
+        ],
+        [InlineKeyboardButton("🧾 Audit / phiên bản", callback_data="viadm|audit|1")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+
+def video_idea_admin_categories_text(rows: list[dict], page: int, total_pages: int) -> str:
+    lines = ["📂 <b>Danh mục ý tưởng</b>", ""]
+    for row in rows:
+        status = "Bật" if bool(row.get("is_active")) else "Tắt"
+        lines.append(
+            f"• <b>{html.escape(str(row.get('public_name') or ''))}</b> · {status} · "
+            f"v{safe_int(row.get('version'), 1)}"
+        )
+    lines.extend(["", f"Trang {page}/{total_pages}"])
+    return "\n".join(lines)
+
+
+def video_idea_admin_categories_keyboard(rows: list[dict], page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(
+            f"{'✅' if bool(row.get('is_active')) else '⏸'} {str(row.get('short_button_name') or row.get('public_name'))[:32]}",
+            callback_data=f"viadm|cat|{int(row.get('id') or 0)}",
+        )]
+        for row in rows
+    ]
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️", callback_data=f"viadm|cats|{page - 1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("➡️", callback_data=f"viadm|cats|{page + 1}"))
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton("⬅️ Quản lý ý tưởng", callback_data="viadm|main|1")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def video_idea_admin_presets_text(rows: list[dict], page: int, total_pages: int) -> str:
+    lines = ["💡 <b>Preset ý tưởng</b>", ""]
+    for row in rows:
+        status = "Bật" if bool(row.get("is_active")) else "Tắt"
+        lines.append(
+            f"• <b>{html.escape(str(row.get('title') or ''))}</b> · "
+            f"{html.escape(str(row.get('category_button_name') or row.get('category_name') or ''))} · {status} · "
+            f"v{safe_int(row.get('version'), 1)}"
+        )
+    lines.extend(["", f"Trang {page}/{total_pages}"])
+    return "\n".join(lines)
+
+
+def video_idea_admin_presets_keyboard(rows: list[dict], page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(
+            f"{'✅' if bool(row.get('is_active')) else '⏸'} {str(row.get('title') or '')[:35]}",
+            callback_data=f"viadm|pre|{int(row.get('id') or 0)}",
+        )]
+        for row in rows
+    ]
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("⬅️", callback_data=f"viadm|pres|{page - 1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("➡️", callback_data=f"viadm|pres|{page + 1}"))
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton("⬅️ Quản lý ý tưởng", callback_data="viadm|main|1")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def video_idea_admin_category_detail_text(row: dict) -> str:
+    return (
+        f"📂 <b>{html.escape(str(row.get('public_name') or 'Danh mục'))}</b>\n\n"
+        f"• Tên nút: {html.escape(str(row.get('short_button_name') or ''))}\n"
+        f"• Mô tả: {html.escape(str(row.get('description') or ''))}\n"
+        f"• Thứ tự: {safe_int(row.get('sort_order'), 0)}\n"
+        f"• Trạng thái: {'Đang bật' if bool(row.get('is_active')) else 'Đang tắt'}\n"
+        f"• Phiên bản: {safe_int(row.get('version'), 1)}"
+    )
+
+
+def video_idea_admin_category_detail_keyboard(row: dict) -> InlineKeyboardMarkup:
+    row_id = int(row.get("id") or 0)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍️ Sửa", callback_data=f"viadm|editc|{row_id}"),
+            InlineKeyboardButton("↕️ Đổi thứ tự", callback_data=f"viadm|ordc|{row_id}"),
+        ],
+        [InlineKeyboardButton(
+            "⏸ Tắt danh mục" if bool(row.get("is_active")) else "▶️ Bật danh mục",
+            callback_data=f"viadm|togc|{row_id}",
+        )],
+        [InlineKeyboardButton("⬅️ Danh mục", callback_data="viadm|cats|1")],
+    ])
+
+
+def video_idea_admin_preset_detail_text(row: dict) -> str:
+    return (
+        f"💡 <b>{html.escape(str(row.get('title') or 'Preset'))}</b>\n\n"
+        f"• Nhóm: {html.escape(str(row.get('category_name') or ''))}\n"
+        f"• Mô tả: {html.escape(str(row.get('description') or ''))}\n"
+        f"• Cảnh gợi ý: {safe_int(row.get('recommended_scene_count'), 3)} · 8 giây/cảnh\n"
+        f"• Giọng: {html.escape(str(row.get('voice_plan') or ''))}\n"
+        f"• Nhạc: {html.escape(str(row.get('music_plan') or ''))}\n"
+        f"• Hình: {html.escape(str(row.get('visual_plan') or ''))}\n"
+        f"• Trạng thái: {'Đang bật' if bool(row.get('is_active')) else 'Đang tắt'}\n"
+        f"• Thứ tự: {safe_int(row.get('sort_order'), 0)} · Phiên bản: {safe_int(row.get('version'), 1)}"
+    )
+
+
+def video_idea_admin_preset_detail_keyboard(row: dict) -> InlineKeyboardMarkup:
+    row_id = int(row.get("id") or 0)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👁 Xem trước", callback_data=f"viadm|preview|{row_id}"),
+            InlineKeyboardButton("✍️ Sửa", callback_data=f"viadm|editp|{row_id}"),
+        ],
+        [
+            InlineKeyboardButton("↕️ Đổi thứ tự", callback_data=f"viadm|ordp|{row_id}"),
+            InlineKeyboardButton("📄 Nhân bản", callback_data=f"viadm|clone|{row_id}"),
+        ],
+        [InlineKeyboardButton(
+            "⏸ Tắt preset" if bool(row.get("is_active")) else "▶️ Bật preset",
+            callback_data=f"viadm|togp|{row_id}",
+        )],
+        [InlineKeyboardButton("⬅️ Preset", callback_data="viadm|pres|1")],
+    ])
+
+
+def video_idea_admin_candidate_text(candidate: dict) -> str:
+    action = str(candidate.get("action") or "")
+    payload = dict(candidate.get("payload") or {})
+    labels = {
+        "create_category": "Thêm danh mục",
+        "update_category": "Sửa danh mục",
+        "toggle_category": "Bật/tắt danh mục",
+        "create_preset": "Thêm preset",
+        "update_preset": "Sửa preset",
+        "toggle_preset": "Bật/tắt preset",
+        "clone_preset": "Nhân bản preset",
+        "import": "Import JSON",
+    }
+    preview_fields = {
+        key: value
+        for key, value in payload.items()
+        if key in {
+            "category_key", "public_name", "short_button_name", "title", "preset_key",
+            "recommended_scene_count", "scene_duration_sec", "sort_order", "is_active",
+            "description", "music_plan", "audio_plan", "voice_plan", "visual_plan",
+        }
+    }
+    if action == "import":
+        preview_fields = {
+            "categories": len((payload.get("validated") or {}).get("categories") or []),
+            "presets": len((payload.get("validated") or {}).get("presets") or []),
+            "schema_version": (payload.get("validated") or {}).get("schema_version"),
+        }
+    body = html.escape(json.dumps(preview_fields, ensure_ascii=False, indent=2)[:3000])
+    return (
+        f"👁 <b>Xem trước: {labels.get(action, 'Thay đổi')}</b>\n\n"
+        f"<pre>{body}</pre>\n"
+        "Chỉ ghi DB sau khi bấm Xác nhận. Không có provider hoặc wallet nào được gọi."
+    )
+
+
+def video_idea_admin_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Xác nhận lưu", callback_data="viadm|save|1"),
+        InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1"),
+    ]])
+
+
+def video_idea_admin_error_text(_error: Exception) -> str:
+    return (
+        "⚠️ Dữ liệu chưa hợp lệ hoặc xung đột với khóa đang có. "
+        "Vui lòng kiểm tra ID chỉ gồm chữ thường/số/gạch, số cảnh 1–20, thời lượng 8 giây và độ dài các trường."
+    )
+
+
+async def cmd_video_idea_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    context.user_data.pop("video_idea_admin_input", None)
+    context.user_data.pop("video_idea_admin_candidate", None)
+    return await update.message.reply_text(
+        video_idea_admin_main_text(),
+        parse_mode="HTML",
+        reply_markup=video_idea_admin_main_keyboard(),
+    )
+
+
+async def handle_video_idea_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query.from_user or not is_admin_user(query.from_user.id):
+        return await query.answer("Bạn không có quyền dùng chức năng này.", show_alert=True)
+    await query.answer()
+    uid = query.from_user.id
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "main"
+    value = parts[2] if len(parts) > 2 else ""
+
+    if action == "main":
+        context.user_data.pop("video_idea_admin_input", None)
+        context.user_data.pop("video_idea_admin_candidate", None)
+        return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
+
+    if action == "cats":
+        all_rows = video_idea_dynamic_categories(active_only=False)
+        page_size = 8
+        total_pages = max(1, (len(all_rows) + page_size - 1) // page_size)
+        page = max(1, min(safe_int(value, 1), total_pages))
+        rows = all_rows[(page - 1) * page_size:page * page_size]
+        return await safe_edit_or_send(
+            query,
+            video_idea_admin_categories_text(rows, page, total_pages),
+            parse_mode="HTML",
+            reply_markup=video_idea_admin_categories_keyboard(rows, page, total_pages),
+        )
+
+    if action == "pres":
+        all_rows = _video_idea_dynamic_db(lambda conn: video_idea_store.list_presets(conn, active_only=False, limit=2000))
+        page_size = 10
+        total_pages = max(1, (len(all_rows) + page_size - 1) // page_size)
+        page = max(1, min(safe_int(value, 1), total_pages))
+        rows = all_rows[(page - 1) * page_size:page * page_size]
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_admin_presets_text(rows, page, total_pages),
+            reply_markup=video_idea_admin_presets_keyboard(rows, page, total_pages),
+        )
+
+    if action == "cat":
+        row = video_idea_dynamic_category(safe_int(value, 0))
+        if not row:
+            return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
+        return await safe_edit_or_send(query, video_idea_admin_category_detail_text(row), parse_mode="HTML", reply_markup=video_idea_admin_category_detail_keyboard(row))
+
+    if action == "pre":
+        row = video_idea_dynamic_preset(safe_int(value, 0))
+        if not row:
+            return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
+        return await safe_edit_or_send_long_html(query, video_idea_admin_preset_detail_text(row), reply_markup=video_idea_admin_preset_detail_keyboard(row))
+
+    if action == "preview":
+        row = video_idea_dynamic_preset(safe_int(value, 0))
+        return await safe_edit_or_send(
+            query,
+            video_idea_dynamic_preset_text(row),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Preset", callback_data=f"viadm|pre|{safe_int(value, 0)}")]]),
+        )
+
+    if action == "newc":
+        context.user_data["video_idea_admin_input"] = {"action": "create_category"}
+        return await safe_edit_or_send(
+            query,
+            "➕ <b>Thêm danh mục</b>\n\nGửi JSON gồm: category_key, public_name, short_button_name, description, icon, sort_order.\n\nVí dụ: <code>{\"category_key\":\"new_group\",\"public_name\":\"Nhóm mới\",\"short_button_name\":\"Nhóm mới\",\"description\":\"Mô tả\",\"icon\":\"💡\",\"sort_order\":17}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1")]]),
+        )
+
+    if action == "pickc":
+        categories = video_idea_dynamic_categories(active_only=False)
+        rows = [[InlineKeyboardButton(
+            f"{row.get('icon') or '💡'} {str(row.get('short_button_name') or row.get('public_name'))[:30]}",
+            callback_data=f"viadm|newp|{int(row.get('id') or 0)}",
+        )] for row in categories]
+        rows.append([InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1")])
+        return await safe_edit_or_send(query, "➕ <b>Chọn danh mục cho preset mới</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+
+    if action == "newp":
+        category = video_idea_dynamic_category(safe_int(value, 0))
+        context.user_data["video_idea_admin_input"] = {"action": "create_preset", "category": category}
+        return await safe_edit_or_send(
+            query,
+            "➕ <b>Thêm preset</b>\n\nGửi một JSON object. Bắt buộc: preset_key, title, description, system_guidance, user_prompt_template, recommended_scene_count, music_plan, voice_plan, visual_plan. scene_duration_sec phải là 8. Có thể thêm audio_plan, content_safety_note, routing và prompt seed.\n\nHệ thống sẽ kiểm tra rồi hiện preview trước khi lưu.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1")]]),
+        )
+
+    if action in {"editc", "editp", "ordc", "ordp", "clone"}:
+        context.user_data["video_idea_admin_input"] = {"action": action, "entity_id": safe_int(value, 0)}
+        instructions = {
+            "editc": "Gửi JSON chứa các trường danh mục cần sửa.",
+            "editp": "Gửi JSON chứa các trường preset cần sửa.",
+            "ordc": "Gửi số thứ tự mới cho danh mục.",
+            "ordp": "Gửi số thứ tự mới cho preset.",
+            "clone": "Gửi: preset_key_mới | Tên preset mới. Bản nhân sẽ mặc định tắt.",
+        }
+        return await safe_edit_or_send(
+            query,
+            f"✍️ <b>Chuẩn bị thay đổi</b>\n\n{instructions[action]}\n\nSẽ có preview trước khi ghi DB.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1")]]),
+        )
+
+    if action in {"togc", "togp"}:
+        entity_id = safe_int(value, 0)
+        if action == "togc":
+            before = video_idea_dynamic_category(entity_id)
+            if not before:
+                return await safe_edit_or_send(
+                    query,
+                    video_idea_admin_error_text(ValueError("category_not_found")),
+                    reply_markup=video_idea_admin_main_keyboard(),
+                )
+            payload = {"is_active": 0 if bool(before.get("is_active")) else 1}
+            candidate = {"action": "toggle_category", "entity_id": entity_id, "payload": payload}
+        else:
+            before = video_idea_dynamic_preset(entity_id)
+            if not before:
+                return await safe_edit_or_send(
+                    query,
+                    video_idea_admin_error_text(ValueError("preset_not_found")),
+                    reply_markup=video_idea_admin_main_keyboard(),
+                )
+            payload = {"is_active": 0 if bool(before.get("is_active")) else 1}
+            candidate = {"action": "toggle_preset", "entity_id": entity_id, "payload": payload}
+        context.user_data["video_idea_admin_candidate"] = candidate
+        return await safe_edit_or_send(query, video_idea_admin_candidate_text(candidate), parse_mode="HTML", reply_markup=video_idea_admin_confirm_keyboard())
+
+    if action == "export":
+        payload = _video_idea_dynamic_db(video_idea_store.export_catalog)
+        document = io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        document.name = f"video_idea_catalog_v{video_idea_store.SCHEMA_VERSION}.json"
+        await query.message.reply_document(document=document, caption="📤 Export kho ý tưởng video · không chứa khóa provider.")
+        return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
+
+    if action == "import":
+        context.user_data["video_idea_admin_input"] = {"action": "import"}
+        return await safe_edit_or_send(
+            query,
+            "📥 <b>Import JSON</b>\n\nDán object JSON schema_version=1. Hệ thống sẽ kiểm tra khóa trùng, giới hạn trường, category tham chiếu và bí mật provider rồi mới hiện preview.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="viadm|cancel|1")]]),
+        )
+
+    if action == "audit":
+        rows = _video_idea_dynamic_db(lambda conn: video_idea_store.list_audit(conn, limit=20))
+        lines = ["🧾 <b>Audit gần nhất</b>", ""]
+        for row in rows:
+            lines.append(
+                f"• {html.escape(str(row.get('action') or ''))} · {html.escape(str(row.get('entity_key') or ''))} · "
+                f"{html.escape(str(row.get('actor_id') or ''))} · {html.escape(str(row.get('created_at') or ''))}"
+            )
+        if not rows:
+            lines.append("Chưa có thay đổi admin.")
+        return await safe_edit_or_send_long_html(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quản lý", callback_data="viadm|main|1")]]))
+
+    if action == "cancel":
+        context.user_data.pop("video_idea_admin_input", None)
+        context.user_data.pop("video_idea_admin_candidate", None)
+        return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
+
+    if action == "save":
+        candidate = dict(context.user_data.get("video_idea_admin_candidate") or {})
+        actor_id = str(uid)
+        try:
+            def _apply(conn):
+                operation = str(candidate.get("action") or "")
+                payload = dict(candidate.get("payload") or {})
+                entity_id = safe_int(candidate.get("entity_id"), 0)
+                if operation == "create_category":
+                    return video_idea_store.create_category(conn, payload, actor_id=actor_id)
+                if operation in {"update_category", "toggle_category"}:
+                    return video_idea_store.update_category(conn, entity_id, payload, actor_id=actor_id)
+                if operation == "create_preset":
+                    return video_idea_store.create_preset(conn, payload, actor_id=actor_id)
+                if operation in {"update_preset", "toggle_preset"}:
+                    return video_idea_store.update_preset(conn, entity_id, payload, actor_id=actor_id)
+                if operation == "clone_preset":
+                    return video_idea_store.clone_preset(conn, entity_id, payload["preset_key"], payload["title"], actor_id=actor_id)
+                if operation == "import":
+                    return video_idea_store.apply_import(conn, payload["validated"], actor_id=actor_id)
+                raise ValueError("unknown_admin_operation")
+            result = _video_idea_dynamic_db(_apply)
+        except Exception as error:
+            logger.warning("video idea admin save rejected: %s", type(error).__name__)
+            return await safe_edit_or_send(query, video_idea_admin_error_text(error), reply_markup=video_idea_admin_confirm_keyboard())
+        context.user_data.pop("video_idea_admin_input", None)
+        context.user_data.pop("video_idea_admin_candidate", None)
+        summary = html.escape(json.dumps(result, ensure_ascii=False, default=str)[:1200])
+        return await safe_edit_or_send(
+            query,
+            f"✅ <b>Đã lưu thay đổi</b>\n\n<code>{summary}</code>",
+            parse_mode="HTML",
+            reply_markup=video_idea_admin_main_keyboard(),
+        )
+
+    return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
+
+
 async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -89294,30 +90715,35 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
     if action == "explore":
         clear_developing_video_pending(uid)
-        return await safe_edit_or_send(
+        return await safe_edit_or_send_long_html(
             query,
-            video_idea_catalog_categories_text(lang),
-            parse_mode="HTML",
-            reply_markup=video_idea_catalog_categories_keyboard(lang),
+            video_idea_dynamic_page_text(1, lang),
+            reply_markup=video_idea_dynamic_page_keyboard(1, lang),
         )
     if action == "catalog":
-        category = value if value in dict(video_idea_catalog.list_categories()) else "sales"
+        category_row = video_idea_dynamic_category_key(value) or video_idea_dynamic_category_key("sales")
+        category_id = safe_int(category_row.get("id"), 0)
+        presets = video_idea_dynamic_presets(category_id, offset=0, limit=5)
         state = {
-            "catalog_category": category,
-            "catalog_offset": 0,
+            "idea2": True,
+            "idea_category_id": category_id,
+            "idea_category": category_row,
+            "preset_offset": 0,
             "provider_called": False,
             "image_provider_called": False,
+            "music_provider_calls": 0,
+            "voice_provider_calls": 0,
+            "files_generated": 0,
             "job_created": False,
             "outbox_created": False,
             "wallet_mutations": 0,
             "xu_charged": 0,
         }
-        restore_developing_video_pending(uid, "videoidea", state, "catalog_options")
-        return await safe_edit_or_send(
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_presets")
+        return await safe_edit_or_send_long_html(
             query,
-            video_idea_catalog_options_text(state, lang),
-            parse_mode="HTML",
-            reply_markup=video_idea_catalog_options_keyboard(lang),
+            video_idea_dynamic_category_text(category_row, presets),
+            reply_markup=video_idea_dynamic_category_keyboard(category_id, presets, lang),
         )
     if action == "catalog_refresh":
         state = dict(get_developing_video_pending(uid) or {})
@@ -199337,6 +200763,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_video_finalization_pending_text(update, context):
         return
 
+    if await handle_video_idea_admin_pending_text(update, context):
+        return
+
     if await handle_developing_video_pending_text(update, context):
         return
 
@@ -200732,6 +202161,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_self_scene_ai_callback, pattern=r"^selfscene\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_long_video_callback, pattern=r"^longvideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\|"))
+    tg_app.add_handler(CommandHandler("video_idea_admin", cmd_video_idea_admin))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_idea_admin_callback, pattern=r"^viadm\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_idea_dynamic_callback, pattern=r"^videa\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_upload_callback, pattern=r"^video_upload\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_editor_callback, pattern=r"^videoedit\|"))

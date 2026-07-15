@@ -26,7 +26,34 @@ CATEGORIES = (
     ("lifestyle", "👗 Thời trang / ẩm thực"),
     ("digital", "💻 Ứng dụng / website / trò chơi"),
     ("visual", "🎧 Sự kiện / nhạc hình / điểm nhấn"),
+    ("history", "🏺 Lịch sử / Văn hóa & Thần thoại"),
+    ("sports", "🏆 Thể thao / Thể thao điện tử"),
+    ("travel", "🧭 Du lịch / Trải nghiệm địa phương"),
+    ("industry", "🏭 Kỹ thuật / Công nghiệp & Tự động hóa"),
+    ("data_news", "📊 Tin tức / Phân tích dữ liệu"),
+    ("self_help", "🌱 Động lực / Phát triển bản thân"),
+    ("meme", "🎭 Giải trí / Meme / Bắt trend"),
+    ("asmr", "🌧 ASMR / Thư giãn / Lofi & Chill"),
 )
+
+CATEGORY_METADATA = {
+    "sales": ("🛍", "Bán hàng / quảng cáo", "Bán hàng", "Ý tưởng giới thiệu sản phẩm, chứng minh lợi ích và kêu gọi hành động đáng tin."),
+    "ugc": ("📱", "Mạng xã hội / UGC", "Mạng xã hội", "Ý tưởng đời thường, góc nhìn người dùng và nội dung ngắn phù hợp mạng xã hội."),
+    "education": ("🎓", "Hướng dẫn / kiến thức", "Hướng dẫn", "Giải thích kiến thức, quy trình và mẹo thực hành theo từng bước rõ ràng."),
+    "story": ("🎬", "Kể chuyện / trailer", "Kể chuyện", "Ý tưởng có nhân vật, xung đột, bước ngoặt và kết thúc trọn vẹn."),
+    "space": ("🏠", "Kiến trúc / bất động sản", "Kiến trúc", "Khám phá công trình, nội thất, bất động sản và trải nghiệm không gian đúng hình học."),
+    "lifestyle": ("👗", "Thời trang / ẩm thực", "Đời sống", "Thời trang, ẩm thực, làm đẹp, sức khỏe và trải nghiệm đời sống giàu cảm giác."),
+    "digital": ("💻", "Ứng dụng / website / trò chơi", "Sản phẩm số", "Demo ứng dụng, website, trò chơi và quy trình số bằng luồng thao tác thật dễ hiểu."),
+    "visual": ("🎧", "Sự kiện / nhạc hình / điểm nhấn", "Nhạc hình", "Video nhịp điệu, sự kiện, đồ họa chuyển động và điểm nhấn thị giác."),
+    "history": ("🏺", "Lịch sử / Văn hóa & Thần thoại", "Lịch sử", "Kể lịch sử, văn hóa và truyền thuyết bằng hình ảnh điện ảnh nhưng phân biệt rõ dữ kiện với giai thoại."),
+    "sports": ("🏆", "Thể thao / Thể thao điện tử", "Thể thao", "Khung nội dung nhận định, chiến thuật và tin nhanh; dữ liệu hiện thời phải được xác minh riêng."),
+    "travel": ("🧭", "Du lịch / Trải nghiệm địa phương", "Du lịch", "Review địa phương, hành trình, nightlife và nghỉ dưỡng theo góc nhìn chân thực."),
+    "industry": ("🏭", "Kỹ thuật / Công nghiệp & Tự động hóa", "Kỹ thuật", "Showcase quy trình kỹ thuật, giải pháp B2B, công nghiệp và tự động hóa an toàn."),
+    "data_news": ("📊", "Tin tức / Phân tích dữ liệu", "Dữ liệu", "Tóm tắt tin và trực quan hóa số liệu; không bịa dữ liệu, không hứa dự đoán chắc thắng."),
+    "self_help": ("🌱", "Động lực / Phát triển bản thân", "Phát triển", "Podcast ngắn, định hướng và thói quen tích cực nhưng không hứa hẹn thành công chắc chắn."),
+    "meme": ("🎭", "Giải trí / Meme / Bắt trend", "Meme / trend", "POV, parody và meme nguyên bản; không mạo danh hoặc sao chép giọng người thật khi chưa được phép."),
+    "asmr": ("🌧", "ASMR / Thư giãn / Lofi & Chill", "ASMR / Lofi", "Không gian âm thanh, thao tác thư giãn và lofi; toàn bộ âm thanh mới chỉ là kế hoạch trước xác nhận."),
+}
 
 CATEGORY_PLATFORMS = {
     "sales": ("TikTok", "Facebook Reels", "Instagram Reels", "YouTube Shorts"),
@@ -37,6 +64,14 @@ CATEGORY_PLATFORMS = {
     "lifestyle": ("TikTok", "Instagram Reels", "YouTube Shorts", "Facebook Reels"),
     "digital": ("YouTube", "TikTok", "Facebook Reels", "Instagram Reels"),
     "visual": ("TikTok", "Instagram Reels", "YouTube Shorts", "Facebook Reels"),
+    "history": ("YouTube", "TikTok", "Facebook Reels", "YouTube Shorts"),
+    "sports": ("TikTok", "YouTube Shorts", "Facebook Reels", "YouTube"),
+    "travel": ("TikTok", "Instagram Reels", "YouTube", "Facebook Reels"),
+    "industry": ("LinkedIn", "YouTube", "Facebook", "TikTok"),
+    "data_news": ("YouTube Shorts", "TikTok", "Facebook Reels", "LinkedIn"),
+    "self_help": ("TikTok", "Instagram Reels", "YouTube Shorts", "Facebook Reels"),
+    "meme": ("TikTok", "Instagram Reels", "YouTube Shorts", "Facebook Reels"),
+    "asmr": ("YouTube", "TikTok", "Instagram Reels", "YouTube Shorts"),
 }
 
 CATEGORY_VARIATION_AXES = {
@@ -48,6 +83,14 @@ CATEGORY_VARIATION_AXES = {
     "lifestyle": ("nhân vật", "hoạt động", "địa điểm", "thời điểm", "cảm xúc"),
     "digital": ("người dùng", "vấn đề", "tính năng", "thao tác", "kết quả"),
     "visual": ("chủ thể", "nhịp", "màu", "chuyển động", "điểm nhấn"),
+    "history": ("thời kỳ", "nhân vật", "dữ kiện", "giai thoại", "hiện vật"),
+    "sports": ("môn đấu", "đội/tướng", "chiến thuật", "dữ liệu", "thời điểm"),
+    "travel": ("địa điểm", "trải nghiệm", "ngân sách", "thời điểm", "góc nhìn"),
+    "industry": ("bài toán", "thiết bị", "quy trình", "an toàn", "lợi ích"),
+    "data_news": ("nguồn", "mốc thời gian", "chỉ số", "so sánh", "kết luận"),
+    "self_help": ("mục tiêu", "trở ngại", "thói quen", "tiến trình", "hành động"),
+    "meme": ("tình huống", "nhân vật hư cấu", "nhịp hài", "phản ứng", "twist"),
+    "asmr": ("không gian", "âm thanh", "thao tác", "nhịp", "vòng lặp"),
 }
 
 CATEGORY_SCENE_ARCS = {
@@ -59,6 +102,14 @@ CATEGORY_SCENE_ARCS = {
     "lifestyle": "không gian -> hoạt động -> chi tiết -> cảm xúc -> dư âm",
     "digital": "vấn đề -> thao tác -> tính năng -> kết quả -> bước tiếp theo",
     "visual": "thiết lập nhịp -> biến đổi -> điểm nhấn -> cao trào -> kết khung",
+    "history": "bối cảnh -> dữ kiện -> nhân vật/hiện vật -> diễn biến -> ý nghĩa và nguồn",
+    "sports": "bối cảnh trận/meta -> điểm nóng -> phân tích -> bằng chứng -> nhận định có điều kiện",
+    "travel": "đặt chân -> khám phá -> trải nghiệm -> lưu ý thực tế -> dư âm địa phương",
+    "industry": "bài toán -> khảo sát -> giải pháp -> triển khai an toàn -> kết quả đo được",
+    "data_news": "câu hỏi -> nguồn dữ liệu -> trực quan hóa -> diễn giải -> giới hạn/kết luận",
+    "self_help": "vấn đề -> nhận thức -> hành động nhỏ -> tiến trình -> lời nhắc thực tế",
+    "meme": "thiết lập quen thuộc -> lệch kỳ vọng -> phản ứng -> cú bẻ -> kết ngắn",
+    "asmr": "thiết lập không gian -> âm thanh đầu -> chuỗi thao tác -> nhịp ổn định -> vòng lặp êm",
 }
 
 # Twenty curated semantic beats per group. A shorter plan samples these beats
@@ -162,6 +213,105 @@ CATEGORY_BEAT_IDEAS = {
         "Gom các yếu tố vào một bố cục hoàn chỉnh", "Khép bằng end frame rõ hoặc vòng lặp mượt",
     ),
 }
+
+CATEGORY_BEAT_IDEAS.update({
+    "history": (
+        "Mở bằng hiện vật hoặc địa danh làm điểm neo", "Xác định rõ thời kỳ và phạm vi câu chuyện",
+        "Phân biệt dữ kiện được ghi nhận với giai thoại", "Giới thiệu nhân vật hoặc cộng đồng trung tâm",
+        "Mô tả hoàn cảnh xã hội ảnh hưởng tới sự kiện", "Cho thấy mục tiêu hoặc thách thức lúc bấy giờ",
+        "Trình bày bằng chứng hoặc nguồn tham khảo chính", "Tái hiện trang phục và đạo cụ đúng bối cảnh",
+        "Diễn giải hành động đầu tiên làm thay đổi tình thế", "Làm rõ chiến thuật, kỹ thuật hoặc phong tục liên quan",
+        "Nêu giới hạn của điều hiện còn biết", "Đặt hai cách lý giải cạnh nhau một cách công bằng",
+        "Tái hiện bước ngoặt mà không thêm dữ kiện giả", "Cho thấy hệ quả trực tiếp với con người và địa phương",
+        "Kết nối hiện vật với ý nghĩa văn hóa", "Phân biệt phần truyền thuyết trong lời kể dân gian",
+        "Giải thích điều hậu thế thường hiểu nhầm", "Tóm tắt giá trị lịch sử có thể kiểm chứng",
+        "Gợi mở nơi đọc hoặc kiểm tra thông tin thêm", "Khép bằng hình ảnh di sản và ghi chú nguồn rõ",
+    ),
+    "sports": (
+        "Mở bằng tình huống thi đấu hoặc meta cần phân tích", "Nêu rõ trận đấu, phiên bản hoặc thời điểm dữ liệu",
+        "Giới thiệu hai bên và điều kiện so sánh", "Chỉ ra điểm mạnh cốt lõi của bên thứ nhất",
+        "Chỉ ra điểm mạnh cốt lõi của bên thứ hai", "Đặt bản đồ, đội hình hoặc vị trí chiến thuật",
+        "Phân tích tình huống mở đầu có thể quyết định nhịp", "Tách một pha xử lý thành các quyết định rõ",
+        "Giải thích vai trò của thông số hoặc kỹ năng chính", "Nêu một cách phản công hợp lý",
+        "Chỉ ra sai lầm thường gặp trong kèo đấu", "Đưa dữ liệu đã xác minh để kiểm tra nhận định",
+        "Phân tích thay đổi chiến thuật ở giữa trận", "Đánh giá rủi ro khi chọn phương án tấn công",
+        "Đánh giá rủi ro khi chọn phương án phòng thủ", "Nêu yếu tố bất định không thể bỏ qua",
+        "Tổng hợp điều kiện để mỗi bên có lợi thế", "Đưa nhận định có điều kiện thay vì khẳng định chắc chắn",
+        "Nhắc người xem kiểm tra đội hình hoặc tin mới", "Khép bằng câu hỏi chiến thuật để thảo luận",
+    ),
+    "travel": (
+        "Mở bằng khoảnh khắc đặc trưng của điểm đến", "Định vị địa điểm và thời điểm trải nghiệm",
+        "Cho thấy cách tiếp cận hoặc đường đi thực tế", "Giới thiệu không gian đầu tiên theo góc nhìn người đi",
+        "Nêu chi tiết địa phương tạo khác biệt", "Hoàn tất trải nghiệm nhỏ đầu tiên",
+        "Ghi lại âm thanh và nhịp sống tại chỗ", "Thử món ăn, dịch vụ hoặc hoạt động tiêu biểu",
+        "Nêu cảm nhận thật cùng một điểm cần lưu ý", "Di chuyển sang điểm kế tiếp theo tuyến hợp lý",
+        "Cho thấy con người hoặc văn hóa địa phương", "Cận cảnh kiến trúc, vật liệu hoặc cảnh quan",
+        "Đưa mẹo chuẩn bị dựa trên trải nghiệm", "Nói rõ thông tin giá/giờ cần được kiểm tra lại",
+        "Tạo một khoảng nghỉ để cảm nhận không gian", "So sánh kỳ vọng với trải nghiệm thực tế",
+        "Chọn khoảnh khắc đáng nhớ nhất", "Gợi ý ai phù hợp với hành trình này",
+        "Tóm tắt tuyến đi không gây hiểu nhầm", "Khép bằng toàn cảnh và lời mời khám phá có trách nhiệm",
+    ),
+    "industry": (
+        "Mở bằng bài toán vận hành hoặc an toàn cụ thể", "Xác định môi trường công trình và phạm vi hệ thống",
+        "Khảo sát hiện trạng trước khi đề xuất giải pháp", "Chỉ ra rủi ro hoặc lãng phí đang tồn tại",
+        "Nêu tiêu chuẩn hoặc yêu cầu cần tuân thủ", "Giới thiệu sơ đồ giải pháp ở mức dễ hiểu",
+        "Cận cảnh thiết bị chính và chức năng", "Trình bày bước chuẩn bị và bảo hộ an toàn",
+        "Hoàn tất một công đoạn lắp đặt hoặc cấu hình", "Kiểm tra tín hiệu hoặc thông số sau công đoạn",
+        "Nối thiết bị vào hệ thống theo đúng quy trình", "Minh họa tự động hóa xử lý một tình huống thật",
+        "Cho thấy dashboard hoặc kết quả giám sát", "Nêu trường hợp lỗi và cách cách ly an toàn",
+        "So sánh trước và sau bằng chỉ số phù hợp", "Giải thích lợi ích vận hành không phóng đại",
+        "Nêu kế hoạch bảo trì và trách nhiệm sử dụng", "Chỉ rõ giới hạn cần chuyên gia xác nhận",
+        "Tổng hợp quy trình thành các mốc kiểm tra", "Khép bằng hệ thống hoạt động ổn định và báo cáo nghiệm thu",
+    ),
+    "data_news": (
+        "Mở bằng câu hỏi dữ liệu cần trả lời", "Ghi rõ nguồn và thời điểm của bộ dữ liệu",
+        "Giải thích chỉ số chính bằng ngôn ngữ đơn giản", "Cho thấy quy mô mẫu hoặc phạm vi thống kê",
+        "Trình bày mốc cơ sở để người xem so sánh", "Vẽ xu hướng đầu tiên mà không suy diễn",
+        "Chỉ ra điểm tăng hoặc giảm đáng chú ý", "So sánh hai nhóm trong cùng điều kiện",
+        "Giải thích khác biệt giữa tương quan và nguyên nhân", "Nêu độ bất định hoặc sai số nếu có",
+        "Kiểm tra một nhận định phổ biến bằng số liệu", "Đưa ngoại lệ làm thay đổi cách hiểu",
+        "Chuyển dữ liệu thành biểu đồ dễ đọc", "Tóm tắt một phát hiện có thể kiểm chứng",
+        "Nêu dữ liệu còn thiếu trước khi kết luận", "Với xác suất, nhắc rõ không có kết quả chắc thắng",
+        "Với tin thời sự, đánh dấu phần cần xác minh live", "Đưa ra cách người xem tự kiểm tra nguồn",
+        "Tổng hợp ba điểm quan trọng nhất", "Khép bằng giới hạn phân tích và thời điểm cập nhật",
+    ),
+    "self_help": (
+        "Mở bằng tình huống người xem dễ đồng cảm", "Gọi tên một trở ngại cụ thể thay vì phán xét",
+        "Làm rõ mục tiêu thực tế trong giai đoạn này", "Tách điều kiểm soát được khỏi điều không kiểm soát",
+        "Chọn một hành động nhỏ có thể bắt đầu hôm nay", "Thiết kế môi trường giúp hành động dễ hơn",
+        "Hoàn tất lần thực hành đầu tiên", "Ghi nhận khó khăn mà không tô hồng",
+        "Điều chỉnh kế hoạch sau một lần vấp", "Xây một dấu hiệu nhắc thói quen",
+        "Theo dõi tiến trình bằng chỉ số đơn giản", "Tạo phần thưởng nhỏ không phá mục tiêu",
+        "Nêu một ranh giới để tránh kiệt sức", "Cho thấy tiến bộ qua nhiều ngày",
+        "Kết nối thói quen với giá trị cá nhân", "Loại bỏ lời hứa thành công chắc chắn",
+        "Chia sẻ một câu hỏi tự phản tư", "Tóm tắt lộ trình thành ba việc dễ nhớ",
+        "Mời người xem chọn bước tiếp theo phù hợp", "Khép bằng lời động viên thực tế và có điều kiện",
+    ),
+    "meme": (
+        "Mở bằng tình huống đời thường ai cũng nhận ra", "Giới thiệu nhân vật hư cấu và mong muốn đơn giản",
+        "Đặt một quy tắc kỳ vọng rất rõ", "Cho chi tiết đầu tiên đi lệch kỳ vọng",
+        "Ghi lại phản ứng tự nhiên thay vì xúc phạm", "Đẩy hiểu lầm lên thêm một nấc",
+        "Cho nhân vật thử cách xử lý hợp lý", "Để cách xử lý tạo ra hệ quả hài mới",
+        "Dùng vật thể hoặc chữ làm điểm nhấn", "Tạo khoảng dừng đúng nhịp trước câu chốt",
+        "Đổi góc nhìn sang nhân vật thứ hai", "Hé lộ thông tin khiến tình huống đổi nghĩa",
+        "Tránh dùng hình ảnh hoặc giọng người thật trái phép", "Đưa cú bẻ liên quan trực tiếp tới thiết lập",
+        "Cho nhân vật tự nhận ra điều trớ trêu", "Kết thúc hành động thay vì kéo dài trò đùa",
+        "Giữ một câu hoặc biểu cảm dễ nhớ", "Tạo biến thể nguyên bản không sao chép meme",
+        "Chừa nhịp cho caption hoặc phản ứng", "Khép nhanh bằng end frame an toàn và rõ nghĩa",
+    ),
+    "asmr": (
+        "Mở bằng toàn cảnh không gian thư giãn", "Đặt nguồn sáng và thời gian trong ngày",
+        "Giới thiệu âm thanh nền đầu tiên", "Cận cảnh vật liệu tạo âm thanh",
+        "Hoàn tất một thao tác chậm và rõ", "Để âm thanh tự nhiên ngân hết",
+        "Thêm lớp âm thanh thứ hai nhẹ hơn", "Giữ nhịp đều không có thay đổi đột ngột",
+        "Chuyển góc máy nhưng giữ cùng không gian", "Lặp một thao tác với biến thể nhỏ",
+        "Tạo khoảng yên để tai nghỉ", "Đưa âm thanh môi trường trở lại làm điểm neo",
+        "Cận cảnh thao tác có kết cấu dễ chịu", "Cân bằng âm lượng giữa các lớp",
+        "Giảm chuyển động để chuẩn bị vòng lặp", "Nối trạng thái cuối về gần khung mở đầu",
+        "Không đưa tuyên bố chữa bệnh hoặc y khoa", "Giữ hình ảnh và âm thanh không gây giật mình",
+        "Hoàn tất chuỗi thao tác cuối", "Khép bằng vòng lặp mượt hoặc fade tự nhiên",
+    ),
+})
 
 
 def _idea(
@@ -683,6 +833,246 @@ IDEAS = (
         "Macro theo nhịp, hoàn tất từng thao tác, tăng dần quy mô khung hình và kết bằng hero shot.",
         formats=("macro", "ASMR visual", "product visualizer"),
     ),
+    _idea(
+        "history_legendary_general", "history", "Dã sử và chân dung danh tướng",
+        "Đặt nhân vật vào đúng thời kỳ, tách dữ kiện có nguồn khỏi giai thoại rồi kể một chiến lược hoặc lựa chọn trọn vẹn.",
+        "Một hiện vật hoặc địa danh mở ra câu hỏi về quyết định đã làm thay đổi cục diện.",
+        "Kể lịch sử hấp dẫn nhưng không xuyên tạc hoặc biến giai thoại thành sự thật.",
+        "script_image_video", "character", "tài liệu lịch sử điện ảnh, tôn trọng dữ kiện",
+        "Chân dung, trang phục, kiến trúc và bản đồ đúng thời kỳ; phần tái dựng được nhận diện rõ.",
+        "Mỗi cảnh hoàn tất một dữ kiện hoặc hành động; lời dẫn chỉ khẳng định điều có căn cứ và ghi rõ phần còn tranh luận.",
+        formats=("historical portrait", "documentary short", "battle strategy"),
+    ),
+    _idea(
+        "history_legendary_weapon", "history", "Vũ khí huyền thoại dưới góc nhìn thực tế",
+        "Phân tích nguồn gốc, vật liệu, cấu tạo, cách sử dụng và phần giai thoại của một binh khí cổ.",
+        "Cận cảnh chi tiết chế tác khiến người xem đặt câu hỏi món binh khí thật sự hoạt động ra sao.",
+        "Giúp người xem hiểu hiện vật mà không phóng đại sức mạnh hoặc kích thước.",
+        "storyboard_prompt", "product_3d_showcase", "khảo cứu hiện vật, macro điện ảnh",
+        "Tỉ lệ, vật liệu, hoa văn và cách cầm hợp lý; không tự thêm chữ khắc hoặc biểu tượng sai.",
+        "Từ tổng quan tới cấu tạo, thao tác mô phỏng an toàn, đối chiếu giai thoại và kết bằng giá trị văn hóa.",
+        formats=("artifact breakdown", "3D explainer", "museum story"),
+    ),
+    _idea(
+        "history_folklore_mystery", "history", "Truyền thuyết dân gian và điều còn bí ẩn",
+        "Kể một truyền thuyết theo nguồn lưu truyền, giải thích bối cảnh văn hóa và phân biệt rõ phần chưa kiểm chứng.",
+        "Một âm thanh hoặc dấu tích quen thuộc xuất hiện trong không gian đêm nhưng không dùng hù dọa rẻ tiền.",
+        "Bảo tồn chất kể dân gian mà không khẳng định hiện tượng siêu nhiên là sự thật.",
+        "video_ai_real", "cinematic_vfx", "huyền bí tiết chế, giàu văn hóa",
+        "Không gian địa phương nhất quán, ánh sáng đêm dễ nhìn, nhân vật và nghi thức không bị chế giễu.",
+        "Từ lời kể, dấu tích, nhiều cách giải thích tới ý nghĩa văn hóa; kết mở có ghi chú truyền thuyết.",
+        formats=("folklore", "night story", "cultural mystery"),
+    ),
+    _idea(
+        "sports_match_analysis", "sports", "Nhận định trận đấu có dữ liệu",
+        "Nêu bối cảnh, điểm nóng chiến thuật, phương án của hai bên và kết bằng nhận định có điều kiện.",
+        "Một sơ đồ chiến thuật làm lộ khoảng trống có thể quyết định trận đấu.",
+        "Giúp người xem hiểu trận đấu; không hardcode kết quả hoặc tin hiện thời chưa xác minh.",
+        "script_image_video", "tutorial_explainer", "bình luận thể thao nhanh, đồ họa rõ",
+        "Sân đấu, đội hình và biểu đồ minh họa trung tính; chỉ dùng dữ liệu người dùng cung cấp hoặc đã xác minh.",
+        "Mỗi cảnh giải thích một pha hoặc nguyên tắc; cuối video nêu điều kiện có thể làm nhận định thay đổi.",
+        formats=("match preview", "tactical analysis", "sports short"),
+    ),
+    _idea(
+        "sports_esports_matchup", "sports", "Phân tích meta và kèo kỹ năng",
+        "So sánh bộ kỹ năng, ngưỡng sức mạnh, cách trao đổi và điều kiện thắng của hai lựa chọn trong đúng phiên bản.",
+        "Hai lối chơi đối lập xuất hiện trên cùng một bản đồ chiến thuật.",
+        "Mổ xẻ meta dễ hiểu, không giả dữ liệu phiên bản hoặc dùng tài sản bản quyền trái phép.",
+        "storyboard_prompt", "app_game_demo", "eSports năng lượng, infographic động",
+        "Đồ họa nguyên bản, icon minh họa an toàn, trạng thái bản đồ và chỉ số nhất quán.",
+        "Mỗi cảnh hoàn tất một khía cạnh: bộ kỹ năng, thời điểm mạnh, trao đổi, giao tranh và kết luận có điều kiện.",
+        formats=("meta analysis", "matchup", "esports explainer"),
+    ),
+    _idea(
+        "sports_transfer_brief", "sports", "Bản tin chuyển nhượng 60 giây",
+        "Tóm tắt các diễn biến theo trạng thái xác minh, nguồn và mốc thời gian; tách tin chính thức khỏi đồn đoán.",
+        "Một dòng thời gian nhanh cho thấy thương vụ đang ở giai đoạn nào.",
+        "Cập nhật dễ hiểu mà không biến tin đồn thành thông báo chính thức.",
+        "video_trend", "ugc_social_creator", "bản tin thể thao dứt khoát",
+        "Ảnh minh họa có quyền sử dụng, thẻ trạng thái rõ 'chính thức' hoặc 'chưa xác nhận'.",
+        "Mỗi cảnh là một thông tin có nguồn và thời điểm; cảnh cuối nhắc kiểm tra cập nhật mới nhất.",
+        formats=("transfer news", "60s brief", "sports update"),
+    ),
+    _idea(
+        "travel_nightlife", "travel", "Khám phá nightlife có chọn lọc",
+        "Đi qua một tuyến trải nghiệm đêm, chú ý không gian, âm thanh, dịch vụ và lưu ý an toàn thực tế.",
+        "Ánh đèn và âm thanh từ một lối vào kín đáo kéo người xem vào hành trình.",
+        "Review chân thực, không tự khẳng định giá hoặc giờ mở cửa hiện tại.",
+        "video_ai_real", "architecture_walkthrough", "nightlife POV, neon tiết chế",
+        "Giữ đúng địa điểm, lộ trình camera và ánh sáng; không quay cận người lạ khi chưa có quyền.",
+        "Mỗi cảnh hoàn tất một điểm dừng; chuyển bằng bước chân hoặc âm thanh địa phương, kết ở toàn cảnh đêm.",
+        formats=("nightlife guide", "POV review", "local experience"),
+    ),
+    _idea(
+        "travel_unique_local", "travel", "Một trải nghiệm địa phương độc đáo",
+        "Theo chân người trải nghiệm từ chuẩn bị, lên đường, hoạt động chính tới khoảnh khắc đáng nhớ nhất.",
+        "Một góc nhìn POV hé lộ địa điểm quen mà người xem chưa từng trải nghiệm theo cách này.",
+        "Truyền cảm hứng khám phá có trách nhiệm và đưa lưu ý thực tế rõ.",
+        "video_trend", "ugc_social_creator", "travel vlog chân thật",
+        "Cùng người, trang phục và thời tiết trong một tuyến thời gian; địa điểm không bị ghép sai.",
+        "Mỗi cảnh hoàn thành một chặng; lời dẫn nêu cảm nhận thật, giá/giờ cần được kiểm tra trước khi đi.",
+        formats=("local experience", "POV travel", "day trip"),
+    ),
+    _idea(
+        "travel_staycation", "travel", "Staycation từ phòng tới dịch vụ",
+        "Review tuyến trải nghiệm nghỉ dưỡng: tiếp cận, phòng, tiện ích, dịch vụ, điểm mạnh và một lưu ý.",
+        "Cánh cửa mở ra trục nhìn đẹp nhất của không gian nghỉ dưỡng.",
+        "Giúp người xem đánh giá nơi ở thay vì chỉ xem montage quảng cáo.",
+        "script_image_video", "real_estate_property", "resort walkthrough cao cấp",
+        "Hình học phòng, vật liệu, cảnh quan và ánh sáng đúng; không tự thêm tiện ích không có.",
+        "Camera đi theo tuyến thật, hoàn tất từng khu vực rồi mới chuyển; cuối video tóm tắt ai phù hợp.",
+        formats=("staycation", "hotel review", "resort tour"),
+    ),
+    _idea(
+        "industry_elv_installation", "industry", "Thi công ELV, camera và chiếu sáng",
+        "Showcase khảo sát, thiết kế, thi công, kiểm thử và bàn giao hệ thống điện nhẹ trong môi trường thật.",
+        "Một điểm mù hoặc tín hiệu gián đoạn làm lộ bài toán an toàn cần giải quyết.",
+        "Giới thiệu năng lực B2B bằng quy trình và kết quả đo được, không đưa hướng dẫn nguy hiểm.",
+        "script_image_video", "architecture_walkthrough", "công nghiệp sạch, kỹ thuật tin cậy",
+        "Công xưởng đúng hình học, PPE đầy đủ, cáp/thiết bị hợp lý và sơ đồ không chứa bí mật hệ thống.",
+        "Mỗi cảnh hoàn tất một mốc khảo sát, lắp đặt hoặc kiểm tra; chỉ chuyên gia đủ điều kiện thực hiện thao tác nguy hiểm.",
+        formats=("ELV showcase", "installation process", "B2B case study"),
+    ),
+    _idea(
+        "industry_erp_transformation", "industry", "Chuyển đổi số và tự động hóa ERP",
+        "Biến một quy trình thủ công thành luồng số có dữ liệu vào, kiểm soát, tự động hóa và kết quả rõ.",
+        "Một bảng tính rời rạc được đặt cạnh dashboard đồng bộ theo thời gian.",
+        "Giải thích giá trị chuyển đổi số mà không hứa tiết kiệm hoặc hiệu suất chưa được đo.",
+        "storyboard_prompt", "website_saas_demo", "B2B công nghệ, luồng dữ liệu sạch",
+        "Giao diện mẫu không chứa dữ liệu thật, vai trò người dùng và bước phê duyệt nhất quán.",
+        "Mỗi cảnh hoàn tất một bước quy trình; có ngoại lệ, kiểm soát và chỉ số trước/sau hợp lệ.",
+        formats=("ERP demo", "digital transformation", "workflow automation"),
+    ),
+    _idea(
+        "industry_device_unboxing", "industry", "Đập hộp thiết bị kỹ thuật chuyên dụng",
+        "Từ niêm phong, phụ kiện, cổng kết nối, lắp thử tới kiểm tra chức năng và giới hạn sử dụng.",
+        "Macro một chi tiết linh kiện cho thấy đây không phải bài mở hộp phổ thông.",
+        "Review kỹ thuật có căn cứ, không tự khẳng định chuẩn hoặc hiệu năng chưa kiểm thử.",
+        "video_ai_real", "product_3d_showcase", "macro kỹ thuật, chi tiết sắc nét",
+        "Model, cổng, board mạch và phụ kiện đúng tham chiếu; không tự thêm chứng nhận hoặc logo.",
+        "Mỗi cảnh hoàn tất một bước mở hộp hay kiểm tra; cảnh cuối nêu đối tượng phù hợp và giới hạn.",
+        formats=("technical unboxing", "device review", "hardware showcase"),
+    ),
+    _idea(
+        "data_probability_literacy", "data_news", "Xác suất và thống kê dễ hiểu",
+        "Giải thích tần suất, chu kỳ, xác suất và sai lầm nhận thức bằng biểu đồ có nguồn.",
+        "Một chuỗi số tưởng như có quy luật được đặt cạnh xác suất thực tế.",
+        "Dạy tư duy dữ liệu; không dự đoán chắc thắng, không khuyến khích đặt cược.",
+        "script_image_video", "tutorial_explainer", "infographic dữ liệu sáng rõ",
+        "Biểu đồ có nhãn, mẫu và mốc thời gian; không tự tạo kết quả xổ số hoặc tỷ lệ giả.",
+        "Từ câu hỏi, dữ liệu, biểu đồ, giới hạn tới disclaimer xác suất; kết bằng cách tự kiểm tra nguồn.",
+        formats=("probability explainer", "statistics", "data literacy"),
+    ),
+    _idea(
+        "data_bar_chart_story", "data_news", "Biểu đồ đua top theo thời gian",
+        "Kể sự thay đổi thứ hạng qua các mốc bằng dữ liệu đã xác minh, chú thích nguồn và bối cảnh.",
+        "Hai đối tượng đổi vị trí tại một mốc bất ngờ khiến người xem muốn biết nguyên nhân.",
+        "Biến bảng số liệu thành câu chuyện trực quan mà không bóp méo tỉ lệ.",
+        "storyboard_prompt", "animation_2d_3d", "data visualization mạch lạc",
+        "Trục, đơn vị, màu và thứ hạng nhất quán; nguồn và năm hiển thị rõ, không dùng số liệu bịa.",
+        "Mỗi cảnh hoàn tất một giai đoạn; camera giữ biểu đồ đọc được, kết bằng phạm vi dữ liệu và nguồn.",
+        formats=("bar chart race", "ranking history", "data story"),
+    ),
+    _idea(
+        "data_daily_brief", "data_news", "Tóm tắt tin vắn bằng dữ liệu",
+        "Gom các tin cùng chủ đề, mỗi cảnh một ý có nguồn, thời điểm và điều người xem cần biết.",
+        "Ba chỉ số quan trọng xuất hiện như tiêu đề của bản tin ngắn.",
+        "Cập nhật nhanh nhưng không khẳng định thông tin chưa được xác minh live.",
+        "video_trend", "tutorial_explainer", "bản tin sạch, nhịp nhanh vừa đủ",
+        "Thẻ tin và biểu đồ nguyên bản, nguồn/mốc giờ rõ, không dùng hình vi phạm bản quyền.",
+        "Mỗi cảnh một tin trọn vẹn; phân biệt dữ kiện, phân tích và phần cần theo dõi thêm.",
+        formats=("news brief", "daily data", "60s update"),
+    ),
+    _idea(
+        "selfhelp_podcast_short", "self_help", "Podcast short có một thông điệp trọn vẹn",
+        "Mở bằng câu hỏi thật, triển khai một góc nhìn, ví dụ và hành động nhỏ thay vì ghép quote rời rạc.",
+        "Một câu nói ngắn chạm đúng tình huống người xem đang trải qua.",
+        "Tạo nội dung truyền cảm hứng thực tế, không hứa thay đổi cuộc đời tức thì.",
+        "script_image_video", "ugc_social_creator", "podcast short gần gũi",
+        "Nhân vật hoặc nền hình ảnh có quyền sử dụng, caption dễ đọc và vùng an toàn rõ.",
+        "Lời đọc vừa 8 giây mỗi cảnh, không cắt giữa câu; nền hình nối cảm xúc và kết bằng hành động nhỏ.",
+        formats=("podcast short", "quote reflection", "motivational reel"),
+    ),
+    _idea(
+        "selfhelp_career_roadmap", "self_help", "Lộ trình nghề nghiệp có mốc kiểm tra",
+        "Từ mục tiêu dài hạn, năng lực hiện tại, bước học, dự án thử nghiệm tới mốc đánh giá lại.",
+        "Một bản đồ 5 năm được thu nhỏ thành bước có thể bắt đầu trong tuần này.",
+        "Giúp người xem định hướng mà không hứa chắc chắn về chức danh hoặc thu nhập.",
+        "storyboard_prompt", "tutorial_explainer", "roadmap trực quan, điềm tĩnh",
+        "Timeline, mốc kỹ năng và checklist rõ; không dùng biểu đồ thu nhập giả.",
+        "Mỗi cảnh hoàn tất một mốc; cảnh cuối nhắc điều chỉnh theo hoàn cảnh và phản hồi thực tế.",
+        formats=("career roadmap", "business plan", "learning path"),
+    ),
+    _idea(
+        "selfhelp_habit_system", "self_help", "Kỷ luật bằng hệ thống thói quen nhỏ",
+        "Theo một ngày thực tế, chỉ ra tín hiệu, hành động, trở ngại, điều chỉnh và cách ghi nhận tiến bộ.",
+        "Một hành động hai phút mở đầu thay cho lời hô hào kỷ luật chung chung.",
+        "Khuyến khích thói quen bền vững, tránh tôn vinh kiệt sức hoặc hình mẫu phi thực tế.",
+        "video_ai_real", "ugc_social_creator", "day-in-the-life chân thật",
+        "Cùng nhân vật, lịch trình và không gian; tiến bộ thể hiện bằng hành động chứ không phải thành tích giả.",
+        "Mỗi cảnh hoàn thành một thói quen; có vấp, điều chỉnh và kết bằng lựa chọn tiếp theo.",
+        formats=("habit routine", "day in life", "discipline diary"),
+    ),
+    _idea(
+        "meme_office_pov", "meme", "POV tình huống công sở",
+        "Thiết lập một quy tắc quen thuộc, tạo hiểu lầm nhỏ, phản ứng và cú bẻ liên quan trực tiếp.",
+        "Dòng chữ POV khiến người xem nhận ra ngay tình huống trớ trêu.",
+        "Tạo tiếng cười nguyên bản, không nhắm vào nhóm yếu thế hoặc người thật cụ thể.",
+        "video_trend", "ugc_social_creator", "hài tình huống nhanh, camera điện thoại",
+        "Nhân vật hư cấu, bối cảnh an toàn, caption ngắn; không dùng khuôn mặt hoặc giọng người thật trái phép.",
+        "Mỗi cảnh trọn một nhịp hài; khoảng dừng trước punchline và kết nhanh không kéo dài trò đùa.",
+        formats=("POV", "office comedy", "relatable skit"),
+    ),
+    _idea(
+        "meme_visual_parody", "meme", "Parody hình ảnh nguyên bản",
+        "Lấy một mô-típ phổ biến rồi viết lại tình huống, nhân vật và cú chốt mới hoàn toàn.",
+        "Một hình ảnh quen về cấu trúc nhưng khác hoàn toàn về nhân vật và bối cảnh.",
+        "Bắt trend mà không sao chép nguyên tác hoặc mạo danh người thật.",
+        "storyboard_prompt", "animation_2d_3d", "parody hoạt hình nguyên bản",
+        "Thiết kế nhân vật riêng, không dùng logo hoặc nhân vật bản quyền; biểu cảm rõ và nhất quán.",
+        "Mỗi cảnh phát triển một lớp kỳ vọng; cú bẻ cuối xuất phát từ chi tiết đã cài ở đầu.",
+        formats=("parody", "animated meme", "trend remix"),
+    ),
+    _idea(
+        "meme_voice_comedy", "meme", "Hội thoại hài với giọng được phép",
+        "Viết đoạn đối đáp giữa nhân vật hư cấu, có nhịp setup–phản hồi–punchline và kế hoạch giọng hợp lệ.",
+        "Hai nhân vật hiểu cùng một câu theo hai nghĩa khác nhau.",
+        "Lập kế hoạch lồng tiếng hài nhưng không clone giọng người thật khi chưa có quyền.",
+        "script_image_video", "character", "hội thoại nhân vật, nhịp hài rõ",
+        "Nhân vật nguyên bản, khẩu hình và biểu cảm hợp câu; không dùng nhận diện người nổi tiếng.",
+        "Mỗi cảnh chứa câu thoại trọn vẹn dưới giới hạn thời lượng; voice plan chỉ là metadata trước xác nhận.",
+        formats=("dialogue comedy", "voice parody", "character skit"),
+    ),
+    _idea(
+        "asmr_rain_window", "asmr", "Mưa bên cửa sổ và không gian học tập",
+        "Xây một vòng lặp mưa, ánh đèn, thao tác nhẹ và khoảng yên để học hoặc làm việc.",
+        "Giọt mưa trượt qua kính trong khi căn phòng dần sáng ấm.",
+        "Tạo kế hoạch thư giãn không giật mình; không tuyên bố chữa mất ngủ hoặc bệnh lý.",
+        "video_ai_real", "architecture_interior", "cozy rain, loop mượt",
+        "Căn phòng, cửa sổ và nguồn sáng nhất quán; chuyển động mưa tự nhiên và không chớp sáng mạnh.",
+        "Âm thanh mưa chỉ là kế hoạch; trạng thái cuối nối lại khung đầu để loop tự nhiên.",
+        formats=("rain ambience", "study loop", "cozy room"),
+    ),
+    _idea(
+        "asmr_cooking_process", "asmr", "ASMR nấu ăn theo thao tác trọn vẹn",
+        "Từng cảnh hoàn tất một thao tác chuẩn bị, cắt, trộn, nấu hoặc trình bày với âm thanh chân thực.",
+        "Âm thanh dao chạm thớt mở đầu trước khi toàn bộ nguyên liệu hiện ra.",
+        "Tạo trải nghiệm cảm giác rõ mà vẫn giữ vệ sinh và an toàn thực phẩm.",
+        "storyboard_prompt", "fashion_lookbook", "macro ẩm thực, âm thanh tự nhiên",
+        "Tay, dụng cụ và nguyên liệu đúng hình dạng; bếp sạch, thao tác nhiệt/dao an toàn.",
+        "Không cắt giữa thao tác; âm thanh từng cảnh được ghi chú riêng và cân bằng sau khi ghép.",
+        formats=("cooking ASMR", "food prep", "sensory process"),
+    ),
+    _idea(
+        "asmr_lofi_workspace", "asmr", "Lofi làm việc với nhịp hình tối giản",
+        "Theo một phiên làm việc yên tĩnh, chuyển nhẹ giữa bàn, ghi chú, nghỉ mắt và quay lại tập trung.",
+        "Đèn bàn bật lên cùng nhịp đầu tiên của một bản lofi chưa được tạo.",
+        "Lập kế hoạch visualizer tập trung; không gọi Music/Suno ở bước tham khảo.",
+        "script_image_video", "cinematic_vfx", "lofi tối giản, màu dịu",
+        "Không gian và vật dụng giữ nguyên, chuyển động nhỏ, vùng hình không gây phân tâm.",
+        "Mỗi cảnh có nhịp riêng nhưng cùng BPM dự kiến; music plan chỉ được thực thi sau xác nhận cuối.",
+        formats=("lofi workspace", "focus loop", "study visualizer"),
+    ),
 )
 
 IDEA_BY_ID = {str(item["idea_id"]): item for item in IDEAS}
@@ -696,6 +1086,68 @@ RELATED_CATEGORIES = {
     "lifestyle": "sales",
     "digital": "education",
     "visual": "story",
+    "history": "education",
+    "sports": "data_news",
+    "travel": "lifestyle",
+    "industry": "digital",
+    "data_news": "education",
+    "self_help": "education",
+    "meme": "ugc",
+    "asmr": "visual",
+}
+
+CATEGORY_SYSTEM_GUIDANCE = {
+    "sales": "Lập kế hoạch quảng cáo trung thực, nêu đúng lợi ích có thể chứng minh và không tạo tuyên bố quá mức.",
+    "ugc": "Lập kế hoạch nội dung đời thường tự nhiên, giữ trải nghiệm đáng tin và không giả mạo lời chứng thực.",
+    "education": "Giải thích theo từng bước dễ kiểm tra, dùng ví dụ rõ và không biến giả định thành dữ kiện.",
+    "story": "Xây dựng mạch kể có mở đầu, phát triển, cao trào và kết thúc; mỗi cảnh hoàn tất một nhịp truyện.",
+    "space": "Giữ hình học, vật liệu, kiến trúc và lộ trình camera nhất quán giữa các cảnh.",
+    "lifestyle": "Ưu tiên trải nghiệm chân thực, cảm giác rõ và hành động hoàn chỉnh trong từng cảnh.",
+    "digital": "Mô tả đúng luồng thao tác sản phẩm số; không bịa tính năng, số liệu hoặc giao diện chưa được cung cấp.",
+    "visual": "Thiết kế nhịp hình, chuyển động và điểm nhấn nhất quán; âm thanh chỉ là kế hoạch trước xác nhận cuối.",
+    "history": "Phân biệt dữ kiện có nguồn với dã sử, truyền thuyết hoặc tái hiện nghệ thuật; không bịa sự kiện lịch sử.",
+    "sports": "Chỉ dùng kết quả, đội hình, meta hoặc chuyển nhượng hiện thời khi người dùng cung cấp hay đã xác minh nguồn trực tiếp.",
+    "travel": "Không khẳng định giá, giờ mở cửa hoặc tình trạng dịch vụ hiện thời nếu chưa có nguồn được xác minh.",
+    "industry": "Trình bày giải pháp B2B chuyên nghiệp, ưu tiên an toàn và không đưa chỉ dẫn vận hành nguy hiểm chưa được kiểm chứng.",
+    "data_news": "Không bịa dữ liệu hoặc tin tức; xác suất chỉ mang tính giáo dục, không hứa dự đoán chắc thắng hay khuyến khích đánh bạc.",
+    "self_help": "Đưa ra gợi ý thực tế và có điều kiện; không hứa thành công, chữa bệnh hoặc kết quả tài chính chắc chắn.",
+    "meme": "Tạo nội dung nguyên bản, không quấy rối, mạo danh hoặc sao chép giọng người thật khi chưa có quyền rõ ràng.",
+    "asmr": "Thiết kế trải nghiệm thư giãn nhưng không đưa tuyên bố chữa bệnh; nhạc và âm thanh chỉ được lưu dưới dạng kế hoạch.",
+}
+
+CATEGORY_MEDIA_PLANS = {
+    "sales": ("nhịp hiện đại, gọn, không lấn lời", "rõ ràng, đáng tin", "sạch, sản phẩm là trọng tâm"),
+    "ugc": ("nhẹ, đời thường", "tự nhiên như chia sẻ thật", "ánh sáng tự nhiên, camera gần gũi"),
+    "education": ("tối giản, hỗ trợ tập trung", "mạch lạc, vừa tốc độ", "minh họa rõ, chữ có vùng an toàn"),
+    "story": ("điện ảnh theo nhịp câu chuyện", "giàu cảm xúc nhưng tiết chế", "điện ảnh, continuity nhân vật rõ"),
+    "space": ("ambient kiến trúc", "thuyết minh điềm tĩnh", "đúng phối cảnh, vật liệu và ánh sáng"),
+    "lifestyle": ("ấm, giàu cảm giác", "thân thiện", "chi tiết chất liệu, màu tự nhiên"),
+    "digital": ("tech tối giản", "chuyên nghiệp, dễ theo dõi", "giao diện rõ, thao tác có thứ tự"),
+    "visual": ("nhịp hình và âm thanh đồng bộ", "tùy chọn, ưu tiên hình", "motion graphic có chủ đích"),
+    "history": ("epic điện ảnh, nhạc cụ phù hợp bối cảnh", "trầm ấm, phân biệt dữ kiện và giai thoại", "điện ảnh hoài cổ, trang phục đúng bối cảnh"),
+    "sports": ("năng lượng cao, tiết tấu nhanh", "bình luận rõ và có điều kiện", "hành động nhanh, đồ họa chiến thuật dễ đọc"),
+    "travel": ("ambient địa phương, không lấn tiếng hiện trường", "POV chân thực", "góc nhìn trải nghiệm, màu tự nhiên"),
+    "industry": ("corporate/tech gọn", "chuyên nghiệp, đáng tin", "ánh sáng sạch, cận cảnh thiết bị an toàn"),
+    "data_news": ("nhịp bản tin tiết chế", "dứt khoát, đọc rõ số", "infographic có nguồn và mốc thời gian"),
+    "self_help": ("ấm, nâng đỡ, không cường điệu", "bình tĩnh, thực tế", "đời thường, tiến trình nhỏ có thật"),
+    "meme": ("nhịp hài nguyên bản", "không giả giọng người thật", "POV rõ, cú bẻ dễ hiểu"),
+    "asmr": ("ambient/lofi hoặc âm thanh hiện trường", "không lời hoặc rất nhẹ", "chuyển động chậm, vòng lặp êm"),
+}
+
+CATEGORY_AUDIO_PLANS = {
+    category_key: "Âm thanh hiện trường tùy chọn; chỉ cân chỉnh sau khi các cảnh đã ghép."
+    for category_key, _label in CATEGORIES
+}
+CATEGORY_AUDIO_PLANS["asmr"] = (
+    "Ưu tiên âm thanh môi trường chân thực, chọn loop hoặc fade tự nhiên, giữ nhịp đều và "
+    "tránh thay đổi âm lượng đột ngột; chỉ là kế hoạch trước xác nhận cuối."
+)
+
+CATEGORY_DEFAULT_SCENE_COUNT = {
+    "sales": 3, "ugc": 3, "education": 3, "story": 5,
+    "space": 5, "lifestyle": 3, "digital": 3, "visual": 5,
+    "history": 3, "sports": 4, "travel": 3, "industry": 5,
+    "data_news": 3, "self_help": 3, "meme": 3, "asmr": 5,
 }
 
 LEGACY_CINEMA_ACTIONS = frozenset({
@@ -969,6 +1421,81 @@ def build_scene3_handoff_state(plan: dict[str, Any]) -> dict[str, Any]:
         "xu_charged": 0,
     })
     return video_scene3_flow.normalize_state(state)
+
+
+def dynamic_category_seeds() -> list[dict[str, Any]]:
+    """Return the curated category seed consumed by the SQLite catalog."""
+
+    rows: list[dict[str, Any]] = []
+    for sort_order, (category_key, _legacy_label) in enumerate(CATEGORIES, 1):
+        icon, public_name, short_button_name, description = CATEGORY_METADATA[category_key]
+        rows.append({
+            "category_key": category_key,
+            "public_name": public_name,
+            "short_button_name": short_button_name,
+            "description": description,
+            "icon": icon,
+            "sort_order": sort_order,
+            "is_active": 1,
+            "created_by": "system_seed",
+        })
+    return rows
+
+
+def dynamic_preset_seeds() -> list[dict[str, Any]]:
+    """Map all legacy and new curated ideas into versioned SQLite presets.
+
+    The first 48 rows keep their existing keys and creative content. SQLite
+    uses ``INSERT OR IGNORE`` so later admin edits are never overwritten by a
+    restart or a new deployment.
+    """
+
+    category_positions: dict[str, int] = {}
+    rows: list[dict[str, Any]] = []
+    for idea in IDEAS:
+        category_key = str(idea.get("category") or "story")
+        category_positions[category_key] = category_positions.get(category_key, 0) + 1
+        music_plan, voice_plan, visual_plan = CATEGORY_MEDIA_PLANS[category_key]
+        scene_count = CATEGORY_DEFAULT_SCENE_COUNT[category_key]
+        title = str(idea.get("title") or "Ý tưởng video").strip()
+        rows.append({
+            "preset_key": str(idea.get("idea_id") or "").strip(),
+            "category_key": category_key,
+            "title": title,
+            "description": str(idea.get("summary") or "").strip(),
+            "system_guidance": (
+                f"{CATEGORY_SYSTEM_GUIDANCE[category_key]} "
+                "Viết đúng số cảnh người dùng chọn; mỗi cảnh dài khoảng 8 giây, "
+                "hoàn tất một ý hoặc hành động và nối mượt sang cảnh kế tiếp."
+            ),
+            "user_prompt_template": (
+                f"Lập kế hoạch {{scene_count}} cảnh cho ý tưởng '{title}' về {{topic}}. "
+                "Bám sát yêu cầu riêng: {customer_brief}. Mỗi cảnh phải có mục tiêu, "
+                "chủ thể, hành động, trạng thái đầu-cuối, camera, ánh sáng, âm thanh, "
+                "câu lệnh hình và câu lệnh video riêng. Không chia cơ học một đoạn dài."
+            ),
+            "recommended_scene_count": scene_count,
+            "scene_duration_sec": SCENE_SECONDS,
+            "music_plan": music_plan,
+            "audio_plan": CATEGORY_AUDIO_PLANS[category_key],
+            "voice_plan": voice_plan,
+            "visual_plan": visual_plan,
+            "content_safety_note": CATEGORY_SYSTEM_GUIDANCE[category_key],
+            "recommended_product_id": str(idea.get("recommended_product_id") or "video_ai_real"),
+            "recommended_profile_id": str(idea.get("recommended_profile_id") or "tutorial_explainer"),
+            "hook": str(idea.get("hook") or ""),
+            "objective": str(idea.get("objective") or ""),
+            "style": str(idea.get("style") or ""),
+            "image_prompt_seed": str(idea.get("image_prompt_seed") or ""),
+            "video_prompt_seed": str(idea.get("video_prompt_seed") or ""),
+            "scene_arc": str(idea.get("scene_arc") or CATEGORY_SCENE_ARCS[category_key]),
+            "platform_fit": list(idea.get("platform_fit") or CATEGORY_PLATFORMS[category_key]),
+            "variation_axes": list(idea.get("variation_axes") or CATEGORY_VARIATION_AXES[category_key]),
+            "sort_order": category_positions[category_key],
+            "is_active": 1,
+            "created_by": "system_seed",
+        })
+    return rows
 
 
 def catalog_status() -> dict[str, Any]:
