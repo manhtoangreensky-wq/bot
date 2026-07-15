@@ -4229,10 +4229,18 @@ def product_video_initial_scene_tasks(
     job_id: int | str,
     scene_count: int,
     scene_duration_seconds: int = PRODUCT_VIDEO_SCENE_SECONDS,
+    scene_cards: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     safe_job_id = str(job_id or "").strip() or "job"
     safe_count = max(1, min(20, int(scene_count or 1)))
     safe_duration = max(1, min(PRODUCT_VIDEO_SCENE_SECONDS, int(scene_duration_seconds or PRODUCT_VIDEO_SCENE_SECONDS)))
+    cards_by_index: dict[int, dict[str, Any]] = {}
+    for fallback_index, raw_card in enumerate(scene_cards or [], start=1):
+        if not isinstance(raw_card, dict):
+            continue
+        card = dict(raw_card)
+        index = max(1, min(safe_count, _as_int(card.get("scene_index"), fallback_index)))
+        cards_by_index[index] = card
     return [
         {
             "scene_index": index,
@@ -4271,6 +4279,19 @@ def product_video_initial_scene_tasks(
             "failure_reason": "",
             "provider_wait_elapsed_seconds": 0,
             "provider_started_at_epoch": "",
+            "scene_role": str(cards_by_index.get(index, {}).get("role") or ""),
+            "scene_prompt": str(
+                cards_by_index.get(index, {}).get("provider_prompt")
+                or cards_by_index.get(index, {}).get("video_prompt")
+                or ""
+            ),
+            "provider_prompt": str(
+                cards_by_index.get(index, {}).get("provider_prompt")
+                or cards_by_index.get(index, {}).get("video_prompt")
+                or ""
+            ),
+            "image_prompt": str(cards_by_index.get(index, {}).get("image_prompt") or ""),
+            "scene_prompt_source": "video_project_scene" if cards_by_index.get(index) else "",
         }
         for index in range(1, safe_count + 1)
     ]
@@ -4326,8 +4347,16 @@ def build_product_video_confirm_kickoff_payload(
         if per_scene_orchestration
         else PRODUCT_VIDEO_ORCHESTRATION_MODE_RAW_DELIVERY
     )
+    project_scene_cards = _json_loads(str(project.get("scene_cards_json") or ""), [])
+    if not isinstance(project_scene_cards, list):
+        project_scene_cards = []
     scene_tasks = (
-        product_video_initial_scene_tasks(job.get("id") or job.get("job_id") or "job", scene_count, scene_duration)
+        product_video_initial_scene_tasks(
+            job.get("id") or job.get("job_id") or "job",
+            scene_count,
+            scene_duration,
+            scene_cards=[dict(item) for item in project_scene_cards if isinstance(item, dict)],
+        )
         if per_scene_orchestration
         else []
     )
