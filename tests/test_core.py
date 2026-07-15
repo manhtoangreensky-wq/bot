@@ -8326,16 +8326,16 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     assert "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu" in entry_text
     assert "API" not in entry_text
     entry_rows = bot.quick_image_entry_keyboard("vi").inline_keyboard
-    assert [button.callback_data for button in entry_rows[0]] == ["create_media|qi_suggest", "create_media|qi_refresh"]
-    assert [button.callback_data for button in entry_rows[1]] == ["create_media|qi_custom", "menu|main_image"]
+    assert [button.callback_data for button in entry_rows[0]] == ["create_media|qi_suggest", "create_media|qi_custom"]
+    assert [button.callback_data for button in entry_rows[1]] == ["menu|main_image", "menu|main"]
 
     first = bot.quick_image_suggestions(0, "vi")
-    second = bot.quick_image_suggestions(3, "vi")
+    second = bot.quick_image_suggestions(5, "vi")
     assert len(bot.quick_image_suggestion_bank("vi")) >= 20
-    assert len(first) == 3
+    assert len(first) == 5
     assert first != second
     suggestions_text = bot.quick_image_suggestions_text({"suggest_offset": 0}, "vi")
-    assert "3 chủ đề gợi ý tạo ảnh" in suggestions_text
+    assert "5 ý tưởng gợi ý tạo ảnh" in suggestions_text
     assert "soạn prompt hoàn chỉnh" in suggestions_text
     assert first[0] in suggestions_text
     suggestion_callbacks = [
@@ -8343,7 +8343,16 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         for row in bot.quick_image_suggestions_keyboard("vi").inline_keyboard
         for button in row
     ]
-    assert {"create_media|qi_pick_1", "create_media|qi_pick_2", "create_media|qi_pick_3", "create_media|qi_refresh", "create_media|qi_custom"}.issubset(set(suggestion_callbacks))
+    assert {
+        "create_media|qi_pick_1",
+        "create_media|qi_pick_2",
+        "create_media|qi_pick_3",
+        "create_media|qi_pick_4",
+        "create_media|qi_pick_5",
+        "create_media|qi_refresh",
+        "create_media|qi_custom",
+    }.issubset(set(suggestion_callbacks))
+    assert [button.text for button in bot.quick_image_suggestions_keyboard("vi").inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
 
     prepared_prompt, negative_prompt = bot.quick_image_prompt_from_topic(first[0], "vi")
     rewritten_prompt, rewritten_negative = bot.quick_image_prompt_from_topic(first[0], "vi", 1)
@@ -8360,7 +8369,7 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         prompt=prepared_prompt,
         negative_prompt=negative_prompt,
         prompt_source="suggestion",
-        suggest_offset=3,
+        suggest_offset=5,
     )
     assert state["step"] == "prepared_prompt"
     assert state["prompt_source"] == "suggestion"
@@ -8378,7 +8387,7 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         "create_media|qi_rewrite",
         "create_media|qi_topics",
         "create_media|qi_custom",
-        "create_media|qi_back_suggestions",
+        "create_media|qi_back_source",
     }.issubset(set(prepared_callbacks))
 
     logo_choice_callbacks = [
@@ -8442,17 +8451,19 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     assert [button.callback_data for button in confirm_rows[0]] == ["shopai|confirm|token-1", "create_media|qi_back_tier"]
     assert [button.callback_data for button in confirm_rows[-1]] == ["menu|main"]
 
-    planning_keyboards = [
+    two_column_planning_keyboards = [
         bot.quick_image_entry_keyboard("vi"),
-        bot.quick_image_suggestions_keyboard("vi"),
         bot.quick_image_prepared_prompt_keyboard("vi"),
         bot.quick_image_custom_prompt_keyboard("vi"),
         bot.quick_image_ratio_keyboard("vi"),
         bot.quick_image_tier_keyboard("vi"),
         bot.quick_image_confirm_keyboard("token-1", "vi"),
     ]
-    for keyboard in planning_keyboards:
+    for keyboard in two_column_planning_keyboards:
         assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
+    suggestion_rows = bot.quick_image_suggestions_keyboard("vi").inline_keyboard
+    assert len(suggestion_rows[0]) == 5
+    assert all(len(row) <= 2 for row in suggestion_rows[1:])
 
     assert '"source": "quick_image_v6"' in callback_source
     assert 'set_quick_image_flow(\n            uid,\n            "prepared_prompt"' in callback_source

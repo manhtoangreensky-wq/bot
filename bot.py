@@ -143469,7 +143469,7 @@ def quick_image_prompt_from_topic(topic: str = "", lang: str = "vi", variant: in
     return str(result.get("prompt") or ""), str(result.get("negative_prompt") or "")
 
 def quick_image_suggestions(offset: int = 0, lang: str = "vi") -> list[str]:
-    return video_v6_rotating_items(quick_image_suggestion_bank(lang), offset, 3)
+    return video_v6_rotating_items(quick_image_suggestion_bank(lang), offset, 5)
 
 def quick_image_entry_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -143481,7 +143481,7 @@ def quick_image_entry_text(lang: str = "vi") -> str:
         )
     return (
         "🖼 <b>Tạo ảnh nhanh</b>\n\n"
-        "Bạn muốn bắt đầu tạo ảnh theo cách nào?\n\n"
+        "Bạn muốn chọn ý tưởng có sẵn hay tự viết mô tả ảnh?\n\n"
         "TOAN AAS sẽ giúp bạn chọn prompt trước, sau đó mới chọn tỉ lệ và gói giá để tạo ảnh thật.\n"
         "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
@@ -143490,23 +143490,22 @@ def quick_image_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✨ 3 gợi ý tạo ảnh" if vi else "✨ 3 image ideas", callback_data="create_media|qi_suggest"),
-            InlineKeyboardButton("🔄 Gợi ý khác" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
+            InlineKeyboardButton("💡 Chọn từ 5 gợi ý" if vi else "💡 Choose from 5 ideas", callback_data="create_media|qi_suggest"),
+            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
         ],
         [
-            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
             InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="menu|main_image"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def quick_image_suggestions_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
     if normalize_user_language(lang) != "vi":
-        lines = ["✨ <b>Three image topic suggestions</b>", "", "Choose a topic. TOAN AAS will prepare the full prompt before ratio and pricing.", ""]
+        lines = ["✨ <b>Five image ideas</b>", "", "Choose an idea. TOAN AAS will prepare the full prompt before ratio and pricing.", ""]
     else:
-        lines = ["✨ <b>3 chủ đề gợi ý tạo ảnh</b>", "", "Chọn một chủ đề. TOAN AAS sẽ soạn prompt hoàn chỉnh trước khi chọn tỉ lệ và giá.", ""]
+        lines = ["✨ <b>5 ý tưởng gợi ý tạo ảnh</b>", "", "Chọn một ý tưởng. TOAN AAS sẽ soạn prompt hoàn chỉnh trước khi chọn tỉ lệ và giá.", ""]
     lines.extend(f"{idx}. {html.escape(item)}" for idx, item in enumerate(suggestions, 1))
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
     return "\n".join(lines)
@@ -143515,18 +143514,17 @@ def quick_image_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("1️⃣ Chọn chủ đề 1" if vi else "1️⃣ Choose topic 1", callback_data="create_media|qi_pick_1"),
-            InlineKeyboardButton("2️⃣ Chọn chủ đề 2" if vi else "2️⃣ Choose topic 2", callback_data="create_media|qi_pick_2"),
+            InlineKeyboardButton(str(index), callback_data=f"create_media|qi_pick_{index}")
+            for index in range(1, 6)
         ],
         [
-            InlineKeyboardButton("3️⃣ Chọn chủ đề 3" if vi else "3️⃣ Choose topic 3", callback_data="create_media|qi_pick_3"),
-            InlineKeyboardButton("🔄 Gợi ý khác" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
-        ],
-        [
+            InlineKeyboardButton("🔄 Đổi gợi ý" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
             InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
-            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
     ])
 
 def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi") -> str:
@@ -143556,7 +143554,7 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
         return (
             "✨ <b>Optimized image prompt</b>\n\n"
             f"Purpose: <b>{html.escape(purpose_label)}</b>\n"
-            f"Topic: <b>{html.escape(topic or original_request)}</b>\n"
+            f"Idea: <b>{html.escape(topic or original_request)}</b>\n"
             f"Suggested ratio: <b>{html.escape(suggested_ratio)}</b>\n\n"
             f"Main prompt:\n<code>{html.escape(prompt)}</code>\n\n"
             f"Negative prompt:\n<code>{html.escape(negative)}</code>\n"
@@ -143566,24 +143564,24 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
     return (
         "✨ <b>Prompt ảnh đã được soạn và tối ưu</b>\n\n"
         f"Mục tiêu: <b>{html.escape(purpose_label)}</b>\n"
-        f"Chủ đề: <b>{html.escape(topic or original_request)}</b>\n"
+        f"Ý tưởng: <b>{html.escape(topic or original_request)}</b>\n"
         f"Tỉ lệ đề xuất: <b>{html.escape(suggested_ratio)}</b>\n\n"
         f"Prompt chính:\n<code>{html.escape(prompt)}</code>\n\n"
         f"Negative prompt:\n<code>{html.escape(negative)}</code>\n\n"
         + (f"Lưu ý: {html.escape(caution)}\n\n" if caution else "")
         + vague_note
-        + "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc chọn chủ đề khác.\n"
+        + "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc đổi ý tưởng.\n"
         "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def quick_image_prepared_prompt_keyboard(
     lang: str = "vi",
     *,
-    back_callback: str = "create_media|qi_back_suggestions",
+    back_callback: str = "create_media|qi_back_source",
     back_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
-    back_text = back_label or ("✨ Chọn chủ đề khác" if vi else "✨ Another topic")
+    back_text = back_label or ("⬅️ Quay lại" if vi else "⬅️ Back")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
@@ -143594,10 +143592,13 @@ def quick_image_prepared_prompt_keyboard(
             InlineKeyboardButton("✍️ Sửa prompt" if vi else "✍️ Edit prompt", callback_data="create_media|qi_custom"),
         ],
         [
-            InlineKeyboardButton("✨ Chọn chủ đề khác" if vi else "✨ Another topic", callback_data="create_media|qi_topics"),
+            InlineKeyboardButton("🔄 Đổi ý tưởng" if vi else "🔄 Change idea", callback_data="create_media|qi_topics"),
             InlineKeyboardButton(back_text, callback_data=back_callback),
         ],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [
+            InlineKeyboardButton("🖼 Menu ảnh" if vi else "🖼 Image menu", callback_data="menu|main_image"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
     ])
 
 def quick_image_custom_prompt_text(lang: str = "vi", prompt: str = "") -> str:
@@ -154152,9 +154153,17 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
             state["step"] = "ai_prompt"
             set_frame_video_state(uid, state)
             return await safe_edit_or_send(query, "⚠️ Anh/chị cần nhập prompt ảnh trước. Bot chưa trừ Xu.", parse_mode=None)
-        enabled, guard_message = shopaikey_public_generation_guard("image")
-        if not enabled and not is_admin_user(uid):
-            return await safe_edit_or_send(query, guard_message or ui_text(lang, "media.public_off"), parse_mode=None)
+        submit_guard = shopaikey_provider_submit_guard(
+            "image",
+            source="public_user_final_confirm",
+            confirmed=True,
+        )
+        if not submit_guard.get("provider_submit_allowed") and not is_admin_user(uid):
+            return await safe_edit_or_send(
+                query,
+                str(submit_guard.get("message") or ui_text(lang, "media.public_off")),
+                parse_mode=None,
+            )
         unit_cost = img2vid_image_unit_cost()
         image_cost = int(unit_cost * count)
         charged_amount = 0
@@ -155578,7 +155587,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         state = get_quick_image_flow(uid) or set_quick_image_flow(uid, "entry", suggest_offset=0)
         offset = _safe_int(state.get("suggest_offset"), 0)
         if action == "qi_refresh":
-            offset += 3
+            offset += 5
         state = set_quick_image_flow(uid, "suggestions", suggest_offset=offset, prompt_source="suggestion")
         return await safe_edit_or_send(
             query,
@@ -155600,7 +155609,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             set_quick_image_flow(uid, "entry", suggest_offset=0)
             return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
         try:
-            index = max(1, min(3, int(action.rsplit("_", 1)[1])))
+            index = max(1, min(5, int(action.rsplit("_", 1)[1])))
         except Exception:
             index = 1
         suggestions = quick_image_suggestions(_safe_int(state.get("suggest_offset"), 0), lang)
@@ -155644,6 +155653,23 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         )
     if action in {"qi_topics", "qi_back_suggestions"}:
         state = set_quick_image_flow(uid, "suggestions")
+        return await safe_edit_or_send(
+            query,
+            quick_image_suggestions_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_suggestions_keyboard(lang),
+        )
+    if action == "qi_back_source":
+        state = get_quick_image_flow(uid) or {}
+        if state.get("prompt_source") == "custom":
+            state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
+            return await safe_edit_or_send(
+                query,
+                quick_image_custom_prompt_text(lang, state.get("original_request") or state.get("selected_topic") or ""),
+                parse_mode="HTML",
+                reply_markup=quick_image_custom_prompt_keyboard(lang),
+            )
+        state = set_quick_image_flow(uid, "suggestions", prompt_source="suggestion")
         return await safe_edit_or_send(
             query,
             quick_image_suggestions_text(state, lang),
