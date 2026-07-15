@@ -184803,28 +184803,102 @@ def video_dubbing_flow_failure_text(mode: str, lang: str = "vi") -> str:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
     return subdub_mode_fail_text(VIDEO_SUBTITLE_MODE_CREATE, lang)
 
-def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
-    current = dict(result or {})
-    message_id = str(
-        current.get("video_delivery_message_id")
-        or current.get("final_video_message_id")
-        or current.get("subdub_final_video_message_id")
-        or current.get("telegram_message_id")
-        or current.get("delivery_message_id")
+def subdub_terminal_delivery_evidence(
+    result: dict | None = None,
+    job: dict | None = None,
+) -> dict:
+    """Return only Telegram-confirmed final artifact delivery evidence."""
+    current_result = dict(result or {})
+    result_state = dict(current_result.get("state") or {})
+    current_job = dict(job or {})
+    mode = normalize_video_translate_mode(
+        current_result.get("mode")
+        or result_state.get("mode")
+        or result_state.get("video_processing_mode")
+        or current_job.get("mode")
+        or current_job.get("mapped_mode")
+    )
+    artifact_type = str(
+        current_result.get("terminal_artifact_type")
+        or result_state.get("terminal_artifact_type")
+        or current_job.get("terminal_artifact_type")
+        or ""
+    ).strip().lower()
+    video_message_id = str(
+        current_result.get("video_delivery_message_id")
+        or current_result.get("final_video_message_id")
+        or current_result.get("subdub_final_video_message_id")
+        or result_state.get("video_delivery_message_id")
+        or result_state.get("final_video_message_id")
+        or current_job.get("video_delivery_message_id")
+        or current_job.get("final_video_message_id")
+        or current_job.get("subdub_final_video_message_id")
         or ""
     ).strip()
-    sent_video_count = max(
+    final_video_delivered = any(
+        truthy_value(value, False)
+        for value in (
+            current_result.get("final_mp4_delivered"),
+            current_result.get("video_delivered"),
+            result_state.get("final_mp4_delivered"),
+            current_job.get("final_mp4_delivered"),
+        )
+    )
+    if video_message_id and final_video_delivered:
+        return {
+            "message_id": video_message_id,
+            "artifact_type": "video",
+            "is_video": True,
+            "mode": mode,
+        }
+
+    srt_message_id = str(
+        current_result.get("srt_delivery_message_id")
+        or result_state.get("srt_delivery_message_id")
+        or current_job.get("srt_delivery_message_id")
+        or ""
+    ).strip()
+    if (
+        mode == VIDEO_SUBTITLE_MODE_CREATE
+        and artifact_type in {"subtitle", "srt"}
+        and srt_message_id
+        and not final_video_delivered
+    ):
+        return {
+            "message_id": srt_message_id,
+            "artifact_type": "subtitle",
+            "is_video": False,
+            "mode": mode,
+        }
+    return {}
+
+
+def subdub_result_has_delivered_video(result: dict | None = None) -> bool:
+    current = dict(result or {})
+    # video_delivery_message_id is the only accepted Telegram video id here;
+    # generic delivery ids and sent_video_document counters are debug only.
+    # Legacy counters are intentionally not delivery proof without Telegram's
+    # video message id. Keep reading them only for backward-compatible debug.
+    _legacy_sent_video_count = max(
         _safe_int(current.get("sent_video"), 0),
         _safe_int(current.get("sent_video_document"), 0),
     )
-    return bool(
-        truthy_value(current.get("video_delivered"), False)
-        or truthy_value(current.get("final_mp4_delivered"), False)
-        or truthy_value(current.get("delivery_succeeded"), False)
-        or truthy_value(current.get("delivery_success"), False)
-        or bool(message_id)
-        or sent_video_count > 0
-    )
+    evidence = subdub_terminal_delivery_evidence(current)
+    return bool(evidence.get("is_video"))
+
+
+def subdub_registry_terminal_state(
+    result: dict | None = None,
+    job: dict | None = None,
+) -> str:
+    """Prevent internal success flags from committing a delivered registry state."""
+    current = dict(result or {})
+    terminal_state = subdub_result_terminal_state(current)
+    if terminal_state != "delivered":
+        return terminal_state
+    if subdub_terminal_delivery_evidence(current, job):
+        return terminal_state
+    return "failed_no_charge"
 
 def subdub_receipt_voice_label(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     current = {
@@ -186205,33 +186279,8 @@ def subdub_final_video_artifact_exists(job: dict | None = None) -> bool:
 
 def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
     current = dict(job or {})
-    terminal = str(current.get("terminal_state") or "").strip().lower()
-    outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
-    message_id = str(
-        current.get("final_video_message_id")
-        or current.get("subdub_final_video_message_id")
-        or current.get("video_delivery_message_id")
-        or current.get("delivery_message_id")
-        or current.get("telegram_message_id")
-        or ""
-    ).strip()
-    terminal_success = bool(
-        current.get("terminal_public_outcome_sent")
-        and outcome == "success"
-    )
-    return bool(
-        terminal == "delivered"
-        or truthy_value(current.get("delivery_succeeded"), False)
-        or truthy_value(current.get("delivery_success"), False)
-        or truthy_value(current.get("public_success_sent"), False)
-        or truthy_value(current.get("output_sent"), False)
-        or truthy_value(current.get("final_mp4_delivered"), False)
-        or terminal_success
-        or bool(message_id)
-        or current.get("subdub_delivered_at")
-        or current.get("delivered_at")
-        or current.get("subdub_success_message_id")
-    )
+    evidence = subdub_terminal_delivery_evidence({}, current)
+    return bool(evidence.get("is_video"))
 
 
 def subdub_restore_delivered_combo_result(
@@ -186821,25 +186870,10 @@ async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: s
 
 def subdub_confirmed_video_delivery_message_id(result: dict | None = None, job: dict | None = None) -> str:
     """Return delivery evidence only when it belongs to a real final video."""
-    current_job = dict(job or {})
-    current_result = dict(result or {})
-    has_final_video = bool(
-        truthy_value(current_result.get("has_video"), False)
-        or truthy_value(current_result.get("final_mp4_delivered"), False)
-        or truthy_value(current_job.get("final_mp4_delivered"), False)
-    )
-    if not has_final_video:
+    evidence = subdub_terminal_delivery_evidence(result, job)
+    if not evidence.get("is_video"):
         return ""
-    return str(
-        current_result.get("video_delivery_message_id")
-        or current_result.get("final_video_message_id")
-        or current_result.get("subdub_final_video_message_id")
-        or current_result.get("telegram_message_id")
-        or current_job.get("video_delivery_message_id")
-        or current_job.get("final_video_message_id")
-        or current_job.get("subdub_final_video_message_id")
-        or ""
-    ).strip()
+    return str(evidence.get("message_id") or "").strip()
 
 async def subdub_finalize_delivered_panel(
     query,
@@ -186850,12 +186884,15 @@ async def subdub_finalize_delivered_panel(
     result: dict | None = None,
     rendered_text: str = "",
 ) -> object | None:
-    """Finalize the original progress panel after confirmed MP4 delivery."""
+    """Finalize the original panel after confirmed Telegram artifact delivery."""
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
-    delivery_message_id = subdub_confirmed_video_delivery_message_id(result, job)
+    evidence = subdub_terminal_delivery_evidence(result, job)
+    delivery_message_id = str(evidence.get("message_id") or "").strip()
     if not job_key or not job or not delivery_message_id:
         return None
 
+    artifact_type = str(evidence.get("artifact_type") or "").strip().lower()
+    is_video = bool(evidence.get("is_video"))
     panel_message_id = str(job.get("status_panel_message_id") or "").strip()
     panel_chat_id = str(
         job.get("status_panel_chat_id")
@@ -186864,31 +186901,47 @@ async def subdub_finalize_delivered_panel(
         or ""
     ).strip()
     delivered_text = rendered_text or subdub_progress_text("delivered", job_id, lang)
+    delivered_fields = {
+        "status": "completed",
+        "terminal_state": "delivered",
+        "lifecycle_state": "delivered",
+        "current_stage": "delivered",
+        "progress_stage": "delivered",
+        "progress_percent": 100,
+        "completed_steps": subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+        "panel_finalized": True,
+        "panel_final_percent": 100,
+        "status_panel_terminalized": True,
+        "refresh_stopped_after_terminal": True,
+        "terminal_public_outcome_type": "success",
+        "terminal_public_outcome_sent": True,
+        "public_error_sent": False,
+        "public_failure_sent": False,
+        "public_error_sent_count": 0,
+        "delivery_success": True,
+        "delivery_succeeded": True,
+        "output_sent": True,
+        "delivery_message_id": delivery_message_id,
+        "subdub_delivery_message_id": delivery_message_id,
+        "delivery_confirmed_before_success": True,
+        "terminal_artifact_type": artifact_type,
+    }
+    if is_video:
+        delivered_fields.update({
+            "final_mp4_delivered": True,
+            "video_delivery_message_id": delivery_message_id,
+            "final_video_message_id": delivery_message_id,
+            "subdub_final_video_message_id": delivery_message_id,
+        })
+    else:
+        delivered_fields.update({
+            "final_mp4_delivered": False,
+            "srt_delivery_message_id": delivery_message_id,
+            "auto_subtitle_file_delivered": True,
+        })
     update_subtitle_dub_pipeline_job(
         job_key,
-        status="completed",
-        terminal_state="delivered",
-        lifecycle_state="delivered",
-        current_stage="delivered",
-        progress_stage="delivered",
-        progress_percent=100,
-        completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
-        panel_finalized=True,
-        panel_final_percent=100,
-        status_panel_terminalized=True,
-        refresh_stopped_after_terminal=True,
-        terminal_public_outcome_type="success",
-        terminal_public_outcome_sent=True,
-        public_error_sent=False,
-        public_failure_sent=False,
-        public_error_sent_count=0,
-        delivery_success=True,
-        delivery_succeeded=True,
-        final_mp4_delivered=True,
-        output_sent=True,
-        video_delivery_message_id=delivery_message_id,
-        final_video_message_id=delivery_message_id,
-        subdub_final_video_message_id=delivery_message_id,
+        **delivered_fields,
     )
 
     bot_client = getattr(context, "bot", None)
@@ -186927,7 +186980,6 @@ async def subdub_finalize_delivered_panel(
             if already_final:
                 return getattr(query, "message", None)
             logger.warning("subtitle/dub terminal panel edit skipped | %s", sanitize_log_text(str(exc))[:120])
-            return None
 
     try:
         rendered = await safe_edit_or_send(
@@ -186965,11 +187017,26 @@ async def subdub_send_success_receipt_once(
     receipt_text: str,
     reply_markup=None,
 ) -> object | None:
-    """Send one receipt, and only after a final MP4 has a Telegram message id."""
+    """Send one receipt only after Telegram confirms the lane's final artifact."""
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
-    delivery_message_id = subdub_confirmed_video_delivery_message_id({}, job)
+    evidence = subdub_terminal_delivery_evidence({}, job)
+    delivery_message_id = str(evidence.get("message_id") or "").strip()
     existing_receipt_id = str(job.get("subdub_success_message_id") or job.get("receipt_message_id") or "").strip()
-    if not message or not job_key or not delivery_message_id:
+    terminal_state = str(job.get("terminal_state") or "").strip().lower()
+    if not message or not job_key or not delivery_message_id or terminal_state != "delivered":
+        return None
+    panel_ready = bool(
+        truthy_value(job.get("status_panel_terminal_edit_succeeded"), False)
+        and _safe_int(job.get("panel_final_percent"), 0) == 100
+        and truthy_value(job.get("status_panel_terminalized"), False)
+    )
+    if not panel_ready:
+        update_subtitle_dub_pipeline_job(
+            job_key,
+            receipt_send_state="blocked_until_terminal_panel",
+            receipt_blocked_reason="terminal_panel_not_confirmed",
+            receipt_sent_once=False,
+        )
         return None
     if existing_receipt_id or truthy_value(job.get("receipt_sent_once"), False):
         update_subtitle_dub_pipeline_job(
@@ -187826,7 +187893,7 @@ def mark_subtitle_dub_pipeline_output_sent(
     job["status"] = "completed" if desired_terminal == "delivered" else str(job.get("status") or "")
     job["delivery_message_id"] = str(delivery_message_id or video_delivery_message_id or audio_delivery_message_id or srt_delivery_message_id or job.get("delivery_message_id") or "")
     job["delivery_success"] = bool(job.get("delivery_message_id"))
-    job["delivery_succeeded"] = bool(job.get("delivery_succeeded") and not partial_audio_terminal)
+    job["delivery_succeeded"] = bool(job.get("delivery_message_id") and not partial_audio_terminal)
     job["validation_started"] = True
     job["validation_passed"] = True
     job["output_validated_before_success"] = True
@@ -190471,22 +190538,59 @@ async def subdub_tesseract_languages(executable: str) -> set[str]:
 
 def subdub_tesseract_language_spec(source_language: str, available: set[str]) -> str:
     language = subdub_normalize_language_code(source_language)
-    candidates = {
-        "vi": ["vie", "eng"],
+    exact_candidates = {
+        "vi": ["vie"],
         "en": ["eng"],
-        "zh": ["chi_sim", "chi_tra", "eng"],
-        "ja": ["jpn", "eng"],
-        "ko": ["kor", "eng"],
-        "th": ["tha", "eng"],
-        "ar": ["ara", "eng"],
-        "hi": ["hin", "eng"],
-        "ru": ["rus", "eng"],
-        "auto": ["chi_sim", "chi_tra", "eng"],
-    }.get(language, [language, "eng"])
-    selected = [item for item in candidates if item in available]
-    if not selected and "eng" in available:
-        selected = ["eng"]
+        "zh": ["chi_sim", "chi_tra"],
+        "ja": ["jpn"],
+        "ko": ["kor"],
+        "th": ["tha"],
+        "ar": ["ara"],
+        "hi": ["hin"],
+        "ru": ["rus"],
+    }
+    if language == "auto":
+        candidates = ["chi_sim", "chi_tra", "jpn", "kor", "tha", "ara", "hin", "rus", "vie"]
+        selected = [item for item in candidates if item in available]
+        if selected and "eng" in available:
+            selected.append("eng")
+    else:
+        candidates = exact_candidates.get(language, [language])
+        selected = [item for item in candidates if item in available]
+        if selected and language != "en" and "eng" in available:
+            selected.append("eng")
     return "+".join(dict.fromkeys(selected))
+
+
+def subdub_ocr_cues_match_source_language(
+    segments: list[dict] | None,
+    source_language: str = "auto",
+    language_spec: str = "",
+) -> bool:
+    cues = list(segments or [])
+    if not cues:
+        return False
+    language = subdub_normalize_language_code(source_language)
+    spec_parts = {item.strip() for item in str(language_spec or "").split("+") if item.strip()}
+    if language == "auto" and spec_parts and spec_parts <= {"eng", "osd"}:
+        return False
+    text = " ".join(
+        str(item.get("source_text") or item.get("text") or "")
+        for item in cues
+    )
+    expected_scripts = {
+        "zh": r"[\u3400-\u9fff]",
+        "ja": r"[\u3040-\u30ff\u3400-\u9fff]",
+        "ko": r"[\uac00-\ud7af]",
+        "th": r"[\u0e00-\u0e7f]",
+        "ar": r"[\u0600-\u06ff]",
+        "hi": r"[\u0900-\u097f]",
+        "ru": r"[\u0400-\u04ff]",
+    }
+    expected = expected_scripts.get(language)
+    if expected and len(re.findall(expected, text)) < 2:
+        return False
+    return bool(subdub_canonical_cues.normalize_cue_text(text))
 
 def subdub_parse_tesseract_tsv(payload: bytes) -> tuple[str, float]:
     decoded = payload.decode("utf-8", errors="replace")
@@ -190793,6 +190897,12 @@ def subdub_normalize_language_code(value: str = "") -> str:
         return "ko"
     if text in {"th", "tha", "thai", "ภาษาไทย"}:
         return "th"
+    if text in {"ar", "ara", "arabic", "العربية"}:
+        return "ar"
+    if text in {"hi", "hin", "hindi", "हिन्दी", "हिंदी"}:
+        return "hi"
+    if text in {"ru", "rus", "russian", "русский"}:
+        return "ru"
     return text.split("-", 1)[0][:12]
 
 def subdub_detect_language_from_text(text: str = "", provider_language: str = "") -> str:
@@ -190808,6 +190918,12 @@ def subdub_detect_language_from_text(text: str = "", provider_language: str = ""
         return "ko"
     if re.search(r"[\u0e00-\u0e7f]", body):
         return "th"
+    if re.search(r"[\u0600-\u06ff]", body):
+        return "ar"
+    if re.search(r"[\u0900-\u097f]", body):
+        return "hi"
+    if re.search(r"[\u0400-\u04ff]", body):
+        return "ru"
     lowered = subdub_voice_text_normalized(body)
     vietnamese_marks = "ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ"
     if any(ch in body.lower() for ch in vietnamese_marks) or re.search(r"\b(cua|toi|ban|khong|duoc|voi|nhung|nguoi)\b", lowered):
@@ -191454,6 +191570,14 @@ async def video_dubbing_resolve_canonical_source_script(
         source_language=source_language,
     )
     ocr_segments = list(ocr_result.get("segments") or [])
+    ocr_language_spec = str(ocr_result.get("language_spec") or "")
+    ocr_quality_ok = subdub_ocr_cues_match_source_language(
+        ocr_segments,
+        source_language,
+        ocr_language_spec,
+    )
+    if ocr_segments and not ocr_quality_ok:
+        ocr_segments = []
     if ocr_segments:
         ocr_subtitle = str(ocr_result.get("subtitle") or video_dubbing_srt_from_segments(ocr_segments)).strip()
         detected_language = subdub_detect_language_from_text(ocr_subtitle, source_language)
@@ -191473,7 +191597,8 @@ async def video_dubbing_resolve_canonical_source_script(
             "detected_language": detected_language,
             "extraction_source": "burned_in_ocr",
             "source_priority": "burned_in_ocr",
-            "ocr_language_spec": str(ocr_result.get("language_spec") or ""),
+            "ocr_language_spec": ocr_language_spec,
+            "ocr_quality_accepted": True,
             "duration_seconds": int(ocr_result.get("duration_seconds") or duration_seconds or (canonical[-1].get("end") or 0)),
         }
 
@@ -191511,7 +191636,7 @@ async def video_dubbing_resolve_canonical_source_script(
         "subtitle": canonical_srt,
         "script": video_dubbing_plain_script(canonical_srt),
         "asr_provider": str(result.get("provider") or ""),
-        "detail": f"ocr={ocr_result.get('detail') or 'unavailable'};asr={result.get('detail') or ''}",
+        "detail": f"ocr={ocr_result.get('detail') or 'unavailable'};ocr_quality={'accepted' if ocr_quality_ok else 'rejected'};asr={result.get('detail') or ''}",
         "segments": canonical,
         "canonical_cues": canonical,
         "detected_language": detected_language,
@@ -194150,8 +194275,14 @@ async def execute_video_dubbing_pipeline(
         update_fields.pop("status", None)
         update_fields.pop("terminal_state", None)
         if result.get("ok"):
-            result_terminal_state = subdub_result_terminal_state(result)
-            if not dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}).get("output_sent"):
+            result_terminal_state = subdub_registry_terminal_state(
+                result,
+                SUBTITLE_DUB_PIPELINE_JOBS.get(job_key),
+            )
+            if (
+                result_terminal_state == "delivered"
+                and not dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}).get("output_sent")
+            ):
                 mark_subtitle_dub_pipeline_output_sent(
                     job_key,
                     terminal_state=result_terminal_state,
@@ -194161,12 +194292,42 @@ async def execute_video_dubbing_pipeline(
                     audio_delivery_message_id=str(result.get("audio_delivery_message_id") or ""),
                     srt_delivery_message_id=str(result.get("srt_delivery_message_id") or ""),
                 )
-            update_subtitle_dub_pipeline_job(
-                job_key,
-                status="partial" if (result.get("partial_result") or result.get("delivery_partial_result")) else "completed",
-                terminal_state=result_terminal_state,
-                **update_fields,
-            )
+                result_terminal_state = subdub_registry_terminal_state(
+                    result,
+                    SUBTITLE_DUB_PIPELINE_JOBS.get(job_key),
+                )
+            if result_terminal_state == "delivered":
+                update_subtitle_dub_pipeline_job(
+                    job_key,
+                    status="partial" if (result.get("partial_result") or result.get("delivery_partial_result")) else "completed",
+                    terminal_state=result_terminal_state,
+                    **update_fields,
+                )
+            else:
+                failed_fields = {
+                    **update_fields,
+                    "lifecycle_state": "failed_no_charge",
+                    "current_stage": "failed_no_charge",
+                    "progress_stage": "failed_no_charge",
+                    "progress_percent": subdub_progress_percent_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                    "completed_steps": subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+                    "success_blocked_reason": "telegram_final_artifact_message_id_missing",
+                    "delivery_confirmed_before_success": False,
+                    "delivery_success": False,
+                    "delivery_succeeded": False,
+                    "public_success_sent": False,
+                    "final_mp4_delivered": False,
+                    "receipt_send_state": "blocked_missing_delivery_evidence",
+                    "receipt_sent_once": False,
+                    "charge_status": "not_charged",
+                    "charged_xu": 0,
+                }
+                update_subtitle_dub_pipeline_job(
+                    job_key,
+                    status="failed_no_charge",
+                    terminal_state="failed_no_charge",
+                    **failed_fields,
+                )
         else:
             update_subtitle_dub_pipeline_job(job_key, status="failed", terminal_state="failed_no_charge", **update_fields)
             if debug_job:
@@ -197612,6 +197773,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             set_video_dubbing_pending(uid, "confirm", processing="0")
             return None
         if subdub_job_has_failure_public_outcome(latest_pipeline_job) and delivered_result_video:
+            confirmed_video_message_id = subdub_confirmed_video_delivery_message_id(
+                result,
+                latest_pipeline_job,
+            )
             result["late_fail_suppressed"] = True
             result["public_error_sent"] = False
             result["public_error_sent_count"] = 0
@@ -197636,7 +197801,9 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 delivery_success=True,
                 delivery_succeeded=True,
                 final_mp4_delivered=True,
-                video_delivery_message_id=str(result.get("video_delivery_message_id") or result.get("telegram_message_id") or ""),
+                video_delivery_message_id=confirmed_video_message_id,
+                final_video_message_id=confirmed_video_message_id,
+                subdub_final_video_message_id=confirmed_video_message_id,
                 status_panel_terminalized=True,
                 refresh_stopped_after_terminal=True,
                 panel_finalized=True,
@@ -197672,11 +197839,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             value = result_state.get(keep_key) or state.get(keep_key)
             if str(value or "").strip():
                 completed_fields[keep_key] = value
-        completed_state = set_video_dubbing_pending(
-            uid,
-            "completed",
-            **completed_fields,
-        )
         if result.get("partial_audio_delivered") or str(result.get("terminal_public_outcome_type") or "").strip().lower() == "partial_audio_delivered":
             if pipeline_job_key:
                 update_subtitle_dub_pipeline_job(
@@ -197693,26 +197855,53 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     cost_line_reason="partial_audio_no_full_video_charge",
                 )
             return None
-        confirmed_video_message_id = subdub_confirmed_video_delivery_message_id(
+        confirmed_delivery = subdub_terminal_delivery_evidence(
             result,
             SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key),
         )
-        if confirmed_video_message_id:
-            completed_job_id = str(
-                result.get("job_id")
-                or latest_pipeline_job.get("job_id")
-                or latest_pipeline_job.get("internal_job_id")
-                or ""
-            )
-            await subdub_finalize_delivered_panel(
-                query,
-                context,
-                pipeline_job_key,
-                completed_job_id,
-                lang,
-                result,
-                subdub_progress_text("delivered", completed_job_id, lang),
-            )
+        if not confirmed_delivery:
+            blocked_charge = int(result.get("charged") or result.get("charged_xu") or 0)
+            if blocked_charge > 0:
+                refund_charged_credit(
+                    uid,
+                    blocked_charge,
+                    event_type=f"video_{mode}_terminal_evidence_refund",
+                    note="Telegram final artifact message id missing",
+                    was_charged=True,
+                )
+            if pipeline_job_key:
+                update_subtitle_dub_pipeline_job(
+                    pipeline_job_key,
+                    success_blocked_reason="telegram_final_artifact_message_id_missing",
+                    delivery_confirmed_before_success=False,
+                    receipt_send_state="blocked_missing_delivery_evidence",
+                    receipt_sent_once=False,
+                    charge_status="not_charged",
+                    charged_xu=0,
+                )
+            set_video_dubbing_pending(uid, "confirm", processing="0")
+            return None
+
+        completed_state = set_video_dubbing_pending(
+            uid,
+            "completed",
+            **completed_fields,
+        )
+        completed_job_id = str(
+            result.get("job_id")
+            or latest_pipeline_job.get("job_id")
+            or latest_pipeline_job.get("internal_job_id")
+            or ""
+        )
+        await subdub_finalize_delivered_panel(
+            query,
+            context,
+            pipeline_job_key,
+            completed_job_id,
+            lang,
+            result,
+            subdub_progress_text("delivered", completed_job_id, lang),
+        )
         receipt_text = video_dubbing_receipt_text(completed_state, result, lang)
         sent_receipt = await subdub_send_success_receipt_once(
             query.message,

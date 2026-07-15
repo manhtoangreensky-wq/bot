@@ -135,6 +135,29 @@ def test_live5_burned_in_ocr_has_priority_over_asr(monkeypatch):
     assert calls["asr"] == 0
 
 
+def test_live5_ocr_never_falls_back_to_english_for_unknown_or_cjk_source():
+    assert bot.subdub_tesseract_language_spec("auto", {"eng"}) == ""
+    assert bot.subdub_tesseract_language_spec("zh", {"eng"}) == ""
+    assert bot.subdub_tesseract_language_spec("zh", {"chi_sim", "eng"}) == "chi_sim+eng"
+    assert bot.subdub_tesseract_language_spec("en", {"eng"}) == "eng"
+
+
+def test_live5_ocr_rejects_wrong_script_before_it_becomes_canonical_source():
+    wrong_script = canonical.canonicalize_segments(
+        [{"index": 1, "start": 0.0, "end": 1.0, "text": "FEMB PIE TBRYRAEELH"}],
+        extraction_source="burned_in_ocr",
+        source_language="zh",
+    )
+    correct_script = canonical.canonicalize_segments(
+        [{"index": 1, "start": 0.0, "end": 1.0, "text": "这是字幕"}],
+        extraction_source="burned_in_ocr",
+        source_language="zh",
+    )
+
+    assert bot.subdub_ocr_cues_match_source_language(wrong_script, "zh", "chi_sim+eng") is False
+    assert bot.subdub_ocr_cues_match_source_language(correct_script, "zh", "chi_sim+eng") is True
+
+
 def test_live5_ocr_unavailable_uses_timestamp_preserving_asr_fallback(monkeypatch):
     captured = {}
 
@@ -313,15 +336,12 @@ def test_live5_dub_only_does_not_depend_on_canonical_ocr_and_keeps_baseline_seam
     ).stdout
     current = (REPO / "bot.py").read_text(encoding="utf-8")
     locked_functions = (
-        "handle_video_dubbing_callback",
         "resolve_video_dub_tts_voice",
         "resolve_video_dub_tts_voice_id",
         "video_dubbing_resolve_source_script",
         "synthesize_dub_segment_chunks",
         "build_dub_timeline_audio",
         "send_public_subtitle_dub_final_outputs",
-        "subdub_finalize_delivered_panel",
-        "subdub_send_success_receipt_once",
     )
     for name in locked_functions:
         assert _top_level_function_source(current, name) == _top_level_function_source(baseline, name), name
