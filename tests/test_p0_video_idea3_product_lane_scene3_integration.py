@@ -135,6 +135,7 @@ def test_product_catalog_back_stack_and_legacy_guards_are_source_bound_and_read_
     callback = _between("async def handle_video_product_callback", "\n\nasync def handle_video_product_pending_text")
     dynamic = _between("async def handle_video_idea_dynamic_callback", "\n\ndef video_idea_admin_main_text")
     image_strategy = _between("def video_scene3_image_strategy_text", "\n\ndef video_scene3_prompt_text")
+    image_source = _between("def video_scene3_image_source_keyboard", "\n\ndef video_scene3_image_assets_text")
 
     assert 'requested_product != product_id' in callback
     assert 'requested_product not in VIDEO_IDEA_PRODUCT_LANE_PRODUCTS' in callback
@@ -151,9 +152,10 @@ def test_product_catalog_back_stack_and_legacy_guards_are_source_bound_and_read_
     assert "provider.submit" not in dynamic
 
     assert 'if bool((state or {}).get("storyboard_image_required"))' in image_strategy
-    assert '"vprofile|image_strategy_upload"' in image_strategy
-    assert '"vprofile|image_strategy_set|ai_image"' in image_strategy
-    assert "direct_description" not in image_strategy.split("source_rows =", 1)[1].split("return video_scene3_keyboard", 1)[0].split("else", 1)[0]
+    assert "video_scene3_image_source_keyboard(state)" in image_strategy
+    assert "Gửi ảnh có sẵn" in image_source
+    assert "Tạo ảnh mới" in image_source
+    assert "image_strategy_upload" not in image_strategy
 
 
 def test_public_idea_lane_never_enters_legacy_planning_interceptor():

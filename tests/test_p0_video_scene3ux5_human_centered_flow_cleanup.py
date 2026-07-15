@@ -118,7 +118,8 @@ def test_transition_is_one_dedicated_step_for_each_scene_boundary():
         video_scene3_flow.CANONICAL_STEPS.index("video_prompts") + 1
     )
     assert video_scene3_flow.BACK_STEP["transitions"] == "video_prompts"
-    assert video_scene3_flow.BACK_STEP["full_review"] == "transitions"
+    assert video_scene3_flow.BACK_STEP["automatic_text"] == "transitions"
+    assert video_scene3_flow.BACK_STEP["full_review"] == "post_addons"
     for boundary in range(1, 4):
         suggestions = video_scene3_flow.transition_suggestions(state, boundary)
         assert len(suggestions) == 5
@@ -135,9 +136,12 @@ def test_transition_is_one_dedicated_step_for_each_scene_boundary():
 
 def test_postproduction_keeps_logo_text_watermark_positions_and_audio_volume_concrete():
     public_keys = {key for key, _label in video_scene3_flow.PUBLIC_POST_ADDONS}
-    assert {"logo_image", "watermark_text", "subtitles", "text_overlay"} <= public_keys
-    assert video_scene3_flow.AUDIO_POST_ADDONS == {"voice", "dubbing", "music", "sfx"}
-    assert video_scene3_flow.AUDIO_VOLUME_LEVELS == (20, 40, 60, 80, 100)
+    assert public_keys == {
+        "logo_image", "watermark_text", "subtitles", "dubbing",
+        "music", "sfx", "automatic_text", "source_audio",
+    }
+    assert video_scene3_flow.AUDIO_POST_ADDONS == {"dubbing", "music", "sfx", "source_audio"}
+    assert video_scene3_flow.AUDIO_VOLUME_LEVELS == (0, 25, 50, 75, 100, 125, 150, 175, 200)
     state = video_scene3_flow.configure_post_asset(_state(), "logo_image", file_id="logo-file")
     state = video_scene3_flow.configure_post_position(state, "logo_image", "top_right")
     state = video_scene3_flow.configure_watermark_text(state, "© Thương hiệu")

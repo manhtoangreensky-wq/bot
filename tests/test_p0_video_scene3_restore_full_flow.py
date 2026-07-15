@@ -108,18 +108,20 @@ def _state(scene_count: int = 3) -> dict:
 
 
 def _planned(scene_count: int = 3) -> dict:
-    return video_scene3_flow.build_planning_package(_state(scene_count))
+    state = video_scene3_flow.set_image_source_mode(_state(scene_count), "create")
+    return video_scene3_flow.build_planning_package(state)
 
 
 def test_scene3_canonical_order_and_back_stack_are_complete():
     assert video_scene3_flow.CANONICAL_STEPS == (
-        "subject", "scene_count", "technical_profile", "suggestion",
-        "requirements", "materials", "creative_controls", "content_addons", "scene_plan",
-        "image_strategy", "image_prompts", "video_prompts", "transitions", "full_review", "post_addons",
+        "subject", "scene_count", "technical_profile", "character", "image_source", "image_assets",
+        "creative_controls", "requirements", "audio_plan", "scene_plan", "image_prompts",
+        "video_prompts", "transitions", "automatic_text", "post_addons", "full_review",
         "aspect_ratio", "quality", "final_report", "final_confirmation",
     )
+    routed = video_scene3_flow.set_image_source_mode(video_scene3_flow.default_state(), "create")
     for previous, current in zip(video_scene3_flow.CANONICAL_STEPS, video_scene3_flow.CANONICAL_STEPS[1:]):
-        assert video_scene3_flow.BACK_STEP[current] == previous
+        assert video_scene3_flow.canonical_back_step({**routed, "step": current}) == previous
     assert video_scene3_flow.BACK_STEP["subject"] == "menu"
 
 
@@ -172,6 +174,7 @@ def test_exact_n_semantic_scenes_image_plans_and_video_prompts(scene_count: int)
         "scenes": scene_count,
         "image_strategies": scene_count,
         "image_prompts": scene_count,
+        "image_prompts_expected": scene_count,
         "video_prompts": scene_count,
     }
     for index, scene in enumerate(state["plan"]["scenes"], 1):
@@ -266,17 +269,21 @@ def test_logo_reference_has_six_positions_safe_size_and_never_claims_mp4_overlay
     assert video_scene3_flow.logo_position_label("top_right") == "↗️ Trên phải"
 
 
-def test_voice_is_separate_from_dubbing_and_presets_remain_planning_only():
-    assert "voice" in dict(video_scene3_flow.POST_ADDONS)
-    assert "dubbing" in dict(video_scene3_flow.POST_ADDONS)
-    state = video_scene3_flow.cycle_post_addon_preset(_state(2), "voice")
-    voice = state["postproduction_addons"]["voice"]
-    assert voice["enabled"] is True
-    assert voice["value"]["voice_type"] == "female"
-    assert voice["value"]["applied_to_mp4"] is False
-    second = video_scene3_flow.cycle_post_addon_preset(state, "voice")
-    assert second["postproduction_addons"]["voice"]["value"]["voice_type"] == "male"
-    assert second["postproduction_addons"]["dubbing"]["enabled"] is False
+def test_legacy_voice_is_migrated_into_one_canonical_dubbing_owner():
+    assert "voice" not in dict(video_scene3_flow.PUBLIC_POST_ADDONS)
+    assert "dubbing" in dict(video_scene3_flow.PUBLIC_POST_ADDONS)
+    state = video_scene3_flow.default_state()
+    state["postproduction_addons"]["voice"] = {
+        "enabled": True,
+        "value": {"voice_type": "female", "script_note": "Lời giới thiệu"},
+        "history": [],
+    }
+    migrated = video_scene3_flow.normalize_state(state)
+    dubbing = migrated["postproduction_addons"]["dubbing"]
+    assert dubbing["enabled"] is True
+    assert dubbing["value"]["voice_type"] == "female"
+    assert dubbing["value"]["dialogue_text"] == "Lời giới thiệu"
+    assert dubbing["value"]["applied_to_mp4"] is False
     dubbing_languages = {preset[1]["language"] for preset in video_scene3_flow.POST_ADDON_PRESETS["dubbing"]}
     assert dubbing_languages == {"vi", "en", "ja", "ko", "zh", "other"}
 
@@ -308,8 +315,14 @@ def test_transition_change_and_restore_are_scene_isolated_and_version_safe():
 
 def test_content_addons_create_scene_dependent_timing_only_when_plan_is_built():
     state = _state(3)
-    state = video_scene3_flow.set_entry(state, "content_affecting_addons", "voiceover", "Lời dẫn theo cảnh")
-    state = video_scene3_flow.set_entry(state, "content_affecting_addons", "cta", "Kết ở cảnh cuối")
+    state = video_scene3_flow.configure_voice_choice(state, "default_female")
+    state = video_scene3_flow.upsert_automatic_text_item(
+        state,
+        item_type="cta",
+        text="Xem thêm thông tin",
+        scene_scope="3",
+        timing="scene_end",
+    )
     planned = video_scene3_flow.build_planning_package(state)
     assert list(planned["voice_timing_by_scene"]) == ["1", "2", "3"]
     assert planned["cta_placement_by_scene"] == {"3": {"placement": "cuối cảnh", "approved": False}}
@@ -322,7 +335,7 @@ def test_post_addon_suggestion_does_not_enable_or_execute_any_addon():
     state["reference_assets"] = {"items": [{"type": "logo", "file_id": "logo-1"}]}
     state = video_scene3_flow.set_entry(state, "content_affecting_addons", "captions", "Theo lời dẫn")
     suggestions = video_scene3_flow.post_addon_suggestions(state)
-    assert suggestions == ["logo_image", "subtitles"]
+    assert suggestions == ["logo_image"]
     assert all(not item["enabled"] for item in state["postproduction_addons"].values())
     assert all(not config.get("applied_to_mp4") for config in video_scene3_flow.POST_ADDON_DEFAULTS.values() if "applied_to_mp4" in config)
 
@@ -369,6 +382,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
     scene3_names = (
         "video_scene3_keyboard",
         "video_scene3_nav_rows",
+        "video_scene3_field_editor_keyboard",
         "video_scene3_profile_keyboard",
         "video_scene3_suggestion_keyboard",
         "video_scene3_requirements_keyboard",
@@ -376,6 +390,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         "video_scene3_creative_keyboard",
         "video_scene3_creative_detail_keyboard",
         "video_scene3_creative_suggestions_keyboard",
+        "video_scene3_audio_plan_keyboard",
         "video_scene3_content_addon_keyboard",
         "video_scene3_content_detail_keyboard",
         "video_scene3_content_suggestions_keyboard",
@@ -383,6 +398,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         "video_scene3_scene_plan_keyboard",
         "video_scene3_scene_detail_keyboard",
         "video_scene3_transition_keyboard",
+        "video_scene3_image_source_keyboard",
         "video_scene3_image_strategy_keyboard",
         "video_scene3_prompt_keyboard",
         "video_scene3_full_review_keyboard",
@@ -447,7 +463,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         namespace["video_scene3_image_strategy_keyboard"](),
         namespace["video_scene3_prompt_keyboard"]("image"),
         namespace["video_scene3_prompt_keyboard"]("video"),
-        namespace["video_scene3_full_review_keyboard"](),
+        namespace["video_scene3_full_review_keyboard"](state),
         namespace["video_scene3_post_keyboard"](state),
         namespace["video_scene3_post_detail_keyboard"]({**state, "active_post_addon": "voice"}),
         namespace["video_scene3_post_position_keyboard"](),
@@ -512,10 +528,12 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         assert len(callbacks) == len(set(callbacks)), (markup_index, callbacks)
 
     suggestion_markup = namespace["video_scene3_suggestion_keyboard"]()
-    assert [button.text for button in suggestion_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
-    assert [button.callback_data for button in suggestion_markup.inline_keyboard[0]] == [
-        f"vprofile|suggest|{index}" for index in range(1, 6)
-    ]
+    assert [button.text for button in suggestion_markup.inline_keyboard[0]] == ["👨 Nhân vật nam", "👩 Nhân vật nữ"]
+    assert not any(
+        "|suggest" in str(button.callback_data)
+        for row in suggestion_markup.inline_keyboard
+        for button in row
+    )
     creative_markup = namespace["video_scene3_creative_suggestions_keyboard"]({**state, "active_creative": "visual_style"})
     assert [button.text for button in creative_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
     content_markup = namespace["video_scene3_content_suggestions_keyboard"]({**state, "active_content_addon": "captions"})
@@ -567,11 +585,10 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
             button.callback_data for row in markup.inline_keyboard for button in row
         )
     assert {
-        "vprofile|suggest_skip",
         "vprofile|req_none",
         "vprofile|material_skip",
         "vprofile|creative_skip",
-        "vprofile|content_skip",
+        "vprofile|audio_skip",
         "vprofile|post_skip",
     } <= optional_callbacks
 
@@ -807,7 +824,7 @@ def test_callback_registration_has_one_authoritative_final_confirm_and_no_legacy
         'if action == "count":',
         'if action in {"ctype", "ctype_suggest", "ctype_accept", "ctype_restore", "ctype_view"}:',
         'if action == "select":',
-        'if action == "suggest":',
+        'if action in {"suggest", "suggest_refresh", "suggest_restore", "suggest_custom", "suggest_skip"}:',
         'if action == "handoff":',
     ):
         assert profile_handler.index(guarded_action) > guard_position
@@ -891,6 +908,12 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         step = history.pop() if history else "menu"
         return save_state(context, {**state, "step": step, "history": history})
 
+    def return_parent(context, state, parent, **fields):
+        history = list(state.get("history") or [])
+        if history and history[-1] == parent:
+            history.pop()
+        return save_state(context, {**state, **fields, "step": parent, "history": history})
+
     async def render(_query, state, _lang):
         rendered_steps.append(str(state.get("step") or ""))
         return state
@@ -915,6 +938,7 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         "save_video_profile_studio_state": save_state,
         "video_profile_studio_step": step_state,
         "video_profile_studio_pop_step": pop_state,
+        "video_scene3_return_to_parent": return_parent,
         "video_profile_studio_option": lambda selection_id: (
             {"selection_id": selection_id}
             if selection_id in dict(video_scene3_flow.TECHNICAL_PROFILES)
@@ -986,26 +1010,25 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         state = await run_action("vprofile|profile_none")
         assert state["step"] == "technical_profile"
         assert not state.get("technical_profile")
-        state = await advance_with_exact_back("vprofile|select|architecture_interior", "suggestion", "technical_profile")
+        state = await advance_with_exact_back("vprofile|select|architecture_interior", "character", "technical_profile")
         assert state["content_type"] == "real_estate_fpv"
-        assert len(state["suggestions"]) == 5
-        state = await advance_with_exact_back("vprofile|suggest_skip", "requirements", "suggestion")
-        assert state["selected_suggestion"] == {}
+        state = await advance_with_exact_back("vprofile|character|none", "image_source", "character")
+        state = await advance_with_exact_back("vprofile|image_source|description", "creative_controls", "image_source")
         for callback, expected_step, previous_step in (
-            ("vprofile|req_none", "materials", "requirements"),
-            ("vprofile|material_skip", "creative_controls", "materials"),
-            ("vprofile|creative_skip", "content_addons", "creative_controls"),
-            ("vprofile|content_skip", "scene_plan", "content_addons"),
-            ("vprofile|scene_done", "image_strategy", "scene_plan"),
-            ("vprofile|image_strategy_done", "image_prompts", "image_strategy"),
-            ("vprofile|image_prompt_done", "video_prompts", "image_prompts"),
-                ("vprofile|video_prompt_done", "transitions", "video_prompts"),
-                ("vprofile|transitions_done", "full_review", "transitions"),
-            ("vprofile|review_done", "post_addons", "full_review"),
-            ("vprofile|post_skip", "aspect_ratio", "post_addons"),
+            ("vprofile|creative_skip", "requirements", "creative_controls"),
+            ("vprofile|req_none", "audio_plan", "requirements"),
+            ("vprofile|audio_skip", "scene_plan", "audio_plan"),
+            ("vprofile|scene_done", "video_prompts", "scene_plan"),
+            ("vprofile|video_prompt_done", "transitions", "video_prompts"),
+            ("vprofile|transitions_done", "automatic_text", "transitions"),
+            ("vprofile|text_skip", "post_addons", "automatic_text"),
+            ("vprofile|post_skip", "full_review", "post_addons"),
+            ("vprofile|review_continue", "aspect_ratio", "full_review"),
             ("vprofile|ratio|16x9", "quality", "aspect_ratio"),
             ("vprofile|tier|300", "final_report", "quality"),
         ):
+            if callback == "vprofile|video_prompt_done":
+                state = await run_action("vprofile|video_prompt_approve_all")
             state = await advance_with_exact_back(callback, expected_step, previous_step)
             assert video_scene3_flow.preconfirm_side_effects(state) == {
                 "provider_called": False,
@@ -1015,19 +1038,17 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
                 "xu_charged": 0,
                 "wallet_mutations": 0,
             }
-            if callback == "vprofile|post_skip":
-                for scene_index in range(1, state["scene_count"] + 1):
-                    state = video_scene3_flow.approve_prompt(state, kind="image", scene_index=scene_index)
-                    state = video_scene3_flow.approve_prompt(state, kind="video", scene_index=scene_index)
-                save_state(context, state)
             if callback == "vprofile|ratio|16x9":
                 assert state["aspect_ratio"] == "16:9"
                 assert state["content_addons"]["aspect_ratio"] == "16:9"
-                for collection_name in ("image_prompt_versions", "video_prompt_versions"):
-                    for scene_index in range(1, state["scene_count"] + 1):
-                        entry = state[collection_name][str(scene_index)]
-                        assert video_scene3_flow.active_prompt(entry)["aspect_ratio"] == "16:9"
-                        assert entry["approved"] is False
+                assert state["image_prompt_versions"] == {}
+                for scene_index in range(1, state["scene_count"] + 1):
+                    entry = state["video_prompt_versions"][str(scene_index)]
+                    assert video_scene3_flow.active_prompt(entry)["aspect_ratio"] == "16:9"
+                    assert entry["approved"] is False
+                for scene_index in range(1, state["scene_count"] + 1):
+                    state = video_scene3_flow.approve_prompt(state, kind="video", scene_index=scene_index)
+                save_state(context, state)
         state = await run_action("vprofile|handoff")
         assert state["step"] == "final_confirmation"
         state = await run_action("vprofile|invoice_back")

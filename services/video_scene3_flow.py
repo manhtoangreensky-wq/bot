@@ -21,18 +21,19 @@ CANONICAL_STEPS = (
     "subject",
     "scene_count",
     "technical_profile",
-    "suggestion",
-    "requirements",
-    "materials",
+    "character",
+    "image_source",
+    "image_assets",
     "creative_controls",
-    "content_addons",
+    "requirements",
+    "audio_plan",
     "scene_plan",
-    "image_strategy",
     "image_prompts",
     "video_prompts",
     "transitions",
-    "full_review",
+    "automatic_text",
     "post_addons",
+    "full_review",
     "aspect_ratio",
     "quality",
     "final_report",
@@ -43,23 +44,101 @@ BACK_STEP = {
     "subject": "menu",
     "scene_count": "subject",
     "technical_profile": "scene_count",
-    "suggestion": "technical_profile",
-    "requirements": "suggestion",
-    "materials": "requirements",
-    "creative_controls": "materials",
-    "content_addons": "creative_controls",
-    "scene_plan": "content_addons",
-    "image_strategy": "scene_plan",
-    "image_prompts": "image_strategy",
-    "video_prompts": "image_prompts",
+    "character": "technical_profile",
+    "image_source": "character",
+    "image_assets": "image_source",
+    "image_quote": "image_assets",
+    "creative_controls": "image_source",
+    "requirements": "creative_controls",
+    "audio_plan": "requirements",
+    "scene_plan": "audio_plan",
+    "image_prompts": "scene_plan",
+    "video_prompts": "scene_plan",
     "transitions": "video_prompts",
-    "full_review": "transitions",
-    "post_addons": "full_review",
-    "aspect_ratio": "post_addons",
+    "automatic_text": "transitions",
+    "post_addons": "automatic_text",
+    "full_review": "post_addons",
+    "aspect_ratio": "full_review",
     "quality": "aspect_ratio",
     "final_report": "quality",
     "final_confirmation": "final_report",
+    # Canonical child screens. They never depend on incidental history order.
+    "requirement_detail": "requirements",
+    "creative_detail": "creative_controls",
+    "creative_suggestions": "creative_controls",
+    "materials": "image_source",
+    "materials_manage": "image_assets",
+    "image_strategy": "image_source",
+    "content_addons": "requirements",
+    "content_detail": "audio_plan",
+    "content_suggestions": "audio_plan",
+    "content_position": "audio_plan",
+    "scene_detail": "scene_plan",
+    "transition_picker": "transitions",
+    "post_detail": "post_addons",
+    "post_position": "post_detail",
+    "post_volume": "post_detail",
+    "automatic_text_detail": "automatic_text",
+    "automatic_text_review": "automatic_text",
+    "automatic_text_position": "automatic_text_review",
+    "automatic_text_scope": "automatic_text_review",
+    "automatic_text_timing": "automatic_text_review",
+    "automatic_text_target": "automatic_text_review",
+    "automatic_text_duration": "automatic_text_review",
+    "automatic_text_animation": "automatic_text_review",
+    "automatic_text_style": "automatic_text_review",
+    "quality_guide": "quality",
+    "logo_position": "post_detail",
+    "await_count_custom": "scene_count",
+    "await_profile_custom": "technical_profile",
+    "await_character_description": "character",
+    "await_material_upload": "image_assets",
+    "await_material_caption": "materials_manage",
+    "await_requirement": "requirement_detail",
+    "await_creative": "creative_detail",
+    "await_scene_edit": "scene_plan",
+    "await_image_prompt": "image_prompts",
+    "await_image_negative": "image_prompts",
+    "await_video_prompt": "video_prompts",
+    "await_video_negative": "video_prompts",
+    "await_automatic_text": "automatic_text",
+    "await_automatic_text_coordinates": "automatic_text_review",
+    "await_automatic_text_timestamp": "automatic_text_review",
+    "await_post_config": "post_detail",
+    "await_post_text": "post_detail",
+    "await_post_asset_upload": "post_detail",
+    "await_post_volume": "post_volume",
 }
+
+
+def canonical_back_step(state: dict[str, Any] | None) -> str:
+    """Return the public parent for a SCENE3 screen without history guessing."""
+
+    current = dict(state or {})
+    step = str(current.get("step") or "menu")
+    if step == "creative_controls" and str(current.get("image_source_mode") or "") in {"uploaded", "create"}:
+        return "image_assets"
+    if step == "video_prompts" and image_prompts_required(current):
+        return "image_prompts"
+    if step == "transitions" and str(current.get("transitions_return_step") or "") == "full_review":
+        return "full_review"
+    if step == "automatic_text_review" and str(current.get("automatic_text_return_step") or "") == "full_review":
+        return "full_review"
+    if step == "post_addons" and str(current.get("post_list_return_step") or "") == "full_review":
+        return "full_review"
+    if step == "post_detail" and str(current.get("post_return_step") or "") == "audio_plan":
+        return "audio_plan"
+    if step == "automatic_text_scope" and not str(current.get("active_automatic_text_id") or ""):
+        return "automatic_text"
+    if step == "await_material_upload":
+        return str(current.get("input_return_step") or "image_assets")
+    if step in {"await_post_config", "await_post_text", "await_post_asset_upload"}:
+        return str(current.get("input_return_step") or "post_detail")
+    if step in {"await_image_prompt", "await_image_negative"}:
+        return "image_prompts"
+    if step in {"await_video_prompt", "await_video_negative"}:
+        return "video_prompts"
+    return str(BACK_STEP.get(step) or "menu")
 
 CONTENT_TYPES = (
     {"id": "storytelling", "label": "📖 Kể chuyện", "arc": "mở vấn đề, phát triển hành động, khép lại trọn ý"},
@@ -255,6 +334,34 @@ LOGO_POSITIONS = (
     ("bottom_right", "↘️ Dưới phải"),
 )
 
+AUTOMATIC_TEXT_FIXED_POSITIONS = (
+    ("top_left", "↖️ Trên trái"),
+    ("top_center", "⬆️ Trên giữa"),
+    ("top_right", "↗️ Trên phải"),
+    ("middle_left", "⬅️ Giữa trái"),
+    ("center", "⏺ Giữa"),
+    ("middle_right", "➡️ Giữa phải"),
+    ("bottom_left", "↙️ Dưới trái"),
+    ("bottom_center", "⬇️ Dưới giữa"),
+    ("bottom_right", "↘️ Dưới phải"),
+)
+
+CHARACTER_MODES = (
+    ("male", "👨 Nhân vật nam"),
+    ("female", "👩 Nhân vật nữ"),
+    ("auto", "🤖 Tự xác định từ mô tả"),
+    ("none", "🧑 Không có nhân vật chính"),
+    ("uploaded", "📎 Gửi ảnh nhân vật"),
+    ("custom", "✍️ Tự nhập mô tả"),
+)
+
+IMAGE_SOURCE_MODES = (
+    ("uploaded", "📎 Gửi ảnh có sẵn"),
+    ("create", "✨ Tạo ảnh mới"),
+    ("description", "📝 Chỉ dùng mô tả"),
+    ("none", "🎞️ Không cần ảnh"),
+)
+
 CREATIVE_CONTROLS = (
     ("context", "🧭 Chủ đề/ngữ cảnh"),
     ("colors", "🎨 Màu sắc"),
@@ -350,14 +457,14 @@ PROFILE_CREATIVE_GUIDANCE: dict[str, dict[str, str]] = {
 }
 
 CONTENT_ADDONS = (
-    ("voiceover", "🎙 Lời dẫn/lời thoại"),
-    ("captions", "💬 Phụ đề/chữ hiển thị"),
-    ("cta", "📣 Lời kêu gọi hành động"),
-    ("scene_text", "🔤 Chữ riêng theo cảnh"),
+    ("voiceover", "Legacy voice request"),
+    ("captions", "Legacy caption request"),
+    ("cta", "Legacy CTA request"),
+    ("scene_text", "Legacy scene text request"),
     ("logo_safe_zone", "🏷 Chừa vùng logo"),
     ("watermark_safe_zone", "🔖 Chừa vùng dấu bản quyền"),
     ("preserve_source_audio", "🔊 Giữ âm thanh gốc"),
-    ("music_mood", "🎵 Nhịp/cảm xúc nhạc"),
+    ("music_mood", "Legacy music intent"),
     ("transition_style", "🔗 Kiểu chuyển cảnh"),
     ("target_duration", "⏳ Thời lượng mục tiêu"),
 )
@@ -366,12 +473,16 @@ CONTENT_ADDONS = (
 # transitions have their own per-boundary step; duration is already fixed by
 # the scene count. Keeping them out of this public list removes three duplicate
 # configuration paths while preserving old session fields internally.
-PUBLIC_CONTENT_ADDONS = tuple(
-    item for item in CONTENT_ADDONS
-    if item[0] in {
-        "voiceover", "captions", "cta", "scene_text",
-        "preserve_source_audio", "music_mood",
-    }
+# Kept only to read old sessions. Public SCENE3 uses AUDIO_PLANNING_ADDONS and
+# the canonical post-production entries below, so no setting has two owners.
+PUBLIC_CONTENT_ADDONS: tuple[tuple[str, str], ...] = ()
+
+AUDIO_PLANNING_ADDONS = (
+    ("dubbing", "🎙️ Lồng tiếng"),
+    ("subtitles", "💬 Phụ đề"),
+    ("source_audio", "🔊 Âm thanh gốc"),
+    ("music", "🎵 Nhạc nền"),
+    ("sfx", "💥 Hiệu ứng âm thanh"),
 )
 
 CONTENT_ADDON_SUGGESTIONS: dict[str, tuple[str, ...]] = {
@@ -438,11 +549,15 @@ POST_ADDONS = (
     ("watermark_text", "🔖 Dấu bản quyền chữ"),
     ("watermark_image", "🖼 Dấu bản quyền hình"),
     ("subtitles", "💬 Phụ đề"),
-    ("voice", "🗣 Giọng đọc"),
     ("dubbing", "🎙 Lồng tiếng"),
     ("music", "🎵 Nhạc nền"),
-    ("text_overlay", "🔤 Chữ hiển thị"),
     ("sfx", "🔊 Hiệu ứng âm thanh"),
+    ("source_audio", "🔊 Âm thanh gốc"),
+    ("automatic_text", "📝 Chữ trên video"),
+    # Legacy read-only fields. normalize_state migrates them into the owners
+    # above and the public keyboard never exposes these entries.
+    ("voice", "Giọng đọc cũ"),
+    ("text_overlay", "Chữ hiển thị cũ"),
     ("audio_balance", "🎚 Cân bằng âm thanh"),
     ("mp4_export", "📦 Xuất MP4"),
 )
@@ -452,11 +567,14 @@ POST_ADDONS = (
 # output rather than an optional add-on.
 PUBLIC_POST_ADDONS = tuple(
     item for item in POST_ADDONS
-    if item[0] not in {"watermark_image", "audio_balance", "mp4_export"}
+    if item[0] in {
+        "logo_image", "watermark_text", "subtitles", "dubbing",
+        "music", "sfx", "automatic_text", "source_audio",
+    }
 )
 
-AUDIO_POST_ADDONS = frozenset({"voice", "dubbing", "music", "sfx"})
-AUDIO_VOLUME_LEVELS = (20, 40, 60, 80, 100)
+AUDIO_POST_ADDONS = frozenset({"dubbing", "music", "sfx", "source_audio"})
+AUDIO_VOLUME_LEVELS = (0, 25, 50, 75, 100, 125, 150, 175, 200)
 VOICE_CHOICES: dict[str, dict[str, Any]] = {
     "default_female": {
         "voice_type": "female",
@@ -472,6 +590,11 @@ VOICE_CHOICES: dict[str, dict[str, Any]] = {
         "voice_type": "custom_voice",
         "voice_source": "user_or_saved_asset",
         "custom_voice_required": True,
+    },
+    "follow_character": {
+        "voice_type": "follow_character",
+        "voice_source": "grounded_character",
+        "custom_voice_required": False,
     },
 }
 MUSIC_SOURCE_CHOICES: dict[str, dict[str, Any]] = {
@@ -542,9 +665,13 @@ POST_ADDON_DEFAULTS: dict[str, dict[str, Any]] = {
     "dubbing": {
         "language": "vi",
         "voice_source": "not_selected",
+        "voice_type": "not_selected",
+        "voice_choice": "",
+        "dialogue_text": "",
         "timing": "fit_scene",
         "source_audio_policy": "duck",
         "volume_percent": 100,
+        "peak_guard": True,
         "applied_to_mp4": False,
     },
     "music": {
@@ -556,6 +683,7 @@ POST_ADDON_DEFAULTS: dict[str, dict[str, Any]] = {
         "fade_in": True,
         "fade_out": True,
         "ducking": True,
+        "peak_guard": True,
         "paid_generation": False,
         "applied_to_mp4": False,
     },
@@ -568,6 +696,19 @@ POST_ADDON_DEFAULTS: dict[str, dict[str, Any]] = {
     "sfx": {
         "source": "library_only",
         "volume_percent": 35,
+        "peak_guard": True,
+        "user_note": "",
+        "applied_to_mp4": False,
+    },
+    "source_audio": {
+        "source": "original_video_audio",
+        "volume_percent": 100,
+        "duck_under_dubbing": True,
+        "peak_guard": True,
+        "applied_to_mp4": False,
+    },
+    "automatic_text": {
+        "owner": "automatic_text_items",
         "applied_to_mp4": False,
     },
     "audio_balance": {
@@ -638,11 +779,75 @@ POST_ADDON_PRESETS: dict[str, tuple[tuple[str, dict[str, Any]], ...]] = {
 }
 
 IMAGE_STRATEGIES = (
-    ("direct_description", "📝 Tạo trực tiếp từ mô tả"),
-    ("uploaded_image", "📎 Dùng ảnh đã tải"),
-    ("ai_image", "✨ Lập kế hoạch tạo ảnh AI"),
-    ("previous_last_frame", "🔗 Dùng khung cuối cảnh trước"),
+    ("description", "📝 Chỉ dùng mô tả"),
+    ("uploaded", "📎 Dùng ảnh đã gửi"),
+    ("create", "✨ Lập kế hoạch tạo ảnh mới"),
+    ("none", "🎞️ Không cần ảnh"),
 )
+
+AUTOMATIC_TEXT_TYPES = (
+    ("scene_title", "🏷️ Tiêu đề cảnh"),
+    ("character_intro", "👤 Giới thiệu nhân vật"),
+    ("product_label", "📦 Nhãn sản phẩm"),
+    ("highlight", "💡 Điểm nổi bật"),
+    ("cta", "📣 Kêu gọi hành động"),
+    ("annotation", "💬 Chú thích ngắn"),
+    ("tracked_label", "📍 Chữ theo người/vật"),
+    ("data_info", "🔢 Số liệu/thông tin"),
+    ("footer_source", "🧾 Chân trang/nguồn"),
+    ("custom", "📝 Chữ tự nhập"),
+)
+
+AUTOMATIC_TEXT_POSITIONS = (
+    ("auto_safe", "✨ Tự chọn vị trí an toàn"),
+    *AUTOMATIC_TEXT_FIXED_POSITIONS,
+    ("custom_coordinates", "✍️ Tự nhập tọa độ"),
+)
+
+AUTOMATIC_TEXT_TIMINGS = (
+    ("scene_start", "Đầu cảnh"),
+    ("scene_end", "Cuối cảnh"),
+    ("character_appears", "Khi nhân vật xuất hiện"),
+    ("product_appears", "Khi sản phẩm xuất hiện"),
+    ("after_dialogue", "Sau một câu thoại"),
+    ("timestamp", "Theo thời điểm"),
+    ("whole_scene", "Theo toàn cảnh"),
+)
+
+AUTOMATIC_TEXT_ANIMATIONS = (
+    ("none", "Không chuyển động"),
+    ("fade", "Mờ dần"),
+    ("slide_soft", "Trượt nhẹ"),
+    ("zoom_soft", "Phóng nhẹ"),
+    ("pop_soft", "Bật lên nhẹ"),
+    ("typewriter", "Gõ chữ"),
+)
+
+AUTOMATIC_TEXT_TARGETS = (
+    ("person", "Theo người"),
+    ("face", "Theo khuôn mặt"),
+    ("product", "Theo sản phẩm"),
+    ("object", "Theo vật thể"),
+    ("fixed", "Vùng cố định an toàn"),
+)
+
+AUTOMATIC_TEXT_DURATIONS = (
+    (2, "2 giây"),
+    (3, "3 giây"),
+    (4, "4 giây"),
+    (5, "5 giây"),
+    (SCENE_SECONDS, "Hết cảnh"),
+)
+
+AUTOMATIC_TEXT_STYLES = (
+    "Tối giản", "Điện ảnh", "Công nghệ", "Bán hàng",
+    "UGC", "Giáo dục", "Trẻ em", "Cao cấp", "Thẻ giới thiệu nhân vật",
+)
+
+# This flow has no object detector/tracker in the planning runtime. The public
+# UI must therefore describe a fixed safe position instead of offering a fake
+# tracking control.
+AUTOMATIC_TEXT_TRACKING_AVAILABLE = False
 
 TRANSITIONS = {
     "cut on action": ("Cắt theo hành động", "Chuyển sau khi hành động đã hoàn tất tự nhiên."),
@@ -705,6 +910,7 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "content_type_history": [],
         "suggested_content_type": "",
         "technical_profile": "",
+        "custom_technical_profile": "",
         "technical_profile_history": [],
         "suggested_technical_profile": "",
         "technical_profile_suggestion_offset": 0,
@@ -715,6 +921,17 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "suggestion_version": 0,
         "suggestion_history": [],
         "selected_suggestion": {},
+        "character_config": {
+            "mode": "",
+            "gender": "",
+            "gender_grounded": False,
+            "description": "",
+            "history": [],
+        },
+        "image_source_mode": "",
+        "image_source_history": [],
+        "image_generation_confirmed": False,
+        "image_generation_quote": {},
         "preservation_requirements": _entry_map(REQUIREMENT_CATEGORIES),
         "requirements": {},
         "reference_assets": {},
@@ -732,6 +949,9 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "voice_timing_by_scene": {},
         "cta_placement_by_scene": {},
         "postproduction_addons": _entry_map(POST_ADDONS),
+        "automatic_text_items": [],
+        "automatic_text_history": [],
+        "automatic_text_tracking_available": AUTOMATIC_TEXT_TRACKING_AVAILABLE,
         "post_addon_suggestion": [],
         "post_addons": {},
         "aspect_ratio": aspect_ratio if aspect_ratio in {"9:16", "16:9", "1:1", "4:5"} else "9:16",
@@ -782,6 +1002,7 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
         "continuity_contract", "image_strategy_per_scene", "image_prompt_versions", "video_prompt_versions",
         "voice_timing_by_scene", "cta_placement_by_scene", "post_addons", "estimate",
         "duration_estimate", "price_estimate", "final_report", "selected_suggestion",
+        "character_config", "image_generation_quote",
     ):
         base[field] = dict(base.get(field) or {})
     base["transition_plan"] = [dict(item) for item in base.get("transition_plan") or [] if isinstance(item, dict)]
@@ -789,9 +1010,46 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     base["suggestions"] = [dict(item) for item in base.get("suggestions") or [] if isinstance(item, dict)][:5]
     base["suggestion_history"] = [list(items) for items in base.get("suggestion_history") or [] if isinstance(items, list)][-5:]
     base["content_type_history"] = [str(item) for item in base.get("content_type_history") or [] if content_type(str(item))][-10:]
-    valid_profiles = {key for key, _label in TECHNICAL_PROFILES}
+    valid_profiles = {key for key, _label in TECHNICAL_PROFILES} | {"custom"}
     base["technical_profile_history"] = [str(item) for item in base.get("technical_profile_history") or [] if not item or str(item) in valid_profiles][-10:]
     base["post_addon_suggestion"] = [str(item) for item in base.get("post_addon_suggestion") or [] if str(item) in dict(POST_ADDONS)]
+    base["automatic_text_items"] = [
+        dict(item) for item in base.get("automatic_text_items") or [] if isinstance(item, dict)
+    ][:40]
+    base["automatic_text_history"] = [
+        list(items) for items in base.get("automatic_text_history") or [] if isinstance(items, list)
+    ][-10:]
+    base["image_source_history"] = [
+        str(item) for item in base.get("image_source_history") or []
+        if str(item) in dict(IMAGE_SOURCE_MODES)
+    ][-10:]
+    if str(base.get("image_source_mode") or "") not in dict(IMAGE_SOURCE_MODES):
+        base["image_source_mode"] = ""
+    character = dict(base.get("character_config") or {})
+    character.setdefault("mode", "")
+    character.setdefault("gender", "")
+    character.setdefault("gender_grounded", False)
+    character.setdefault("description", "")
+    character["history"] = [dict(item) for item in character.get("history") or [] if isinstance(item, dict)][-10:]
+    base["character_config"] = character
+    # Migrate old public owners once. The legacy fields stay readable but are
+    # never rendered as a second configuration path.
+    post_entries = dict(base.get("postproduction_addons") or {})
+    legacy_voice = dict(post_entries.get("voice") or {})
+    dubbing = dict(post_entries.get("dubbing") or {})
+    if legacy_voice.get("enabled") and not dubbing.get("enabled"):
+        legacy_value = dict(legacy_voice.get("value") or {}) if isinstance(legacy_voice.get("value"), dict) else {}
+        dubbing_value = dict(dubbing.get("value") or {}) if isinstance(dubbing.get("value"), dict) else post_addon_default("dubbing")
+        dubbing_value.update({
+            "voice_choice": str(legacy_value.get("voice_choice") or ""),
+            "voice_type": str(legacy_value.get("voice_type") or "not_selected"),
+            "voice_source": str(legacy_value.get("voice_source") or "not_selected"),
+            "dialogue_text": str(legacy_value.get("script_note") or ""),
+            "volume_percent": int(legacy_value.get("volume_percent") or 100),
+        })
+        dubbing.update({"enabled": True, "value": dubbing_value})
+        post_entries["dubbing"] = dubbing
+    base["postproduction_addons"] = post_entries
     base["scene_count"] = max(0, min(MAX_SCENES, int(base.get("scene_count") or 0)))
     base["provider_called"] = False
     base["image_provider_called"] = False
@@ -873,14 +1131,14 @@ def post_addon_suggestions(state: dict[str, Any]) -> list[str]:
 
     state = normalize_state(state)
     suggestions: list[str] = []
-    content_addons = dict(state.get("content_affecting_addons") or {})
+    post_entries = dict(state.get("postproduction_addons") or {})
     assets = [dict(item) for item in (state.get("reference_assets") or {}).get("items") or [] if isinstance(item, dict)]
     if any(str(item.get("type") or "") == "logo" for item in assets):
         suggestions.append("logo_image")
-    if (content_addons.get("captions") or {}).get("enabled"):
+    if (post_entries.get("subtitles") or {}).get("enabled"):
         suggestions.append("subtitles")
-    if (content_addons.get("voiceover") or {}).get("enabled"):
-        suggestions.extend(["voice", "audio_balance"])
+    if (post_entries.get("dubbing") or {}).get("enabled"):
+        suggestions.append("dubbing")
     if any(str(item.get("type") or "") == "music" for item in assets):
         suggestions.extend(["music", "audio_balance"])
     result: list[str] = []
@@ -890,14 +1148,373 @@ def post_addon_suggestions(state: dict[str, Any]) -> list[str]:
     return result
 
 
-def technical_profile_label(profile_id: str) -> str:
+def technical_profile_label(profile_id: str, custom_profile: str = "") -> str:
     if not str(profile_id or ""):
         return "Không dùng mẫu chuyên ngành"
+    if str(profile_id or "") == "custom":
+        return str(custom_profile or "Profile tự nhập")[:180]
     return next((label for key, label in TECHNICAL_PROFILES if key == profile_id), "Mẫu chuyên ngành chưa xác định")
 
 
 def post_addon_default(key: str) -> dict[str, Any]:
     return deepcopy(POST_ADDON_DEFAULTS.get(str(key or ""), {}))
+
+
+def set_character_mode(state: dict[str, Any], mode: str, *, description: str = "") -> dict[str, Any]:
+    """Store a grounded character choice without guessing ambiguous gender."""
+
+    mode = str(mode or "")
+    if mode not in dict(CHARACTER_MODES):
+        return normalize_state(state)
+    updated = normalize_state(state)
+    current = dict(updated.get("character_config") or {})
+    previous = {
+        "mode": str(current.get("mode") or ""),
+        "gender": str(current.get("gender") or ""),
+        "gender_grounded": bool(current.get("gender_grounded")),
+        "description": str(current.get("description") or ""),
+    }
+    history = [dict(item) for item in current.get("history") or [] if isinstance(item, dict)]
+    if any(previous.values()):
+        history.append(previous)
+    gender = mode if mode in {"male", "female"} else ""
+    grounded = mode in {"male", "female"}
+    if mode == "auto":
+        normalized = unicodedata.normalize("NFKD", str(updated.get("subject") or "").lower())
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        male_markers = ("nguoi dan ong", "nam chinh", "chang trai", "be trai")
+        female_markers = ("nguoi phu nu", "nu chinh", "co gai", "be gai")
+        male = any(marker in normalized for marker in male_markers)
+        female = any(marker in normalized for marker in female_markers)
+        if male != female:
+            gender = "male" if male else "female"
+            grounded = True
+    current.update({
+        "mode": mode,
+        "gender": gender,
+        "gender_grounded": grounded,
+        "description": str(description or current.get("description") or "")[:1600],
+        "needs_gender_confirmation": bool(mode == "auto" and not grounded),
+        "history": history[-10:],
+    })
+    updated["character_config"] = current
+    if mode == "none":
+        updated = set_entry(updated, "preservation_requirements", "identity", "Không có nhân vật chính", enabled=True)
+    elif grounded:
+        label = "nhân vật nam" if gender == "male" else "nhân vật nữ"
+        updated = set_entry(updated, "preservation_requirements", "identity", f"Giữ nhất quán {label} đã chọn", enabled=True)
+    elif description:
+        updated = set_entry(updated, "preservation_requirements", "identity", description, enabled=True)
+    return updated
+
+
+def restore_character_mode(state: dict[str, Any]) -> dict[str, Any]:
+    updated = normalize_state(state)
+    current = dict(updated.get("character_config") or {})
+    history = [dict(item) for item in current.get("history") or [] if isinstance(item, dict)]
+    if history:
+        previous = history.pop()
+        previous["history"] = history
+        updated["character_config"] = previous
+    return updated
+
+
+def character_voice_choice(state: dict[str, Any]) -> str:
+    character = dict(normalize_state(state).get("character_config") or {})
+    if not character.get("gender_grounded"):
+        return ""
+    return {"male": "default_male", "female": "default_female"}.get(str(character.get("gender") or ""), "")
+
+
+def set_image_source_mode(state: dict[str, Any], mode: str) -> dict[str, Any]:
+    mode = str(mode or "")
+    if mode not in dict(IMAGE_SOURCE_MODES):
+        return normalize_state(state)
+    updated = normalize_state(state)
+    previous = str(updated.get("image_source_mode") or "")
+    history = list(updated.get("image_source_history") or [])
+    if previous and previous != mode:
+        history.append(previous)
+    updated["image_source_mode"] = mode
+    updated["image_source_history"] = history[-10:]
+    if mode != "create":
+        updated["image_generation_confirmed"] = False
+        updated["image_generation_quote"] = {}
+    return updated
+
+
+def prepare_image_generation_quote(state: dict[str, Any], unit_price_xu: int) -> dict[str, Any]:
+    """Persist a planning-only image quote without creating a paid task."""
+
+    updated = normalize_state(state)
+    if str(updated.get("image_source_mode") or "") != "create":
+        return updated
+    try:
+        unit_price = max(0, int(unit_price_xu))
+    except (TypeError, ValueError):
+        unit_price = 0
+    image_count = max(MIN_SCENES, min(MAX_SCENES, int(updated.get("scene_count") or 1)))
+    updated["image_generation_quote"] = {
+        "image_count": image_count,
+        "unit_price_xu": unit_price,
+        "total_price_xu": unit_price * image_count,
+        "quote_consistent": True,
+        "provider_called": False,
+        "job_created": False,
+        "outbox_created": False,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    }
+    updated["image_generation_confirmed"] = False
+    return updated
+
+
+def confirm_image_generation_quote(state: dict[str, Any]) -> dict[str, Any]:
+    """Confirm the quote only; actual image generation remains a later action."""
+
+    updated = normalize_state(state)
+    quote = dict(updated.get("image_generation_quote") or {})
+    expected = max(MIN_SCENES, min(MAX_SCENES, int(updated.get("scene_count") or 1)))
+    if (
+        str(updated.get("image_source_mode") or "") == "create"
+        and int(quote.get("image_count") or 0) == expected
+        and bool(quote.get("quote_consistent"))
+    ):
+        updated["image_generation_confirmed"] = True
+    return updated
+
+
+def image_prompts_required(state: dict[str, Any]) -> bool:
+    return str(normalize_state(state).get("image_source_mode") or "") in {"uploaded", "create"}
+
+
+def automatic_text_safe_position(
+    state: dict[str, Any],
+    *,
+    occupied: list[str] | None = None,
+    preferred: tuple[str, ...] | None = None,
+    exclude_item_id: str = "",
+) -> str:
+    """Choose a deterministic fixed slot without claiming visual tracking."""
+
+    updated = normalize_state(state)
+    reserved = {str(item) for item in (occupied or []) if str(item)}
+    post = dict(updated.get("postproduction_addons") or {})
+    for key in ("logo_image", "watermark_text", "subtitles"):
+        entry = dict(post.get(key) or {})
+        value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+        if entry.get("enabled") and str(value.get("position") or ""):
+            reserved.add(str(value.get("position")))
+    reserved.update(
+        str(item.get("position") or "")
+        for item in updated.get("automatic_text_items") or []
+        if (
+            isinstance(item, dict)
+            and item.get("enabled", True)
+            and str(item.get("id") or "") != str(exclude_item_id or "")
+        )
+    )
+    order = preferred or (
+        "top_center", "top_left", "top_right", "middle_left", "middle_right",
+        "bottom_left", "bottom_right", "center", "bottom_center",
+    )
+    for position in order:
+        if position not in reserved:
+            return position
+    return ""
+
+
+def upsert_automatic_text_item(
+    state: dict[str, Any],
+    *,
+    item_type: str,
+    text: str,
+    scene_scope: str = "all",
+    position: str = "auto_safe",
+    timing: str = "whole_scene",
+    animation: str = "fade",
+    style: str = "Tối giản",
+) -> dict[str, Any]:
+    """Create or edit one planning-only text item; never fabricate its copy."""
+
+    item_type = str(item_type or "")
+    content = str(text or "").strip()
+    if item_type not in dict(AUTOMATIC_TEXT_TYPES) or not content:
+        return normalize_state(state)
+    if timing not in dict(AUTOMATIC_TEXT_TIMINGS):
+        timing = "whole_scene"
+    if animation not in dict(AUTOMATIC_TEXT_ANIMATIONS):
+        animation = "fade"
+    if style not in AUTOMATIC_TEXT_STYLES:
+        style = "Tối giản"
+    updated = normalize_state(state)
+    items = [dict(item) for item in updated.get("automatic_text_items") or [] if isinstance(item, dict)]
+    history = [list(rows) for rows in updated.get("automatic_text_history") or [] if isinstance(rows, list)]
+    history.append(deepcopy(items))
+    character_card = item_type in {"character_intro", "tracked_label"}
+    if character_card and str(scene_scope or "all") == "all":
+        scene_scope = str(max(1, int(updated.get("active_scene_index") or 1)))
+    existing_index = next(
+        (
+            index for index, item in enumerate(items)
+            if str(item.get("type") or "") == item_type
+            and str(item.get("scene_scope") or "all") == str(scene_scope or "all")
+        ),
+        -1,
+    )
+    existing_item_id = str(items[existing_index].get("id") or "") if existing_index >= 0 else ""
+    requested_tracking = position == "tracked" or character_card
+    if position == "auto_safe" or requested_tracking:
+        preferred = (
+            "middle_left", "middle_right", "bottom_left", "bottom_right",
+            "top_left", "top_right", "top_center", "center", "bottom_center",
+        ) if character_card else None
+        fixed = automatic_text_safe_position(
+            updated,
+            preferred=preferred,
+            exclude_item_id=existing_item_id,
+        )
+        if not fixed:
+            return updated
+        position = fixed
+    if position not in dict(AUTOMATIC_TEXT_FIXED_POSITIONS) and position != "custom_coordinates":
+        return updated
+    item_id = existing_item_id or f"text_{len(items) + 1}"
+    if character_card:
+        requested_timing = "character_appears"
+        actual_timing = "character_appears" if AUTOMATIC_TEXT_TRACKING_AVAILABLE else "scene_start"
+        timing_fallback_reason = "" if AUTOMATIC_TEXT_TRACKING_AVAILABLE else "runtime_detection_unavailable"
+        duration_seconds = 3
+        end_seconds: int | str = 3
+        if animation == "fade":
+            animation = "slide_soft"
+        if style == "Tối giản":
+            style = "Thẻ giới thiệu nhân vật"
+    else:
+        requested_timing = timing
+        actual_timing = timing
+        timing_fallback_reason = ""
+        duration_seconds = SCENE_SECONDS
+        end_seconds = "scene_end"
+    item = {
+        "id": item_id,
+        "type": item_type,
+        "text": content[:800],
+        "scene_scope": str(scene_scope or "all")[:80],
+        "position": position,
+        "position_mode": "fixed_safe",
+        "tracking_requested": requested_tracking,
+        "tracking_active": bool(requested_tracking and AUTOMATIC_TEXT_TRACKING_AVAILABLE),
+        "tracking_fallback_reason": (
+            "runtime_tracking_unavailable"
+            if requested_tracking and not AUTOMATIC_TEXT_TRACKING_AVAILABLE
+            else ""
+        ),
+        "target_kind": "person" if character_card else "fixed",
+        "timing_requested": requested_timing,
+        "timing": actual_timing,
+        "timing_fallback_reason": timing_fallback_reason,
+        "start_seconds": 0,
+        "end_seconds": end_seconds,
+        "duration_seconds": duration_seconds,
+        "disappear_on_scene_change": True,
+        "animation": animation,
+        "style": style,
+        "design": (
+            {
+                "family": "Inter",
+                "weight": "semibold",
+                "text_color": "#FFFFFF",
+                "accent_color": "#22C55E",
+                "background": "dark_translucent_lower_third",
+                "shadow": "soft",
+                "max_lines": 2,
+                "line_height": 1.15,
+                "safe_margin_ratio": 0.04,
+                "title_size_ratio": 0.045,
+                "detail_size_ratio": 0.032,
+            }
+            if character_card
+            else {}
+        ),
+        "layout_guard": (
+            {
+                "always_avoid": ("subtitles", "logo", "watermark", "existing_text", "frame_edges"),
+                "avoid_when_detectable": ("face", "person", "product"),
+                "fallback": "fixed_safe_position",
+            }
+            if character_card
+            else {}
+        ),
+        "enabled": True,
+        "applied_to_mp4": False,
+    }
+    if existing_index >= 0:
+        items[existing_index] = item
+    else:
+        items.append(item)
+    updated["automatic_text_items"] = items[:40]
+    updated["automatic_text_history"] = history[-10:]
+    return _sync_automatic_text_owner(updated)
+
+
+def _sync_automatic_text_owner(state: dict[str, Any]) -> dict[str, Any]:
+    """Keep the one post-production owner aligned with automatic_text_items."""
+
+    updated = normalize_state(state)
+    items = [dict(item) for item in updated.get("automatic_text_items") or [] if isinstance(item, dict)]
+    entry = dict((updated.get("postproduction_addons") or {}).get("automatic_text") or {})
+    entry["enabled"] = bool(items)
+    entry["value"] = {"owner": "automatic_text_items", "item_count": len(items), "applied_to_mp4": False}
+    post = dict(updated.get("postproduction_addons") or {})
+    post["automatic_text"] = entry
+    updated["postproduction_addons"] = post
+    return updated
+
+
+def update_automatic_text_item(state: dict[str, Any], item_id: str, **changes: Any) -> dict[str, Any]:
+    updated = normalize_state(state)
+    items = [dict(item) for item in updated.get("automatic_text_items") or [] if isinstance(item, dict)]
+    target = str(item_id or "")
+    if not target:
+        return updated
+    index = next((index for index, item in enumerate(items) if str(item.get("id") or "") == target), -1)
+    if index < 0:
+        return updated
+    history = [list(rows) for rows in updated.get("automatic_text_history") or [] if isinstance(rows, list)]
+    history.append(deepcopy(items))
+    allowed = {
+        "text", "scene_scope", "position", "position_mode", "coordinates",
+        "timing", "start_seconds", "end_seconds", "duration_seconds",
+        "animation", "style", "tracking_requested", "tracking_active",
+        "tracking_fallback_reason", "target_kind", "timing_requested",
+        "timing_fallback_reason", "disappear_on_scene_change",
+    }
+    items[index].update({key: value for key, value in changes.items() if key in allowed})
+    updated["automatic_text_items"] = items
+    updated["automatic_text_history"] = history[-10:]
+    return _sync_automatic_text_owner(updated)
+
+
+def delete_automatic_text_item(state: dict[str, Any], item_id: str) -> dict[str, Any]:
+    updated = normalize_state(state)
+    items = [dict(item) for item in updated.get("automatic_text_items") or [] if isinstance(item, dict)]
+    filtered = [item for item in items if str(item.get("id") or "") != str(item_id or "")]
+    if len(filtered) != len(items):
+        history = [list(rows) for rows in updated.get("automatic_text_history") or [] if isinstance(rows, list)]
+        history.append(deepcopy(items))
+        updated["automatic_text_history"] = history[-10:]
+        updated["automatic_text_items"] = filtered
+    return _sync_automatic_text_owner(updated)
+
+
+def restore_automatic_text_items(state: dict[str, Any]) -> dict[str, Any]:
+    updated = normalize_state(state)
+    history = [list(rows) for rows in updated.get("automatic_text_history") or [] if isinstance(rows, list)]
+    if history:
+        updated["automatic_text_items"] = [dict(item) for item in history.pop() if isinstance(item, dict)]
+        updated["automatic_text_history"] = history
+    return _sync_automatic_text_owner(updated)
 
 
 def creative_suggestions(state: dict[str, Any], key: str) -> list[str]:
@@ -1089,15 +1706,20 @@ def configure_audio_volume(state: dict[str, Any], key: str, volume_percent: int)
         volume = int(volume_percent)
     except (TypeError, ValueError):
         return normalize_state(state)
-    if volume not in AUDIO_VOLUME_LEVELS:
+    if volume < 0 or volume > 200:
         return normalize_state(state)
     updated = normalize_state(state)
     current = dict((updated.get("postproduction_addons") or {}).get(key) or {})
     config = post_addon_default(key)
     if isinstance(current.get("value"), dict):
         config.update(dict(current.get("value") or {}))
-    config.update({"volume_percent": volume, "applied_to_mp4": False})
-    return set_entry(updated, "postproduction_addons", key, config, enabled=True)
+    config.update({
+        "volume_percent": volume,
+        "peak_guard": True,
+        "clipping_guard": "limit_peak_before_mix",
+        "applied_to_mp4": False,
+    })
+    return set_entry(updated, "postproduction_addons", key, config, enabled=volume > 0)
 
 
 def personal_voice_asset(state: dict[str, Any], user_id: int) -> dict[str, Any]:
@@ -1125,15 +1747,24 @@ def personal_voice_asset(state: dict[str, Any], user_id: int) -> dict[str, Any]:
 
 
 def configure_voice_choice(state: dict[str, Any], choice: str, *, user_id: int = 0) -> dict[str, Any]:
-    """Choose female, male, or personal voice for the post-production plan."""
+    """Choose one canonical dubbing voice without guessing character gender."""
 
     choice = str(choice or "")
     patch = VOICE_CHOICES.get(choice)
     if not patch:
         return normalize_state(state)
     updated = normalize_state(state)
-    current = dict((updated.get("postproduction_addons") or {}).get("voice") or {})
-    config = post_addon_default("voice")
+    if choice == "follow_character":
+        grounded_choice = character_voice_choice(updated)
+        if not grounded_choice:
+            character = dict(updated.get("character_config") or {})
+            character["needs_gender_confirmation"] = True
+            updated["character_config"] = character
+            return updated
+        choice = grounded_choice
+        patch = VOICE_CHOICES[choice]
+    current = dict((updated.get("postproduction_addons") or {}).get("dubbing") or {})
+    config = post_addon_default("dubbing")
     if isinstance(current.get("value"), dict):
         config.update(dict(current.get("value") or {}))
     for field in (
@@ -1155,7 +1786,7 @@ def configure_voice_choice(state: dict[str, Any], choice: str, *, user_id: int =
         })
     config.update(deepcopy(patch))
     config.update({"voice_choice": choice, "applied_to_mp4": False})
-    return set_entry(updated, "postproduction_addons", "voice", config, enabled=True)
+    return set_entry(updated, "postproduction_addons", "dubbing", config, enabled=True)
 
 
 def configure_music_source(state: dict[str, Any], source_choice: str) -> dict[str, Any]:
@@ -1209,11 +1840,11 @@ def configure_post_note(state: dict[str, Any], key: str, text: str) -> dict[str,
     config = post_addon_default(key)
     if isinstance(current.get("value"), dict):
         config.update(dict(current.get("value") or {}))
-    field = {"voice": "script_note", "music": "music_request"}.get(key, "user_note")
+    field = {"voice": "script_note", "dubbing": "dialogue_text", "music": "music_request"}.get(key, "user_note")
     config.update({field: value[:1600]})
     if "applied_to_mp4" in config:
         config["applied_to_mp4"] = False
-    enabled = bool(current.get("enabled")) if key in {"voice", "music"} else True
+    enabled = bool(current.get("enabled")) if key in {"voice", "dubbing", "music"} else True
     return set_entry(updated, "postproduction_addons", key, config, enabled=enabled)
 
 
@@ -1224,6 +1855,13 @@ def normalize_material_type(value: str) -> str:
 
 def logo_position_label(value: str) -> str:
     return dict(LOGO_POSITIONS).get(str(value or ""), "Chưa chọn vị trí")
+
+
+def automatic_text_position_label(value: str) -> str:
+    return dict(AUTOMATIC_TEXT_FIXED_POSITIONS).get(
+        str(value or ""),
+        "Tọa độ tự nhập" if str(value or "") == "custom_coordinates" else "Chưa chọn vị trí",
+    )
 
 
 def configure_logo_reference(
@@ -1501,30 +2139,34 @@ def public_requirements(state: dict[str, Any]) -> dict[str, Any]:
 
 def planner_content_addons(state: dict[str, Any]) -> dict[str, Any]:
     updated = normalize_state(state)
-    entries = dict(updated.get("content_affecting_addons") or {})
+    post = dict(updated.get("postproduction_addons") or {})
     aspect = str(updated.get("aspect_ratio") or "9:16")
 
-    def _safe_zone_position(key: str, default: str) -> str:
-        item = dict(entries.get(key) or {})
-        value = item.get("value")
-        if isinstance(value, dict):
-            position = str(value.get("position") or "")
-        else:
-            position = str(value or "")
+    def _enabled(key: str) -> bool:
+        return bool((post.get(key) or {}).get("enabled"))
+
+    def _position(key: str, default: str) -> str:
+        item = dict(post.get(key) or {})
+        value = dict(item.get("value") or {}) if isinstance(item.get("value"), dict) else {}
+        position = str(value.get("position") or "")
         return position if position in dict(LOGO_POSITIONS) else default
 
+    text_items = [dict(item) for item in updated.get("automatic_text_items") or [] if isinstance(item, dict)]
+    has_cta = any(item.get("enabled", True) and str(item.get("type") or "") == "cta" for item in text_items)
+    music_value = dict((post.get("music") or {}).get("value") or {}) if isinstance((post.get("music") or {}).get("value"), dict) else {}
+
     result: dict[str, Any] = {
-        "voiceover": bool(entries["voiceover"].get("enabled")),
-        "dialogue": bool(entries["voiceover"].get("enabled")),
-        "captions": bool(entries["captions"].get("enabled")),
-        "subtitle_required": bool(entries["captions"].get("enabled")),
-        "cta": bool(entries["cta"].get("enabled")),
-        "logo_safe_zone": _safe_zone_position("logo_safe_zone", "top_right") if entries["logo_safe_zone"].get("enabled") else "none",
-        "watermark_safe_zone": _safe_zone_position("watermark_safe_zone", "bottom_right") if entries["watermark_safe_zone"].get("enabled") else "none",
-        "preserve_source_audio": bool(entries["preserve_source_audio"].get("enabled")),
+        "voiceover": _enabled("dubbing"),
+        "dialogue": _enabled("dubbing"),
+        "captions": _enabled("subtitles"),
+        "subtitle_required": _enabled("subtitles"),
+        "cta": has_cta,
+        "logo_safe_zone": _position("logo_image", "top_right") if _enabled("logo_image") else "none",
+        "watermark_safe_zone": _position("watermark_text", "bottom_right") if _enabled("watermark_text") else "none",
+        "preserve_source_audio": _enabled("source_audio"),
         "aspect_ratio": aspect,
-        "music_mood": str(entries["music_mood"].get("value") or "theo mạch cảm xúc của nội dung"),
-        "transition_style": str(entries["transition_style"].get("value") or ""),
+        "music_mood": str(music_value.get("music_request") or "") if _enabled("music") else "",
+        "transition_style": "",
     }
     return result
 
@@ -1535,9 +2177,14 @@ def planner_post_addons(state: dict[str, Any]) -> dict[str, bool]:
         "logo_burn_in": bool(entries["logo_image"].get("enabled")),
         "watermark_burn_in": bool(entries["watermark_text"].get("enabled") or entries["watermark_image"].get("enabled")),
         "subtitle_rendering": bool(entries["subtitles"].get("enabled")),
-        "dubbing_mix": bool(entries["voice"].get("enabled") or entries["dubbing"].get("enabled")),
+        "dubbing_mix": bool(entries["dubbing"].get("enabled")),
         "music_mix": bool(entries["music"].get("enabled")),
-        "final_audio_mix": bool(entries["audio_balance"].get("enabled")),
+        "final_audio_mix": bool(
+            entries["dubbing"].get("enabled")
+            or entries["music"].get("enabled")
+            or entries["sfx"].get("enabled")
+            or entries["source_audio"].get("enabled")
+        ),
         # Product Video always requires a validated MP4 final; this is not an
         # optional public add-on and therefore does not need a checkbox.
         "output_packaging": True,
@@ -1545,6 +2192,8 @@ def planner_post_addons(state: dict[str, Any]) -> dict[str, bool]:
 
 
 def _profile_for_planner(state: dict[str, Any]) -> str:
+    if str(state.get("technical_profile") or "") == "custom":
+        return str(state.get("custom_technical_profile") or state.get("content_type") or "storytelling")
     return str(state.get("technical_profile") or state.get("content_type") or "storytelling")
 
 
@@ -1662,13 +2311,16 @@ def initialize_scene_artifacts(state: dict[str, Any], package: dict[str, Any]) -
     strategies: dict[str, Any] = {}
     image_versions: dict[str, Any] = {}
     video_versions: dict[str, Any] = {}
+    image_mode = str(updated.get("image_source_mode") or "description")
+    needs_image_prompts = image_prompts_required(updated)
     for scene in scenes:
         index = int(scene.get("scene_index") or 0)
         key = str(index)
-        strategies[key] = {"strategy": "direct_description", "approved": False}
-        image_versions[key] = {"active_version": 1, "approved": False, "versions": [{"version": 1, **_image_prompt(scene, {**updated, "plan": package})}]}
+        strategies[key] = {"strategy": image_mode, "approved": image_mode in {"description", "none"}}
+        if needs_image_prompts:
+            image_versions[key] = {"active_version": 1, "approved": False, "versions": [{"version": 1, **_image_prompt(scene, {**updated, "plan": package})}]}
         video_versions[key] = {"active_version": 1, "approved": False, "versions": [{"version": 1, **_video_prompt(scene, prompt_rows.get(index, {}), updated)}]}
-    content_entries = dict(updated.get("content_affecting_addons") or {})
+    post_entries = dict(updated.get("postproduction_addons") or {})
     voice_timing = {
         str(index): {
             "start_seconds": (index - 1) * SCENE_SECONDS,
@@ -1676,10 +2328,14 @@ def initialize_scene_artifacts(state: dict[str, Any], package: dict[str, Any]) -
             "approved": False,
         }
         for index in range(1, len(scenes) + 1)
-    } if (content_entries.get("voiceover") or {}).get("enabled") else {}
+    } if (post_entries.get("dubbing") or {}).get("enabled") else {}
     cta_placement = {
         str(len(scenes)): {"placement": "cuối cảnh", "approved": False}
-    } if scenes and (content_entries.get("cta") or {}).get("enabled") else {}
+    } if scenes and any(
+        str(item.get("type") or "") == "cta" and item.get("enabled", True)
+        for item in updated.get("automatic_text_items") or []
+        if isinstance(item, dict)
+    ) else {}
     updated.update({
         "scene_plan": package,
         "plan": package,
@@ -1885,6 +2541,7 @@ def scene_contract_counts(state: dict[str, Any]) -> dict[str, int]:
         "scenes": len((updated.get("plan") or {}).get("scenes") or []),
         "image_strategies": len(updated.get("image_strategy_per_scene") or {}),
         "image_prompts": len(updated.get("image_prompt_versions") or {}),
+        "image_prompts_expected": expected if image_prompts_required(updated) else 0,
         "video_prompts": len(updated.get("video_prompt_versions") or {}),
     }
 
