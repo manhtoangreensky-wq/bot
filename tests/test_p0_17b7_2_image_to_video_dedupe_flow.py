@@ -167,11 +167,14 @@ def test_merge_images_ai_first_path_uses_existing_image_core_guarded():
     query = _run_frame(user_id, "framevideo|ai_first")
     assert "Tạo ảnh AI nhanh rồi ghép" in query.edits[-1][0]
     callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
+    assert "framevideo|ai_suggest" in callbacks
     assert "framevideo|ai_prompt" in callbacks
-    assert "framevideo|start" in callbacks
+    assert "framevideo|hub" in callbacks
+    assert "framevideo|start" not in callbacks
+    assert "framevideo|layout" not in callbacks
     assert "menu|main_image" not in callbacks
     assert "vproduct|open|storyboard_prompt" not in callbacks
-    assert bot.get_frame_video_state(user_id)["step"] == "ai_prompt"
+    assert bot.get_frame_video_state(user_id)["step"] == "ai_entry"
 
 
 def test_merge_images_ai_first_handoff_to_effect_selection():

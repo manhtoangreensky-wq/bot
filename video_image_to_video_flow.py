@@ -67,10 +67,6 @@ def frame_video_ai_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("✍️ Tự nhập prompt" if is_vi else "✍️ Custom prompt", callback_data="framevideo|ai_prompt"),
         ],
         [
-            InlineKeyboardButton("📚 Gợi ý bố cục" if is_vi else "📚 Layout guide", callback_data="framevideo|layout"),
-            InlineKeyboardButton("📤 Dùng ảnh có sẵn" if is_vi else "📤 Use existing images", callback_data="framevideo|start"),
-        ],
-        [
             InlineKeyboardButton("⬅️ Ghép ảnh thành video" if is_vi else "⬅️ Image slideshow video", callback_data="framevideo|hub"),
             InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
         ],
