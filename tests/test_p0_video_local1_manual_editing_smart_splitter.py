@@ -89,38 +89,38 @@ def _real_ffmpeg_fixture(path: Path, *, duration_seconds: int = 5, audio: bool =
 
 
 def test_local1_video_edit_menu_present() -> None:
-    assert '"label_vi": "🛠 Chỉnh sửa video"' in BOT_SOURCE
+    assert '"label_vi": "🛠️ Chỉnh sửa / Nâng cấp video"' in BOT_SOURCE
     assert '"entry_callback": "videoedit|hub"' in BOT_SOURCE
 
 
 def test_local1_manual_edit_entry_present() -> None:
     hub = _between(BOT_SOURCE, "def video_edit_hub_keyboard", "def video_edit_info_text")
     assert "✂️ Chỉnh sửa thủ công" in hub
-    assert 'callback_data="videoedit|manual"' in hub
+    assert '"videoedit|manual"' in hub
 
 
 def test_local1_split_entry_present() -> None:
     hub = _between(BOT_SOURCE, "def video_edit_hub_keyboard", "def video_edit_info_text")
-    assert "🧩 Cắt video nhiều đoạn" in hub
-    assert 'callback_data="videoedit|split"' in hub
-    assert "videoedit|ai_info" not in hub
+    assert "🎞️ Cắt, ghép & sắp xếp" in hub
+    assert '"videoedit|timeline"' in hub
+    assert "videoedit|split" not in hub
 
 
 def test_local1_exact_back_from_upload() -> None:
     source = _between(BOT_SOURCE, "def video_local_upload_keyboard", "def _video_local_duration_text")
-    assert 'callback_data=f"videoedit|{tool}"' in source
+    assert 'f"videoedit|{tool}"' in source
 
 
 def test_local1_exact_back_from_options() -> None:
     manual = _between(BOT_SOURCE, "def video_local_manual_options_keyboard", "def video_local_split_options_text")
     split = _between(BOT_SOURCE, "def video_local_split_options_keyboard", "def video_local_choice_keyboard")
-    assert 'callback_data="videoedit|source_summary"' in manual
-    assert 'callback_data="videoedit|source_summary"' in split
+    assert '"videoedit|source_summary"' in manual
+    assert 'back_target = "videoedit|options|manual"' in split
 
 
 def test_local1_exact_back_from_confirmation() -> None:
     source = _between(BOT_SOURCE, "def video_local_confirmation_keyboard", "def video_editor_menu_text")
-    assert 'callback_data=f"videoedit|options|{tool}"' in source
+    assert 'f"videoedit|options|{tool}"' in source
 
 
 def test_local1_no_processing_before_confirm() -> None:
@@ -653,7 +653,7 @@ def test_local1_services_do_not_call_real_providers() -> None:
 
 def test_local1_route_matrix_is_canonical() -> None:
     route = _between(BOT_SOURCE, '"video_local_edit": {', "def video_public_route_for_tool")
-    assert '"expected_children": ("videoedit|manual", "videoedit|split")' in route
+    assert '"expected_children": ("videoedit|ai", "videoedit|manual", "videoedit|audio", "videoedit|timeline")' in route
     assert '"back_target": "menu|main_video"' in route
     assert '"job_reachable": True' in route
 

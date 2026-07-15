@@ -64,9 +64,14 @@ AIEDIT1_SCOPE_FILES = frozenset(
         "services/video_ai_edit_router.py",
         "services/video_ai_edit_status.py",
         "services/video_ai_edit_validation.py",
+        "services/video_edit_capabilities.py",
+        "services/video_local_editing.py",
         "tests/aiedit1_scope_guard.py",
         AIEDIT1_TEST_FILE,
         "tests/test_p0_17b11_video_ui_ux_cleanup.py",
+        "tests/test_p0_17b7_1_video_menu_cleanup.py",
+        "tests/test_p0_18f_video_menu_route_audit_fix_only.py",
+        "tests/test_p0_18k_video_menu_flow_standardization_routing_matrix.py",
         "tests/test_p0_18m_restore_canonical_video_product_flows_from_backup.py",
         "tests/test_p0_18q2_video_auto_refresh_status_like_subdub_only.py",
         "tests/test_p0_23h14f_music_voice_preset_duet_progress_single_track_fix.py",
@@ -93,6 +98,7 @@ AIEDIT1_SCOPE_FILES = frozenset(
         "tests/test_p0_video_duration2_scene_or_seconds_pricing_decision.py",
         "tests/test_p0_video_knowledge1_profile_router_and_studio_menu.py",
         "tests/test_p0_video_local1_manual_editing_smart_splitter.py",
+        "tests/test_p0_video_edit2_upgrade_audio_ai_backstack.py",
     }
 )
 
