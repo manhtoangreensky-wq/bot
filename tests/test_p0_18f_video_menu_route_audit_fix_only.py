@@ -86,7 +86,7 @@ def test_video_menu_current_buttons_unchanged():
         "🎬 Video dài tập",
         "🎞 Storyboard",
         "💡 Ý tưởng video",
-        "🛠 Chỉnh sửa video",
+        "🛠️ Chỉnh sửa / Nâng cấp video",
         "📥 Tải video từ liên kết",
         "🏠 Menu chính",
         "📖 Hướng dẫn video",
@@ -104,7 +104,18 @@ def test_video_menu_each_button_routes_to_matching_flow():
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
         ("longvideo|public_guard", "Video dài tập", ()),
         ("vdownload|start", "Tải video từ liên kết", ()),
-        ("videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split")),
+        (
+            "videoedit|hub",
+            "Chỉnh sửa / Nâng cấp video",
+            (
+                "videoedit|ai",
+                "videoedit|manual",
+                "videoedit|audio",
+                "videoedit|timeline",
+                "videoedit|effects",
+                "videoedit|restore",
+            ),
+        ),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):
         _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=callback == "vproduct|open|video_trend")
@@ -197,7 +208,12 @@ def test_download_video_link_route():
 
 
 def test_local_video_edit_route():
-    _assert_route(918811, "videoedit|hub", "Chỉnh sửa video", ("videoedit|manual", "videoedit|split"))
+    _assert_route(
+        918811,
+        "videoedit|hub",
+        "Chỉnh sửa / Nâng cấp video",
+        ("videoedit|ai", "videoedit|manual", "videoedit|audio", "videoedit|timeline", "videoedit|effects", "videoedit|restore"),
+    )
 
 
 def test_legacy_video_idea_callback_redirects_to_canonical_hub_without_side_effects():

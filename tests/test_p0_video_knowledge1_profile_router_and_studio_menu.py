@@ -221,25 +221,23 @@ def test_main_video_menu_hides_studio_but_preserves_internal_route_and_edit_hub(
     assert '("video_local_edit", "video_downloader")' in public_rows
     assert '"label_vi": "🎯 Studio Profile AI"' in BOT_SOURCE
     assert '"entry_callback": "vprofile|menu"' in BOT_SOURCE
-    assert '"label_vi": "🛠 Chỉnh sửa video"' in BOT_SOURCE
+    assert '"label_vi": "🛠️ Chỉnh sửa / Nâng cấp video"' in BOT_SOURCE
     assert '"entry_callback": "videoedit|hub"' in BOT_SOURCE
     assert 'CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\\|")' in BOT_SOURCE
 
 
 def test_edit_video_hub_restores_only_tools_with_real_existing_handlers() -> None:
     hub = _source_between("def video_edit_hub_text", "def video_editor_menu_text")
-    assert "✨ Chỉnh sửa bằng AI" in hub
+    assert "✨ Chỉnh sửa & nâng cấp bằng AI" in hub
     assert "✂️ Chỉnh sửa thủ công" in hub
-    assert "🧩 Cắt video nhiều đoạn" in hub
-    assert '("videoedit|manual")' not in hub
+    assert "🎞️ Cắt, ghép & sắp xếp" in hub
     for callback in (
-        '"videoedit|ai"', '"videoedit|manual"', '"videoedit|split"',
-        '"videoedit|quick|concat"', '"videoedit|quick|aspect"',
-        '"videoedit|quick|compress"', '"videoedit|quick|audio"',
-        '"videoedit|quick|subtitle"', '"menu|main_video"',
+        '"videoedit|ai"', '"videoedit|manual"', '"videoedit|audio"',
+        '"videoedit|timeline"', '"videoedit|effects"', '"videoedit|restore"',
+        '"videoedit|plan"', '"videoedit|guide"', '"menu|main_video"',
     ):
         assert callback in hub
-    assert "Công cụ local hiện không thu Xu" in hub
+    assert "videoedit|quick|" not in hub
 
 
 def test_profile_studio_back_routes_to_exact_previous_screen() -> None:
@@ -341,6 +339,15 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
         IDEA2_SERVICE_FILES
         | {IDEA2_TEST_FILE, SCENE3UX3_TEST_FILE, SCENE3UX4_TEST_FILE}
     ) if IDEA2_TEST_FILE in touched else set()
+    edit2_test = "tests/test_p0_video_edit2_upgrade_audio_ai_backstack.py"
+    edit2_allowed = {
+        edit2_test,
+        "services/video_edit_capabilities.py",
+        "services/video_local_editing.py",
+        "services/video_ai_edit_prompt.py",
+        "tests/aiedit1_scope_guard.py",
+        "tests/test_p0_video_local1_manual_editing_smart_splitter.py",
+    } if edit2_test in touched else set()
     for path in touched:
         assert (
             path == "bot.py"
@@ -355,6 +362,7 @@ def test_scope_does_not_touch_music_subdub_or_product_video_workers() -> None:
             or path in scene2_allowed
             or path in scene3_allowed
             or path in idea2_allowed
+            or path in edit2_allowed
         ), path
     forbidden_paths = {
         "local_worker.py",

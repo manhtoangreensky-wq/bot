@@ -83,7 +83,7 @@ def test_video_menu_layout_groups_primary_products_above_helpers():
         ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
         ["🎥 Tự quay & đổi cảnh AI", "🎬 Video dài tập"],
         ["🎞 Storyboard", "💡 Ý tưởng video"],
-        ["🛠 Chỉnh sửa video", "📥 Tải video từ liên kết"],
+        ["🛠️ Chỉnh sửa / Nâng cấp video", "📥 Tải video từ liên kết"],
         ["🏠 Menu chính", "📖 Hướng dẫn video"],
     ]
 

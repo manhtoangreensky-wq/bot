@@ -127,25 +127,26 @@ class JsonResponse:
 
 
 def test_aiedit1_menu_entry_present():
-    assert 'callback_data="videoedit|ai"' in BOT_SOURCE
-    assert "Chỉnh sửa bằng AI" in BOT_SOURCE
+    assert '"videoedit|ai"' in BOT_SOURCE
+    assert "Chỉnh sửa & nâng cấp bằng AI" in BOT_SOURCE
 
 
 def test_aiedit1_upload_flow():
-    assert 'set_video_editor_pending(uid, "await_ai_video"' in BOT_SOURCE
+    callback = source_between(BOT_SOURCE, "async def handle_video_editor_callback", "async def handle_video_upload_callback")
+    assert '"await_ai_video"' in callback
+    assert "set_video_editor_pending(" in callback
     assert 'if step == "await_ai_video"' in BOT_SOURCE
     assert "inspect_video_editor_source" in BOT_SOURCE
 
 
 def test_aiedit1_exact_back_routes():
     required = {
-        'callback_data="videoedit|ai"',
-        'callback_data="videoedit|ai_source"',
-        'callback_data="videoedit|ai_suggestions"',
-        'callback_data="videoedit|ai_settings"',
-        'callback_data="videoedit|ai_prompt"',
+        '"videoedit|ai"',
+        '"videoedit|ai_source"',
+        '"videoedit|ai_suggestions"',
+        '"videoedit|ai_settings"',
+        '"videoedit|ai_prompt"',
     }
-    assert required.issubset(set(line.strip().split(",")[0] for line in BOT_SOURCE.splitlines()) | required)
     for value in required:
         assert value in BOT_SOURCE
 

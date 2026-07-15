@@ -61,7 +61,10 @@ def test_video_menu_has_video_downloader():
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
     assert "📥 Tải video từ liên kết" in labels
     assert "vdownload|start" in callbacks
-    assert _rows(bot.main_video_keyboard("vi"))[-2] == ["📥 Tải video từ liên kết"]
+    assert _rows(bot.main_video_keyboard("vi"))[-2] == [
+        "🛠️ Chỉnh sửa / Nâng cấp video",
+        "📥 Tải video từ liên kết",
+    ]
 
 
 def test_video_downloader_not_in_translation_dub_studio():

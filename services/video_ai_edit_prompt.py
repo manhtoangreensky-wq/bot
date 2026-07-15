@@ -84,6 +84,8 @@ def build_professional_prompt(
     else:
         background = "Keep the original environment and background unless a selected effect only changes lighting or color."
     aspect = _clean(options.get("target_aspect_ratio") or route.get("target_aspect_ratio") or "keep source")
+    aspect_method = _clean(options.get("aspect_method") or "crop theo khung")
+    effect_timing = _clean(options.get("effect_timing") or "toàn video")
     duration = int(options.get("target_duration_seconds") or route.get("target_duration_seconds") or 0)
     text_pref = _clean(options.get("text_preference") or "do not add unrequested text, captions or logos")
     camera_pref = _clean(options.get("camera_motion_preference") or profile.get("camera_motion_treatment") or "preserve source motion")
@@ -100,10 +102,10 @@ def build_professional_prompt(
         "environment_background": background,
         "lighting": _clean(profile.get("lighting_treatment") or "balanced realistic lighting"),
         "color_grade": _clean(profile.get("color_treatment") or "natural controlled color grade"),
-        "effects": ", ".join(effect_stack) or "subtle professional enhancement",
+        "effects": (", ".join(effect_stack) or "subtle professional enhancement") + f"; timing: {effect_timing}",
         "camera_motion": camera_pref,
         "timing_pacing": f"Preserve coherent timing. {INTENSITY_DIRECTIONS.get(intensity, INTENSITY_DIRECTIONS['medium'])}",
-        "aspect_resolution": f"Target aspect ratio {aspect}; keep a valid resolution no larger than the configured output limit.",
+        "aspect_resolution": f"Target aspect ratio {aspect}; method: {aspect_method}; keep a valid resolution no larger than the configured output limit.",
         "output_realism_style": _clean(profile.get("visual_objective") or "polished, coherent and artifact-free output"),
         "audio_policy": audio_policy,
         "text_logo_caption_policy": text_pref,

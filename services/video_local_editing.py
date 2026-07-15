@@ -32,7 +32,7 @@ RESOLUTION_PRESETS = {"keep", "720p", "1080p"}
 ROTATIONS = {0, 90, 180, 270}
 FLIP_MODES = {"none", "horizontal", "vertical"}
 SPEED_PRESETS = {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}
-VOLUME_PRESETS = {0.0, 0.5, 1.0, 1.5, 2.0}
+VOLUME_PRESETS = {0.0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5, 2.0}
 COLOR_PRESETS = {
     "keep": "",
     "bright_clear": "eq=brightness=0.025:contrast=1.06:saturation=1.06,unsharp=5:5:0.45:5:5:0.0",
@@ -141,7 +141,7 @@ def normalize_manual_edit_plan(
     if speed not in SPEED_PRESETS:
         raise LocalVideoEditError("speed_invalid")
     volume = _number(raw.get("volume"), 1.0)
-    if volume not in VOLUME_PRESETS:
+    if not 0.0 <= volume <= 2.0:
         raise LocalVideoEditError("volume_invalid")
     color = str(raw.get("color_preset") or "keep").strip().lower()
     if color not in COLOR_PRESETS:
