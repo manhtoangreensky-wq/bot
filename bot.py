@@ -67114,7 +67114,6 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
 async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
     state = video_scene3_flow.normalize_state(state)
     step = str(state.get("step") or "subject")
-    back_only = video_scene3_keyboard(video_scene3_nav_rows())
     pending = {
         "await_count_custom": "🔢 <b>Nhập số cảnh</b>\n\nGửi một số từ 1 đến 20. Mỗi cảnh khoảng 8 giây và phải là một ý hoặc hành động hoàn chỉnh.",
         "await_suggestion": "✍️ <b>Nhập hướng nội dung riêng</b>\n\nMô tả hook, mạch kể và kết quả mong muốn. Hệ thống sẽ phân bổ đúng số cảnh đã chọn.",
@@ -67137,53 +67136,55 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "await_image_negative": "🚫 <b>Sửa yêu cầu loại trừ ảnh</b>\n\nGửi các lỗi/hình ảnh không được xuất hiện.",
         "await_video_prompt": "✍️ <b>Sửa câu lệnh video</b>\n\nGửi nội dung mới cho cảnh đang chọn. Hệ thống sẽ lưu thành phiên bản mới.",
         "await_video_negative": "🚫 <b>Sửa yêu cầu loại trừ video</b>\n\nGửi các lỗi/chuyển động không được xuất hiện.",
-        "await_post_config": video_scene3_post_input_text(state),
+        "await_post_config": lambda: video_scene3_post_input_text(state),
         "await_post_text": "✍️ <b>Nhập chữ bản quyền</b>\n\nGửi một dòng chữ ngắn sẽ xuất hiện trên video. Sau đó anh/chị chọn vị trí hiển thị.",
         "await_post_asset_upload": "📎 <b>Gửi ảnh logo</b>\n\nGửi ảnh hoặc file PNG/JPG/WEBP. Sau đó anh/chị chọn vị trí; hệ thống giữ đúng tỉ lệ ảnh.",
     }
     renderers = {
-        "menu": (video_profile_studio_menu_text(lang), video_profile_studio_menu_keyboard(lang)),
-        "subject": (video_profile_scene1_subject_text(lang), video_profile_scene1_subject_keyboard(lang)),
-        "await_subject": (video_profile_scene1_subject_text(lang), video_profile_scene1_subject_keyboard(lang)),
-        "scene_count": (video_profile_scene1_count_text(state, lang), video_profile_scene1_count_keyboard(lang)),
+        "menu": lambda: (video_profile_studio_menu_text(lang), video_profile_studio_menu_keyboard(lang)),
+        "subject": lambda: (video_profile_scene1_subject_text(lang), video_profile_scene1_subject_keyboard(lang)),
+        "await_subject": lambda: (video_profile_scene1_subject_text(lang), video_profile_scene1_subject_keyboard(lang)),
+        "scene_count": lambda: (video_profile_scene1_count_text(state, lang), video_profile_scene1_count_keyboard(lang)),
         # Old sessions may still persist this step; render the canonical profile
         # screen so users never see the removed duplicate taxonomy menu.
-        "content_type": (video_scene3_profile_text(state), video_scene3_profile_keyboard(state)),
-        "technical_profile": (video_scene3_profile_text(state), video_scene3_profile_keyboard(state)),
-        "suggestion": (video_scene3_suggestion_text(state), video_scene3_suggestion_keyboard()),
-        "requirements": (video_scene3_requirements_text(state), video_scene3_requirements_keyboard(state)),
-        "requirement_detail": (video_scene3_requirement_detail_text(state), video_scene3_requirement_detail_keyboard(state)),
-        "materials": (video_scene3_materials_text(state), video_scene3_materials_keyboard()),
-        "materials_manage": (video_scene3_materials_manage_text(state), video_scene3_materials_manage_keyboard()),
-        "creative_controls": (video_scene3_creative_text(state), video_scene3_creative_keyboard(state)),
-        "creative_detail": (video_scene3_creative_detail_text(state), video_scene3_creative_detail_keyboard(state)),
-        "creative_suggestions": (video_scene3_creative_suggestions_text(state), video_scene3_creative_suggestions_keyboard(state)),
-        "content_addons": (video_scene3_content_addon_text(state), video_scene3_content_addon_keyboard(state)),
-        "content_detail": (video_scene3_content_detail_text(state), video_scene3_content_detail_keyboard(state)),
-        "content_suggestions": (video_scene3_content_suggestions_text(state), video_scene3_content_suggestions_keyboard(state)),
-        "content_position": (video_scene3_content_position_text(state), video_scene3_content_position_keyboard()),
-        "scene_plan": (video_scene3_scene_plan_text(state), video_scene3_scene_plan_keyboard()),
-        "scene_detail": (video_scene3_scene_detail_text(state), video_scene3_scene_detail_keyboard()),
-        "transitions": (video_scene3_transitions_text(state), video_scene3_transitions_keyboard(state)),
-        "transition_picker": (video_scene3_transition_text(state), video_scene3_transition_keyboard(state)),
-        "image_strategy": (video_scene3_image_strategy_text(state), video_scene3_image_strategy_keyboard(state)),
-        "image_prompts": (video_scene3_prompt_text(state, "image"), video_scene3_prompt_keyboard("image", state)),
-        "video_prompts": (video_scene3_prompt_text(state, "video"), video_scene3_prompt_keyboard("video", state)),
-        "full_review": (video_scene3_full_review_text(state), video_scene3_full_review_keyboard()),
-        "post_addons": (video_scene3_post_text(state), video_scene3_post_keyboard(state)),
-        "post_detail": (video_scene3_post_detail_text(state), video_scene3_post_detail_keyboard(state)),
-        "post_position": (video_scene3_post_position_text(state), video_scene3_post_position_keyboard()),
-        "post_volume": (video_scene3_post_volume_text(state), video_scene3_post_volume_keyboard()),
-        "logo_position": (video_scene3_logo_position_text(state), video_scene3_logo_position_keyboard()),
-        "aspect_ratio": (video_scene3_aspect_text(state), video_scene3_aspect_keyboard()),
-        "quality": (video_profile_scene1_quality_text(state, lang), video_scene3_quality_keyboard(lang)),
-        "quality_guide": (video_scene3_quality_guide_text(), video_scene3_quality_guide_keyboard()),
-        "final_report": (video_scene3_final_text(state, safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)), video_scene3_final_keyboard()),
+        "content_type": lambda: (video_scene3_profile_text(state), video_scene3_profile_keyboard(state)),
+        "technical_profile": lambda: (video_scene3_profile_text(state), video_scene3_profile_keyboard(state)),
+        "suggestion": lambda: (video_scene3_suggestion_text(state), video_scene3_suggestion_keyboard()),
+        "requirements": lambda: (video_scene3_requirements_text(state), video_scene3_requirements_keyboard(state)),
+        "requirement_detail": lambda: (video_scene3_requirement_detail_text(state), video_scene3_requirement_detail_keyboard(state)),
+        "materials": lambda: (video_scene3_materials_text(state), video_scene3_materials_keyboard()),
+        "materials_manage": lambda: (video_scene3_materials_manage_text(state), video_scene3_materials_manage_keyboard()),
+        "creative_controls": lambda: (video_scene3_creative_text(state), video_scene3_creative_keyboard(state)),
+        "creative_detail": lambda: (video_scene3_creative_detail_text(state), video_scene3_creative_detail_keyboard(state)),
+        "creative_suggestions": lambda: (video_scene3_creative_suggestions_text(state), video_scene3_creative_suggestions_keyboard(state)),
+        "content_addons": lambda: (video_scene3_content_addon_text(state), video_scene3_content_addon_keyboard(state)),
+        "content_detail": lambda: (video_scene3_content_detail_text(state), video_scene3_content_detail_keyboard(state)),
+        "content_suggestions": lambda: (video_scene3_content_suggestions_text(state), video_scene3_content_suggestions_keyboard(state)),
+        "content_position": lambda: (video_scene3_content_position_text(state), video_scene3_content_position_keyboard()),
+        "scene_plan": lambda: (video_scene3_scene_plan_text(state), video_scene3_scene_plan_keyboard()),
+        "scene_detail": lambda: (video_scene3_scene_detail_text(state), video_scene3_scene_detail_keyboard()),
+        "transitions": lambda: (video_scene3_transitions_text(state), video_scene3_transitions_keyboard(state)),
+        "transition_picker": lambda: (video_scene3_transition_text(state), video_scene3_transition_keyboard(state)),
+        "image_strategy": lambda: (video_scene3_image_strategy_text(state), video_scene3_image_strategy_keyboard(state)),
+        "image_prompts": lambda: (video_scene3_prompt_text(state, "image"), video_scene3_prompt_keyboard("image", state)),
+        "video_prompts": lambda: (video_scene3_prompt_text(state, "video"), video_scene3_prompt_keyboard("video", state)),
+        "full_review": lambda: (video_scene3_full_review_text(state), video_scene3_full_review_keyboard()),
+        "post_addons": lambda: (video_scene3_post_text(state), video_scene3_post_keyboard(state)),
+        "post_detail": lambda: (video_scene3_post_detail_text(state), video_scene3_post_detail_keyboard(state)),
+        "post_position": lambda: (video_scene3_post_position_text(state), video_scene3_post_position_keyboard()),
+        "post_volume": lambda: (video_scene3_post_volume_text(state), video_scene3_post_volume_keyboard()),
+        "logo_position": lambda: (video_scene3_logo_position_text(state), video_scene3_logo_position_keyboard()),
+        "aspect_ratio": lambda: (video_scene3_aspect_text(state), video_scene3_aspect_keyboard()),
+        "quality": lambda: (video_profile_scene1_quality_text(state, lang), video_scene3_quality_keyboard(lang)),
+        "quality_guide": lambda: (video_scene3_quality_guide_text(), video_scene3_quality_guide_keyboard()),
+        "final_report": lambda: (video_scene3_final_text(state, safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)), video_scene3_final_keyboard()),
     }
     if step in pending:
-        text_value, keyboard = pending[step], back_only
+        pending_value = pending[step]
+        text_value = pending_value() if callable(pending_value) else pending_value
+        keyboard = video_scene3_keyboard(video_scene3_nav_rows())
     else:
-        text_value, keyboard = renderers.get(step, renderers["menu"])
+        text_value, keyboard = renderers.get(step, renderers["menu"])()
     if len(str(text_value or "")) > 3500:
         return await safe_edit_or_send_long_html(query, text_value, reply_markup=keyboard)
     return await safe_edit_or_send(query, text_value, parse_mode="HTML", reply_markup=keyboard)
@@ -68425,7 +68426,7 @@ def video_local_manual_options_keyboard(lang: str = "vi") -> InlineKeyboardMarku
         [("✂️ Cắt & chia đoạn", "videoedit|manual_cut"), ("➕ Ghép & sắp xếp", "videoedit|manual_join")],
         [("🎚️ Chỉnh âm thanh", "videoedit|manual_audio"), ("🎥 Hiệu ứng & chuyển động", "videoedit|manual_effects")],
         [("⏩ Đổi tốc độ", "videoedit|speed"), ("🔄 Xoay / lật", "videoedit|manual_rotate_flip")],
-        [("✅ Xem lại", "videoedit|review"), ("🎞 Thông tin video", "videoedit|source_summary")],
+        [("✅ Xem lại", "videoedit|review"), ("🎞 Thông tin video", "videoedit|source_info")],
         [(ui_text(lang, "common.back"), "videoedit|source_summary"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
@@ -68502,7 +68503,7 @@ def video_local_split_options_keyboard(state: dict, lang: str = "vi") -> InlineK
     if (state or {}).get("split_ranges"):
         items.append(("✅ Xem lại", "videoedit|review"))
     else:
-        items.append(("🎞 Thông tin video", "videoedit|source_summary"))
+        items.append(("🎞 Thông tin video", "videoedit|source_info"))
     last_section = str((state or {}).get("last_section") or "")
     back_target = "videoedit|options|manual" if last_section in {"manual", "timeline"} else "videoedit|source_summary"
     items.extend([
@@ -71854,7 +71855,7 @@ def task3d_product_intro_keyboard(
         ],
         "video_ai_real": [
             [("✨ Prompt AI → Video", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video AI", "vproduct|ai_image_menu|video_ai_real")],
-            [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Phân tích video", "menu|hint_video_status")],
+            [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Phân tích video", "videoref|analyze")],
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "script_image_video": [
@@ -82509,7 +82510,7 @@ def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Prompt → AI 视频", "promptvideo|start"),
             ("🖼 图片 → AI 视频", "imagevideo|start"),
             ("🎞 参考视频 → AI 视频", "videoref|start"),
-            ("📊 视频分析", "menu|hint_video_status"),
+            ("📊 视频分析", "videoref|analyze"),
         ]
         back = "🔙 返回视频菜单"
     elif normalize_user_language(lang) != "vi":
@@ -82517,7 +82518,7 @@ def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Prompt → AI Video", "promptvideo|start"),
             ("🖼 Image → AI Video", "imagevideo|start"),
             ("🎞 Reference video → AI Video", "videoref|start"),
-            ("📊 Video analysis", "menu|hint_video_status"),
+            ("📊 Video analysis", "videoref|analyze"),
         ]
         back = "🔙 Back to Video"
     else:
@@ -82525,7 +82526,7 @@ def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Prompt → Video AI", "promptvideo|start"),
             ("🖼 Ảnh → Video AI", "imagevideo|start"),
             ("🎞 Video mẫu → Video AI", "videoref|start"),
-            ("📊 Phân tích video", "menu|hint_video_status"),
+            ("📊 Phân tích video", "videoref|analyze"),
         ]
         back = "🔙 Quay lại Video"
     return video_v6_keyboard(items, lang, back=(back, "menu|main_video"))
@@ -84052,7 +84053,8 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "source_file_name", "source_mime_type", "prompt_kind", "custom_prompt",
             "suggest_offset", "prompt_variant_offset", "motion_offset", "music_offset",
             "style_offset", "selected_suggestion_index", "source_duration",
-            "source_file_size", "source_width", "source_height", "analysis_kind",
+            "source_file_size", "source_width", "source_height", "source_fps",
+            "source_video_codec", "source_has_audio", "analysis_kind",
             "processing", "reference_template", "shot_type", "shot_count",
             "reference_id", "source_url", "source_description", "channel_name", "channel_url",
             "niche", "target_audience", "content_style", "tone", "blocked_topics",
@@ -84981,8 +84983,45 @@ def video_reference_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
+def video_reference_analysis_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📊 <b>Detailed video analysis</b>\n\n"
+            f"Send a video up to {VIDEO_SAMPLE_MAX_SECONDS} seconds / {VIDEO_SAMPLE_MAX_MB} MB. "
+            "TOAN AAS will read the file facts, then help review its opening, subject, action, scene flow, pacing, camera, sound and ending.\n\n"
+            "File facts are shown separately from content confirmed by you. The bot does not invent visual or spoken content it cannot verify. "
+            "This planning step does not call a video provider and does not charge Xu."
+        )
+    return (
+        "📊 <b>Phân tích video chi tiết</b>\n\n"
+        f"Gửi video tối đa {VIDEO_SAMPLE_MAX_SECONDS} giây / {VIDEO_SAMPLE_MAX_MB} MB. "
+        "TOAN AAS sẽ đọc thông tin file, sau đó cùng anh/chị xem phần mở đầu, chủ thể, hành động, mạch cảnh, nhịp dựng, góc máy, âm thanh và cách kết thúc.\n\n"
+        "Thông tin đọc trực tiếp từ file được tách riêng với nội dung do anh/chị xác nhận. "
+        "Hệ thống không tự nhận đã thấy hoặc nghe được chi tiết chưa kiểm chứng. Bước này chưa gọi nguồn tạo video và chưa trừ Xu."
+    )
+
+def video_reference_analysis_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Gửi video để phân tích" if is_vi else "📎 Send video for analysis", callback_data="videoref|await_video")],
+        [
+            InlineKeyboardButton("⬅️ Video AI chân thật" if is_vi else "⬅️ Real AI Video", callback_data="menu|video_ai_true"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
 def video_reference_direction_text(state: dict | None = None, lang: str = "vi") -> str:
-    duration = _safe_int((state or {}).get("source_duration"), 0)
+    state = state or {}
+    duration = _safe_int(state.get("source_duration"), 0)
+    width = _safe_int(state.get("source_width"), 0)
+    height = _safe_int(state.get("source_height"), 0)
+    size_mb = max(0.0, _safe_int(state.get("source_file_size"), 0) / (1024 * 1024))
+    fps = str(state.get("source_fps") or "").strip()
+    codec = str(state.get("source_video_codec") or "").strip()
+    audio_code = str(state.get("source_has_audio") or "unknown").strip().lower()
+    audio_vi = "Có" if audio_code == "yes" else ("Không" if audio_code == "no" else "Chưa đọc được")
+    audio_en = "Yes" if audio_code == "yes" else ("No" if audio_code == "no" else "Not available")
+    detailed = str(state.get("input_type") or "") == "detailed_analysis"
     duration_line = f"\nVideo: <b>{duration}s</b>" if duration else ""
     long_note_en = ""
     long_note_vi = ""
@@ -84990,10 +85029,34 @@ def video_reference_direction_text(state: dict | None = None, lang: str = "vi") 
         long_note_en = f"\n\nThis is a long reference sample. TOAN AAS will analyze it as a plan; provider rendering remains limited to segments of at most {VIDEO_PROVIDER_RENDER_MAX_SECONDS} seconds."
         long_note_vi = f"\n\nĐây là video mẫu dài. TOAN AAS chỉ phân tích thành kế hoạch; nếu render provider thì phải chia từng đoạn tối đa {VIDEO_PROVIDER_RENDER_MAX_SECONDS} giây."
     if normalize_user_language(lang) != "vi":
+        if detailed:
+            return (
+                "📊 <b>Video received for detailed analysis</b>\n\n"
+                f"• Duration: <b>{duration or '-'}s</b>\n"
+                f"• Frame: <b>{width or '-'} × {height or '-'}</b>\n"
+                f"• FPS / codec: <b>{fps or '-'} / {codec or '-'}</b>\n"
+                f"• Audio: <b>{audio_en}</b>\n"
+                f"• File size: <b>{size_mb:.1f} MB</b>\n\n"
+                "Next, choose the content direction. The report will cover the opening, subject/action, scene flow, pacing, camera, sound and ending, "
+                "while keeping file facts separate from content you confirm."
+                f"{long_note_en}\n\nPlanning is free; no video provider call and no Xu charged."
+            )
         return (
             "🎞 <b>Reference video received</b>\n\n"
             "How should TOAN AAS analyze and adapt its structure?"
             f"{duration_line}{long_note_en}\n\nPlanning is free; no provider call and no Xu charged."
+        )
+    if detailed:
+        return (
+            "📊 <b>Đã nhận video để phân tích chi tiết</b>\n\n"
+            f"• Thời lượng: <b>{duration or '-'} giây</b>\n"
+            f"• Khung hình: <b>{width or '-'} × {height or '-'}</b>\n"
+            f"• FPS / định dạng hình: <b>{fps or '-'} / {codec or '-'}</b>\n"
+            f"• Âm thanh: <b>{audio_vi}</b>\n"
+            f"• Dung lượng: <b>{size_mb:.1f} MB</b>\n\n"
+            "Bước tiếp theo, hãy chọn hướng nội dung. Báo cáo sẽ đi theo phần mở đầu, chủ thể/hành động, mạch cảnh, nhịp dựng, góc máy, âm thanh và cách kết thúc; "
+            "thông tin file luôn tách riêng với nội dung do anh/chị xác nhận."
+            f"{long_note_vi}\n\nBước này chưa gọi nguồn tạo video và chưa trừ Xu."
         )
     return (
         "🎞 <b>Đã nhận video mẫu</b>\n\n"
@@ -85074,6 +85137,7 @@ def video_reference_waiting_text(lang: str = "vi") -> str:
 
 def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
+    detailed = str(state.get("input_type") or "") == "detailed_analysis"
     topic = _short_pending_text(state.get("selected_topic"), 180) or ("new topic" if normalize_user_language(lang) != "vi" else "chủ đề mới")
     direction = video_reference_direction_label(state.get("analysis_kind"), lang)
     template = rotating_suggestions(
@@ -85106,8 +85170,21 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
     render_prompt = str(render_plan.get("prompt") or "")
     if normalize_user_language(lang) != "vi":
         lines = [
-            "🎞 <b>New video plan from a reference video</b>",
+            "📊 <b>Detailed analysis and video plan</b>" if detailed else "🎞 <b>New video plan from a reference video</b>",
             "",
+        ]
+        if detailed:
+            lines.extend([
+                "<b>File facts read directly</b>",
+                f"Duration: {html.escape(str(state.get('source_duration') or '-'))}s · frame: {html.escape(str(state.get('source_width') or '-'))} × {html.escape(str(state.get('source_height') or '-'))}",
+                f"FPS / codec / audio: {html.escape(str(state.get('source_fps') or '-'))} / {html.escape(str(state.get('source_video_codec') or '-'))} / {html.escape(str(state.get('source_has_audio') or 'unknown'))}",
+                "",
+                "<b>Content confirmed by you</b>",
+                f"Direction: {html.escape(direction)} · topic: {html.escape(topic)}",
+                "The content plan below follows these confirmed details; it does not claim unverified visual or spoken recognition.",
+                "",
+            ])
+        lines.extend([
             "<b>1. Reference summary</b>",
             f"Structure template: {html.escape(template_text)}. Study pacing and camera language only; do not copy protected identity or branding.",
             "",
@@ -85117,7 +85194,7 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
             "Lighting/color: consistent, readable subject, no copied logo or face.",
             "",
             f"<b>3. Proposed scenes for {html.escape(topic)}</b>",
-        ]
+        ])
         for idx, (duration, content) in enumerate(scene_specs, 1):
             motion = motions[idx - 1] if idx <= len(motions) else "stable camera motion"
             lines.extend([
@@ -85143,8 +85220,27 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
         ])
         return "\n".join(lines)
     lines = [
-        "🎞 <b>Kế hoạch video mới từ video mẫu</b>",
+        "📊 <b>Phân tích chi tiết và kế hoạch video</b>" if detailed else "🎞 <b>Kế hoạch video mới từ video mẫu</b>",
         "",
+    ]
+    if detailed:
+        audio_code = str(state.get("source_has_audio") or "unknown").lower()
+        audio_text = "có" if audio_code == "yes" else ("không" if audio_code == "no" else "chưa đọc được")
+        lines.extend([
+            "<b>Thông tin đọc trực tiếp từ file</b>",
+            f"• Thời lượng: {html.escape(str(state.get('source_duration') or '-'))} giây",
+            f"• Khung hình: {html.escape(str(state.get('source_width') or '-'))} × {html.escape(str(state.get('source_height') or '-'))}",
+            f"• FPS / định dạng hình: {html.escape(str(state.get('source_fps') or '-'))} / {html.escape(str(state.get('source_video_codec') or '-'))}",
+            f"• Âm thanh: {audio_text}",
+            "",
+            "<b>Nội dung đã được anh/chị xác nhận</b>",
+            f"• Hướng: {html.escape(direction)}",
+            f"• Chủ đề: {html.escape(topic)}",
+            "• Báo cáo bên dưới bám vào phần mở đầu, chủ thể/hành động, mạch cảnh, nhịp dựng, camera, âm thanh và đoạn kết.",
+            "• Hệ thống không tự nhận đã thấy hoặc nghe được chi tiết chưa kiểm chứng.",
+            "",
+        ])
+    lines.extend([
         "<b>1. Tóm tắt video mẫu</b>",
         f"Mẫu cấu trúc: {html.escape(template_text)}. Chỉ học nhịp, bố cục và ngôn ngữ camera; không sao chép nhận diện/bản quyền.",
         "",
@@ -85154,7 +85250,7 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
         "• Ánh sáng/màu: nhất quán, chủ thể rõ, không sao chép logo/khuôn mặt.",
         "",
         f"<b>3. Cấu trúc cảnh cho {html.escape(topic)}</b>",
-    ]
+    ])
     for idx, (duration, content) in enumerate(scene_specs, 1):
         motion = motions[idx - 1] if idx <= len(motions) else "chuyển động ổn định"
         lines.extend([
@@ -85324,12 +85420,14 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
     if not info:
         return False
     lang = get_user_language(uid) or "vi"
+    detailed = str(pending.get("input_type") or "") == "detailed_analysis"
+    retry_keyboard = video_reference_analysis_start_keyboard(lang) if detailed else video_reference_start_keyboard(lang)
     if not VIDEO_ANALYZE_ENABLED:
         await update.message.reply_text(
             "🎞 Công cụ phân tích video mẫu đang bảo trì. TOAN AAS chưa gọi provider và chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
             else "🎞 Reference-video analysis is under maintenance. No provider call and no Xu charge.",
-            reply_markup=video_reference_start_keyboard(lang),
+            reply_markup=retry_keyboard,
         )
         return True
     if info.get("duration") and int(info["duration"]) > int(VIDEO_SAMPLE_MAX_SECONDS or 600):
@@ -85337,7 +85435,7 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
             f"⚠️ Video mẫu vượt giới hạn {int(VIDEO_SAMPLE_MAX_SECONDS or 600)} giây. Vui lòng gửi video ngắn hơn. Bot chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
             else f"⚠️ The reference video exceeds {int(VIDEO_SAMPLE_MAX_SECONDS or 600)} seconds. Send a shorter video. No Xu charged.",
-            reply_markup=video_reference_start_keyboard(lang),
+            reply_markup=retry_keyboard,
         )
         return True
     max_bytes = int(VIDEO_SAMPLE_MAX_MB or 100) * 1024 * 1024
@@ -85346,7 +85444,7 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
             f"⚠️ Video mẫu vượt giới hạn {int(VIDEO_SAMPLE_MAX_MB or 100)} MB. Vui lòng gửi file nhỏ hơn. Bot chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
             else f"⚠️ The reference video exceeds {int(VIDEO_SAMPLE_MAX_MB or 100)} MB. Send a smaller file. No Xu charged.",
-            reply_markup=video_reference_start_keyboard(lang),
+            reply_markup=retry_keyboard,
         )
         return True
     remember_last_media(update)
@@ -85375,6 +85473,19 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
             safety_notes=REFERENCE_SAFETY_NOTE,
             status="draft",
         )
+    inspection = {}
+    if detailed and _safe_int(info.get("file_size"), 0) <= video_local_validation.MAX_UPLOAD_BYTES:
+        try:
+            inspection = await inspect_video_editor_source(
+                context,
+                {
+                    "source_file_id": info.get("file_id"),
+                    "source_file_name": info.get("file_name"),
+                    "source_file_size": info.get("file_size"),
+                },
+            )
+        except Exception:
+            logger.warning("detailed reference-video local inspection failed", exc_info=True)
     set_developing_video_pending(
         uid,
         "videoref",
@@ -85386,6 +85497,9 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
         source_file_size=info.get("file_size"),
         source_width=info.get("width"),
         source_height=info.get("height"),
+        source_fps=inspection.get("fps") if inspection.get("ok") else "",
+        source_video_codec=inspection.get("video_codec") if inspection.get("ok") else "",
+        source_has_audio="yes" if inspection.get("ok") and inspection.get("has_audio") else ("no" if inspection.get("ok") else "unknown"),
         reference_id=ref_id,
     )
     state = get_developing_video_pending(uid) or {}
@@ -89459,6 +89573,16 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
 
+    if action == "analyze":
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "videoref", "await_video", input_type="detailed_analysis")
+        return await safe_edit_or_send(
+            query,
+            video_reference_analysis_start_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_reference_analysis_start_keyboard(lang),
+        )
+
     if action == "hub":
         clear_developing_video_pending(uid)
         return await safe_edit_or_send(query, video_reference_hub_text(lang), parse_mode="HTML", reply_markup=video_reference_hub_keyboard(lang))
@@ -89570,9 +89694,21 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
         return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
 
     if action in {"start", "await_video", "back_upload"}:
+        current = get_developing_video_pending(uid) or {}
+        detailed = str(current.get("input_type") or "") == "detailed_analysis"
         clear_developing_video_pending(uid)
-        set_developing_video_pending(uid, "videoref", "await_video")
-        return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
+        set_developing_video_pending(
+            uid,
+            "videoref",
+            "await_video",
+            input_type="detailed_analysis" if detailed else "reference_video",
+        )
+        return await safe_edit_or_send(
+            query,
+            video_reference_analysis_start_text(lang) if detailed else video_reference_start_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_reference_analysis_start_keyboard(lang) if detailed else video_reference_start_keyboard(lang),
+        )
 
     pending = get_developing_video_pending(uid)
     plan = get_latest_developing_video_plan(uid, "videoref")
@@ -201282,7 +201418,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     if action == "manual_done":
         current = update_video_editor_pending(uid, "options", selected_tool="manual", last_section="manual")
         return await safe_edit_or_send(query, video_local_manual_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang))
-    if action == "source_summary":
+    if action in {"source_summary", "source_info"}:
         update_video_editor_pending(uid, "source_summary")
         return await safe_edit_or_send(
             query,
