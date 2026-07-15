@@ -536,7 +536,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         f"vproduct|microflow_choose|{index}" for index in range(5)
     ]
     assert [[button.text for button in row] for row in microflow_markup.inline_keyboard[1:3]] == [
-        ["🔄 Gợi ý lại", "✍️ Nhập chủ đề riêng"],
+        ["🔄 Gợi ý lại", "✍️ Sửa nội dung"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]
 
@@ -834,14 +834,14 @@ def test_public_product_microflows_use_clean_vietnamese_labels():
     intro = _function_source("task3d_product_intro_keyboard")
     microflow_text = _function_source("video_microflow_text")
     microflow_keyboard = _function_source("video_microflow_keyboard")
-    assert "Câu lệnh AI → Video" in intro
+    assert "Prompt AI → Video" in intro
     assert "Gửi bảng phân cảnh sẵn" in intro
-    assert "Gửi câu lệnh sẵn" in microflow_keyboard
-    assert "Gợi ý câu lệnh" in microflow_keyboard
+    assert "Gửi prompt có sẵn" in microflow_keyboard
+    assert "Gợi ý prompt" in microflow_keyboard
     assert "Prompt → Video AI" not in intro
     assert "Gửi prompt sẵn" not in microflow_keyboard
     assert "awaiting_prompt_text" in microflow_text
-    assert "Gửi câu lệnh video có sẵn" in microflow_text
+    assert "Gửi prompt video có sẵn" in microflow_text
 
 
 def test_data_contract_contains_b14_and_scene_first_fields():
