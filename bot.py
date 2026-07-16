@@ -191924,8 +191924,10 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["outline_color"] = "#000000"
         style["outline"] = max(4, int(style.get("outline") or 0))
         style["shadow"] = max(1, int(style.get("shadow") or 0))
-        style["background"] = "none"
-        style["boxed_background"] = False
+        style["background"] = "box"
+        style["boxed_background"] = True
+        style["uppercase_text"] = True
+        style["bold_text"] = True
         style["cover_original"] = False
         style["hardsub_cover_enabled"] = False
         raise_px = max(2, int(round(8.0 * float(style["play_res_y"]) / 1080.0)))
@@ -192157,9 +192159,12 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     for block in blocks:
         block_start = float(block.get("start") or 0)
         block_end = max(block_start + 0.2, float(block.get("end") or 0))
+        block_text = str(block.get("text") or "")
+        if style.get("uppercase_text"):
+            block_text = block_text.upper()
         if style.get("m4live1_style_renderer_only") or style.get("m4live2_subtitle_bottom_lock"):
             escaped = subdub_ass_wrap_text(
-                str(block.get("text") or ""),
+                block_text,
                 style,
                 int(style.get("max_lines") or 2),
             )
@@ -192178,7 +192183,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
             last_dialogue_end = max(last_dialogue_end, block_end)
             continue
         chunks = subdub_ass_text_chunks(
-            str(block.get("text") or ""),
+            block_text,
             style,
             int(style.get("max_lines") or 2),
         )
