@@ -263,7 +263,7 @@ def test_live5_combo_audio_is_fitted_per_cue_without_global_drift(monkeypatch):
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(bot, "run_ffmpeg_command", fake_ffmpeg)
     chunks = [
-        {"start": 0.5, "end": 2.25, "audio_duration": 3.5, "audio_bytes": b"a"},
+        {"start": 0.5, "end": 2.25, "audio_duration": 1.9, "audio_bytes": b"a"},
         {"start": 3.0, "end": 5.75, "audio_duration": 1.0, "audio_bytes": b"b"},
     ]
 
@@ -320,9 +320,10 @@ def test_live5_renderer_preserves_source_duration_and_does_not_use_shortest(monk
     assert commands[-1][commands[-1].index("-t") + 1] == "26.000"
 
 
-def test_live5_dub_only_does_not_depend_on_canonical_ocr_and_keeps_baseline_seams():
-    assert bot.subdub_mode_uses_canonical_cues(bot.VIDEO_SUBTITLE_MODE_DUB) is False
+def test_live8_all_four_lanes_use_one_canonical_cue_contract_and_keep_provider_core():
+    assert bot.subdub_mode_uses_canonical_cues(bot.VIDEO_SUBTITLE_MODE_CREATE) is True
     assert bot.subdub_mode_uses_canonical_cues(bot.VIDEO_SUBTITLE_MODE_TRANSLATE) is True
+    assert bot.subdub_mode_uses_canonical_cues(bot.VIDEO_SUBTITLE_MODE_DUB) is True
     assert bot.subdub_mode_uses_canonical_cues(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB) is True
 
     baseline = subprocess.run(
@@ -339,8 +340,6 @@ def test_live5_dub_only_does_not_depend_on_canonical_ocr_and_keeps_baseline_seam
         "resolve_video_dub_tts_voice",
         "resolve_video_dub_tts_voice_id",
         "video_dubbing_resolve_source_script",
-        "synthesize_dub_segment_chunks",
-        "build_dub_timeline_audio",
         "send_public_subtitle_dub_final_outputs",
     )
     for name in locked_functions:
@@ -354,5 +353,8 @@ def test_live5_final_video_and_telegram_message_are_required_before_success():
     assert "partial_result and (audio_bytes or srt_bytes or subtitle_items)" not in source
     assert "FINAL_VIDEO_DELIVERY_NOT_CONFIRMED" in source
     assert "delivered_video_message_id" in source
-    assert "await _progress(\"delivered\")" in source
-    assert source.index("FINAL_VIDEO_DELIVERY_NOT_CONFIRMED") < source.index("await _progress(\"delivered\")")
+    # The core may only return Telegram delivery evidence. One shared outer
+    # terminal function owns the 100% panel and exactly-once receipt.
+    assert "await _progress(\"delivered\")" not in source
+    assert "delivery_confirmed" in source
+    assert "mark_subtitle_dub_pipeline_output_sent" in source
