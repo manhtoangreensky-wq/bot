@@ -49,7 +49,7 @@ def test_manual_editor_options_have_unique_callbacks_and_both_summary_routes_are
     callbacks = [button.callback_data for row in markup.inline_keyboard for button in row]
     assert len(callbacks) == len(set(callbacks))
     assert "videoedit|source_info" in callbacks
-    assert "videoedit|source_summary" in callbacks
+    assert "videoedit|source_summary" not in callbacks
 
     handler = _function_source("handle_video_editor_callback")
     assert 'if action in {"source_summary", "source_info"}:' in handler

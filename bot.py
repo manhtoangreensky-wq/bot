@@ -63673,6 +63673,85 @@ async def safe_mode_callback_guard(update: Update, context: ContextTypes.DEFAULT
             pass
         raise ApplicationHandlerStop
 
+
+VIDEO_PUBLIC_CALLBACK_DEDUPE_TTL_SECONDS = 10 * 60
+VIDEO_PUBLIC_CALLBACK_PREFIXES = (
+    "vproduct|", "vprofile|", "framevideo|", "vpromptlib|", "videoidea|",
+    "longvideo|", "vdownload|", "videoedit|", "trendg|", "tvflow|",
+    "motion|", "adconcept|", "promptvideo|", "imagevideo|", "videoref|",
+    "videodub|", "marketing|", "selfscene|", "storypack|", "videa|",
+    "video_upload|", "storyboard|", "vfinal|", "videoaddon|", "archprofile|",
+    "video|status|",
+)
+_VIDEO_PUBLIC_CALLBACK_CLAIMS: dict[str, float] = {}
+_VIDEO_PUBLIC_MEDIA_CLAIMS: dict[str, float] = {}
+
+
+def _claim_video_public_event(cache: dict[str, float], event_id: str, now_ts: float | None = None) -> bool:
+    """Atomically claim a Telegram event and keep the bounded cache short-lived."""
+
+    clean_id = str(event_id or "").strip()
+    if not clean_id:
+        return True
+    now_value = float(now_ts if now_ts is not None else time.time())
+    cutoff = now_value - VIDEO_PUBLIC_CALLBACK_DEDUPE_TTL_SECONDS
+    if len(cache) > 4096:
+        for key, claimed_at in list(cache.items()):
+            if float(claimed_at or 0) < cutoff:
+                cache.pop(key, None)
+        overflow = len(cache) - 4096
+        if overflow > 0:
+            for key in list(cache)[:overflow]:
+                cache.pop(key, None)
+    claimed_at = float(cache.get(clean_id) or 0)
+    if claimed_at >= cutoff:
+        return False
+    cache[clean_id] = now_value
+    return True
+
+
+def _is_video_public_callback(data: str, context) -> bool:
+    callback = str(data or "")
+    if callback in {"menu|main_video", "menu|guide_video_ai"}:
+        return True
+    if callback.startswith(VIDEO_PUBLIC_CALLBACK_PREFIXES):
+        return True
+    if callback.startswith("create_media|qi_") or callback == "create_media|cancel":
+        user_data = getattr(context, "user_data", None)
+        return bool(isinstance(user_data, dict) and user_data.get("video_scene3_image_handoff_active"))
+    return False
+
+
+async def video_public_callback_dedupe_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not _is_video_public_callback(str(query.data or ""), context):
+        return
+    if _claim_video_public_event(_VIDEO_PUBLIC_CALLBACK_CLAIMS, str(getattr(query, "id", "") or "")):
+        return
+    try:
+        await query.answer("TOAN AAS đã nhận thao tác này.")
+    except Exception:
+        pass
+    raise ApplicationHandlerStop
+
+
+async def video_public_media_dedupe_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = getattr(update, "message", None)
+    if not message:
+        return
+    chat_id = safe_int(getattr(getattr(message, "chat", None), "id", 0), 0)
+    message_id = safe_int(getattr(message, "message_id", 0), 0)
+    event_id = f"{chat_id}:{message_id}" if chat_id and message_id else ""
+    if event_id and event_id in _VIDEO_PUBLIC_MEDIA_CLAIMS:
+        if not _claim_video_public_event(_VIDEO_PUBLIC_MEDIA_CLAIMS, event_id):
+            raise ApplicationHandlerStop
+    user_data = getattr(context, "user_data", None)
+    raw_state = dict(user_data.get(VIDEO_PROFILE_STUDIO_SESSION_KEY) or {}) if isinstance(user_data, dict) else {}
+    if str(raw_state.get("step") or "") not in {"await_material_upload", "await_post_asset_upload"}:
+        return
+    if not _claim_video_public_event(_VIDEO_PUBLIC_MEDIA_CLAIMS, event_id):
+        raise ApplicationHandlerStop
+
 def admin_internal_command(handler):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_admin_user(update.effective_user.id):
@@ -66028,7 +66107,7 @@ def video_scene3_image_assets_keyboard(state: dict) -> InlineKeyboardMarkup:
             [("👁 Xem/xóa/thay ảnh", "vprofile|material_view"), ("✅ Xong phần ảnh", "vprofile|image_assets_done")],
         ])
     else:
-        rows.append([("💰 Xem báo giá ảnh", "vprofile|image_quote"), ("⬅️ Chọn nguồn khác", "vprofile|back")])
+        rows.append([("💰 Xem báo giá ảnh", "vprofile|image_quote")])
     rows.append([("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
@@ -68921,10 +69000,16 @@ def video_local_source_summary_text(state: dict, lang: str = "vi") -> str:
 def video_local_source_summary_keyboard(tool: str, lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     entry_context = str((state or {}).get("entry_context") or "")
     upload_target = "timeline" if entry_context == "timeline" else tool
-    parent = "timeline" if entry_context == "timeline" else "options|manual"
+    previous_step = str((state or {}).get("step") or "")
+    if entry_context == "timeline":
+        back_target = "videoedit|manual_join"
+    elif previous_step == "manual_cut":
+        back_target = "videoedit|manual_cut"
+    else:
+        back_target = "videoedit|hub"
     return video_scene3_keyboard([
         [("➡️ Chọn thao tác", f"videoedit|options|{tool}"), ("📎 Gửi video khác", f"videoedit|upload|{upload_target}")],
-        [(ui_text(lang, "common.back"), f"videoedit|{parent}"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), back_target), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -69957,25 +70042,52 @@ def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
     return str(route.get("label_vi") or tool_id)
 
 
+VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
+    ("vproduct|b14_confirm", "handle_product_video_public_confirm_callback"),
+    ("vproduct|", "handle_video_product_callback"),
+    ("vpromptlib|", "handle_video_prompt_library_callback"),
+    ("archprofile|", "handle_architecture_profile_callback"),
+    ("vprofile|", "handle_video_profile_studio_callback"),
+    ("trendg|", "handle_trend_guided_callback"),
+    ("tvflow|", "handle_trend_video_flow_callback"),
+    ("motion|", "handle_creative_motion_callback"),
+    ("adconcept|", "handle_cinematic_ad_callback"),
+    ("promptvideo|", "handle_prompt_video_callback"),
+    ("imagevideo|", "handle_image_video_callback"),
+    ("videoref|", "handle_video_reference_callback"),
+    ("vdownload|", "handle_video_downloader_callback"),
+    ("videodub|", "handle_video_dubbing_callback"),
+    ("marketing|", "handle_marketing_callback"),
+    ("selfscene|", "handle_self_scene_ai_callback"),
+    ("longvideo|", "handle_long_video_callback"),
+    ("storypack|", "handle_storyboard_pack_callback"),
+    ("videa|", "handle_video_idea_dynamic_callback"),
+    ("videoidea|", "handle_video_idea_callback"),
+    ("video_upload|", "handle_video_upload_callback"),
+    ("videoedit|", "handle_video_editor_callback"),
+    ("storyboard|", "handle_storyboard_callback"),
+    ("vfinal|", "handle_video_finalization_callback"),
+    ("videoaddon|", "handle_video_addon_callback"),
+    ("create_media|", "handle_create_media_callback"),
+    ("framevideo|", "handle_frame_video_callback"),
+    ("video|status|", "handle_public_video_status_callback"),
+    ("shopai|", "handle_shopaikey_public_callback"),
+    ("shopai_video_job|", "handle_shopaikey_video_job_callback"),
+    ("pricing|", "handle_pricing_callback"),
+    ("viadm|", "handle_video_idea_admin_callback"),
+    ("menu|", "handle_menu_callback"),
+)
+
+
 def video_route_expected_handler(callback: str) -> str:
-    if str(callback or "") == "menu|guide_video_ai":
-        return "handle_menu_callback"
-    if str(callback or "").startswith("vproduct|"):
-        return "handle_video_product_callback"
-    if str(callback or "").startswith("vpromptlib|"):
-        return "handle_video_prompt_library_callback"
-    if str(callback or "").startswith("vdownload|"):
-        return "handle_video_downloader_callback"
-    if str(callback or "").startswith("vprofile|"):
-        return "handle_video_profile_studio_callback"
-    if str(callback or "").startswith("archprofile|"):
-        return "handle_architecture_profile_callback"
-    if str(callback or "").startswith("videoedit|"):
-        return "handle_video_editor_callback"
-    if str(callback or "").startswith("longvideo|"):
-        return "handle_long_video_callback"
-    if str(callback or "").startswith("videoidea|"):
-        return "handle_video_idea_callback"
+    callback_value = str(callback or "")
+    if callback_value == "vproduct|b14_confirm":
+        return "handle_product_video_public_confirm_callback"
+    if callback_value.startswith("vproduct|b14_confirm"):
+        return ""
+    for prefix, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES[1:]:
+        if callback_value.startswith(prefix):
+            return owner
     return ""
 
 
@@ -70511,7 +70623,6 @@ def video_semantics_audit_payload() -> dict:
 
 
 def video_callback_audit_payload() -> dict:
-    handled_prefixes = ("vproduct|", "framevideo|", "menu|", "vpromptlib|", "videoidea|", "longvideo|", "vdownload|", "vprofile|", "archprofile|", "videoedit|")
     rows = []
     for tool_id in VIDEO_PUBLIC_ROUTE_MATRIX:
         if tool_id in {"prompt_library", "video_downloader"}:
@@ -70525,10 +70636,12 @@ def video_callback_audit_payload() -> dict:
             for button in row
             if button.callback_data
         ]
-        missing = [callback for callback in callbacks if not str(callback or "").startswith(handled_prefixes)]
+        owners = {callback: video_route_expected_handler(callback) for callback in callbacks}
+        missing = [callback for callback, owner in owners.items() if not owner]
         rows.append({
             "product_id": product_id,
             "callbacks": callbacks,
+            "owners": owners,
             "missing": missing,
             "ok": not missing,
         })
@@ -82535,9 +82648,19 @@ async def handle_video_scene3_pending_media(update: Update, context: ContextType
     if not update.message or not update.effective_user:
         return False
     state = video_profile_studio_state(context)
+    message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+    processed_message_ids = [
+        safe_int(item, 0) for item in (state.get("processed_media_message_ids") or [])
+        if safe_int(item, 0) > 0
+    ][-80:]
+    if message_id and message_id in processed_message_ids:
+        return True
     step = str(state.get("step") or "")
     if step not in {"await_material_upload", "await_post_asset_upload"}:
         return False
+    if message_id:
+        state["processed_media_message_ids"] = (processed_message_ids + [message_id])[-80:]
+        state = save_video_profile_studio_state(context, state)
     post_logo_upload = step == "await_post_asset_upload"
     target = "logo_image" if post_logo_upload else video_scene3_flow.normalize_material_type(str(state.get("input_target") or ""))
     allowed_targets = {
@@ -111857,6 +111980,10 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
     package_used = action == "package"
     package_item = {}
     package_use_result = {}
+    scene3_handoff = str(pending.get("origin_flow") or "") == "video_scene3"
+    scene3_return_callback = str(pending.get("return_to") or "vprofile|image_ai_return") if scene3_handoff else ""
+    scene3_return_label = str(pending.get("return_label") or "⬅️ Nguồn hình ảnh") if scene3_handoff else ""
+    scene3_return_state = None
     final_preview_cost = int(shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image") or base_cost)
     if package_used:
         package_item = active_package_item_for_user(uid, package_item_type)
@@ -111877,6 +112004,8 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
         )
         return await edit_insufficient_credits(query, int(balance_before or 0), final_preview_cost, uid)
 
+    if str(pending.get("source") or "") == "quick_image_v6":
+        clear_quick_image_flow(uid)
     job_id = create_shopaikey_job(
         uid,
         query.message.chat_id,
@@ -111942,7 +112071,17 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
     output_file_id = ""
     if status == "PASS" and shopaikey_image_result_payload_looks_valid(image_url, b64_json):
         update_shopaikey_job(job_id=job_id, status="DELIVERING", result_url=image_url, model=result.get("model") or model, attempts=1)
-        success_markup = trend_workflow_image_success_keyboard(job_id, scene_index, lang) if (workflow_id or trend_output_id) else public_image_success_keyboard(job_id, image_tier, lang)
+        success_markup = (
+            trend_workflow_image_success_keyboard(job_id, scene_index, lang)
+            if (workflow_id or trend_output_id)
+            else public_image_success_keyboard(
+                job_id,
+                image_tier,
+                lang,
+                return_callback=scene3_return_callback,
+                return_label=scene3_return_label,
+            )
+        )
         success_caption = ui_text(
             lang,
             "image.success",
@@ -111962,6 +112101,17 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
         )
         if output_file_id:
             update_shopaikey_job(job_id=job_id, output_file_id=output_file_id)
+        if output_sent and scene3_handoff:
+            scene3_return_state = video_scene3_record_generated_image(
+                context,
+                uid,
+                pending,
+                job_id=job_id,
+                output_file_id=output_file_id,
+                image_url=image_url,
+                prompt=prompt,
+                delivered=True,
+            )
         if output_sent and image_url and (workflow_id or trend_output_id):
             update_trend_workflow_generated_image(
                 output_id=trend_output_id,
@@ -112025,6 +112175,20 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
         )
         if getattr(context, "chat_data", None) is not None:
             context.chat_data["shopaikey_public_image_error_notified_at"] = time.time()
+        if scene3_handoff:
+            scene3_return_state = video_scene3_record_generated_image(
+                context,
+                uid,
+                pending,
+                job_id=job_id,
+                prompt=prompt,
+                delivered=False,
+            )
+            return await safe_edit_or_send(
+                query,
+                public_image_provider_fail_message(0, False, lang),
+                reply_markup=video_scene3_image_source_keyboard(scene3_return_state or {}),
+            )
         return await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=public_image_provider_fail_message(0, False, lang),
@@ -112094,6 +112258,16 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
                 int(credits_now or 0),
                 f"shopaikey_image{tier_reason}; required={int(charge.get('final_cost') or base_cost)}",
             )
+            if scene3_return_state:
+                return await safe_edit_or_send(
+                    query,
+                    (
+                        "✅ Ảnh đã gửi và đã được đưa về đúng phiên Video. Số dư vừa thay đổi nên TOAN AAS chưa trừ Xu.\n\n"
+                        + video_scene3_image_assets_text(scene3_return_state)
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=video_scene3_image_assets_keyboard(scene3_return_state),
+                )
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text="✅ Ảnh đã gửi thành công. Số dư vừa thay đổi nên TOAN AAS chưa trừ Xu; vui lòng kiểm tra số dư trước khi tạo tiếp.",
@@ -112151,6 +112325,17 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
         f"shopaikey_image_success; tier={image_tier}; delivered_before_charge=true; charged={deducted}",
     )
     credits_after, _, _ = get_user(uid)
+    if scene3_return_state:
+        return await safe_edit_or_send(
+            query,
+            (
+                "✅ Ảnh hợp lệ đã được gửi và đưa về đúng phiên Video.\n"
+                f"• Số dư còn lại: <b>{xu_number(int(credits_after or 0))} Xu</b>\n\n"
+                + video_scene3_image_assets_text(scene3_return_state)
+            ),
+            parse_mode="HTML",
+            reply_markup=video_scene3_image_assets_keyboard(scene3_return_state),
+        )
     return await context.bot.send_message(chat_id=query.message.chat_id, text=ui_text(lang, "account.balance_left", credits=int(credits_after or 0)))
 
 async def handle_shopaikey_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data_override: str = ""):
@@ -112315,8 +112500,6 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 reply_markup=public_video_active_job_keyboard(active_public_job, lang),
             )
         return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
-    if str(pending.get("source") or "") == "quick_image_v6":
-        clear_quick_image_flow(uid)
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
     if job_type == "video":
@@ -144675,7 +144858,7 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
         if key in {
             "prompt", "prompt_source", "selected_topic", "negative_prompt", "original_request",
             "image_purpose", "purpose_label", "style", "suggested_ratio", "text_logo_caution",
-            "logo_watermark_text", "ratio_back_target",
+            "logo_watermark_text", "ratio_back_target", "return_to", "return_label", "source_flow",
         }:
             limit = 300 if key == "logo_watermark_text" else 1400
             payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:limit]
@@ -144701,6 +144884,102 @@ def get_quick_image_flow(user_id) -> dict | None:
         USER_PENDING.pop(key, None)
         return None
     return pending
+
+
+def quick_image_context_return_callback(state: dict | None = None) -> str:
+    state = dict(state or {})
+    if str(state.get("source_flow") or "") == "video_scene3":
+        return str(state.get("return_to") or "vprofile|image_ai_return")
+    return "menu|main_image"
+
+
+def quick_image_context_return_label(state: dict | None = None, lang: str = "vi") -> str:
+    state = dict(state or {})
+    if str(state.get("source_flow") or "") == "video_scene3":
+        return str(state.get("return_label") or ("⬅️ Nguồn hình ảnh" if normalize_user_language(lang) == "vi" else "⬅️ Image source"))
+    return "⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back"
+
+
+def quick_image_video_scene3_confirmation_fields(state: dict | None = None) -> dict:
+    state = dict(state or {})
+    if str(state.get("source_flow") or "") != "video_scene3":
+        return {}
+    return {
+        "origin_flow": "video_scene3",
+        "return_to": str(state.get("return_to") or "vprofile|image_ai_return")[:120],
+        "return_label": str(state.get("return_label") or "⬅️ Nguồn hình ảnh")[:120],
+    }
+
+
+def video_scene3_record_generated_image(
+    context,
+    user_id,
+    pending: dict | None = None,
+    *,
+    job_id: int = 0,
+    output_file_id: str = "",
+    image_url: str = "",
+    prompt: str = "",
+    delivered: bool = False,
+) -> dict | None:
+    pending = dict(pending or {})
+    if str(pending.get("origin_flow") or "") != "video_scene3":
+        return None
+    state = video_profile_studio_state(context)
+    state = video_scene3_flow.set_image_source_mode(state, "create")
+    target_step = "image_source"
+    if delivered and (str(output_file_id or "").strip() or str(image_url or "").strip()):
+        assets = dict(state.get("reference_assets") or {})
+        items = [dict(item) for item in assets.get("items") or [] if isinstance(item, dict)]
+        asset_record = {
+            "type": "storyboard_frames" if state.get("storyboard_image_required") else "visual_style_reference",
+            "media_kind": "image",
+            "file_id": str(output_file_id or "")[:240],
+            "file_unique_id": "",
+            "mime_type": "image/*",
+            "file_name": "",
+            "source_message_id": 0,
+            "owner_user_id": safe_int(user_id, 0),
+            "caption": str(prompt or "")[:500],
+            "source": "quick_image_v6",
+            "source_job_id": safe_int(job_id, 0),
+            "result_url": str(image_url or "")[:1000],
+            "provider_uploaded": False,
+        }
+        marker = (
+            str(asset_record.get("source_job_id") or ""),
+            str(asset_record.get("file_id") or ""),
+            str(asset_record.get("result_url") or ""),
+        )
+        existing_index = next(
+            (
+                index for index, item in enumerate(items)
+                if (
+                    str(item.get("source_job_id") or ""),
+                    str(item.get("file_id") or ""),
+                    str(item.get("result_url") or ""),
+                ) == marker
+            ),
+            -1,
+        )
+        if existing_index >= 0:
+            items[existing_index] = asset_record
+        else:
+            items.append(asset_record)
+        assets["items"] = items[-40:]
+        state.update({
+            "reference_assets": assets,
+            "assets": assets,
+            "active_material_index": len(assets["items"]),
+            "image_generation_confirmed": True,
+        })
+        target_step = "image_assets"
+    state = video_profile_studio_step(context, state, target_step, push=False)
+    state = save_video_profile_studio_state(context, state)
+    if isinstance(getattr(context, "user_data", None), dict):
+        context.user_data["video_scene3_image_handoff_active"] = False
+    return state
+
 
 def clear_quick_image_flow(user_id) -> bool:
     pending = USER_PENDING.pop(quick_image_flow_pending_key(user_id), None) or {}
@@ -144793,15 +145072,26 @@ def quick_image_entry_text(lang: str = "vi") -> str:
         "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
-def quick_image_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_entry_keyboard(
+    lang: str = "vi",
+    *,
+    back_callback: str = "menu|main_image",
+    back_label: str | None = None,
+) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
+    back_text = back_label or ("⬅️ Quay lại" if vi else "⬅️ Back")
+    back_button = (
+        InlineKeyboardButton(back_text, callback_data="menu|main_image")
+        if back_callback == "menu|main_image"
+        else InlineKeyboardButton(back_text, callback_data=back_callback)
+    )
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("💡 Chọn từ 5 gợi ý" if vi else "💡 Choose from 5 ideas", callback_data="create_media|qi_suggest"),
             InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="menu|main_image"),
+            back_button,
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -144886,9 +145176,12 @@ def quick_image_prepared_prompt_keyboard(
     *,
     back_callback: str = "create_media|qi_back_source",
     back_label: str | None = None,
+    context_return_callback: str = "menu|main_image",
+    context_return_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     back_text = back_label or ("⬅️ Quay lại" if vi else "⬅️ Back")
+    context_text = context_return_label or ("🖼 Menu ảnh" if vi else "🖼 Image menu")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
@@ -144903,7 +145196,7 @@ def quick_image_prepared_prompt_keyboard(
             InlineKeyboardButton(back_text, callback_data=back_callback),
         ],
         [
-            InlineKeyboardButton("🖼 Menu ảnh" if vi else "🖼 Image menu", callback_data="menu|main_image"),
+            InlineKeyboardButton(context_text, callback_data=context_return_callback),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -145646,7 +145939,14 @@ def image_job_retry_warranty_remaining(job_id: int = 0) -> int:
         return 0
     return max(0, total - used)
 
-def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+def public_image_success_keyboard(
+    job_id: int,
+    tier: str = "",
+    lang: str = "vi",
+    *,
+    return_callback: str = "",
+    return_label: str = "",
+) -> InlineKeyboardMarkup:
     tier_norm = normalize_image_tier(tier)
     retry_button = InlineKeyboardButton(
         ui_text(lang, "image.regenerate_paid"),
@@ -145661,6 +145961,20 @@ def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi")
         "vi": "🖼 Tạo ảnh nữa",
         "zh": "🖼 再创建一张图片",
     }.get(normalize_user_language(lang), "🖼 Create another image")
+    if return_callback:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image"),
+                retry_button,
+            ],
+            [
+                InlineKeyboardButton(return_label or "⬅️ Nguồn hình ảnh", callback_data=return_callback),
+                InlineKeyboardButton(create_another_label, callback_data="vprofile|image_source|create"),
+            ],
+            [
+                InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main"),
+            ],
+        ])
     rows = [
         [
             InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image"),
@@ -156799,7 +157113,11 @@ async def handle_quick_image_flow_pending_text(update: Update, context: ContextT
     await update.message.reply_text(
         quick_image_prepared_prompt_text(state, lang),
         parse_mode="HTML",
-        reply_markup=quick_image_prepared_prompt_keyboard(lang),
+        reply_markup=quick_image_prepared_prompt_keyboard(
+            lang,
+            context_return_callback=quick_image_context_return_callback(state),
+            context_return_label=quick_image_context_return_label(state, lang),
+        ),
     )
     return True
 
@@ -156829,6 +157147,14 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     uid = query.from_user.id if query.from_user else 0
     lang = get_user_language(uid) or "vi"
     if action == "cancel":
+        quick_state = get_quick_image_flow(uid) or {}
+        if str(quick_state.get("source_flow") or "") == "video_scene3":
+            clear_quick_image_flow(uid)
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data["video_scene3_image_handoff_active"] = False
+            scene_state = video_profile_studio_state(context)
+            scene_state = video_profile_studio_step(context, scene_state, "image_source", push=False)
+            return await video_profile_scene1_render(query, scene_state, lang)
         clear_media_creator_pending_states(uid)
         return await safe_edit_or_send(
             query,
@@ -156871,6 +157197,8 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         clear_media_aspect_pending(uid)
         clear_public_video_package_context(uid)
         clear_image_menu_pending(uid)
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data["video_scene3_image_handoff_active"] = False
         set_quick_image_flow(uid, "entry", suggest_offset=0)
         return await safe_edit_or_send(
             query,
@@ -156883,12 +157211,16 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         token = str(state.get("confirm_token") or "")
         if token:
             pop_shopaikey_pending_confirmation(token, uid)
-        set_quick_image_flow(uid, "entry", confirm_token="")
+        state = set_quick_image_flow(uid, "entry", confirm_token="")
         return await safe_edit_or_send(
             query,
             quick_image_entry_text(lang),
             parse_mode="HTML",
-            reply_markup=quick_image_entry_keyboard(lang),
+            reply_markup=quick_image_entry_keyboard(
+                lang,
+                back_callback=quick_image_context_return_callback(state),
+                back_label=quick_image_context_return_label(state, lang),
+            ),
         )
     if action in {"qi_suggest", "qi_refresh"}:
         state = get_quick_image_flow(uid) or set_quick_image_flow(uid, "entry", suggest_offset=0)
@@ -156941,7 +157273,11 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_prepared_prompt_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_prepared_prompt_keyboard(lang),
+            reply_markup=quick_image_prepared_prompt_keyboard(
+                lang,
+                context_return_callback=quick_image_context_return_callback(state),
+                context_return_label=quick_image_context_return_label(state, lang),
+            ),
         )
     if action == "qi_rewrite":
         state = get_quick_image_flow(uid) or {}
@@ -156956,7 +157292,11 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_prepared_prompt_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_prepared_prompt_keyboard(lang),
+            reply_markup=quick_image_prepared_prompt_keyboard(
+                lang,
+                context_return_callback=quick_image_context_return_callback(state),
+                context_return_label=quick_image_context_return_label(state, lang),
+            ),
         )
     if action in {"qi_topics", "qi_back_suggestions"}:
         state = set_quick_image_flow(uid, "suggestions")
@@ -157085,7 +157425,11 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 query,
                 quick_image_prepared_prompt_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=quick_image_prepared_prompt_keyboard(lang),
+                reply_markup=quick_image_prepared_prompt_keyboard(
+                    lang,
+                    context_return_callback=quick_image_context_return_callback(state),
+                    context_return_label=quick_image_context_return_label(state, lang),
+                ),
             )
         if state.get("prompt_source") == "aichat":
             state = set_quick_image_flow(uid, "prepared_prompt")
@@ -157184,6 +157528,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "package_item_type": package_item_type,
             "source": "quick_image_v6",
             "provider_submit_source": "public_user_final_confirm",
+            **quick_image_video_scene3_confirmation_fields(state),
             **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
         })
         set_quick_image_flow(uid, "confirm", tier=tier, confirm_token=token)
@@ -200917,6 +201262,12 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             },
         )
         return await video_profile_scene1_render(query, state, lang)
+    if action == "image_ai_return":
+        clear_quick_image_flow(uid)
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data["video_scene3_image_handoff_active"] = False
+        state = video_profile_studio_step(context, state, "image_source", push=False)
+        return await video_profile_scene1_render(query, state, lang)
     if not video_scene2_action_allowed(state, action):
         state = video_scene2_reconcile_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
@@ -201081,6 +201432,29 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
                 show_alert=True,
             )
         state = video_scene3_flow.set_image_source_mode(state, mode)
+        if mode == "create":
+            state = video_profile_studio_step(context, state, "image_source", push=False)
+            clear_quick_image_flow(uid)
+            quick_state = set_quick_image_flow(
+                uid,
+                "entry",
+                suggest_offset=0,
+                source_flow="video_scene3",
+                return_to="vprofile|image_ai_return",
+                return_label="⬅️ Nguồn hình ảnh",
+            )
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data["video_scene3_image_handoff_active"] = True
+            return await safe_edit_or_send(
+                query,
+                quick_image_entry_text(lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_entry_keyboard(
+                    lang,
+                    back_callback=quick_image_context_return_callback(quick_state),
+                    back_label=quick_image_context_return_label(quick_state, lang),
+                ),
+            )
         target = "image_assets" if mode in {"uploaded", "create"} else "creative_controls"
         state = video_profile_studio_step(context, state, target)
         return await video_profile_scene1_render(query, state, lang)
@@ -204061,6 +204435,14 @@ async def lifespan(app: FastAPI):
 
     tg_app.add_handler(MessageHandler(filters.ALL, safe_mode_message_guard), group=-10)
     tg_app.add_handler(CallbackQueryHandler(safe_mode_callback_guard), group=-10)
+    tg_app.add_handler(CallbackQueryHandler(video_public_callback_dedupe_guard), group=-9)
+    tg_app.add_handler(
+        MessageHandler(
+            filters.PHOTO | filters.VOICE | filters.AUDIO | filters.VIDEO | filters.Document.ALL,
+            video_public_media_dedupe_guard,
+        ),
+        group=-9,
+    )
     tg_app.add_handler(BusinessConnectionHandler(handle_cskh_business_connection))
     tg_app.add_handler(BusinessMessagesDeletedHandler(handle_cskh_deleted_business_messages))
     tg_app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, handle_cskh_business_message))

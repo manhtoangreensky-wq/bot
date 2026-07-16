@@ -233,6 +233,8 @@ def test_image_live1_no_forbidden_runtime_scope_or_provider_submit_in_tests():
         "tests/test_p0_aichat6_open_public_live_flows.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
+        "tests/test_p0_video_route5_full_callback_image_ai_backstack.py",
+        "tests/test_p0_video_flow4_callback_route_recovery.py",
     }
     if AIEDIT1_TEST_FILE in changed:
         allowed |= AIEDIT1_SCOPE_FILES
