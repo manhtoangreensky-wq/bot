@@ -110,6 +110,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import video_addon_planner, video_scene3_flow, video_scene_prompt_builder, video_semantic_scene_planner
+from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
 from services.pricing_guide_content import (
@@ -179,6 +180,8 @@ from free_tools_hub import (
     sensitive_free_task_reason,
     should_show_soft_promo,
 )
+
+
 from providers.video_downloader_provider import (
     VIDEO_DOWNLOADER_RIGHTS_COPY,
 )
@@ -238,6 +241,21 @@ try:
 except Exception as e:
     pytesseract = None
     PYTESSERACT_ERROR = str(e)[:240]
+
+
+_TelegramInlineKeyboardMarkup = InlineKeyboardMarkup
+
+
+class InlineKeyboardMarkup(_TelegramInlineKeyboardMarkup):
+    """Telegram markup with one canonical Back/Main bottom row when present."""
+
+    def __init__(self, inline_keyboard, *args, **kwargs):
+        rows = ui_navigation.canonicalize_bottom_navigation(
+            inline_keyboard,
+            button_factory=InlineKeyboardButton,
+        )
+        super().__init__(rows, *args, **kwargs)
+
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
