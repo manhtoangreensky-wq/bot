@@ -10,7 +10,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from . import video_scene3_flow
+from . import video_profile_catalog, video_scene3_flow
 
 
 SCENE_SECONDS = 8
@@ -1365,9 +1365,12 @@ def build_scene3_handoff_state(
     if product_id == "self_shot_scene_change" and not source_media_refs:
         raise ValueError("self_shot_source_video_required")
     profile_id = str(source.get("recommended_profile_id") or "tutorial_explainer")
-    valid_profiles = {key for key, _label in video_scene3_flow.TECHNICAL_PROFILES}
-    if profile_id not in valid_profiles:
-        profile_id = "tutorial_explainer"
+    primary_profile = video_profile_catalog.canonical_profile_key(profile_id)
+    category_key = str(source.get("category_key") or source.get("category") or "")
+    category_profiles = tuple(video_profile_catalog.IDEA_GROUP_PROFILE_MAP.get(category_key) or ())
+    if not primary_profile:
+        primary_profile = str(category_profiles[0] if category_profiles else "knowledge_explainer")
+    technical_profile = video_profile_catalog.technical_profile_for_profile(primary_profile)
     title = str(source.get("title") or source.get("selected_topic") or "Ý tưởng video").strip()
     context_parts = [
         str(source.get("summary") or "").strip(),
@@ -1385,8 +1388,12 @@ def build_scene3_handoff_state(
         "product_type": product_id,
         "source_product_id": product_id,
         "scene_count": count,
-        "content_type": video_scene3_flow.content_type_for_profile(profile_id, state),
-        "technical_profile": profile_id,
+        "primary_profile": primary_profile,
+        "linked_profiles": [],
+        "profile_page": video_profile_catalog.profile_page(primary_profile),
+        "profile_bundle_version": video_profile_catalog.SCHEMA_VERSION,
+        "content_type": video_profile_catalog.content_type_for_profile(primary_profile),
+        "technical_profile": technical_profile,
         "context": context,
         "profile_context": context,
         "selected_suggestion": {

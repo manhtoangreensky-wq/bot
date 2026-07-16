@@ -10,7 +10,12 @@ import unicodedata
 from copy import deepcopy
 from typing import Any
 
-from services import video_addon_planner, video_scene_prompt_builder, video_semantic_scene_planner
+from services import (
+    video_addon_planner,
+    video_profile_catalog,
+    video_scene_prompt_builder,
+    video_semantic_scene_planner,
+)
 
 
 SCENE_SECONDS = 8
@@ -116,6 +121,12 @@ def canonical_back_step(state: dict[str, Any] | None) -> str:
 
     current = dict(state or {})
     step = str(current.get("step") or "menu")
+    if step == "profile_links":
+        return "technical_profile"
+    if step == "profile_suggestions":
+        return "technical_profile"
+    if step == "character" and str(current.get("primary_profile") or ""):
+        return "profile_links"
     if step == "creative_controls" and str(current.get("image_source_mode") or "") in {"uploaded", "create"}:
         return "image_assets"
     if step == "video_prompts" and image_prompts_required(current):
@@ -915,6 +926,11 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "suggested_technical_profile": "",
         "technical_profile_suggestion_offset": 0,
         "show_all_technical_profiles": False,
+        "primary_profile": "",
+        "linked_profiles": [],
+        "profile_page": 1,
+        "profile_suggestion_keys": [],
+        "profile_bundle_version": video_profile_catalog.SCHEMA_VERSION,
         "context": "",
         "profile_context": "",
         "suggestions": [],
@@ -982,6 +998,10 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
         aspect_ratio=str(raw.get("aspect_ratio") or (raw.get("content_addons") or {}).get("aspect_ratio") or "9:16"),
     )
     base.update(raw)
+    profile_state = dict(base)
+    if "profile_bundle_version" not in raw:
+        profile_state["profile_bundle_version"] = 0
+    base.update(video_profile_catalog.migrate_session_profile_state(profile_state))
     base["history"] = [str(item) for item in base.get("history") or [] if str(item or "").strip()][-40:]
     for field, items in (
         ("preservation_requirements", REQUIREMENT_CATEGORIES),
@@ -1010,8 +1030,25 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     base["suggestions"] = [dict(item) for item in base.get("suggestions") or [] if isinstance(item, dict)][:5]
     base["suggestion_history"] = [list(items) for items in base.get("suggestion_history") or [] if isinstance(items, list)][-5:]
     base["content_type_history"] = [str(item) for item in base.get("content_type_history") or [] if content_type(str(item))][-10:]
-    valid_profiles = {key for key, _label in TECHNICAL_PROFILES} | {"custom"}
-    base["technical_profile_history"] = [str(item) for item in base.get("technical_profile_history") or [] if not item or str(item) in valid_profiles][-10:]
+    valid_profiles = (
+        {key for key, _label in TECHNICAL_PROFILES}
+        | set(video_profile_catalog.PROFILE_BY_KEY)
+        | {"custom"}
+    )
+    base["technical_profile_history"] = [
+        str(item)
+        for item in base.get("technical_profile_history") or []
+        if (
+            not item
+            or str(item) in valid_profiles
+            or video_profile_catalog.PROFILE_KEY_RE.fullmatch(str(item))
+        )
+    ][-10:]
+    base["linked_profiles"] = [
+        str(item)
+        for item in base.get("linked_profiles") or []
+        if str(item) and str(item) != str(base.get("primary_profile") or "")
+    ][:video_profile_catalog.MAX_LINKED_PROFILES]
     base["post_addon_suggestion"] = [str(item) for item in base.get("post_addon_suggestion") or [] if str(item) in dict(POST_ADDONS)]
     base["automatic_text_items"] = [
         dict(item) for item in base.get("automatic_text_items") or [] if isinstance(item, dict)
@@ -1088,6 +1125,9 @@ def content_type(content_type_id: str) -> dict[str, str]:
 def content_type_for_profile(profile_id: str, state: dict[str, Any] | None = None) -> str:
     """Derive internal story taxonomy from the selected public profile."""
 
+    canonical = video_profile_catalog.canonical_profile_key(profile_id)
+    if canonical:
+        return video_profile_catalog.content_type_for_profile(canonical)
     mapped = str(PROFILE_CONTENT_TYPE.get(str(profile_id or "")) or "")
     if mapped:
         return mapped
@@ -1153,7 +1193,45 @@ def technical_profile_label(profile_id: str, custom_profile: str = "") -> str:
         return "Không dùng mẫu chuyên ngành"
     if str(profile_id or "") == "custom":
         return str(custom_profile or "Profile tự nhập")[:180]
+    canonical = video_profile_catalog.canonical_profile_key(profile_id)
+    if canonical:
+        return video_profile_catalog.profile_label(canonical, custom_profile)
     return next((label for key, label in TECHNICAL_PROFILES if key == profile_id), "Mẫu chuyên ngành chưa xác định")
+
+
+def select_primary_profile(
+    state: dict[str, Any],
+    profile_id: str,
+    *,
+    custom_profile: str = "",
+) -> dict[str, Any]:
+    """Select one canonical primary profile and keep related profiles off."""
+
+    updated = normalize_state(state)
+    selected = video_profile_catalog.select_primary_profile(
+        updated,
+        profile_id,
+        custom_profile=custom_profile,
+    )
+    selected["profile_context"] = video_profile_catalog.profile_bundle_context(
+        str(selected.get("primary_profile") or ""),
+        selected.get("linked_profiles") or [],
+    )
+    return normalize_state(selected)
+
+
+def toggle_linked_profile(state: dict[str, Any], profile_id: str) -> tuple[dict[str, Any], bool]:
+    """Toggle one optional linked profile without changing the primary."""
+
+    updated, changed = video_profile_catalog.toggle_linked_profile(
+        normalize_state(state),
+        profile_id,
+    )
+    updated["profile_context"] = video_profile_catalog.profile_bundle_context(
+        str(updated.get("primary_profile") or ""),
+        updated.get("linked_profiles") or [],
+    )
+    return normalize_state(updated), changed
 
 
 def post_addon_default(key: str) -> dict[str, Any]:
@@ -2070,7 +2148,15 @@ def suggestions_for(state: dict[str, Any], *, revision: int | None = None) -> li
     state = normalize_state(state)
     info = content_type(str(state.get("content_type") or "storytelling")) or content_type("storytelling")
     subject = str(state.get("subject") or "chủ đề video").strip()
-    profile = technical_profile_label(str(state.get("technical_profile") or ""))
+    primary_profile = str(state.get("primary_profile") or state.get("technical_profile") or "")
+    profile = technical_profile_label(
+        primary_profile,
+        str(state.get("custom_technical_profile") or ""),
+    )
+    bundle_context = video_profile_catalog.profile_bundle_context(
+        primary_profile,
+        state.get("linked_profiles") or [],
+    )
     count = max(1, int(state.get("scene_count") or 1))
     rev = int(state.get("suggestion_version") or 0) + 1 if revision is None else max(1, int(revision))
     rows: list[dict[str, Any]] = []
@@ -2083,7 +2169,10 @@ def suggestions_for(state: dict[str, Any], *, revision: int | None = None) -> li
             "hook": f"{hook} về {subject}.",
             "concept": f"Kể theo loại {info['label'].split(' ', 1)[-1].lower()}, {info['arc']}.",
             "flow": f"Phân bổ thành đúng {count} cảnh: {flow}; mỗi cảnh hoàn tất một ý hoặc hành động.",
-            "context": f"{profile}; giữ mạch hình ảnh và trạng thái cuối cảnh trước sang cảnh sau.",
+            "context": (
+                f"{profile}; {bundle_context} "
+                "Giữ mạch hình ảnh và trạng thái cuối cảnh trước sang cảnh sau."
+            ),
             "reason": reason,
             "revision": rev,
         })
@@ -2264,6 +2353,9 @@ def planner_post_addons(state: dict[str, Any]) -> dict[str, bool]:
 
 
 def _profile_for_planner(state: dict[str, Any]) -> str:
+    primary_profile = str(state.get("primary_profile") or "")
+    if primary_profile and primary_profile != "custom":
+        return video_profile_catalog.technical_profile_for_profile(primary_profile)
     if str(state.get("technical_profile") or "") == "custom":
         return str(state.get("custom_technical_profile") or state.get("content_type") or "storytelling")
     return str(state.get("technical_profile") or state.get("content_type") or "storytelling")
@@ -2287,15 +2379,41 @@ def build_planning_package(state: dict[str, Any]) -> dict[str, Any]:
         "lighting": str(creative["emotion"].get("value") or ""),
         "visual_style": str(creative["visual_style"].get("value") or ""),
     })
+    primary_profile = str(updated.get("primary_profile") or updated.get("technical_profile") or "")
+    linked_profiles = list(updated.get("linked_profiles") or [])
+    semantic_beats = [
+        dict(item)
+        for item in updated.get("idea_scene_beats") or []
+        if isinstance(item, dict)
+    ]
+    if not semantic_beats and primary_profile:
+        semantic_beats = video_profile_catalog.semantic_beats_for_bundle(
+            primary_profile,
+            linked_profiles,
+            count,
+        )
+    bundle_context = video_profile_catalog.profile_bundle_context(
+        primary_profile,
+        linked_profiles,
+    )
+    planning_context = " ".join(
+        item
+        for item in (
+            str(updated.get("context") or ""),
+            str(updated.get("profile_context") or ""),
+            bundle_context,
+        )
+        if item
+    )
     plan = video_semantic_scene_planner.build_semantic_scene_plan(
         subject=str(updated.get("subject") or ""),
         scene_count=count,
         profile_id=_profile_for_planner(updated),
-        context=str(updated.get("context") or updated.get("profile_context") or ""),
+        context=planning_context,
         requirements=requirements,
         assets=dict(updated.get("reference_assets") or updated.get("assets") or {}),
         addon_plan=addon_plan,
-        semantic_beats=[dict(item) for item in updated.get("idea_scene_beats") or [] if isinstance(item, dict)],
+        semantic_beats=semantic_beats,
     )
     package = video_scene_prompt_builder.build_prompt_package(plan)
     return initialize_scene_artifacts(updated, package)
