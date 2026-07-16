@@ -30,7 +30,9 @@ def build_scene_provider_prompt(
         f"Development: {scene.get('development')}",
         f"Completed end state: {scene.get('completion_state')}",
         f"Camera: {scene.get('camera')}",
-        f"Lighting: {scene.get('lighting')}",
+        f"Creative palette and lighting: {scene.get('creative_palette_lighting') or scene.get('lighting')}",
+        f"Identity color locks: {scene.get('identity_color_locks') or 'none supplied'}",
+        f"Color conflict policy: {scene.get('color_conflict_policy') or 'identity locks override creative palette'}",
         f"Visual style: {scene.get('visual_style')}",
         f"Dialogue/voiceover: {scene.get('dialogue_or_voiceover') or 'none'}",
         f"Continuity: {_join(continuity_contract.get('must_remain_constant'))}",
@@ -85,10 +87,24 @@ def build_prompt_package(plan: dict[str, Any]) -> dict[str, Any]:
         f"Continuity contract: identity={_join(continuity.get('identity'))}; "
         f"products={_join(continuity.get('products'))}; logos={_join(continuity.get('logos'))}; "
         f"environment={_join(continuity.get('environment'))}; geometry={_join(continuity.get('architecture_geometry'))}; "
-        f"palette={_join(continuity.get('color_palette'))}; lighting={continuity.get('lighting_state')}; "
+        f"creative_palette_lighting={_join(continuity.get('creative_palette_lighting'))}; "
+        f"identity_color_locks={_join(continuity.get('identity_color_locks'))}; "
+        f"color_policy={continuity.get('color_conflict_policy')}; "
+        f"resolved_palette={_join(continuity.get('color_palette'))}; lighting={continuity.get('lighting_state')}; "
         f"time={continuity.get('time_of_day')}; direction={continuity.get('motion_direction')}; "
         f"camera={continuity.get('camera_language')}."
     )
+    transitions = []
+    for item in updated.get("transitions") or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row["transition_id"] = str(
+            row.get("transition_id")
+            or f"scene_{int(row.get('from_scene') or 0)}_to_{int(row.get('to_scene') or 0)}"
+        )
+        transitions.append(row)
+    updated["transitions"] = transitions
     post = dict(addon_plan.get("post_production") or {})
     return {
         **updated,

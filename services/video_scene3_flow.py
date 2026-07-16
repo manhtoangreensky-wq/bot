@@ -25,6 +25,7 @@ MAX_SCENES = 20
 CANONICAL_STEPS = (
     "subject",
     "scene_count",
+    "aspect_ratio",
     "technical_profile",
     "character",
     "image_source",
@@ -35,11 +36,7 @@ CANONICAL_STEPS = (
     "scene_plan",
     "image_prompts",
     "video_prompts",
-    "transitions",
-    "automatic_text",
-    "post_addons",
     "full_review",
-    "aspect_ratio",
     "quality",
     "final_report",
     "final_confirmation",
@@ -48,7 +45,8 @@ CANONICAL_STEPS = (
 BACK_STEP = {
     "subject": "menu",
     "scene_count": "subject",
-    "technical_profile": "scene_count",
+    "aspect_ratio": "scene_count",
+    "technical_profile": "aspect_ratio",
     "character": "technical_profile",
     "image_source": "character",
     "image_assets": "image_source",
@@ -59,12 +57,11 @@ BACK_STEP = {
     "scene_plan": "audio_plan",
     "image_prompts": "scene_plan",
     "video_prompts": "scene_plan",
-    "transitions": "video_prompts",
-    "automatic_text": "transitions",
-    "post_addons": "automatic_text",
-    "full_review": "post_addons",
-    "aspect_ratio": "full_review",
-    "quality": "aspect_ratio",
+    "full_review": "video_prompts",
+    "transitions": "full_review",
+    "automatic_text": "full_review",
+    "post_addons": "full_review",
+    "quality": "full_review",
     "final_report": "quality",
     "final_confirmation": "final_report",
     # Canonical child screens. They never depend on incidental history order.
@@ -131,14 +128,16 @@ def canonical_back_step(state: dict[str, Any] | None) -> str:
         return "image_assets"
     if step == "video_prompts" and image_prompts_required(current):
         return "image_prompts"
-    if step == "transitions" and str(current.get("transitions_return_step") or "") == "full_review":
+    if step == "audio_plan" and str(current.get("audio_plan_return_step") or "") == "full_review":
         return "full_review"
-    if step == "automatic_text_review" and str(current.get("automatic_text_return_step") or "") == "full_review":
+    if step == "transitions":
         return "full_review"
-    if step == "post_addons" and str(current.get("post_list_return_step") or "") == "full_review":
+    if step in {"automatic_text", "automatic_text_review"} and str(current.get("automatic_text_return_step") or "") == "full_review":
         return "full_review"
-    if step == "post_detail" and str(current.get("post_return_step") or "") == "audio_plan":
-        return "audio_plan"
+    if step == "post_addons":
+        return "full_review"
+    if step == "post_detail" and str(current.get("post_return_step") or "") in {"audio_plan", "full_review"}:
+        return str(current.get("post_return_step"))
     if step == "automatic_text_scope" and not str(current.get("active_automatic_text_id") or ""):
         return "automatic_text"
     if step == "await_material_upload":
@@ -224,7 +223,7 @@ REQUIREMENT_CATEGORIES = (
     ("identity", "🧍 Nhân vật/nhận diện"),
     ("product", "📦 Sản phẩm"),
     ("brand_logo", "🏷 Phong cách thương hiệu"),
-    ("colors", "🎨 Màu sắc chủ đạo"),
+    ("colors", "🔒 Màu nhận diện"),
     ("materials", "🧱 Vật liệu"),
     ("environment", "🏞 Bối cảnh/kiến trúc"),
     ("wardrobe", "👗 Trang phục"),
@@ -375,13 +374,21 @@ IMAGE_SOURCE_MODES = (
 
 CREATIVE_CONTROLS = (
     ("context", "🧭 Chủ đề/ngữ cảnh"),
-    ("colors", "🎨 Màu sắc"),
+    ("colors", "🎨 Bảng màu & ánh sáng"),
     ("visual_style", "🖼 Phong cách hình ảnh"),
     ("motion", "🏃 Chuyển động"),
     ("camera", "🎥 Góc máy"),
     ("pacing", "⏱ Nhịp dựng"),
     ("emotion", "💭 Cảm xúc"),
     ("negative", "🚫 Điều cần tránh"),
+)
+
+FIELD_SUGGESTION_PAGE_SIZE = 5
+FIELD_SUGGESTION_VARIANTS = (
+    "",
+    " Ưu tiên tính nhất quán từ cảnh đầu đến cảnh cuối.",
+    " Điều chỉnh bố cục phù hợp tỉ lệ {aspect_ratio} và vùng an toàn.",
+    " Phân bổ rõ cho {scene_count} cảnh, mỗi cảnh hoàn tất một ý hoặc hành động.",
 )
 
 CREATIVE_QUICK_PRESETS = (
@@ -578,9 +585,19 @@ POST_ADDONS = (
 # output rather than an optional add-on.
 PUBLIC_POST_ADDONS = tuple(
     item for item in POST_ADDONS
+    if item[0] in {"logo_image", "watermark_text"}
+)
+
+PUBLIC_CONFIGURABLE_POST_ADDONS = tuple(
+    item for item in POST_ADDONS
     if item[0] in {
-        "logo_image", "watermark_text", "subtitles", "dubbing",
-        "music", "sfx", "automatic_text", "source_audio",
+        "logo_image",
+        "watermark_text",
+        "subtitles",
+        "dubbing",
+        "music",
+        "sfx",
+        "source_audio",
     }
 )
 
@@ -910,6 +927,13 @@ def _entry_map(items: tuple[tuple[str, str], ...]) -> dict[str, dict[str, Any]]:
     return {key: {"enabled": False, "value": "", "history": []} for key, _label in items}
 
 
+def _safe_nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: str = "9:16") -> dict[str, Any]:
     return {
         "step": "scene_count" if subject else "await_subject",
@@ -953,6 +977,7 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "reference_assets": {},
         "assets": {},
         "creative_controls": _entry_map(CREATIVE_CONTROLS),
+        "field_suggestion_offsets": {},
         "content_affecting_addons": _entry_map(CONTENT_ADDONS),
         "content_addons": {"cta": False, "aspect_ratio": aspect_ratio, "transition_style": ""},
         "scene_plan": {},
@@ -1025,6 +1050,11 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
         "character_config", "image_generation_quote",
     ):
         base[field] = dict(base.get(field) or {})
+    base["field_suggestion_offsets"] = {
+        str(key): _safe_nonnegative_int(value)
+        for key, value in dict(base.get("field_suggestion_offsets") or {}).items()
+        if str(key or "")
+    }
     base["transition_plan"] = [dict(item) for item in base.get("transition_plan") or [] if isinstance(item, dict)]
     base["idea_scene_beats"] = [dict(item) for item in base.get("idea_scene_beats") or [] if isinstance(item, dict)][:MAX_SCENES]
     base["suggestions"] = [dict(item) for item in base.get("suggestions") or [] if isinstance(item, dict)][:5]
@@ -1795,6 +1825,9 @@ def configure_audio_volume(state: dict[str, Any], key: str, volume_percent: int)
         "volume_percent": volume,
         "peak_guard": True,
         "clipping_guard": "limit_peak_before_mix",
+        "ducking": bool(key in {"music", "sfx", "source_audio"}),
+        "fade_in_seconds": 0.25 if key in {"music", "sfx"} else 0,
+        "fade_out_seconds": 0.25 if key in {"music", "sfx"} else 0,
         "applied_to_mp4": False,
     })
     return set_entry(updated, "postproduction_addons", key, config, enabled=volume > 0)
@@ -2085,19 +2118,91 @@ def requirement_suggestion(key: str, state: dict[str, Any]) -> str:
     return suggestions[0] if suggestions else "Giữ nguyên chi tiết quan trọng giữa mọi cảnh."
 
 
-def unified_field_suggestions(state: dict[str, Any], group: str, key: str) -> list[str]:
-    """Resolve the five choices for one canonical editor field."""
+def _expanded_field_suggestions(
+    state: dict[str, Any],
+    values: list[str],
+) -> list[str]:
+    """Expand five approved choices into four non-repeating context pages."""
+
+    updated = normalize_state(state)
+    aspect_ratio = str(updated.get("aspect_ratio") or "9:16")
+    scene_count = max(MIN_SCENES, int(updated.get("scene_count") or 1))
+    expanded: list[str] = []
+    for variant in FIELD_SUGGESTION_VARIANTS:
+        suffix = variant.format(
+            aspect_ratio=aspect_ratio,
+            scene_count=scene_count,
+        )
+        for value in values[:FIELD_SUGGESTION_PAGE_SIZE]:
+            expanded.append(f"{str(value).rstrip('.')}.{suffix}".strip())
+    return list(dict.fromkeys(expanded))[:20]
+
+
+def unified_field_suggestion_catalog(
+    state: dict[str, Any],
+    group: str,
+    key: str,
+) -> list[str]:
+    """Return the complete 20-choice catalog for one canonical field."""
 
     clean_group = str(group or "")
     clean_key = str(key or "")
     if clean_group == "creative_controls" and clean_key in dict(CREATIVE_CONTROLS):
-        return creative_suggestions(state, clean_key)
+        return _expanded_field_suggestions(state, creative_suggestions(state, clean_key))
     if (
         clean_group == "preservation_requirements"
         and clean_key in dict(PUBLIC_REQUIREMENT_CATEGORIES)
     ):
-        return requirement_suggestions(state, clean_key)
+        return _expanded_field_suggestions(state, requirement_suggestions(state, clean_key))
     return []
+
+
+def _field_suggestion_offset_key(group: str, key: str) -> str:
+    return f"{str(group or '')}:{str(key or '')}"
+
+
+def unified_field_suggestion_page(state: dict[str, Any], group: str, key: str) -> int:
+    updated = normalize_state(state)
+    offset = int(
+        (updated.get("field_suggestion_offsets") or {}).get(
+            _field_suggestion_offset_key(group, key),
+            0,
+        )
+        or 0
+    )
+    return (offset // FIELD_SUGGESTION_PAGE_SIZE) + 1
+
+
+def unified_field_suggestions(state: dict[str, Any], group: str, key: str) -> list[str]:
+    """Resolve the five choices for one canonical editor field."""
+
+    updated = normalize_state(state)
+    catalog = unified_field_suggestion_catalog(updated, group, key)
+    if not catalog:
+        return []
+    offset_key = _field_suggestion_offset_key(group, key)
+    offset = int((updated.get("field_suggestion_offsets") or {}).get(offset_key, 0) or 0)
+    offset %= len(catalog)
+    return catalog[offset:offset + FIELD_SUGGESTION_PAGE_SIZE]
+
+
+def rotate_unified_field_suggestions(
+    state: dict[str, Any],
+    group: str,
+    key: str,
+) -> dict[str, Any]:
+    """Advance five choices; the first page repeats only after all 20."""
+
+    updated = normalize_state(state)
+    catalog = unified_field_suggestion_catalog(updated, group, key)
+    if not catalog:
+        return updated
+    offsets = dict(updated.get("field_suggestion_offsets") or {})
+    offset_key = _field_suggestion_offset_key(group, key)
+    current = int(offsets.get(offset_key, 0) or 0)
+    offsets[offset_key] = (current + FIELD_SUGGESTION_PAGE_SIZE) % len(catalog)
+    updated["field_suggestion_offsets"] = offsets
+    return updated
 
 
 def select_unified_field_suggestion(
@@ -2374,10 +2479,27 @@ def build_planning_package(state: dict[str, Any]) -> dict[str, Any]:
     )
     creative = dict(updated.get("creative_controls") or {})
     requirements = public_requirements(updated)
+    creative_palette_lighting = str(
+        creative["colors"].get("value")
+        if creative["colors"].get("enabled")
+        else ""
+    )
+    identity_colors = dict(
+        (updated.get("preservation_requirements") or {}).get("colors") or {}
+    )
+    identity_color_locks = str(
+        identity_colors.get("value")
+        if identity_colors.get("enabled")
+        else ""
+    )
     requirements.update({
         "camera": str(creative["camera"].get("value") or ""),
-        "lighting": str(creative["emotion"].get("value") or ""),
+        "lighting": creative_palette_lighting,
         "visual_style": str(creative["visual_style"].get("value") or ""),
+        "creative_palette_lighting": creative_palette_lighting,
+        "identity_color_locks": identity_color_locks,
+        "color_palette": identity_color_locks or creative_palette_lighting,
+        "color_conflict_policy": "identity_color_locks_override_creative_palette",
     })
     primary_profile = str(updated.get("primary_profile") or updated.get("technical_profile") or "")
     linked_profiles = list(updated.get("linked_profiles") or [])
@@ -2451,7 +2573,9 @@ def _image_prompt(scene: dict[str, Any], state: dict[str, Any]) -> dict[str, Any
         "composition": "chủ thể rõ; chừa vùng an toàn theo tùy chọn đã chọn",
         "camera": str(scene.get("camera") or ""),
         "lighting": str(scene.get("lighting") or ""),
-        "colors": str(scene.get("visual_style") or ""),
+        "colors": str(scene.get("creative_palette_lighting") or scene.get("lighting") or ""),
+        "identity_color_locks": str(scene.get("identity_color_locks") or ""),
+        "color_conflict_policy": str(scene.get("color_conflict_policy") or ""),
         "aspect_ratio": aspect,
         "safe_zone": dict(((state.get("plan") or {}).get("addon_plan") or {}).get("composition_constraints") or {}),
     }
@@ -2465,7 +2589,8 @@ def _video_prompt(scene: dict[str, Any], prompt_row: dict[str, Any], state: dict
         f"Chủ thể: {scene.get('subject')}. Bối cảnh: {scene.get('environment')}. "
         f"Trạng thái đầu: {scene.get('start_state')}. Hành động hoàn chỉnh: {scene.get('primary_action')}. "
         f"Diễn biến: {scene.get('development')}. Trạng thái kết: {scene.get('completion_state')}. "
-        f"Camera: {scene.get('camera')}. Ánh sáng: {scene.get('lighting')}. "
+        f"Camera: {scene.get('camera')}. Bảng màu và ánh sáng: {scene.get('creative_palette_lighting') or scene.get('lighting')}. "
+        f"Màu nhận diện phải giữ nguyên: {scene.get('identity_color_locks') or 'theo tư liệu đã chọn'}. "
         f"Phong cách: {scene.get('visual_style')}. Hoàn tất hành động, câu nói và chuyển động camera trước khi chuyển cảnh."
     )
     return {
@@ -2479,7 +2604,9 @@ def _video_prompt(scene: dict[str, Any], prompt_row: dict[str, Any], state: dict
         "environment": str(scene.get("environment") or ""),
         "camera": str(scene.get("camera") or ""),
         "lighting": str(scene.get("lighting") or ""),
-        "colors": str(scene.get("visual_style") or ""),
+        "colors": str(scene.get("creative_palette_lighting") or scene.get("lighting") or ""),
+        "identity_color_locks": str(scene.get("identity_color_locks") or ""),
+        "color_conflict_policy": str(scene.get("color_conflict_policy") or ""),
         "voice_or_dialogue": str(scene.get("dialogue_or_voiceover") or ""),
         "audio_intent": str(scene.get("audio_intent") or ""),
         "preserve": list(scene.get("preserve_constraints") or []),
@@ -2533,7 +2660,17 @@ def initialize_scene_artifacts(state: dict[str, Any], package: dict[str, Any]) -
         "image_strategy_per_scene": strategies,
         "image_prompt_versions": image_versions,
         "video_prompt_versions": video_versions,
-        "transition_plan": [dict(item) for item in package.get("transitions") or []],
+        "transition_plan": [
+            {
+                **dict(item),
+                "transition_id": str(
+                    item.get("transition_id")
+                    or f"scene_{int(item.get('from_scene') or 0)}_to_{int(item.get('to_scene') or 0)}"
+                ),
+            }
+            for item in package.get("transitions") or []
+            if isinstance(item, dict)
+        ],
         "voice_timing_by_scene": voice_timing,
         "cta_placement_by_scene": cta_placement,
         "active_scene_index": 1,
@@ -2610,11 +2747,16 @@ def set_scene_transition(
     public = transition_public(transition)
     for item in transitions:
         if int(item.get("from_scene") or 0) == index:
+            item["transition_id"] = str(
+                item.get("transition_id")
+                or f"scene_{index}_to_{index + 1}"
+            )
             item["transition_type"] = transition
             item["instruction"] = f"{public['label']}: {public['description']}"
             found = True
     if not found and index < len(scenes):
         transitions.append({
+            "transition_id": f"scene_{index}_to_{index + 1}",
             "from_scene": index,
             "to_scene": index + 1,
             "transition_type": transition,

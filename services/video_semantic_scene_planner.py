@@ -182,6 +182,22 @@ def build_semantic_scene_plan(
             "completion_state": completion,
             "camera": str(requirements.get("camera") or continuity.get("camera_language") or "camera có động cơ và dừng tự nhiên"),
             "lighting": str(requirements.get("lighting") or continuity.get("lighting_state") or "ánh sáng nhất quán"),
+            "creative_palette_lighting": str(
+                requirements.get("creative_palette_lighting")
+                or "; ".join(continuity.get("creative_palette_lighting") or [])
+                or requirements.get("lighting")
+                or continuity.get("lighting_state")
+                or "ánh sáng nhất quán"
+            ),
+            "identity_color_locks": str(
+                requirements.get("identity_color_locks")
+                or "; ".join(continuity.get("identity_color_locks") or [])
+            ),
+            "color_conflict_policy": str(
+                requirements.get("color_conflict_policy")
+                or continuity.get("color_conflict_policy")
+                or "identity_color_locks_override_creative_palette"
+            ),
             "visual_style": str(requirements.get("visual_style") or f"phong cách {family} nhất quán"),
             "dialogue_or_voiceover": _dialogue(content_addons, subject_clean, role_base, index, count, max_words),
             "audio_intent": str(content_addons.get("music_mood") or continuity.get("audio_style") or "theo mạch nội dung"),

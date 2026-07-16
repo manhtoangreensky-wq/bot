@@ -449,11 +449,13 @@ def test_actual_telegram_callback_routes_guided_screens_and_legacy_redirects_wit
         assert state["step"] == "post_addons"
         state = await run_action("vprofile|post_toggle|mp4_export")
         assert state["step"] == "post_addons"
-        state = await run_action("vprofile|post_toggle|subtitles")
+        state = save_state(context, {**state, "step": "audio_plan"})
+        state = await run_action("vprofile|audio_open|subtitles")
         state = await run_action("vprofile|post_enable")
         assert state["postproduction_addons"]["subtitles"]["enabled"] is True
         state = await run_action("vprofile|post_detail_done")
-        state = await run_action("vprofile|post_toggle|dubbing")
+        assert state["step"] == "audio_plan"
+        state = await run_action("vprofile|audio_open|dubbing")
         state = await run_action("vprofile|post_voice_choice|custom_voice")
         assert state["step"] == "await_material_upload"
         assert state["input_target"] == "voice_audio"
@@ -479,7 +481,8 @@ def test_actual_telegram_callback_routes_guided_screens_and_legacy_redirects_wit
         assert state["step"] == "post_detail"
         assert state["postproduction_addons"]["dubbing"]["value"]["volume_percent"] == 50
         state = await run_action("vprofile|post_detail_done")
-        state = await run_action("vprofile|post_toggle|music")
+        assert state["step"] == "audio_plan"
+        state = await run_action("vprofile|audio_open|music")
         state = await run_action("vprofile|post_music_source|create_new")
         state = await run_action("vprofile|post_music_mode|with_lyrics")
         state = await run_action("vprofile|post_volume")

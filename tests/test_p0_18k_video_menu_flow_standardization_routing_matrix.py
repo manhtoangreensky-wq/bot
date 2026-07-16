@@ -132,11 +132,11 @@ def test_video_route_entry_context_is_saved_per_button():
             assert child in callbacks
 
 
-def test_video_prompt_and_storyboard_are_prompt_flows_not_auto_render():
+def test_storyboard_is_image_required_planning_that_can_reach_confirmed_render():
     route = bot.video_public_route_for_tool("storyboard_prompt")
     assert route["category"] == "planning"
-    assert route["invoice_reachable"] is False
-    assert route["job_reachable"] is False
+    assert route["invoice_reachable"] is True
+    assert route["job_reachable"] is True
     text, markup, session = _press(180101, route["entry_callback"])
     callbacks = _callbacks(markup)
     assert "Storyboard" in text

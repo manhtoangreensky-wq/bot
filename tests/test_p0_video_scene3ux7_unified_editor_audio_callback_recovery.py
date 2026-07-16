@@ -201,6 +201,7 @@ def test_audio_planner_toggle_is_canonical_reversible_and_has_no_duplicate_owner
 def test_audio_keyboard_has_one_callback_per_action_and_no_duplicate_buttons():
     scope = _compile_functions(
         "video_scene3_keyboard",
+        "video_scene3_nav_rows",
         "video_scene3_audio_plan_keyboard",
         namespace={
             "InlineKeyboardButton": _Button,
@@ -370,10 +371,10 @@ def test_actual_callback_owner_handles_field_picks_audio_toggles_plan_and_skip_o
         save_state(context, _state(step="audio_plan"))
         for key, _label in video_scene3_flow.AUDIO_PLANNING_ADDONS:
             state = await run(f"vprofile|audio_open|{key}")
-            assert state["step"] == "audio_plan"
-            assert state["postproduction_addons"][key]["enabled"] is True
-            state = await run(f"vprofile|audio_open|{key}")
-            assert state["postproduction_addons"][key]["enabled"] is False
+            assert state["step"] == "post_detail"
+            assert state["active_post_addon"] == key
+            assert state["post_return_step"] == "audio_plan"
+            state = save_state(context, {**state, "step": "audio_plan"})
 
         state = await run("vprofile|audio_done")
         assert state["step"] == "scene_plan"
@@ -409,6 +410,7 @@ def test_registration_and_back_stack_have_one_owner_and_no_cross_module_route():
     assert video_scene3_flow.BACK_STEP["audio_plan"] == "requirements"
     handler = _function_source("handle_video_profile_studio_callback")
     audio_block = handler[handler.index('if action == "audio_open"'):handler.index('if action == "content"')]
-    assert '"post_detail"' not in audio_block
-    assert "toggle_audio_planning_addon" in audio_block
+    assert '"post_detail"' in audio_block
+    assert 'post_return_step="audio_plan"' in audio_block
+    assert "toggle_audio_planning_addon" not in audio_block
     assert "Có lỗi khi xử lý lệnh" not in audio_block
