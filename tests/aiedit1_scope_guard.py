@@ -10,6 +10,14 @@ LOCAL1_BOOT_COMPAT_MARKER = "test_local1_concat_manifest_is_python311_safe_and_e
 ARCH1_TEST_FILE = "tests/test_p0_profile_arch1_architecture_interior_realestate_studio.py"
 ARCH1_SCOPE_MARKER = "test_arch1_scope_lock"
 SCENE3UX2_BRANCH_PREFIX = "hotfix/p0-video-scene3ux2-"
+VIDEO_EDIT3_BRANCH_PREFIX = "hotfix/p0-video-edit3-"
+VIDEO_EDIT3_SCOPE_FILES = frozenset(
+    {
+        "services/video_edit_state_machine.py",
+        "services/video_local_validation.py",
+        "tests/test_p0_video_edit3_canonical_intake_route_state_machine.py",
+    }
+)
 SCENE3UX2_SCOPE_FILES = frozenset(
     {
         "bot.py",
@@ -148,6 +156,8 @@ def aiedit1_scope_files(paths=()):
     allowed = set(AIEDIT1_SCOPE_FILES)
     if _current_branch().startswith(SCENE3UX2_BRANCH_PREFIX):
         allowed.update(SCENE3UX2_SCOPE_FILES)
+    if _current_branch().startswith(VIDEO_EDIT3_BRANCH_PREFIX):
+        allowed.update(VIDEO_EDIT3_SCOPE_FILES)
     marker_path = Path(__file__).resolve().parents[1] / LOCAL1_BOOT_COMPAT_TEST
     marker_present = (
         marker_path.is_file()

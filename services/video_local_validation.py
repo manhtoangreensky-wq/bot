@@ -208,7 +208,8 @@ def probe_video_file(path: str | os.PathLike[str], *, ffprobe_path: str = "", ti
         return {"ok": False, "reason": "ffprobe_invalid_json", "bytes": size}
     streams = [item for item in payload.get("streams") or [] if isinstance(item, dict)]
     video_stream = next((item for item in streams if str(item.get("codec_type") or "") == "video"), {})
-    has_audio = any(str(item.get("codec_type") or "") == "audio" for item in streams)
+    audio_stream_count = sum(1 for item in streams if str(item.get("codec_type") or "") == "audio")
+    has_audio = audio_stream_count > 0
     format_data = payload.get("format") if isinstance(payload.get("format"), dict) else {}
     try:
         duration = float(format_data.get("duration") or 0)
@@ -228,6 +229,7 @@ def probe_video_file(path: str | os.PathLike[str], *, ffprobe_path: str = "", ti
         "fps": fps,
         "has_video": bool(video_stream),
         "has_audio": has_audio,
+        "audio_stream_count": audio_stream_count,
         "format_name": str(format_data.get("format_name") or ""),
         "video_codec": str(video_stream.get("codec_name") or ""),
     }
