@@ -72,8 +72,8 @@ def test_combo_canonical_timeline_fits_each_tts_chunk_inside_its_cue(monkeypatch
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(bot, "run_ffmpeg_command", fake_run)
     chunks = [
-        {"start": 0.0, "end": 2.0, "audio_duration": 5.0, "audio_bytes": b"one"},
-        {"start": 2.0, "end": 4.0, "audio_duration": 4.0, "audio_bytes": b"two"},
+        {"start": 0.0, "end": 2.0, "audio_duration": 2.2, "audio_bytes": b"one"},
+        {"start": 2.0, "end": 4.0, "audio_duration": 2.1, "audio_bytes": b"two"},
     ]
 
     output, detail = asyncio.run(bot.build_canonical_dub_timeline_audio(chunks, 4.0))
@@ -82,8 +82,22 @@ def test_combo_canonical_timeline_fits_each_tts_chunk_inside_its_cue(monkeypatch
     assert "ffmpeg_canonical_timeline_audio" in detail
     filter_value = commands[-1][commands[-1].index("-filter_complex") + 1]
     assert filter_value.count("atrim=duration=2.000") >= 4
-    assert "atempo=2.0" in filter_value
+    assert "atempo=1.100000" in filter_value
     assert commands[-1][commands[-1].index("-t") + 1] == "4.000"
+
+
+def test_canonical_timeline_rejects_tts_that_cannot_fit_without_overlap(monkeypatch):
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    output, detail = asyncio.run(
+        bot.build_canonical_dub_timeline_audio(
+            [{"cue_id": "cue-1", "start": 0.0, "end": 2.0, "audio_duration": 5.0, "audio_bytes": b"one"}],
+            2.0,
+        )
+    )
+
+    assert output == b""
+    assert "canonical_tts_segment_exceeds_cue:cue-1" in detail
+    assert "max_tempo=1.150" in detail
 
 
 def test_long_video_asr_chunks_keep_absolute_timestamps(monkeypatch):
@@ -207,7 +221,10 @@ def test_auto_subtitle_uses_audio_asr_original_language_only(monkeypatch):
     assert captured["source_language"] == "auto"
     assert prepared["source_subtitle"].strip() == SOURCE_SRT.strip()
     assert prepared["output_subtitle"].strip() == SOURCE_SRT.strip()
-    assert prepared["output_segments"] == SOURCE_SEGMENTS
+    assert [(cue["start"], cue["end"], cue["source_text"]) for cue in prepared["output_segments"]] == [
+        (item["start"], item["end"], item["text"]) for item in SOURCE_SEGMENTS
+    ]
+    assert all(cue["cue_id"] for cue in prepared["output_segments"])
     assert prepared["detected_language"] == "vi"
     assert prepared["translation_provider"] == ""
     assert prepared["translated_segment_count"] == 0
