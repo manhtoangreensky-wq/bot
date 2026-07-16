@@ -2007,6 +2007,46 @@ def requirement_suggestion(key: str, state: dict[str, Any]) -> str:
     return suggestions[0] if suggestions else "Giữ nguyên chi tiết quan trọng giữa mọi cảnh."
 
 
+def unified_field_suggestions(state: dict[str, Any], group: str, key: str) -> list[str]:
+    """Resolve the five choices for one canonical editor field."""
+
+    clean_group = str(group or "")
+    clean_key = str(key or "")
+    if clean_group == "creative_controls" and clean_key in dict(CREATIVE_CONTROLS):
+        return creative_suggestions(state, clean_key)
+    if (
+        clean_group == "preservation_requirements"
+        and clean_key in dict(PUBLIC_REQUIREMENT_CATEGORIES)
+    ):
+        return requirement_suggestions(state, clean_key)
+    return []
+
+
+def select_unified_field_suggestion(
+    state: dict[str, Any],
+    group: str,
+    key: str,
+    selection: int,
+) -> dict[str, Any]:
+    """Persist one numbered choice without changing any sibling field."""
+
+    updated = normalize_state(state)
+    suggestions = unified_field_suggestions(updated, group, key)
+    index = int(selection or 0)
+    if index < 1 or index > len(suggestions):
+        return updated
+    updated = set_entry(
+        updated,
+        str(group or ""),
+        str(key or ""),
+        suggestions[index - 1],
+        enabled=True,
+    )
+    if str(group or "") == "preservation_requirements":
+        updated["requirements"] = public_requirements(updated)
+    return updated
+
+
 def creative_defaults(state: dict[str, Any]) -> dict[str, str]:
     profile = technical_profile_label(str((state or {}).get("technical_profile") or ""))
     content = content_type_label(str((state or {}).get("content_type") or ""))
@@ -2129,6 +2169,38 @@ def restore_entry(state: dict[str, Any], group: str, key: str) -> dict[str, Any]
         entries[key] = item
         updated[group] = entries
     return updated
+
+
+def toggle_audio_planning_addon(state: dict[str, Any], key: str) -> dict[str, Any]:
+    """Toggle the single canonical post-production entry used by planning."""
+
+    clean_key = str(key or "")
+    updated = normalize_state(state)
+    if clean_key not in dict(AUDIO_PLANNING_ADDONS):
+        return updated
+    current = dict((updated.get("postproduction_addons") or {}).get(clean_key) or {})
+    if current.get("enabled"):
+        return remove_entry(updated, "postproduction_addons", clean_key)
+    value = current.get("value")
+    if not isinstance(value, dict) or not value:
+        value = post_addon_default(clean_key)
+    return set_entry(
+        updated,
+        "postproduction_addons",
+        clean_key,
+        value,
+        enabled=True,
+    )
+
+
+def finalize_audio_planning(state: dict[str, Any], *, skip: bool = False) -> dict[str, Any]:
+    """Build the local scene plan after applying or clearing audio choices."""
+
+    updated = normalize_state(state)
+    if skip:
+        for key, _label in AUDIO_PLANNING_ADDONS:
+            updated = remove_entry(updated, "postproduction_addons", key)
+    return build_planning_package(updated)
 
 
 def public_requirements(state: dict[str, Any]) -> dict[str, Any]:
