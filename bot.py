@@ -107,7 +107,7 @@ from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import profile_router, video_edit_capabilities, video_edit_state_machine, video_local_editing, video_local_validation, video_smart_splitter
 from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
-from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_prompt_vault
+from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import video_addon_planner, video_scene3_flow, video_scene_prompt_builder, video_semantic_scene_planner
 from services import video_prompt_continuity as video_continuity
@@ -5184,6 +5184,7 @@ def init_db():
         video_idea_catalog.dynamic_category_seeds(),
         video_idea_catalog.dynamic_preset_seeds(),
     )
+    video_profile_catalog.seed_catalog(conn)
     conn.commit()
     conn.close()
 
@@ -65230,6 +65231,11 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "ctype_restore": {"content_type", "technical_profile"},
     "ctype_view": {"content_type", "technical_profile"},
     "select": {"technical_profile", "content_type"},
+    "profile_page": {"technical_profile", "content_type"},
+    "profile_select": {"technical_profile", "content_type", "profile_suggestions"},
+    "profile_link_toggle": {"profile_links"},
+    "profile_links_done": {"profile_links"},
+    "profile_links_skip": {"profile_links"},
     "profile_none": {"technical_profile", "content_type"},
     "profile_suggest": {"technical_profile", "content_type"},
     "profile_suggest_refresh": {"technical_profile", "content_type"},
@@ -65525,6 +65531,7 @@ def video_scene2_reconcile_state(context, state: dict) -> dict:
         "await_image_prompt", "await_image_negative", "await_video_prompt", "await_video_negative",
         "await_post_config", "await_post_text", "await_post_asset_upload",
         "requirement_detail", "materials_manage", "creative_detail", "creative_suggestions", "content_detail", "content_suggestions", "content_position",
+        "profile_links", "profile_suggestions",
         "scene_detail", "transitions", "transition_picker", "logo_position", "post_detail", "post_position", "post_volume", "quality_guide", "image_quote",
         "automatic_text_review", "automatic_text_position", "automatic_text_scope", "automatic_text_timing", "automatic_text_target", "automatic_text_duration", "automatic_text_animation", "automatic_text_style",
     }
@@ -65534,7 +65541,10 @@ def video_scene2_reconcile_state(context, state: dict) -> dict:
         state["content_type"] = video_scene3_flow.suggested_content_type(state)
     if step == "content_type":
         return video_profile_studio_step(context, state, "technical_profile", push=False)
-    if step not in {"scene_count", "await_count_custom", "technical_profile"} and not str(state.get("technical_profile") or ""):
+    if (
+        step not in {"scene_count", "await_count_custom", "technical_profile", "profile_suggestions"}
+        and not str(state.get("primary_profile") or state.get("technical_profile") or "")
+    ):
         return video_profile_studio_step(context, state, "technical_profile", push=False)
     return save_video_profile_studio_state(context, state)
 
@@ -65577,20 +65587,30 @@ def video_profile_studio_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
 
 
 def video_profile_studio_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    rows = []
-    options = list(profile_router.STUDIO_PROFILE_OPTIONS)
-    for index in range(0, len(options), 2):
-        row = []
-        for item in options[index:index + 2]:
-            row.append(InlineKeyboardButton(
-                str(item.get("label_vi") or item.get("selection_id") or "Profile"),
-                callback_data=f"vprofile|select|{item.get('selection_id')}",
-            ))
-        rows.append(row)
-    if rows and len(rows[-1]) == 1:
-        rows[-1].append(InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai"))
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vprofile|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    return InlineKeyboardMarkup(rows)
+    # Compatibility alias only. The former 14-profile public keyboard must
+    # never reopen; stale callers are redirected to the canonical catalog.
+    from services import video_profile_catalog as profile_catalog
+
+    first_page = profile_catalog.PAGE_GROUPS[0][0]
+    options = [
+        item
+        for item in profile_catalog.profile_seeds()
+        if str(item.get("page_group") or "") == first_page
+    ]
+    rows = [
+        [
+            (
+                f"{str(item.get('icon') or '🎯')} {str(item.get('short_name') or item.get('public_name') or '')}",
+                f"vprofile|profile_select|{str(item.get('profile_key') or '')}",
+            )
+            for item in options[index:index + 2]
+        ]
+        for index in range(0, len(options), 2)
+    ]
+    rows.append([("💡 Gợi ý profile phù hợp", "vprofile|profile_suggest"), ("✍️ Tự nhập profile", "vprofile|profile_custom")])
+    rows.append([("⬅️ Trang trước", "vprofile|profile_page|3"), ("➡️ Trang sau", "vprofile|profile_page|2")])
+    rows.append([("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")])
+    return video_scene3_keyboard(rows)
 
 
 def video_profile_studio_question_text(selection_id: str, lang: str = "vi") -> str:
@@ -66002,27 +66022,204 @@ def video_scene3_summary(entries: dict, labels: tuple[tuple[str, str], ...]) -> 
     return "; ".join(selected) if selected else "Chưa thêm"
 
 
+def _video_profile_dynamic_db(read_fn):
+    conn = db_connect()
+    try:
+        video_profile_catalog.seed_catalog(conn)
+        conn.commit()
+        return read_fn(conn)
+    finally:
+        conn.close()
+
+
+def video_profile_catalog_page_rows(page: int) -> list[dict]:
+    selected_page = max(1, min(len(video_profile_catalog.PAGE_GROUPS), safe_int(page, 1)))
+    page_group = video_profile_catalog.PAGE_GROUPS[selected_page - 1][0]
+    try:
+        return _video_profile_dynamic_db(
+            lambda conn: video_profile_catalog.list_profiles(
+                conn,
+                page_group=page_group,
+                active_only=True,
+            )
+        )
+    except Exception:
+        return [
+            dict(item)
+            for item in video_profile_catalog.PROFILE_SEEDS
+            if str(item.get("page_group") or "") == page_group and bool(item.get("is_active"))
+        ]
+
+
+def video_profile_catalog_record(profile_key: str) -> dict:
+    clean_key = str(profile_key or "").strip()
+    if not clean_key:
+        return {}
+    try:
+        return _video_profile_dynamic_db(
+            lambda conn: video_profile_catalog.profile_by_key(
+                conn,
+                clean_key,
+                active_only=True,
+            )
+        )
+    except Exception:
+        return dict(video_profile_catalog.PROFILE_BY_KEY.get(clean_key) or {})
+
+
+def video_profile_catalog_link_rows(profile_key: str) -> list[dict]:
+    clean_key = str(profile_key or "").strip()
+    if not clean_key or clean_key == "custom":
+        return []
+    try:
+        return _video_profile_dynamic_db(
+            lambda conn: video_profile_catalog.links_for_profile(
+                conn,
+                clean_key,
+                active_only=True,
+                limit=5,
+            )
+        )
+    except Exception:
+        return video_profile_catalog.linked_candidates(clean_key, limit=5)
+
+
+def video_profile_public_label(state: dict, profile_key: str = "") -> str:
+    key = str(profile_key or state.get("primary_profile") or "")
+    if key == "custom":
+        return str(state.get("custom_technical_profile") or "Profile tự nhập")[:180]
+    record = video_profile_catalog_record(key)
+    return str(
+        record.get("public_name")
+        or video_profile_catalog.profile_label(key, str(state.get("custom_technical_profile") or ""))
+    )
+
+
 def video_scene3_profile_text(state: dict) -> str:
-    suggested = str(state.get("suggested_technical_profile") or "")
-    suggestion_line = (
-        f"\n• Gợi ý đang xem: <b>{html.escape(video_scene3_flow.technical_profile_label(suggested))}</b>"
-        if suggested else ""
+    page = max(1, min(len(video_profile_catalog.PAGE_GROUPS), safe_int(state.get("profile_page"), 1)))
+    page_label = video_profile_catalog.PAGE_GROUPS[page - 1][1]
+    primary = str(state.get("primary_profile") or "")
+    primary_line = (
+        f"\n• Profile chính: <b>{html.escape(video_profile_public_label(state, primary))}</b>"
+        if primary else ""
     )
     return (
-        "🎯 <b>Chọn profile video</b>\n\n"
+        "🎯 <b>Chọn Video Profile</b>\n\n"
         f"• Chủ đề: {html.escape(str(state.get('subject') or '')[:220])}\n"
         f"• Số cảnh: <b>{safe_int(state.get('scene_count'), 1)}</b>\n"
-        f"• Có đủ: <b>14 profile</b>{suggestion_line}\n\n"
-        "Chọn một profile sát nhất hoặc tự nhập profile riêng. Gợi ý chỉ để tham khảo, không tự thay lựa chọn của anh/chị."
+        f"• Trang {page}/3: <b>{html.escape(page_label)}</b>\n"
+        f"• Có đủ: <b>32 profile</b>{primary_line}\n\n"
+        "Chọn một profile làm khung kể chuyện chính. Gợi ý chỉ để tham khảo và không tự thay lựa chọn của anh/chị."
     )
 
 
 def video_scene3_profile_keyboard(state: dict) -> InlineKeyboardMarkup:
+    from services import video_profile_catalog
+
     rows = []
-    options = list(video_scene3_flow.TECHNICAL_PROFILES)
+    page = max(1, min(len(video_profile_catalog.PAGE_GROUPS), safe_int(state.get("profile_page"), 1)))
+    try:
+        options = video_profile_catalog_page_rows(page)
+    except NameError:
+        page_group = video_profile_catalog.PAGE_GROUPS[page - 1][0]
+        options = [
+            item
+            for item in video_profile_catalog.profile_seeds()
+            if str(item.get("page_group") or "") == page_group
+        ]
     for index in range(0, len(options), 2):
-        rows.append([(label, f"vprofile|select|{profile_id}") for profile_id, label in options[index:index + 2]])
+        rows.append([
+            (
+                f"{str(item.get('icon') or '🎯')} {str(item.get('short_name') or item.get('public_name') or '')}",
+                f"vprofile|profile_select|{str(item.get('profile_key') or '')}",
+            )
+            for item in options[index:index + 2]
+        ])
     rows.append([("💡 Gợi ý profile phù hợp", "vprofile|profile_suggest"), ("✍️ Tự nhập profile", "vprofile|profile_custom")])
+    previous_page = 3 if page == 1 else page - 1
+    next_page = 1 if page == 3 else page + 1
+    rows.append([
+        ("⬅️ Trang trước", f"vprofile|profile_page|{previous_page}"),
+        ("➡️ Trang sau", f"vprofile|profile_page|{next_page}"),
+    ])
+    rows.append([("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")])
+    return video_scene3_keyboard(rows)
+
+
+def video_scene3_profile_links_text(state: dict) -> str:
+    primary = str(state.get("primary_profile") or "")
+    linked = [str(item) for item in state.get("linked_profiles") or [] if str(item)]
+    candidates = video_profile_catalog_link_rows(primary)
+    lines = [
+        "🔗 <b>Kết hợp Video Profile</b>",
+        "",
+        f"• Profile chính: <b>{html.escape(video_profile_public_label(state, primary))}</b>",
+        f"• Đã chọn bổ sung: <b>{len(linked)}/2</b>",
+        "",
+        "Profile bổ sung chỉ thêm góc ngành, hình ảnh hoặc nền tảng; không thay khung kể chuyện chính.",
+    ]
+    if candidates:
+        lines.extend(["", "Gợi ý phù hợp:"])
+        for item in candidates:
+            lines.append(
+                f"• <b>{html.escape(str(item.get('public_name') or ''))}</b>: "
+                f"{html.escape(str(item.get('reason') or 'Bổ sung góc thể hiện phù hợp.'))}"
+            )
+    else:
+        lines.extend(["", "Chưa có profile liên kết phù hợp. Anh/chị có thể tiếp tục với profile chính."])
+    notice = str(state.get("profile_link_notice") or "").strip()
+    if notice:
+        lines.extend(["", f"⚠️ {html.escape(notice)}"])
+    return "\n".join(lines)
+
+
+def video_scene3_profile_links_keyboard(state: dict) -> InlineKeyboardMarkup:
+    selected = {str(item) for item in state.get("linked_profiles") or [] if str(item)}
+    candidates = video_profile_catalog_link_rows(str(state.get("primary_profile") or ""))
+    buttons = [
+        (
+            f"{'✅' if str(item.get('target_profile_key') or item.get('profile_key') or '') in selected else '☐'} "
+            f"{str(item.get('short_name') or item.get('public_name') or '')}",
+            f"vprofile|profile_link_toggle|{str(item.get('target_profile_key') or item.get('profile_key') or '')}",
+        )
+        for item in candidates
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([("✅ Xong profile", "vprofile|profile_links_done"), ("⏭️ Không kết hợp", "vprofile|profile_links_skip")])
+    rows.append([("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")])
+    return video_scene3_keyboard(rows)
+
+
+def video_scene3_profile_suggestions_text(state: dict) -> str:
+    suggestions = [
+        str(item)
+        for item in state.get("profile_suggestion_keys") or []
+        if str(item)
+    ][:5]
+    lines = [
+        "💡 <b>Gợi ý Video Profile phù hợp</b>",
+        "",
+        f"• Chủ đề: {html.escape(str(state.get('subject') or '')[:220])}",
+        f"• Số cảnh: <b>{safe_int(state.get('scene_count'), 1)}</b>",
+        "",
+        "Chọn một gợi ý nếu phù hợp. Mở màn này không tự ghi đè profile đã chọn.",
+    ]
+    for index, key in enumerate(suggestions, 1):
+        lines.append(f"{index}. {html.escape(video_profile_public_label(state, key))}")
+    return "\n".join(lines)
+
+
+def video_scene3_profile_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
+    suggestions = [
+        str(item)
+        for item in state.get("profile_suggestion_keys") or []
+        if str(item)
+    ][:5]
+    buttons = [
+        (f"{index}. {video_profile_public_label(state, key)}", f"vprofile|profile_select|{key}")
+        for index, key in enumerate(suggestions, 1)
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
@@ -66138,7 +66335,7 @@ def video_scene3_suggestion_text(state: dict) -> str:
     suggestions = list(state.get("suggestions") or [])
     lines = [
         "💡 <b>Gợi ý hướng nội dung</b>", "",
-        f"• Profile: <b>{html.escape(video_scene3_flow.technical_profile_label(str(state.get('technical_profile') or ''), str(state.get('custom_technical_profile') or '')))}</b>",
+        f"• Video Profile: <b>{html.escape(video_profile_public_label(state))}</b>",
         f"• Đúng <b>{safe_int(state.get('scene_count'), 1)} cảnh</b>", "",
     ]
     for item in suggestions[:5]:
@@ -66545,7 +66742,7 @@ def video_scene3_scene_plan_text(state: dict) -> str:
     lines = [
         "🎞 <b>Kế hoạch cảnh hoàn chỉnh</b>", "",
         f"• Chủ đề: {html.escape(str(state.get('subject') or '')[:220])}",
-        f"• Profile: <b>{html.escape(video_scene3_flow.technical_profile_label(str(state.get('technical_profile') or ''), str(state.get('custom_technical_profile') or '')))}</b>",
+        f"• Video Profile: <b>{html.escape(video_profile_public_label(state))}</b>",
         f"• Số cảnh: <b>{len(scenes)}/{safe_int(state.get('scene_count'), 1)}</b> · khoảng <b>{len(scenes) * 8}s</b>", "",
     ]
     for scene in scenes[:20]:
@@ -66990,7 +67187,7 @@ def video_scene3_full_review_text(state: dict) -> str:
     lines = [
         "📋 <b>Xem lại toàn bộ kế hoạch</b>", "",
         f"• Chủ đề: {html.escape(str(state.get('subject') or '')[:220])}",
-        f"• Profile: {html.escape(video_scene3_flow.technical_profile_label(str(state.get('technical_profile') or ''), str(state.get('custom_technical_profile') or '')))}",
+        f"• Video Profile: {html.escape(video_profile_public_label(state))}",
         f"• Hướng nội dung: {html.escape(str((state.get('selected_suggestion') or {}).get('title') or 'Theo yêu cầu riêng')[:180])}",
         f"• Ngữ cảnh: {html.escape(str(state.get('context') or state.get('profile_context') or 'Theo chủ đề đã chọn')[:320])}",
         f"• Cảnh: <b>{counts['scenes']}/{counts['expected']}</b> · khoảng <b>{counts['expected'] * 8}s</b>",
@@ -67367,12 +67564,19 @@ def video_scene3_final_text(state: dict, user_id: int = 0) -> str:
         except Exception:
             balance = 0
     post = video_scene3_summary(state.get("postproduction_addons") or {}, video_scene3_flow.PUBLIC_POST_ADDONS)
+    linked_labels = [
+        video_profile_public_label(state, str(item))
+        for item in state.get("linked_profiles") or []
+        if str(item)
+    ][:video_profile_catalog.MAX_LINKED_PROFILES]
+    linked_line = ", ".join(linked_labels) if linked_labels else "Không kết hợp"
     return (
         "🧾 <b>Báo cáo tổng hợp trước xác nhận</b>\n\n"
         f"• Ý tưởng: {html.escape(str(state.get('subject') or '')[:260])}\n"
         f"• Số cảnh: <b>{count}</b>\n"
         f"• Tổng thời lượng dự kiến: <b>{count * 8} giây</b>\n"
-        f"• Profile: {html.escape(video_scene3_flow.technical_profile_label(str(state.get('technical_profile') or ''), str(state.get('custom_technical_profile') or '')))}\n"
+        f"• Video Profile: {html.escape(video_profile_public_label(state))}\n"
+        f"• Profile bổ sung: {html.escape(linked_line)}\n"
         f"• Tỉ lệ: <b>{html.escape(str(state.get('aspect_ratio') or '9:16'))}</b>\n"
         f"• Gói: <b>{html.escape(video_b14_package_full_label(quality_xu))}</b>\n"
         f"• Giá mỗi cảnh theo gói: <b>{xu_number(quality_xu)} Xu</b>\n"
@@ -67482,6 +67686,8 @@ def video_profile_scene1_storyboard_payload(state: dict) -> dict:
         "profile": profile.to_public_dict(),
         "story_bible": {
             "profile_id": profile_id,
+            "primary_profile": str(state.get("primary_profile") or ""),
+            "linked_profiles": [str(item) for item in state.get("linked_profiles") or []][:2],
             "content_type": content_type_id,
             "technical_profile": str(state.get("technical_profile") or ""),
             "title": str(state.get("subject") or "TOAN AAS Video"),
@@ -67501,6 +67707,8 @@ def video_profile_scene1_storyboard_payload(state: dict) -> dict:
         "preview_text": "Kế hoạch video theo cảnh đã được duyệt",
         "prompt_context": {
             "profile_id": profile_id,
+            "primary_profile": str(state.get("primary_profile") or ""),
+            "linked_profiles": [str(item) for item in state.get("linked_profiles") or []][:2],
             "technical_profile": str(state.get("technical_profile") or ""),
             "selected_transition_style": str(((plan.get("addon_plan") or {}).get("content_affecting") or {}).get("transition_style") or "tự nhiên"),
             "selected_voice_music_subtitle_cues": dict((plan.get("addon_plan") or {}).get("post_production") or {}),
@@ -67581,6 +67789,13 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
             "product_type": str(state.get("product_type") or state.get("source_product_id") or "video_ai_real"),
             "subject": str(state.get("subject") or ""),
             "scene_count": count,
+            "primary_profile": str(state.get("primary_profile") or ""),
+            "linked_profiles": [str(item) for item in state.get("linked_profiles") or []][:2],
+            "profile_page": safe_int(state.get("profile_page"), 1),
+            "profile_bundle_version": safe_int(
+                state.get("profile_bundle_version"),
+                video_profile_catalog.SCHEMA_VERSION,
+            ),
             "content_type": str(state.get("content_type") or ""),
             "technical_profile": str(state.get("technical_profile") or ""),
             "custom_technical_profile": str(state.get("custom_technical_profile") or ""),
@@ -67672,6 +67887,11 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         # screen so users never see the removed duplicate taxonomy menu.
         "content_type": lambda: (video_scene3_profile_text(state), video_scene3_profile_keyboard(state)),
         "technical_profile": lambda: (video_scene3_profile_text(state), video_scene3_profile_keyboard(state)),
+        "profile_links": lambda: (video_scene3_profile_links_text(state), video_scene3_profile_links_keyboard(state)),
+        "profile_suggestions": lambda: (
+            video_scene3_profile_suggestions_text(state),
+            video_scene3_profile_suggestions_keyboard(state),
+        ),
         "suggestion": lambda: (video_scene3_character_text(state), video_scene3_character_keyboard()),
         "character": lambda: (video_scene3_character_text(state), video_scene3_character_keyboard()),
         "image_source": lambda: (video_scene3_image_source_text(state), video_scene3_image_source_keyboard(state)),
@@ -200933,6 +201153,10 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
             state,
             "technical_profile",
             rebuild_scene_count=False,
+            primary_profile="",
+            linked_profiles=[],
+            profile_page=1,
+            profile_suggestion_keys=[],
             content_type=content_type_id,
             suggested_content_type=content_type_id,
             suggested_technical_profile=video_scene3_flow.suggested_technical_profile(content_type_id),
@@ -200940,20 +201164,23 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
         await update.message.reply_text(video_scene3_profile_text(state), parse_mode="HTML", reply_markup=video_scene3_profile_keyboard(state))
         return True
     if step == "await_profile_custom":
-        old_profile = str(state.get("technical_profile") or "")
-        history = list(state.get("technical_profile_history") or [])
-        if old_profile and old_profile != "custom":
-            history.append(old_profile)
-        state.update({
-            "technical_profile": "custom",
-            "selection_id": "custom",
-            "custom_technical_profile": user_text[:300],
-            "content_type": video_scene3_flow.suggested_content_type(state),
-            "technical_profile_history": history[-10:],
-            "suggested_technical_profile": "",
-        })
-        state = video_scene3_return_to_parent(context, state, "character", input_target="")
-        await update.message.reply_text(video_scene3_character_text(state), parse_mode="HTML", reply_markup=video_scene3_character_keyboard())
+        state = video_scene3_flow.select_primary_profile(
+            state,
+            "custom",
+            custom_profile=user_text[:300],
+        )
+        state = video_scene3_return_to_parent(
+            context,
+            state,
+            "profile_links",
+            input_target="",
+            selection_id="custom",
+        )
+        await update.message.reply_text(
+            video_scene3_profile_links_text(state),
+            parse_mode="HTML",
+            reply_markup=video_scene3_profile_links_keyboard(state),
+        )
         return True
     if step == "await_character_description":
         state = video_scene3_flow.set_character_mode(state, "custom", description=user_text[:1600])
@@ -201313,6 +201540,10 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             state,
             "technical_profile",
             rebuild_scene_count=False,
+            primary_profile="",
+            linked_profiles=[],
+            profile_page=1,
+            profile_suggestion_keys=[],
             content_type=content_type_id,
             suggested_content_type=content_type_id,
             suggested_technical_profile=video_scene3_flow.suggested_technical_profile(content_type_id),
@@ -201335,28 +201566,85 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         )
         return await video_profile_scene1_render(query, state, lang)
     if action == "select":
-        selection_id = parts[2] if len(parts) > 2 else ""
+        # Legacy 14-profile callback. It is intentionally read-only: old
+        # Telegram messages return to the canonical 32-profile catalog without
+        # overwriting a modern selection.
+        state = video_profile_studio_step(context, state, "technical_profile", push=False)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "profile_page":
+        page = max(1, min(3, safe_int(parts[2] if len(parts) > 2 else 1, 1)))
+        state = video_profile_studio_step(
+            context,
+            state,
+            "technical_profile",
+            push=False,
+            profile_page=page,
+        )
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "profile_select":
+        selection_id = str(parts[2] if len(parts) > 2 else "").strip()
         if not str(state.get("subject") or "").strip():
             state = video_profile_studio_step(context, state, "await_subject", push=False)
             return await video_profile_scene1_render(query, state, lang)
         if safe_int(state.get("scene_count"), 0) < 1:
             state = video_profile_studio_step(context, state, "scene_count", push=False)
             return await video_profile_scene1_render(query, state, lang)
-        if not video_profile_studio_option(selection_id):
+        record = video_profile_catalog_record(selection_id)
+        if not record:
             state = video_profile_studio_step(context, state, "technical_profile", push=False)
             return await video_profile_scene1_render(query, state, lang)
-        old_profile = str(state.get("technical_profile") or "")
-        profile_history = list(state.get("technical_profile_history") or [])
-        if old_profile and old_profile != selection_id:
-            profile_history.append(old_profile)
-        state.update({
-            "technical_profile": selection_id,
-            "selection_id": selection_id,
-            "content_type": video_scene3_flow.content_type_for_profile(selection_id, state),
-            "technical_profile_history": profile_history[-10:],
-            "suggested_technical_profile": "",
-        })
-        state = video_profile_studio_step(context, state, "character")
+        state = video_scene3_flow.select_primary_profile(state, selection_id)
+        page_group = str(record.get("page_group") or "")
+        page = next(
+            (
+                index
+                for index, (key, _label) in enumerate(video_profile_catalog.PAGE_GROUPS, 1)
+                if key == page_group
+            ),
+            safe_int(state.get("profile_page"), 1),
+        )
+        state = video_profile_studio_step(
+            context,
+            state,
+            "profile_links",
+            profile_page=page,
+            selection_id=selection_id,
+            profile_link_notice="",
+        )
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "profile_link_toggle":
+        selection_id = str(parts[2] if len(parts) > 2 else "").strip()
+        if not video_profile_catalog_record(selection_id):
+            state = video_profile_studio_step(context, state, "profile_links", push=False)
+            return await video_profile_scene1_render(query, state, lang)
+        before = list(state.get("linked_profiles") or [])
+        state, changed = video_scene3_flow.toggle_linked_profile(state, selection_id)
+        if changed:
+            state["profile_link_notice"] = ""
+        elif selection_id not in before and len(before) >= video_profile_catalog.MAX_LINKED_PROFILES:
+            state["profile_link_notice"] = "Chỉ chọn tối đa 2 profile bổ sung."
+        state = video_profile_studio_step(context, state, "profile_links", push=False)
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "profile_links_done":
+        state = video_profile_studio_step(
+            context,
+            state,
+            "character",
+            profile_link_notice="",
+        )
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "profile_links_skip":
+        state["linked_profiles"] = []
+        state["profile_context"] = video_profile_catalog.profile_bundle_context(
+            str(state.get("primary_profile") or ""),
+            [],
+        )
+        state = video_profile_studio_step(
+            context,
+            state,
+            "character",
+            profile_link_notice="",
+        )
         return await video_profile_scene1_render(query, state, lang)
     if action == "profile_toggle_all":
         # Legacy callback: the current public screen already shows all 14 profiles.
@@ -201364,30 +201652,26 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
     if action in {"profile_suggest", "profile_suggest_refresh"}:
-        offset = safe_int(state.get("technical_profile_suggestion_offset"), 0)
-        if action == "profile_suggest_refresh":
-            offset += 1
-        content_type_id = str(state.get("content_type") or video_scene3_flow.suggested_content_type(state))
-        state.update({
-            "content_type": content_type_id,
-            "technical_profile_suggestion_offset": offset,
-            "suggested_technical_profile": video_scene3_flow.suggested_technical_profile(
-                content_type_id,
-                offset,
-            ),
-        })
-        state = save_video_profile_studio_state(context, state)
+        suggestions = video_profile_catalog.suggest_primary_profiles(
+            str(state.get("subject") or ""),
+            safe_int(state.get("scene_count"), 1),
+            limit=5,
+        )
+        state = video_profile_studio_step(
+            context,
+            state,
+            "profile_suggestions",
+            profile_suggestion_keys=[
+                str(item.get("profile_key") or "")
+                for item in suggestions
+                if str(item.get("profile_key") or "")
+            ][:5],
+        )
         return await video_profile_scene1_render(query, state, lang)
     if action == "profile_none":
         # Old messages may still contain this callback.  It no longer bypasses
         # the required profile choice and safely returns to the 14-profile list.
-        content_type_id = str(state.get("content_type") or video_scene3_flow.suggested_content_type(state))
-        state.update({
-            "content_type": content_type_id,
-            "step": "technical_profile",
-            "suggested_technical_profile": video_scene3_flow.suggested_technical_profile(content_type_id),
-        })
-        state = save_video_profile_studio_state(context, state)
+        state = video_profile_studio_step(context, state, "technical_profile", push=False)
         return await video_profile_scene1_render(query, state, lang)
     if action in {"profile_accept", "profile_restore", "profile_view"}:
         # Removed callbacks from old Telegram messages are read-only. A

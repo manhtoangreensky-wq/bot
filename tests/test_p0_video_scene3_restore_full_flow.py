@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import video_scene3_flow
+from services import video_profile_catalog, video_scene3_flow
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -564,10 +564,11 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         button.callback_data
         for row in profile_markup.inline_keyboard
         for button in row
-        if button.callback_data.startswith("vprofile|select|")
+        if button.callback_data.startswith("vprofile|profile_select|")
     ]
-    assert len(public_profile_callbacks) == 14
+    assert len(public_profile_callbacks) == 10
     assert len(public_profile_callbacks) == len(set(public_profile_callbacks))
+    assert len(video_profile_catalog.PROFILE_SEEDS) == 32
     assert "vprofile|profile_none" not in {
         button.callback_data for row in profile_markup.inline_keyboard for button in row
     }
@@ -949,6 +950,10 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         "video_profile_scene1_render": render,
         "safe_edit_or_send": edit_or_send,
         "safe_int": safe_int,
+        "video_profile_catalog": video_profile_catalog,
+        "video_profile_catalog_record": lambda selection_id: dict(
+            video_profile_catalog.PROFILE_BY_KEY.get(selection_id) or {}
+        ),
         "video_scene3_flow": video_scene3_flow,
         "video_scene3_active_scene": lambda state: max(1, min(int(state.get("scene_count") or 1), int(state.get("active_scene_index") or 1))),
         "VIDEO_PRODUCT_REGISTRY": {},
@@ -1010,8 +1015,16 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         state = await run_action("vprofile|profile_none")
         assert state["step"] == "technical_profile"
         assert not state.get("technical_profile")
-        state = await advance_with_exact_back("vprofile|select|architecture_interior", "character", "technical_profile")
+        state = await run_action("vprofile|select|architecture_interior")
+        assert state["step"] == "technical_profile"
+        assert not state.get("primary_profile")
+        state = await advance_with_exact_back(
+            "vprofile|profile_select|architecture_interior_renovation",
+            "profile_links",
+            "technical_profile",
+        )
         assert state["content_type"] == "real_estate_fpv"
+        state = await advance_with_exact_back("vprofile|profile_links_done", "character", "profile_links")
         state = await advance_with_exact_back("vprofile|character|none", "image_source", "character")
         state = await advance_with_exact_back("vprofile|image_source|description", "creative_controls", "image_source")
         for callback, expected_step, previous_step in (
