@@ -65279,7 +65279,7 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "material_skip": {"materials"},
     "creative": {"creative_controls"},
     "creative_suggest": {"creative_detail"},
-    "creative_pick": {"creative_suggestions"},
+    "creative_pick": {"creative_detail", "creative_suggestions"},
     "creative_custom": {"creative_detail", "creative_suggestions"},
     "creative_detail_done": {"creative_detail", "creative_suggestions"},
     "creative_quick": {"creative_controls"},
@@ -201486,17 +201486,14 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "req_pick":
         key = str(state.get("active_requirement") or "")
-        suggestions = video_scene3_flow.requirement_suggestions(state, key)
         selection = safe_int(parts[2] if len(parts) > 2 else 0, 0)
-        if key in dict(video_scene3_flow.PUBLIC_REQUIREMENT_CATEGORIES) and 1 <= selection <= len(suggestions):
-            state = video_scene3_flow.set_entry(
+        if key in dict(video_scene3_flow.PUBLIC_REQUIREMENT_CATEGORIES):
+            state = video_scene3_flow.select_unified_field_suggestion(
                 state,
                 "preservation_requirements",
                 key,
-                suggestions[selection - 1],
-                enabled=True,
+                selection,
             )
-            state["requirements"] = video_scene3_flow.public_requirements(state)
             state.update({"step": "requirement_detail", "active_requirement": key})
             state = save_video_profile_studio_state(context, state)
         return await video_profile_scene1_render(query, state, lang)
@@ -201645,10 +201642,14 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action == "creative_pick":
         key = str(state.get("active_creative") or "")
-        suggestions = video_scene3_flow.creative_suggestions(state, key)
         selection = safe_int(parts[2] if len(parts) > 2 else 0, 0)
-        if 1 <= selection <= len(suggestions):
-            state = video_scene3_flow.set_entry(state, "creative_controls", key, suggestions[selection - 1], enabled=True)
+        if key in dict(video_scene3_flow.CREATIVE_CONTROLS):
+            state = video_scene3_flow.select_unified_field_suggestion(
+                state,
+                "creative_controls",
+                key,
+                selection,
+            )
             state = video_scene3_return_to_parent(context, state, "creative_detail", active_creative=key)
         return await video_profile_scene1_render(query, state, lang)
     if action == "creative_custom":
@@ -201702,19 +201703,39 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action == "audio_open":
         key = str(parts[2] if len(parts) > 2 else "")
         if key in dict(video_scene3_flow.AUDIO_PLANNING_ADDONS):
-            state.update({"active_post_addon": key, "post_return_step": "audio_plan"})
-            state = video_profile_studio_step(context, state, "post_detail")
+            state = video_scene3_flow.toggle_audio_planning_addon(state, key)
+            state = save_video_profile_studio_state(
+                context,
+                {
+                    **state,
+                    "step": "audio_plan",
+                    "active_post_addon": "",
+                    "post_return_step": "",
+                },
+            )
         return await video_profile_scene1_render(query, state, lang)
     if action in {"audio_done", "audio_skip"}:
-        if action == "audio_skip":
-            for key, _label in video_scene3_flow.AUDIO_PLANNING_ADDONS:
-                state = video_scene3_flow.remove_entry(state, "postproduction_addons", key)
         try:
-            state = video_scene3_flow.build_planning_package(state)
-        except ValueError:
+            state = video_scene3_flow.finalize_audio_planning(
+                state,
+                skip=action == "audio_skip",
+            )
+        except Exception as exc:
+            logger.warning(
+                "video_scene3_audio_planning_failed | action=%s | error=%s",
+                action,
+                type(exc).__name__,
+            )
+            state = save_video_profile_studio_state(
+                context,
+                {**state, "step": "audio_plan"},
+            )
             return await safe_edit_or_send(
                 query,
-                "⚠️ Chưa đủ dữ liệu để lập đúng số cảnh. Anh/chị hãy kiểm tra lại chủ đề, profile và yêu cầu đã chọn. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                video_scene3_audio_plan_text(state)
+                + "\n\n⚠️ Chưa đủ dữ liệu để lập đúng số cảnh. Anh/chị hãy quay lại kiểm tra chủ đề, số cảnh và profile. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=video_scene3_audio_plan_keyboard(state),
             )
         state = video_profile_studio_step(context, state, "scene_plan", quality_xu=0)
         return await video_profile_scene1_render(query, state, lang)
