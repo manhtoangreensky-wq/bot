@@ -114,12 +114,13 @@ def test_public_keyboards_remove_duplicate_and_aggregate_controls():
 
 def test_transition_is_one_dedicated_step_for_each_scene_boundary():
     state = video_scene3_flow.build_planning_package(_state(scene_count=4))
-    assert video_scene3_flow.CANONICAL_STEPS.index("transitions") == (
+    assert "transitions" not in video_scene3_flow.CANONICAL_STEPS
+    assert video_scene3_flow.CANONICAL_STEPS.index("full_review") == (
         video_scene3_flow.CANONICAL_STEPS.index("video_prompts") + 1
     )
-    assert video_scene3_flow.BACK_STEP["transitions"] == "video_prompts"
-    assert video_scene3_flow.BACK_STEP["automatic_text"] == "transitions"
-    assert video_scene3_flow.BACK_STEP["full_review"] == "post_addons"
+    assert video_scene3_flow.BACK_STEP["transitions"] == "full_review"
+    assert video_scene3_flow.BACK_STEP["automatic_text"] == "full_review"
+    assert video_scene3_flow.BACK_STEP["post_addons"] == "full_review"
     for boundary in range(1, 4):
         suggestions = video_scene3_flow.transition_suggestions(state, boundary)
         assert len(suggestions) == 5
@@ -136,9 +137,10 @@ def test_transition_is_one_dedicated_step_for_each_scene_boundary():
 
 def test_postproduction_keeps_logo_text_watermark_positions_and_audio_volume_concrete():
     public_keys = {key for key, _label in video_scene3_flow.PUBLIC_POST_ADDONS}
-    assert public_keys == {
+    assert public_keys == {"logo_image", "watermark_text"}
+    assert {key for key, _label in video_scene3_flow.PUBLIC_CONFIGURABLE_POST_ADDONS} == {
         "logo_image", "watermark_text", "subtitles", "dubbing",
-        "music", "sfx", "automatic_text", "source_audio",
+        "music", "sfx", "source_audio",
     }
     assert video_scene3_flow.AUDIO_POST_ADDONS == {"dubbing", "music", "sfx", "source_audio"}
     assert video_scene3_flow.AUDIO_VOLUME_LEVELS == (0, 25, 50, 75, 100, 125, 150, 175, 200)

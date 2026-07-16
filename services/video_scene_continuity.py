@@ -16,6 +16,9 @@ CONTINUITY_FIELDS = (
     "environment",
     "architecture_geometry",
     "color_palette",
+    "creative_palette_lighting",
+    "identity_color_locks",
+    "color_conflict_policy",
     "lighting_state",
     "time_of_day",
     "motion_direction",
@@ -59,6 +62,12 @@ def build_continuity_contract(
         "environment": _items(assets.get("environment") or requirements.get("environment")),
         "architecture_geometry": _items(assets.get("architecture_geometry") or requirements.get("architecture_geometry")),
         "color_palette": _items(requirements.get("color_palette") or assets.get("color_palette")),
+        "creative_palette_lighting": _items(requirements.get("creative_palette_lighting")),
+        "identity_color_locks": _items(requirements.get("identity_color_locks")),
+        "color_conflict_policy": str(
+            requirements.get("color_conflict_policy")
+            or "identity_color_locks_override_creative_palette"
+        ),
         "lighting_state": str(requirements.get("lighting_state") or "ánh sáng nhất quán theo profile"),
         "time_of_day": str(requirements.get("time_of_day") or "giữ cùng thời điểm trừ khi có chuyển thời gian chủ ý"),
         "motion_direction": str(requirements.get("motion_direction") or "trái sang phải"),

@@ -42,18 +42,17 @@ def _package(scene_count: int = 3, profile_id: str = "product_3d_showcase", **co
 
 def test_canonical_wizard_is_scene_first_and_price_is_near_end():
     assert video_scene3_flow.CANONICAL_STEPS == (
-        "subject", "scene_count", "technical_profile", "character", "image_source", "image_assets",
+        "subject", "scene_count", "aspect_ratio", "technical_profile", "character", "image_source", "image_assets",
         "creative_controls", "requirements", "audio_plan", "scene_plan", "image_prompts",
-        "video_prompts", "transitions", "automatic_text", "post_addons", "full_review",
-        "aspect_ratio", "quality", "final_report", "final_confirmation",
+        "video_prompts", "full_review", "quality", "final_report", "final_confirmation",
     )
     assert "VIDEO_SCENE1_CANONICAL_STEPS = video_scene3_flow.CANONICAL_STEPS" in BOT_SOURCE
     handler = BOT_SOURCE[BOT_SOURCE.index("async def handle_video_profile_studio_pending_text"):BOT_SOURCE.index("async def handle_video_profile_studio_callback")]
     assert handler.index('if step == "await_subject"') < handler.index('if step == "await_count_custom"')
     scene3_source = (ROOT / "services" / "video_scene3_flow.py").read_text(encoding="utf-8")
-    assert '"scene_count",\n    "technical_profile",\n    "character"' in scene3_source
+    assert '"scene_count",\n    "aspect_ratio",\n    "technical_profile"' in scene3_source
     assert '"scene_count",\n    "content_type",\n    "technical_profile"' not in scene3_source
-    assert '"post_addons",\n    "full_review",\n    "aspect_ratio",\n    "quality"' in (ROOT / "services" / "video_scene3_flow.py").read_text(encoding="utf-8")
+    assert '"video_prompts",\n    "full_review",\n    "quality"' in scene3_source
     assert '"vprofile|invoice_back"' in BOT_SOURCE
     assert 'if action == "invoice_back"' in BOT_SOURCE
     assert 'current = str(state.get("step") or "menu")' in BOT_SOURCE

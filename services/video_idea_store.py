@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping
 
 SCHEMA_VERSION = 1
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
+ASPECT_RATIO_OPTIONS = ("9:16", "16:9", "1:1", "4:5")
 FORBIDDEN_IMPORT_KEYS = {
     "api_key", "apikey", "token", "secret", "password", "authorization",
     "bearer", "private_key", "provider_key",
@@ -26,6 +27,7 @@ CATEGORY_FIELDS = (
 PRESET_FIELDS = (
     "preset_key", "category_key", "title", "description", "system_guidance",
     "user_prompt_template", "recommended_scene_count", "scene_duration_sec",
+    "recommended_aspect_ratio",
     "music_plan", "audio_plan", "voice_plan", "visual_plan", "content_safety_note",
     "recommended_product_id", "recommended_profile_id", "hook", "objective",
     "style", "image_prompt_seed", "video_prompt_seed", "scene_arc",
@@ -111,6 +113,7 @@ def ensure_schema(conn) -> None:
             user_prompt_template TEXT NOT NULL DEFAULT '',
             recommended_scene_count INTEGER NOT NULL DEFAULT 3,
             scene_duration_sec INTEGER NOT NULL DEFAULT 8,
+            recommended_aspect_ratio TEXT NOT NULL DEFAULT '9:16',
             music_plan TEXT NOT NULL DEFAULT '',
             audio_plan TEXT NOT NULL DEFAULT '',
             voice_plan TEXT NOT NULL DEFAULT '',
@@ -156,6 +159,7 @@ def ensure_schema(conn) -> None:
         "user_prompt_template": "TEXT NOT NULL DEFAULT ''",
         "recommended_scene_count": "INTEGER NOT NULL DEFAULT 3",
         "scene_duration_sec": "INTEGER NOT NULL DEFAULT 8",
+        "recommended_aspect_ratio": "TEXT NOT NULL DEFAULT '9:16'",
         "music_plan": "TEXT NOT NULL DEFAULT ''",
         "audio_plan": "TEXT NOT NULL DEFAULT ''",
         "voice_plan": "TEXT NOT NULL DEFAULT ''",
@@ -257,17 +261,19 @@ def seed_catalog(
             INSERT OR IGNORE INTO video_idea_presets
                 (preset_key, category_id, title, description, system_guidance,
                  user_prompt_template, recommended_scene_count, scene_duration_sec,
+                 recommended_aspect_ratio,
                  music_plan, audio_plan, voice_plan, visual_plan, content_safety_note,
                  recommended_product_id, recommended_profile_id, hook, objective,
                  style, image_prompt_seed, video_prompt_seed, scene_arc,
                  platform_fit_json, variation_axes_json, sort_order, is_active,
                  version, created_at, updated_at, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             """,
             (
                 item["preset_key"], category_id, item["title"], item["description"],
                 item["system_guidance"], item["user_prompt_template"],
                 item["recommended_scene_count"], item["scene_duration_sec"],
+                item["recommended_aspect_ratio"],
                 item["music_plan"], item["audio_plan"], item["voice_plan"], item["visual_plan"],
                 item["content_safety_note"], item["recommended_product_id"],
                 item["recommended_profile_id"], item["hook"], item["objective"],
@@ -371,6 +377,9 @@ def _hydrate_preset(row: Mapping[str, Any] | None) -> dict[str, Any]:
     result["summary"] = str(result.get("description") or "")
     result["recommended_scene_count"] = int(result.get("recommended_scene_count") or 3)
     result["scene_seconds"] = int(result.get("scene_duration_sec") or 8)
+    aspect_ratio = str(result.get("recommended_aspect_ratio") or "9:16").strip()
+    result["recommended_aspect_ratio"] = aspect_ratio if aspect_ratio in ASPECT_RATIO_OPTIONS else "9:16"
+    result["aspect_ratio"] = result["recommended_aspect_ratio"]
     result.update({
         "reference_only": True,
         "planning_only": True,
@@ -428,6 +437,13 @@ def normalize_preset(raw: Mapping[str, Any]) -> dict[str, Any]:
     duration = int(item.get("scene_duration_sec") or item.get("scene_seconds") or 8)
     if duration != 8:
         raise ValueError("scene_duration_must_be_8")
+    aspect_ratio = str(
+        item.get("recommended_aspect_ratio")
+        or item.get("aspect_ratio")
+        or "9:16"
+    ).strip()
+    if aspect_ratio not in ASPECT_RATIO_OPTIONS:
+        raise ValueError("invalid_recommended_aspect_ratio")
     return {
         "preset_key": key,
         "category_key": category_key,
@@ -437,6 +453,7 @@ def normalize_preset(raw: Mapping[str, Any]) -> dict[str, Any]:
         "user_prompt_template": _bounded(item.get("user_prompt_template"), 4000, "user_prompt_template"),
         "recommended_scene_count": scene_count,
         "scene_duration_sec": duration,
+        "recommended_aspect_ratio": aspect_ratio,
         "music_plan": _bounded(item.get("music_plan"), 600, "music_plan"),
         "audio_plan": _bounded(
             item.get("audio_plan") or "Âm thanh hiện trường tùy chọn; chỉ cân chỉnh sau khi ghép video.",
@@ -547,17 +564,19 @@ def create_preset(conn, payload: Mapping[str, Any], *, actor_id: str) -> dict[st
         INSERT INTO video_idea_presets
             (preset_key, category_id, title, description, system_guidance,
              user_prompt_template, recommended_scene_count, scene_duration_sec,
+             recommended_aspect_ratio,
              music_plan, audio_plan, voice_plan, visual_plan, content_safety_note,
              recommended_product_id, recommended_profile_id, hook, objective,
              style, image_prompt_seed, video_prompt_seed, scene_arc,
              platform_fit_json, variation_axes_json, sort_order, is_active,
              version, created_at, updated_at, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
         """,
         (
             item["preset_key"], category["id"], item["title"], item["description"],
             item["system_guidance"], item["user_prompt_template"],
             item["recommended_scene_count"], item["scene_duration_sec"],
+            item["recommended_aspect_ratio"],
             item["music_plan"], item["audio_plan"], item["voice_plan"], item["visual_plan"],
             item["content_safety_note"], item["recommended_product_id"],
             item["recommended_profile_id"], item["hook"], item["objective"],
@@ -586,6 +605,7 @@ def update_preset(conn, preset_id: int, payload: Mapping[str, Any], *, actor_id:
         UPDATE video_idea_presets SET
             preset_key=?, category_id=?, title=?, description=?, system_guidance=?,
             user_prompt_template=?, recommended_scene_count=?, scene_duration_sec=?,
+            recommended_aspect_ratio=?,
             music_plan=?, audio_plan=?, voice_plan=?, visual_plan=?, content_safety_note=?,
             recommended_product_id=?, recommended_profile_id=?, hook=?, objective=?,
             style=?, image_prompt_seed=?, video_prompt_seed=?, scene_arc=?,
@@ -597,6 +617,7 @@ def update_preset(conn, preset_id: int, payload: Mapping[str, Any], *, actor_id:
             merged["preset_key"], category["id"], merged["title"], merged["description"],
             merged["system_guidance"], merged["user_prompt_template"],
             merged["recommended_scene_count"], merged["scene_duration_sec"],
+            merged["recommended_aspect_ratio"],
             merged["music_plan"], merged["audio_plan"], merged["voice_plan"], merged["visual_plan"],
             merged["content_safety_note"], merged["recommended_product_id"],
             merged["recommended_profile_id"], merged["hook"], merged["objective"],
@@ -652,6 +673,7 @@ def export_catalog(conn) -> dict[str, Any]:
     preset_fields = {
         "preset_key", "category_key", "title", "description", "system_guidance",
         "user_prompt_template", "recommended_scene_count", "scene_duration_sec",
+        "recommended_aspect_ratio",
         "music_plan", "audio_plan", "voice_plan", "visual_plan", "content_safety_note",
         "recommended_product_id", "recommended_profile_id", "hook", "objective",
         "style", "image_prompt_seed", "video_prompt_seed", "scene_arc",

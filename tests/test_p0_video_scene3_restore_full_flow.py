@@ -46,6 +46,20 @@ def _keyboard_namespace(*names: str) -> dict:
         "video_ai_edit_entry_back": lambda *_args, **_kwargs: "videoedit|ai",
         "ui_text": lambda _lang, key: "⬅️ Quay lại" if key == "common.back" else "🏠 Menu chính",
         "VIDEO_B14_2_QUALITY_OPTIONS": (200, 300, 400, 500, 600, 800, 1000, 1200, 1500),
+        "VIDEO_SCENE3_CANONICAL_PUBLIC_PRODUCTS": frozenset({
+            "video_trend", "video_ai_real", "script_image_video", "video_reference", "motion_prompt",
+        }),
+        "video_provider_catalog": SimpleNamespace(
+            resolve_product_video_model=lambda **_kwargs: {
+                "ok": True,
+                "provider": "fixture_video",
+                "model": "fixture_scene_model",
+            },
+            model_metadata_from_resolution=lambda resolution: {
+                "provider": resolution.get("provider"),
+                "model": resolution.get("model"),
+            },
+        ),
         "video_b14_package_button_label": lambda value: f"{value} Xu",
         "safe_int": lambda value, default=0: int(value) if str(value or "").isdigit() else default,
         "env_flag": lambda _name, default="0": str(default).strip().lower() in {"1", "true", "yes", "on"},
@@ -114,10 +128,9 @@ def _planned(scene_count: int = 3) -> dict:
 
 def test_scene3_canonical_order_and_back_stack_are_complete():
     assert video_scene3_flow.CANONICAL_STEPS == (
-        "subject", "scene_count", "technical_profile", "character", "image_source", "image_assets",
+        "subject", "scene_count", "aspect_ratio", "technical_profile", "character", "image_source", "image_assets",
         "creative_controls", "requirements", "audio_plan", "scene_plan", "image_prompts",
-        "video_prompts", "transitions", "automatic_text", "post_addons", "full_review",
-        "aspect_ratio", "quality", "final_report", "final_confirmation",
+        "video_prompts", "full_review", "quality", "final_report", "final_confirmation",
     )
     routed = video_scene3_flow.set_image_source_mode(video_scene3_flow.default_state(), "create")
     for previous, current in zip(video_scene3_flow.CANONICAL_STEPS, video_scene3_flow.CANONICAL_STEPS[1:]):
@@ -271,7 +284,9 @@ def test_logo_reference_has_six_positions_safe_size_and_never_claims_mp4_overlay
 
 def test_legacy_voice_is_migrated_into_one_canonical_dubbing_owner():
     assert "voice" not in dict(video_scene3_flow.PUBLIC_POST_ADDONS)
-    assert "dubbing" in dict(video_scene3_flow.PUBLIC_POST_ADDONS)
+    assert "dubbing" not in dict(video_scene3_flow.PUBLIC_POST_ADDONS)
+    assert "dubbing" in dict(video_scene3_flow.PUBLIC_CONFIGURABLE_POST_ADDONS)
+    assert "dubbing" in dict(video_scene3_flow.AUDIO_PLANNING_ADDONS)
     state = video_scene3_flow.default_state()
     state["postproduction_addons"]["voice"] = {
         "enabled": True,
@@ -412,6 +427,7 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         "video_scene3_final_keyboard",
         "video_scene3_invoice_keyboard",
         "video_edit_hub_keyboard",
+        "video_scene3_canonical_entry_keyboard",
         "task3d_product_intro_keyboard",
         "video_ai_edit_intro_keyboard",
         "video_ai_edit_upload_keyboard",
@@ -951,6 +967,17 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         "safe_edit_or_send": edit_or_send,
         "safe_int": safe_int,
         "video_profile_catalog": video_profile_catalog,
+        "video_provider_catalog": SimpleNamespace(
+            resolve_product_video_model=lambda **_kwargs: {
+                "ok": True,
+                "provider": "fixture_video",
+                "model": "fixture_scene_model",
+            },
+            model_metadata_from_resolution=lambda resolution: {
+                "provider": resolution.get("provider"),
+                "model": resolution.get("model"),
+            },
+        ),
         "video_profile_catalog_record": lambda selection_id: dict(
             video_profile_catalog.PROFILE_BY_KEY.get(selection_id) or {}
         ),
@@ -1005,9 +1032,12 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         return state
 
     async def run_flow():
-        state = await advance_with_exact_back("vprofile|count|2", "technical_profile", "scene_count")
+        state = await advance_with_exact_back("vprofile|count|2", "aspect_ratio", "scene_count")
         assert state["scene_count"] == 2
         assert state["quality_xu"] == 0
+        state = await advance_with_exact_back("vprofile|ratio|16x9", "technical_profile", "aspect_ratio")
+        assert state["aspect_ratio"] == "16:9"
+        assert state["content_addons"]["aspect_ratio"] == "16:9"
         internal_type = state["content_type"]
         state = await run_action("vprofile|ctype|fashion_lookbook")
         assert state["step"] == "technical_profile"
@@ -1032,12 +1062,8 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
             ("vprofile|req_none", "audio_plan", "requirements"),
             ("vprofile|audio_skip", "scene_plan", "audio_plan"),
             ("vprofile|scene_done", "video_prompts", "scene_plan"),
-            ("vprofile|video_prompt_done", "transitions", "video_prompts"),
-            ("vprofile|transitions_done", "automatic_text", "transitions"),
-            ("vprofile|text_skip", "post_addons", "automatic_text"),
-            ("vprofile|post_skip", "full_review", "post_addons"),
-            ("vprofile|review_continue", "aspect_ratio", "full_review"),
-            ("vprofile|ratio|16x9", "quality", "aspect_ratio"),
+            ("vprofile|video_prompt_done", "full_review", "video_prompts"),
+            ("vprofile|review_continue", "quality", "full_review"),
             ("vprofile|tier|300", "final_report", "quality"),
         ):
             if callback == "vprofile|video_prompt_done":
@@ -1051,17 +1077,6 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
                 "xu_charged": 0,
                 "wallet_mutations": 0,
             }
-            if callback == "vprofile|ratio|16x9":
-                assert state["aspect_ratio"] == "16:9"
-                assert state["content_addons"]["aspect_ratio"] == "16:9"
-                assert state["image_prompt_versions"] == {}
-                for scene_index in range(1, state["scene_count"] + 1):
-                    entry = state["video_prompt_versions"][str(scene_index)]
-                    assert video_scene3_flow.active_prompt(entry)["aspect_ratio"] == "16:9"
-                    assert entry["approved"] is False
-                for scene_index in range(1, state["scene_count"] + 1):
-                    state = video_scene3_flow.approve_prompt(state, kind="video", scene_index=scene_index)
-                save_state(context, state)
         state = await run_action("vprofile|handoff")
         assert state["step"] == "final_confirmation"
         state = await run_action("vprofile|invoice_back")

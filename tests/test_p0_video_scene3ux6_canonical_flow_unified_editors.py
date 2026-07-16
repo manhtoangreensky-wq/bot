@@ -36,16 +36,16 @@ def _state(scene_count: int = 3) -> dict:
 
 def test_canonical_order_and_back_matrix_are_explicit():
     expected = (
-        "subject", "scene_count", "technical_profile", "character",
+        "subject", "scene_count", "aspect_ratio", "technical_profile", "character",
         "image_source", "image_assets", "creative_controls", "requirements",
         "audio_plan", "scene_plan", "image_prompts", "video_prompts",
-        "transitions", "automatic_text", "post_addons", "full_review",
-        "aspect_ratio", "quality", "final_report", "final_confirmation",
+        "full_review", "quality", "final_report", "final_confirmation",
     )
     assert video_scene3_flow.CANONICAL_STEPS == expected
-    assert video_scene3_flow.BACK_STEP["technical_profile"] == "scene_count"
-    assert video_scene3_flow.BACK_STEP["automatic_text"] == "transitions"
-    assert video_scene3_flow.BACK_STEP["post_addons"] == "automatic_text"
+    assert video_scene3_flow.BACK_STEP["aspect_ratio"] == "scene_count"
+    assert video_scene3_flow.BACK_STEP["technical_profile"] == "aspect_ratio"
+    assert video_scene3_flow.BACK_STEP["automatic_text"] == "full_review"
+    assert video_scene3_flow.BACK_STEP["post_addons"] == "full_review"
     assert video_scene3_flow.canonical_back_step({"step": "automatic_text_review"}) == "automatic_text"
     assert video_scene3_flow.canonical_back_step({
         "step": "automatic_text_review",
@@ -126,8 +126,11 @@ def test_audio_and_text_have_one_canonical_owner_each():
     }
     assert video_scene3_flow.PUBLIC_CONTENT_ADDONS == ()
     assert {key for key, _label in video_scene3_flow.PUBLIC_POST_ADDONS} == {
+        "logo_image", "watermark_text",
+    }
+    assert {key for key, _label in video_scene3_flow.PUBLIC_CONFIGURABLE_POST_ADDONS} == {
         "logo_image", "watermark_text", "subtitles", "dubbing",
-        "music", "sfx", "automatic_text", "source_audio",
+        "music", "sfx", "source_audio",
     }
     audio_keyboard = _function_source("video_scene3_audio_plan_keyboard")
     assert "Lời dẫn/lời thoại" not in audio_keyboard

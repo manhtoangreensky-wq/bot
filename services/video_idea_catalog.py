@@ -14,6 +14,7 @@ from . import video_profile_catalog, video_scene3_flow
 
 
 SCENE_SECONDS = 8
+ASPECT_RATIO_OPTIONS = ("9:16", "16:9", "1:1", "4:5")
 SCENE_COUNT_OPTIONS = (1, 2, 3, 5, 10, 20)
 DURATION_OPTIONS = tuple(count * SCENE_SECONDS for count in SCENE_COUNT_OPTIONS)
 
@@ -1308,6 +1309,11 @@ def build_plan(
         "idea_kind": "catalog",
         "duration_seconds": duration,
         "scene_count": selected_scene_count,
+        "recommended_aspect_ratio": (
+            str(base.get("recommended_aspect_ratio") or base.get("aspect_ratio") or "9:16")
+            if str(base.get("recommended_aspect_ratio") or base.get("aspect_ratio") or "9:16") in ASPECT_RATIO_OPTIONS
+            else "9:16"
+        ),
         "source_mode": str(source_mode or "text_prompt"),
         "custom_note": str(custom_note or "").strip(),
         "prompt_variant_offset": 0,
@@ -1337,6 +1343,8 @@ IDEA_PRODUCT_HANDOFFS = frozenset({
     "video_trend",
     "video_ai_real",
     "script_image_video",
+    "video_reference",
+    "motion_prompt",
     "storyboard_prompt",
     "self_shot_scene_change",
 })
@@ -1371,6 +1379,13 @@ def build_scene3_handoff_state(
     if not primary_profile:
         primary_profile = str(category_profiles[0] if category_profiles else "knowledge_explainer")
     technical_profile = video_profile_catalog.technical_profile_for_profile(primary_profile)
+    recommended_aspect_ratio = str(
+        source.get("recommended_aspect_ratio")
+        or source.get("aspect_ratio")
+        or "9:16"
+    ).strip()
+    if recommended_aspect_ratio not in ASPECT_RATIO_OPTIONS:
+        recommended_aspect_ratio = "9:16"
     title = str(source.get("title") or source.get("selected_topic") or "Ý tưởng video").strip()
     context_parts = [
         str(source.get("summary") or "").strip(),
@@ -1381,13 +1396,22 @@ def build_scene3_handoff_state(
     if custom_note:
         context_parts.append(f"Điều chỉnh riêng: {custom_note}")
     context = " ".join(part for part in context_parts if part and not part.endswith(": "))
-    state = video_scene3_flow.default_state(product_type=product_id, subject=title, aspect_ratio="9:16")
+    state = video_scene3_flow.default_state(
+        product_type=product_id,
+        subject=title,
+        aspect_ratio=recommended_aspect_ratio,
+    )
     state.update({
-        "step": "video_prompts",
+        # A preset is already a complete planning input. Normal lanes open at
+        # editable video prompts; storyboard keeps its mandatory image source
+        # gate instead of reviving the retired image_strategy screen.
+        "step": "image_source" if product_id == "storyboard_prompt" else "video_prompts",
         "history": ["video_idea_result"],
         "product_type": product_id,
         "source_product_id": product_id,
         "scene_count": count,
+        "recommended_aspect_ratio": recommended_aspect_ratio,
+        "aspect_ratio": recommended_aspect_ratio,
         "primary_profile": primary_profile,
         "linked_profiles": [],
         "profile_page": video_profile_catalog.profile_page(primary_profile),
@@ -1442,13 +1466,15 @@ def build_scene3_handoff_state(
         creative[key] = entry
     state["creative_controls"] = creative
     state = video_scene3_flow.build_planning_package(state)
-    next_step = "image_strategy" if product_id == "storyboard_prompt" else "video_prompts"
+    next_step = "image_source" if product_id == "storyboard_prompt" else "video_prompts"
     state.update({
         "step": next_step,
         "history": ["video_idea_result"],
         "origin": "video_idea_catalog",
         "idea_return_callback": "videoidea|catalog_result",
         "selected_video_idea": source,
+        "recommended_aspect_ratio": recommended_aspect_ratio,
+        "aspect_ratio": recommended_aspect_ratio,
         "final_confirmed": False,
         "provider_called": False,
         "image_provider_called": False,
@@ -1516,6 +1542,7 @@ def dynamic_preset_seeds() -> list[dict[str, Any]]:
             ),
             "recommended_scene_count": scene_count,
             "scene_duration_sec": SCENE_SECONDS,
+            "recommended_aspect_ratio": str(idea.get("recommended_aspect_ratio") or idea.get("aspect_ratio") or "9:16"),
             "music_plan": music_plan,
             "audio_plan": CATEGORY_AUDIO_PLANS[category_key],
             "voice_plan": voice_plan,
