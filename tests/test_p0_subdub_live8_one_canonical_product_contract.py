@@ -166,7 +166,10 @@ def test_live8_subtitle_style_is_current_plus_two_and_raised_eight_px_at_1080p()
     assert live8["subtitle_alignment"] == "bottom_center"
     assert live8["subtitle_margin_v_after"] == baseline["subtitle_margin_v_after"] + 8
     assert live8["subtitle_max_lines"] == 2
-    assert live8["boxed_background"] is False
+    assert live8["background"] == "box"
+    assert live8["boxed_background"] is True
+    assert live8["uppercase_text"] is True
+    assert live8["bold_text"] is True
     assert live8["cover_original"] is False
 
 
@@ -283,5 +286,6 @@ def test_live8_scope_is_subdub_only():
         "tests/test_p0_subdub_live5_subtitle_combo_canonical_cue_restore.py",
         "tests/test_p0_subdub_live6_mp4_audio_cue_long_auto_subtitle.py",
         "tests/test_p0_subdub_live8_one_canonical_product_contract.py",
+        "tests/test_p0_subdub_live9_persistent_execution_recovery.py",
     }
     assert set(changed) <= allowed
