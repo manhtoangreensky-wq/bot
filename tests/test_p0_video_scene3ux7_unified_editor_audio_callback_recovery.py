@@ -213,11 +213,12 @@ def test_audio_keyboard_has_one_callback_per_action_and_no_duplicate_buttons():
     assert callbacks == [
         "vprofile|audio_open|dubbing",
         "vprofile|audio_open|subtitles",
-        "vprofile|audio_open|source_audio",
-        "vprofile|audio_open|music",
-        "vprofile|audio_open|sfx",
-        "vprofile|audio_done",
-        "vprofile|audio_skip",
+            "vprofile|audio_open|source_audio",
+            "vprofile|audio_open|music",
+            "vprofile|audio_open|sfx",
+            "vprofile|audio_review",
+            "vprofile|audio_done",
+            "vprofile|audio_skip",
         "vprofile|back",
         "menu|main",
     ]

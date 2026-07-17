@@ -87,7 +87,13 @@ def test_route5_root_duplicate_callback_is_removed_from_create_image_assets_scre
     )
     markup = scope["video_scene3_image_assets_keyboard"]({"image_source_mode": "create"})
     callbacks = _callbacks(markup)
-    assert callbacks == ["vprofile|image_quote", "vprofile|back", "menu|main"]
+    assert callbacks == [
+        "vprofile|image_quote",
+        "vprofile|image_source|none",
+        "vprofile|back",
+        "menu|main",
+    ]
+    assert all(len(row) == 2 for row in markup.inline_keyboard)
     assert len(callbacks) == len(set(callbacks))
 
 

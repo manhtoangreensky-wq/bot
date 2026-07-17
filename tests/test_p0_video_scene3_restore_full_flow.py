@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import video_profile_catalog, video_scene3_flow
+from services import video_flow6, video_profile_catalog, video_scene3_flow
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,14 +128,16 @@ def _planned(scene_count: int = 3) -> dict:
 
 def test_scene3_canonical_order_and_back_stack_are_complete():
     assert video_scene3_flow.CANONICAL_STEPS == (
-        "subject", "scene_count", "aspect_ratio", "technical_profile", "character", "image_source", "image_assets",
-        "creative_controls", "requirements", "audio_plan", "scene_plan", "image_prompts",
-        "video_prompts", "full_review", "quality", "final_report", "final_confirmation",
+        "content_mode", "scene_count", "aspect_ratio", "asset_gate", "technical_profile", "content_choice",
+        "character", "image_source", "image_assets", "creative_controls", "requirements", "audio_plan",
+        "scene_plan", "image_prompts", "video_prompts", "full_review", "quality", "final_report",
+        "final_confirmation",
     )
     routed = video_scene3_flow.set_image_source_mode(video_scene3_flow.default_state(), "create")
+    routed["asset_requirement"] = "images_required"
     for previous, current in zip(video_scene3_flow.CANONICAL_STEPS, video_scene3_flow.CANONICAL_STEPS[1:]):
         assert video_scene3_flow.canonical_back_step({**routed, "step": current}) == previous
-    assert video_scene3_flow.BACK_STEP["subject"] == "menu"
+    assert video_scene3_flow.BACK_STEP["content_mode"] == "menu"
 
 
 def test_scene3_keeps_content_taxonomy_internal_and_exposes_fourteen_profiles():
@@ -544,16 +546,20 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         assert len(callbacks) == len(set(callbacks)), (markup_index, callbacks)
 
     suggestion_markup = namespace["video_scene3_suggestion_keyboard"]()
-    assert [button.text for button in suggestion_markup.inline_keyboard[0]] == ["👨 Nhân vật nam", "👩 Nhân vật nữ"]
-    assert not any(
-        "|suggest" in str(button.callback_data)
+    assert [[button.text for button in row] for row in suggestion_markup.inline_keyboard[:3]] == [
+        ["1", "2"],
+        ["3", "4"],
+        ["5", "🔄 Đổi 5 gợi ý"],
+    ]
+    assert sum(
+        "|suggest|" in str(button.callback_data)
         for row in suggestion_markup.inline_keyboard
         for button in row
-    )
+    ) == 5
     creative_markup = namespace["video_scene3_creative_suggestions_keyboard"]({**state, "active_creative": "visual_style"})
-    assert [button.text for button in creative_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
+    assert [button.text for button in creative_markup.inline_keyboard[0]] == ["1", "2"]
     content_markup = namespace["video_scene3_content_suggestions_keyboard"]({**state, "active_content_addon": "captions"})
-    assert [button.text for button in content_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
+    assert [button.text for button in content_markup.inline_keyboard[0]] == ["1", "2"]
 
     microflow_namespace = _keyboard_namespace(
         "video_scene3_keyboard",
@@ -566,12 +572,19 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         options=[{}] * 5,
         kind="prompt",
     )
-    assert [button.text for button in microflow_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
-    assert [button.callback_data for button in microflow_markup.inline_keyboard[0]] == [
-        f"vproduct|microflow_choose|{index}" for index in range(5)
+    assert [[button.text for button in row] for row in microflow_markup.inline_keyboard[:3]] == [
+        ["1", "2"],
+        ["3", "4"],
+        ["5", "🔄 Gợi ý lại"],
     ]
-    assert [[button.text for button in row] for row in microflow_markup.inline_keyboard[1:3]] == [
-        ["🔄 Gợi ý lại", "✍️ Sửa nội dung"],
+    assert [
+        button.callback_data
+        for row in microflow_markup.inline_keyboard[:3]
+        for button in row
+        if button.callback_data.startswith("vproduct|microflow_choose|")
+    ] == [f"vproduct|microflow_choose|{index}" for index in range(5)]
+    assert [[button.text for button in row] for row in microflow_markup.inline_keyboard[3:5]] == [
+        ["✍️ Sửa nội dung", "📖 Xem hướng dẫn"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]
 
@@ -838,10 +851,12 @@ def test_callback_registration_has_one_authoritative_final_confirm_and_no_legacy
     profile_handler = _function_source("handle_video_profile_studio_callback")
     guard_position = profile_handler.index("if not video_scene2_action_allowed(state, action):")
     for guarded_action in (
+        'if action == "mode":',
         'if action == "count":',
         'if action in {"ctype", "ctype_suggest", "ctype_accept", "ctype_restore", "ctype_view"}:',
         'if action == "select":',
-        'if action in {"suggest", "suggest_refresh", "suggest_restore", "suggest_custom", "suggest_skip"}:',
+        'if action == "profile_select":',
+        'if action == "suggest":',
         'if action == "handoff":',
     ):
         assert profile_handler.index(guarded_action) > guard_position
@@ -947,6 +962,35 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         invoice_seen.append(snapshot)
         return snapshot
 
+    def prepare_content_choices(state, *, rotate=False):
+        flow_context = video_flow6.context_from_scene_state(state)
+        if rotate:
+            flow_context = video_flow6.rotate_suggestion_page(flow_context)
+        suggestions = video_flow6.suggestion_page(
+            flow_context,
+            profile_label=video_profile_catalog.profile_label(
+                str(state.get("primary_profile") or state.get("technical_profile") or "")
+            ),
+        )
+        return video_flow6.sync_scene_state({
+            **state,
+            "suggestions": [dict(item) for item in suggestions],
+            "video_flow_context": flow_context,
+        })
+
+    def flow6_preflight(_uid, state, _quality):
+        flow_context = video_flow6.context_from_scene_state(state)
+        return {
+            "ok": True,
+            "route": video_flow6.execution_route_for(flow_context),
+            "route_selection": {
+                "ok": True,
+                "provider": "fixture_video",
+                "model": "fixture_scene_model",
+            },
+            "required_capability": "text_to_video_or_scene_video",
+        }
+
     namespace = {
         "Update": object,
         "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
@@ -961,11 +1005,14 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
             if selection_id in dict(video_scene3_flow.TECHNICAL_PROFILES)
             else {}
         ),
+        "video_scene3_prepare_content_choices": prepare_content_choices,
+        "video_flow6_preflight_for_state": flow6_preflight,
         "video_scene2_action_allowed": lambda _state, _action: True,
         "video_scene2_reconcile_state": lambda _context, state: state,
         "video_profile_scene1_render": render,
         "safe_edit_or_send": edit_or_send,
         "safe_int": safe_int,
+        "video_flow6": video_flow6,
         "video_profile_catalog": video_profile_catalog,
         "video_provider_catalog": SimpleNamespace(
             resolve_product_video_model=lambda **_kwargs: {
@@ -1012,8 +1059,8 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
 
     query = Query()
     context = SimpleNamespace(user_data={})
-    initial = video_scene3_flow.default_state(product_type="video_ai_real", subject="Giới thiệu căn hộ sáng tự nhiên")
-    initial.update({"step": "scene_count", "history": ["await_subject"], "source_product_id": "video_ai_real"})
+    initial = video_scene3_flow.default_state(product_type="video_ai_real")
+    initial.update({"step": "content_mode", "history": ["menu"], "source_product_id": "video_ai_real"})
     save_state(context, initial)
     update = SimpleNamespace(callback_query=query)
 
@@ -1032,6 +1079,7 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         return state
 
     async def run_flow():
+        state = await advance_with_exact_back("vprofile|mode|suggestions", "scene_count", "content_mode")
         state = await advance_with_exact_back("vprofile|count|2", "aspect_ratio", "scene_count")
         assert state["scene_count"] == 2
         assert state["quality_xu"] == 0
@@ -1050,11 +1098,12 @@ def test_actual_public_callback_runs_scene_first_to_final_report_without_side_ef
         assert not state.get("primary_profile")
         state = await advance_with_exact_back(
             "vprofile|profile_select|architecture_interior_renovation",
-            "profile_links",
+            "content_choice",
             "technical_profile",
         )
         assert state["content_type"] == "real_estate_fpv"
-        state = await advance_with_exact_back("vprofile|profile_links_done", "character", "profile_links")
+        state = await advance_with_exact_back("vprofile|suggest|1", "character", "content_choice")
+        assert state["subject"]
         state = await advance_with_exact_back("vprofile|character|none", "image_source", "character")
         state = await advance_with_exact_back("vprofile|image_source|description", "creative_controls", "image_source")
         for callback, expected_step, previous_step in (
