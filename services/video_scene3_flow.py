@@ -12,6 +12,7 @@ from typing import Any
 
 from services import (
     video_addon_planner,
+    video_flow6,
     video_profile_catalog,
     video_scene_prompt_builder,
     video_semantic_scene_planner,
@@ -23,10 +24,12 @@ MIN_SCENES = 1
 MAX_SCENES = 20
 
 CANONICAL_STEPS = (
-    "subject",
+    "content_mode",
     "scene_count",
     "aspect_ratio",
+    "asset_gate",
     "technical_profile",
+    "content_choice",
     "character",
     "image_source",
     "image_assets",
@@ -43,11 +46,17 @@ CANONICAL_STEPS = (
 )
 
 BACK_STEP = {
-    "subject": "menu",
-    "scene_count": "subject",
+    "content_mode": "menu",
+    "subject": "content_mode",
+    "await_subject": "technical_profile",
+    "scene_count": "content_mode",
     "aspect_ratio": "scene_count",
+    "asset_gate": "aspect_ratio",
     "technical_profile": "aspect_ratio",
-    "character": "technical_profile",
+    "content_choice": "technical_profile",
+    "suggestion": "technical_profile",
+    "await_suggestion": "content_choice",
+    "character": "content_choice",
     "image_source": "character",
     "image_assets": "image_source",
     "image_quote": "image_assets",
@@ -92,6 +101,8 @@ BACK_STEP = {
     "quality_guide": "quality",
     "logo_position": "post_detail",
     "await_count_custom": "scene_count",
+    "await_ratio_custom": "aspect_ratio",
+    "await_flow6_asset_upload": "asset_gate",
     "await_profile_custom": "technical_profile",
     "await_character_description": "character",
     "await_material_upload": "image_assets",
@@ -122,8 +133,10 @@ def canonical_back_step(state: dict[str, Any] | None) -> str:
         return "technical_profile"
     if step == "profile_suggestions":
         return "technical_profile"
-    if step == "character" and str(current.get("primary_profile") or ""):
-        return "profile_links"
+    if step == "technical_profile" and str(current.get("asset_requirement") or "") != "optional":
+        return "asset_gate"
+    if step == "character":
+        return "content_choice"
     if step == "creative_controls" and str(current.get("image_source_mode") or "") in {"uploaded", "create"}:
         return "image_assets"
     if step == "video_prompts" and image_prompts_required(current):
@@ -934,11 +947,20 @@ def _safe_nonnegative_int(value: Any) -> int:
         return 0
 
 
-def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: str = "9:16") -> dict[str, Any]:
+def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: str = "") -> dict[str, Any]:
+    flow_context = video_flow6.new_context(product_id=str(product_type or "video_ai_real"))
     return {
-        "step": "scene_count" if subject else "await_subject",
-        "history": ["await_subject"] if subject else ["menu"],
+        "step": "content_mode",
+        "history": ["menu"],
         "product_type": str(product_type or ""),
+        "flow_kind": str(flow_context.get("flow_kind") or "ai_real"),
+        "content_mode": "",
+        "asset_requirement": str(flow_context.get("asset_requirement") or "optional"),
+        "primary_profile_key": "",
+        "content_choice": {},
+        "asset_manifest": dict(flow_context.get("asset_manifest") or {}),
+        "execution_route": {},
+        "video_flow_context": flow_context,
         "subject": str(subject or ""),
         "scene_count": 0,
         "content_type": "",
@@ -995,7 +1017,7 @@ def default_state(*, product_type: str = "", subject: str = "", aspect_ratio: st
         "automatic_text_tracking_available": AUTOMATIC_TEXT_TRACKING_AVAILABLE,
         "post_addon_suggestion": [],
         "post_addons": {},
-        "aspect_ratio": aspect_ratio if aspect_ratio in {"9:16", "16:9", "1:1", "4:5"} else "9:16",
+        "aspect_ratio": aspect_ratio if aspect_ratio in {"9:16", "16:9", "1:1", "4:5"} else "",
         "quality_tier": 0,
         "quality_xu": 0,
         "estimate": {},
@@ -1020,7 +1042,7 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     base = default_state(
         product_type=str(raw.get("product_type") or raw.get("source_product_id") or ""),
         subject=str(raw.get("subject") or ""),
-        aspect_ratio=str(raw.get("aspect_ratio") or (raw.get("content_addons") or {}).get("aspect_ratio") or "9:16"),
+        aspect_ratio=str(raw.get("aspect_ratio") or (raw.get("content_addons") or {}).get("aspect_ratio") or ""),
     )
     base.update(raw)
     profile_state = dict(base)
@@ -1127,7 +1149,7 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     base["outbox_created"] = False
     base["xu_charged"] = 0
     base["wallet_mutations"] = 0
-    return base
+    return video_flow6.sync_scene_state(base)
 
 
 def invalidate_scene_outputs(state: dict[str, Any], scene_count: int) -> dict[str, Any]:
@@ -1243,9 +1265,16 @@ def select_primary_profile(
         profile_id,
         custom_profile=custom_profile,
     )
+    selected["linked_profiles"] = []
+    selected["primary_profile_key"] = str(selected.get("primary_profile") or profile_id or "")
+    selected["selected_suggestion"] = {}
+    selected["content_choice"] = {}
+    selected["suggestions"] = []
+    selected["suggestion_version"] = 0
+    selected["suggestion_history"] = []
     selected["profile_context"] = video_profile_catalog.profile_bundle_context(
         str(selected.get("primary_profile") or ""),
-        selected.get("linked_profiles") or [],
+        [],
     )
     return normalize_state(selected)
 
@@ -2213,19 +2242,24 @@ def select_unified_field_suggestion(
 ) -> dict[str, Any]:
     """Persist one numbered choice without changing any sibling field."""
 
-    updated = normalize_state(state)
-    suggestions = unified_field_suggestions(updated, group, key)
-    index = int(selection or 0)
+    clean_group = str(group or "")
+    clean_key = str(key or "")
+    try:
+        index = int(selection or 0)
+    except (TypeError, ValueError):
+        return deepcopy(state)
+    suggestions = unified_field_suggestions(state, clean_group, clean_key)
     if index < 1 or index > len(suggestions):
-        return updated
+        return deepcopy(state)
+    updated = normalize_state(state)
     updated = set_entry(
         updated,
-        str(group or ""),
-        str(key or ""),
+        clean_group,
+        clean_key,
         suggestions[index - 1],
         enabled=True,
     )
-    if str(group or "") == "preservation_requirements":
+    if clean_group == "preservation_requirements":
         updated["requirements"] = public_requirements(updated)
     return updated
 
@@ -2251,37 +2285,24 @@ def content_type_label(content_type_id: str) -> str:
 
 def suggestions_for(state: dict[str, Any], *, revision: int | None = None) -> list[dict[str, Any]]:
     state = normalize_state(state)
-    info = content_type(str(state.get("content_type") or "storytelling")) or content_type("storytelling")
-    subject = str(state.get("subject") or "chủ đề video").strip()
     primary_profile = str(state.get("primary_profile") or state.get("technical_profile") or "")
-    profile = technical_profile_label(
+    profile_label = technical_profile_label(
         primary_profile,
         str(state.get("custom_technical_profile") or ""),
     )
-    bundle_context = video_profile_catalog.profile_bundle_context(
-        primary_profile,
-        state.get("linked_profiles") or [],
-    )
-    count = max(1, int(state.get("scene_count") or 1))
     rev = int(state.get("suggestion_version") or 0) + 1 if revision is None else max(1, int(revision))
-    rows: list[dict[str, Any]] = []
-    offset = (rev - 1) % len(_SUGGESTION_PATTERNS)
-    for index in range(5):
-        hook, flow, reason = _SUGGESTION_PATTERNS[(index + offset) % len(_SUGGESTION_PATTERNS)]
-        rows.append({
-            "index": index + 1,
-            "title": f"Hướng {index + 1}: {hook}",
-            "hook": f"{hook} về {subject}.",
-            "concept": f"Kể theo loại {info['label'].split(' ', 1)[-1].lower()}, {info['arc']}.",
-            "flow": f"Phân bổ thành đúng {count} cảnh: {flow}; mỗi cảnh hoàn tất một ý hoặc hành động.",
-            "context": (
-                f"{profile}; {bundle_context} "
-                "Giữ mạch hình ảnh và trạng thái cuối cảnh trước sang cảnh sau."
-            ),
-            "reason": reason,
+    page = ((rev - 1) % 4) + 1
+    context = video_flow6.context_from_scene_state({**state, "primary_profile_key": primary_profile})
+    rows = video_flow6.suggestion_page(context, page=page, profile_label=profile_label)
+    return [
+        {
+            **dict(item),
+            "index": index,
             "revision": rev,
-        })
-    return rows
+            "context": f"{profile_label}. Giữ mạch hình ảnh và trạng thái cuối cảnh trước sang cảnh sau.",
+        }
+        for index, item in enumerate(rows, 1)
+    ]
 
 
 def select_suggestion(state: dict[str, Any], index: int) -> dict[str, Any]:
@@ -2291,8 +2312,12 @@ def select_suggestion(state: dict[str, Any], index: int) -> dict[str, Any]:
         suggestions = suggestions_for(updated)
         updated["suggestions"] = suggestions
         updated["suggestion_version"] = int(suggestions[0].get("revision") or 1)
-    selected = dict(suggestions[max(0, min(len(suggestions) - 1, int(index) - 1))])
+    requested = int(index or 0)
+    if requested < 1 or requested > len(suggestions):
+        return updated
+    selected = dict(suggestions[requested - 1])
     updated["selected_suggestion"] = selected
+    updated["content_choice"] = selected
     updated["context"] = str(selected.get("concept") or selected.get("flow") or "")
     updated["profile_context"] = updated["context"]
     return updated
@@ -2309,6 +2334,7 @@ def refresh_suggestions(state: dict[str, Any]) -> dict[str, Any]:
     updated["suggestions"] = suggestions_for(updated, revision=revision)
     updated["suggestion_version"] = revision
     updated["selected_suggestion"] = {}
+    updated["content_choice"] = {}
     return updated
 
 
@@ -2320,6 +2346,7 @@ def restore_suggestions(state: dict[str, Any]) -> dict[str, Any]:
         updated["suggestion_history"] = history
         updated["suggestion_version"] = max(1, int(updated.get("suggestion_version") or 1) - 1)
         updated["selected_suggestion"] = {}
+        updated["content_choice"] = {}
     return updated
 
 

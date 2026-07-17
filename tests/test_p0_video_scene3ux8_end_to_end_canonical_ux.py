@@ -24,11 +24,13 @@ def _base_state() -> dict:
 
 def test_canonical_order_puts_ratio_after_scene_count_and_quality_near_the_end():
     steps = video_scene3_flow.CANONICAL_STEPS
-    assert steps[:5] == (
-        "subject",
+    assert steps[:7] == (
+        "content_mode",
         "scene_count",
         "aspect_ratio",
+        "asset_gate",
         "technical_profile",
+        "content_choice",
         "character",
     )
     assert steps.index("video_prompts") < steps.index("full_review")
@@ -214,7 +216,7 @@ def test_quality_copy_resolves_checked_in_catalog_without_provider_http():
     assert "video_scene3_public_quality_spec(price, scene_count=scene_count)" in quality_text
 
 
-def test_bot_routes_compatible_products_to_one_scene3_entry_and_excludes_frame_concat():
+def test_bot_routes_compatible_products_to_one_scene3_entry_and_includes_flow6_special_modes():
     for product_id in (
         "video_trend",
         "video_ai_real",
@@ -228,9 +230,9 @@ def test_bot_routes_compatible_products_to_one_scene3_entry_and_excludes_frame_c
         BOT_SOURCE.index("VIDEO_SCENE3_CANONICAL_PUBLIC_PRODUCTS ="):
         BOT_SOURCE.index("VIDEO_SCENE2_LEGACY_PRICE_KEYS =")
     ]
-    assert '"frame_video_local"' not in canonical_block
-    assert '"storyboard_prompt"' not in canonical_block
-    assert '"self_shot_scene_change"' not in canonical_block
+    assert '"frame_video_local"' in canonical_block
+    assert '"storyboard_prompt"' in canonical_block
+    assert '"self_shot_scene_change"' in canonical_block
 
 
 def test_product_preset_click_opens_editable_scene_preview_without_provider_side_effects():

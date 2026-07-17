@@ -221,15 +221,23 @@ def test_idea2_handoff_maps_to_primary_profile_without_auto_linking():
     assert state["xu_charged"] == 0
 
 
-def test_public_bot_contract_uses_three_page_catalog_and_read_only_legacy_callbacks():
+def test_public_bot_contract_uses_one_profile_and_read_only_legacy_callbacks():
     assert 'f"vprofile|profile_select|{str(item.get(\'profile_key\') or \'\')}"' in BOT_SOURCE
     assert '"vprofile|profile_page|' in BOT_SOURCE
-    assert '"vprofile|profile_link_toggle|' in BOT_SOURCE
-    assert '"vprofile|profile_links_done"' in BOT_SOURCE
-    assert '"vprofile|profile_links_skip"' in BOT_SOURCE
+    assert '"vprofile|profile_link_toggle|' not in BOT_SOURCE
+    links_keyboard = BOT_SOURCE[
+        BOT_SOURCE.index("def video_scene3_profile_links_keyboard"):
+        BOT_SOURCE.index("def video_scene3_profile_suggestions_text")
+    ]
+    assert "return video_scene3_profile_keyboard(state)" in links_keyboard
     assert '"profile_links": lambda:' in BOT_SOURCE
     assert '"profile_suggestions": lambda:' in BOT_SOURCE
     assert "for index in range(0, len(options), 2)" in BOT_SOURCE
+    for legacy_action in ("profile_link_toggle", "profile_links_done", "profile_links_skip"):
+        action_anchor = BOT_SOURCE.index(f'if action == "{legacy_action}":')
+        action_block = BOT_SOURCE[action_anchor:].split("\n    if action ==", 1)[0]
+        assert '"technical_profile", push=False' in action_block
+        assert "linked_profiles=[]" in action_block
     assert "Legacy 14-profile callback" in BOT_SOURCE
     legacy_anchor = BOT_SOURCE.index("# Legacy 14-profile callback")
     legacy_block = BOT_SOURCE[legacy_anchor:].split(
@@ -253,7 +261,7 @@ def test_profile_back_stack_and_preconfirm_side_effects_are_canonical():
     state["step"] = "profile_links"
     assert video_scene3_flow.canonical_back_step(state) == "technical_profile"
     state["step"] = "character"
-    assert video_scene3_flow.canonical_back_step(state) == "profile_links"
+    assert video_scene3_flow.canonical_back_step(state) == "content_choice"
     state["step"] = "profile_suggestions"
     assert video_scene3_flow.canonical_back_step(state) == "technical_profile"
 

@@ -36,14 +36,17 @@ def _state(scene_count: int = 3) -> dict:
 
 def test_canonical_order_and_back_matrix_are_explicit():
     expected = (
-        "subject", "scene_count", "aspect_ratio", "technical_profile", "character",
-        "image_source", "image_assets", "creative_controls", "requirements",
-        "audio_plan", "scene_plan", "image_prompts", "video_prompts",
-        "full_review", "quality", "final_report", "final_confirmation",
+        "content_mode", "scene_count", "aspect_ratio", "asset_gate",
+        "technical_profile", "content_choice", "character", "image_source",
+        "image_assets", "creative_controls", "requirements", "audio_plan",
+        "scene_plan", "image_prompts", "video_prompts", "full_review",
+        "quality", "final_report", "final_confirmation",
     )
     assert video_scene3_flow.CANONICAL_STEPS == expected
     assert video_scene3_flow.BACK_STEP["aspect_ratio"] == "scene_count"
     assert video_scene3_flow.BACK_STEP["technical_profile"] == "aspect_ratio"
+    assert video_scene3_flow.BACK_STEP["content_choice"] == "technical_profile"
+    assert video_scene3_flow.BACK_STEP["character"] == "content_choice"
     assert video_scene3_flow.BACK_STEP["automatic_text"] == "full_review"
     assert video_scene3_flow.BACK_STEP["post_addons"] == "full_review"
     assert video_scene3_flow.canonical_back_step({"step": "automatic_text_review"}) == "automatic_text"
