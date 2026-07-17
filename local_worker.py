@@ -10,6 +10,7 @@ explicitly enable it.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import socket
 import shutil
@@ -55,7 +56,7 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
-from services import video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_local_validation
+from services import frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_local_validation
 
 
 def load_dotenv(path: str) -> None:
@@ -1301,7 +1302,7 @@ def run_frame_video_render(job: dict) -> None:
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         photos = list(payload.get("photos") or [])
-        if len(photos) < 1:
+        if len(photos) < frame_video_runtime.FRAME_VIDEO_MIN_IMAGES:
             update_job(job_id, "failed", "not_enough_images")
             return
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1313,18 +1314,77 @@ def run_frame_video_render(job: dict) -> None:
                 path = os.path.join(tmpdir, f"frame_input_{idx}.jpg")
                 telegram_download_file(file_id, path)
                 image_paths.append(path)
+            state = dict(payload.get("state") or {})
+            state["photos"] = photos
+            logo_path = ""
+            music_path = ""
+            voice_path = ""
+            for key, filename in (
+                ("logo_file_id", "frame_logo.img"),
+                ("music_file_id", "frame_music.audio"),
+                ("voice_file_id", "frame_voice.audio"),
+            ):
+                file_id = str(state.get(key) or "")
+                if not file_id:
+                    continue
+                path = os.path.join(tmpdir, filename)
+                telegram_download_file(file_id, path)
+                if key == "logo_file_id":
+                    logo_path = path
+                elif key == "music_file_id":
+                    music_path = path
+                else:
+                    voice_path = path
             output_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
-            run_frame_video_ffmpeg(
+            render = frame_video_runtime.build_ffmpeg_command(
                 image_paths,
                 output_path,
-                int(payload.get("width") or 720),
-                int(payload.get("height") or 1280),
-                float(payload.get("seconds_per_image") or 1.5),
-                str(payload.get("effect") or "fade"),
-                min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
+                state,
+                ffmpeg_path=local_ffmpeg_path(),
+                music_path=music_path,
+                voice_path=voice_path,
+                logo_path=logo_path,
             )
-            output_file_id = telegram_send_video(str(payload.get("chat_id") or ""), output_path, str(payload.get("caption") or ""))
-        update_job(job_id, "succeeded", "frame video sent", output_file_id=output_file_id)
+            completed = subprocess.run(
+                render.command,
+                capture_output=True,
+                text=True,
+                timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, int(payload.get("max_render_seconds") or 180)),
+                check=False,
+            )
+            if completed.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                raise RuntimeError(first_line(completed.stderr or completed.stdout) or "frame_video_ffmpeg_failed")
+            probe = frame_video_runtime.probe_mp4(output_path, render.expected_duration, render.expects_audio)
+            if not probe.get("ok"):
+                raise RuntimeError(f"frame_video_validate:{probe.get('reason')}")
+            digest = hashlib.sha256()
+            with open(output_path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            receipt = telegram_send_video_receipt(
+                str(payload.get("chat_id") or ""),
+                output_path,
+                str(payload.get("caption") or ""),
+                filename="toan_aas_frame_video.mp4",
+            )
+            if not receipt.get("sent") or not receipt.get("message_id"):
+                raise RuntimeError("frame_video_delivery_receipt_missing")
+            terminal = {
+                "delivery_message_id": str(receipt.get("message_id") or ""),
+                "delivery_file_id": str(receipt.get("file_id") or ""),
+                "output_size_bytes": int(os.path.getsize(output_path)),
+                "output_sha256": digest.hexdigest(),
+                "ffprobe": probe,
+                "charge_policy": "post_delivery",
+                "wallet_charge_amount_xu": 0,
+            }
+        update_job(
+            job_id,
+            "succeeded",
+            "frame video validated and sent",
+            output_url=json.dumps(terminal, ensure_ascii=False, separators=(",", ":")),
+            output_file_id=str(receipt.get("file_id") or ""),
+        )
     except subprocess.TimeoutExpired:
         update_job(job_id, "failed", "frame_video_render_timeout")
     except Exception as exc:
