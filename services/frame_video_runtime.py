@@ -122,6 +122,13 @@ def canonical_image_manifest(items: Iterable[Any], max_images: int = FRAME_VIDEO
                 "file_size": max(0, _safe_int(item.get("file_size"), 0)),
                 "source": str(item.get("source") or "telegram")[:80],
                 "caption": str(item.get("caption") or "")[:1000],
+                "prompt": str(item.get("prompt") or "")[:4000],
+                "model": str(item.get("model") or "")[:200],
+                "tier": str(item.get("tier") or "")[:80],
+                "ratio": str(item.get("ratio") or "")[:40],
+                "image_job_id": max(0, _safe_int(item.get("image_job_id"), 0)),
+                "delivery_message_id": max(0, _safe_int(item.get("delivery_message_id"), 0)),
+                "receipt_key": str(item.get("receipt_key") or "")[:200],
                 "ordinal": len(manifest) + 1,
                 "is_cover": bool(item.get("is_cover")),
             }
