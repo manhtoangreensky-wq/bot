@@ -109,7 +109,7 @@ from services import architecture_profile_router, architecture_profile_status
 from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit_router, video_ai_edit_status, video_ai_edit_validation
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
-from services import frame_video_flow, frame_video_runtime
+from services import frame_video_commercial, frame_video_flow, frame_video_runtime
 from services import video_addon_planner, video_flow6, video_scene3_flow, video_scene_prompt_builder, video_semantic_scene_planner
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
@@ -42326,6 +42326,24 @@ def handle_frame_video_worker_job_update(previous_job: dict, updated_job: dict) 
         payload = {}
     frame_job_id = str(payload.get("frame_job_id") or "")
     user_id = str(payload.get("user_id") or updated_job.get("user_id") or "")
+    if status == "running" and frame_job_id:
+        update_frame_video_job(
+            frame_job_id,
+            status="rendering",
+            owner="local_worker",
+            progress_percent=45,
+            lease_owner=str(updated_job.get("worker_id") or "local_worker"),
+            heartbeat_updated_at=now_text(),
+            started_at=now_text(),
+        )
+        update_frame_video_job_config(
+            frame_job_id,
+            claim_attempted=True,
+            claim_result="running",
+            execution_owner="local_worker",
+            ffmpeg_command_created=True,
+        )
+        return
     if status == "succeeded":
         receipt = {}
         try:
@@ -133689,6 +133707,93 @@ async def send_generated_image_result(
                 return True, output_file_id
     return False, output_file_id
 
+
+async def send_frame_video_generated_image(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id,
+    *,
+    image_url: str,
+    b64_json: str,
+    caption: str,
+) -> dict:
+    """Deliver one generated image and return the Telegram delivery receipt."""
+
+    async def receipt(sent, artifact_fallback: str = "") -> dict:
+        message_id = int(getattr(sent, "message_id", 0) or 0)
+        photos = getattr(sent, "photo", None) or []
+        document = getattr(sent, "document", None)
+        file_id = str(
+            (getattr(photos[-1], "file_id", "") if photos else "")
+            or getattr(document, "file_id", "")
+            or ""
+        )
+        artifact = file_id or str(artifact_fallback or "").strip()
+        return {
+            "sent": bool(message_id and artifact),
+            "message_id": message_id,
+            "file_id": file_id,
+            "artifact": artifact,
+        }
+
+    image_url = str(image_url or "").strip()
+    b64_json = str(b64_json or "").strip()
+    if image_url:
+        try:
+            sent = await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=caption)
+            return await receipt(sent, image_url)
+        except Exception as photo_exc:
+            logger.warning(
+                "frame video generated image photo delivery failed | %s",
+                sanitize_log_text(str(photo_exc))[:220],
+            )
+        try:
+            sent = await context.bot.send_document(
+                chat_id=chat_id,
+                document=image_url,
+                filename="toan_aas_frame_image.png",
+                caption=caption,
+            )
+            return await receipt(sent, image_url)
+        except Exception as document_exc:
+            logger.warning(
+                "frame video generated image document delivery failed | %s",
+                sanitize_log_text(str(document_exc))[:220],
+            )
+    if b64_json:
+        try:
+            image_bytes = base64.b64decode(b64_json, validate=False)
+        except Exception:
+            image_bytes = b""
+        if image_bytes:
+            def image_file():
+                value = io.BytesIO(image_bytes)
+                value.name = "toan_aas_frame_image.png"
+                return value
+
+            try:
+                sent = await context.bot.send_photo(chat_id=chat_id, photo=image_file(), caption=caption)
+                return await receipt(sent, hashlib.sha256(image_bytes).hexdigest())
+            except Exception as photo_exc:
+                logger.warning(
+                    "frame video generated b64 photo delivery failed | %s",
+                    sanitize_log_text(str(photo_exc))[:220],
+                )
+            try:
+                sent = await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=image_file(),
+                    filename="toan_aas_frame_image.png",
+                    caption=caption,
+                )
+                return await receipt(sent, hashlib.sha256(image_bytes).hexdigest())
+            except Exception as document_exc:
+                logger.warning(
+                    "frame video generated b64 document delivery failed | %s",
+                    sanitize_log_text(str(document_exc))[:220],
+                )
+    return {"sent": False, "message_id": 0, "file_id": "", "artifact": ""}
+
+
 async def resolve_video_source(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
     reply = update.message.reply_to_message if update.message else None
     source = reply_media_candidate(reply, {"video"})
@@ -134296,6 +134401,9 @@ def img2vid_state_debug_dict(job_id: str = "", state: dict | None = None, job: d
     job = job if isinstance(job, dict) else {}
     price = img2vid_slideshow_price_for_state(state or job)
     photos = list((state or job).get("photos") or [])
+    worker_job_id = int(job.get("local_worker_job_id") or 0)
+    worker_job = get_local_worker_job(worker_job_id) if worker_job_id else {}
+    commercial_debug = frame_video_commercial.job_debug(job, worker_job)
     return {
         "job_id": str(job_id or job.get("job_id") or ""),
         "mode": str(state.get("mode") or job.get("mode") or "existing_images"),
@@ -134317,6 +134425,7 @@ def img2vid_state_debug_dict(job_id: str = "", state: dict | None = None, job: d
         "delivery_status": str(job.get("delivery_status") or job.get("status") or ""),
         "refund_required": bool(job.get("refund_required")),
         "refund_applied": bool(job.get("refund_applied")),
+        **commercial_debug,
     }
 
 def img2vid_seconds_keyboard(back_callback: str = "framevideo|back|collect") -> InlineKeyboardMarkup:
@@ -134387,27 +134496,115 @@ def img2vid_ai_prompt_from_topic(topic: str = "") -> str:
     )
     return str(package.get("prompt") or clean_topic).strip()[:1200]
 
-def img2vid_ai_confirm_text(state: dict | None) -> str:
-    state = state if isinstance(state, dict) else {}
-    count = max(2, min(int(state.get("ai_image_count") or 2), IMG2VID_AI_IMAGE_MAX_COUNT))
-    unit = img2vid_image_unit_cost()
-    total = unit * count
-    prompt = html.escape(str(state.get("ai_prompt") or "").strip()[:500])
-    return (
-        "✨ <b>Xác nhận tạo ảnh AI</b>\n\n"
-        f"• Số ảnh: <b>{count}</b>\n"
-        f"• Giá ảnh: <b>{xu_number(unit)} Xu/ảnh</b>\n"
-        f"• Tổng Xu: <b>{xu_number(total)} Xu</b>\n"
-        f"• Prompt: <i>{prompt}</i>\n\n"
-        "TOAN AAS sẽ tạo nhiều ảnh cùng chủ đề trước. Nếu tạo thiếu ảnh, hệ thống hoàn Xu phần ảnh chưa tạo."
+
+def frame_video_image_quote(state: dict | None) -> dict:
+    clean = normalize_frame_video_state(state)
+    tier = image_tier_payload(str(clean.get("ai_image_tier") or ""))
+    return frame_video_commercial.image_quote(
+        tier,
+        count=int(clean.get("ai_image_count") or 2),
+        ratio=str(clean.get("ratio") or "9x16"),
+        prompt=str(clean.get("ai_prompt") or ""),
     )
 
-def img2vid_ai_confirm_keyboard() -> InlineKeyboardMarkup:
+
+def img2vid_ai_prompt_review_keyboard(state: dict | None, lang: str = "vi") -> InlineKeyboardMarkup:
+    clean = normalize_frame_video_state(state)
+    back_callback = "framevideo|ai_suggest" if str(clean.get("ai_prompt_source") or "") == "suggestion" else "framevideo|ai_first"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận tạo ảnh", callback_data="framevideo|ai_generate_confirm")],
-        [InlineKeyboardButton("🔢 Đổi số ảnh", callback_data="framevideo|ai_count_menu")],
         [
-            InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("⭐ Chọn chất lượng ảnh", callback_data="framevideo|ai_tier_menu"),
+            InlineKeyboardButton("✍️ Sửa prompt", callback_data="framevideo|ai_prompt"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+        ],
+    ])
+
+
+def img2vid_ai_tier_text(state: dict | None) -> str:
+    clean = normalize_frame_video_state(state)
+    count = max(2, min(int(clean.get("ai_image_count") or 2), IMG2VID_AI_IMAGE_MAX_COUNT))
+    lines = [
+        "⭐ <b>Chọn chất lượng ảnh</b>",
+        "",
+        f"• Số ảnh: <b>{count}</b>",
+        f"• Tỉ lệ: <b>{html.escape(str(clean.get('ratio') or '9x16').replace('x', ':'))}</b>",
+        "",
+        "Giá dưới đây lấy từ bảng giá ảnh đang bật. Tạo ảnh và ghép video là hai hóa đơn riêng.",
+        "",
+    ]
+    available = 0
+    for tier_name in IMAGE_TIER_ORDER:
+        tier = image_tier_payload(tier_name)
+        if not tier.get("enabled") or not str(tier.get("model") or "").strip() or int(tier.get("cost") or 0) <= 0:
+            continue
+        available += 1
+        lines.append(
+            f"• <b>{html.escape(str(tier.get('label') or tier_name))}</b>: "
+            f"{xu_number(int(tier.get('cost') or 0))} Xu/ảnh · "
+            f"{html.escape(image_tier_quality_note(tier_name, 'vi'))}"
+        )
+    if not available:
+        lines.extend(["", "⚠️ Chưa có gói ảnh hợp lệ đang bật. Hệ thống không tạo tác vụ và không trừ Xu."])
+    return "\n".join(lines)
+
+
+def img2vid_ai_tier_keyboard() -> InlineKeyboardMarkup:
+    buttons = []
+    for tier_name in IMAGE_TIER_ORDER:
+        tier = image_tier_payload(tier_name)
+        if not tier.get("enabled") or not str(tier.get("model") or "").strip() or int(tier.get("cost") or 0) <= 0:
+            continue
+        buttons.append(
+            InlineKeyboardButton(
+                f"{IMAGE_TIER_ICONS.get(tier_name, '⭐')} {tier.get('label')} · {xu_number(int(tier.get('cost') or 0))} Xu",
+                callback_data=f"framevideo|ai_tier|{tier_name}",
+            )
+        )
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|ai_prepared"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def img2vid_ai_confirm_text(state: dict | None) -> str:
+    clean = normalize_frame_video_state(state)
+    quote = frame_video_image_quote(clean)
+    prompt = html.escape(str(clean.get("ai_prompt") or "").strip()[:500])
+    blocker = str(quote.get("blocker") or "")
+    blocker_line = f"\n⚠️ Chưa thể xác nhận: <code>{html.escape(blocker)}</code>\n" if blocker else ""
+    return (
+        "🧾 <b>Hóa đơn tạo ảnh AI</b>\n\n"
+        f"• Gói: <b>{html.escape(str(quote.get('label') or '-'))}</b>\n"
+        f"• Công nghệ: <b>{html.escape(str(quote.get('model') or '-'))}</b>\n"
+        f"• Số ảnh: <b>{int(quote.get('image_count') or 0)}</b>\n"
+        f"• Giá mỗi ảnh: <b>{xu_number(int(quote.get('unit_price_xu') or 0))} Xu</b>\n"
+        f"• Tổng ảnh: <b>{xu_number(int(quote.get('total_price_xu') or 0))} Xu</b>\n"
+        f"• Tỉ lệ: <b>{html.escape(str(quote.get('ratio') or '9:16'))}</b>\n"
+        f"• Prompt: <i>{prompt}</i>\n\n"
+        "Ảnh chỉ được tạo sau xác nhận này. TOAN AAS chỉ ghi Xu cho ảnh đã giao thành công và có biên nhận Telegram."
+        f"{blocker_line}"
+    )
+
+def img2vid_ai_confirm_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
+    quote = frame_video_image_quote(state)
+    first_label = "✅ Xác nhận tạo ảnh" if quote.get("ok") else "⛔ Chưa thể tạo ảnh"
+    first_callback = "framevideo|ai_generate_confirm" if quote.get("ok") else "framevideo|ai_tier_menu"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(first_label, callback_data=first_callback),
+            InlineKeyboardButton("✍️ Sửa prompt", callback_data="framevideo|ai_prompt"),
+        ],
+        [
+            InlineKeyboardButton("🔢 Đổi số ảnh", callback_data="framevideo|ai_count_menu"),
+            InlineKeyboardButton("⭐ Đổi chất lượng", callback_data="framevideo|ai_tier_menu"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|ai_tier_menu"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
         ],
     ])
@@ -134460,18 +134657,28 @@ def frame_video_audio_extra_for_state(state: dict) -> int:
     return 0
 
 def frame_video_price_breakdown(state: dict) -> dict:
-    if bool((state or {}).get("img2vid_lock1")):
+    state = state if isinstance(state, dict) else {}
+    if bool(state.get("img2vid_lock1")) and str(state.get("commercial_flow_version") or "") != "framevideo2":
         return img2vid_slideshow_price_for_state(state)
-    count = len((state or {}).get("photos") or [])
+    count = len(state.get("photos") or [])
     duration_seconds = frame_video_estimated_output_seconds(state)
+    quality = {
+        "fast": "fast",
+        "balanced": "standard",
+        "beautiful": "high",
+    }.get(str(state.get("quality") or "balanced"), "standard")
+    subtitle_option = "subtitle" if bool(state.get("subtitle_enabled") and state.get("subtitle_text")) else "none"
+    dubbing_option = "dubbing" if bool(state.get("voice_enabled") and state.get("voice_file_id")) else "none"
+    music_option = "user_upload" if bool(state.get("music_enabled") and state.get("music_file_id")) else "none"
     pricing = calculate_video_total_price(
         duration_seconds,
         "local_frame_video",
-        "fast",
-        (state or {}).get("current_video_subtitle_option") or "none",
-        (state or {}).get("current_video_dubbing_option") or "none",
-        bool((state or {}).get("translation_enabled")),
+        quality,
+        subtitle_option,
+        dubbing_option,
+        bool(state.get("translation_enabled")),
         segment_seconds=duration_seconds,
+        music_option=music_option,
     )
     return {
         "image_count": max(2, int(count or 0)),
@@ -134483,8 +134690,11 @@ def frame_video_price_breakdown(state: dict) -> dict:
         "subtitle_xu": int(pricing.get("subtitle_xu") or 0),
         "dubbing_xu": int(pricing.get("dubbing_xu") or 0),
         "addon_xu": int(pricing.get("addon_xu") or 0),
+        "music_xu": int(pricing.get("music_xu") or 0),
         "estimated_vnd": int(pricing.get("estimated_vnd") or 0),
         "total": int(pricing.get("total_xu") or 0),
+        "pricing_source": "tiered_media_pricing",
+        "quality": str(state.get("quality") or "balanced"),
     }
 
 def frame_video_status_payload() -> dict:
@@ -134606,6 +134816,58 @@ def frame_video_worker_connected() -> bool:
 def frame_video_maintenance_text() -> str:
     return "🎞 Công cụ ghép ảnh thành video đang bảo trì hoặc cần worker xử lý. TOAN AAS chưa trừ Xu. Vui lòng thử lại sau."
 
+
+def frame_video_preflight_message(result: dict) -> str:
+    blocker = str((result or {}).get("blocker") or "")
+    messages = {
+        "video_pricing_unavailable": "⚠️ Gói dựng video hiện chưa có giá hợp lệ. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
+        "video_package_unavailable": "⚠️ Gói dựng video hiện chưa khả dụng. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
+        "execution_owner_unavailable": "⚠️ Chưa có máy ghép video sẵn sàng. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
+        "ffmpeg_unavailable": "⚠️ Máy ghép video chưa có bộ dựng file. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+        "ffprobe_unavailable": "⚠️ Máy ghép video chưa có bước kiểm tra MP4. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+        "output_storage_not_writable": "⚠️ Vùng lưu file tạm chưa sẵn sàng. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+    }
+    return messages.get(blocker, "⚠️ Kế hoạch ghép ảnh chưa vượt qua kiểm tra trước khi dựng. Hệ thống chưa tạo tác vụ và chưa trừ Xu.")
+
+
+def frame_video_commercial_preflight(state: dict, user_id=0) -> dict:
+    clean = normalize_frame_video_state(state)
+    worker = local_worker_status_payload()
+    worker_ffmpeg_path = str(worker.get("ffmpeg_path") or get_system_setting("local_worker:ffmpeg_path_seen", "") or "").strip()
+    worker_ready = bool(
+        worker.get("enabled")
+        and worker.get("poll_enabled")
+        and worker.get("token_configured")
+        and worker.get("connected")
+        and worker_ffmpeg_path
+        and worker.get("ffprobe_path_configured")
+    )
+    direct_allowed = bool(FRAME_VIDEO_DIRECT_RENDER_ENABLED and not FRAME_VIDEO_REQUIRE_LOCAL_WORKER)
+    ffmpeg_path = frame_video_ffmpeg_path() if direct_allowed else ""
+    ffprobe_path = ffprobe_path_for_ffmpeg(ffmpeg_path) if ffmpeg_path else ""
+    quote = frame_video_commercial.video_quote(clean, frame_video_price_breakdown(clean))
+    result = frame_video_commercial.preflight(
+        clean,
+        ffmpeg_path=ffmpeg_path,
+        ffprobe_path=ffprobe_path,
+        worker_connected=worker_ready,
+        output_writable=bool(os.path.isdir(tempfile.gettempdir()) and os.access(tempfile.gettempdir(), os.W_OK)),
+        package_available=bool(quote.get("ok")),
+    )
+    result.update(
+        {
+            "video_quote": quote,
+            "ffmpeg_path": ffmpeg_path,
+            "ffprobe_path": ffprobe_path,
+            "worker_connected": bool(worker.get("connected")),
+            "worker_ready": worker_ready,
+            "worker_ffmpeg_path": worker_ffmpeg_path,
+            "message": frame_video_preflight_message(result),
+        }
+    )
+    return result
+
+
 def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
     photos = list((state or {}).get("photos") or [])
     image_count = len(photos)
@@ -134626,6 +134888,30 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
             "action": "blocked",
             "reason": "too_many_images",
             "message": f"⚠️ Số ảnh vượt giới hạn {int(FRAME_VIDEO_MAX_IMAGES or 20)} ảnh. Bot chưa trừ Xu.",
+            "worker_connected": worker_connected,
+        }
+    generated_photos = [row for row in photos if str((row or {}).get("source") or "") == "generated"]
+    receipts = list((state or {}).get("generated_image_receipts") or [])
+    receipt_keys = {
+        str(row.get("receipt_key") or "")
+        for row in receipts
+        if isinstance(row, dict) and bool(row.get("charge_recorded"))
+    }
+    unpaid_generated = [
+        row
+        for row in generated_photos
+        if not str(row.get("receipt_key") or "")
+        or str(row.get("receipt_key") or "") not in receipt_keys
+    ]
+    if unpaid_generated:
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "image_charge_pending",
+            "message": (
+                "⚠️ Có ảnh AI đã giao nhưng biên nhận Xu chưa hoàn tất. "
+                "Hệ thống chưa tạo hóa đơn video, chưa dựng MP4 và không gọi thêm nguồn ảnh."
+            ),
             "worker_connected": worker_connected,
         }
     if total_input_mb and total_input_mb > float(FRAME_VIDEO_MAX_INPUT_MB or 50):
@@ -134656,19 +134942,33 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
     if not plan.get("ok"):
         reason = str((plan.get("errors") or ["invalid_plan"])[0])
         return {"ok": False, "action": "blocked", "reason": reason, "message": "⚠️ Kế hoạch ghép ảnh chưa hợp lệ. Anh/chị kiểm tra lại ảnh và thời lượng. Bot chưa trừ Xu.", "worker_connected": worker_connected}
-    ffmpeg_path = frame_video_ffmpeg_path()
-    if ffmpeg_path:
+    preflight = frame_video_commercial_preflight(state, user_id)
+    if not preflight.get("ok"):
+        return {
+            **preflight,
+            "ok": False,
+            "action": "blocked",
+            "reason": str(preflight.get("blocker") or "preflight_failed"),
+        }
+    if str(preflight.get("execution_owner") or "") == "local_ffmpeg":
         return {
             "ok": True,
             "action": "direct_render",
             "reason": "railway_ffmpeg_ready" if is_railway_runtime() else "local_ffmpeg_ready",
             "message": "",
             "worker_connected": worker_connected,
-            "ffmpeg_path": ffmpeg_path,
+            "ffmpeg_path": str(preflight.get("ffmpeg_path") or ""),
+            "ffprobe_path": str(preflight.get("ffprobe_path") or ""),
+            "preflight": preflight,
         }
-    if worker_connected:
-        return {"ok": True, "action": "worker_queue", "reason": "ffmpeg_worker_fallback", "message": "", "worker_connected": True}
-    return {"ok": False, "action": "blocked", "reason": "ffmpeg_unavailable", "message": frame_video_maintenance_text(), "worker_connected": False}
+    return {
+        "ok": True,
+        "action": "worker_queue",
+        "reason": "local_worker_ready",
+        "message": "",
+        "worker_connected": True,
+        "preflight": preflight,
+    }
 
 def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict, charged_amount: int = 0) -> str:
     clean_state = frame_video_flow.sync_render_overlays(state or {})
@@ -134762,12 +135062,24 @@ def create_frame_video_job(user_id, chat_id, state: dict, charged_amount: int = 
     manifest = frame_video_runtime.canonical_image_manifest((state or {}).get("photos") or [])
     config = frame_video_runtime.canonical_config({**(state or {}), "photos": manifest})
     now = now_text()
-    ffmpeg_path = frame_video_ffmpeg_path()
+    preflight = frame_video_commercial_preflight(state, user_id)
+    ffmpeg_path = str(preflight.get("ffmpeg_path") or "")
     owner = (
         ("railway_ffmpeg" if is_railway_runtime() else "local_ffmpeg")
-        if ffmpeg_path
+        if str(preflight.get("execution_owner") or "") == "local_ffmpeg" and ffmpeg_path
         else "local_worker"
     )
+    commercial_config = {
+        "public_job_type": frame_video_commercial.PUBLIC_JOB_TYPE,
+        "mapped_job_type": frame_video_commercial.WORKER_JOB_TYPE,
+        "execution_owner": owner,
+        "asset_manifest_count": len(manifest),
+        "timeline_built": bool(preflight.get("timeline_built")),
+        "ffmpeg_command_created": False,
+        "claim_attempted": False,
+        "claim_result": "not_claimed",
+        "preflight_blocker": str(preflight.get("blocker") or ""),
+    }
     job = {
         "job_id": job_id,
         "user_id": str(user_id or ""),
@@ -134802,7 +135114,7 @@ def create_frame_video_job(user_id, chat_id, state: dict, charged_amount: int = 
         "storyboard_route_called": False,
         "local_renderer_used": True,
         "image_manifest": manifest,
-        "config": {**config, "state": dict(state or {}), "price_breakdown": breakdown},
+        "config": {**config, **commercial_config, "state": dict(state or {}), "price_breakdown": breakdown},
     }
     FRAME_VIDEO_JOBS[job_id] = job
     try:
@@ -134867,6 +135179,21 @@ def update_frame_video_job(job_id: str, **kwargs) -> dict:
         except Exception as exc:
             logger.warning("frame video durable job update failed | %s", sanitize_log_text(str(exc))[:220])
     return job
+
+
+def update_frame_video_job_config(job_id: str, **values) -> dict:
+    job = frame_video_job_for_user(job_id, 0, allow_any=True)
+    if not job:
+        return {}
+    config = dict(job.get("config") or {})
+    config.update(values)
+    updated = update_frame_video_job(
+        job_id,
+        config_json=json.dumps(config, ensure_ascii=False, default=str, separators=(",", ":")),
+    )
+    updated["config"] = config
+    FRAME_VIDEO_JOBS[str(job_id)] = updated
+    return updated
 
 def frame_video_job_for_user(job_id: str, user_id=0, allow_any: bool = False) -> dict:
     job_id = str(job_id or "")
@@ -134968,10 +135295,22 @@ def frame_video_job_status_text(job: dict) -> str:
     if not job:
         return "⚠️ Không tìm thấy job ghép video này."
     status = str(job.get("status") or "").strip().lower()
+    progress_percent = int(job.get("progress_percent") or 0)
+    local_worker_job_id = int(job.get("local_worker_job_id") or 0)
+    worker_job = get_local_worker_job(local_worker_job_id) if local_worker_job_id else {}
+    worker_status = str((worker_job or {}).get("status") or "").strip().lower()
+    if status not in {"completed", "succeeded", "success", "failed", "failed_no_charge", "error", "cancelled"}:
+        if worker_status == "running":
+            status = "rendering"
+            progress_percent = max(progress_percent, 45)
+        elif worker_status == "queued" or status in {"queued", "waiting_worker"}:
+            status = "waiting_worker"
+            progress_percent = max(progress_percent, 10)
     stage = {
         "received_assets": "received_images",
         "planning": "preparing_layout",
         "queued": "received_images",
+        "waiting_worker": "received_images",
         "validating": "checking_file",
         "delivering": "sending_result",
         "running": "rendering_video",
@@ -134995,7 +135334,7 @@ def frame_video_job_status_text(job: dict) -> str:
         "frame_video",
         str(job.get("job_id") or ""),
         stage,
-        int(job.get("progress_percent") or 0) if job.get("progress_percent") is not None else None,
+        progress_percent,
         terminal,
     )
     lines = [text, "", f"• Số ảnh: <code>{int(job.get('image_count') or 0)}</code>"]
@@ -135157,6 +135496,127 @@ def frame_video_images_text(state: dict) -> str:
     )
 
 
+def frame_video_selected_image_receipt(state: dict | None) -> dict:
+    clean = normalize_frame_video_state(state)
+    selected = frame_video_flow.selected_image(clean)
+    job_id = int(selected.get("image_job_id") or 0)
+    message_id = int(selected.get("delivery_message_id") or 0)
+    receipt_key = str(selected.get("receipt_key") or "")
+    receipts = list(clean.get("generated_image_receipts") or [])
+    return dict(next(
+        (
+            row
+            for row in receipts
+            if (receipt_key and str(row.get("receipt_key") or "") == receipt_key)
+            or (job_id and int(row.get("image_job_id") or 0) == job_id)
+            or (message_id and int(row.get("message_id") or 0) == message_id)
+        ),
+        {},
+    ))
+
+
+def frame_video_image_regenerate_quote(state: dict | None) -> dict:
+    clean = normalize_frame_video_state(state)
+    selected = frame_video_flow.selected_image(clean)
+    receipt = frame_video_selected_image_receipt(clean)
+    prompt = str(selected.get("prompt") or receipt.get("prompt") or "").strip()
+    tier_name = str(selected.get("tier") or clean.get("ai_image_tier") or "").strip()
+    model = str(selected.get("model") or receipt.get("model") or "").strip()
+    if not tier_name and model:
+        tier_name = next(
+            (
+                name
+                for name in IMAGE_TIER_ORDER
+                if str(image_tier_payload(name).get("model") or "").strip() == model
+            ),
+            "",
+        )
+    quote = frame_video_commercial.image_quote(
+        image_tier_payload(tier_name),
+        count=1,
+        minimum_count=1,
+        ratio=str(selected.get("ratio") or receipt.get("ratio") or clean.get("ratio") or "9x16"),
+        prompt=prompt,
+    )
+    blockers = list(quote.get("blockers") or [])
+    if not selected:
+        blockers.insert(0, "image_not_selected")
+    elif str(selected.get("source") or "") != "generated" and not receipt:
+        blockers.insert(0, "image_not_ai_generated")
+    quote.update(
+        {
+            "ok": not blockers,
+            "blockers": blockers,
+            "blocker": blockers[0] if blockers else "",
+            "target_image_id": str(selected.get("image_id") or ""),
+            "prompt": prompt,
+            "tier": tier_name,
+            "model": str(quote.get("model") or model),
+            "receipt": receipt,
+        }
+    )
+    return quote
+
+
+def frame_video_image_receipt_text(state: dict | None) -> str:
+    receipt = frame_video_selected_image_receipt(state)
+    if not receipt:
+        return (
+            "🧾 <b>Biên nhận ảnh</b>\n\n"
+            "Ảnh đang chọn do anh/chị gửi hoặc chưa có biên nhận tạo ảnh AI. "
+            "Hệ thống không tính lại phí ảnh này trong hóa đơn video."
+        )
+    status = "Đã đối soát" if receipt.get("charge_recorded") else "Đã giao, đang chờ đối soát"
+    return (
+        "🧾 <b>Biên nhận ảnh AI</b>\n\n"
+        f"• Mã ảnh: <code>{int(receipt.get('image_job_id') or 0)}</code>\n"
+        f"• Công nghệ: <b>{html.escape(str(receipt.get('model') or '-'))}</b>\n"
+        f"• Tỉ lệ: <b>{html.escape(str(receipt.get('ratio') or '-'))}</b>\n"
+        f"• Telegram đã giao: <b>{'Có' if int(receipt.get('message_id') or 0) else 'Không'}</b>\n"
+        f"• Xu đã ghi: <b>{xu_number(int(receipt.get('xu_charged') or 0))}</b>\n"
+        f"• Trạng thái: <b>{status}</b>"
+    )
+
+
+def frame_video_image_regenerate_invoice_text(state: dict | None) -> str:
+    quote = frame_video_image_regenerate_quote(state)
+    blocker = str(quote.get("blocker") or "")
+    blocker_text = f"\n\n⚠️ Chưa thể tạo lại: <code>{html.escape(blocker)}</code>." if blocker else ""
+    return (
+        "🔁 <b>Tạo lại một ảnh AI</b>\n\n"
+        f"• Công nghệ: <b>{html.escape(str(quote.get('model') or '-'))}</b>\n"
+        f"• Số ảnh: <b>1</b>\n"
+        f"• Giá: <b>{xu_number(int(quote.get('total_price_xu') or 0))} Xu</b>\n"
+        f"• Tỉ lệ: <b>{html.escape(str(quote.get('ratio') or '-'))}</b>\n"
+        f"• Prompt giữ nguyên: <i>{html.escape(str(quote.get('prompt') or '')[:500])}</i>\n\n"
+        "Ảnh cũ được giữ nguyên cho đến khi ảnh mới đã giao thành công và biên nhận Xu hoàn tất."
+        f"{blocker_text}"
+    )
+
+
+def frame_video_image_regenerate_keyboard(state: dict | None) -> InlineKeyboardMarkup:
+    clean = normalize_frame_video_state(state)
+    quote = frame_video_image_regenerate_quote(clean)
+    request_id = str(clean.get("image_regeneration_request_id") or "")
+    if quote.get("ok") and request_id:
+        first_row = [
+            InlineKeyboardButton(
+                "✅ Xác nhận tạo lại",
+                callback_data=f"framevideo|image_regenerate_confirm|{request_id}",
+            ),
+            InlineKeyboardButton("🧾 Xem biên nhận cũ", callback_data="framevideo|image_receipt"),
+        ]
+    else:
+        first_row = [
+            InlineKeyboardButton("🔄 Thay bằng ảnh gửi", callback_data="framevideo|image_action|replace"),
+            InlineKeyboardButton("🧾 Xem biên nhận", callback_data="framevideo|image_receipt"),
+        ]
+    return InlineKeyboardMarkup([
+        first_row,
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+
 def frame_video_images_keyboard(state: dict) -> InlineKeyboardMarkup:
     clean = normalize_frame_video_state(state)
     buttons = []
@@ -135176,6 +135636,7 @@ def frame_video_images_keyboard(state: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔄 Thay ảnh", callback_data="framevideo|image_action|replace"), InlineKeyboardButton("🗑️ Xóa ảnh", callback_data="framevideo|image_action|delete")],
         [InlineKeyboardButton("📑 Nhân đôi", callback_data="framevideo|image_action|duplicate"), InlineKeyboardButton("🖼️ Đặt ảnh bìa", callback_data="framevideo|image_action|cover")],
         [InlineKeyboardButton("⏱️ Thời lượng ảnh này", callback_data="framevideo|image_duration"), InlineKeyboardButton("📎 Gửi thêm ảnh", callback_data="framevideo|upload")],
+        [InlineKeyboardButton("🔁 Tạo lại ảnh AI", callback_data="framevideo|image_regenerate"), InlineKeyboardButton("🧾 Biên nhận ảnh", callback_data="framevideo|image_receipt")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
     return InlineKeyboardMarkup(buttons)
@@ -135197,6 +135658,7 @@ def frame_video_duration_menu_keyboard(selected_only: bool = False) -> InlineKey
         [InlineKeyboardButton("2 giây", callback_data=f"framevideo|duration_set|{scope}|2"), InlineKeyboardButton("3 giây", callback_data=f"framevideo|duration_set|{scope}|3")],
         [InlineKeyboardButton("4 giây", callback_data=f"framevideo|duration_set|{scope}|4"), InlineKeyboardButton("5 giây", callback_data=f"framevideo|duration_set|{scope}|5")],
         [InlineKeyboardButton("8 giây", callback_data=f"framevideo|duration_set|{scope}|8"), InlineKeyboardButton("✍️ Nhập số khác", callback_data=f"framevideo|duration_custom|{scope}")],
+        [InlineKeyboardButton("🖼️ Từng ảnh", callback_data="framevideo|image_duration"), InlineKeyboardButton("✅ Áp dụng tất cả", callback_data="framevideo|duration_menu")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images" if selected_only else "framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
@@ -135256,38 +135718,71 @@ def frame_video_music_menu_text(state: dict) -> str:
     )
 
 
-def frame_video_music_menu_keyboard(state: dict) -> InlineKeyboardMarkup:
+def frame_video_music_menu_keyboard(
+    state: dict,
+    back_callback: str = "framevideo|panel",
+) -> InlineKeyboardMarkup:
     clean = normalize_frame_video_state(state)
+    allowed_back_callbacks = {
+        "framevideo|addons",
+        "framevideo|audio_menu",
+        "framevideo|panel",
+    }
+    if back_callback not in allowed_back_callbacks:
+        back_callback = "framevideo|panel"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📎 Gửi file nhạc", callback_data="framevideo|music_upload"), InlineKeyboardButton("🔊 Chỉnh âm lượng", callback_data="framevideo|volume_menu|music")],
         [InlineKeyboardButton("🌫️ Mờ đầu/cuối", callback_data="framevideo|audio_fade|music"), InlineKeyboardButton("⏭️ Không dùng nhạc", callback_data="framevideo|music_off")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
 
 def frame_video_addons_text(state: dict) -> str:
     clean = normalize_frame_video_state(state)
     return (
-        "📝 <b>Chữ trên video và bổ sung</b>\n\n"
+        "🧩 <b>Bổ sung cho video</b>\n\n"
+        f"• Chuyển cảnh: <b>{html.escape(FRAME_VIDEO_TRANSITION_LABELS.get(str(clean.get('transition') or 'fade'), 'Mờ dần'))}</b>\n"
+        f"• Chuyển động: <b>{html.escape(FRAME_VIDEO_MOTION_LABELS.get(str(clean.get('motion') or 'none'), 'Ảnh tĩnh'))}</b>\n"
+        f"• Nhạc: <b>{'Bật' if clean.get('music_file_id') else 'Tắt'}</b> · {_safe_int(clean.get('music_volume_percent'), 0)}%\n"
         f"• Logo hình: <b>{'Bật' if clean.get('logo_file_id') else 'Tắt'}</b> · {html.escape(FRAME_VIDEO_POSITION_LABELS.get(str(clean.get('logo_position') or ''), str(clean.get('logo_position') or '')))}\n"
         f"• Watermark chữ: <b>{'Bật' if clean.get('watermark_text') else 'Tắt'}</b> · {html.escape(FRAME_VIDEO_POSITION_LABELS.get(str(clean.get('watermark_position') or ''), str(clean.get('watermark_position') or '')))}\n"
         f"• Phụ đề: <b>{'Bật' if clean.get('subtitle_text') else 'Tắt'}</b> · Dưới giữa\n"
         f"• Lồng tiếng: <b>{'Bật' if clean.get('voice_file_id') else 'Tắt'}</b> · {_safe_int(clean.get('voice_volume_percent'), 0)}%\n"
         f"• Chữ trên video: <b>{len(clean.get('text_overlays') or [])} mục</b>\n\n"
-        "Chỉ các mục đã có nội dung/file mới được áp dụng vào MP4 cuối."
+        "Mọi mục mặc định tắt. Chỉ nội dung/file đã chọn mới được đưa vào MP4 cuối."
     )
 
 
 def frame_video_addons_keyboard(state: dict) -> InlineKeyboardMarkup:
     clean = normalize_frame_video_state(state)
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Chuyển cảnh", callback_data="framevideo|transition_menu"), InlineKeyboardButton("🎥 Chuyển động", callback_data="framevideo|motion_menu")],
+        [InlineKeyboardButton(f"{'✅' if clean.get('music_file_id') else '□'} Nhạc nền", callback_data="framevideo|music_menu"), InlineKeyboardButton("📝 Chữ trên video", callback_data="framevideo|text_list")],
         [InlineKeyboardButton(f"{'✅' if clean.get('logo_file_id') else '□'} Logo hình", callback_data="framevideo|addon|logo"), InlineKeyboardButton(f"{'✅' if clean.get('watermark_text') else '□'} Watermark chữ", callback_data="framevideo|addon|watermark")],
-        [InlineKeyboardButton(f"{'✅' if clean.get('subtitle_text') else '□'} Phụ đề", callback_data="framevideo|addon|subtitle"), InlineKeyboardButton(f"{'✅' if clean.get('voice_file_id') else '□'} Lồng tiếng", callback_data="framevideo|addon|voice")],
-        [InlineKeyboardButton("✨ Thêm chữ động", callback_data="framevideo|addon|text"), InlineKeyboardButton("👁️ Xem chữ đã thêm", callback_data="framevideo|text_list")],
-        [InlineKeyboardButton("📍 Vị trí logo", callback_data="framevideo|position_menu|logo"), InlineKeyboardButton("📍 Vị trí watermark", callback_data="framevideo|position_menu|watermark")],
-        [InlineKeyboardButton("🔊 Âm lượng lồng tiếng", callback_data="framevideo|volume_menu|voice"), InlineKeyboardButton("🌫️ Mờ tiếng đầu/cuối", callback_data="framevideo|audio_fade|voice")],
-        [InlineKeyboardButton("👁️ Xem kế hoạch", callback_data="framevideo|review"), InlineKeyboardButton("✅ Xong phần này", callback_data="framevideo|panel")],
+        [InlineKeyboardButton("🎙️ Âm thanh", callback_data="framevideo|audio_menu"), InlineKeyboardButton("👁️ Xem cấu hình", callback_data="framevideo|review")],
+        [InlineKeyboardButton("✅ Xong bổ sung", callback_data="framevideo|addons_done"), InlineKeyboardButton("⏭️ Bỏ qua bổ sung", callback_data="framevideo|addons_skip")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+
+def frame_video_audio_menu_text(state: dict) -> str:
+    clean = normalize_frame_video_state(state)
+    return (
+        "🎙️ <b>Âm thanh và phụ đề</b>\n\n"
+        f"• Nhạc nền: <b>{'Bật' if clean.get('music_file_id') else 'Tắt'}</b> · {_safe_int(clean.get('music_volume_percent'), 0)}%\n"
+        f"• Lồng tiếng: <b>{'Bật' if clean.get('voice_file_id') else 'Tắt'}</b> · {_safe_int(clean.get('voice_volume_percent'), 0)}%\n"
+        f"• Phụ đề: <b>{'Bật' if clean.get('subtitle_text') else 'Tắt'}</b> · Dưới giữa\n\n"
+        "Âm lượng giới hạn 0–200% và được giới hạn chống vỡ tiếng khi render."
+    )
+
+
+def frame_video_audio_menu_keyboard(state: dict) -> InlineKeyboardMarkup:
+    clean = normalize_frame_video_state(state)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{'✅' if clean.get('music_file_id') else '□'} Nhạc nền", callback_data="framevideo|music_menu"), InlineKeyboardButton(f"{'✅' if clean.get('voice_file_id') else '□'} Lồng tiếng", callback_data="framevideo|addon|voice")],
+        [InlineKeyboardButton(f"{'✅' if clean.get('subtitle_text') else '□'} Phụ đề", callback_data="framevideo|addon|subtitle"), InlineKeyboardButton("👁️ Xem cấu hình", callback_data="framevideo|addons")],
+        [InlineKeyboardButton("🔊 Âm lượng nhạc", callback_data="framevideo|volume_menu|music"), InlineKeyboardButton("🔊 Âm lượng lời", callback_data="framevideo|volume_menu|voice")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
 
@@ -135401,9 +135896,33 @@ def frame_video_position_keyboard(kind: str, back: str = "framevideo|addons") ->
 def frame_video_quality_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ Nhanh", callback_data="framevideo|quality_set|fast"), InlineKeyboardButton("⭐ Cân bằng", callback_data="framevideo|quality_set|balanced")],
-        [InlineKeyboardButton("💎 Đẹp", callback_data="framevideo|quality_set|beautiful"), InlineKeyboardButton("👁️ Xem khác biệt", callback_data="framevideo|quality_info")],
+        [InlineKeyboardButton("💎 Đẹp", callback_data="framevideo|quality_set|beautiful"), InlineKeyboardButton("✅ Xong chất lượng", callback_data="framevideo|panel")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
+
+
+def frame_video_quality_text(state: dict) -> str:
+    clean = normalize_frame_video_state(state)
+    current = str(clean.get("quality") or "balanced")
+    lines = [
+        "⭐ <b>Chọn chất lượng MP4</b>",
+        "",
+        f"Đang chọn: <b>{html.escape(FRAME_VIDEO_QUALITY_LABELS.get(current, current))}</b>",
+        "",
+    ]
+    for token in ("fast", "balanced", "beautiful"):
+        detail = frame_video_commercial.QUALITY_DETAILS[token]
+        preset = frame_video_runtime.QUALITY_PRESETS[token]
+        marker = "✅" if token == current else "•"
+        lines.extend(
+            [
+                f"{marker} <b>{html.escape(str(detail['label']))}</b> · {int(preset['long_edge'])}p · {int(preset['fps'])} FPS",
+                f"  Mạnh: {html.escape(str(detail['strength']))}.",
+                f"  Lưu ý: {html.escape(str(detail['limit']))}.",
+            ]
+        )
+    lines.extend(["", "Giá video được tính ở hóa đơn riêng sau khi kế hoạch hoàn tất."])
+    return "\n".join(lines)
 
 
 def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> str:
@@ -135423,8 +135942,33 @@ def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> st
         f"• Logo: {'Có' if summary['has_logo'] else 'Không'} · Watermark: {'Có' if summary['has_watermark'] else 'Không'}",
         f"• Chữ/phụ đề: {summary['text_count']} mục",
     ]
+    receipts = [row for row in list(clean.get("generated_image_receipts") or []) if isinstance(row, dict)]
+    generated_count = sum(1 for row in list(clean.get("photos") or []) if str(row.get("source") or "") == "generated")
+    uploaded_count = max(0, int(summary["image_count"]) - generated_count)
+    image_charge = int(clean.get("image_generation_charged_amount") or 0)
+    image_receipts_paid = bool(receipts) and all(bool(row.get("charge_recorded")) for row in receipts)
+    lines.extend(["", "<b>Ảnh đầu vào</b>"])
+    if generated_count:
+        lines.append(
+            f"• Ảnh AI: <b>{generated_count}</b> ảnh · "
+            f"biên nhận <b>{len(receipts)}</b> · "
+            f"{'đã ghi ' + xu_number(image_charge) + ' Xu' if image_receipts_paid else 'chưa hoàn tất đối soát'}"
+        )
+    if uploaded_count:
+        lines.append(f"• Ảnh anh/chị gửi: <b>{uploaded_count}</b> ảnh · không có phí tạo ảnh AI")
     if invoice:
-        lines.extend(["", f"Tổng dự kiến: <b>{xu_number(cost)} Xu</b>", "Xu chỉ được ghi sau khi MP4 hợp lệ đã gửi thành công."])
+        lines.extend(
+            [
+                "",
+                "<b>Hóa đơn dựng MP4</b>",
+                f"• Dựng video: <b>{xu_number(int(price.get('base') or 0))} Xu</b>",
+                f"• Tùy chọn bổ sung: <b>{xu_number(int(price.get('addon_xu') or 0))} Xu</b>",
+                f"• Nhạc: <b>{xu_number(int(price.get('music_xu') or 0))} Xu</b>",
+                f"• Tổng video dự kiến: <b>{xu_number(cost)} Xu</b>",
+                "• Phí ảnh AI đã giao được đối soát riêng và không cộng lại vào hóa đơn video.",
+                "Xu video chỉ được ghi sau khi MP4 hợp lệ đã gửi thành công.",
+            ]
+        )
     else:
         lines.extend(["", "Màn này chỉ xem kế hoạch, chưa tạo file và chưa trừ Xu."])
     return "\n".join(lines)
@@ -136484,27 +137028,47 @@ async def handle_frame_video_pending_media(update: Update, context: ContextTypes
         await update.message.reply_text(frame_video_collect_text(len(state["photos"])), reply_markup=frame_video_collect_keyboard())
         return True
     if target == "logo_upload":
+        return_to = str(state.get("addon_return_to") or "addons")
         state.update({"logo_enabled": True, "logo_file_id": file_id, "pending_input": "", "step": "addons"})
         set_frame_video_state(uid, state)
         await update.message.reply_text(
             "✅ Đã nhận logo. Chọn vị trí logo.",
-            reply_markup=frame_video_position_keyboard("logo"),
+            reply_markup=frame_video_position_keyboard(
+                "logo",
+                "framevideo|audio_menu" if return_to == "audio_menu" else "framevideo|addons",
+            ),
         )
         return True
     audio_key = "music" if target == "music_upload" else "voice"
+    return_to = str(
+        state.get("music_return_to") if audio_key == "music" else state.get("addon_return_to")
+        or ("music_menu" if audio_key == "music" else "addons")
+    )
     state.update({
         f"{audio_key}_enabled": True,
         f"{audio_key}_file_id": file_id,
         "pending_input": "",
-        "step": "music" if audio_key == "music" else "addons",
+        "step": "music" if audio_key == "music" else ("audio" if return_to == "audio_menu" else "addons"),
     })
     set_frame_video_state(uid, state)
     if audio_key == "music":
-        await update.message.reply_text(frame_video_music_menu_text(state), parse_mode="HTML", reply_markup=frame_video_music_menu_keyboard(state))
+        back_callback = {
+            "audio_menu": "framevideo|audio_menu",
+            "addons": "framevideo|addons",
+            "panel": "framevideo|panel",
+        }.get(return_to, "framevideo|panel")
+        await update.message.reply_text(
+            frame_video_music_menu_text(state),
+            parse_mode="HTML",
+            reply_markup=frame_video_music_menu_keyboard(state, back_callback),
+        )
     else:
         await update.message.reply_text(
             f"✅ Đã nhận file lồng tiếng. Âm lượng hiện tại {int(state.get('voice_volume_percent') or 100)}%.",
-            reply_markup=frame_video_volume_keyboard("voice", "framevideo|addons"),
+            reply_markup=frame_video_volume_keyboard(
+                "voice",
+                "framevideo|audio_menu" if return_to == "audio_menu" else "framevideo|addons",
+            ),
         )
     return True
 
@@ -136530,8 +137094,15 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
                 return True
             kind = str(state.get("pending_volume_kind") or "music")
             state = frame_video_flow.set_volume(state, kind, int(value))
-            state.update({"step": "music" if kind == "music" else "addons", "pending_volume_kind": ""})
+            return_to = str(state.get("pending_return_to") or ("music_menu" if kind == "music" else "addons"))
+            state.update({"step": "audio" if return_to == "audio_menu" else ("music" if return_to == "music_menu" else "addons"), "pending_volume_kind": "", "pending_return_to": ""})
             set_frame_video_state(uid, state)
+            if return_to == "audio_menu":
+                await update.message.reply_text(
+                    f"✅ Đã đặt âm lượng {int(value)}%.",
+                    reply_markup=frame_video_audio_menu_keyboard(state),
+                )
+                return True
             await update.message.reply_text(
                 f"✅ Đã đặt âm lượng {int(value)}%.",
                 reply_markup=frame_video_music_menu_keyboard(state) if kind == "music" else frame_video_addons_keyboard(state),
@@ -136600,10 +137171,21 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
             await update.message.reply_text("✅ Đã lưu watermark. Chọn vị trí hiển thị.", reply_markup=frame_video_position_keyboard("watermark"))
             return True
         if step == "subtitle_input":
-            state.update({"subtitle_enabled": True, "subtitle_text": content, "subtitle_position": "bottom_center", "step": "addons"})
+            return_to = str(state.get("addon_return_to") or "addons")
+            state.update({
+                "subtitle_enabled": True,
+                "subtitle_text": content,
+                "subtitle_position": "bottom_center",
+                "step": "audio" if return_to == "audio_menu" else "addons",
+                "pending_input": "",
+            })
             state = frame_video_flow.sync_render_overlays(state)
             set_frame_video_state(uid, state)
-            await update.message.reply_text(frame_video_addons_text(state), parse_mode="HTML", reply_markup=frame_video_addons_keyboard(state))
+            await update.message.reply_text(
+                frame_video_audio_menu_text(state) if return_to == "audio_menu" else frame_video_addons_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_audio_menu_keyboard(state) if return_to == "audio_menu" else frame_video_addons_keyboard(state),
+            )
             return True
         if step == "text_edit_input":
             try:
@@ -136632,7 +137214,7 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
         await update.message.reply_text(
             ivf.frame_video_ai_prompt_text(state.get("ai_prompt") or "", get_user_language(uid) or "vi"),
             parse_mode="HTML",
-            reply_markup=ivf.frame_video_ai_prompt_keyboard(get_user_language(uid) or "vi"),
+            reply_markup=img2vid_ai_prompt_review_keyboard(state, get_user_language(uid) or "vi"),
         )
         return True
     if step == "ai_count_custom":
@@ -136641,10 +137223,16 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
             await update.message.reply_text(f"⚠️ Số ảnh hợp lệ là 2-{IMG2VID_AI_IMAGE_MAX_COUNT}.")
             return True
         state["ai_image_count"] = count
-        state["image_generation_price"] = int(img2vid_image_unit_cost() * count)
-        state["step"] = "ai_confirm"
+        state["ai_image_tier"] = ""
+        state["image_generation_price"] = 0
+        state["step"] = "ai_entry"
         set_frame_video_state(uid, state)
-        await update.message.reply_text(img2vid_ai_confirm_text(state), parse_mode="HTML", reply_markup=img2vid_ai_confirm_keyboard())
+        await update.message.reply_text(
+            ivf.frame_video_ai_first_guard_text(get_user_language(uid) or "vi")
+            + f"\n\nĐã chọn: <b>{count} ảnh</b>. Bây giờ chọn gợi ý hoặc tự nhập prompt.",
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_first_keyboard(get_user_language(uid) or "vi"),
+        )
         return True
     if step == "seconds_custom":
         raw = text.replace(",", ".")
@@ -157784,6 +158372,7 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
     args = list(getattr(context, "args", []) or [])
     if args:
         job = frame_video_job_for_user(args[0], uid)
+        job = frame_video_reconcile_charge_for_status(job, uid)
         return await update.message.reply_text(
             frame_video_job_status_text(job),
             parse_mode="HTML",
@@ -157829,7 +158418,7 @@ async def cmd_img2vid_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
-    job = FRAME_VIDEO_JOBS.get(job_id) if job_id else {}
+    job = frame_video_job_for_user(job_id, uid, allow_any=True) if job_id else {}
     state = get_frame_video_state(uid) if not job else {}
     debug = img2vid_state_debug_dict(job_id, state, job)
     lines = ["🧾 <b>IMG2VID DEBUG</b>", ""]
@@ -157914,11 +158503,12 @@ async def cmd_tool_test_frame_video(update: Update, context: ContextTypes.DEFAUL
 
 
 FRAME_VIDEO_CANONICAL_ACTIONS = {
-    "panel", "upload", "images", "sort", "image_select", "image_action", "image_duration",
+    "panel", "upload", "images", "sort", "image_select", "image_action", "image_receipt", "image_duration",
     "duration_menu", "duration_set", "duration_custom", "ratio_menu", "ratio_set", "ratio_custom",
     "fit_menu", "fit_set", "transition_menu", "transition_set", "transition_time",
     "motion_menu", "motion_set", "music_menu", "music_upload", "music_off", "volume_menu",
-    "volume", "volume_custom", "audio_fade", "addons", "addon", "position_menu", "position_set",
+    "volume", "volume_custom", "audio_fade", "addons", "audio_menu", "addons_done", "addons_skip",
+    "addon", "position_menu", "position_set",
     "text_list", "text_select", "text_editor", "text_action", "text_edit", "text_scope_menu",
     "text_scope_set", "text_timing", "text_animation_menu", "text_animation_set",
     "text_style_menu", "text_style_set", "quality_menu", "quality_set", "quality_info", "review",
@@ -157930,6 +158520,7 @@ FRAME_VIDEO_LEGACY_REDIRECT_ACTIONS = {
     "preview", "preview_check", "mode_frame", "mode_audio", "mode_ai", "save", "text_delete_last",
 }
 FRAME_VIDEO_CONFIRM_LOCKS: dict[str, asyncio.Lock] = {}
+FRAME_VIDEO_IMAGE_CONFIRM_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def frame_video_planned_charge_xu(state: dict, user_id=0) -> int:
@@ -158036,6 +158627,28 @@ def frame_video_charge_after_delivery(job_id: str, user_id, state: dict) -> dict
         charged_at=now_text(),
     )
     return {"ok": True, "reason": "charged", "charged": charged}
+
+
+def frame_video_reconcile_charge_for_status(job: dict | None, user_id) -> dict:
+    current = dict(job or {})
+    if not current:
+        return current
+    if (
+        str(current.get("delivery_status") or "") == "sent"
+        and str(current.get("delivery_message_id") or "").strip()
+        and int(current.get("receipt_recorded") or 0)
+        and str(current.get("charge_state") or "") in {"not_charged", "charge_pending"}
+    ):
+        result = frame_video_charge_after_delivery(str(current.get("job_id") or ""), user_id, {})
+        if result.get("ok"):
+            update_frame_video_job(
+                str(current.get("job_id") or ""),
+                status="completed",
+                progress_percent=100,
+                finished_at=now_text(),
+            )
+        current = frame_video_job_for_user(str(current.get("job_id") or ""), user_id, allow_any=True) or current
+    return current
 
 
 async def handle_frame_video_final_confirm(
@@ -158362,6 +158975,12 @@ async def handle_frame_video_canonical_callback(
         )
     if action in {"images", "sort"}:
         return await show(frame_video_images_text(state), frame_video_images_keyboard(state), "images")
+    if action == "image_receipt":
+        return await show(
+            frame_video_image_receipt_text(state),
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            "image_receipt",
+        )
     if action == "image_select" and len(parts) > 2:
         state = frame_video_flow.apply_image_action(state, "select", parts[2])
         set_frame_video_state(uid, state)
@@ -158465,7 +159084,19 @@ async def handle_frame_video_canonical_callback(
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_panel_text(state), parse_mode="HTML", reply_markup=frame_video_panel_keyboard())
     if action == "music_menu":
-        return await show(frame_video_music_menu_text(state), frame_video_music_menu_keyboard(state), "music")
+        current_step = str(state.get("step") or "")
+        return_to = "audio_menu" if current_step == "audio" else ("addons" if current_step == "addons" else "panel")
+        state["music_return_to"] = return_to
+        back_callback = {
+            "audio_menu": "framevideo|audio_menu",
+            "addons": "framevideo|addons",
+            "panel": "framevideo|panel",
+        }[return_to]
+        return await show(
+            frame_video_music_menu_text(state),
+            frame_video_music_menu_keyboard(state, back_callback),
+            "music",
+        )
     if action == "music_upload":
         state.update({"step": "music_upload", "pending_input": "music_upload"})
         set_frame_video_state(uid, state)
@@ -158478,57 +159109,137 @@ async def handle_frame_video_canonical_callback(
     if action == "music_off":
         state.update({"music_enabled": False, "music_file_id": ""})
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, frame_video_music_menu_text(state), parse_mode="HTML", reply_markup=frame_video_music_menu_keyboard(state))
+        return_to = str(state.get("music_return_to") or "panel")
+        back_callback = {
+            "audio_menu": "framevideo|audio_menu",
+            "addons": "framevideo|addons",
+            "panel": "framevideo|panel",
+        }.get(return_to, "framevideo|panel")
+        return await safe_edit_or_send(
+            query,
+            frame_video_music_menu_text(state),
+            parse_mode="HTML",
+            reply_markup=frame_video_music_menu_keyboard(state, back_callback),
+        )
     if action == "volume_menu" and len(parts) > 2:
         kind = parts[2] if parts[2] in {"music", "voice"} else "music"
         label = "nhạc nền" if kind == "music" else "lồng tiếng"
+        current_step = str(state.get("step") or "")
+        return_to = "audio_menu" if current_step == "audio" else ("music_menu" if kind == "music" else "addons")
+        state["volume_return_to"] = return_to
         return await show(
             f"🔊 <b>Âm lượng {label}</b>\n\nHiện tại: <b>{int(state.get(f'{kind}_volume_percent') or 0)}%</b>. Giới hạn 0–200%, có chống vỡ tiếng.",
-            frame_video_volume_keyboard(kind, "framevideo|music_menu" if kind == "music" else "framevideo|addons"),
+            frame_video_volume_keyboard(kind, f"framevideo|{return_to}"),
             "volume",
         )
     if action == "volume" and len(parts) > 3:
         kind = parts[2]
         state = frame_video_flow.set_volume(state, kind, _safe_int(parts[3], 0))
+        return_to = str(state.get("volume_return_to") or ("music_menu" if kind == "music" else "addons"))
         set_frame_video_state(uid, state)
+        if return_to == "audio_menu":
+            return await safe_edit_or_send(query, frame_video_audio_menu_text(state), parse_mode="HTML", reply_markup=frame_video_audio_menu_keyboard(state))
+        if return_to == "addons":
+            return await safe_edit_or_send(
+                query,
+                frame_video_addons_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_addons_keyboard(state),
+            )
         return await safe_edit_or_send(
             query,
             frame_video_music_menu_text(state) if kind == "music" else frame_video_addons_text(state),
             parse_mode="HTML",
-            reply_markup=frame_video_music_menu_keyboard(state) if kind == "music" else frame_video_addons_keyboard(state),
+            reply_markup=(
+                frame_video_music_menu_keyboard(state, "framevideo|panel")
+                if kind == "music"
+                else frame_video_addons_keyboard(state)
+            ),
         )
     if action == "volume_custom" and len(parts) > 2:
         kind = parts[2] if parts[2] in {"music", "voice"} else "music"
-        state.update({"step": "volume_custom", "pending_input": "volume", "pending_volume_kind": kind})
+        return_to = str(state.get("volume_return_to") or ("music_menu" if kind == "music" else "addons"))
+        state.update({"step": "volume_custom", "pending_input": "volume", "pending_volume_kind": kind, "pending_return_to": return_to})
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(
             query,
             "✍️ Nhập âm lượng từ 0 đến 200%.",
             parse_mode=None,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|music_menu" if kind == "music" else "framevideo|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data=f"framevideo|{return_to}"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
         )
     if action == "audio_fade" and len(parts) > 2:
         kind = parts[2] if parts[2] in {"music", "voice"} else "music"
         key = f"{kind}_fade_seconds"
         state[key] = 0.0 if _safe_float(state.get(key), 0.0) > 0 else 0.35
         set_frame_video_state(uid, state)
+        return_to = str(state.get("music_return_to") or "panel") if kind == "music" else str(state.get("addon_return_to") or "addons")
+        if return_to == "audio_menu":
+            return await safe_edit_or_send(
+                query,
+                frame_video_audio_menu_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_audio_menu_keyboard(state),
+            )
+        if return_to == "addons":
+            return await safe_edit_or_send(
+                query,
+                frame_video_addons_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_addons_keyboard(state),
+            )
         return await safe_edit_or_send(
             query,
             frame_video_music_menu_text(state) if kind == "music" else frame_video_addons_text(state),
             parse_mode="HTML",
-            reply_markup=frame_video_music_menu_keyboard(state) if kind == "music" else frame_video_addons_keyboard(state),
+            reply_markup=(
+                frame_video_music_menu_keyboard(state, "framevideo|panel")
+                if kind == "music"
+                else frame_video_addons_keyboard(state)
+            ),
         )
     if action == "addons":
         return await show(frame_video_addons_text(state), frame_video_addons_keyboard(state), "addons")
+    if action == "audio_menu":
+        return await show(frame_video_audio_menu_text(state), frame_video_audio_menu_keyboard(state), "audio")
+    if action == "addons_done":
+        return await show(frame_video_panel_text(state), frame_video_panel_keyboard(), "panel")
+    if action == "addons_skip":
+        state.update(
+            {
+                "transition": "none",
+                "motion": "none",
+                "music_enabled": False,
+                "music_file_id": "",
+                "voice_enabled": False,
+                "voice_file_id": "",
+                "subtitle_enabled": False,
+                "subtitle_text": "",
+                "logo_enabled": False,
+                "logo_file_id": "",
+                "watermark_enabled": False,
+                "watermark_text": "",
+                "text_overlays": [],
+                "selected_text_id": "",
+            }
+        )
+        state = frame_video_flow.sync_render_overlays(state)
+        return await show(frame_video_panel_text(state), frame_video_panel_keyboard(), "panel")
     if action == "addon" and len(parts) > 2:
         kind = parts[2]
+        return_to = "audio_menu" if str(state.get("step") or "") == "audio" and kind in {"voice", "subtitle"} else "addons"
+        state["addon_return_to"] = return_to
         existing_key = {"logo": "logo_file_id", "watermark": "watermark_text", "subtitle": "subtitle_text", "voice": "voice_file_id"}.get(kind, "")
         if existing_key and state.get(existing_key):
             state[existing_key] = ""
             state[f"{kind}_enabled"] = False
             state = frame_video_flow.sync_render_overlays(state)
             set_frame_video_state(uid, state)
-            return await safe_edit_or_send(query, frame_video_addons_text(state), parse_mode="HTML", reply_markup=frame_video_addons_keyboard(state))
+            return await safe_edit_or_send(
+                query,
+                frame_video_audio_menu_text(state) if return_to == "audio_menu" else frame_video_addons_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_audio_menu_keyboard(state) if return_to == "audio_menu" else frame_video_addons_keyboard(state),
+            )
         if kind in {"logo", "voice"}:
             state.update({"step": f"{kind}_upload", "pending_input": f"{kind}_upload"})
             set_frame_video_state(uid, state)
@@ -158537,7 +159248,13 @@ async def handle_frame_video_canonical_callback(
                 query,
                 prompt,
                 parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        "⬅️ Quay lại",
+                        callback_data="framevideo|audio_menu" if return_to == "audio_menu" else "framevideo|addons",
+                    ),
+                    InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+                ]]),
             )
         if kind in {"watermark", "subtitle", "text"}:
             state.update({"step": f"{kind}_input" if kind != "text" else "text_input", "pending_input": kind})
@@ -158551,7 +159268,13 @@ async def handle_frame_video_canonical_callback(
                 query,
                 prompt,
                 parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        "⬅️ Quay lại",
+                        callback_data="framevideo|audio_menu" if return_to == "audio_menu" else "framevideo|addons",
+                    ),
+                    InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+                ]]),
             )
     if action == "position_menu" and len(parts) > 2:
         kind = parts[2]
@@ -158648,33 +159371,384 @@ async def handle_frame_video_canonical_callback(
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_text_editor_text(state), parse_mode="HTML", reply_markup=frame_video_text_editor_keyboard())
     if action == "quality_menu":
-        current = FRAME_VIDEO_QUALITY_LABELS.get(str(state.get("quality") or "balanced"), "Cân bằng")
-        return await show(f"⭐ <b>Chất lượng MP4</b>\n\nĐang chọn: <b>{current}</b>. Mỗi lựa chọn map trực tiếp vào độ phân giải, FPS, CRF và tốc độ FFmpeg.", frame_video_quality_keyboard(), "quality")
+        return await show(frame_video_quality_text(state), frame_video_quality_keyboard(), "quality")
     if action == "quality_set" and len(parts) > 2:
         state["quality"] = parts[2] if parts[2] in frame_video_runtime.QUALITY_PRESETS else "balanced"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, frame_video_panel_text(state), parse_mode="HTML", reply_markup=frame_video_panel_keyboard())
+        return await safe_edit_or_send(query, frame_video_quality_text(state), parse_mode="HTML", reply_markup=frame_video_quality_keyboard())
     if action == "quality_info":
-        rows = []
-        for token, item in frame_video_runtime.QUALITY_PRESETS.items():
-            rows.append(
-                f"• <b>{html.escape(str(item['label']))}</b>: {int(item['long_edge'])}p cạnh dài · {int(item['fps'])} FPS · H.264 CRF {int(item['crf'])}. "
-                f"{html.escape(str(item['strength']))}; giới hạn: {html.escape(str(item['limit']))}."
-            )
-        return await show("⭐ <b>Khác biệt chất lượng</b>\n\n" + "\n".join(rows), frame_video_quality_keyboard(), "quality")
+        return await show(frame_video_quality_text(state), frame_video_quality_keyboard(), "quality")
     if action == "review":
         return await show(frame_video_review_text(state, uid, False), frame_video_review_keyboard(False), "review")
     if action == "continue":
         plan = frame_video_runtime.validate_plan(frame_video_flow.sync_render_overlays(state))
         if not plan.get("ok"):
             return await safe_edit_or_send(query, "⚠️ Kế hoạch chưa đủ 2 ảnh hợp lệ. Hệ thống chưa tạo tác vụ và chưa trừ Xu.", parse_mode=None, reply_markup=frame_video_panel_keyboard())
+        preflight = frame_video_runtime_guard(state, uid)
+        if not preflight.get("ok"):
+            state.update({"preflight_result": dict(preflight), "step": "review", "pending_input": ""})
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                str(preflight.get("message") or frame_video_preflight_message(preflight)),
+                parse_mode=None,
+                reply_markup=frame_video_review_keyboard(False),
+            )
+        state["preflight_result"] = dict(preflight.get("preflight") or preflight)
+        state["video_quote"] = dict((preflight.get("preflight") or {}).get("video_quote") or {})
         return await show(frame_video_review_text(state, uid, True), frame_video_review_keyboard(True), "invoice")
     if action == "confirm":
         return await handle_frame_video_final_confirm(query, context, uid, state, lang)
     return await show(frame_video_panel_text(state), frame_video_panel_keyboard(), "panel")
 
 
+async def handle_frame_video_image_regeneration(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    uid,
+    state: dict,
+    request_id: str,
+):
+    lock = FRAME_VIDEO_IMAGE_CONFIRM_LOCKS.setdefault(str(uid), asyncio.Lock())
+    async with lock:
+        latest = normalize_frame_video_state(get_frame_video_state(uid) or state)
+        active_request_id = str(latest.get("image_regeneration_request_id") or "")
+        if not request_id or request_id != active_request_id:
+            completed = request_id and request_id == str(latest.get("image_regeneration_last_completed_id") or "")
+            return await safe_edit_or_send(
+                query,
+                (
+                    "✅ Yêu cầu tạo lại ảnh này đã hoàn tất; hệ thống không tạo hoặc ghi Xu lần hai."
+                    if completed
+                    else "⏰ Hóa đơn tạo lại ảnh này đã cũ. Hệ thống chưa gọi nguồn ảnh và chưa trừ Xu."
+                ),
+                parse_mode=None,
+                reply_markup=frame_video_images_keyboard(latest),
+            )
+        if str(latest.get("image_regeneration_status") or "") == "generating":
+            return await safe_edit_or_send(
+                query,
+                "✨ Ảnh thay thế đang được tạo và giao. Vui lòng không bấm lại.",
+                parse_mode=None,
+            )
+
+        pending = dict(latest.get("image_regeneration_pending") or {})
+        pending_delivered = bool(
+            str(pending.get("request_id") or "") == request_id
+            and int(pending.get("image_job_id") or 0) > 0
+            and int(pending.get("message_id") or 0) > 0
+            and isinstance(pending.get("photo"), dict)
+        )
+        quote = frame_video_image_regenerate_quote(latest)
+        if not pending_delivered and not quote.get("ok"):
+            latest["image_regeneration_status"] = "blocked"
+            set_frame_video_state(uid, latest)
+            return await safe_edit_or_send(
+                query,
+                frame_video_image_regenerate_invoice_text(latest),
+                parse_mode="HTML",
+                reply_markup=frame_video_image_regenerate_keyboard(latest),
+            )
+
+        if pending_delivered:
+            image_job_id = int(pending.get("image_job_id") or 0)
+            message_id = int(pending.get("message_id") or 0)
+            unit_price = int(pending.get("unit_price_xu") or 0)
+            target_image_id = str(pending.get("target_image_id") or "")
+            replacement = dict(pending.get("photo") or {})
+        else:
+            submit_guard = shopaikey_provider_submit_guard(
+                "image",
+                source="public_user_final_confirm",
+                confirmed=True,
+            )
+            if not submit_guard.get("provider_submit_allowed") and not is_admin_user(uid):
+                return await safe_edit_or_send(
+                    query,
+                    str(submit_guard.get("message") or ui_text(get_user_language(uid) or "vi", "media.public_off")),
+                    parse_mode=None,
+                    reply_markup=frame_video_image_regenerate_keyboard(latest),
+                )
+            unit_price = int(quote.get("unit_price_xu") or 0)
+            if not is_admin_user(uid):
+                credits, _, _ = get_user(
+                    uid,
+                    query.from_user.first_name or query.from_user.username or "Frame video user",
+                )
+                if int(credits or 0) < unit_price:
+                    return await edit_insufficient_credits(query, int(credits or 0), unit_price, uid)
+            target_image_id = str(quote.get("target_image_id") or "")
+            latest.update(
+                {
+                    "image_regeneration_status": "generating",
+                    "image_regeneration_target_id": target_image_id,
+                    "step": "image_regenerating",
+                }
+            )
+            set_frame_video_state(uid, latest)
+            await safe_edit_or_send(
+                query,
+                "✨ TOAN AAS đang tạo lại đúng một ảnh. Ảnh cũ vẫn được giữ cho đến khi ảnh mới đã giao và đối soát xong.",
+                parse_mode=None,
+            )
+            image_job_id = create_shopaikey_job(
+                uid,
+                query.message.chat_id,
+                "image",
+                model=str(quote.get("model") or ""),
+                prompt=str(quote.get("prompt") or ""),
+                status="QUEUED",
+                admin_only=False,
+                xu_cost_planned=unit_price,
+                source_job_id=f"frame-video-regenerate:{request_id}",
+                retry_warranty_count=int(quote.get("retry_warranty_count") or 0),
+            )
+            update_shopaikey_job(
+                image_job_id,
+                status="PROCESSING",
+                confirmed_at=now_text(),
+                billing_status="not_charged",
+            )
+            try:
+                result = await shopaikey_image_generate(
+                    str(quote.get("prompt") or ""),
+                    model=str(quote.get("model") or ""),
+                    aspect_ratio=str(quote.get("ratio") or "9:16"),
+                    tier=str(quote.get("tier") or ""),
+                )
+            except Exception as exc:
+                reason = sanitize_log_text(str(exc))[:220]
+                update_shopaikey_job(
+                    image_job_id,
+                    status="FAILED_NO_CHARGE",
+                    billing_status="not_charged",
+                    fail_reason=reason,
+                    finished_at=now_text(),
+                )
+                latest.update({"image_regeneration_status": "failed_no_charge", "step": "images"})
+                set_frame_video_state(uid, latest)
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="⚠️ Chưa tạo được ảnh thay thế. Ảnh cũ vẫn nguyên vẹn và hệ thống chưa trừ Xu.",
+                    reply_markup=frame_video_images_keyboard(latest),
+                )
+            image_url = str((result or {}).get("image_url") or (result or {}).get("url") or "").strip()
+            b64_json = str((result or {}).get("b64_json") or "").strip()
+            if not image_url and not b64_json:
+                update_shopaikey_job(
+                    image_job_id,
+                    status="FAILED_NO_CHARGE",
+                    billing_status="not_charged",
+                    fail_reason="provider_returned_no_image",
+                    finished_at=now_text(),
+                )
+                latest.update({"image_regeneration_status": "failed_no_charge", "step": "images"})
+                set_frame_video_state(uid, latest)
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="⚠️ Nguồn ảnh chưa trả file hợp lệ. Ảnh cũ vẫn nguyên vẹn và hệ thống chưa trừ Xu.",
+                    reply_markup=frame_video_images_keyboard(latest),
+                )
+            delivery = await send_frame_video_generated_image(
+                context,
+                query.message.chat_id,
+                image_url=image_url,
+                b64_json=b64_json,
+                caption="🖼 Ảnh AI tạo lại cho video ghép ảnh.",
+            )
+            if not delivery.get("sent"):
+                update_shopaikey_job(
+                    image_job_id,
+                    status="FAILED_NO_CHARGE",
+                    billing_status="not_charged",
+                    fail_reason="telegram_image_delivery_failed",
+                    finished_at=now_text(),
+                )
+                latest.update({"image_regeneration_status": "failed_no_charge", "step": "images"})
+                set_frame_video_state(uid, latest)
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="⚠️ Telegram chưa nhận ảnh thay thế. Ảnh cũ vẫn nguyên vẹn và hệ thống chưa trừ Xu.",
+                    reply_markup=frame_video_images_keyboard(latest),
+                )
+            message_id = int(delivery.get("message_id") or 0)
+            final_model = str((result or {}).get("final_model") or quote.get("model") or "")
+            latest = frame_video_commercial.record_image_receipt(
+                latest,
+                image_job_id=image_job_id,
+                model=final_model,
+                prompt=str(quote.get("prompt") or ""),
+                ratio=str(quote.get("ratio") or ""),
+                artifact=str(delivery.get("artifact") or ""),
+                message_id=message_id,
+                charged_xu=0,
+                timestamp=now_text(),
+            )
+            receipt_key = f"{image_job_id}:{message_id}"
+            replacement = {
+                "file_id": str(delivery.get("file_id") or ""),
+                "image_url": image_url,
+                "mime_type": "image/png",
+                "file_size": 0,
+                "source": "generated",
+                "prompt": str(quote.get("prompt") or ""),
+                "model": final_model,
+                "tier": str(quote.get("tier") or ""),
+                "ratio": str(quote.get("ratio") or ""),
+                "image_job_id": image_job_id,
+                "delivery_message_id": message_id,
+                "receipt_key": receipt_key,
+            }
+            pending = {
+                "request_id": request_id,
+                "target_image_id": target_image_id,
+                "image_job_id": image_job_id,
+                "message_id": message_id,
+                "unit_price_xu": unit_price,
+                "photo": replacement,
+            }
+            latest.update(
+                {
+                    "image_regeneration_pending": pending,
+                    "image_regeneration_status": "delivered_charge_pending",
+                    "step": "image_regeneration_charge_pending",
+                }
+            )
+            update_shopaikey_job(
+                image_job_id,
+                status="DELIVERED_CHARGE_PENDING",
+                result_url=image_url,
+                result_sent=1,
+                output_file_id=str(delivery.get("file_id") or ""),
+                output_sent_message_id=str(message_id),
+                output_sent_at=now_text(),
+                output_sent_result_url=image_url,
+                output_sent_source="frame_video_image_regenerate_confirm",
+                billing_status="delivery_verified_charge_pending",
+            )
+            set_frame_video_state(uid, latest)
+
+        charge_ok = is_admin_user(uid)
+        charged_amount = 0
+        if not is_admin_user(uid):
+            charge = spend_fixed_credit_info(
+                uid,
+                unit_price,
+                "spend_frame_video_ai_image_regenerate_post_delivery",
+                f"Tạo lại ảnh AI đã giao request={request_id}",
+                apply_member_discount_flag=False,
+            )
+            charge_ok = bool(charge.get("ok"))
+            charged_amount = int(charge.get("final_cost") or unit_price) if charge_ok else 0
+        if not charge_ok:
+            latest.update(
+                {
+                    "image_regeneration_pending": pending,
+                    "image_regeneration_status": "delivered_charge_pending",
+                    "step": "image_regeneration_charge_pending",
+                }
+            )
+            set_frame_video_state(uid, latest)
+            return await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=(
+                    "⚠️ Ảnh mới đã giao nhưng chưa đối soát được Xu. TOAN AAS giữ ảnh cũ trong timeline; "
+                    "bấm lại Xác nhận chỉ thử đối soát, không tạo thêm ảnh."
+                ),
+                reply_markup=frame_video_image_regenerate_keyboard(latest),
+            )
+        latest = frame_video_commercial.apply_single_image_charge(
+            latest,
+            image_job_id=image_job_id,
+            message_id=message_id,
+            charged_xu=charged_amount,
+        )
+        try:
+            latest["photos"] = frame_video_runtime.manifest_replace(
+                latest.get("photos") or [],
+                target_image_id,
+                replacement,
+            )
+        except ValueError:
+            update_shopaikey_job(
+                image_job_id,
+                status="DELIVERED_CHARGE_RECORDED_REPLACE_FAILED",
+                billing_status="charged" if not is_admin_user(uid) else "admin_no_charge",
+                fail_reason="target_image_missing_after_delivery",
+                finished_at=now_text(),
+            )
+            latest.update(
+                {
+                    "image_regeneration_status": "replace_failed_after_charge",
+                    "image_regeneration_pending": pending,
+                    "step": "images",
+                }
+            )
+            set_frame_video_state(uid, latest)
+            return await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="⚠️ Ảnh mới đã giao và đối soát nhưng ảnh đích không còn trong kế hoạch. Không có ảnh cũ nào bị xóa.",
+                reply_markup=frame_video_images_keyboard(latest),
+            )
+        latest.update(
+            {
+                "selected_image_id": target_image_id,
+                "image_regeneration_status": "completed",
+                "image_regeneration_last_completed_id": request_id,
+                "image_regeneration_request_id": "",
+                "image_regeneration_target_id": "",
+                "image_regeneration_pending": {},
+                "step": "images",
+            }
+        )
+        update_shopaikey_job(
+            image_job_id,
+            status="SUCCEEDED",
+            xu_deducted=charged_amount,
+            billing_status="charged" if not is_admin_user(uid) else "admin_no_charge",
+            finished_at=now_text(),
+        )
+        set_frame_video_state(uid, latest)
+        return await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=(
+                f"✅ Đã thay đúng một ảnh AI và ghi {charged_amount} Xu sau khi Telegram giao thành công. "
+                "Thứ tự, ảnh bìa và các ảnh còn lại được giữ nguyên."
+            ),
+            reply_markup=frame_video_images_keyboard(latest),
+        )
+
+
 async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYPE, uid, lang: str, action: str, parts: list[str], state: dict):
+    if action == "image_regenerate":
+        quote = frame_video_image_regenerate_quote(state)
+        request_id = hashlib.sha256(
+            f"{uid}:{quote.get('target_image_id')}:{time.time_ns()}".encode("utf-8")
+        ).hexdigest()[:12]
+        state.update(
+            {
+                "image_regeneration_request_id": request_id,
+                "image_regeneration_target_id": str(quote.get("target_image_id") or ""),
+                "image_regeneration_status": "invoice" if quote.get("ok") else "blocked",
+                "image_regeneration_pending": {},
+                "step": "image_regenerate_invoice",
+            }
+        )
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            frame_video_image_regenerate_invoice_text(state),
+            parse_mode="HTML",
+            reply_markup=frame_video_image_regenerate_keyboard(state),
+        )
+    if action == "image_regenerate_confirm" and len(parts) > 2:
+        return await handle_frame_video_image_regeneration(
+            query,
+            context,
+            uid,
+            state,
+            str(parts[2] or ""),
+        )
     if action == "ai_prompt":
         state["step"] = "ai_prompt"
         set_frame_video_state(uid, state)
@@ -158709,7 +159783,7 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
             query,
             ivf.frame_video_ai_prompt_text(state.get("ai_prompt") or "", lang),
             parse_mode="HTML",
-            reply_markup=ivf.frame_video_ai_prompt_keyboard(lang, suggestion_source=True),
+            reply_markup=img2vid_ai_prompt_review_keyboard(state, lang),
         )
     if action == "ai_prepared":
         prompt = str(state.get("ai_prompt") or "").strip()
@@ -158728,114 +159802,410 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
             query,
             ivf.frame_video_ai_prompt_text(prompt, lang),
             parse_mode="HTML",
-            reply_markup=ivf.frame_video_ai_prompt_keyboard(
-                lang,
-                suggestion_source=str(state.get("ai_prompt_source") or "") == "suggestion",
-            ),
+            reply_markup=img2vid_ai_prompt_review_keyboard(state, lang),
         )
     if action == "ai_count_menu":
-        if not str(state.get("ai_prompt") or "").strip():
-            state["step"] = "ai_entry"
-            set_frame_video_state(uid, state)
-            return await safe_edit_or_send(
-                query,
-                ivf.frame_video_ai_first_guard_text(lang),
-                parse_mode="HTML",
-                reply_markup=ivf.frame_video_ai_first_keyboard(lang),
-            )
         state["step"] = "ai_count"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, "🔢 Chọn số ảnh AI muốn tạo trước khi ghép video.", parse_mode=None, reply_markup=img2vid_ai_count_keyboard("framevideo|ai_prepared"))
+        back = "framevideo|ai_prepared" if str(state.get("ai_prompt") or "").strip() else "framevideo|hub"
+        return await safe_edit_or_send(
+            query,
+            "🔢 <b>Chọn số ảnh AI</b>\n\nSố ảnh quyết định trực tiếp tổng giá tạo ảnh. Sau bước này anh/chị mới chọn gợi ý hoặc tự nhập prompt.",
+            parse_mode="HTML",
+            reply_markup=img2vid_ai_count_keyboard(back),
+        )
     if action == "ai_count" and len(parts) > 2:
         count = max(2, min(_safe_int(parts[2], 2), IMG2VID_AI_IMAGE_MAX_COUNT))
         state["ai_image_count"] = count
-        state["image_generation_price"] = int(img2vid_image_unit_cost() * count)
-        state["step"] = "ai_confirm"
+        state["ai_image_tier"] = ""
+        state["image_generation_price"] = 0
+        state["step"] = "ai_entry"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, img2vid_ai_confirm_text(state), parse_mode="HTML", reply_markup=img2vid_ai_confirm_keyboard())
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_ai_first_guard_text(lang)
+            + f"\n\nĐã chọn: <b>{count} ảnh</b>. Bây giờ chọn gợi ý hoặc tự nhập prompt.",
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ai_first_keyboard(lang),
+        )
     if action == "ai_count_custom":
         state["step"] = "ai_count_custom"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, f"Nhập số ảnh muốn tạo (2-{IMG2VID_AI_IMAGE_MAX_COUNT}).", parse_mode=None)
-    if action == "ai_generate_confirm":
-        prompt = str(state.get("ai_prompt") or "").strip()
-        count = max(2, min(int(state.get("ai_image_count") or 2), IMG2VID_AI_IMAGE_MAX_COUNT))
-        if not prompt:
+    if action == "ai_tier_menu":
+        if not str(state.get("ai_prompt") or "").strip():
             state["step"] = "ai_prompt"
             set_frame_video_state(uid, state)
-            return await safe_edit_or_send(query, "⚠️ Anh/chị cần nhập prompt ảnh trước. Bot chưa trừ Xu.", parse_mode=None)
-        submit_guard = shopaikey_provider_submit_guard(
-            "image",
-            source="public_user_final_confirm",
-            confirmed=True,
-        )
-        if not submit_guard.get("provider_submit_allowed") and not is_admin_user(uid):
             return await safe_edit_or_send(
                 query,
-                str(submit_guard.get("message") or ui_text(lang, "media.public_off")),
+                "⚠️ Anh/chị cần hoàn thiện prompt ảnh trước. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode=None,
+                reply_markup=ivf.frame_video_ai_custom_prompt_keyboard(lang),
+            )
+        state["step"] = "ai_tier"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            img2vid_ai_tier_text(state),
+            parse_mode="HTML",
+            reply_markup=img2vid_ai_tier_keyboard(),
+        )
+    if action == "ai_tier" and len(parts) > 2:
+        tier_name = normalize_image_tier(parts[2])
+        tier = image_tier_payload(tier_name)
+        state["ai_image_tier"] = tier_name
+        state["ai_image_model"] = str(tier.get("model") or "")
+        quote = frame_video_image_quote(state)
+        state["image_generation_price"] = int(quote.get("total_price_xu") or 0)
+        state["step"] = "ai_invoice"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            img2vid_ai_confirm_text(state),
+            parse_mode="HTML",
+            reply_markup=img2vid_ai_confirm_keyboard(state),
+        )
+    if action == "ai_generate_confirm":
+        lock = FRAME_VIDEO_IMAGE_CONFIRM_LOCKS.setdefault(str(uid), asyncio.Lock())
+        async with lock:
+            latest = normalize_frame_video_state(get_frame_video_state(uid) or state)
+            if str(latest.get("image_batch_status") or "") == "generating":
+                return await safe_edit_or_send(
+                    query,
+                    "✨ Bộ ảnh đang được tạo và giao. Vui lòng không bấm lại.",
+                    parse_mode=None,
+                )
+            if (
+                str(latest.get("image_batch_status") or "") == "completed"
+                and len(latest.get("photos") or []) >= 2
+                and len(latest.get("generated_image_receipts") or []) >= 2
+            ):
+                return await safe_edit_or_send(
+                    query,
+                    f"✅ Đã có {len(latest.get('photos') or [])} ảnh được giao. Không tạo hoặc ghi Xu trùng.",
+                    parse_mode=None,
+                    reply_markup=img2vid_generated_images_keyboard(),
+                )
+            if (
+                str(latest.get("image_batch_status") or "") == "delivered_charge_pending"
+                and latest.get("generated_image_receipts")
+                and latest.get("photos")
+            ):
+                receipts = list(latest.get("generated_image_receipts") or [])
+                delivered_job_ids = [
+                    int(row.get("image_job_id") or 0)
+                    for row in receipts
+                    if int(row.get("image_job_id") or 0) > 0
+                ]
+                unit_price = int(latest.get("image_generation_unit_price") or 0)
+                charge_amount = unit_price * len(receipts)
+                if unit_price <= 0 or charge_amount <= 0:
+                    return await safe_edit_or_send(
+                        query,
+                        "⚠️ Biên nhận ảnh đang thiếu giá gốc. Hệ thống không gọi lại nguồn ảnh và chưa ghi Xu.",
+                        parse_mode=None,
+                        reply_markup=img2vid_ai_confirm_keyboard(latest),
+                    )
+                charge_ok = is_admin_user(uid)
+                charged_amount = 0
+                if not is_admin_user(uid):
+                    charge = spend_fixed_credit_info(
+                        uid,
+                        charge_amount,
+                        "spend_frame_video_ai_images_post_delivery",
+                        f"Đối soát lại ảnh AI đã giao batch={latest.get('image_batch_id') or ''}",
+                        apply_member_discount_flag=False,
+                    )
+                    charge_ok = bool(charge.get("ok"))
+                    charged_amount = int(charge.get("final_cost") or charge_amount) if charge_ok else 0
+                if not charge_ok:
+                    return await safe_edit_or_send(
+                        query,
+                        "⚠️ Ảnh đã giao nhưng chưa đối soát được Xu. Bấm lại chỉ thử đối soát, không tạo thêm ảnh.",
+                        parse_mode=None,
+                        reply_markup=img2vid_ai_confirm_keyboard(latest),
+                    )
+                latest = frame_video_commercial.apply_image_batch_charge(latest, charged_xu=charged_amount)
+                for image_job_id in delivered_job_ids:
+                    update_shopaikey_job(
+                        image_job_id,
+                        status="SUCCEEDED",
+                        xu_deducted=0 if is_admin_user(uid) else unit_price,
+                        billing_status="charged" if not is_admin_user(uid) else "admin_no_charge",
+                        finished_at=now_text(),
+                    )
+                latest["image_batch_status"] = "completed"
+                latest["step"] = "ai_images_ready" if len(latest.get("photos") or []) >= 2 else "collect"
+                set_frame_video_state(uid, latest)
+                return await safe_edit_or_send(
+                    query,
+                    (
+                        f"✅ Đã hoàn tất biên nhận {len(receipts)} ảnh và ghi {charged_amount} Xu. "
+                        "Không tạo thêm ảnh; hóa đơn dựng MP4 vẫn tách riêng."
+                    ),
+                    parse_mode=None,
+                    reply_markup=(
+                        img2vid_generated_images_keyboard()
+                        if len(latest.get("photos") or []) >= 2
+                        else frame_video_collect_keyboard()
+                    ),
+                )
+            quote = frame_video_image_quote(latest)
+            if not quote.get("ok"):
+                latest["step"] = "ai_tier"
+                set_frame_video_state(uid, latest)
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Gói ảnh chưa hợp lệ. Hệ thống chưa tạo job, chưa gọi nguồn ảnh và chưa trừ Xu.",
+                    parse_mode=None,
+                    reply_markup=img2vid_ai_tier_keyboard(),
+                )
+            submit_guard = shopaikey_provider_submit_guard(
+                "image",
+                source="public_user_final_confirm",
+                confirmed=True,
+            )
+            if not submit_guard.get("provider_submit_allowed") and not is_admin_user(uid):
+                return await safe_edit_or_send(
+                    query,
+                    str(submit_guard.get("message") or ui_text(lang, "media.public_off")),
+                    parse_mode=None,
+                    reply_markup=img2vid_ai_confirm_keyboard(latest),
+                )
+            count = int(quote.get("image_count") or 0)
+            total_price = int(quote.get("total_price_xu") or 0)
+            unit_price = int(quote.get("unit_price_xu") or 0)
+            if not is_admin_user(uid):
+                credits, _, _ = get_user(
+                    uid,
+                    query.from_user.first_name or query.from_user.username or "Frame video user",
+                )
+                if int(credits or 0) < total_price:
+                    return await edit_insufficient_credits(query, int(credits or 0), total_price, uid)
+            batch_id = str(latest.get("image_batch_id") or f"fvi-{uid}-{int(time.time())}")
+            latest.update({
+                "step": "generating_images",
+                "image_batch_id": batch_id,
+                "image_batch_status": "generating",
+                "image_generation_price": total_price,
+                "image_generation_unit_price": unit_price,
+                "image_generation_charged_amount": 0,
+                "image_generation_paid": False,
+                "image_batch_charge_recorded": False,
+                "generated_image_receipts": [],
+                "generated_image_job_ids": [],
+                "photos": [],
+            })
+            set_frame_video_state(uid, latest)
+            await safe_edit_or_send(
+                query,
+                f"✨ TOAN AAS đang tạo và kiểm tra {count} ảnh. Xu chỉ được ghi sau khi từng ảnh được Telegram xác nhận đã giao.",
                 parse_mode=None,
             )
-        unit_cost = img2vid_image_unit_cost()
-        image_cost = int(unit_cost * count)
-        charged_amount = 0
-        if image_cost > 0 and not is_admin_user(uid):
-            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Img2Vid user")
-            if int(credits or 0) < image_cost:
-                return await edit_insufficient_credits(query, int(credits or 0), image_cost, uid)
-            charge = spend_fixed_credit_info(uid, image_cost, "spend_img2vid_ai_images", "Tạo ảnh AI nhanh để ghép video", apply_member_discount_flag=False)
-            if not charge.get("ok"):
-                credits_now, _, _ = get_user(uid)
-                return await edit_insufficient_credits(query, int(credits_now or 0), image_cost, uid)
-            charged_amount = int(charge.get("final_cost") or image_cost)
-        state["image_generation_paid"] = image_cost > 0
-        state["image_generation_price"] = image_cost
-        state["image_generation_charged_amount"] = charged_amount if charged_amount else image_cost
-        state["step"] = "generating_images"
-        set_frame_video_state(uid, state)
-        await safe_edit_or_send(query, f"✨ TOAN AAS đang tạo {count} ảnh cùng chủ đề. Vui lòng chờ, không cần gửi lại lệnh.", parse_mode=None)
-        generated = []
-        for idx, image_prompt in enumerate(img2vid_image_prompt_variants(prompt, count), start=1):
-            try:
-                result = await shopaikey_image_generate(image_prompt, aspect_ratio="9:16", tier="low")
-            except Exception as exc:
-                logger.warning("img2vid ai image generation failed | %s", sanitize_log_text(str(exc))[:220])
-                continue
-            status = str((result or {}).get("status") or "").lower()
-            image_url = str((result or {}).get("image_url") or (result or {}).get("url") or "").strip()
-            b64_json = str((result or {}).get("b64_json") or "")
-            if status not in {"success", "succeeded", "ok"} and not (image_url or b64_json):
-                continue
-            sent_ok, file_id = await send_generated_image_result(context, query.message.chat_id, image_url, f"🖼 Ảnh {idx}/{count} cho video ghép ảnh.", None, lang, b64_json=b64_json)
-            if sent_ok:
-                generated.append({"file_id": str(file_id or ""), "image_url": image_url, "file_size": 0, "source": "generated", "prompt": image_prompt})
-        missing = max(0, count - len(generated))
-        refund_applied = False
-        if missing > 0 and image_cost > 0 and not is_admin_user(uid):
-            refund_applied = refund_charged_credit(uid, missing * unit_cost, "img2vid_ai_image_refund", "", "Hoàn Xu ảnh AI chưa tạo đủ trong Ghép ảnh thành video", True)
-        if not generated:
-            state["generated_image_count"] = 0
-            state["refund_applied"] = refund_applied
-            state["step"] = "ai_prompt"
-            set_frame_video_state(uid, state)
-            return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ TOAN AAS chưa tạo được ảnh AI lần này. Bot đã hoàn Xu phần ảnh chưa tạo nếu có trừ.", reply_markup=ivf.frame_video_unified_menu_keyboard(lang))
-        state["photos"] = generated[:FRAME_VIDEO_MAX_IMAGES]
-        state["generated_image_count"] = len(generated)
-        state["refund_applied"] = refund_applied
-        if len(generated) < 2:
-            state["step"] = "collect"
-            set_frame_video_state(uid, state)
+
+            generated = []
+            delivered_job_ids = []
+            model = str(quote.get("model") or "")
+            tier_name = str(quote.get("tier") or "")
+            ratio = str(quote.get("ratio") or "9:16")
+            prompts = img2vid_image_prompt_variants(str(latest.get("ai_prompt") or ""), count)
+            for index, image_prompt in enumerate(prompts, start=1):
+                image_job_id = create_shopaikey_job(
+                    uid,
+                    query.message.chat_id,
+                    "image",
+                    model=model,
+                    prompt=image_prompt,
+                    status="QUEUED",
+                    admin_only=False,
+                    xu_cost_planned=unit_price,
+                    source_job_id=batch_id,
+                    retry_warranty_count=int(quote.get("retry_warranty_count") or 0),
+                )
+                latest["generated_image_job_ids"] = list(latest.get("generated_image_job_ids") or []) + [image_job_id]
+                update_shopaikey_job(
+                    image_job_id,
+                    status="PROCESSING",
+                    confirmed_at=now_text(),
+                    billing_status="not_charged",
+                )
+                set_frame_video_state(uid, latest)
+                try:
+                    result = await shopaikey_image_generate(
+                        image_prompt,
+                        model=model,
+                        aspect_ratio=ratio,
+                        tier=tier_name,
+                    )
+                except Exception as exc:
+                    reason = sanitize_log_text(str(exc))[:220]
+                    update_shopaikey_job(
+                        image_job_id,
+                        status="FAILED_NO_CHARGE",
+                        billing_status="not_charged",
+                        fail_reason=reason,
+                        finished_at=now_text(),
+                    )
+                    continue
+                image_url = str((result or {}).get("image_url") or (result or {}).get("url") or "").strip()
+                b64_json = str((result or {}).get("b64_json") or "").strip()
+                if not image_url and not b64_json:
+                    update_shopaikey_job(
+                        image_job_id,
+                        status="FAILED_NO_CHARGE",
+                        billing_status="not_charged",
+                        fail_reason=str((result or {}).get("detail") or "provider_returned_no_image"),
+                        finished_at=now_text(),
+                    )
+                    continue
+                delivery = await send_frame_video_generated_image(
+                    context,
+                    query.message.chat_id,
+                    image_url=image_url,
+                    b64_json=b64_json,
+                    caption=f"🖼 Ảnh {index}/{count} cho video ghép ảnh.",
+                )
+                if not delivery.get("sent"):
+                    update_shopaikey_job(
+                        image_job_id,
+                        status="FAILED_NO_CHARGE",
+                        billing_status="not_charged",
+                        fail_reason="telegram_image_delivery_failed",
+                        finished_at=now_text(),
+                    )
+                    continue
+                delivered_job_ids.append(image_job_id)
+                latest = frame_video_commercial.record_image_receipt(
+                    latest,
+                    image_job_id=image_job_id,
+                    model=str((result or {}).get("final_model") or model),
+                    prompt=image_prompt,
+                    ratio=ratio,
+                    artifact=str(delivery.get("artifact") or ""),
+                    message_id=int(delivery.get("message_id") or 0),
+                    charged_xu=0,
+                    timestamp=now_text(),
+                )
+                final_model = str((result or {}).get("final_model") or model)
+                delivery_message_id = int(delivery.get("message_id") or 0)
+                generated.append({
+                    "file_id": str(delivery.get("file_id") or ""),
+                    "image_url": image_url,
+                    "mime_type": "image/png",
+                    "file_size": 0,
+                    "source": "generated",
+                    "prompt": image_prompt,
+                    "model": final_model,
+                    "tier": tier_name,
+                    "ratio": ratio,
+                    "image_job_id": image_job_id,
+                    "delivery_message_id": delivery_message_id,
+                    "receipt_key": f"{image_job_id}:{delivery_message_id}",
+                })
+                update_shopaikey_job(
+                    image_job_id,
+                    status="DELIVERED_CHARGE_PENDING",
+                    result_url=image_url,
+                    result_sent=1,
+                    output_file_id=str(delivery.get("file_id") or ""),
+                    output_sent_message_id=str(delivery.get("message_id") or ""),
+                    output_sent_at=now_text(),
+                    output_sent_result_url=image_url,
+                    output_sent_source="frame_video_public_confirm",
+                    billing_status="delivery_verified_charge_pending",
+                )
+                latest["photos"] = list(generated)
+                latest["generated_image_count"] = len(generated)
+                set_frame_video_state(uid, latest)
+
+            charge_amount = unit_price * len(generated)
+            charge_ok = is_admin_user(uid)
+            charged_amount = 0
+            if generated and not is_admin_user(uid):
+                charge = spend_fixed_credit_info(
+                    uid,
+                    charge_amount,
+                    "spend_frame_video_ai_images_post_delivery",
+                    f"Tạo ảnh AI đã giao batch={batch_id}",
+                    apply_member_discount_flag=False,
+                )
+                charge_ok = bool(charge.get("ok"))
+                charged_amount = int(charge.get("final_cost") or charge_amount) if charge_ok else 0
+            if generated and charge_ok:
+                latest = frame_video_commercial.apply_image_batch_charge(
+                    latest,
+                    charged_xu=charged_amount,
+                )
+                for image_job_id in delivered_job_ids:
+                    update_shopaikey_job(
+                        image_job_id,
+                        status="SUCCEEDED",
+                        xu_deducted=0 if is_admin_user(uid) else unit_price,
+                        billing_status="charged" if not is_admin_user(uid) else "admin_no_charge",
+                        finished_at=now_text(),
+                    )
+            elif generated:
+                for image_job_id in delivered_job_ids:
+                    update_shopaikey_job(
+                        image_job_id,
+                        status="DELIVERED_CHARGE_PENDING",
+                        billing_status="delivery_verified_charge_pending",
+                    )
+            latest["photos"] = generated[:FRAME_VIDEO_MAX_IMAGES]
+            latest["generated_image_count"] = len(generated)
+            latest["image_batch_status"] = (
+                "completed"
+                if generated and charge_ok
+                else ("delivered_charge_pending" if generated else "failed_no_charge")
+            )
+            latest["step"] = "ai_images_ready" if len(generated) >= 2 and charge_ok else "collect"
+            set_frame_video_state(uid, latest)
+            if not generated:
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text="⚠️ TOAN AAS chưa tạo và giao được ảnh nào. Hệ thống không ghi Xu.",
+                    reply_markup=img2vid_ai_confirm_keyboard(latest),
+                )
+            if not charge_ok:
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=(
+                        f"⚠️ Đã giao {len(generated)}/{count} ảnh nhưng chưa ghi được Xu. "
+                        "Hệ thống khóa bước ghép để tránh hóa đơn sai; không gọi thêm nguồn ảnh."
+                    ),
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("⬅️ Ghép ảnh thành video", callback_data="framevideo|hub"),
+                        InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+                    ]]),
+                )
+            if len(generated) < 2:
+                return await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=(
+                        f"⚠️ Đã giao {len(generated)}/{count} ảnh và chỉ ghi Xu cho ảnh đã giao. "
+                        "Cần ít nhất 2 ảnh để ghép video; anh/chị có thể gửi thêm ảnh."
+                    ),
+                    reply_markup=frame_video_collect_keyboard(),
+                )
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=(
-                    f"⚠️ Mới tạo được {len(generated)}/{count} ảnh. Cần ít nhất 2 ảnh để ghép video. "
-                    "Anh/chị có thể gửi thêm ảnh; hệ thống chưa tạo video và chưa trừ Xu video."
+                    f"✅ Đã giao {len(generated)}/{count} ảnh và ghi {charged_amount} Xu cho hóa đơn ảnh.\n\n"
+                    "Bước ghép MP4 có cấu hình và hóa đơn video riêng."
                 ),
-                reply_markup=frame_video_collect_keyboard(),
+                reply_markup=img2vid_generated_images_keyboard(),
             )
-        state["step"] = "ai_images_ready"
-        set_frame_video_state(uid, state)
-        return await context.bot.send_message(chat_id=query.message.chat_id, text=f"✅ Đã tạo {len(generated)}/{count} ảnh cùng chủ đề.\n\nAnh/chị có thể ghép các ảnh này thành video MP4 đơn giản.", reply_markup=img2vid_generated_images_keyboard())
     if action == "ai_stitch_generated":
+        generated_photos = [
+            row for row in list(state.get("photos") or []) if str((row or {}).get("source") or "") == "generated"
+        ]
+        if generated_photos and not bool(state.get("image_generation_paid")):
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Ảnh AI đã giao nhưng biên nhận Xu chưa hoàn tất. Hệ thống chưa mở bước dựng MP4 và không gọi thêm nguồn ảnh.",
+                parse_mode=None,
+                reply_markup=img2vid_ai_confirm_keyboard(state),
+            )
         if len(state.get("photos") or []) < 2:
             state["step"] = "collect"
             set_frame_video_state(uid, state)
@@ -158882,6 +160252,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
 
     if action == "status" and len(parts) > 2:
         job = frame_video_job_for_user(parts[2], uid)
+        job = frame_video_reconcile_charge_for_status(job, uid)
         return await safe_edit_or_send(
             query,
             frame_video_job_status_text(job),
@@ -158894,8 +160265,10 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             clear_media_creator_pending_states(uid)
             set_frame_video_state(uid, {
                 "step": "ai_entry",
+                "current_screen": "ai_count",
                 "photos": [],
                 "img2vid_lock1": True,
+                "commercial_flow_version": "framevideo2",
                 "mode": "ai_images_then_slideshow",
                 "image_sources": "generated",
                 "image_generation_requested": True,
@@ -158912,9 +160285,11 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             })
             return await safe_edit_or_send(
                 query,
-                ivf.frame_video_ai_first_guard_text(lang),
+                "🔢 <b>Chọn số ảnh AI</b>\n\n"
+                "Chọn từ 2 đến 20 ảnh. Số ảnh quyết định trực tiếp hóa đơn tạo ảnh; "
+                "sau đó anh/chị mới chọn gợi ý hoặc tự nhập prompt.",
                 parse_mode="HTML",
-                reply_markup=ivf.frame_video_ai_first_keyboard(lang),
+                reply_markup=img2vid_ai_count_keyboard("framevideo|hub"),
             )
         text = ivf.frame_video_layout_helper_text(lang) if action == "layout" else ivf.frame_video_unified_menu_text(lang)
         markup = ivf.frame_video_layout_helper_keyboard(lang) if action == "layout" else ivf.frame_video_unified_menu_keyboard(lang)
@@ -159276,227 +160651,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         return await start_video_addon_step(query, uid, state, "low", lang, source="frame")
 
     if action == "confirm":
-        min_images = 1 if bool(state.get("img2vid_lock1")) and str(state.get("mode") or "") == "ai_images_then_slideshow" else 2
-        if len(state.get("photos") or []) < min_images:
-            return await safe_edit_or_send(query, f"⚠️ Cần ít nhất {min_images} ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
-        if not bool(state.get("img2vid_lock1")) and (not state.get("paid_preview_seen") or not str(state.get("paid_preview_video_file_id") or "")):
-            return await safe_edit_or_send(
-                query,
-                frame_video_preview_text(state, ready=False),
-                parse_mode="HTML",
-                reply_markup=frame_video_preview_entry_keyboard(),
-            )
-        addon_guard = {"ok": True} if bool(state.get("img2vid_lock1")) else video_addon_runtime_guard(state)
-        if not addon_guard.get("ok"):
-            return await safe_edit_or_send(
-                query,
-                video_addon_guard_text(lang),
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚫 Chọn không thêm", callback_data="videoaddon|none")],
-                    [InlineKeyboardButton("👁 Đổi phụ đề", callback_data="vfinal|addon"), InlineKeyboardButton("🗣 Đổi lồng tiếng", callback_data="vfinal|addon")],
-                    [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
-                ]),
-            )
-        guard = frame_video_runtime_guard(state, uid)
-        if guard.get("action") == "worker_queue":
-            credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
-            render_type = frame_video_render_type(state)
-            base_cost = frame_video_price_for_state(state)
-            preview_cost = int(base_cost or 0) if bool(state.get("img2vid_lock1")) else shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
-            if int(credits or 0) < preview_cost and not is_admin_user(uid):
-                return await edit_insufficient_credits(query, int(credits or 0), preview_cost, uid)
-            charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video", apply_member_discount_flag=not bool(state.get("img2vid_lock1")))
-            if not charge.get("ok"):
-                credits_now, _, _ = get_user(uid)
-                return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or preview_cost), uid)
-            charged_amount = int(charge.get("final_cost") or 0)
-            job_id = create_frame_video_job(uid, query.message.chat_id, state, charged_amount, "waiting_worker")
-            payload = frame_video_worker_payload(job_id, uid, query.message.chat_id, state, charged_amount)
-            try:
-                local_job_id = create_local_worker_job(
-                    user_id=str(uid),
-                    command="frame_video",
-                    job_type="frame_video_render",
-                    provider="local_ffmpeg",
-                    input_file_id=payload,
-                    xu_cost=charged_amount,
-                    admin_only=is_admin_user(uid),
-                )
-            except Exception as e:
-                detail = sanitize_log_text(str(e))[:240]
-                refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do worker queue lỗi", charged_amount > 0)
-                update_frame_video_job(job_id, status="failed", detail=f"worker_queue:{detail}")
-                set_frame_video_last_error(f"worker_queue:{detail}")
-                clear_frame_video_state(uid)
-                return await safe_edit_or_send(
-                    query,
-                    "⚠️ Ghép video lỗi do tài nguyên xử lý không đủ. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại với ít ảnh hơn hoặc chờ worker.\n\n"
-                    f"Job: {job_id}\nStatus: failed",
-                    parse_mode=None,
-                    reply_markup=frame_video_job_status_keyboard(job_id),
-                )
-            update_frame_video_job(job_id, status="waiting_worker", detail=f"local_worker_job:{local_job_id}")
-            state["step"] = "waiting_worker"
-            state["charged_amount"] = charged_amount
-            state["frame_video_job_id"] = job_id
-            state["local_worker_job_id"] = local_job_id
-            set_frame_video_state(uid, state)
-            clear_frame_video_state(uid)
-            price = frame_video_price_breakdown(state)
-            sent = await safe_edit_or_send(
-                query,
-                product_progress_status_text(
-                    "frame_video",
-                    job_id,
-                    "received_images",
-                    5,
-                    public_note=f"TOAN AAS đang ghép {int(price.get('image_count') or 0)} ảnh thành video. Anh/chị không cần gửi lại lệnh.",
-                    lang=lang,
-                ),
-                parse_mode="HTML",
-                reply_markup=frame_video_job_status_keyboard(job_id),
-            )
-            progress_auto_refresh_register_message(sent or query.message, context, product_type="frame_video", job_id=job_id, user_id=uid, lang=lang)
-            return sent
-        if not guard.get("ok"):
-            reason = str(guard.get("reason") or "blocked")
-            set_frame_video_last_error(reason)
-            blocked_status = "failed_worker_unavailable" if reason in {"worker_unavailable", "direct_render_disabled"} else "failed"
-            job_id = create_frame_video_job(uid, query.message.chat_id, state, 0, blocked_status)
-            update_frame_video_job(job_id, status=blocked_status, detail=reason)
-            clear_frame_video_state(uid)
-            return await safe_edit_or_send(
-                query,
-                f"{guard.get('message') or frame_video_maintenance_text()}\n\nJob: {job_id}\nStatus: {blocked_status}",
-                parse_mode=None,
-                reply_markup=frame_video_job_status_keyboard(job_id),
-            )
-        ffmpeg = frame_video_ffmpeg_path()
-        if not ffmpeg:
-            set_frame_video_last_error("ffmpeg_missing")
-            job_id = create_frame_video_job(uid, query.message.chat_id, state, 0, "failed")
-            update_frame_video_job(job_id, status="failed", detail="ffmpeg_missing")
-            clear_frame_video_state(uid)
-            return await safe_edit_or_send(
-                query,
-                f"{frame_video_maintenance_text()}\n\nJob: {job_id}\nStatus: failed",
-                parse_mode=None,
-                reply_markup=frame_video_job_status_keyboard(job_id),
-            )
-        credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
-        render_type = frame_video_render_type(state)
-        base_cost = frame_video_price_for_state(state)
-        preview_cost = int(base_cost or 0) if bool(state.get("img2vid_lock1")) else shopaikey_preview_final_cost(uid, int(base_cost or 0), f"frame_video_{render_type}")
-        if int(credits or 0) < preview_cost and not is_admin_user(uid):
-            return await edit_insufficient_credits(query, int(credits or 0), preview_cost, uid)
-        charge = spend_fixed_credit_info(uid, int(base_cost or 0), f"spend_frame_video_{render_type}", "Ghép ảnh thành video", apply_member_discount_flag=not bool(state.get("img2vid_lock1")))
-        if not charge.get("ok"):
-            credits_now, _, _ = get_user(uid)
-            return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or preview_cost), uid)
-        charged_amount = int(charge.get("final_cost") or 0)
-        job_id = create_frame_video_job(uid, query.message.chat_id, state, charged_amount, "queued")
-        state["step"] = "rendering"
-        state["charged_amount"] = charged_amount
-        state["frame_video_job_id"] = job_id
-        set_frame_video_state(uid, state)
-        update_frame_video_job(job_id, status="rendering", detail="ffmpeg render started")
-        price = frame_video_price_breakdown(state)
-        waiting = await safe_edit_or_send(
-            query,
-            product_progress_status_text(
-                "frame_video",
-                job_id,
-                "rendering_video",
-                65,
-                public_note=f"TOAN AAS đang ghép {int(price.get('image_count') or 0)} ảnh thành video. Anh/chị không cần gửi lại lệnh.",
-                lang=lang,
-            ),
-            parse_mode="HTML",
-            reply_markup=frame_video_job_status_keyboard(job_id),
-        )
-        progress_auto_refresh_register_message(waiting or query.message, context, product_type="frame_video", job_id=job_id, user_id=uid, lang=lang)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            out_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
-            ok, detail = await render_frame_video_from_state(context, state, out_path, tmpdir)
-            out_size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
-            if not ok or not os.path.exists(out_path) or out_size <= 0:
-                refunded = refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do render lỗi", charged_amount > 0)
-                set_frame_video_last_error(f"render_fail:{sanitize_log_text(str(detail))[:220]}")
-                update_frame_video_job(job_id, status="failed", detail=sanitize_log_text(str(detail))[:240], refund_required=charged_amount > 0, refund_applied=refunded)
-                clear_frame_video_state(uid)
-                save_tool_test_result("frame_video", "FAIL", f"render:{sanitize_log_text(str(detail))[:300]}", uid)
-                record_usage_event(
-                    uid,
-                    username=query.from_user.username or "",
-                    event_type="tool_fail",
-                    tool_name="frame_video",
-                    command="framevideo",
-                    status="render_fail",
-                    provider="ffmpeg",
-                    detail=sanitize_log_text(str(detail))[:300],
-                )
-                fail_text = (
-                    "⚠️ Ghép video lỗi do tài nguyên xử lý không đủ. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại với ít ảnh hơn hoặc chờ worker.\n\n"
-                    f"Job: {job_id}\n"
-                    "Status: failed"
-                )
-                if not refunded and charged_amount > 0:
-                    fail_text += "\nNếu số dư chưa cập nhật đúng, vui lòng liên hệ admin."
-                if waiting:
-                    try:
-                        return await waiting.edit_text(fail_text, reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🎞 Thử lại ghép video", callback_data="framevideo|start")],
-                            [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
-                        ]))
-                    except Exception:
-                        pass
-                return await safe_edit_or_send(query, fail_text, parse_mode=None)
-            caption = (
-                "✅ Đã ghép ảnh thành video.\n"
-                f"Job: {job_id}\n"
-                f"Đã trừ: {charged_amount} Xu.\n"
-                "Bạn có thể thêm nhạc hoặc giọng đọc ở bước sau nếu cần."
-            )
-            try:
-                with open(out_path, "rb") as f:
-                    await context.bot.send_video(
-                        chat_id=query.message.chat_id,
-                        video=f,
-                        caption=caption,
-                        reply_markup=frame_video_success_keyboard(),
-                    )
-                clear_frame_video_state(uid)
-                update_frame_video_job(job_id, status="success", detail="mp4 sent", output_mp4_path=out_path, output_mp4_exists=True, output_mp4_size=out_size, delivery_status="sent")
-                save_tool_test_result("frame_video", "PASS", f"rendered {len(state.get('photos') or [])} images; cost={charged_amount}", uid)
-                record_usage_event(
-                    uid,
-                    username=query.from_user.username or "",
-                    event_type="tool_success",
-                    tool_name="frame_video",
-                    command="framevideo",
-                    status="success",
-                    provider="ffmpeg",
-                    xu_delta=-charged_amount,
-                    detail=f"images={len(state.get('photos') or [])}; ratio={state.get('ratio')}; duration={state.get('duration')}; effect={state.get('effect')}",
-                )
-                if waiting:
-                    try:
-                        await waiting.edit_text(
-                            f"✅ Video đã tạo xong và được gửi bên dưới.\n\nJob: {job_id}\nStatus: success",
-                            reply_markup=frame_video_job_status_keyboard(job_id),
-                        )
-                    except Exception:
-                        pass
-                return
-            except Exception as e:
-                detail = sanitize_log_text(str(e))[:300]
-                set_frame_video_last_error(f"telegram_send:{detail}")
-                refund_charged_credit(uid, charged_amount, "frame_video_refund", "", "Hoàn Xu ghép ảnh thành video do Telegram gửi lỗi", charged_amount > 0)
-                update_frame_video_job(job_id, status="failed", detail=f"telegram_send:{detail}")
-                clear_frame_video_state(uid)
-                save_tool_test_result("frame_video", "FAIL_SEND", detail, uid)
-                return await safe_edit_or_send(query, "⚠️ Ghép video lỗi do tài nguyên xử lý không đủ. TOAN AAS đã hoàn Xu nếu có trừ. Vui lòng thử lại với ít ảnh hơn hoặc chờ worker.", parse_mode=None)
+        return await handle_frame_video_final_confirm(query, context, uid, state, lang)
 
     return await safe_edit_or_send(query, frame_video_collect_text(len(state.get("photos") or [])), reply_markup=frame_video_collect_keyboard(), parse_mode=None)
 
@@ -210366,6 +211521,29 @@ async def internal_worker_poll(request: Request):
         if c.rowcount < 1:
             return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
         job = get_local_worker_job(job["id"])
+        if str(job.get("job_type") or "") == frame_video_commercial.WORKER_JOB_TYPE:
+            try:
+                frame_payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+            except Exception:
+                frame_payload = {}
+            frame_job_id = str(frame_payload.get("frame_job_id") or "")
+            if frame_job_id:
+                update_frame_video_job(
+                    frame_job_id,
+                    status="rendering",
+                    owner="local_worker",
+                    progress_percent=45,
+                    lease_owner=worker_id,
+                    heartbeat_updated_at=now,
+                    started_at=now,
+                )
+                update_frame_video_job_config(
+                    frame_job_id,
+                    claim_attempted=True,
+                    claim_result="running",
+                    execution_owner="local_worker",
+                    ffmpeg_command_created=True,
+                )
         return {
             "ok": True,
             "enabled": True,

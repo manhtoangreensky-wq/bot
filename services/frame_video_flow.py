@@ -20,6 +20,14 @@ FRAME_VIDEO_ROUTE_MATRIX = {
     "sort": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
     "image_select": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
     "image_action": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
+    "image_receipt": {"owner": "handle_frame_video_canonical_callback", "screen": "image_receipt", "back": "images"},
+    "image_regenerate": {"owner": "handle_img2vid_lock1_callback", "screen": "image_regenerate_invoice", "back": "images"},
+    "image_regenerate_confirm": {
+        "owner": "handle_img2vid_lock1_callback",
+        "screen": "image_regenerate_delivery",
+        "back": "image_regenerate_invoice",
+        "side_effect": "explicit_image_regenerate_confirm_only",
+    },
     "image_duration": {"owner": "handle_frame_video_canonical_callback", "screen": "image_duration", "back": "images"},
     "duration_set": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "duration"},
     "duration_custom": {"owner": "handle_frame_video_canonical_callback", "screen": "duration_input", "back": "duration"},
@@ -42,6 +50,9 @@ FRAME_VIDEO_ROUTE_MATRIX = {
     "volume_custom": {"owner": "handle_frame_video_canonical_callback", "screen": "volume_input", "back": "music_or_addons"},
     "audio_fade": {"owner": "handle_frame_video_canonical_callback", "screen": "music_or_addons", "back": "music_or_addons"},
     "addons": {"owner": "handle_frame_video_canonical_callback", "screen": "addons", "back": "panel"},
+    "audio_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "audio", "back": "addons"},
+    "addons_done": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "addons"},
+    "addons_skip": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "addons"},
     "addon": {"owner": "handle_frame_video_canonical_callback", "screen": "addon_input", "back": "addons"},
     "position_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "position", "back": "addons"},
     "position_set": {"owner": "handle_frame_video_canonical_callback", "screen": "addons_or_text_editor", "back": "position"},
@@ -104,6 +115,7 @@ FRAME_VIDEO_LEGACY_ROUTE_MATRIX = {
 
 
 FRAME_VIDEO_DEFAULTS: dict[str, Any] = {
+    "commercial_flow_version": "framevideo2",
     "step": "collect",
     "source": "existing_images",
     "image_sources": "uploaded",
@@ -119,6 +131,23 @@ FRAME_VIDEO_DEFAULTS: dict[str, Any] = {
     "transition_seconds": 0.35,
     "motion": "none",
     "quality": "balanced",
+    "ai_image_count": 2,
+    "ai_image_tier": "",
+    "ai_image_model": "",
+    "image_generation_price": 0,
+    "image_generation_unit_price": 0,
+    "image_generation_charged_amount": 0,
+    "image_generation_paid": False,
+    "image_batch_status": "",
+    "image_batch_charge_recorded": False,
+    "generated_image_receipts": [],
+    "generated_image_job_ids": [],
+    "image_regeneration_status": "",
+    "image_regeneration_target_id": "",
+    "image_regeneration_request_id": "",
+    "image_regeneration_last_completed_id": "",
+    "image_regeneration_pending": {},
+    "image_regeneration_charge_count": 0,
     "music_enabled": False,
     "music_file_id": "",
     "music_volume_percent": 35,
@@ -196,6 +225,16 @@ def normalize_state(state: dict[str, Any] | None = None) -> dict[str, Any]:
         str(value)
         for value in list(clean.get("processed_media_message_ids") or [])[-100:]
         if str(value)
+    ]
+    clean["generated_image_receipts"] = [
+        dict(value)
+        for value in list(clean.get("generated_image_receipts") or [])[-frame_video_runtime.FRAME_VIDEO_MAX_IMAGES:]
+        if isinstance(value, dict)
+    ]
+    clean["generated_image_job_ids"] = [
+        int(value)
+        for value in list(clean.get("generated_image_job_ids") or [])[-frame_video_runtime.FRAME_VIDEO_MAX_IMAGES:]
+        if str(value).isdigit() and int(value) > 0
     ]
     clean["text_overlays"] = normalize_text_overlays(clean)
     text_ids = {row["text_id"] for row in clean["text_overlays"] if str(row.get("kind") or "") != "subtitle"}

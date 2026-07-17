@@ -77,6 +77,7 @@ EXECUTION_ROUTES = {
     },
     "frame_video": {
         "job_type": "frame_video_local",
+        "mapped_job_type": "frame_video_render",
         "execution_owner": "local_worker",
         "provider_family": "",
         "local_renderer": "ffmpeg",
