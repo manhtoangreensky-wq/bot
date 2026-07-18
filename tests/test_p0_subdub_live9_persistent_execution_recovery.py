@@ -161,6 +161,47 @@ def test_live9_valid_mp4_is_delivered_once_after_restart_and_receipt_once(monkey
     assert len(capture.message_sends) == 1
 
 
+def test_live9_video_artifact_message_id_blocks_recovery_resend(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    artifact = Path(tmp_path) / "already-delivered.mp4"
+    artifact.write_bytes(b"fixture-mp4-with-audio")
+    job = _make_job()
+    bot.subdub_persist_recovery_fields(
+        job,
+        "test delivered artifact id survives restart",
+        artifact_path=str(artifact),
+        final_mp4_path=str(artifact),
+        artifact_duration=30.0,
+        output_duration=30.0,
+        terminal_artifact_type="video",
+        final_mp4_delivered=True,
+        telegram_artifact_message_id="video-existing",
+        current_stage="delivering",
+        progress_stage="delivering",
+        progress_percent=95,
+        delivery_attempted=True,
+        status_registry_missing_after_restart=True,
+    )
+    bot.SUBTITLE_DUB_PIPELINE_JOBS.clear()
+    bot.ENGINE_ASYNC_MEMORY_JOBS.clear()
+    capture = CaptureBot()
+
+    result = asyncio.run(
+        bot.subdub_recover_persisted_job(
+            _persisted(job),
+            capture,
+            lang="vi",
+            source="status_refresh",
+        )
+    )
+
+    assert result["terminal_state"] == "delivered"
+    assert result["video_delivery_message_id"] == "video-existing"
+    assert len(capture.video_sends) == 0
+    assert len(capture.document_sends) == 0
+    assert len(capture.message_sends) <= 1
+
+
 def test_live9_missing_tts_checkpoint_terminalizes_with_exact_blocker(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     job = _make_job()

@@ -103,6 +103,23 @@ def test_live8_missing_or_long_translation_never_shifts_following_cues():
     assert translated[1]["translated_text"] == source[1]["source_text"]
 
 
+def test_live8_wide_unicode_translation_wraps_without_screen_overflow():
+    source = _source_cues()
+    long_japanese = "まずこの超絶な少女が一体どんな人物なのかちょっと見てみようそして最後まで確認しよう"
+    translated = canonical.apply_translations(
+        source[:1],
+        [{"cue_id": source[0]["cue_id"], "translated_text": long_japanese}],
+        target_language="ja",
+        max_chars=42,
+        max_lines=2,
+    )
+
+    lines = translated[0]["translated_text"].splitlines()
+    assert canonical.same_timeline(source[:1], translated)
+    assert len(lines) <= 2
+    assert all(len(line) <= 24 for line in lines)
+
+
 def test_live8_all_four_lanes_use_the_shared_canonical_core():
     modes = (
         bot.VIDEO_SUBTITLE_MODE_CREATE,
@@ -165,6 +182,8 @@ def test_live8_subtitle_style_is_current_plus_two_and_raised_eight_px_at_1080p()
     assert live8["render_size"] == baseline["render_size"] + 2
     assert live8["subtitle_alignment"] == "bottom_center"
     assert live8["subtitle_margin_v_after"] == baseline["subtitle_margin_v_after"] + 8
+    assert 6 <= live8["subtitle_margin_l_after"] <= 14
+    assert 6 <= live8["subtitle_margin_r_after"] <= 14
     assert live8["subtitle_max_lines"] == 2
     assert live8["background"] == "box"
     assert live8["boxed_background"] is True

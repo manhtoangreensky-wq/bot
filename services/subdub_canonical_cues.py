@@ -353,12 +353,32 @@ def group_ocr_observations(
     )
 
 
+def _contains_wide_script(text: str) -> bool:
+    return any(
+        ("\u3040" <= char <= "\u30ff")
+        or ("\u3400" <= char <= "\u9fff")
+        or ("\uac00" <= char <= "\ud7af")
+        for char in str(text or "")
+    )
+
+
+def _clamp_line(text: str, max_chars: int) -> str:
+    clean = str(text or "").strip()
+    if len(clean) <= max_chars:
+        return clean
+    if max_chars <= 3:
+        return clean[:max_chars]
+    return clean[: max_chars - 3].rstrip() + "..."
+
+
 def wrap_cue_text(text: str, *, max_chars: int = 42, max_lines: int = 2) -> str:
     clean = normalize_cue_text(text).replace("\n", " ")
     if not clean:
         return ""
     max_chars = max(8, int(max_chars or 42))
     max_lines = max(1, int(max_lines or 2))
+    if _contains_wide_script(clean):
+        max_chars = min(max_chars, 24)
     words = clean.split()
     if len(words) <= 1 and len(clean) > max_chars:
         lines = [clean[index:index + max_chars] for index in range(0, len(clean), max_chars)]
@@ -375,8 +395,9 @@ def wrap_cue_text(text: str, *, max_chars: int = 42, max_lines: int = 2) -> str:
         if current:
             lines.append(current)
     if len(lines) > max_lines:
-        lines = [*lines[:max_lines - 1], " ".join(lines[max_lines - 1:])]
-    return "\n".join(lines[:max_lines]).strip()
+        lines = [*lines[:max_lines - 1], _clamp_line(" ".join(lines[max_lines - 1:]), max_chars)]
+    lines = [_clamp_line(line, max_chars) for line in lines[:max_lines]]
+    return "\n".join(line for line in lines if line).strip()
 
 
 def apply_translations(
