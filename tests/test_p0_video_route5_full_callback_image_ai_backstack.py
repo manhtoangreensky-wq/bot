@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import video_scene3_flow
+from services import video_flow6, video_scene3_flow
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -190,6 +190,7 @@ def test_route5_delivered_quick_image_is_recorded_once_and_returns_to_image_asse
         return dict(saved)
 
     scope = _compile_functions(
+        "video_scene3_image_handoff_target_step",
         "video_scene3_record_generated_image",
         namespace={
             "video_profile_studio_state": current_state,
@@ -197,6 +198,8 @@ def test_route5_delivered_quick_image_is_recorded_once_and_returns_to_image_asse
             "video_profile_studio_step": step,
             "save_video_profile_studio_state": save,
             "safe_int": lambda value, default=0: int(value or default),
+            "video_flow7_kind": lambda _state: "ai_real",
+            "video_flow6": video_flow6,
         },
     )
     for _ in range(2):
@@ -224,8 +227,11 @@ def test_route5_contextual_success_and_failure_return_to_scene3_not_image_hub():
     success_keyboard = _function_source("public_image_success_keyboard")
     assert "return_callback=scene3_return_callback" in delivery
     assert "video_scene3_record_generated_image(" in delivery
-    assert "video_scene3_image_assets_keyboard(scene3_return_state)" in delivery
-    assert "video_scene3_image_source_keyboard(scene3_return_state or {})" in delivery
+    assert delivery.count("video_scene3_image_handoff_panel(") >= 3
+    panel = _function_source("video_scene3_image_handoff_panel")
+    assert "video_scene3_asset_gate_keyboard(state)" in panel
+    assert "video_scene3_image_source_keyboard(state)" in panel
+    assert "video_scene3_image_assets_keyboard(state)" in panel
     assert 'callback_data="vprofile|image_source|create"' in success_keyboard
     assert 'callback_data="menu|main_image"' not in success_keyboard
 

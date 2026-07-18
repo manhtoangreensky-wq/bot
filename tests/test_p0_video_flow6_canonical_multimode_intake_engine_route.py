@@ -310,7 +310,7 @@ def test_public_idea_development_and_long_video_guard_keep_two_column_rows() -> 
 
     guard = BOT_SOURCE[
         BOT_SOURCE.index('if value == "multi_scene_film":'):
-        BOT_SOURCE.index('if value in {"image_to_video"}:')
+        BOT_SOURCE.index('if value in {"image_to_video", "frame_video_local"}:')
     ]
     assert guard.count("InlineKeyboardButton(") == 2
     assert "menu|main_video" in guard
