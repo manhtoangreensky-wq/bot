@@ -252,3 +252,29 @@ def test_assets_done_has_one_owner_and_falls_back_to_one_fresh_duration_panel() 
         "async def handle_storyboard_callback",
     )
     assert callback.count('if action == "assets_done"') == 1
+
+
+def test_assets_done_duration_screen_renders_with_two_real_images() -> None:
+    namespace = {
+        "normalize_frame_video_state": flow.normalize_state,
+        "img2vid_slideshow_price_breakdown": _load_pricing_function(),
+        "xu_number": lambda value=0: f"{int(value or 0):,}".replace(",", "."),
+    }
+    numeric_helpers = _source_between("def _safe_int", "def video_v6_keyboard")
+    duration_renderer = _source_between(
+        "def frame_video_duration_menu_text",
+        "def frame_video_duration_menu_keyboard",
+    )
+    exec(compile(numeric_helpers + "\n" + duration_renderer, "bot.py", "exec"), namespace)
+
+    text = namespace["frame_video_duration_menu_text"](
+        {
+            "commercial_flow_version": "framevideo3",
+            "image_count": 2,
+            "photos": [{"file_id": "one"}, {"file_id": "two"}],
+        }
+    )
+
+    assert "Chọn thời lượng và xem giá" in text
+    assert "Số ảnh: <b>2</b>" in text
+    assert "Chưa chọn" in text
