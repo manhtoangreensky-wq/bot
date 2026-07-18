@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import html
 import math
+import re
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -150,3 +154,89 @@ def test_video_delivery_and_charge_order_remains_final_only() -> None:
     )
     assert "delivery_message_id" in confirm
     assert "receipt_recorded" in confirm
+
+
+def test_ai_image_prompts_lock_one_concrete_subject_across_the_batch() -> None:
+    namespace = {"IMG2VID_AI_IMAGE_MAX_COUNT": 20}
+    source = _source_between(
+        "def img2vid_continuity_anchor",
+        "def img2vid_state_debug_dict",
+    )
+    exec(compile("from __future__ import annotations\n" + source, "bot.py", "exec"), namespace)
+    prompts = namespace["img2vid_image_prompt_variants"](
+        "Ảnh sản phẩm quảng cáo studio",
+        2,
+    )
+
+    assert len(prompts) == 2
+    assert prompts[0] != prompts[1]
+    assert all("điện thoại thông minh màu đen nhám" in prompt for prompt in prompts)
+    assert all("HỢP ĐỒNG LIÊN TỤC BẮT BUỘC" in prompt for prompt in prompts)
+    assert all("không thay bằng sản phẩm khác" in prompt for prompt in prompts)
+    assert all("drone" not in prompt.casefold() for prompt in prompts)
+
+
+def test_assets_done_has_one_owner_and_falls_back_to_one_fresh_duration_panel() -> None:
+    saved = []
+    sent = []
+
+    class Logger:
+        def warning(self, *_args, **_kwargs):
+            return None
+
+        def error(self, *_args, **_kwargs):
+            return None
+
+    class Bot:
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+            return kwargs
+
+    async def failing_edit(*_args, **_kwargs):
+        raise RuntimeError("Telegram edit variant not recognized")
+
+    namespace = {
+        "normalize_frame_video_state": lambda state: dict(state),
+        "_safe_int": lambda value, default=0: int(value or default),
+        "ivf": SimpleNamespace(
+            frame_video_image_count_text=lambda *_args: "count",
+            frame_video_image_count_keyboard=lambda *_args: "count_keyboard",
+        ),
+        "frame_video_collect_keyboard": lambda *_args: "collect_keyboard",
+        "frame_video_duration_menu_text": lambda _state: "<b>Chọn thời lượng</b>",
+        "frame_video_duration_menu_keyboard": lambda *_args: "duration_keyboard",
+        "set_frame_video_state": lambda uid, state: saved.append((uid, dict(state))),
+        "safe_edit_or_send": failing_edit,
+        "logger": Logger(),
+        "sanitize_log_text": str,
+        "html": html,
+        "re": re,
+    }
+    source = _source_between(
+        "async def handle_frame_video_assets_done",
+        "async def handle_frame_video_canonical_callback",
+    )
+    exec(compile("from __future__ import annotations\n" + source, "bot.py", "exec"), namespace)
+    query = SimpleNamespace(message=SimpleNamespace(chat_id=123), bot=None)
+    context = SimpleNamespace(bot=Bot())
+    state = {
+        "commercial_flow_version": "framevideo3",
+        "image_count": 2,
+        "photos": [{"file_id": "one"}, {"file_id": "two"}],
+    }
+
+    result = asyncio.run(
+        namespace["handle_frame_video_assets_done"](query, context, 99, "vi", state)
+    )
+
+    assert saved[-1][1]["step"] == "duration"
+    assert len(sent) == 1
+    assert sent[0]["text"] == "<b>Chọn thời lượng</b>"
+    assert sent[0]["reply_markup"] == "duration_keyboard"
+    assert result == sent[0]
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["assets_done"]["owner"] == "handle_frame_video_assets_done"
+    callback = _source_between(
+        "async def handle_frame_video_callback",
+        "async def handle_storyboard_callback",
+    )
+    assert callback.count('if action == "assets_done"') == 1

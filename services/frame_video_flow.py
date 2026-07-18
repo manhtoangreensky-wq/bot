@@ -24,7 +24,7 @@ FRAME_VIDEO_ROUTE_MATRIX = {
         "screen": "images",
         "back": "collect",
     },
-    "assets_done": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "images"},
+    "assets_done": {"owner": "handle_frame_video_assets_done", "screen": "duration", "back": "images"},
     "panel": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "hub"},
     "upload": {"owner": "handle_frame_video_canonical_callback", "screen": "collect", "back": "ratio_first"},
     "images": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
