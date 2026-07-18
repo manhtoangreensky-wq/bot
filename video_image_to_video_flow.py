@@ -8,24 +8,18 @@ def _is_vi(lang: str = "vi") -> bool:
 def frame_video_unified_menu_text(lang: str = "vi") -> str:
     if not _is_vi(lang):
         return (
-            "🎞 <b>Image slideshow video</b>\n\n"
-            "How would you like to make a video from images?\n\n"
-            "1. You already have images:\n"
-            "Send multiple images and TOAN AAS will merge them into an MP4 with simple transitions. "
-            "This path uses TOAN AAS video processing and does not call AI video generation.\n\n"
-            "2. You do not have images yet:\n"
-            "TOAN AAS can help prepare AI images first, then use those images for the MP4 slideshow.\n\n"
-            "The bot only processes after the final confirmation and has not charged Xu on this screen."
+            "🖼️ <b>Image slideshow video</b>\n\n"
+            "Choose where the images will come from. This product uses an image count, not a scene count. "
+            "Each image becomes one ordered item on the final video timeline.\n\n"
+            "You can upload images, create AI images through a separate quoted confirmation, or reuse a saved image. "
+            "Video rendering has its own quote and final confirmation. No Xu has been charged on this screen."
         )
     return (
-        "🎞 <b>Ghép ảnh thành video</b>\n\n"
-        "Bạn muốn làm video từ ảnh theo cách nào?\n\n"
-        "1. Đã có ảnh sẵn:\n"
-        "Gửi nhiều ảnh để TOAN AAS ghép thành video MP4 bằng hiệu ứng chuyển cảnh đơn giản. "
-        "Luồng này dùng công cụ ghép video của TOAN AAS, không gọi AI video.\n\n"
-        "2. Chưa có ảnh:\n"
-        "TOAN AAS sẽ hỗ trợ tạo ảnh AI trước, sau đó dùng các ảnh đã tạo để ghép thành video MP4.\n\n"
-        "Bot chỉ xử lý thật sau bước xác nhận cuối và chưa trừ Xu ở bước này."
+        "🖼️ <b>Ghép ảnh thành video</b>\n\n"
+        "Chọn nguồn ảnh muốn dùng. Sản phẩm này tính theo <b>số ảnh</b>, không dùng số cảnh; "
+        "mỗi ảnh là một phần theo đúng thứ tự trên dòng thời gian video.\n\n"
+        "Anh/chị có thể gửi ảnh sẵn, tạo ảnh AI qua hóa đơn riêng hoặc dùng lại ảnh đã lưu. "
+        "Dựng MP4 có báo giá và xác nhận cuối riêng. Màn này chưa tạo file và chưa trừ Xu."
     )
 
 
@@ -34,12 +28,91 @@ def frame_video_unified_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     main_label = "🏠 Menu chính" if is_vi else "🏠 Main menu"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📤 Dùng ảnh có sẵn" if is_vi else "📤 Use existing images", callback_data="framevideo|start"),
-            InlineKeyboardButton("✨ Tạo ảnh AI nhanh rồi ghép" if is_vi else "✨ Quick AI images then stitch", callback_data="framevideo|ai_first"),
+            InlineKeyboardButton("📎 Gửi ảnh có sẵn" if is_vi else "📎 Upload images", callback_data="framevideo|source|uploaded"),
+            InlineKeyboardButton("✨ Tạo ảnh AI" if is_vi else "✨ Create AI images", callback_data="framevideo|source|ai"),
         ],
         [
-            InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
+            InlineKeyboardButton("🗂️ Dùng ảnh đã lưu" if is_vi else "🗂️ Use a saved image", callback_data="framevideo|source|saved"),
+            InlineKeyboardButton("ℹ️ Cách hoạt động" if is_vi else "ℹ️ How it works", callback_data="framevideo|how"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="menu|main_video"),
             InlineKeyboardButton(main_label, callback_data="framevideo|main"),
+        ],
+    ])
+
+
+def frame_video_how_text(lang: str = "vi") -> str:
+    if not _is_vi(lang):
+        return (
+            "ℹ️ <b>How image-to-video works</b>\n\n"
+            "Choose 2-20 images, set their order and duration, then configure ratio, transitions, motion and optional audio/text. "
+            "TOAN AAS renders one MP4 locally, validates it, delivers it to Telegram, records one receipt, and only then charges Xu."
+        )
+    return (
+        "ℹ️ <b>Cách ghép ảnh thành video</b>\n\n"
+        "Chọn 2–20 ảnh, sắp xếp đúng thứ tự, đặt thời lượng rồi chọn chuyển cảnh, chuyển động và phần bổ sung nếu cần. "
+        "TOAN AAS dựng một MP4, kiểm tra file, gửi qua Telegram, ghi đúng một biên nhận rồi mới trừ Xu.\n\n"
+        "Tạo ảnh AI và dựng video là hai hóa đơn riêng; không có bước nào mặc định miễn phí khi bảng giá đang bật."
+    )
+
+
+def frame_video_how_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Quay lại" if _is_vi(lang) else "⬅️ Back", callback_data="framevideo|hub"),
+        InlineKeyboardButton("🏠 Menu chính" if _is_vi(lang) else "🏠 Main menu", callback_data="framevideo|main"),
+    ]])
+
+
+def frame_video_image_count_text(selected: int = 0, lang: str = "vi") -> str:
+    selected_line = f"\n• Đang chọn: <b>{int(selected)} ảnh</b>" if selected else ""
+    if not _is_vi(lang):
+        return (
+            "🔢 <b>Choose image count</b>\n\n"
+            "Choose exactly 2-20 images. The upload or AI-image step will require this exact count before continuing."
+        )
+    return (
+        "🔢 <b>Chọn số ảnh</b>\n\n"
+        "Chọn chính xác 2–20 ảnh. Bước gửi hoặc tạo ảnh chỉ cho tiếp tục khi đã đủ đúng số lượng này. "
+        "Mỗi ảnh là một phần trên dòng thời gian, không phải một cảnh Video AI."
+        f"{selected_line}\n\nMàn này chưa tạo file và chưa trừ Xu."
+    )
+
+
+def frame_video_image_count_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = _is_vi(lang)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("2 ảnh", callback_data="framevideo|image_count|2"), InlineKeyboardButton("3 ảnh", callback_data="framevideo|image_count|3")],
+        [InlineKeyboardButton("4 ảnh", callback_data="framevideo|image_count|4"), InlineKeyboardButton("5 ảnh", callback_data="framevideo|image_count|5")],
+        [InlineKeyboardButton("8 ảnh", callback_data="framevideo|image_count|8"), InlineKeyboardButton("10 ảnh", callback_data="framevideo|image_count|10")],
+        [InlineKeyboardButton("20 ảnh", callback_data="framevideo|image_count|20"), InlineKeyboardButton("✍️ Nhập số khác" if is_vi else "✍️ Custom", callback_data="framevideo|image_count_custom")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="framevideo|hub"),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
+        ],
+    ])
+
+
+def frame_video_ratio_first_text(selected: str = "9x16", lang: str = "vi") -> str:
+    display = str(selected or "9x16").replace("x", ":")
+    if not _is_vi(lang):
+        return f"📐 <b>Choose video ratio</b>\n\nCurrent: <b>{display}</b>. This ratio is used for AI images and the final MP4."
+    return (
+        "📐 <b>Chọn tỉ lệ video</b>\n\n"
+        f"• Đang chọn: <b>{display}</b>\n\n"
+        "Tỉ lệ được chốt trước khi nhận ảnh để ảnh AI và MP4 cuối cùng cùng một khung hình. Ảnh tải lên không bị bóp méo."
+    )
+
+
+def frame_video_ratio_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = _is_vi(lang)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Dọc 9:16", callback_data="framevideo|ratio_first_set|9x16"), InlineKeyboardButton("Ngang 16:9", callback_data="framevideo|ratio_first_set|16x9")],
+        [InlineKeyboardButton("Vuông 1:1", callback_data="framevideo|ratio_first_set|1x1"), InlineKeyboardButton("Dọc 4:5", callback_data="framevideo|ratio_first_set|4x5")],
+        [InlineKeyboardButton("✍️ Tự nhập" if is_vi else "✍️ Custom ratio", callback_data="framevideo|ratio_first_custom"), InlineKeyboardButton("💡 Gợi ý phù hợp" if is_vi else "💡 Recommended", callback_data="framevideo|ratio_first_recommend")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="framevideo|image_count_menu"),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
         ],
     ])
 
@@ -67,7 +140,7 @@ def frame_video_ai_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("✍️ Tự nhập prompt" if is_vi else "✍️ Custom prompt", callback_data="framevideo|ai_prompt"),
         ],
         [
-            InlineKeyboardButton("⬅️ Ghép ảnh thành video" if is_vi else "⬅️ Image slideshow video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("⬅️ Chọn tỉ lệ" if is_vi else "⬅️ Choose ratio", callback_data="framevideo|ratio_first_menu"),
             InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
         ],
     ])
@@ -79,14 +152,14 @@ def frame_video_ai_suggestions_text(suggestions: list[str] | None = None, lang: 
         lines = [
             "💡 <b>Image set ideas</b>",
             "",
-            "Choose one idea. TOAN AAS will prepare a coherent image-set prompt before asking for the number of images.",
+            "The image count was selected at the start. Choose one idea and TOAN AAS will prepare a coherent image-set prompt.",
             "",
         ]
     else:
         lines = [
             "💡 <b>Gợi ý bộ ảnh để ghép video</b>",
             "",
-            "Chọn một ý tưởng. TOAN AAS sẽ soạn prompt bộ ảnh đồng nhất trước khi hỏi số ảnh cần tạo.",
+            "Số ảnh đã được chốt ở bước đầu. Chọn một ý tưởng để TOAN AAS soạn prompt bộ ảnh đồng nhất.",
             "",
         ]
     lines.extend(f"{index}. {item}" for index, item in enumerate(items, start=1))
@@ -124,13 +197,13 @@ def frame_video_ai_prompt_text(prompt: str = "", lang: str = "vi") -> str:
             "✨ <b>Image-set prompt</b>\n\n"
             f"{clean}\n\n"
             "TOAN AAS will vary composition and camera angle while preserving the same subject and visual style. "
-            "Review the prompt before choosing the image count."
+            "The image count was selected at the start. Review the prompt before choosing image quality."
         )
     return (
         "✨ <b>Prompt bộ ảnh</b>\n\n"
         f"{clean}\n\n"
         "TOAN AAS sẽ đổi bố cục và góc nhìn giữa các ảnh nhưng giữ cùng chủ thể, màu sắc và phong cách. "
-        "Anh/chị hãy kiểm tra prompt trước khi chọn số ảnh."
+        "Số ảnh đã được chọn ở đầu flow. Anh/chị hãy kiểm tra prompt trước khi chọn chất lượng ảnh."
     )
 
 

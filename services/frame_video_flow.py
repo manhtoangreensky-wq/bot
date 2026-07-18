@@ -7,19 +7,31 @@ from services import frame_video_runtime
 
 
 FRAME_VIDEO_ROUTE_MATRIX = {
-    "start": {"owner": "handle_frame_video_callback", "screen": "collect", "back": "hub"},
-    "done": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "collect"},
+    "start": {"owner": "handle_frame_video_callback", "screen": "image_count", "back": "hub"},
+    "source": {"owner": "handle_frame_video_callback", "screen": "image_count", "back": "hub"},
+    "ai_first": {"owner": "handle_frame_video_callback", "screen": "source_next", "back": "ratio_first"},
+    "how": {"owner": "handle_frame_video_callback", "screen": "how", "back": "hub"},
+    "image_count": {"owner": "handle_frame_video_callback", "screen": "ratio_first", "back": "image_count_menu"},
+    "image_count_menu": {"owner": "handle_frame_video_callback", "screen": "image_count", "back": "hub"},
+    "image_count_custom": {"owner": "handle_frame_video_callback", "screen": "image_count_input", "back": "image_count_menu"},
+    "ratio_first_menu": {"owner": "handle_frame_video_callback", "screen": "ratio_first", "back": "image_count_menu"},
+    "ratio_first_set": {"owner": "handle_frame_video_callback", "screen": "source_next", "back": "image_count_menu"},
+    "ratio_first_recommend": {"owner": "handle_frame_video_callback", "screen": "source_next", "back": "image_count_menu"},
+    "ratio_first_custom": {"owner": "handle_frame_video_callback", "screen": "ratio_first_input", "back": "ratio_first"},
+    "done": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
     "ai_stitch_generated": {
         "owner": "handle_frame_video_canonical_callback",
-        "screen": "panel",
-        "back": "hub",
+        "screen": "images",
+        "back": "collect",
     },
+    "assets_done": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "images"},
     "panel": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "hub"},
-    "upload": {"owner": "handle_frame_video_canonical_callback", "screen": "collect", "back": "panel"},
-    "images": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
-    "sort": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
-    "image_select": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
-    "image_action": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "panel"},
+    "upload": {"owner": "handle_frame_video_canonical_callback", "screen": "collect", "back": "ratio_first"},
+    "images": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
+    "sort": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
+    "image_select": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
+    "image_action": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
+    "image_caption": {"owner": "handle_frame_video_canonical_callback", "screen": "image_caption_input", "back": "images"},
     "image_receipt": {"owner": "handle_frame_video_canonical_callback", "screen": "image_receipt", "back": "images"},
     "image_regenerate": {"owner": "handle_img2vid_lock1_callback", "screen": "image_regenerate_invoice", "back": "images"},
     "image_regenerate_confirm": {
@@ -28,20 +40,42 @@ FRAME_VIDEO_ROUTE_MATRIX = {
         "back": "image_regenerate_invoice",
         "side_effect": "explicit_image_regenerate_confirm_only",
     },
+    "ai_prompt": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prompt_input", "back": "ai_prepared"},
+    "ai_suggest": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_suggestions", "back": "ai_first"},
+    "ai_refresh": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_suggestions", "back": "ai_first"},
+    "ai_pick": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prepared", "back": "ai_suggestions"},
+    "ai_prepared": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prepared", "back": "ai_first"},
+    "ai_prompt_set": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prompt_set", "back": "ai_prepared"},
+    "ai_prompt_image": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prompt_image", "back": "ai_prompt_set"},
+    "ai_prompt_image_edit": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prompt_image_input", "back": "ai_prompt_image"},
+    "ai_prompt_image_restore": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prompt_image", "back": "ai_prompt_set"},
+    "ai_prompt_regenerate": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_prepared", "back": "ai_prepared"},
+    "ai_count_menu": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_count", "back": "ai_prepared"},
+    "ai_count": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_first", "back": "ai_count"},
+    "ai_count_custom": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_count_input", "back": "ai_count"},
+    "ai_tier_menu": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_tier", "back": "ai_prepared"},
+    "ai_tier": {"owner": "handle_img2vid_lock1_callback", "screen": "ai_invoice", "back": "ai_tier"},
+    "ai_generate_confirm": {
+        "owner": "handle_img2vid_lock1_callback",
+        "screen": "ai_image_delivery",
+        "back": "ai_invoice",
+        "side_effect": "explicit_image_confirm_only",
+    },
     "image_duration": {"owner": "handle_frame_video_canonical_callback", "screen": "image_duration", "back": "images"},
     "duration_set": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "duration"},
     "duration_custom": {"owner": "handle_frame_video_canonical_callback", "screen": "duration_input", "back": "duration"},
-    "duration_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "panel"},
+    "duration_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "images"},
+    "duration_done": {"owner": "handle_frame_video_canonical_callback", "screen": "transition", "back": "duration"},
     "ratio_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "ratio", "back": "panel"},
     "ratio_set": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "ratio"},
     "ratio_custom": {"owner": "handle_frame_video_canonical_callback", "screen": "ratio_input", "back": "ratio"},
     "fit_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "fit", "back": "ratio"},
     "fit_set": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "fit"},
-    "transition_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "transition", "back": "panel"},
-    "transition_set": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "transition"},
+    "transition_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "transition", "back": "duration"},
+    "transition_set": {"owner": "handle_frame_video_canonical_callback", "screen": "motion", "back": "transition"},
     "transition_time": {"owner": "handle_frame_video_canonical_callback", "screen": "transition_input", "back": "transition"},
-    "motion_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "motion", "back": "panel"},
-    "motion_set": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "motion"},
+    "motion_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "motion", "back": "transition"},
+    "motion_set": {"owner": "handle_frame_video_canonical_callback", "screen": "addons", "back": "motion"},
     "music_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "music", "back": "panel"},
     "music_upload": {"owner": "handle_frame_video_canonical_callback", "screen": "music_input", "back": "music"},
     "music_off": {"owner": "handle_frame_video_canonical_callback", "screen": "music", "back": "music"},
@@ -49,10 +83,10 @@ FRAME_VIDEO_ROUTE_MATRIX = {
     "volume": {"owner": "handle_frame_video_canonical_callback", "screen": "music_or_addons", "back": "volume"},
     "volume_custom": {"owner": "handle_frame_video_canonical_callback", "screen": "volume_input", "back": "music_or_addons"},
     "audio_fade": {"owner": "handle_frame_video_canonical_callback", "screen": "music_or_addons", "back": "music_or_addons"},
-    "addons": {"owner": "handle_frame_video_canonical_callback", "screen": "addons", "back": "panel"},
+    "addons": {"owner": "handle_frame_video_canonical_callback", "screen": "addons", "back": "motion"},
     "audio_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "audio", "back": "addons"},
-    "addons_done": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "addons"},
-    "addons_skip": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "addons"},
+    "addons_done": {"owner": "handle_frame_video_canonical_callback", "screen": "review", "back": "addons"},
+    "addons_skip": {"owner": "handle_frame_video_canonical_callback", "screen": "review", "back": "addons"},
     "addon": {"owner": "handle_frame_video_canonical_callback", "screen": "addon_input", "back": "addons"},
     "position_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "position", "back": "addons"},
     "position_set": {"owner": "handle_frame_video_canonical_callback", "screen": "addons_or_text_editor", "back": "position"},
@@ -68,20 +102,21 @@ FRAME_VIDEO_ROUTE_MATRIX = {
     "text_animation_set": {"owner": "handle_frame_video_canonical_callback", "screen": "text_editor", "back": "text_animation"},
     "text_style_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "text_style", "back": "text_editor"},
     "text_style_set": {"owner": "handle_frame_video_canonical_callback", "screen": "text_editor", "back": "text_style"},
-    "quality_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "quality", "back": "panel"},
-    "quality_set": {"owner": "handle_frame_video_canonical_callback", "screen": "panel", "back": "quality"},
+    "quality_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "quality", "back": "review"},
+    "quality_set": {"owner": "handle_frame_video_canonical_callback", "screen": "quality", "back": "quality"},
     "quality_info": {"owner": "handle_frame_video_canonical_callback", "screen": "quality", "back": "quality"},
-    "review": {"owner": "handle_frame_video_canonical_callback", "screen": "review", "back": "panel"},
-    "continue": {"owner": "handle_frame_video_canonical_callback", "screen": "invoice", "back": "review"},
-    "status": {"owner": "handle_frame_video_callback", "screen": "status", "back": "hub"},
+    "review": {"owner": "handle_frame_video_canonical_callback", "screen": "review", "back": "addons"},
+    "continue": {"owner": "handle_frame_video_canonical_callback", "screen": "invoice", "back": "quality"},
+    "status": {"owner": "handle_frame_video_callback", "screen": "status", "back": "invoice_or_review"},
+    "status_back": {"owner": "handle_frame_video_callback", "screen": "invoice_or_review", "back": "status"},
     "confirm": {
         "owner": "handle_frame_video_final_confirm",
         "screen": "rendering",
         "back": "invoice",
         "side_effect": "explicit_final_confirm_only",
     },
-    "media_image": {"owner": "handle_frame_video_pending_media", "screen": "collect_or_images", "back": "panel"},
-    "media_audio": {"owner": "handle_frame_video_pending_media", "screen": "music_or_addons", "back": "panel"},
+    "media_image": {"owner": "handle_frame_video_pending_media", "screen": "collect_or_images", "back": "collect"},
+    "media_audio": {"owner": "handle_frame_video_pending_media", "screen": "music_or_addons", "back": "addons"},
 }
 
 FRAME_VIDEO_LEGACY_ROUTE_MATRIX = {
@@ -117,6 +152,7 @@ FRAME_VIDEO_LEGACY_ROUTE_MATRIX = {
 FRAME_VIDEO_DEFAULTS: dict[str, Any] = {
     "commercial_flow_version": "framevideo2",
     "step": "collect",
+    "image_count": 0,
     "source": "existing_images",
     "image_sources": "uploaded",
     "mode": "existing_images",
@@ -132,6 +168,8 @@ FRAME_VIDEO_DEFAULTS: dict[str, Any] = {
     "motion": "none",
     "quality": "balanced",
     "ai_image_count": 2,
+    "ai_image_prompts": [],
+    "selected_ai_prompt_index": 1,
     "ai_image_tier": "",
     "ai_image_model": "",
     "image_generation_price": 0,
@@ -185,6 +223,13 @@ def _safe_float(value: Any, fallback: float) -> float:
         return float(fallback)
 
 
+def _safe_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+
+
 def normalize_text_overlays(state: dict[str, Any]) -> list[dict[str, Any]]:
     total = max(0.1, frame_video_runtime.expected_duration_seconds(state))
     normalized: list[dict[str, Any]] = []
@@ -217,6 +262,17 @@ def normalize_text_overlays(state: dict[str, Any]) -> list[dict[str, Any]]:
 def normalize_state(state: dict[str, Any] | None = None) -> dict[str, Any]:
     clean = dict(FRAME_VIDEO_DEFAULTS)
     clean.update(dict(state or {}))
+    requested_count = _safe_int(clean.get("image_count"), 0)
+    clean["image_count"] = (
+        max(frame_video_runtime.FRAME_VIDEO_MIN_IMAGES, min(frame_video_runtime.FRAME_VIDEO_MAX_IMAGES, requested_count))
+        if requested_count >= frame_video_runtime.FRAME_VIDEO_MIN_IMAGES
+        else 0
+    )
+    requested_ai_count = _safe_int(clean.get("ai_image_count"), frame_video_runtime.FRAME_VIDEO_MIN_IMAGES)
+    clean["ai_image_count"] = max(
+        frame_video_runtime.FRAME_VIDEO_MIN_IMAGES,
+        min(frame_video_runtime.FRAME_VIDEO_MAX_IMAGES, requested_ai_count),
+    )
     clean["photos"] = frame_video_runtime.canonical_image_manifest(clean.get("photos") or [])
     valid_ids = {row["image_id"] for row in clean["photos"]}
     if clean.get("selected_image_id") not in valid_ids:
@@ -236,6 +292,23 @@ def normalize_state(state: dict[str, Any] | None = None) -> dict[str, Any]:
         for value in list(clean.get("generated_image_job_ids") or [])[-frame_video_runtime.FRAME_VIDEO_MAX_IMAGES:]
         if str(value).isdigit() and int(value) > 0
     ]
+    normalized_prompts: list[dict[str, Any]] = []
+    for ordinal, raw in enumerate(list(clean.get("ai_image_prompts") or [])[:frame_video_runtime.FRAME_VIDEO_MAX_IMAGES], start=1):
+        item = dict(raw) if isinstance(raw, dict) else {"prompt": str(raw or "")}
+        prompt = " ".join(str(item.get("prompt") or "").split())[:2000]
+        if not prompt:
+            continue
+        normalized_prompts.append(
+            {
+                "index": ordinal,
+                "prompt": prompt,
+                "previous_prompt": " ".join(str(item.get("previous_prompt") or "").split())[:2000],
+            }
+        )
+    clean["ai_image_prompts"] = normalized_prompts
+    prompt_count = len(normalized_prompts)
+    selected_prompt_index = _safe_int(clean.get("selected_ai_prompt_index"), 1)
+    clean["selected_ai_prompt_index"] = max(1, min(selected_prompt_index, prompt_count or 1))
     clean["text_overlays"] = normalize_text_overlays(clean)
     text_ids = {row["text_id"] for row in clean["text_overlays"] if str(row.get("kind") or "") != "subtitle"}
     if clean.get("selected_text_id") not in text_ids:
@@ -336,6 +409,109 @@ def selected_image(state: dict[str, Any]) -> dict[str, Any]:
     clean = normalize_state(state)
     selected = str(clean.get("selected_image_id") or "")
     return next((row for row in clean["photos"] if row["image_id"] == selected), {})
+
+
+def update_selected_image(state: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    clean = normalize_state(state)
+    selected = str(clean.get("selected_image_id") or "")
+    if not selected:
+        raise ValueError("image_not_selected")
+    found = False
+    updated: list[dict[str, Any]] = []
+    for row in clean["photos"]:
+        item = dict(row)
+        if item["image_id"] == selected:
+            found = True
+            for key, value in changes.items():
+                if key == "caption":
+                    item[key] = " ".join(str(value or "").split())[:1000]
+        updated.append(item)
+    if not found:
+        raise ValueError("image_not_found")
+    clean["photos"] = frame_video_runtime.canonical_image_manifest(updated)
+    return normalize_state(clean)
+
+
+def set_ai_image_prompts(state: dict[str, Any], prompts: list[str]) -> dict[str, Any]:
+    clean = normalize_state(state)
+    expected = _safe_int(clean.get("image_count") or clean.get("ai_image_count"), 0)
+    expected = max(
+        frame_video_runtime.FRAME_VIDEO_MIN_IMAGES,
+        min(frame_video_runtime.FRAME_VIDEO_MAX_IMAGES, expected),
+    )
+    values = [" ".join(str(value or "").split())[:2000] for value in list(prompts or [])]
+    if len(values) != expected or any(not value for value in values):
+        raise ValueError("ai_image_prompt_count_mismatch")
+    clean["ai_image_prompts"] = [
+        {"index": index, "prompt": value, "previous_prompt": ""}
+        for index, value in enumerate(values, start=1)
+    ]
+    clean["selected_ai_prompt_index"] = 1
+    return normalize_state(clean)
+
+
+def ai_image_prompt_values(state: dict[str, Any]) -> list[str]:
+    clean = normalize_state(state)
+    expected = _safe_int(clean.get("image_count") or clean.get("ai_image_count"), 0)
+    values = [str(row.get("prompt") or "") for row in clean.get("ai_image_prompts") or []]
+    return (
+        values
+        if expected >= frame_video_runtime.FRAME_VIDEO_MIN_IMAGES and len(values) == expected and all(values)
+        else []
+    )
+
+
+def selected_ai_image_prompt(state: dict[str, Any]) -> dict[str, Any]:
+    clean = normalize_state(state)
+    selected_index = _safe_int(clean.get("selected_ai_prompt_index"), 1)
+    return next(
+        (dict(row) for row in clean.get("ai_image_prompts") or [] if _safe_int(row.get("index"), 0) == selected_index),
+        {},
+    )
+
+
+def update_ai_image_prompt(state: dict[str, Any], index: int, prompt: str) -> dict[str, Any]:
+    clean = normalize_state(state)
+    target = _safe_int(index, 0)
+    value = " ".join(str(prompt or "").split())[:2000]
+    if target <= 0 or not value:
+        raise ValueError("ai_image_prompt_invalid")
+    found = False
+    rows: list[dict[str, Any]] = []
+    for raw in clean.get("ai_image_prompts") or []:
+        row = dict(raw)
+        if _safe_int(row.get("index"), 0) == target:
+            found = True
+            previous = str(row.get("prompt") or "")
+            row.update({"prompt": value, "previous_prompt": previous})
+        rows.append(row)
+    if not found:
+        raise ValueError("ai_image_prompt_not_found")
+    clean["ai_image_prompts"] = rows
+    clean["selected_ai_prompt_index"] = target
+    return normalize_state(clean)
+
+
+def restore_ai_image_prompt(state: dict[str, Any], index: int) -> dict[str, Any]:
+    clean = normalize_state(state)
+    target = _safe_int(index, 0)
+    found = False
+    rows: list[dict[str, Any]] = []
+    for raw in clean.get("ai_image_prompts") or []:
+        row = dict(raw)
+        if _safe_int(row.get("index"), 0) == target:
+            previous = str(row.get("previous_prompt") or "").strip()
+            if not previous:
+                raise ValueError("ai_image_prompt_restore_unavailable")
+            found = True
+            current = str(row.get("prompt") or "")
+            row.update({"prompt": previous, "previous_prompt": current})
+        rows.append(row)
+    if not found:
+        raise ValueError("ai_image_prompt_not_found")
+    clean["ai_image_prompts"] = rows
+    clean["selected_ai_prompt_index"] = target
+    return normalize_state(clean)
 
 
 def mark_media_message_processed(state: dict[str, Any], message_id: Any) -> tuple[dict[str, Any], bool]:

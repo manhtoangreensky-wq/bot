@@ -320,13 +320,27 @@ def validate_plan(state: dict[str, Any]) -> dict[str, Any]:
     manifest = canonical_image_manifest(state.get("photos") or [])
     config = canonical_config({**state, "photos": manifest})
     errors: list[str] = []
+    expected_image_count = max(0, _safe_int(state.get("image_count"), 0))
     if len(manifest) < FRAME_VIDEO_MIN_IMAGES:
         errors.append("not_enough_images")
     if len(manifest) > FRAME_VIDEO_MAX_IMAGES:
         errors.append("too_many_images")
+    if (
+        str(state.get("commercial_flow_version") or "") == "framevideo3"
+        and expected_image_count >= FRAME_VIDEO_MIN_IMAGES
+        and len(manifest) != expected_image_count
+    ):
+        errors.append("image_count_mismatch")
     if config["duration_seconds"] <= 0:
         errors.append("invalid_duration")
-    return {"ok": not errors, "errors": errors, "manifest": manifest, "config": config}
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "manifest": manifest,
+        "config": config,
+        "expected_image_count": expected_image_count,
+        "received_image_count": len(manifest),
+    }
 
 
 def _escape_drawtext(value: str) -> str:
