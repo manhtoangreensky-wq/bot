@@ -164247,10 +164247,21 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML",
             reply_markup=ivf.frame_video_ratio_first_keyboard(lang),
         )
-    if action in {"ratio_first_set", "ratio_first_recommend"}:
+    if action == "ratio_first_recommend":
         if not state:
             return await safe_edit_or_send(query, "⏰ Phiên ghép ảnh đã hết hạn. Hãy mở lại sản phẩm.", parse_mode=None)
-        ratio = "9x16" if action == "ratio_first_recommend" else (parts[2] if len(parts) > 2 else "")
+        state = normalize_frame_video_state(state)
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_ratio_first_text(str(state.get("ratio") or "9x16"), lang)
+            + "\n\nℹ️ Nút gợi ý cũ đã được bỏ. Hãy chọn đúng tỉ lệ cần dùng; hệ thống không tự đổi lựa chọn.",
+            parse_mode="HTML",
+            reply_markup=ivf.frame_video_ratio_first_keyboard(lang),
+        )
+    if action == "ratio_first_set":
+        if not state:
+            return await safe_edit_or_send(query, "⏰ Phiên ghép ảnh đã hết hạn. Hãy mở lại sản phẩm.", parse_mode=None)
+        ratio = parts[2] if len(parts) > 2 else ""
         if ratio not in {"9x16", "16x9", "1x1", "4x5"}:
             return await safe_edit_or_send(query, "⚠️ Tỉ lệ chưa hợp lệ. Hãy chọn lại.", parse_mode=None, reply_markup=ivf.frame_video_ratio_first_keyboard(lang))
         state = normalize_frame_video_state(state)

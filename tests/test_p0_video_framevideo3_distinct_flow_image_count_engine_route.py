@@ -97,7 +97,7 @@ def test_count_ratio_and_ai_suggestion_keyboards_match_framevideo3_contract() ->
     assert "Vuông 1:1" in FLOW_UI_SOURCE
     assert "Dọc 4:5" in FLOW_UI_SOURCE
     assert "✍️ Tự nhập" in FLOW_UI_SOURCE
-    assert "💡 Gợi ý phù hợp" in FLOW_UI_SOURCE
+    assert "💡 Gợi ý phù hợp" not in FLOW_UI_SOURCE
     assert "for index in range(1, 6)" in FLOW_UI_SOURCE
     suggestion_bank = BOT_SOURCE[
         BOT_SOURCE.index("def quick_image_suggestion_bank") : BOT_SOURCE.index("def quick_image_prompt_from_topic")
