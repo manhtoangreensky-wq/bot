@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -9,6 +10,113 @@ from typing import Any, Iterable, TypedDict
 
 CANONICAL_CUE_VERSION = 1
 RENDER_DURATION_TOLERANCE_SECONDS = 0.35
+SUBDUB_PIPELINE_VERSION = "live12-v1"
+
+_LANGUAGE_CODE_ALIASES = {
+    "vi": "vi",
+    "vie": "vi",
+    "vietnamese": "vi",
+    "tieng viet": "vi",
+    "tiếng việt": "vi",
+    "en": "en",
+    "eng": "en",
+    "english": "en",
+    "tieng anh": "en",
+    "tiếng anh": "en",
+    "ja": "ja",
+    "jpn": "ja",
+    "japanese": "ja",
+    "tieng nhat": "ja",
+    "tiếng nhật": "ja",
+    "日本語": "ja",
+    "zh": "zh",
+    "zho": "zh",
+    "chi": "zh",
+    "chinese": "zh",
+    "tieng trung": "zh",
+    "tiếng trung": "zh",
+    "中文": "zh",
+    "ko": "ko",
+    "kor": "ko",
+    "korean": "ko",
+    "tieng han": "ko",
+    "tiếng hàn": "ko",
+    "한국어": "ko",
+    "th": "th",
+    "tha": "th",
+    "thai": "th",
+    "tieng thai": "th",
+    "tiếng thái": "th",
+    "ไทย": "th",
+    "ar": "ar",
+    "ara": "ar",
+    "arabic": "ar",
+    "tieng a rap": "ar",
+    "tiếng ả rập": "ar",
+    "العربية": "ar",
+    "hi": "hi",
+    "hin": "hi",
+    "hindi": "hi",
+    "tieng hindi": "hi",
+    "tiếng hindi": "hi",
+    "हिन्दी": "hi",
+    "ru": "ru",
+    "rus": "ru",
+    "russian": "ru",
+    "tieng nga": "ru",
+    "tiếng nga": "ru",
+    "русский": "ru",
+}
+
+_LANGUAGE_EXPECTED_SCRIPTS = {
+    "vi": {"latin"},
+    "en": {"latin"},
+    "zh": {"cjk"},
+    "ja": {"japanese", "cjk"},
+    "ko": {"korean"},
+    "th": {"thai"},
+    "ar": {"arabic"},
+    "hi": {"devanagari"},
+    "ru": {"cyrillic"},
+}
+
+
+def normalize_language_code(value: Any) -> str:
+    raw = unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+    raw = re.sub(r"\s+", " ", raw)
+    if raw in _LANGUAGE_CODE_ALIASES:
+        return _LANGUAGE_CODE_ALIASES[raw]
+    token = raw.replace("_", "-").split("-", 1)[0]
+    return _LANGUAGE_CODE_ALIASES.get(token, token)
+
+
+def canonical_input_identity(
+    *,
+    input_content_hash: str,
+    mode: str,
+    source_language: str = "auto",
+    target_language: str = "",
+    voice_id: str = "",
+    voice_speed: Any = "1.0",
+    original_audio_mode: str = "",
+    original_audio_volume_percent: Any = 0,
+    dubbed_voice_volume_percent: Any = 100,
+    subdub_pipeline_version: str = SUBDUB_PIPELINE_VERSION,
+) -> str:
+    payload = {
+        "input_content_hash": str(input_content_hash or "").strip(),
+        "mode": str(mode or "").strip().lower(),
+        "source_language": normalize_language_code(source_language) or "auto",
+        "target_language": normalize_language_code(target_language),
+        "voice_id": str(voice_id or "").strip(),
+        "voice_speed": str(voice_speed or "1.0").strip(),
+        "original_audio_mode": str(original_audio_mode or "").strip().lower(),
+        "original_audio_volume_percent": str(original_audio_volume_percent or 0),
+        "dubbed_voice_volume_percent": str(dubbed_voice_volume_percent or 100),
+        "subdub_pipeline_version": str(subdub_pipeline_version or SUBDUB_PIPELINE_VERSION),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 class CanonicalCue(TypedDict, total=False):
@@ -198,18 +306,7 @@ def evaluate_ocr_quality(
     confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
     letter_ratio = len(letters) / max(1, len(visible))
     digit_ratio = len(digits) / max(1, len(visible))
-    language = str(source_language or "auto").strip().lower().replace("_", "-").split("-", 1)[0]
-    expected_scripts = {
-        "vi": {"latin"},
-        "en": {"latin"},
-        "zh": {"cjk"},
-        "ja": {"japanese", "cjk"},
-        "ko": {"korean"},
-        "th": {"thai"},
-        "ar": {"arabic"},
-        "hi": {"devanagari"},
-        "ru": {"cyrillic"},
-    }
+    language = normalize_language_code(source_language)
     reason = ""
     if len(letters) < 2 or letter_ratio < 0.45:
         reason = "ocr_low_letter_ratio"
@@ -217,7 +314,7 @@ def evaluate_ocr_quality(
         reason = "ocr_numeric_noise"
     elif confidence_values and confidence < 0.28:
         reason = "ocr_low_confidence"
-    elif language in expected_scripts and detected_script not in expected_scripts[language]:
+    elif language in _LANGUAGE_EXPECTED_SCRIPTS and detected_script not in _LANGUAGE_EXPECTED_SCRIPTS[language]:
         reason = "ocr_wrong_script_for_source_language"
     elif language == "auto" and language_spec and set(language_spec.split("+")) <= {"eng", "osd"}:
         reason = "ocr_auto_language_pack_incomplete"
@@ -400,6 +497,53 @@ def wrap_cue_text(text: str, *, max_chars: int = 42, max_lines: int = 2) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+def validate_translation_text(text: Any, *, target_language: str) -> dict:
+    raw = unicodedata.normalize("NFC", str(text or ""))
+    language = normalize_language_code(target_language)
+    detected_script = detect_text_script(raw)
+    reason = ""
+    if "\ufffd" in raw:
+        reason = "translation_replacement_character"
+    elif any(unicodedata.category(char) == "Cc" and char not in "\n\r\t" for char in raw):
+        reason = "translation_control_character"
+
+    normalized = normalize_cue_text(raw)
+    visible = [char for char in normalized if not char.isspace()]
+    letters = [char for char in visible if char.isalpha()]
+    digits = [char for char in visible if char.isdigit()]
+    if not reason and not normalized:
+        reason = "translation_empty"
+    elif not reason and digits and (
+        len(digits) / max(1, len(visible)) > 0.45
+        or (len(letters) < 2 and len(digits) >= 4)
+    ):
+        reason = "translation_numeric_garbage"
+    elif (
+        not reason
+        and language in _LANGUAGE_EXPECTED_SCRIPTS
+        and detected_script not in _LANGUAGE_EXPECTED_SCRIPTS[language]
+    ):
+        reason = "translation_wrong_script_for_target_language"
+    elif not reason and detected_script == "latin":
+        tokens = re.findall(r"[A-Za-z\u00c0-\u024f]+", normalized)
+        short_tokens = sum(1 for token in tokens if len(token) <= 2)
+        uppercase_tokens = sum(1 for token in tokens if len(token) >= 2 and token.isupper())
+        lowercase_tokens = sum(1 for token in tokens if any(char.islower() for char in token))
+        if (
+            len(tokens) >= 6
+            and short_tokens / len(tokens) > 0.55
+            and uppercase_tokens >= 3
+            and lowercase_tokens >= 2
+        ):
+            reason = "translation_fragmented_garbage"
+    return {
+        "accepted": not bool(reason),
+        "reason": reason or "accepted",
+        "detected_script": detected_script,
+        "target_language_code": language,
+    }
+
+
 def apply_translations(
     source_cues: Iterable[dict],
     translations: Iterable[dict],
@@ -407,6 +551,7 @@ def apply_translations(
     target_language: str,
     max_chars: int = 42,
     max_lines: int = 2,
+    reject_invalid: bool = False,
 ) -> list[dict]:
     source = canonicalize_segments(
         source_cues,
@@ -426,9 +571,14 @@ def apply_translations(
     output: list[dict] = []
     for cue in source:
         translated = by_cue_id.get(str(cue["cue_id"])) or by_index.get(int(cue["source_index"]))
-        translated_text = normalize_cue_text(
-            (translated or {}).get("translated_text") or (translated or {}).get("text")
-        )
+        raw_translated_text = (translated or {}).get("translated_text") or (translated or {}).get("text")
+        if reject_invalid:
+            validation = validate_translation_text(raw_translated_text, target_language=target_language)
+            if not validation["accepted"]:
+                raise ValueError(
+                    f"translation_text_invalid:{cue['cue_id']}:{validation['reason']}"
+                )
+        translated_text = normalize_cue_text(raw_translated_text)
         missing = not bool(translated_text)
         if missing:
             translated_text = str(cue["source_text"])

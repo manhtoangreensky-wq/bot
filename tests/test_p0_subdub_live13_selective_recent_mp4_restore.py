@@ -6,8 +6,10 @@ import bot
 def test_new_dub_jobs_use_direct_known_good_synthesizers():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
-    assert "result = await synthesize_dub_segment_chunks(*args" in source
-    assert "result = await synthesize_canonical_dub_segment_chunks(" in source
+    assert "synthesize_dub_segment_chunks(*args" not in source
+    assert source.count("synthesize_canonical_dub_segment_chunks(") == 1
+    assert "build_dub_timeline_audio(chunks" not in source
+    assert source.count("build_canonical_dub_timeline_audio(chunks, total_duration)") == 1
     assert "checkpoint_dir=" not in source
     assert "tts_resume_context" not in source
 
