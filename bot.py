@@ -71443,6 +71443,28 @@ def video_public_route_for_tool(tool_id: str) -> dict:
     return dict(VIDEO_PUBLIC_ROUTE_MATRIX.get(str(tool_id or "")) or {})
 
 
+def video_public_product_flow_access(product_id: str) -> dict:
+    product = str(product_id or "").strip()
+    route = video_public_route_for_tool(product)
+    if not route or product not in VIDEO_PRODUCT_REGISTRY:
+        return {
+            "product_id": product,
+            "flow_access_allowed": False,
+            "flow_block_reason": "unknown_video_product",
+        }
+    if product == "multi_scene_film":
+        return {
+            "product_id": product,
+            "flow_access_allowed": False,
+            "flow_block_reason": "long_form_video_in_development",
+        }
+    return {
+        "product_id": product,
+        "flow_access_allowed": True,
+        "flow_block_reason": "",
+    }
+
+
 VIDEO_PROFILE_FIRST_PRODUCTS = frozenset()
 
 VIDEO_INTRO_THEN_PROFILE_PRODUCTS = frozenset({
@@ -83362,9 +83384,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         legacy_state["screen"] = "entry"
         return await video_trend2_render(query, context, legacy_state, lang)
     if action == "open":
-        if value not in VIDEO_PRODUCT_REGISTRY:
+        flow_access = video_public_product_flow_access(value)
+        if not flow_access.get("flow_access_allowed") and value != "multi_scene_film":
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
-        if value == "multi_scene_film":
+        if flow_access.get("flow_block_reason") == "long_form_video_in_development":
             clear_video_session(uid)
             return await safe_edit_or_send(
                 query,
@@ -87808,8 +87831,8 @@ def menu_text_main_video() -> str:
     )
 
 def video_ai_true_text(lang: str = "vi") -> str:
-    enabled, _message = shopaikey_public_generation_guard("video")
-    enabled = bool(enabled and VIDEO_AI_PUBLIC_ENABLED)
+    flow_access = shopaikey_public_flow_access_guard("video")
+    enabled = bool(flow_access.get("flow_access_allowed"))
     if normalize_user_language(lang) == "zh":
         warning = "" if enabled else "\n\n🎬 真实 AI 视频目前维护中或尚未公开。TOAN AAS 未扣除 Xu。你可以先用 Trend 视频生成 prompt/计划。"
         return (
