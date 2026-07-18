@@ -11,6 +11,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from services import video_flow7
+
 
 MIN_SCENES = 1
 MAX_SCENES = 20
@@ -19,15 +21,8 @@ SUPPORTED_RATIOS = frozenset({"9:16", "16:9", "1:1", "4:5"})
 CONTENT_MODES = frozenset({"manual", "suggestions"})
 
 FLOW_KIND_BY_PRODUCT = {
-    "video_ai_real": "ai_real",
-    "video_trend": "ai_real",
-    "script_image_video": "ai_real",
-    "video_reference": "ai_real",
-    "motion_prompt": "ai_real",
-    "video_idea": "idea_video",
+    **video_flow7.PRODUCT_KIND_BY_ID,
     "frame_video_local": "frame_video",
-    "storyboard_prompt": "storyboard",
-    "self_shot_scene_change": "self_shot",
 }
 
 FLOW_SPECS = {
@@ -40,6 +35,16 @@ FLOW_SPECS = {
         "asset_requirement": "optional",
         "default_content_mode": "suggestions",
         "input_mode": "idea_preset_or_text",
+    },
+    "trend_video": {
+        "asset_requirement": "optional",
+        "default_content_mode": "suggestions",
+        "input_mode": "sourced_trend_or_named_sample",
+    },
+    "script_to_video": {
+        "asset_requirement": "optional",
+        "default_content_mode": "manual",
+        "input_mode": "confirmed_script_scene_plan",
     },
     "frame_video": {
         "asset_requirement": "images_required",
@@ -55,6 +60,11 @@ FLOW_SPECS = {
         "asset_requirement": "video_required",
         "default_content_mode": "manual",
         "input_mode": "source_video",
+    },
+    "long_series": {
+        "asset_requirement": "series_dependent",
+        "default_content_mode": "manual",
+        "input_mode": "series_bible",
     },
 }
 
@@ -73,6 +83,22 @@ EXECUTION_ROUTES = {
         "provider_family": "product_video_catalog",
         "local_renderer": "",
         "capability_requirements": ["text_to_video_or_scene_video", "per_scene_8s", "final_mp4"],
+        "fallback": "next_contract_valid_product_video_candidate",
+    },
+    "trend_video": {
+        "job_type": "product_video",
+        "execution_owner": "owner_product_video",
+        "provider_family": "trend_preset_to_product_video",
+        "local_renderer": "",
+        "capability_requirements": ["trend_or_sample_source", "per_scene_8s", "final_mp4"],
+        "fallback": "next_contract_valid_product_video_candidate",
+    },
+    "script_to_video": {
+        "job_type": "product_video",
+        "execution_owner": "owner_product_video",
+        "provider_family": "parsed_scene_plan_to_product_video",
+        "local_renderer": "",
+        "capability_requirements": ["parsed_scene_plan", "per_scene_8s", "final_mp4"],
         "fallback": "next_contract_valid_product_video_candidate",
     },
     "frame_video": {
@@ -106,6 +132,14 @@ EXECUTION_ROUTES = {
         "provider_family": "product_video_catalog",
         "local_renderer": "ffmpeg",
         "capability_requirements": ["video_to_video", "source_video_probe", "final_mp4"],
+        "fallback": "block_no_charge",
+    },
+    "long_series": {
+        "job_type": "long_series_project",
+        "execution_owner": "owner_long_video",
+        "provider_family": "long_series_episode_queue",
+        "local_renderer": "",
+        "capability_requirements": ["episode_queue", "continuity_store", "final_mp4"],
         "fallback": "block_no_charge",
     },
 }
@@ -219,6 +253,7 @@ def normalize_context(value: dict[str, Any] | None) -> dict[str, Any]:
 def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
     source = dict(state or {})
     context = dict(source.get("video_flow_context") or {})
+    source_fields = dict(source.get("source_fields") or context.get("source_fields") or {})
     context.update({
         "product_id": str(source.get("source_product_id") or source.get("product_type") or context.get("product_id") or "video_ai_real"),
         "content_mode": str(source.get("content_mode") or context.get("content_mode") or ""),
@@ -234,6 +269,24 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
             "image": dict(source.get("image_prompt_versions") or {}),
             "video": dict(source.get("video_prompt_versions") or {}),
         },
+        "idea_preset_id": source.get("idea_preset_id") or context.get("idea_preset_id") or "",
+        "script_text": str(source.get("script_text") or source.get("manual_script_raw") or context.get("script_text") or ""),
+        "scene_count_confirmed": bool(source.get("scene_count_confirmed") or context.get("scene_count_confirmed")),
+        "trend_source": dict(
+            source.get("selected_trend_source")
+            or source.get("trend_source")
+            or source_fields.get("selected_trend_source")
+            or source_fields.get("trend_source")
+            or context.get("trend_source")
+            or {}
+        ),
+        "source_fields": source_fields,
+        "transitions": list(
+            source.get("transitions")
+            or source.get("transition_plan")
+            or context.get("transitions")
+            or []
+        ),
         "return_stack": list(source.get("history") or context.get("return_stack") or []),
     })
     assets = dict(source.get("reference_assets") or source.get("assets") or {})
@@ -256,7 +309,29 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
         refs = [str(item) for item in assets.get("source_media_refs") or [] if str(item)]
         if refs and not manifest.get("items"):
             manifest["items"] = [{"file_id": item, "media_kind": "image"} for item in refs]
+    video_item = next(
+        (
+            item for item in manifest.get("items") or []
+            if str(item.get("media_kind") or "").lower() in {"video", "animation"}
+        ),
+        {},
+    )
+    if video_item:
+        manifest["source_video"] = {
+            "file_id": str(video_item.get("file_id") or manifest.get("source_video", {}).get("file_id") or ""),
+            "file_unique_id": str(video_item.get("file_unique_id") or ""),
+        }
+        manifest["probe"] = {
+            "duration_seconds": float(video_item.get("duration_seconds") or 0),
+            "width": int(video_item.get("width") or 0),
+            "height": int(video_item.get("height") or 0),
+            "format": str(video_item.get("mime_type") or video_item.get("file_name") or ""),
+            "audio_streams": int(video_item.get("audio_streams") or 0),
+        }
     context["asset_manifest"] = manifest
+    context["asset_items"] = list(manifest.get("items") or [])
+    context["source_video"] = dict(manifest.get("source_video") or {})
+    context["source_probe"] = dict(manifest.get("probe") or {})
     return normalize_context(context)
 
 
@@ -282,7 +357,7 @@ def asset_gate_status(value: dict[str, Any] | None) -> dict[str, Any]:
     manifest = dict(context["asset_manifest"])
     items = [item for item in manifest.get("items") or [] if str(item.get("file_id") or item.get("path") or "")]
     source_video = dict(manifest.get("source_video") or {})
-    if requirement == "optional":
+    if requirement in {"optional", "preset_dependent", "script_dependent", "series_dependent"}:
         return {"ok": True, "requirement": requirement, "required": 0, "received": len(items), "blocker": ""}
     if requirement == "images_required":
         required = max(1, int(context.get("scene_count") or 0))
@@ -426,10 +501,43 @@ def preflight(
     gate = asset_gate_status(context)
     if not gate["ok"]:
         blockers.append(str(gate["blocker"]))
-    if not str(context.get("primary_profile_key") or ""):
-        blockers.append("primary_profile_missing")
-    if not dict(context.get("content_choice") or {}):
-        blockers.append("content_choice_missing")
+    flow_kind = str(context.get("flow_kind") or "ai_real")
+    if flow_kind == "ai_real":
+        if not str(context.get("primary_profile_key") or ""):
+            blockers.append("primary_profile_missing")
+        if not dict(context.get("content_choice") or {}):
+            blockers.append("content_choice_missing")
+    elif flow_kind == "idea_video":
+        if not str(context.get("idea_preset_id") or ""):
+            blockers.append("idea_preset_missing")
+    elif flow_kind == "script_to_video":
+        if not str(context.get("script_text") or "").strip():
+            blockers.append("script_missing")
+        if not bool(context.get("scene_count_confirmed")):
+            blockers.append("script_scene_count_not_confirmed")
+    elif flow_kind == "storyboard":
+        transitions = list(context.get("transitions") or [])
+        if len(transitions) != max(0, int(context.get("scene_count") or 0) - 1):
+            blockers.append("storyboard_transition_count_invalid")
+    elif flow_kind == "self_shot":
+        source_probe = dict(context.get("source_probe") or {})
+        if not (
+            float(source_probe.get("duration_seconds") or 0) > 0
+            and int(source_probe.get("width") or 0) > 0
+            and int(source_probe.get("height") or 0) > 0
+            and str(source_probe.get("format") or "").strip()
+        ):
+            blockers.append("source_video_probe_missing")
+    elif flow_kind == "trend_video":
+        trend_source = dict(context.get("trend_source") or {})
+        if not (
+            (trend_source.get("source_url") and trend_source.get("observed_at"))
+            or trend_source.get("sample_preset")
+            or trend_source.get("source_type") == "user_topic"
+        ):
+            blockers.append("trend_source_or_sample_missing")
+    elif flow_kind == "long_series":
+        blockers.append("long_series_public_not_ready")
     if not package_available:
         blockers.append("package_unavailable")
     if not engine_ready:
