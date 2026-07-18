@@ -4,7 +4,7 @@ import ast
 import re
 from pathlib import Path
 
-from services import video_flow6, video_flow7, video_scene3_flow, video_storyboard2
+from services import video_flow6, video_flow7, video_profile_catalog, video_scene3_flow, video_storyboard2
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +81,7 @@ def test_scene_image_limits_and_mapping_for_two_and_five_scenes() -> None:
     assert two_summary == {
         "minimum_images": 2,
         "maximum_images": 4,
+        "required_images": 2,
         "ready_images": 2,
         "ready_start": 2,
         "ready_end": 0,
@@ -96,26 +97,83 @@ def test_scene_image_limits_and_mapping_for_two_and_five_scenes() -> None:
     ]
 
 
-def test_storyboard_images_can_be_replaced_deleted_and_reordered_by_scene_slot() -> None:
-    board = _with_start_images(_board(2))
-    moved = video_storyboard2.move_image_to_scene(board, 1, 2, "start")
-    assert moved["active_scene_index"] == 2
-    assert moved["scenes"][1]["start_image"]["file_id"] == "start-1"
-    assert moved["scenes"][0]["start_image"]["file_id"] == "start-2"
-    assert moved["scenes"][1]["start_image"]["image_id"] == "scene_2_start"
-    assert moved["scenes"][0]["start_image"]["image_id"] == "scene_1_start"
+def test_storyboard_batch_image_order_is_all_starts_then_all_ends() -> None:
+    board = video_storyboard2.set_asset_mode(_board(2), "start_end")
+    assert [(item["scene_index"], item["slot"]) for item in video_storyboard2.image_targets(board)] == [
+        (1, "start"),
+        (2, "start"),
+        (1, "end"),
+        (2, "end"),
+    ]
+    for number in range(1, 5):
+        target = video_storyboard2.next_missing_image_target(board)
+        assert target is not None
+        board = video_storyboard2.assign_next_image(
+            board,
+            video_storyboard2.image_record(
+                scene_index=target["scene_index"],
+                slot=target["slot"],
+                file_id=f"batch-{number}",
+                source_type="telegram_upload",
+            ),
+        )
+    assert video_storyboard2.next_missing_image_target(board) is None
+    assert [scene["start_image"]["file_id"] for scene in board["scenes"]] == ["batch-1", "batch-2"]
+    assert [scene["end_image"]["file_id"] for scene in board["scenes"]] == ["batch-3", "batch-4"]
+    assert video_storyboard2.asset_summary(board)["ok"] is True
 
-    replacement = video_storyboard2.image_record(
-        scene_index=2,
-        slot="start",
-        file_id="replacement-2",
-        source_type="telegram_upload",
-        artifact_receipt={"telegram_message_id": 202},
+
+def test_storyboard_batch_targets_scale_to_twenty_or_forty_without_per_scene_buttons() -> None:
+    board = _board(20)
+    assert len(video_storyboard2.image_targets(board)) == 20
+    board = video_storyboard2.set_asset_mode(board, "start_end")
+    assert len(video_storyboard2.image_targets(board)) == 40
+    asset_keyboard = _function_source("storyboard2_asset_keyboard")
+    assert '"vstory|asset_upload_all"' in asset_keyboard
+    assert '"vstory|asset_ai_missing"' in asset_keyboard
+    assert '"vstory|asset_upload|start"' not in asset_keyboard
+    assert '"vstory|asset_upload|end"' not in asset_keyboard
+    assert '"vstory|asset_move_prev"' not in asset_keyboard
+    assert '"vstory|asset_move_next"' not in asset_keyboard
+    detail_keyboard = _function_source("storyboard2_asset_overview_keyboard")
+    assert '"vstory|asset_replace"' in detail_keyboard
+    assert '"vstory|asset_remove"' in detail_keyboard
+    assert '"vstory|asset_move_prev"' in detail_keyboard
+    assert '"vstory|asset_move_next"' in detail_keyboard
+
+
+def test_storyboard_detail_manager_replaces_deletes_and_reorders_only_the_selected_image() -> None:
+    board = video_storyboard2.set_asset_mode(_board(2), "start_end")
+    for number in range(1, 5):
+        target = video_storyboard2.next_missing_image_target(board)
+        board = video_storyboard2.assign_next_image(
+            board,
+            video_storyboard2.image_record(
+                scene_index=target["scene_index"],
+                slot=target["slot"],
+                file_id=f"original-{number}",
+                source_type="telegram_upload",
+            ),
+        )
+    board = video_storyboard2.assign_image(
+        board,
+        1,
+        "start",
+        video_storyboard2.image_record(
+            scene_index=1,
+            slot="start",
+            file_id="replacement",
+            source_type="telegram_upload",
+        ),
     )
-    replaced = video_storyboard2.assign_image(moved, 2, "start", replacement)
-    assert replaced["scenes"][1]["start_image"]["file_id"] == "replacement-2"
-    deleted = video_storyboard2.remove_image(replaced, 2, "start")
-    assert deleted["scenes"][1]["start_image"]["status"] == "missing"
+    assert board["scenes"][0]["start_image"]["file_id"] == "replacement"
+    assert board["scenes"][0]["end_image"]["file_id"] == "original-3"
+    board = video_storyboard2.move_image_to_scene(board, 1, 2, "start")
+    assert board["scenes"][1]["start_image"]["file_id"] == "replacement"
+    assert board["scenes"][0]["start_image"]["file_id"] == "original-2"
+    board = video_storyboard2.remove_image(board, 2, "start")
+    assert board["scenes"][1]["start_image"]["status"] == "missing"
+    assert board["scenes"][1]["end_image"]["file_id"] == "original-4"
 
 
 def test_optional_end_image_changes_capability_without_losing_scene_mapping() -> None:
@@ -257,22 +315,63 @@ def test_paid_image_handoff_returns_to_exact_storyboard_scene_and_slot() -> None
     assert "video_storyboard2.assign_image" in recorder
     assert 'return_pending = {**quick_state, "origin_flow": "video_scene3"}' in cancel
     assert "video_scene3_image_handoff_panel(scene_state)" in cancel
+    success_keyboard = _function_source("public_image_success_keyboard")
+    storyboard_branch = success_keyboard[
+        success_keyboard.index('if return_callback == "vstory|image_return"'):
+        success_keyboard.index("if return_callback:", success_keyboard.index('if return_callback == "vstory|image_return"') + 1)
+    ]
+    assert 'callback_data=return_callback' in storyboard_branch
+    assert 'callback_data="tvflow|save_image"' not in storyboard_branch
+    assert 'callback_data="vprofile|image_source|create"' not in storyboard_branch
 
 
 def test_storyboard_keyboards_have_one_to_five_row_exact_back_and_no_duplicate_actions() -> None:
     suggestion = _function_source("storyboard2_suggestion_keyboard")
-    image_prompt = _function_source("storyboard2_image_prompt_keyboard")
     count = _function_source("storyboard2_count_keyboard")
+    ratio = _function_source("storyboard2_ratio_keyboard")
     video_prompt = _function_source("storyboard2_video_prompt_keyboard")
     assert 'range(1, 6)' in suggestion
-    assert 'range(1, 6)' in image_prompt
     assert 'storyboard2_nav("vstory|entry")' in count
+    assert "Gợi ý" not in ratio
+    assert "suggest" not in ratio
     assert video_prompt.count('"vstory|video_done"') == 1
     assert '"vstory|scene_screen"' in video_prompt
     asset_keyboard = _function_source("storyboard2_asset_keyboard")
-    assert '"vstory|asset_move_prev"' in asset_keyboard
-    assert '"vstory|asset_move_next"' in asset_keyboard
+    assert '"vstory|asset_upload_all"' in asset_keyboard
+    assert '"vstory|asset_ai_missing"' in asset_keyboard
     assert '"💡 Ý tưởng video"' not in _function_source("storyboard2_entry_keyboard")
+
+
+def test_no_public_video_ratio_keyboard_contains_a_ratio_suggestion_action() -> None:
+    for name in (
+        "storyboard2_ratio_keyboard",
+        "video_scene3_aspect_keyboard",
+        "video_b14_aspect_ratio_keyboard",
+        "task3d_aspect_keyboard",
+        "video_trend2_ratio_keyboard",
+        "frame_video_ratio_menu_keyboard",
+        "frame_video_ratio_keyboard",
+        "video_finalization_aspect_keyboard",
+    ):
+        source = _function_source(name)
+        assert "Gợi ý" not in source, name
+        assert "suggest" not in source.lower(), name
+
+
+def test_storyboard_has_32_content_profiles_and_20_related_suggestions() -> None:
+    profiles = [item for item in video_profile_catalog.PROFILE_SEEDS if bool(item.get("is_active", 1))]
+    assert len(profiles) == 32
+    board = _board(2)
+    board = video_storyboard2.set_profile(board, dict(profiles[0]))
+    seen = []
+    for _page in range(4):
+        page = video_storyboard2.suggestion_page(board)
+        assert len(page) == 5
+        assert all(profiles[0]["public_name"] in item["content"] for item in page)
+        seen.extend(item["title"] for item in page)
+        board = video_storyboard2.rotate_suggestions(board)
+    assert len(seen) == 20
+    assert len(set(seen)) == 20
 
 
 def test_all_public_storyboard_callbacks_have_one_canonical_owner() -> None:
@@ -328,7 +427,7 @@ def test_storyboard_quality_back_and_two_frame_fallback_are_exact() -> None:
     assert '"vstory|one_image_mode"' in keyboard
     assert 'if action == "review_from_quality"' in callback
     assert 'if action == "one_image_mode"' in callback
-    assert 'set_end_mode(board, scene_index, "none")' in callback
+    assert 'set_asset_mode(board, "start_only")' in callback
     assert 'step == "quality" and str(state.get("flow_kind") or "") == "storyboard"' in profile_callback
 
 
@@ -376,6 +475,10 @@ def test_invalid_storyboard_inputs_are_idempotent_and_do_not_repeat_error_panels
     media_ledger = 'board["processed_media_message_ids"] = (processed + ([message_id] if message_id else []))[-100:]'
     assert media_handler.count(media_ledger) == 1
     assert media_handler.index(media_ledger) < media_handler.index("if media is None:")
+    assert '{"image_upload_batch", "image_upload_replace"}' in media_handler
+    assert "video_storyboard2.assign_next_image" in media_handler
+    assert "video_storyboard2.assign_image" in media_handler
+    assert 'move(board, "asset_overview", push=False, awaiting_input="")' in media_handler
 
 
 def test_entry_modes_split_after_ratio_and_keep_exact_back_targets() -> None:
@@ -384,10 +487,10 @@ def test_entry_modes_split_after_ratio_and_keep_exact_back_targets() -> None:
     suggestion_keyboard = _function_source("storyboard2_suggestion_keyboard")
     assert 'if entry_mode == "existing"' in callback
     assert 'move(board, "await_content", awaiting_input="content")' in callback
-    assert 'elif entry_mode == "ai"' in callback
-    assert 'move(board, "suggestions", awaiting_input="")' in callback
+    assert 'move(board, "profiles", awaiting_input="")' in callback
+    assert 'if action == "profile_pick"' in callback
     assert '"vstory|ratio_screen" if entry_mode == "existing"' in payload
-    assert '"vstory|ratio_screen" if entry_mode == "ai"' in suggestion_keyboard
+    assert 'storyboard2_nav("vstory|profiles_screen")' in suggestion_keyboard
 
 
 def test_storyboard_service_has_no_provider_http_wallet_or_file_side_effects() -> None:
@@ -416,10 +519,12 @@ def test_all_touched_storyboard_bot_functions_parse_as_python311_source() -> Non
         "storyboard2_entry_keyboard",
         "storyboard2_count_keyboard",
         "storyboard2_ratio_keyboard",
-        "storyboard2_content_choice_keyboard",
+        "storyboard2_profile_rows",
+        "storyboard2_profiles_keyboard",
         "storyboard2_suggestion_keyboard",
         "storyboard2_scene_review_keyboard",
         "storyboard2_asset_keyboard",
+        "storyboard2_asset_overview_keyboard",
         "storyboard2_image_prompt_keyboard",
         "storyboard2_video_prompt_keyboard",
         "storyboard2_transition_keyboard",
@@ -442,6 +547,7 @@ def test_all_touched_storyboard_bot_functions_parse_as_python311_source() -> Non
         "video_scene3_image_handoff_target_step",
         "video_scene3_image_handoff_panel",
         "video_scene3_record_generated_image",
+        "public_image_success_keyboard",
         "handle_storyboard_callback",
         "handle_create_media_callback",
     )

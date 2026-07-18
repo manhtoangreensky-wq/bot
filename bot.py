@@ -65825,52 +65825,85 @@ def storyboard2_ratio_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def storyboard2_content_choice_keyboard() -> InlineKeyboardMarkup:
-    return storyboard2_keyboard([
-        [("✍️ Tự nhập nội dung", "vstory|content_manual"), ("💡 Gợi ý Storyboard", "vstory|content_suggest")],
+def storyboard2_profile_rows(page: int) -> tuple[list[dict], int, int]:
+    profiles = [dict(item) for item in video_profile_catalog.PROFILE_SEEDS if bool(item.get("is_active", 1))]
+    page_size = 8
+    page_count = max(1, (len(profiles) + page_size - 1) // page_size)
+    selected_page = max(1, min(page_count, safe_int(page, 1)))
+    return profiles[(selected_page - 1) * page_size:selected_page * page_size], selected_page, page_count
+
+
+def storyboard2_profiles_keyboard(board: dict) -> InlineKeyboardMarkup:
+    rows, selected_page, page_count = storyboard2_profile_rows(safe_int(board.get("profile_page"), 1))
+    keyboard_rows: list[list[tuple[str, str]]] = []
+    for offset in range(0, len(rows), 2):
+        keyboard_rows.append([
+            (
+                f"{item.get('icon') or '🎬'} {str(item.get('short_name') or item.get('public_name') or '')[:25]}",
+                f"vstory|profile_pick|{item.get('profile_key')}",
+            )
+            for item in rows[offset:offset + 2]
+        ])
+    previous_page = page_count if selected_page == 1 else selected_page - 1
+    next_page = 1 if selected_page == page_count else selected_page + 1
+    keyboard_rows.extend([
+        [("⬅️ Nhóm trước", f"vstory|profile_page|{previous_page}"), ("➡️ Nhóm sau", f"vstory|profile_page|{next_page}")],
+        [("✍️ Tự nhập nội dung", "vstory|content_manual"), ("ℹ️ Trang loại nội dung", "vstory|profile_help")],
         *storyboard2_nav("vstory|ratio_screen"),
     ])
+    return storyboard2_keyboard(keyboard_rows)
 
 
 def storyboard2_suggestion_keyboard(board: dict | None = None) -> InlineKeyboardMarkup:
-    entry_mode = str((board or {}).get("entry_mode") or "guided")
-    back_callback = "vstory|ratio_screen" if entry_mode == "ai" else "vstory|content_screen"
     return storyboard2_keyboard([
         [(str(index), f"vstory|suggest_pick|{index}") for index in range(1, 6)],
         [("🔄 Đổi 5 gợi ý", "vstory|suggest_more"), ("✍️ Tự nhập nội dung", "vstory|content_manual")],
-        *storyboard2_nav(back_callback),
+        *storyboard2_nav("vstory|profiles_screen"),
     ])
 
 
 def storyboard2_scene_review_keyboard(board: dict) -> InlineKeyboardMarkup:
     count = max(1, int(board.get("scene_count") or 1))
     index = max(1, min(count, int(board.get("active_scene_index") or 1)))
+    entry_mode = str(board.get("entry_mode") or "guided")
+    content_mode = str(board.get("content_mode") or "")
+    back_callback = "vstory|ratio_screen" if entry_mode == "existing" else (
+        "vstory|suggestions_screen" if content_mode == "suggestion" else "vstory|profiles_screen"
+    )
     return storyboard2_keyboard([
         [("⬅️ Cảnh trước", "vstory|scene_prev"), ("➡️ Cảnh sau", "vstory|scene_next")],
         [("✍️ Sửa cảnh", "vstory|scene_edit"), ("✅ Xác nhận nội dung", "vstory|content_approve")],
-        *storyboard2_nav("vstory|content_screen"),
+        *storyboard2_nav(back_callback),
     ])
 
 
 def storyboard2_asset_keyboard(board: dict) -> InlineKeyboardMarkup:
     board = video_storyboard2.normalize_state(board)
+    mode = str(board.get("asset_mode") or "start_only")
     rows = [
-        [("📎 Gửi ảnh đầu", "vstory|asset_upload|start"), ("✨ Tạo ảnh đầu AI", "vstory|asset_ai|start")],
-        [("📎 Gửi ảnh cuối", "vstory|asset_upload|end"), ("✨ Tạo ảnh cuối AI", "vstory|asset_ai|end")],
-        [("🚫 Không dùng ảnh cuối", "vstory|asset_no_end"), ("🗑️ Xóa ảnh đang chọn", "vstory|asset_remove")],
+        [("📎 Gửi toàn bộ ảnh", "vstory|asset_upload_all"), ("✨ Tạo ảnh AI còn thiếu", "vstory|asset_ai_missing")],
+        [
+            (("✅ " if mode == "start_only" else "□ ") + "Một ảnh/cảnh", "vstory|asset_mode|start_only"),
+            (("✅ " if mode == "start_end" else "□ ") + "Hai ảnh/cảnh", "vstory|asset_mode|start_end"),
+        ],
+        [("🗂️ Sắp xếp / thay ảnh", "vstory|asset_view"), ("✅ Dùng các ảnh này", "vstory|assets_done")],
+        *storyboard2_nav("vstory|scene_screen"),
+    ]
+    return storyboard2_keyboard(rows)
+
+
+def storyboard2_asset_overview_keyboard(board: dict) -> InlineKeyboardMarkup:
+    board = video_storyboard2.normalize_state(board)
+    rows = [
+        [("⬅️ Ảnh trước", "vstory|asset_prev"), ("➡️ Ảnh sau", "vstory|asset_next")],
+        [("🔄 Thay ảnh này", "vstory|asset_replace"), ("🗑️ Xóa ảnh này", "vstory|asset_remove")],
     ]
     if int(board.get("scene_count") or 0) > 1:
-        rows.extend([
-            [("⬅️ Cảnh trước", "vstory|asset_prev"), ("➡️ Cảnh sau", "vstory|asset_next")],
-            [
-            ("⬆️ Ảnh sang cảnh trước", "vstory|asset_move_prev"),
-            ("⬇️ Ảnh sang cảnh sau", "vstory|asset_move_next"),
-            ],
+        rows.append([
+            ("⬆️ Đổi với cảnh trước", "vstory|asset_move_prev"),
+            ("⬇️ Đổi với cảnh sau", "vstory|asset_move_next"),
         ])
-    rows.extend([
-        [("👁️ Xem ảnh đã nhận", "vstory|asset_view"), ("✅ Dùng các ảnh này", "vstory|assets_done")],
-        *storyboard2_nav("vstory|scene_screen"),
-    ])
+    rows.extend(storyboard2_nav("vstory|assets_screen"))
     return storyboard2_keyboard(rows)
 
 
@@ -65943,12 +65976,13 @@ def storyboard2_review_keyboard() -> InlineKeyboardMarkup:
 STORYBOARD2_CALLBACK_ACTIONS = frozenset({
     "entry", "start", "upload", "ai", "help",
     "count_screen", "count_help", "count", "count_custom",
-    "ratio_screen", "ratio",
-    "content_screen", "content_manual", "content_suggest",
+    "ratio_screen", "ratio", "profiles_screen", "profile_page", "profile_pick", "profile_help",
+    "content_screen", "content_manual", "content_suggest", "suggestions_screen",
     "suggest_more", "suggest_pick",
     "scene_screen", "scene_prev", "scene_next", "scene_edit", "content_approve",
-    "assets_screen", "image_return", "asset_view", "asset_upload", "asset_ai",
-    "asset_no_end", "asset_remove", "asset_prev", "asset_next",
+    "assets_screen", "image_return", "asset_view", "asset_upload_all", "asset_ai_missing", "asset_mode",
+    "asset_upload", "asset_ai",
+    "asset_no_end", "asset_remove", "asset_replace", "asset_prev", "asset_next",
     "asset_move_prev", "asset_move_next", "assets_done",
     "image_prompt_screen", "image_more", "image_custom", "image_negative",
     "image_full", "image_pick",
@@ -66087,17 +66121,28 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             "Tỉ lệ này được giữ cho prompt ảnh, ảnh tạo AI và clip của toàn bộ cảnh. Bước này chưa gọi dịch vụ.",
             storyboard2_ratio_keyboard(),
         )
-    if screen == "content_choice":
-        return (
-            "📝 <b>Chuẩn bị nội dung Storyboard</b>\n\n"
-            f"• Số cảnh: <b>{count}</b> · Tỉ lệ: <b>{html.escape(ratio)}</b>\n\n"
-            "Tự nhập ý tưởng của anh/chị hoặc chọn một cấu trúc Storyboard có sẵn. Sau đó có thể sửa riêng từng cảnh.",
-            storyboard2_content_choice_keyboard(),
+    if screen == "profiles":
+        profile_rows, selected_page, page_count = storyboard2_profile_rows(safe_int(board.get("profile_page"), 1))
+        labels = "\n".join(
+            f"• {html.escape(str(item.get('icon') or '🎬'))} {html.escape(str(item.get('public_name') or ''))}"
+            for item in profile_rows
         )
+        return (
+            "🎯 <b>Chọn loại nội dung Storyboard</b>\n\n"
+            f"• Số cảnh: <b>{count}</b> · Tỉ lệ: <b>{html.escape(ratio)}</b>\n\n"
+            f"Trang {selected_page}/{page_count} trong 32 loại nội dung. Chỉ chọn một loại để nhận 20 gợi ý liên quan, mỗi lần hiện 5 gợi ý.\n\n"
+            f"{labels}",
+            storyboard2_profiles_keyboard(board),
+        )
+    if screen == "content_choice":
+        # Read-only compatibility for sessions created by the old duplicate
+        # content-choice screen. The canonical destination is the profile list.
+        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
+        return storyboard2_screen_payload(board)
     if screen == "await_content":
         entry_mode = str(board.get("entry_mode") or "guided")
         title = "Gửi storyboard có sẵn" if entry_mode == "existing" else "Nhập nội dung Storyboard"
-        back_callback = "vstory|ratio_screen" if entry_mode == "existing" else "vstory|content_screen"
+        back_callback = "vstory|ratio_screen" if entry_mode == "existing" else "vstory|profiles_screen"
         return (
             f"✍️ <b>{title}</b>\n\n"
             "Mô tả chủ thể, mục tiêu, diễn biến và điều người xem cần ghi nhớ. Hệ thống sẽ chia đúng số cảnh đã chọn, "
@@ -66106,9 +66151,12 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         )
     if screen == "suggestions":
         suggestions = video_storyboard2.suggestion_page(board)
+        profile = dict(board.get("profile") or {})
         lines = [
             "💡 <b>5 gợi ý Storyboard</b>",
             "",
+            f"• Loại nội dung: <b>{html.escape(str(profile.get('label') or 'Đã chọn'))}</b>",
+            f"• Bộ gợi ý: <b>{int(board.get('suggestion_offset') or 0) // 5 + 1}/4</b>",
             f"Mỗi gợi ý sẽ được chia thành đúng <b>{count}</b> cảnh ở tỉ lệ <b>{html.escape(ratio)}</b>.",
             "",
         ]
@@ -66135,8 +66183,18 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         )
     if screen == "asset_overview":
         summary = video_storyboard2.asset_summary(board)
+        active_scene_index = max(1, min(count, int(board.get("active_scene_index") or 1)))
+        active_slot = str(board.get("active_slot") or "start")
+        if active_slot == "end" and board.get("asset_mode") != "start_end":
+            active_slot = "start"
+        selected_scene = dict((board.get("scenes") or [])[active_scene_index - 1])
+        selected_image = dict(selected_scene.get(f"{active_slot}_image") or {})
+        selected_label = "ảnh đầu" if active_slot == "start" else "ảnh cuối"
         lines = [
-            "👁️ <b>Ảnh đã nhận theo cảnh</b>",
+            "🗂️ <b>Sắp xếp / thay ảnh Storyboard</b>",
+            "",
+            f"• Đang chọn: <b>{selected_label} cảnh {active_scene_index}</b> · "
+            f"<b>{'Đã có' if selected_image.get('status') == 'ready' else 'Chưa có'}</b>",
             "",
         ]
         for scene_item in board.get("scenes") or []:
@@ -66155,40 +66213,59 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             )
         lines.extend([
             "",
-            f"Tổng: <b>{summary['ready_images']}/{summary['maximum_images']}</b> ảnh tối đa · "
+            f"Tổng: <b>{summary['ready_images']}/{summary['required_images']}</b> ảnh cần dùng · "
             f"đủ ảnh đầu <b>{summary['ready_start']}/{count}</b> cảnh.",
+            "Chọn Ảnh trước/Ảnh sau để đổi mục đang thao tác. Thay, xóa hoặc đổi vị trí chỉ áp dụng cho ảnh đang chọn.",
         ])
-        overview_rows = []
-        if count > 1:
-            overview_rows.extend([
-                [("⬅️ Ảnh cảnh trước", "vstory|asset_prev"), ("➡️ Ảnh cảnh sau", "vstory|asset_next")],
-                [
-                    ("⬆️ Ảnh sang cảnh trước", "vstory|asset_move_prev"),
-                    ("⬇️ Ảnh sang cảnh sau", "vstory|asset_move_next"),
-                ],
-            ])
-        overview_rows.extend([
-            [("🗑️ Xóa ảnh đang chọn", "vstory|asset_remove"), ("✅ Dùng các ảnh này", "vstory|assets_done")],
-            *storyboard2_nav("vstory|assets_screen"),
-        ])
-        return "\n".join(lines), storyboard2_keyboard(overview_rows)
+        return "\n".join(lines), storyboard2_asset_overview_keyboard(board)
     if screen in {"assets", "await_image"}:
         summary = video_storyboard2.asset_summary(board)
-        start = dict(scene.get("start_image") or {})
-        end = dict(scene.get("end_image") or {})
-        end_status = "Đã có" if end.get("status") == "ready" else ("Không dùng" if end.get("status") == "not_used" else "Chưa có")
-        wait_copy = "\n\nHãy gửi một ảnh PNG/JPG/WEBP cho đúng ô đang chọn." if screen == "await_image" else ""
+        target = video_storyboard2.next_missing_image_target(board)
+        mode_label = "hai ảnh/cảnh (ảnh đầu rồi ảnh cuối)" if board.get("asset_mode") == "start_end" else "một ảnh đầu/cảnh"
+        wait_copy = ""
+        if screen == "await_image":
+            pending_image_action = str(board.get("awaiting_input") or "")
+            if pending_image_action == "image_upload_replace":
+                replace_slot = str(board.get("active_slot") or "start")
+                replace_label = "ảnh đầu" if replace_slot == "start" else "ảnh cuối"
+                wait_copy = (
+                    f"\n\n📎 Hãy gửi ảnh mới để thay <b>{replace_label} cảnh {index}</b>. "
+                    "Ảnh mới chỉ thay đúng mục này."
+                )
+            elif target:
+                slot_label = "ảnh đầu" if target.get("slot") == "start" else "ảnh cuối"
+                wait_copy = (
+                    f"\n\n📎 Đang nhận theo thứ tự: <b>{slot_label} cảnh {int(target.get('scene_index') or 1)}</b>. "
+                    "Gửi tiếp ảnh PNG/JPG/WEBP vào cùng màn này; hệ thống tự gắn đúng cảnh."
+                )
+            else:
+                wait_copy = "\n\n✅ Đã nhận đủ ảnh theo chế độ đã chọn."
+        scene_lines = []
+        for scene_item in board.get("scenes") or []:
+            scene_index = int(scene_item.get("scene_index") or 0)
+            start_ready = dict(scene_item.get("start_image") or {}).get("status") == "ready"
+            end_ready = dict(scene_item.get("end_image") or {}).get("status") == "ready"
+            if board.get("asset_mode") == "start_end":
+                scene_lines.append(
+                    f"• Cảnh {scene_index}: ảnh đầu <b>{'Đã có' if start_ready else 'Chưa có'}</b> · "
+                    f"ảnh cuối <b>{'Đã có' if end_ready else 'Chưa có'}</b>"
+                )
+            else:
+                scene_lines.append(f"• Cảnh {scene_index}: ảnh đầu <b>{'Đã có' if start_ready else 'Chưa có'}</b>")
+        await_keyboard = (
+            storyboard2_keyboard(storyboard2_nav("vstory|asset_view"))
+            if screen == "await_image" and str(board.get("awaiting_input") or "") == "image_upload_replace"
+            else storyboard2_asset_keyboard(board)
+        )
         return (
-            f"🖼️ <b>Ảnh Storyboard · cảnh {index}/{count}</b>\n\n"
-            f"• Ảnh đầu: <b>{'Đã có' if start.get('status') == 'ready' else 'Chưa có'}</b>\n"
-            f"• Ảnh cuối: <b>{end_status}</b>\n\n"
-            f"• Đang chọn: <b>{'Ảnh đầu' if str(board.get('active_slot') or 'start') == 'start' else 'Ảnh cuối'}</b>\n\n"
-            f"Tổng đã có: <b>{summary['ready_images']}/{summary['maximum_images']}</b> ảnh tối đa\n"
-            f"Đủ ảnh đầu: <b>{summary['ready_start']}/{count}</b> cảnh\n"
-            f"Cần tối thiểu {summary['minimum_images']} ảnh, tối đa {summary['maximum_images']} ảnh. "
-            "Ảnh cuối chỉ dùng khi gói hỗ trợ ảnh đầu–cuối."
+            "🖼️ <b>Ảnh Storyboard</b>\n\n"
+            f"• Chế độ: <b>{mode_label}</b>\n"
+            f"• Đã có: <b>{summary['ready_images']}/{summary['required_images']}</b> ảnh cần dùng\n\n"
+            + "\n".join(scene_lines)
+            + "\n\nMột nút nhận toàn bộ ảnh; ảnh được gắn lần lượt cho các cảnh, ảnh đầu trước rồi ảnh cuối. "
+            "Tạo ảnh AI dùng thẳng nội dung và câu lệnh Storyboard đã chọn, không mở thêm bộ gợi ý chung."
             + wait_copy,
-            storyboard2_asset_keyboard(board),
+            await_keyboard,
         )
     if screen in {"image_prompt", "await_image_prompt", "await_image_negative"}:
         slot = str(board.get("active_slot") or "start")
@@ -82777,7 +82854,7 @@ def storyboard2_prepare_quick_image(user_id: int, board: dict, prompt: str, nega
         style="storyboard continuity",
         suggested_ratio=str(board.get("aspect_ratio") or "9:16"),
         aspect_ratio=str(board.get("aspect_ratio") or "9:16"),
-        ratio_back_target="vstory|image_prompt_screen",
+        ratio_back_target="vstory|assets_screen",
         source_flow="video_scene3",
         return_to="vstory|image_return",
         return_label="⬅️ Ảnh Storyboard",
@@ -82820,8 +82897,8 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     # here first. Telegram accepts one answer per callback query; answering
     # twice is the source of repeated generic-X reports on stale/invalid taps.
     deferred_answer_actions = {
-        "count_help", "count", "ratio", "suggest_pick", "content_approve",
-        "assets_done", "image_full", "image_pick", "video_full", "video_done",
+        "count_help", "count", "ratio", "profile_help", "profile_pick", "suggest_pick", "content_approve",
+        "assets_done", "asset_ai_missing", "video_full", "video_done",
         "transition_pick", "addon", "finish",
     }
     if action not in deferred_answer_actions:
@@ -82875,19 +82952,52 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         entry_mode = str(board.get("entry_mode") or "guided")
         if entry_mode == "existing":
             board = video_storyboard2.move(board, "await_content", awaiting_input="content")
-        elif entry_mode == "ai":
-            board = video_storyboard2.move(board, "suggestions", awaiting_input="")
         else:
-            board = video_storyboard2.move(board, "content_choice")
+            board["profile_page"] = 1
+            board = video_storyboard2.move(board, "profiles", awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "profiles_screen":
+        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "profile_page":
+        board["profile_page"] = max(1, safe_int(value, 1))
+        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "profile_help":
+        return await query.answer(
+            "Có 32 loại nội dung, chia thành nhiều trang. Chọn đúng một loại để nhận 20 gợi ý liên quan; loại đã chọn không tự ghi đè nội dung anh/chị sửa.",
+            show_alert=True,
+        )
+    if action == "profile_pick":
+        profile = next(
+            (
+                dict(item)
+                for item in video_profile_catalog.PROFILE_SEEDS
+                if bool(item.get("is_active", 1)) and str(item.get("profile_key") or "") == value
+            ),
+            {},
+        )
+        if not profile:
+            return await query.answer("Loại nội dung này không còn khả dụng.", show_alert=True)
+        await query.answer()
+        board = video_storyboard2.set_profile(board, profile)
+        board = video_storyboard2.move(board, "suggestions", awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "content_screen":
-        board = video_storyboard2.move(board, "content_choice", push=False, awaiting_input="")
+        # Old content-choice callbacks are read-only redirects to the one
+        # canonical profile catalog; they do not restore the duplicate screen.
+        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "content_manual":
         board = video_storyboard2.move(board, "await_content", awaiting_input="content")
         return await storyboard2_render(query, context, persist(board))
     if action == "content_suggest":
-        board = video_storyboard2.move(board, "suggestions", awaiting_input="")
+        target = "suggestions" if dict(board.get("profile") or {}) else "profiles"
+        board = video_storyboard2.move(board, target, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "suggestions_screen":
+        target = "suggestions" if dict(board.get("profile") or {}) else "profiles"
+        board = video_storyboard2.move(board, target, push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "suggest_more":
         board = video_storyboard2.rotate_suggestions(board)
@@ -82910,7 +83020,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     if action == "scene_screen":
         board = video_storyboard2.move(board, "scene_review", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
-    if action in {"scene_prev", "scene_next", "asset_prev", "asset_next", "video_prev", "video_next"}:
+    if action in {"scene_prev", "scene_next", "video_prev", "video_next"}:
         count = max(1, int(board.get("scene_count") or 1))
         current = int(board.get("active_scene_index") or 1)
         delta = -1 if action.endswith("prev") else 1
@@ -82918,11 +83028,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         screen = (
             "scene_review"
             if action.startswith("scene")
-            else (
-                "asset_overview"
-                if action.startswith("asset") and str(board.get("screen") or "") == "asset_overview"
-                else ("assets" if action.startswith("asset") else "video_prompts")
-            )
+            else "video_prompts"
         )
         board = video_storyboard2.move(board, screen, push=False)
         return await storyboard2_render(query, context, persist(board))
@@ -82941,27 +83047,53 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "asset_view":
+        targets = video_storyboard2.image_targets(board)
+        active_target = (
+            int(board.get("active_scene_index") or 1),
+            str(board.get("active_slot") or "start"),
+        )
+        if targets and active_target not in {
+            (int(item.get("scene_index") or 1), str(item.get("slot") or "start"))
+            for item in targets
+        }:
+            board["active_scene_index"] = int(targets[0]["scene_index"])
+            board["active_slot"] = str(targets[0]["slot"])
         board = video_storyboard2.move(board, "asset_overview", awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
-    if action == "asset_upload":
-        slot = value if value in {"start", "end"} else "start"
-        board["active_slot"] = slot
-        if slot == "end":
-            board = video_storyboard2.set_end_mode(board, int(board.get("active_scene_index") or 1), "required")
-        board = video_storyboard2.move(board, "await_image", awaiting_input="image_upload")
+    if action == "asset_mode":
+        try:
+            board = video_storyboard2.set_asset_mode(board, value)
+        except ValueError:
+            board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
+            return await storyboard2_render(query, context, persist(board))
+        board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
-    if action == "asset_ai":
-        slot = value if value in {"start", "end"} else "start"
-        board["active_slot"] = slot
-        board["image_prompt_offset"] = 0
-        if slot == "end":
-            board = video_storyboard2.set_end_mode(board, int(board.get("active_scene_index") or 1), "required")
-        board = video_storyboard2.move(board, "image_prompt", awaiting_input="")
+    if action == "asset_upload_all":
+        board = video_storyboard2.move(board, "await_image", awaiting_input="image_upload_batch")
         return await storyboard2_render(query, context, persist(board))
-    if action == "asset_no_end":
-        board = video_storyboard2.set_end_mode(board, int(board.get("active_scene_index") or 1), "none")
-        board["active_slot"] = "end"
-        board = video_storyboard2.move(board, "assets", push=False)
+    if action in {"asset_prev", "asset_next"}:
+        targets = video_storyboard2.image_targets(board)
+        if targets:
+            active_target = (
+                int(board.get("active_scene_index") or 1),
+                str(board.get("active_slot") or "start"),
+            )
+            target_keys = [
+                (int(item.get("scene_index") or 1), str(item.get("slot") or "start"))
+                for item in targets
+            ]
+            try:
+                current_target_index = target_keys.index(active_target)
+            except ValueError:
+                current_target_index = 0
+            delta = -1 if action == "asset_prev" else 1
+            selected_target = targets[(current_target_index + delta) % len(targets)]
+            board["active_scene_index"] = int(selected_target["scene_index"])
+            board["active_slot"] = str(selected_target["slot"])
+        board = video_storyboard2.move(board, "asset_overview", push=False, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "asset_replace":
+        board = video_storyboard2.move(board, "await_image", awaiting_input="image_upload_replace")
         return await storyboard2_render(query, context, persist(board))
     if action == "asset_remove":
         board = video_storyboard2.remove_image(
@@ -82969,59 +83101,30 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             int(board.get("active_scene_index") or 1),
             str(board.get("active_slot") or "start"),
         )
-        board = video_storyboard2.move(board, "assets", push=False)
+        board = video_storyboard2.move(board, "asset_overview", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action in {"asset_move_prev", "asset_move_next"}:
-        count = max(1, int(board.get("scene_count") or 1))
-        current = int(board.get("active_scene_index") or 1)
-        delta = -1 if action.endswith("prev") else 1
-        target = ((current - 1 + delta) % count) + 1
-        board = video_storyboard2.move_image_to_scene(
-            board,
-            current,
-            target,
-            str(board.get("active_slot") or "start"),
-        )
-        board = video_storyboard2.move(board, "assets", push=False)
-        return await storyboard2_render(query, context, persist(board))
-    if action == "assets_done":
-        summary = video_storyboard2.asset_summary(board)
-        if not summary.get("ok"):
-            missing = summary.get("missing_start") or summary.get("missing_required_end") or []
-            return await query.answer(
-                "Chưa đủ ảnh bắt buộc cho cảnh: " + ", ".join(str(item) for item in missing),
-                show_alert=True,
+        source_index = int(board.get("active_scene_index") or 1)
+        target_index = source_index + (-1 if action == "asset_move_prev" else 1)
+        if 1 <= target_index <= int(board.get("scene_count") or 0):
+            board = video_storyboard2.move_image_to_scene(
+                board,
+                source_index,
+                target_index,
+                str(board.get("active_slot") or "start"),
             )
+        board = video_storyboard2.move(board, "asset_overview", push=False, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "asset_ai_missing":
+        target = video_storyboard2.next_missing_image_target(board)
+        if not target:
+            return await query.answer("Đã đủ ảnh theo chế độ Storyboard đang chọn.", show_alert=True)
         await query.answer()
-        board = video_storyboard2.compile_video_prompts(board)
-        board = video_storyboard2.move(board, "video_prompts", awaiting_input="")
-        return await storyboard2_render(query, context, persist(board))
-    if action == "image_prompt_screen":
-        board = video_storyboard2.move(board, "image_prompt", push=False, awaiting_input="")
-        return await storyboard2_render(query, context, persist(board))
-    if action == "image_more":
-        board["image_prompt_offset"] = (int(board.get("image_prompt_offset") or 0) + 5) % 20
-        return await storyboard2_render(query, context, persist(board))
-    if action == "image_custom":
-        board = video_storyboard2.move(board, "await_image_prompt", awaiting_input="image_prompt")
-        return await storyboard2_render(query, context, persist(board))
-    if action == "image_negative":
-        board = video_storyboard2.move(board, "await_image_negative", awaiting_input="image_negative")
-        return await storyboard2_render(query, context, persist(board))
-    if action == "image_full":
-        scene_index = int(board.get("active_scene_index") or 1)
-        slot = str(board.get("active_slot") or "start")
-        prompt = video_storyboard2.image_prompt(board, scene_index, slot, int(board.get("image_prompt_offset") or 0))
-        return await query.answer(prompt["prompt"][:1800], show_alert=True)
-    if action == "image_pick":
-        choice = safe_int(value, 0)
-        if choice < 1 or choice > 5:
-            return await query.answer("Gợi ý ảnh này không hợp lệ.", show_alert=True)
-        await query.answer()
-        scene_index = int(board.get("active_scene_index") or 1)
-        slot = str(board.get("active_slot") or "start")
-        variant = int(board.get("image_prompt_offset") or 0) + choice - 1
-        prompt = video_storyboard2.image_prompt(board, scene_index, slot, variant)
+        scene_index = int(target.get("scene_index") or 1)
+        slot = str(target.get("slot") or "start")
+        board["active_scene_index"] = scene_index
+        board["active_slot"] = slot
+        prompt = video_storyboard2.image_prompt(board, scene_index, slot, 0)
         scene = board["scenes"][scene_index - 1]
         image = dict(scene.get(f"{slot}_image") or {})
         image.update({
@@ -83039,12 +83142,32 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             parse_mode="HTML",
             reply_markup=quick_image_prepared_prompt_keyboard(
                 get_user_language(uid) or "vi",
-                back_callback="vstory|image_prompt_screen",
-                back_label="⬅️ Prompt ảnh",
+                back_callback="vstory|assets_screen",
+                back_label="⬅️ Ảnh Storyboard",
                 context_return_callback="vstory|image_return",
                 context_return_label="🖼️ Ảnh Storyboard",
             ),
         )
+    if action in {
+        "asset_upload", "asset_ai", "asset_no_end", "image_prompt_screen", "image_more", "image_custom",
+        "image_negative", "image_full", "image_pick",
+    }:
+        # Public per-scene/per-slot controls were retired. Old Telegram
+        # messages only return to the batch manager and never mutate assets.
+        board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "assets_done":
+        summary = video_storyboard2.asset_summary(board)
+        if not summary.get("ok"):
+            missing = summary.get("missing_start") or summary.get("missing_required_end") or []
+            return await query.answer(
+                "Chưa đủ ảnh bắt buộc cho cảnh: " + ", ".join(str(item) for item in missing),
+                show_alert=True,
+            )
+        await query.answer()
+        board = video_storyboard2.compile_video_prompts(board)
+        board = video_storyboard2.move(board, "video_prompts", awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
     if action == "video_screen":
         board = video_storyboard2.move(board, "video_prompts", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
@@ -83106,8 +83229,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         board = video_storyboard2.move(board, "review", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "one_image_mode":
-        for scene_index in range(1, int(board.get("scene_count") or 0) + 1):
-            board = video_storyboard2.set_end_mode(board, scene_index, "none")
+        board = video_storyboard2.set_asset_mode(board, "start_only")
         board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "addon":
@@ -86201,7 +86323,8 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
     if str(outer.get("step") or "") != "storyboard2" or not dict(outer.get("storyboard2") or {}):
         return False
     board = video_storyboard2.normalize_state(dict(outer.get("storyboard2") or {}))
-    if str(board.get("awaiting_input") or "") != "image_upload":
+    pending_image_action = str(board.get("awaiting_input") or "")
+    if pending_image_action not in {"image_upload_batch", "image_upload_replace"}:
         return False
     message_id = safe_int(getattr(update.message, "message_id", 0), 0)
     processed = [safe_int(item, 0) for item in board.get("processed_media_message_ids") or [] if safe_int(item, 0) > 0]
@@ -86220,20 +86343,36 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
         if mime_type.startswith("image/"):
             media = document
     if media is None:
+        media_back_callback = "vstory|asset_view" if pending_image_action == "image_upload_replace" else "vstory|assets_screen"
         await update.message.reply_text(
-            "⚠️ Bước này cần một ảnh PNG/JPG/WEBP. Phiên Storyboard và ô ảnh đang chọn vẫn được giữ; chưa tạo tác vụ và chưa trừ Xu.",
-            reply_markup=storyboard2_keyboard(storyboard2_nav("vstory|assets_screen")),
+            "⚠️ Bước này cần ảnh PNG/JPG/WEBP. Phiên nhận ảnh Storyboard vẫn được giữ; chưa tạo tác vụ và chưa trừ Xu.",
+            reply_markup=storyboard2_keyboard(storyboard2_nav(media_back_callback)),
         )
         return True
     file_id = str(getattr(media, "file_id", "") or "")
     if not file_id:
+        media_back_callback = "vstory|asset_view" if pending_image_action == "image_upload_replace" else "vstory|assets_screen"
         await update.message.reply_text(
             "⚠️ Không đọc được mã ảnh Telegram. Vui lòng gửi lại; chưa tạo tác vụ và chưa trừ Xu.",
-            reply_markup=storyboard2_keyboard(storyboard2_nav("vstory|assets_screen")),
+            reply_markup=storyboard2_keyboard(storyboard2_nav(media_back_callback)),
         )
         return True
-    scene_index = int(board.get("active_scene_index") or 1)
-    slot = str(board.get("active_slot") or "start")
+    target = (
+        {
+            "scene_index": int(board.get("active_scene_index") or 1),
+            "slot": str(board.get("active_slot") or "start"),
+        }
+        if pending_image_action == "image_upload_replace"
+        else video_storyboard2.next_missing_image_target(board)
+    )
+    if not target:
+        board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
+        save_storyboard2_state(context, board, outer)
+        payload, keyboard = storyboard2_screen_payload(board)
+        await update.message.reply_text(payload, parse_mode="HTML", reply_markup=keyboard)
+        return True
+    scene_index = int(target.get("scene_index") or 1)
+    slot = str(target.get("slot") or "start")
     record = video_storyboard2.image_record(
         scene_index=scene_index,
         slot=slot,
@@ -86245,12 +86384,32 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
             "mime_type": mime_type,
         },
     )
-    board = video_storyboard2.assign_image(board, scene_index, slot, record)
-    board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
+    if pending_image_action == "image_upload_replace":
+        board = video_storyboard2.assign_image(board, scene_index, slot, record)
+        remaining = video_storyboard2.image_targets(board, missing_only=True)
+        board = video_storyboard2.move(board, "asset_overview", push=False, awaiting_input="")
+    else:
+        board = video_storyboard2.assign_next_image(board, record)
+        remaining = video_storyboard2.image_targets(board, missing_only=True)
+        board = video_storyboard2.move(
+            board,
+            "await_image" if remaining else "assets",
+            push=False,
+            awaiting_input="image_upload_batch" if remaining else "",
+        )
     save_storyboard2_state(context, board, outer)
     payload, keyboard = storyboard2_screen_payload(board)
+    slot_label = "ảnh đầu" if slot == "start" else "ảnh cuối"
+    if pending_image_action == "image_upload_replace":
+        status_line = f"✅ Đã thay {slot_label} cảnh {scene_index}."
+    else:
+        status_line = (
+            f"✅ Đã nhận {slot_label} cảnh {scene_index}. Còn {len(remaining)} ảnh cần gửi."
+            if remaining
+            else f"✅ Đã nhận {slot_label} cảnh {scene_index} và đủ toàn bộ ảnh Storyboard."
+        )
     await update.message.reply_text(
-        f"✅ Đã gắn ảnh vào cảnh {scene_index} ({'ảnh đầu' if slot == 'start' else 'ảnh cuối'}). Chưa gọi provider và chưa trừ Xu.\n\n{payload}",
+        f"{status_line} Chưa gọi provider và chưa trừ Xu.\n\n{payload}",
         parse_mode="HTML",
         reply_markup=keyboard,
     )
@@ -152115,6 +152274,17 @@ def public_image_success_keyboard(
         "vi": "🖼 Tạo ảnh nữa",
         "zh": "🖼 再创建一张图片",
     }.get(normalize_user_language(lang), "🖼 Create another image")
+    if return_callback == "vstory|image_return":
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data=return_callback),
+                retry_button,
+            ],
+            [
+                InlineKeyboardButton(return_label or "⬅️ Ảnh Storyboard", callback_data=return_callback),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main"),
+            ],
+        ])
     if return_callback:
         return InlineKeyboardMarkup([
             [
