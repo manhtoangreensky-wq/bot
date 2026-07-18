@@ -16,11 +16,12 @@ from services import frame_video_runtime
 PUBLIC_JOB_TYPE = "frame_video_local"
 WORKER_JOB_TYPE = "frame_video_render"
 EXECUTION_OWNER = "local_worker"
-PRICING_SOURCE = "tiered_media_pricing"
+PRICING_SOURCE = "frame_video_fixed_quality_promo_v1"
 
 QUALITY_DETAILS = {
     "fast": {
         "label": "Nhanh",
+        "price_xu": 50,
         "technology": "FFmpeg local, H.264",
         "strength": "Tạo nhanh, file gọn, phù hợp xem trên điện thoại",
         "limit": "Ít chi tiết hơn ở chuyển động và chữ nhỏ",
@@ -28,6 +29,7 @@ QUALITY_DETAILS = {
     },
     "balanced": {
         "label": "Cân bằng",
+        "price_xu": 100,
         "technology": "FFmpeg local, H.264 chất lượng cân bằng",
         "strength": "Cân bằng độ nét, tốc độ và dung lượng",
         "limit": "Không tạo chuyển động AI mới từ ảnh",
@@ -35,6 +37,7 @@ QUALITY_DETAILS = {
     },
     "beautiful": {
         "label": "Đẹp",
+        "price_xu": 200,
         "technology": "FFmpeg local, H.264 ưu tiên chi tiết",
         "strength": "Giữ chữ, cạnh và chi tiết ảnh tốt hơn",
         "limit": "Render lâu hơn và file lớn hơn",
@@ -207,17 +210,16 @@ def video_quote(
     if quality not in QUALITY_DETAILS:
         quality = "balanced"
     quality_detail = dict(QUALITY_DETAILS[quality])
-    total = max(0, _safe_int(breakdown.get("total"), 0))
-    free_duration_entitlement = bool(
-        breakdown.get("free_duration_entitlement")
-        and str(breakdown.get("pricing_source") or "").startswith("frame_video_duration_progressive")
-    )
+    base_xu = max(0, _safe_int(quality_detail.get("price_xu"), 0))
+    addon_xu = max(0, _safe_int(breakdown.get("addon_xu"), 0))
+    music_xu = max(0, _safe_int(breakdown.get("music_xu"), 0))
+    total = base_xu + addon_xu + music_xu
     blockers: list[str] = []
     if str(clean.get("commercial_flow_version") or "") == "framevideo3" and not bool(
         clean.get("duration_confirmed")
     ):
         blockers.append("duration_confirmation_missing")
-    if total <= 0 and not free_duration_entitlement:
+    if total <= 0:
         blockers.append("video_pricing_unavailable")
     return {
         "ok": not blockers,
@@ -234,11 +236,11 @@ def video_quote(
         "quality_detail": quality_detail,
         "transition": str(clean.get("transition") or "fade"),
         "motion": str(clean.get("motion") or "none"),
-        "base_xu": max(0, _safe_int(breakdown.get("base"), 0)),
-        "addon_xu": max(0, _safe_int(breakdown.get("addon_xu"), 0)),
-        "music_xu": max(0, _safe_int(breakdown.get("music_xu"), 0)),
+        "base_xu": base_xu,
+        "addon_xu": addon_xu,
+        "music_xu": music_xu,
         "total_price_xu": total,
-        "free_duration_entitlement": free_duration_entitlement,
+        "free_duration_entitlement": False,
     }
 
 

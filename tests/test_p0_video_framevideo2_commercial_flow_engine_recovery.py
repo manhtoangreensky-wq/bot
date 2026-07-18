@@ -250,7 +250,9 @@ def test_video_quote_and_preflight_are_nonzero_provider_free_and_owner_aware() -
         {"base": 40, "addon_xu": 10, "music_xu": 5, "total": 55},
     )
     assert quote["ok"] is True
-    assert quote["total_price_xu"] == 55
+    assert quote["base_xu"] == 100
+    assert quote["total_price_xu"] == 115
+    assert quote["pricing_source"] == "frame_video_fixed_quality_promo_v1"
     assert quote["public_job_type"] == "frame_video_local"
     assert quote["mapped_job_type"] == "frame_video_render"
 

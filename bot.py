@@ -1682,8 +1682,8 @@ FRAME_VIDEO_DURATION_SLOW_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_SLOW_EXTRA_XU
 FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU", 20)
 FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU", 30)
 FRAME_VIDEO_ENABLED = env_flag("FRAME_VIDEO_ENABLED", "true")
-FRAME_VIDEO_DIRECT_RENDER_ENABLED = env_flag("FRAME_VIDEO_DIRECT_RENDER_ENABLED", "false")
-FRAME_VIDEO_REQUIRE_LOCAL_WORKER = env_flag("FRAME_VIDEO_REQUIRE_LOCAL_WORKER", "true")
+FRAME_VIDEO_DIRECT_RENDER_ENABLED = env_flag("FRAME_VIDEO_DIRECT_RENDER_ENABLED", "true")
+FRAME_VIDEO_REQUIRE_LOCAL_WORKER = env_flag("FRAME_VIDEO_REQUIRE_LOCAL_WORKER", "false")
 FRAME_VIDEO_MAX_IMAGES = max(2, min(100, env_int("FRAME_VIDEO_MAX_IMAGES", 20)))
 FRAME_VIDEO_MAX_OUTPUT_SECONDS = max(5, env_int("FRAME_VIDEO_MAX_OUTPUT_SECONDS", 160))
 FRAME_VIDEO_MAX_INPUT_MB = max(1, env_int("FRAME_VIDEO_MAX_INPUT_MB", 50))
@@ -71443,6 +71443,28 @@ def video_public_route_for_tool(tool_id: str) -> dict:
     return dict(VIDEO_PUBLIC_ROUTE_MATRIX.get(str(tool_id or "")) or {})
 
 
+def video_public_product_flow_access(product_id: str) -> dict:
+    product = str(product_id or "").strip()
+    route = video_public_route_for_tool(product)
+    if not route or product not in VIDEO_PRODUCT_REGISTRY:
+        return {
+            "product_id": product,
+            "flow_access_allowed": False,
+            "flow_block_reason": "unknown_video_product",
+        }
+    if product == "multi_scene_film":
+        return {
+            "product_id": product,
+            "flow_access_allowed": False,
+            "flow_block_reason": "long_form_video_in_development",
+        }
+    return {
+        "product_id": product,
+        "flow_access_allowed": True,
+        "flow_block_reason": "",
+    }
+
+
 VIDEO_PROFILE_FIRST_PRODUCTS = frozenset()
 
 VIDEO_INTRO_THEN_PROFILE_PRODUCTS = frozenset({
@@ -83362,9 +83384,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         legacy_state["screen"] = "entry"
         return await video_trend2_render(query, context, legacy_state, lang)
     if action == "open":
-        if value not in VIDEO_PRODUCT_REGISTRY:
+        flow_access = video_public_product_flow_access(value)
+        if not flow_access.get("flow_access_allowed") and value != "multi_scene_film":
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
-        if value == "multi_scene_film":
+        if flow_access.get("flow_block_reason") == "long_form_video_in_development":
             clear_video_session(uid)
             return await safe_edit_or_send(
                 query,
@@ -87808,8 +87831,8 @@ def menu_text_main_video() -> str:
     )
 
 def video_ai_true_text(lang: str = "vi") -> str:
-    enabled, _message = shopaikey_public_generation_guard("video")
-    enabled = bool(enabled and VIDEO_AI_PUBLIC_ENABLED)
+    flow_access = shopaikey_public_flow_access_guard("video")
+    enabled = bool(flow_access.get("flow_access_allowed"))
     if normalize_user_language(lang) == "zh":
         warning = "" if enabled else "\n\n🎬 真实 AI 视频目前维护中或尚未公开。TOAN AAS 未扣除 Xu。你可以先用 Trend 视频生成 prompt/计划。"
         return (
@@ -137720,87 +137743,57 @@ def frame_video_audio_extra_for_state(state: dict) -> int:
 
 def frame_video_price_breakdown(state: dict) -> dict:
     state = state if isinstance(state, dict) else {}
-    if bool(state.get("img2vid_lock1")) and str(state.get("commercial_flow_version") or "") != "framevideo2":
-        base = img2vid_slideshow_price_for_state(state)
-        duration_seconds = float(base.get("total_seconds") or 0)
-        # Uploaded subtitle/voice/music files are assets, not provider jobs. They
-        # remain free here; only an explicit generated-service request gets a
-        # catalog add-on price before the separate final confirmation.
-        generated_subtitle = bool(
-            state.get("subtitle_generation_requested")
-            or str(state.get("subtitle_source") or "").lower() in {"generated", "auto", "ai"}
-        )
-        generated_voice = bool(
-            state.get("voice_generation_requested")
-            or str(state.get("voice_source") or "").lower() in {"generated", "tts", "ai", "default_male", "default_female"}
-        )
-        generated_music = bool(
-            state.get("music_generation_requested")
-            or str(state.get("music_source") or "").lower() in {"generated", "ai", "suno"}
-        )
-        addon = calculate_video_addon_price(
-            duration_seconds,
-            "subtitle" if generated_subtitle else "none",
-            "dubbing" if generated_voice else "none",
-            bool(state.get("translation_enabled")),
-        )
-        music = calculate_music_price(
-            duration_seconds=duration_seconds,
-            music_option="ai" if generated_music else "none",
-        )
-        video_base = int(base.get("total") or 0)
-        total = video_base + int(addon.get("addon_xu") or 0) + int(music.get("music_xu") or 0)
-        return {
-            **base,
-            "base": int(video_base),
-            "duration_extra": int(base.get("duration_extra") or 0),
-            "subtitle_xu": int(addon.get("subtitle_xu") or 0),
-            "dubbing_xu": int(addon.get("dubbing_xu") or 0),
-            "addon_xu": int(addon.get("addon_xu") or 0),
-            "music_xu": int(music.get("music_xu") or 0),
-            "estimated_vnd": int(total) * int(XU_TO_VND or 100),
-            "total": int(total),
-            "price_xu": int(total),
-            "generated_subtitle": generated_subtitle,
-            "generated_voice": generated_voice,
-            "generated_music": generated_music,
-            "pricing_source": "frame_video_duration_progressive_v1_plus_addons",
-        }
-    count = len(state.get("photos") or [])
     duration_seconds = frame_video_estimated_output_seconds(state)
-    quality = {
-        "fast": "fast",
-        "balanced": "standard",
-        "beautiful": "high",
-    }.get(str(state.get("quality") or "balanced"), "standard")
-    subtitle_option = "subtitle" if bool(state.get("subtitle_enabled") and state.get("subtitle_text")) else "none"
-    dubbing_option = "dubbing" if bool(state.get("voice_enabled") and state.get("voice_file_id")) else "none"
-    music_option = "user_upload" if bool(state.get("music_enabled") and state.get("music_file_id")) else "none"
-    pricing = calculate_video_total_price(
-        duration_seconds,
-        "local_frame_video",
-        quality,
-        subtitle_option,
-        dubbing_option,
-        bool(state.get("translation_enabled")),
-        segment_seconds=duration_seconds,
-        music_option=music_option,
+    quality = str(state.get("quality") or "balanced")
+    if quality not in frame_video_commercial.QUALITY_DETAILS:
+        quality = "balanced"
+    base_xu = int(frame_video_commercial.QUALITY_DETAILS[quality].get("price_xu") or 0)
+    generated_subtitle = bool(
+        state.get("subtitle_generation_requested")
+        or str(state.get("subtitle_source") or "").lower() in {"generated", "auto", "ai"}
     )
+    generated_voice = bool(
+        state.get("voice_generation_requested")
+        or str(state.get("voice_source") or "").lower()
+        in {"generated", "tts", "ai", "default_male", "default_female"}
+    )
+    generated_music = bool(
+        state.get("music_generation_requested")
+        or str(state.get("music_source") or "").lower() in {"generated", "ai", "suno"}
+    )
+    addon = calculate_video_addon_price(
+        duration_seconds,
+        "subtitle" if generated_subtitle else "none",
+        "dubbing" if generated_voice else "none",
+        bool(state.get("translation_enabled")),
+    )
+    music = calculate_music_price(
+        duration_seconds=duration_seconds,
+        music_option="ai" if generated_music else "none",
+    )
+    addon_xu = int(addon.get("addon_xu") or 0)
+    music_xu = int(music.get("music_xu") or 0)
+    total = base_xu + addon_xu + music_xu
     return {
-        "image_count": max(2, int(count or 0)),
+        "image_count": max(2, len(state.get("photos") or [])),
         "duration_seconds": int(math.ceil(duration_seconds or 0)),
-        "base": int(pricing.get("base_video_xu") or 0),
+        "base": base_xu,
         "duration_extra": 0,
         "effect_extra": 0,
         "audio_extra": 0,
-        "subtitle_xu": int(pricing.get("subtitle_xu") or 0),
-        "dubbing_xu": int(pricing.get("dubbing_xu") or 0),
-        "addon_xu": int(pricing.get("addon_xu") or 0),
-        "music_xu": int(pricing.get("music_xu") or 0),
-        "estimated_vnd": int(pricing.get("estimated_vnd") or 0),
-        "total": int(pricing.get("total_xu") or 0),
-        "pricing_source": "tiered_media_pricing",
-        "quality": str(state.get("quality") or "balanced"),
+        "subtitle_xu": int(addon.get("subtitle_xu") or 0),
+        "dubbing_xu": int(addon.get("dubbing_xu") or 0),
+        "addon_xu": addon_xu,
+        "music_xu": music_xu,
+        "estimated_vnd": total * int(XU_TO_VND or 100),
+        "total": total,
+        "price_xu": total,
+        "free_duration_entitlement": False,
+        "generated_subtitle": generated_subtitle,
+        "generated_voice": generated_voice,
+        "generated_music": generated_music,
+        "pricing_source": frame_video_commercial.PRICING_SOURCE,
+        "quality": quality,
     }
 
 def frame_video_status_payload() -> dict:
@@ -137949,9 +137942,14 @@ def frame_video_commercial_preflight(state: dict, user_id=0) -> dict:
         and worker_ffmpeg_path
         and worker.get("ffprobe_path_configured")
     )
-    direct_allowed = bool(FRAME_VIDEO_DIRECT_RENDER_ENABLED and not FRAME_VIDEO_REQUIRE_LOCAL_WORKER)
-    ffmpeg_path = frame_video_ffmpeg_path() if direct_allowed else ""
-    ffprobe_path = ffprobe_path_for_ffmpeg(ffmpeg_path) if ffmpeg_path else ""
+    # The public route follows actual runtime capability. Railway already ships
+    # FFmpeg/ffprobe, so stale legacy flags must not force a healthy deployment
+    # to wait forever for an external worker.
+    candidate_ffmpeg = frame_video_ffmpeg_path()
+    candidate_ffprobe = ffprobe_path_for_ffmpeg(candidate_ffmpeg) if candidate_ffmpeg else ""
+    direct_allowed = bool(candidate_ffmpeg and candidate_ffprobe)
+    ffmpeg_path = candidate_ffmpeg if direct_allowed else ""
+    ffprobe_path = candidate_ffprobe if direct_allowed else ""
     quote = frame_video_commercial.video_quote(clean, frame_video_price_breakdown(clean))
     result = frame_video_commercial.preflight(
         clean,
@@ -138837,34 +138835,23 @@ def frame_video_duration_menu_text(state: dict, selected_only: bool = False) -> 
             "Thời lượng nay được chọn một lần cho cả video ở bước riêng để giá không bị lệch. "
             "Quay lại quản lý ảnh rồi bấm <b>Dùng các ảnh này</b>."
         )
-    count = len(clean.get("photos") or [])
     current_seconds = _safe_float(clean.get("seconds_per_image"), 3.0)
-    current_price = img2vid_slideshow_price_breakdown(count, current_seconds)
     selected_text = (
-        f"<b>{current_seconds:g} giây/ảnh</b> · "
-        f"<b>{current_price['duration_seconds']} giây tính giá</b> · "
-        f"<b>{xu_number(int(current_price['price_xu']))} Xu</b>"
+        f"<b>{current_seconds:g} giây/ảnh</b>"
         if clean.get("duration_confirmed")
         else "<b>Chưa chọn</b>"
     )
-    rows = []
-    for value in (2, 3, 4, 5, 8):
-        preview = img2vid_slideshow_price_breakdown(count, value)
-        rows.append(
-            f"• {value} giây/ảnh → {preview['duration_seconds']} giây · "
-            f"{xu_number(int(preview['price_xu']))} Xu"
-        )
+    count = len(clean.get("photos") or [])
+    total_seconds = max(0, int(math.ceil(count * current_seconds)))
     return (
-        "⏱️ <b>Chọn thời lượng và xem giá</b>\n\n"
+        "⏱️ <b>Chọn thời lượng mỗi ảnh</b>\n\n"
         f"• Số ảnh: <b>{count}</b>\n"
-        f"• Đang chọn: {selected_text}\n\n"
-        "<b>Bảng giá lũy tiến theo tổng thời lượng ảnh:</b>\n"
-        "• 0–5 giây: 0 Xu\n"
-        "• Phần từ trên 5 đến 10 giây: 20 Xu/giây\n"
-        "• Phần từ trên 10 đến 20 giây: 15 Xu/giây\n"
-        "• Phần trên 20 giây: 10 Xu/giây\n\n"
-        + "\n".join(rows)
-        + "\n\nGiá được tính theo từng phần vượt mốc. Phải chọn một mức rồi mới tiếp tục."
+        f"• Đang chọn: {selected_text}\n"
+        f"• Video dự kiến: <b>{total_seconds} giây</b>\n\n"
+        "Thời lượng quyết định nhịp xem, không thay đổi giá gói dựng. "
+        "Giá cố định được chọn ở bước Hoàn thiện video: Nhanh 50 Xu, "
+        "Cân bằng 100 Xu hoặc Đẹp 200 Xu.\n\n"
+        "Phải chọn một mức thời lượng rồi mới tiếp tục."
     )
 
 
@@ -138879,17 +138866,10 @@ def frame_video_duration_menu_keyboard(
                 InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"),
                 InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
             ]])
-        clean = normalize_frame_video_state(state)
-        count = len(clean.get("photos") or [])
-
-        def option_label(value: int) -> str:
-            price = img2vid_slideshow_price_breakdown(count, value)
-            return f"{value}s/ảnh · {xu_number(int(price['price_xu']))} Xu"
-
         rows = [
-            [InlineKeyboardButton(option_label(2), callback_data="framevideo|duration_set|all|2"), InlineKeyboardButton(option_label(3), callback_data="framevideo|duration_set|all|3")],
-            [InlineKeyboardButton(option_label(4), callback_data="framevideo|duration_set|all|4"), InlineKeyboardButton(option_label(5), callback_data="framevideo|duration_set|all|5")],
-            [InlineKeyboardButton(option_label(8), callback_data="framevideo|duration_set|all|8"), InlineKeyboardButton("✍️ Nhập số khác", callback_data="framevideo|duration_custom|all")],
+            [InlineKeyboardButton("2 giây/ảnh", callback_data="framevideo|duration_set|all|2"), InlineKeyboardButton("3 giây/ảnh", callback_data="framevideo|duration_set|all|3")],
+            [InlineKeyboardButton("4 giây/ảnh", callback_data="framevideo|duration_set|all|4"), InlineKeyboardButton("5 giây/ảnh", callback_data="framevideo|duration_set|all|5")],
+            [InlineKeyboardButton("8 giây/ảnh", callback_data="framevideo|duration_set|all|8"), InlineKeyboardButton("✍️ Nhập số khác", callback_data="framevideo|duration_custom|all")],
             [InlineKeyboardButton("✅ Dùng thời lượng này", callback_data="framevideo|duration_done")],
             [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
         ]
@@ -139144,8 +139124,8 @@ def frame_video_quality_keyboard(state: dict | None = None) -> InlineKeyboardMar
     done_callback = "framevideo|continue" if is_framevideo3 else "framevideo|panel"
     done_label = "✅ Bước tiếp theo" if is_framevideo3 else "✅ Hoàn thiện video"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Nhanh", callback_data="framevideo|quality_set|fast"), InlineKeyboardButton("⭐ Cân bằng", callback_data="framevideo|quality_set|balanced")],
-        [InlineKeyboardButton("💎 Đẹp", callback_data="framevideo|quality_set|beautiful"), InlineKeyboardButton(done_label, callback_data=done_callback)],
+        [InlineKeyboardButton("⚡ Nhanh · 50 Xu", callback_data="framevideo|quality_set|fast"), InlineKeyboardButton("⭐ Cân bằng · 100 Xu", callback_data="framevideo|quality_set|balanced")],
+        [InlineKeyboardButton("💎 Đẹp · 200 Xu", callback_data="framevideo|quality_set|beautiful"), InlineKeyboardButton(done_label, callback_data=done_callback)],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|review" if is_framevideo3 else "framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
@@ -139188,7 +139168,12 @@ def frame_video_quality_text(state: dict) -> str:
                 f"  Lưu ý: {html.escape(str(detail['limit']))}.",
             ]
         )
-    lines.extend(["", "Giá cuối được khóa ở hóa đơn riêng. Preflight chạy lại ngay trước hóa đơn và không tạo job khi chưa đạt."])
+    lines.extend([
+        "",
+        "Giá gói dựng là giá khuyến mãi cố định, không đổi theo độ dài video. "
+        "Dịch vụ tạo thêm nếu có được ghi riêng ở hóa đơn. Preflight chạy lại "
+        "ngay trước hóa đơn và không tạo job khi chưa đạt.",
+    ])
     return "\n".join(lines)
 
 
@@ -139228,12 +139213,12 @@ def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> st
             [
                 "",
                 "<b>Hóa đơn dựng MP4</b>",
-                f"• Thời lượng tính giá: <b>{int(price.get('duration_seconds') or 0)} giây</b>",
-                f"• Dựng video: <b>{xu_number(int(price.get('base') or 0))} Xu</b>",
+                f"• Thời lượng video: <b>{int(price.get('duration_seconds') or 0)} giây</b>",
+                f"• Gói dựng cố định: <b>{xu_number(int(price.get('base') or 0))} Xu</b>",
                 f"• Tùy chọn bổ sung: <b>{xu_number(int(price.get('addon_xu') or 0))} Xu</b>",
                 f"• Nhạc: <b>{xu_number(int(price.get('music_xu') or 0))} Xu</b>",
                 f"• Tổng video dự kiến: <b>{xu_number(cost)} Xu</b>",
-                "• Giá thời lượng: 0–5 giây miễn phí; phần 6–10 giây 20 Xu/giây; phần 11–20 giây 15 Xu/giây; phần trên 20 giây 10 Xu/giây.",
+                "• Giá gói dựng không đổi theo thời lượng video.",
                 "• Mức giá gồm đúng phần dựng và các dịch vụ tạo thêm đã chọn.",
                 "• Phí ảnh AI đã giao được đối soát riêng và không cộng lại vào hóa đơn video.",
                 "Xu video chỉ được ghi sau khi MP4 hợp lệ đã gửi thành công.",
@@ -162564,25 +162549,38 @@ async def handle_frame_video_assets_done(
 ):
     """Finish the image stage through one owner and always expose the next screen."""
 
-    state = normalize_frame_video_state(state)
-    expected = _safe_int(state.get("image_count"), 0)
-    received = len(state.get("photos") or [])
-    if expected < 2:
-        state.update({"step": "image_count", "pending_input": ""})
-        text = ivf.frame_video_image_count_text(0, lang)
-        markup = ivf.frame_video_image_count_keyboard(lang)
-        parse_mode = "HTML"
-    elif received != expected:
-        state.update({"step": "collect", "pending_input": ""})
-        text = f"⚠️ Cần đúng {expected} ảnh; hiện đã nhận {received}. Hãy gửi đủ trước khi tiếp tục."
+    try:
+        state = normalize_frame_video_state(state)
+        expected = _safe_int(state.get("image_count"), 0)
+        received = len(state.get("photos") or [])
+        if expected < 2:
+            state.update({"step": "image_count", "pending_input": ""})
+            text = ivf.frame_video_image_count_text(0, lang)
+            markup = ivf.frame_video_image_count_keyboard(lang)
+            parse_mode = "HTML"
+        elif received != expected:
+            state.update({"step": "collect", "pending_input": ""})
+            text = f"⚠️ Cần đúng {expected} ảnh; hiện đã nhận {received}. Hãy gửi đủ trước khi tiếp tục."
+            markup = frame_video_collect_keyboard("framevideo|ratio_first_menu", state)
+            parse_mode = None
+        else:
+            state.update({"step": "duration", "pending_input": ""})
+            text = frame_video_duration_menu_text(state)
+            markup = frame_video_duration_menu_keyboard(False, state)
+            parse_mode = "HTML"
+        set_frame_video_state(uid, state)
+    except Exception as exc:
+        logger.error(
+            "framevideo assets_done route failed | uid=%s | %s",
+            uid,
+            sanitize_log_text(str(exc))[:240],
+        )
+        text = (
+            "⚠️ Chưa mở được bước thời lượng. Ảnh vẫn được giữ nguyên; "
+            "anh/chị hãy bấm Dùng các ảnh này lại một lần."
+        )
         markup = frame_video_collect_keyboard("framevideo|ratio_first_menu", state)
         parse_mode = None
-    else:
-        state.update({"step": "duration", "pending_input": ""})
-        text = frame_video_duration_menu_text(state)
-        markup = frame_video_duration_menu_keyboard(False, state)
-        parse_mode = "HTML"
-    set_frame_video_state(uid, state)
 
     try:
         return await safe_edit_or_send(
@@ -164201,7 +164199,15 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
 
 async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as exc:
+        # A repeated or slightly old Telegram callback must not abort the
+        # canonical route and surface the global generic-X handler.
+        logger.warning(
+            "framevideo callback answer skipped | %s",
+            sanitize_log_text(str(exc))[:180],
+        )
     data = query.data or ""
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
