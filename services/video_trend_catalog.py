@@ -19,6 +19,20 @@ from typing import Any, Callable, Iterable, Mapping
 SCHEMA_VERSION = 1
 DEFAULT_MAX_AGE_DAYS = 14
 DEFAULT_REFRESH_DAYS = 7
+MEDIA_TREND_TERMS = (
+    "tiktok", "reels", "shorts", "youtube short", "facebook reel", "instagram reel",
+    "meme", "challenge", "thử thách", "âm thanh", "audio", "sound", "remix",
+    "transition", "chuyển cảnh", "hiệu ứng", "effect", "hook", "mở đầu",
+    "pov", "ugc", "unboxing", "đập hộp", "review", "livestream", "viral",
+    "dance", "nhảy", "biến hình", "storytime", "duet", "stitch", "capcut",
+    "template", "filter", "video format", "format video", "phong cách quay",
+    "cách quay", "quảng cáo ngắn", "video quảng cáo",
+)
+MEDIA_PLATFORM_TERMS = (
+    "tiktok", "youtube shorts", "shorts", "instagram reels", "facebook reels",
+    "reels", "mạng xã hội", "social video",
+)
+GENERIC_SEARCH_ONLY_TITLES = {"nghệ", "fpt", "vtv5"}
 SOURCE_REGISTRY = {
     "google_trends_vn": {
         "name": "Google Trends - Việt Nam",
@@ -162,6 +176,46 @@ def _trend_id(source_name: str, source_url: str, title: str) -> str:
     return "tr_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
+def _media_search_text(raw: Mapping[str, Any]) -> str:
+    keywords = raw.get("keywords") or []
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    return " ".join(
+        _clean(value, 1000).casefold()
+        for value in (
+            raw.get("title"), raw.get("short_title"), raw.get("summary"),
+            raw.get("platform"), raw.get("category"), raw.get("evidence"),
+            *list(keywords),
+        )
+        if _clean(value, 1000)
+    )
+
+
+def is_media_trend(raw: Mapping[str, Any]) -> bool:
+    """Return true only when the record describes a reusable media trend."""
+
+    title = _clean(raw.get("title") or raw.get("short_title"), 240).casefold()
+    platform = _clean(raw.get("platform"), 160).casefold()
+    searchable = _media_search_text(raw)
+    if title in GENERIC_SEARCH_ONLY_TITLES and not any(term in platform for term in MEDIA_PLATFORM_TERMS):
+        return False
+    platform_match = any(term in platform for term in MEDIA_PLATFORM_TERMS)
+    format_match = any(term in searchable for term in MEDIA_TREND_TERMS)
+    return bool(platform_match or format_match)
+
+
+def _deduplicate_media_items(items: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
+    for raw in items:
+        if not isinstance(raw, Mapping) or not is_media_trend(raw):
+            continue
+        title = re.sub(r"[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+", " ", _clean(raw.get("title"), 240).casefold()).strip()
+        key = title or _clean(raw.get("source_url"), 1000).casefold()
+        if key and key not in unique:
+            unique[key] = dict(raw)
+    return list(unique.values())
+
+
 def normalize_item(
     raw: Mapping[str, Any],
     *,
@@ -283,6 +337,47 @@ def list_items(conn, *, limit: int = 5, offset: int = 0, category: str = "", inc
     return result
 
 
+def list_media_items(
+    conn,
+    *,
+    limit: int = 5,
+    offset: int = 0,
+    category: str = "",
+    historical: bool = False,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """List only media trends; inactive rows form the historical catalog."""
+
+    ensure_schema(conn)
+    clauses = ["is_active=0" if historical else "is_active=1"]
+    params: list[Any] = []
+    if category:
+        clauses.append("category=?")
+        params.append(str(category))
+    rows = conn.execute(
+        f"SELECT {','.join(_ITEM_COLUMNS)} FROM trend_items WHERE {' AND '.join(clauses)} "
+        "ORDER BY last_verified_at DESC, source_published_at DESC, title ASC",
+        tuple(params),
+    ).fetchall()
+    current = now or utc_now()
+    media_rows: list[dict[str, Any]] = []
+    for row in rows:
+        item = _row_dict(row)
+        if not is_media_trend(item):
+            continue
+        expires = parse_time(item.get("expires_at"))
+        item["stale"] = bool(historical or (expires and expires < current))
+        media_rows.append(item)
+    start = max(0, int(offset or 0))
+    size = max(1, min(100, int(limit or 5)))
+    return media_rows[start:start + size]
+
+
+def list_media_categories(conn, *, historical: bool = False) -> list[str]:
+    rows = list_media_items(conn, limit=100, historical=historical)
+    return sorted({str(row.get("category") or "").strip() for row in rows if str(row.get("category") or "").strip()})
+
+
 def get_item(conn, trend_id: str) -> dict[str, Any]:
     ensure_schema(conn)
     row = conn.execute(
@@ -369,8 +464,10 @@ def refresh_catalog(
             all_items.extend(fetcher(source) or [])
         except Exception as exc:  # Cache is intentionally kept on source failure.
             blockers.append(f"{key}:{type(exc).__name__}")
-    counts = upsert_items(conn, all_items, now=now, max_age_days=max_age_days) if all_items else {"inserted": 0, "updated": 0}
-    success = bool(all_items)
+    media_items = _deduplicate_media_items(all_items)
+    rejected_count = max(0, len(all_items) - len(media_items))
+    counts = upsert_items(conn, media_items, now=now, max_age_days=max_age_days) if media_items else {"inserted": 0, "updated": 0}
+    success = bool(media_items)
     # A source outage must not empty the public menu. Expiration resumes only
     # after at least one source returned a fresh, attributable item.
     expired = expire_items(conn, now=now) if success else 0
@@ -383,6 +480,7 @@ def refresh_catalog(
         "inserted_count": counts["inserted"],
         "updated_count": counts["updated"],
         "expired_count": expired,
+        "rejected_count": rejected_count,
         "blocker": ";".join(blockers),
         "cache_preserved": not success,
         "paid_provider_calls": 0,
@@ -416,12 +514,17 @@ def refresh_status(conn) -> dict[str, Any]:
         return {
             "last_run_at": "", "last_success_at": "", "next_run_at": "",
             "sources_checked": [], "inserted_count": 0, "updated_count": 0,
-            "expired_count": 0, "blocker": "not_refreshed_yet",
+            "expired_count": 0, "rejected_count": 0,
+            "blocker": "not_refreshed_yet",
         }
     try:
         sources = json.loads(row[3] or "[]")
     except (TypeError, ValueError):
         sources = []
+    try:
+        detail = json.loads(row[8] or "{}")
+    except (TypeError, ValueError):
+        detail = {}
     return {
         "last_run_at": row[0] or "",
         "last_success_at": row[1] or "",
@@ -430,6 +533,7 @@ def refresh_status(conn) -> dict[str, Any]:
         "inserted_count": int(row[4] or 0),
         "updated_count": int(row[5] or 0),
         "expired_count": int(row[6] or 0),
+        "rejected_count": int(detail.get("rejected_count") or 0),
         "blocker": row[7] or "",
     }
 

@@ -134,9 +134,9 @@ ENTRY_ROWS = {
     ),
     "video_trend": (
         (("🔥 Trend mới nhất", "vtrend|catalog|latest"),
-         ("🗂️ Trend theo nhóm", "vtrend|categories")),
+         ("🗂️ Trend đã xu hướng", "vtrend|historical")),
         (("✍️ Tự nhập trend", "vtrend|manual_trend"),
-         ("ℹ️ Nguồn & độ mới", "vtrend|freshness")),
+         ("📖 Hướng dẫn", "vtrend|help")),
     ),
     "script_image_video": (
         (("📄 Kịch bản có sẵn", "vproduct|script_existing|script_image_video"),

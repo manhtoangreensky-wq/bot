@@ -65446,7 +65446,6 @@ VIDEO_SCENE2_ACTION_EXPECTED_STEPS = {
     "count_recommended": {"scene_count"},
     "count": {"scene_count", "await_count_custom"},
     "ratio_custom": {"aspect_ratio"},
-    "ratio_suggest": {"aspect_ratio"},
     "asset_upload": {"asset_gate"},
     "asset_create_ai": {"asset_gate"},
     "asset_ai_return": {"asset_gate", "image_source", "image_assets"},
@@ -67413,10 +67412,8 @@ def video_scene3_suggestion_keyboard(state: dict | None = None) -> InlineKeyboar
     if not number_buttons:
         number_buttons = [(str(index), f"vprofile|suggest|{index}") for index in range(1, 6)]
     return video_scene3_keyboard([
-        number_buttons[:2],
-        number_buttons[2:4],
-        [number_buttons[4], ("🔄 Đổi 5 gợi ý", "vprofile|suggest_refresh")],
-        [("✍️ Tự nhập nội dung", "vprofile|suggest_custom"), ("↩️ Khôi phục nội dung", "vprofile|suggest_restore")],
+        number_buttons,
+        [("🔄 Đổi 5 gợi ý", "vprofile|suggest_refresh"), ("✍️ Tự nhập nội dung", "vprofile|suggest_custom")],
         [("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -68565,11 +68562,11 @@ def video_scene3_aspect_text(state: dict) -> str:
 
 
 def video_scene3_aspect_keyboard() -> InlineKeyboardMarkup:
-    return video_scene3_keyboard([
-        [("Dọc 9:16", "vprofile|ratio|9x16"), ("Ngang 16:9", "vprofile|ratio|16x9")],
-        [("Vuông 1:1", "vprofile|ratio|1x1"), ("Dọc 4:5", "vprofile|ratio|4x5")],
-        [("✍️ Tự nhập", "vprofile|ratio_custom"), ("💡 Gợi ý phù hợp", "vprofile|ratio_suggest")],
-        *video_scene3_nav_rows(),
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Dọc 9:16", callback_data="vprofile|ratio|9x16"), InlineKeyboardButton("Ngang 16:9", callback_data="vprofile|ratio|16x9")],
+        [InlineKeyboardButton("Vuông 1:1", callback_data="vprofile|ratio|1x1"), InlineKeyboardButton("Dọc 4:5", callback_data="vprofile|ratio|4x5")],
+        [InlineKeyboardButton("✍️ Tự nhập", callback_data="vprofile|ratio_custom")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="vprofile|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 
@@ -82029,9 +82026,9 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
 VIDEO_TREND2_STATE_KEY = "video_trend2_state"
 VIDEO_TREND2_PARENT = {
     "catalog": "entry",
+    "historical": "entry",
     "categories": "entry",
-    "sources": "catalog",
-    "freshness": "entry",
+    "help": "entry",
     "scene_count": "catalog",
     "aspect_ratio": "scene_count",
     "content_source": "aspect_ratio",
@@ -82045,6 +82042,7 @@ def video_trend2_state(context) -> dict:
     state = dict((getattr(context, "user_data", {}) or {}).get(VIDEO_TREND2_STATE_KEY) or {})
     state.setdefault("screen", "entry")
     state.setdefault("catalog_offset", 0)
+    state.setdefault("catalog_mode", "latest")
     state.setdefault("profile_page", 1)
     state.setdefault("suggestion_offset", 0)
     state.setdefault("selected_trend", {})
@@ -82115,11 +82113,11 @@ def video_trend2_entry_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔥 Trend mới nhất", callback_data="vtrend|catalog|latest"),
-            InlineKeyboardButton("🗂️ Trend theo nhóm", callback_data="vtrend|categories"),
+            InlineKeyboardButton("🗂️ Trend đã xu hướng", callback_data="vtrend|historical"),
         ],
         [
             InlineKeyboardButton("✍️ Tự nhập trend", callback_data="vtrend|manual_trend"),
-            InlineKeyboardButton("ℹ️ Nguồn & độ mới", callback_data="vtrend|freshness"),
+            InlineKeyboardButton("📖 Hướng dẫn", callback_data="vtrend|help"),
         ],
         video_trend2_nav("menu|main_video"),
     ])
@@ -82127,40 +82125,40 @@ def video_trend2_entry_keyboard() -> InlineKeyboardMarkup:
 
 def video_trend2_catalog_rows(state: dict) -> list[dict]:
     category = str(state.get("category") or "")
+    historical = str(state.get("catalog_mode") or "latest") == "historical"
     return video_trend2_db(
-        lambda conn: video_trend_catalog.list_items(
+        lambda conn: video_trend_catalog.list_media_items(
             conn,
             limit=100,
             offset=0,
             category=category,
-            include_stale_cache=True,
+            historical=historical,
         )
     )
 
 
 def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
     category = str(state.get("category") or "")
+    historical = str(state.get("catalog_mode") or "latest") == "historical"
     offset = max(0, safe_int(state.get("catalog_offset"), 0))
     page = rows[offset:offset + 5]
     title = f" trong nhóm {html.escape(category)}" if category else ""
+    catalog_title = "Trend đã xu hướng" if historical else "Trend mới nhất"
     if not page:
         return (
-            "🔥 <b>Trend mới nhất</b>\n\n"
-            "Chưa có trend đã kiểm nguồn trong bộ nhớ. Anh/chị có thể tự nhập trend; "
+            f"{'🗂️' if historical else '🔥'} <b>{catalog_title}</b>\n\n"
+            "Chưa có media trend phù hợp trong bộ nhớ. Anh/chị có thể tự nhập trend; "
             "hệ thống chưa tạo video, chưa gọi nguồn dựng và chưa trừ Xu."
         )
-    lines = [f"🔥 <b>Trend mới nhất{title}</b>", ""]
+    lines = [f"{'🗂️' if historical else '🔥'} <b>{catalog_title}{title}</b>", ""]
     for index, item in enumerate(page, 1):
         stale_note = " · bản lưu gần nhất" if item.get("stale") else ""
-        verified_at = str(item.get("last_verified_at") or item.get("collected_at") or "Chưa rõ")
         summary = str(item.get("summary") or "Chưa có mô tả ngắn từ nguồn.")
         lines.extend([
             f"{index}. <b>{html.escape(str(item.get('short_title') or item.get('title') or ''))}</b>",
             f"   Nền tảng: {html.escape(str(item.get('platform') or 'Chưa xác định'))}",
-            f"   Nhóm: {html.escape(str(item.get('category') or 'Đang thịnh hành'))}",
-            f"   Mô tả: {html.escape(summary[:220])}",
-            f"   Nguồn: {html.escape(str(item.get('source_name') or 'Nguồn công khai'))}{stale_note}",
-            f"   Kiểm tra gần nhất: {html.escape(verified_at[:19].replace('T', ' '))}",
+            f"   Dạng nội dung: {html.escape(str(item.get('category') or 'Media trend'))}{stale_note}",
+            f"   Ý chính: {html.escape(summary[:220])}",
             "",
         ])
     lines.extend([
@@ -82186,7 +82184,10 @@ def video_trend2_catalog_keyboard(state: dict, rows: list[dict]) -> InlineKeyboa
         ])
         keyboard.append([
             InlineKeyboardButton("✍️ Tự nhập trend", callback_data="vtrend|manual_trend"),
-            InlineKeyboardButton("ℹ️ Xem nguồn", callback_data="vtrend|sources"),
+            InlineKeyboardButton(
+                "🔥 Trend mới nhất" if str(state.get("catalog_mode") or "latest") == "historical" else "🗂️ Trend đã xu hướng",
+                callback_data="vtrend|catalog|latest" if str(state.get("catalog_mode") or "latest") == "historical" else "vtrend|historical",
+            ),
         ])
     else:
         keyboard.append([
@@ -82222,7 +82223,7 @@ def video_trend2_ratio_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Dọc 9:16", callback_data="vtrend|ratio|9:16"), InlineKeyboardButton("Ngang 16:9", callback_data="vtrend|ratio|16:9")],
         [InlineKeyboardButton("Vuông 1:1", callback_data="vtrend|ratio|1:1"), InlineKeyboardButton("Dọc 4:5", callback_data="vtrend|ratio|4:5")],
-        [InlineKeyboardButton("✍️ Tự nhập", callback_data="vtrend|ratio_custom"), InlineKeyboardButton("💡 Gợi ý theo trend", callback_data="vtrend|ratio_suggest")],
+        [InlineKeyboardButton("✍️ Tự nhập", callback_data="vtrend|ratio_custom")],
         video_trend2_nav("vtrend|back"),
     ])
 
@@ -82230,8 +82231,8 @@ def video_trend2_ratio_keyboard() -> InlineKeyboardMarkup:
 def video_trend2_content_source_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💡 Gợi ý theo trend", callback_data="vtrend|profiles|1"),
-            InlineKeyboardButton("🗂️ Kho Ý tưởng video", callback_data="vtrend|idea_catalog"),
+            InlineKeyboardButton("🎯 Chọn loại nội dung", callback_data="vtrend|profiles|1"),
+            InlineKeyboardButton("💡 Kho Ý tưởng video", callback_data="vtrend|idea_catalog"),
         ],
         [
             InlineKeyboardButton("✍️ Tự nhập nội dung", callback_data="vtrend|manual_content"),
@@ -82318,29 +82319,8 @@ def video_trend2_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(str(index), callback_data=f"vtrend|suggestion|{index - 1}") for index, _item in enumerate(page, 1)],
         [InlineKeyboardButton("🔄 Đổi 5 gợi ý", callback_data="vtrend|suggestions_more"), InlineKeyboardButton("✍️ Tự nhập nội dung", callback_data="vtrend|manual_content")],
-        [InlineKeyboardButton("↩️ Khôi phục nội dung", callback_data="vtrend|restore_content"), InlineKeyboardButton("🔄 Đổi loại nội dung", callback_data="vtrend|profiles|1")],
         video_trend2_nav("vtrend|back"),
     ])
-
-
-def video_trend2_sources_text(state: dict) -> str:
-    rows = video_trend2_catalog_rows(state)
-    offset = max(0, safe_int(state.get("catalog_offset"), 0))
-    page = rows[offset:offset + 5]
-    if not page:
-        return "ℹ️ <b>Nguồn trend</b>\n\nChưa có nguồn trend trong bộ nhớ. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
-    lines = ["ℹ️ <b>Nguồn của 5 trend đang xem</b>", ""]
-    for index, item in enumerate(page, 1):
-        freshness = str(item.get("last_verified_at") or item.get("collected_at") or "Chưa rõ")
-        stale_note = " · dữ liệu lưu gần nhất" if item.get("stale") else ""
-        lines.extend([
-            f"{index}. <b>{html.escape(str(item.get('short_title') or item.get('title') or ''))}</b>",
-            f"   Nguồn: {html.escape(str(item.get('source_name') or 'Nguồn công khai'))}",
-            f"   Thu thập/kiểm tra: {html.escape(freshness)}{stale_note}",
-            f"   Liên kết: {html.escape(str(item.get('source_url') or 'Không có'))}",
-        ])
-    lines.extend(["", "Không tự bịa lượt xem hoặc mức tăng trưởng khi nguồn không công bố."])
-    return "\n".join(lines)
 
 
 def video_trend2_preview_text(state: dict) -> str:
@@ -82429,7 +82409,10 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
         rows = video_trend2_catalog_rows(state)
         return await safe_edit_or_send_long_html(target, video_trend2_catalog_text(state, rows), reply_markup=video_trend2_catalog_keyboard(state, rows))
     if screen == "categories":
-        categories = video_trend2_db(video_trend_catalog.list_categories)
+        historical = str(state.get("catalog_mode") or "latest") == "historical"
+        categories = video_trend2_db(
+            lambda conn: video_trend_catalog.list_media_categories(conn, historical=historical)
+        )
         rows = [
             [InlineKeyboardButton(category, callback_data=f"vtrend|category|{index}") for index, category in enumerate(categories[start:start + 2], start=start)]
             for start in range(0, len(categories), 2)
@@ -82439,28 +82422,20 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
         rows.append(video_trend2_nav("vtrend|back"))
         return await safe_edit_or_send(
             target,
-            "🗂️ <b>Trend theo nhóm</b>\n\nChọn một nhóm nguồn công khai. Chưa tạo video và chưa trừ Xu.",
+            "🔎 <b>Lọc media trend</b>\n\nChọn một dạng nội dung truyền thông. Chưa tạo video và chưa trừ Xu.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows),
         )
-    if screen == "freshness":
-        status = video_trend2_db(video_trend_catalog.refresh_status)
-        source_lines = "\n".join(f"• {html.escape(str(item.get('name') or ''))}" for item in video_trend_catalog.SOURCE_REGISTRY.values())
+    if screen == "help":
         return await safe_edit_or_send(
             target,
-            "ℹ️ <b>Nguồn & độ mới</b>\n\n"
-            f"{source_lines}\n\n"
-            f"• Lần cập nhật thành công: {html.escape(str(status.get('last_success_at') or 'Chưa có'))}\n"
-            f"• Lần dự kiến tiếp theo: {html.escape(str(status.get('next_run_at') or 'Khi lịch tuần chạy'))}\n"
-            f"• Trạng thái nguồn: {html.escape(str(status.get('blocker') or 'Bình thường'))}\n\n"
-            "Không tự bịa mức phổ biến khi nguồn không công bố số liệu.",
+            "📖 <b>Video theo trend</b>\n\n"
+            "1. Chọn một media trend mới hoặc tự nhập.\n"
+            "2. Chọn số cảnh và tỉ lệ.\n"
+            "3. Chọn loại nội dung, Kho Ý tưởng video hoặc tự nhập nội dung.\n"
+            "4. Xem, sửa prompt rồi hoàn thiện video.\n\n"
+            "Chỉ sau hóa đơn và xác nhận cuối hệ thống mới được tạo tác vụ. Xu chỉ trừ sau khi video cuối hợp lệ đã được gửi.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|back")]),
-        )
-    if screen == "sources":
-        return await safe_edit_or_send_long_html(
-            target,
-            video_trend2_sources_text(state),
             reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|back")]),
         )
     if screen == "scene_count":
@@ -82475,7 +82450,7 @@ async def video_trend2_render(target, context, state: dict, lang: str = "vi"):
     if screen == "content_source":
         return await safe_edit_or_send(
             target,
-            "🧭 <b>Chọn nguồn nội dung</b>\n\nGợi ý theo trend sẽ cho chọn đúng một trong 32 loại nội dung rồi tạo 20 hướng riêng. Kho Ý tưởng video dùng preset có sẵn; tự nhập giữ nguyên nội dung của anh/chị.",
+            "🧭 <b>Chọn cách xây nội dung</b>\n\nChọn loại nội dung để mở đúng một trong 32 profile rồi nhận gợi ý bám trend. Kho Ý tưởng video dùng preset có sẵn; tự nhập giữ nguyên nội dung của anh/chị.",
             parse_mode="HTML",
             reply_markup=video_trend2_content_source_keyboard(),
         )
@@ -82512,13 +82487,19 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "screen": "entry",
             "screen_parents": {},
             "category": "",
+            "catalog_mode": "latest",
             "catalog_offset": 0,
             "last_callback_query_id": callback_query_id,
         })
         return await video_trend2_render(query, context, state, lang)
     if action == "catalog":
         state = video_trend2_open_screen(state, "catalog")
-        state.update({"category": "", "catalog_offset": 0, "pending_input": ""})
+        state.update({"category": "", "catalog_mode": "latest", "catalog_offset": 0, "pending_input": ""})
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
+    if action == "historical":
+        state = video_trend2_open_screen(state, "catalog", parent="entry")
+        state.update({"category": "", "catalog_mode": "historical", "catalog_offset": 0, "pending_input": ""})
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
     if action == "categories":
@@ -82527,7 +82508,10 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
     if action == "category":
-        categories = video_trend2_db(video_trend_catalog.list_categories)
+        historical = str(state.get("catalog_mode") or "latest") == "historical"
+        categories = video_trend2_db(
+            lambda conn: video_trend_catalog.list_media_categories(conn, historical=historical)
+        )
         index = safe_int(value, -1)
         if index < 0 or index >= len(categories):
             state["screen"] = "categories"
@@ -82543,18 +82527,18 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state["screen"] = "catalog"
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
-    if action == "freshness":
-        state = video_trend2_open_screen(state, "freshness")
+    if action == "help":
+        state = video_trend2_open_screen(state, "help", parent="entry")
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
-    if action == "sources":
-        state = video_trend2_open_screen(state, "sources", parent="catalog")
-        state["pending_input"] = ""
-        state = save_video_trend2_state(context, state)
-        return await video_trend2_render(query, context, state, lang)
+    if action in {"freshness", "sources", "ratio_suggest"}:
+        readonly = dict(state)
+        if str(readonly.get("screen") or "") not in VIDEO_TREND2_PARENT:
+            readonly["screen"] = "entry"
+        return await video_trend2_render(query, context, readonly, lang)
     if action == "pick":
         trend = video_trend2_db(lambda conn: video_trend_catalog.get_item(conn, value))
-        if not trend:
+        if not trend or not video_trend_catalog.is_media_trend(trend):
             state["screen"] = "catalog"
             state = save_video_trend2_state(context, state)
             return await video_trend2_render(query, context, state, lang)
@@ -82563,7 +82547,10 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
     if action == "manual_trend":
-        state.update({"pending_input": "manual_trend", "screen": "entry"})
+        state.update({
+            "pending_input": "manual_trend",
+            "input_return_screen": str(state.get("screen") or "entry"),
+        })
         save_video_trend2_state(context, state)
         return await safe_edit_or_send(
             query,
@@ -82608,17 +82595,6 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         return await safe_edit_or_send(
             query,
             "✍️ <b>Nhập tỉ lệ</b>\n\nGửi một trong bốn tỉ lệ: 9:16, 16:9, 1:1 hoặc 4:5.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|resume")]),
-        )
-    if action == "ratio_suggest":
-        platform = str((state.get("selected_trend") or {}).get("platform") or "").casefold()
-        recommended = "9:16" if any(token in platform for token in ("tiktok", "social", "mạng xã hội")) else "16:9"
-        return await safe_edit_or_send(
-            query,
-            "💡 <b>Gợi ý tỉ lệ</b>\n\n"
-            f"Dựa trên nền tảng của trend, tỉ lệ phù hợp thường là <b>{recommended}</b>. "
-            "Đây chỉ là gợi ý; hệ thống không tự đổi lựa chọn của anh/chị.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([video_trend2_nav("vtrend|resume")]),
         )
@@ -85598,7 +85574,10 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
     lang = get_user_language(update.effective_user.id) or "vi"
     if pending == "manual_trend":
         now = datetime.now(timezone.utc).isoformat()
-        state = video_trend2_open_screen(state, "scene_count", parent="entry")
+        input_parent = str(state.get("input_return_screen") or "entry")
+        if input_parent not in {"entry", "catalog"}:
+            input_parent = "entry"
+        state = video_trend2_open_screen(state, "scene_count", parent=input_parent)
         state.update({
             "selected_trend": {
                 "trend_id": "manual_trend",
@@ -85616,6 +85595,7 @@ async def handle_video_trend2_pending_text(update: Update, context: ContextTypes
                 "manual_input": True,
             },
             "pending_input": "",
+            "input_return_screen": "",
         })
     elif pending == "scene_count":
         count = safe_int(text, 0)
@@ -210804,18 +210784,9 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state = video_profile_studio_step(context, state, "await_ratio_custom")
         return await video_profile_scene1_render(query, state, lang)
     if action == "ratio_suggest":
-        source_ratio = str((state.get("source_fields") or {}).get("aspect_ratio") or "")
-        flow_kind = str(state.get("flow_kind") or video_flow6.flow_kind_for_product(str(state.get("source_product_id") or "")))
-        ratio = source_ratio if source_ratio in video_flow6.SUPPORTED_RATIOS else ("16:9" if flow_kind in {"storyboard", "self_shot"} else "9:16")
-        state["aspect_ratio"] = ratio
-        content = dict(state.get("content_addons") or {})
-        content["aspect_ratio"] = ratio
-        state["content_addons"] = content
-        state = video_flow6.sync_scene_state(state)
-        if video_flow7_uses_idea_catalog(state):
-            return await video_flow7_open_idea_catalog_from_state(query, context, uid, state, lang)
-        state, target = video_flow7_after_ratio(state)
-        state = video_profile_studio_step(context, state, target)
+        # Read-only compatibility for old Telegram messages. Public ratio
+        # screens no longer expose or auto-apply a suggested ratio.
+        state = video_profile_studio_step(context, state, "aspect_ratio", push=False)
         return await video_profile_scene1_render(query, state, lang)
     if action == "asset_upload":
         state = video_profile_studio_step(

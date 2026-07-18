@@ -173,7 +173,7 @@ def test_trend_entry_and_sequence_are_canonical() -> None:
     rows = video_flow7.ENTRY_ROWS["video_trend"]
     labels = [label for row in rows for label, _callback in row]
     callbacks = [callback for row in rows for _label, callback in row]
-    assert labels == ["🔥 Trend mới nhất", "🗂️ Trend theo nhóm", "✍️ Tự nhập trend", "ℹ️ Nguồn & độ mới"]
+    assert labels == ["🔥 Trend mới nhất", "🗂️ Trend đã xu hướng", "✍️ Tự nhập trend", "📖 Hướng dẫn"]
     assert all("idea" not in callback for callback in callbacks)
     sequence = video_flow7.PRODUCT_SPECS["trend_video"]["sequence"]
     assert sequence[:6] == (
@@ -256,15 +256,17 @@ def test_changed_bot_regions_compile_as_python_311_source() -> None:
     compile(idea_region, "bot.py:trend2_idea_callback", "exec")
 
 
-def test_public_layout_source_ratio_content_and_back_contracts_are_present() -> None:
+def test_public_layout_catalog_ratio_content_and_back_contracts_are_present() -> None:
     source = _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_trend2_callback")
-    assert 'callback_data="vtrend|sources"' in source
     assert 'callback_data="vtrend|categories"' in source
+    assert 'callback_data="vtrend|historical"' in source
+    assert 'callback_data="vtrend|help"' in source
     assert 'callback_data="vtrend|ratio_custom"' in source
-    assert 'callback_data="vtrend|ratio_suggest"' in source
+    assert 'callback_data="vtrend|ratio_suggest"' not in source
+    assert 'callback_data="vtrend|sources"' not in source
+    assert 'callback_data="vtrend|freshness"' not in source
     assert 'callback_data="vtrend|idea_catalog"' in source
     assert 'callback_data="vtrend|manual_content"' in source
-    assert 'callback_data="vtrend|restore_content"' in source
     assert "[InlineKeyboardButton(str(index)" in source
     assert 'InlineKeyboardButton("⬅️ Quay lại"' in source
     assert 'InlineKeyboardButton("🏠 Menu chính"' in source
@@ -318,16 +320,12 @@ def test_idea_callback_is_idempotent_and_trend_errors_are_specific() -> None:
     assert "Có lỗi khi xử lý lệnh" not in handler
 
 
-def test_trend_catalog_shows_source_platform_category_summary_and_freshness() -> None:
+def test_public_trend_catalog_hides_internal_source_and_freshness_details() -> None:
     source = _between("def video_trend2_catalog_text", "def video_trend2_catalog_keyboard")
-    for label in (
-        "Nền tảng:",
-        "Nhóm:",
-        "Mô tả:",
-        "Nguồn:",
-        "Kiểm tra gần nhất:",
-    ):
+    for label in ("Nền tảng:", "Dạng nội dung:", "Ý chính:"):
         assert label in source
+    assert "Nguồn:" not in source
+    assert "Kiểm tra gần nhất:" not in source
 
 
 def test_every_public_trend_button_has_one_action_branch() -> None:
@@ -335,10 +333,10 @@ def test_every_public_trend_button_has_one_action_branch() -> None:
     declared = set(re.findall(r"vtrend\|([a-z_]+)", source))
     expected = {
         "back", "catalog", "categories", "category", "continue", "edit_content",
-        "entry", "freshness", "idea_catalog", "idea_return", "manual_content",
+        "entry", "help", "historical", "idea_catalog", "idea_return", "manual_content",
         "manual_trend", "more", "pick", "profile", "profiles", "ratio",
-        "ratio_custom", "ratio_suggest", "restore_content", "resume", "scene_note",
-        "scenes", "scenes_custom", "sources", "suggestion", "suggestions_more",
+        "ratio_custom", "resume", "scene_note", "scenes", "scenes_custom",
+        "suggestion", "suggestions_more",
     }
     assert declared == expected
     for action in expected - {"manual_content", "edit_content"}:

@@ -2106,11 +2106,13 @@ def validate_adaptive_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple
 
 
 def validate_two_column_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple[str, str]]]:
-    """Legacy validator retained for non-SCENE3 callers and old contract tests."""
+    """Keep two columns, with one compact 1-5 suggestion-row exception."""
 
     normalized = validate_adaptive_rows(rows)
-    if any(len(row) != 2 for row in normalized):
-        raise ValueError("video_scene3_keyboard_requires_exactly_two_buttons_per_row")
+    for row in normalized:
+        compact_suggestions = len(row) == 5 and [label for label, _callback in row] == ["1", "2", "3", "4", "5"]
+        if len(row) != 2 and not compact_suggestions:
+            raise ValueError("video_scene3_keyboard_requires_exactly_two_buttons_per_row")
     return normalized
 
 
