@@ -134763,24 +134763,43 @@ def img2vid_seconds_per_image_for_state(state: dict | None) -> float:
     duration = frame_video_duration_payload(state.get("duration") or "standard")
     return round(float(duration.get("seconds") or 3.0), 2)
 
-def img2vid_slideshow_price_breakdown(image_count: int = 0, seconds_per_image=0) -> dict:
+def img2vid_slideshow_price_breakdown(
+    image_count: int = 0,
+    seconds_per_image=0,
+    *,
+    total_seconds=None,
+) -> dict:
     count = max(0, int(image_count or 0))
     seconds_each = max(0.1, float(seconds_per_image or 0))
-    total_seconds = round(count * seconds_each, 2)
-    if count <= 3 and total_seconds <= 6:
-        price = 0
-    else:
-        first = max(0.0, min(total_seconds, 10.0) - 6.0) * 10
-        second = max(0.0, min(total_seconds, 20.0) - 10.0) * 8
-        third = max(0.0, total_seconds - 20.0) * 6
-        price = int(math.ceil(first + second + third))
+    planned_seconds = round(
+        max(0.0, float(total_seconds))
+        if total_seconds is not None
+        else count * seconds_each,
+        2,
+    )
+    billable_seconds = int(math.ceil(planned_seconds))
+    first_seconds = max(0, min(billable_seconds, 10) - 5)
+    second_seconds = max(0, min(billable_seconds, 20) - 10)
+    third_seconds = max(0, billable_seconds - 20)
+    first_xu = first_seconds * 20
+    second_xu = second_seconds * 15
+    third_xu = third_seconds * 10
+    price = int(first_xu + second_xu + third_xu)
+    free_duration_entitlement = billable_seconds <= 5
     return {
         "image_count": count,
         "seconds_per_image": seconds_each,
-        "duration_seconds": int(math.ceil(total_seconds)),
-        "total_seconds": total_seconds,
-        "free_limit_images": 3,
-        "free_limit_seconds": 6,
+        "duration_seconds": billable_seconds,
+        "total_seconds": planned_seconds,
+        "billable_seconds": billable_seconds,
+        "free_limit_seconds": 5,
+        "first_tier_seconds": first_seconds,
+        "first_tier_xu": first_xu,
+        "second_tier_seconds": second_seconds,
+        "second_tier_xu": second_xu,
+        "third_tier_seconds": third_seconds,
+        "third_tier_xu": third_xu,
+        "free_duration_entitlement": free_duration_entitlement,
         "price_xu": int(price),
         "total": int(price),
         "base": int(price),
@@ -134791,16 +134810,23 @@ def img2vid_slideshow_price_breakdown(image_count: int = 0, seconds_per_image=0)
         "subtitle_xu": 0,
         "dubbing_xu": 0,
         "estimated_vnd": int(price) * int(XU_TO_VND or 100),
+        "pricing_source": "frame_video_duration_progressive_v1",
     }
 
 def img2vid_slideshow_price_for_state(state: dict | None) -> dict:
     state = state if isinstance(state, dict) else {}
     count = len(state.get("photos") or [])
-    total_seconds = frame_video_runtime.expected_duration_seconds(state)
-    seconds_each = total_seconds / count if count else img2vid_seconds_per_image_for_state(state)
+    seconds_each = img2vid_seconds_per_image_for_state(state)
+    duration_map = frame_video_runtime.image_duration_map(state)
+    total_seconds = (
+        sum(float(duration_map.get(str(row.get("image_id") or "")) or seconds_each) for row in state.get("photos") or [])
+        if count
+        else 0.0
+    )
     return img2vid_slideshow_price_breakdown(
         count,
         seconds_each,
+        total_seconds=total_seconds,
     )
 
 def img2vid_image_unit_cost() -> int:
@@ -135245,15 +135271,12 @@ def frame_video_price_breakdown(state: dict) -> dict:
             duration_seconds=duration_seconds,
             music_option="ai" if generated_music else "none",
         )
-        # FRAMEVIDEO3 has no implicit free render. The historical short-preview
-        # formula may return zero, so the configured local-render minimum is the
-        # product price floor unless an explicit entitlement is added elsewhere.
-        video_base = max(int(base.get("total") or 0), int(LOCAL_FRAME_VIDEO_MIN_XU or 0))
+        video_base = int(base.get("total") or 0)
         total = video_base + int(addon.get("addon_xu") or 0) + int(music.get("music_xu") or 0)
         return {
             **base,
             "base": int(video_base),
-            "duration_extra": max(0, int(video_base) - int(base.get("total") or 0)),
+            "duration_extra": int(base.get("duration_extra") or 0),
             "subtitle_xu": int(addon.get("subtitle_xu") or 0),
             "dubbing_xu": int(addon.get("dubbing_xu") or 0),
             "addon_xu": int(addon.get("addon_xu") or 0),
@@ -135264,7 +135287,7 @@ def frame_video_price_breakdown(state: dict) -> dict:
             "generated_subtitle": generated_subtitle,
             "generated_voice": generated_voice,
             "generated_music": generated_music,
-            "pricing_source": "framevideo3_configured_minimum_plus_duration_and_addons",
+            "pricing_source": "frame_video_duration_progressive_v1_plus_addons",
         }
     count = len(state.get("photos") or [])
     duration_seconds = frame_video_estimated_output_seconds(state)
@@ -135426,6 +135449,7 @@ def frame_video_maintenance_text() -> str:
 def frame_video_preflight_message(result: dict) -> str:
     blocker = str((result or {}).get("blocker") or "")
     messages = {
+        "duration_confirmation_missing": "⚠️ Anh/chị chưa chọn và xác nhận thời lượng ảnh. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
         "video_pricing_unavailable": "⚠️ Gói dựng video hiện chưa có giá hợp lệ. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
         "video_package_unavailable": "⚠️ Gói dựng video hiện chưa khả dụng. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
         "execution_owner_unavailable": "⚠️ Chưa có máy ghép video sẵn sàng. Hệ thống chưa tạo tác vụ, chưa dựng file và chưa trừ Xu.",
@@ -135460,6 +135484,27 @@ def frame_video_commercial_preflight(state: dict, user_id=0) -> dict:
         output_writable=bool(os.path.isdir(tempfile.gettempdir()) and os.access(tempfile.gettempdir(), os.W_OK)),
         package_available=bool(quote.get("ok")),
     )
+    if not quote.get("ok"):
+        quote_blockers = [
+            str(value)
+            for value in list(quote.get("blockers") or [])
+            if str(value)
+        ]
+        existing_blockers = [
+            str(value)
+            for value in list(result.get("blockers") or [])
+            if str(value) and str(value) != "video_package_unavailable"
+        ]
+        blockers = quote_blockers + [
+            value for value in existing_blockers if value not in quote_blockers
+        ]
+        result.update(
+            {
+                "ok": False,
+                "blocker": blockers[0] if blockers else "video_pricing_unavailable",
+                "blockers": blockers or ["video_pricing_unavailable"],
+            }
+        )
     result.update(
         {
             "video_quote": quote,
@@ -135468,9 +135513,9 @@ def frame_video_commercial_preflight(state: dict, user_id=0) -> dict:
             "worker_connected": bool(worker.get("connected")),
             "worker_ready": worker_ready,
             "worker_ffmpeg_path": worker_ffmpeg_path,
-            "message": frame_video_preflight_message(result),
         }
     )
+    result["message"] = frame_video_preflight_message(result)
     return result
 
 
@@ -136046,7 +136091,7 @@ def frame_video_collect_keyboard(
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📎 Gửi ảnh", callback_data="framevideo|upload"), InlineKeyboardButton("👁️ Xem ảnh", callback_data="framevideo|images")],
             [InlineKeyboardButton("↕️ Sắp xếp", callback_data="framevideo|sort"), InlineKeyboardButton("🗑️ Xóa / thay ảnh", callback_data="framevideo|images")],
-            [InlineKeyboardButton("✅ Dùng các ảnh này", callback_data="framevideo|assets_done"), InlineKeyboardButton("🔄 Đổi nguồn", callback_data="framevideo|hub")],
+            [InlineKeyboardButton("✅ Dùng các ảnh này", callback_data="framevideo|assets_done")],
             [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
         ])
     return InlineKeyboardMarkup([
@@ -136143,10 +136188,7 @@ def frame_video_images_text(state: dict) -> str:
     rows = []
     for index, item in enumerate(clean.get("photos") or [], start=1):
         marker = "👉 " if item.get("image_id") == selected else ""
-        duration = frame_video_runtime.image_duration_map(clean).get(str(item.get("image_id") or ""), clean.get("seconds_per_image") or 3)
-        caption = " ".join(str(item.get("caption") or "").split())
-        caption_tail = f" · {html.escape(caption[:80])}" if caption else ""
-        rows.append(f"{marker}{index}. Ảnh {index} · {duration:g} giây" + (" · ảnh bìa" if item.get("is_cover") else "") + caption_tail)
+        rows.append(f"{marker}{index}. Ảnh {index}" + (" · ảnh bìa" if item.get("is_cover") else ""))
     listing = "\n".join(rows) if rows else "Chưa có ảnh."
     return (
         "🗂️ <b>Quản lý và sắp xếp ảnh</b>\n\n"
@@ -136258,18 +136300,12 @@ def frame_video_image_regenerate_keyboard(state: dict | None) -> InlineKeyboardM
     quote = frame_video_image_regenerate_quote(clean)
     request_id = str(clean.get("image_regeneration_request_id") or "")
     if quote.get("ok") and request_id:
-        first_row = [
-            InlineKeyboardButton(
-                "✅ Xác nhận tạo lại",
-                callback_data=f"framevideo|image_regenerate_confirm|{request_id}",
-            ),
-            InlineKeyboardButton("🧾 Xem biên nhận cũ", callback_data="framevideo|image_receipt"),
-        ]
+        first_row = [InlineKeyboardButton(
+            "✅ Xác nhận tạo lại",
+            callback_data=f"framevideo|image_regenerate_confirm|{request_id}",
+        )]
     else:
-        first_row = [
-            InlineKeyboardButton("🔄 Thay bằng ảnh gửi", callback_data="framevideo|image_action|replace"),
-            InlineKeyboardButton("🧾 Xem biên nhận", callback_data="framevideo|image_receipt"),
-        ]
+        first_row = [InlineKeyboardButton("🔄 Thay bằng ảnh gửi", callback_data="framevideo|image_action|replace")]
     return InlineKeyboardMarkup([
         first_row,
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
@@ -136294,26 +136330,23 @@ def frame_video_images_keyboard(state: dict) -> InlineKeyboardMarkup:
         buttons.extend([
             [InlineKeyboardButton("⬆️ Lên trước", callback_data="framevideo|image_action|up"), InlineKeyboardButton("⬇️ Xuống sau", callback_data="framevideo|image_action|down")],
             [InlineKeyboardButton("🔄 Thay ảnh", callback_data="framevideo|image_action|replace"), InlineKeyboardButton("🗑️ Xóa ảnh", callback_data="framevideo|image_action|delete")],
-            [InlineKeyboardButton("📝 Ghi chú ảnh", callback_data="framevideo|image_caption"), InlineKeyboardButton("🖼️ Đặt ảnh bìa", callback_data="framevideo|image_action|cover")],
-            [InlineKeyboardButton("⏱️ Thời lượng ảnh này", callback_data="framevideo|image_duration"), InlineKeyboardButton("📎 Gửi thêm ảnh", callback_data="framevideo|upload")],
+            [InlineKeyboardButton("🖼️ Đặt ảnh bìa", callback_data="framevideo|image_action|cover"), InlineKeyboardButton("📎 Gửi thêm ảnh", callback_data="framevideo|upload")],
         ])
         selected = frame_video_flow.selected_image(clean)
         if str(selected.get("source") or "") == "generated" or frame_video_selected_image_receipt(clean):
             buttons.append([
                 InlineKeyboardButton("🔁 Tạo lại ảnh AI", callback_data="framevideo|image_regenerate"),
-                InlineKeyboardButton("🧾 Biên nhận ảnh", callback_data="framevideo|image_receipt"),
+                InlineKeyboardButton("✅ Dùng các ảnh này", callback_data="framevideo|assets_done"),
             ])
-        buttons.extend([
-            [InlineKeyboardButton("✅ Dùng các ảnh này", callback_data="framevideo|assets_done"), InlineKeyboardButton("🔄 Đổi nguồn", callback_data="framevideo|hub")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|upload"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
-        ])
+        else:
+            buttons.append([InlineKeyboardButton("✅ Dùng các ảnh này", callback_data="framevideo|assets_done")])
+        buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|upload"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")])
         return InlineKeyboardMarkup(buttons)
     buttons.extend([
         [InlineKeyboardButton("⬆️ Lên trước", callback_data="framevideo|image_action|up"), InlineKeyboardButton("⬇️ Xuống sau", callback_data="framevideo|image_action|down")],
         [InlineKeyboardButton("🔄 Thay ảnh", callback_data="framevideo|image_action|replace"), InlineKeyboardButton("🗑️ Xóa ảnh", callback_data="framevideo|image_action|delete")],
         [InlineKeyboardButton("📑 Nhân đôi", callback_data="framevideo|image_action|duplicate"), InlineKeyboardButton("🖼️ Đặt ảnh bìa", callback_data="framevideo|image_action|cover")],
-        [InlineKeyboardButton("⏱️ Thời lượng ảnh này", callback_data="framevideo|image_duration"), InlineKeyboardButton("📎 Gửi thêm ảnh", callback_data="framevideo|upload")],
-        [InlineKeyboardButton("🔁 Tạo lại ảnh AI", callback_data="framevideo|image_regenerate"), InlineKeyboardButton("🧾 Biên nhận ảnh", callback_data="framevideo|image_receipt")],
+        [InlineKeyboardButton("📎 Gửi thêm ảnh", callback_data="framevideo|upload"), InlineKeyboardButton("🔁 Tạo lại ảnh AI", callback_data="framevideo|image_regenerate")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
     return InlineKeyboardMarkup(buttons)
@@ -136322,11 +136355,40 @@ def frame_video_images_keyboard(state: dict) -> InlineKeyboardMarkup:
 def frame_video_duration_menu_text(state: dict, selected_only: bool = False) -> str:
     clean = normalize_frame_video_state(state)
     if selected_only:
-        selected = frame_video_flow.selected_image(clean)
-        index = next((i for i, row in enumerate(clean.get("photos") or [], start=1) if row.get("image_id") == selected.get("image_id")), 0)
-        current = frame_video_runtime.image_duration_map(clean).get(str(selected.get("image_id") or ""), clean.get("seconds_per_image") or 3)
-        return f"⏱️ <b>Thời lượng ảnh {index}</b>\n\nHiện tại: <b>{_safe_float(current, 3.0):g} giây</b>."
-    return f"⏱️ <b>Thời lượng mỗi ảnh</b>\n\nMặc định hiện tại: <b>{_safe_float(clean.get('seconds_per_image'), 3.0):g} giây</b>. Có thể chỉnh riêng từng ảnh trong Quản lý ảnh."
+        return (
+            "ℹ️ <b>Nút thời lượng cũ</b>\n\n"
+            "Thời lượng nay được chọn một lần cho cả video ở bước riêng để giá không bị lệch. "
+            "Quay lại quản lý ảnh rồi bấm <b>Dùng các ảnh này</b>."
+        )
+    count = len(clean.get("photos") or [])
+    current_seconds = _safe_float(clean.get("seconds_per_image"), 3.0)
+    current_price = img2vid_slideshow_price_breakdown(count, current_seconds)
+    selected_text = (
+        f"<b>{current_seconds:g} giây/ảnh</b> · "
+        f"<b>{current_price['duration_seconds']} giây tính giá</b> · "
+        f"<b>{xu_number(int(current_price['price_xu']))} Xu</b>"
+        if clean.get("duration_confirmed")
+        else "<b>Chưa chọn</b>"
+    )
+    rows = []
+    for value in (2, 3, 4, 5, 8):
+        preview = img2vid_slideshow_price_breakdown(count, value)
+        rows.append(
+            f"• {value} giây/ảnh → {preview['duration_seconds']} giây · "
+            f"{xu_number(int(preview['price_xu']))} Xu"
+        )
+    return (
+        "⏱️ <b>Chọn thời lượng và xem giá</b>\n\n"
+        f"• Số ảnh: <b>{count}</b>\n"
+        f"• Đang chọn: {selected_text}\n\n"
+        "<b>Bảng giá lũy tiến theo tổng thời lượng ảnh:</b>\n"
+        "• 0–5 giây: 0 Xu\n"
+        "• Phần từ trên 5 đến 10 giây: 20 Xu/giây\n"
+        "• Phần từ trên 10 đến 20 giây: 15 Xu/giây\n"
+        "• Phần trên 20 giây: 10 Xu/giây\n\n"
+        + "\n".join(rows)
+        + "\n\nGiá được tính theo từng phần vượt mốc. Phải chọn một mức rồi mới tiếp tục."
+    )
 
 
 def frame_video_duration_menu_keyboard(
@@ -136335,18 +136397,25 @@ def frame_video_duration_menu_keyboard(
 ) -> InlineKeyboardMarkup:
     scope = "one" if selected_only else "all"
     if is_frame_video3_state(state):
-        rows = [
-            [InlineKeyboardButton("2 giây", callback_data=f"framevideo|duration_set|{scope}|2"), InlineKeyboardButton("3 giây", callback_data=f"framevideo|duration_set|{scope}|3")],
-            [InlineKeyboardButton("4 giây", callback_data=f"framevideo|duration_set|{scope}|4"), InlineKeyboardButton("5 giây", callback_data=f"framevideo|duration_set|{scope}|5")],
-            [InlineKeyboardButton("8 giây", callback_data=f"framevideo|duration_set|{scope}|8"), InlineKeyboardButton("✍️ Nhập số khác", callback_data=f"framevideo|duration_custom|{scope}")],
-        ]
         if selected_only:
-            rows.append([InlineKeyboardButton("⬅️ Quản lý ảnh", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")])
-        else:
-            rows.extend([
-                [InlineKeyboardButton("🧩 Từng ảnh", callback_data="framevideo|images"), InlineKeyboardButton("📋 Áp dụng tất cả", callback_data="framevideo|duration_done")],
-                [InlineKeyboardButton("⬅️ Quản lý ảnh", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
-            ])
+            return InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"),
+                InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+            ]])
+        clean = normalize_frame_video_state(state)
+        count = len(clean.get("photos") or [])
+
+        def option_label(value: int) -> str:
+            price = img2vid_slideshow_price_breakdown(count, value)
+            return f"{value}s/ảnh · {xu_number(int(price['price_xu']))} Xu"
+
+        rows = [
+            [InlineKeyboardButton(option_label(2), callback_data="framevideo|duration_set|all|2"), InlineKeyboardButton(option_label(3), callback_data="framevideo|duration_set|all|3")],
+            [InlineKeyboardButton(option_label(4), callback_data="framevideo|duration_set|all|4"), InlineKeyboardButton(option_label(5), callback_data="framevideo|duration_set|all|5")],
+            [InlineKeyboardButton(option_label(8), callback_data="framevideo|duration_set|all|8"), InlineKeyboardButton("✍️ Nhập số khác", callback_data="framevideo|duration_custom|all")],
+            [InlineKeyboardButton("✅ Dùng thời lượng này", callback_data="framevideo|duration_done")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        ]
         return InlineKeyboardMarkup(rows)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("2 giây", callback_data=f"framevideo|duration_set|{scope}|2"), InlineKeyboardButton("3 giây", callback_data=f"framevideo|duration_set|{scope}|3")],
@@ -136596,7 +136665,7 @@ def frame_video_position_keyboard(kind: str, back: str = "framevideo|addons") ->
 def frame_video_quality_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
     is_framevideo3 = is_frame_video3_state(state)
     done_callback = "framevideo|continue" if is_framevideo3 else "framevideo|panel"
-    done_label = "🧾 Xem báo giá" if is_framevideo3 else "✅ Hoàn thiện video"
+    done_label = "✅ Bước tiếp theo" if is_framevideo3 else "✅ Hoàn thiện video"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ Nhanh", callback_data="framevideo|quality_set|fast"), InlineKeyboardButton("⭐ Cân bằng", callback_data="framevideo|quality_set|balanced")],
         [InlineKeyboardButton("💎 Đẹp", callback_data="framevideo|quality_set|beautiful"), InlineKeyboardButton(done_label, callback_data=done_callback)],
@@ -136682,10 +136751,12 @@ def frame_video_review_text(state: dict, user_id=0, invoice: bool = False) -> st
             [
                 "",
                 "<b>Hóa đơn dựng MP4</b>",
+                f"• Thời lượng tính giá: <b>{int(price.get('duration_seconds') or 0)} giây</b>",
                 f"• Dựng video: <b>{xu_number(int(price.get('base') or 0))} Xu</b>",
                 f"• Tùy chọn bổ sung: <b>{xu_number(int(price.get('addon_xu') or 0))} Xu</b>",
                 f"• Nhạc: <b>{xu_number(int(price.get('music_xu') or 0))} Xu</b>",
                 f"• Tổng video dự kiến: <b>{xu_number(cost)} Xu</b>",
+                "• Giá thời lượng: 0–5 giây miễn phí; phần 6–10 giây 20 Xu/giây; phần 11–20 giây 15 Xu/giây; phần trên 20 giây 10 Xu/giây.",
                 "• Mức giá gồm đúng phần dựng và các dịch vụ tạo thêm đã chọn.",
                 "• Phí ảnh AI đã giao được đối soát riêng và không cộng lại vào hóa đơn video.",
                 "Xu video chỉ được ghi sau khi MP4 hợp lệ đã gửi thành công.",
@@ -137741,6 +137812,7 @@ async def handle_frame_video_pending_media(update: Update, context: ContextTypes
         if target == "replace_image":
             selected = str(state.get("selected_image_id") or "")
             state["photos"] = frame_video_runtime.manifest_replace(state.get("photos") or [], selected, item)
+            state["duration_confirmed"] = False
             state["pending_input"] = ""
             state["step"] = "images"
             state = normalize_frame_video_state(state)
@@ -137839,6 +137911,16 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
         )
         return True
     if step == "image_caption_input":
+        if is_frame_video3_state(state):
+            state.update({"step": "images", "pending_input": ""})
+            set_frame_video_state(uid, state)
+            await update.message.reply_text(
+                frame_video_images_text(state)
+                + "\n\nNút ghi chú ảnh cũ đã được bỏ khỏi quy trình.",
+                parse_mode="HTML",
+                reply_markup=frame_video_images_keyboard(state),
+            )
+            return True
         content = " ".join(text.split())[:1000]
         if not content:
             await update.message.reply_text("⚠️ Ghi chú đang trống. Anh/chị nhập lại nhé.")
@@ -137885,6 +137967,15 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
         await update.message.reply_text(text_next, parse_mode="HTML", reply_markup=markup_next)
         return True
     if step in {"duration_custom", "image_duration_custom", "transition_time_custom", "volume_custom"}:
+        if step == "image_duration_custom" and is_frame_video3_state(state):
+            state.update({"step": "duration", "pending_input": ""})
+            set_frame_video_state(uid, state)
+            await update.message.reply_text(
+                frame_video_duration_menu_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_duration_menu_keyboard(False, state),
+            )
+            return True
         raw = text.replace(",", ".").replace("%", "").strip()
         try:
             value = float(raw)
@@ -159426,6 +159517,7 @@ def frame_video3_new_state(source: str = "uploaded") -> dict:
             "image_generation_price": 0,
             "ratio": "9x16",
             "duration": "standard",
+            "duration_confirmed": False,
             "effect": "fade",
             "music_choice": "skip",
             "music_merge_enabled": False,
@@ -160020,30 +160112,13 @@ async def handle_frame_video_canonical_callback(
         )
     if action in {"images", "sort"}:
         return await show(frame_video_images_text(state), frame_video_images_keyboard(state), "images")
-    if action == "image_caption":
-        if not frame_video_flow.selected_image(state):
-            return await safe_edit_or_send(
-                query,
-                "⚠️ Hãy chọn một ảnh trước khi ghi chú.",
-                parse_mode=None,
-                reply_markup=frame_video_images_keyboard(state),
-            )
-        state.update({"step": "image_caption_input", "pending_input": "image_caption"})
-        set_frame_video_state(uid, state)
+    if action in {"image_caption", "image_receipt", "image_duration"}:
         return await safe_edit_or_send(
             query,
-            "📝 Nhập ghi chú ngắn cho ảnh đang chọn. Ghi chú chỉ dùng để giữ đúng ý khi lập kế hoạch, không gọi provider.",
-            parse_mode=None,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"),
-                InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
-            ]]),
-        )
-    if action == "image_receipt":
-        return await show(
-            frame_video_image_receipt_text(state),
-            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|images"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
-            "image_receipt",
+            frame_video_images_text(state)
+            + "\n\nℹ️ Nút cũ đã được bỏ khỏi quy trình. Ảnh và biên nhận nội bộ vẫn được giữ nguyên.",
+            parse_mode="HTML",
+            reply_markup=frame_video_images_keyboard(state),
         )
     if action == "image_select" and len(parts) > 2:
         state = frame_video_flow.apply_image_action(state, "select", parts[2])
@@ -160068,8 +160143,6 @@ async def handle_frame_video_canonical_callback(
             return await safe_edit_or_send(query, f"⚠️ Không thể cập nhật ảnh: {sanitize_log_text(str(exc))}.", parse_mode=None, reply_markup=frame_video_images_keyboard(state))
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_images_text(state), parse_mode="HTML", reply_markup=frame_video_images_keyboard(state))
-    if action == "image_duration":
-        return await show(frame_video_duration_menu_text(state, True), frame_video_duration_menu_keyboard(True, state), "image_duration")
     if action == "duration_menu":
         return await show(frame_video_duration_menu_text(state), frame_video_duration_menu_keyboard(False, state), "duration")
     if action == "duration_set" and len(parts) > 3:
@@ -160082,6 +160155,13 @@ async def handle_frame_video_canonical_callback(
                 "⚠️ Thời lượng không hợp lệ. Hãy chọn lại.",
                 parse_mode=None,
                 reply_markup=frame_video_duration_menu_keyboard(scope == "one", state),
+            )
+        if scope == "one" and is_frame_video3_state(state):
+            return await safe_edit_or_send(
+                query,
+                frame_video_duration_menu_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_duration_menu_keyboard(False, state),
             )
         state = frame_video_flow.set_selected_duration(state, value) if scope == "one" else frame_video_flow.set_global_duration(state, value)
         set_frame_video_state(uid, state)
@@ -160101,6 +160181,13 @@ async def handle_frame_video_canonical_callback(
                 parse_mode=None,
                 reply_markup=frame_video_collect_keyboard("framevideo|ratio_first_menu", state),
             )
+        if not bool(state.get("duration_confirmed")):
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Hãy chọn một mức thời lượng trong bảng trước khi tiếp tục. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode=None,
+                reply_markup=frame_video_duration_menu_keyboard(False, state),
+            )
         state.update({"step": "transition", "pending_input": ""})
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(
@@ -160111,6 +160198,13 @@ async def handle_frame_video_canonical_callback(
         )
     if action == "duration_custom" and len(parts) > 2:
         selected_only = parts[2] == "one"
+        if selected_only and is_frame_video3_state(state):
+            return await safe_edit_or_send(
+                query,
+                frame_video_duration_menu_text(state),
+                parse_mode="HTML",
+                reply_markup=frame_video_duration_menu_keyboard(False, state),
+            )
         state.update({"step": "image_duration_custom" if selected_only else "duration_custom", "pending_input": "duration"})
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(
@@ -160776,6 +160870,7 @@ async def handle_frame_video_image_regeneration(
                 target_image_id,
                 replacement,
             )
+            latest["duration_confirmed"] = False
         except ValueError:
             update_shopaikey_job(
                 image_job_id,

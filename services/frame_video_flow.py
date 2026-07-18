@@ -31,8 +31,18 @@ FRAME_VIDEO_ROUTE_MATRIX = {
     "sort": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
     "image_select": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
     "image_action": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
-    "image_caption": {"owner": "handle_frame_video_canonical_callback", "screen": "image_caption_input", "back": "images"},
-    "image_receipt": {"owner": "handle_frame_video_canonical_callback", "screen": "image_receipt", "back": "images"},
+    "image_caption": {
+        "owner": "handle_frame_video_canonical_callback",
+        "screen": "images",
+        "back": "images",
+        "mutation": "read_only_redirect",
+    },
+    "image_receipt": {
+        "owner": "handle_frame_video_canonical_callback",
+        "screen": "images",
+        "back": "images",
+        "mutation": "read_only_redirect",
+    },
     "image_regenerate": {"owner": "handle_img2vid_lock1_callback", "screen": "image_regenerate_invoice", "back": "images"},
     "image_regenerate_confirm": {
         "owner": "handle_img2vid_lock1_callback",
@@ -61,7 +71,12 @@ FRAME_VIDEO_ROUTE_MATRIX = {
         "back": "ai_invoice",
         "side_effect": "explicit_image_confirm_only",
     },
-    "image_duration": {"owner": "handle_frame_video_canonical_callback", "screen": "image_duration", "back": "images"},
+    "image_duration": {
+        "owner": "handle_frame_video_canonical_callback",
+        "screen": "images",
+        "back": "images",
+        "mutation": "read_only_redirect",
+    },
     "duration_set": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "duration"},
     "duration_custom": {"owner": "handle_frame_video_canonical_callback", "screen": "duration_input", "back": "duration"},
     "duration_menu": {"owner": "handle_frame_video_canonical_callback", "screen": "duration", "back": "images"},
@@ -159,6 +174,7 @@ FRAME_VIDEO_DEFAULTS: dict[str, Any] = {
     "img2vid_lock1": True,
     "seconds_per_image": 3.0,
     "image_durations": {},
+    "duration_confirmed": False,
     "ratio": "9x16",
     "fit_mode": "contain",
     "background_color": "#111111",
@@ -306,6 +322,7 @@ def normalize_state(state: dict[str, Any] | None = None) -> dict[str, Any]:
             }
         )
     clean["ai_image_prompts"] = normalized_prompts
+    clean["duration_confirmed"] = bool(clean.get("duration_confirmed"))
     prompt_count = len(normalized_prompts)
     selected_prompt_index = _safe_int(clean.get("selected_ai_prompt_index"), 1)
     clean["selected_ai_prompt_index"] = max(1, min(selected_prompt_index, prompt_count or 1))
@@ -528,6 +545,7 @@ def add_photo(state: dict[str, Any], photo: dict[str, Any]) -> dict[str, Any]:
     clean = normalize_state(state)
     clean["photos"] = frame_video_runtime.manifest_add(clean["photos"], photo)
     clean["selected_image_id"] = clean["photos"][-1]["image_id"] if clean["photos"] else ""
+    clean["duration_confirmed"] = False
     return clean
 
 
@@ -540,8 +558,10 @@ def apply_image_action(state: dict[str, Any], action: str, image_id: str = "") -
         return clean
     if action == "delete":
         clean["photos"] = frame_video_runtime.manifest_delete(clean["photos"], target)
+        clean["duration_confirmed"] = False
     elif action == "duplicate":
         clean["photos"] = frame_video_runtime.manifest_duplicate(clean["photos"], target)
+        clean["duration_confirmed"] = False
     elif action in {"up", "down"}:
         clean["photos"] = frame_video_runtime.manifest_move(clean["photos"], target, action)
     elif action == "cover":
@@ -555,6 +575,7 @@ def set_global_duration(state: dict[str, Any], seconds: float) -> dict[str, Any]
     clean["seconds_per_image"] = value
     clean["image_durations"] = {}
     clean["duration"] = "custom"
+    clean["duration_confirmed"] = True
     return clean
 
 
@@ -565,6 +586,7 @@ def set_selected_duration(state: dict[str, Any], seconds: float) -> dict[str, An
         durations = dict(clean.get("image_durations") or {})
         durations[selected] = max(0.5, min(30.0, float(seconds)))
         clean["image_durations"] = durations
+        clean["duration_confirmed"] = True
     return clean
 
 

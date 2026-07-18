@@ -208,8 +208,16 @@ def video_quote(
         quality = "balanced"
     quality_detail = dict(QUALITY_DETAILS[quality])
     total = max(0, _safe_int(breakdown.get("total"), 0))
+    free_duration_entitlement = bool(
+        breakdown.get("free_duration_entitlement")
+        and str(breakdown.get("pricing_source") or "").startswith("frame_video_duration_progressive")
+    )
     blockers: list[str] = []
-    if total <= 0:
+    if str(clean.get("commercial_flow_version") or "") == "framevideo3" and not bool(
+        clean.get("duration_confirmed")
+    ):
+        blockers.append("duration_confirmation_missing")
+    if total <= 0 and not free_duration_entitlement:
         blockers.append("video_pricing_unavailable")
     return {
         "ok": not blockers,
@@ -230,6 +238,7 @@ def video_quote(
         "addon_xu": max(0, _safe_int(breakdown.get("addon_xu"), 0)),
         "music_xu": max(0, _safe_int(breakdown.get("music_xu"), 0)),
         "total_price_xu": total,
+        "free_duration_entitlement": free_duration_entitlement,
     }
 
 
