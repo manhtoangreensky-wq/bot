@@ -285,7 +285,9 @@ def test_live8_scope_is_subdub_only():
         "services/subtitle_dub_product_pipeline.py",
         "tests/test_p0_subdub_live5_subtitle_combo_canonical_cue_restore.py",
         "tests/test_p0_subdub_live6_mp4_audio_cue_long_auto_subtitle.py",
-        "tests/test_p0_subdub_live8_one_canonical_product_contract.py",
-        "tests/test_p0_subdub_live9_persistent_execution_recovery.py",
-    }
+            "tests/test_p0_subdub_live8_one_canonical_product_contract.py",
+            "tests/test_p0_subdub_live9_persistent_execution_recovery.py",
+            "tests/test_p0_subdub_live10_menu_route_isolation.py",
+            "tests/test_p0_subdub_live10_tts_checkpoint_resume.py",
+        }
     assert set(changed) <= allowed
