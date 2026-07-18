@@ -46,7 +46,7 @@ def test_progressive_duration_price_table(seconds: int, expected_xu: int) -> Non
     assert price["pricing_source"] == "frame_video_duration_progressive_v1"
 
 
-def test_duration_is_mandatory_and_only_explicit_short_duration_can_be_free() -> None:
+def test_duration_is_mandatory_and_video_package_is_never_implicitly_free() -> None:
     state = flow.normalize_state(
         {
             "commercial_flow_version": "framevideo3",
@@ -62,11 +62,12 @@ def test_duration_is_mandatory_and_only_explicit_short_duration_can_be_free() ->
     assert blocked["blocker"] == "duration_confirmation_missing"
 
     state = flow.set_global_duration(state, 2)
-    free_breakdown = _load_pricing_function()(2, 2)
-    allowed = commercial.video_quote(state, free_breakdown)
+    legacy_free_breakdown = _load_pricing_function()(2, 2)
+    allowed = commercial.video_quote(state, legacy_free_breakdown)
     assert allowed["ok"] is True
-    assert allowed["total_price_xu"] == 0
-    assert allowed["free_duration_entitlement"] is True
+    assert allowed["base_xu"] == 100
+    assert allowed["total_price_xu"] == 100
+    assert allowed["free_duration_entitlement"] is False
 
     fake_free = commercial.video_quote(
         state,
@@ -79,8 +80,37 @@ def test_duration_is_mandatory_and_only_explicit_short_duration_can_be_free() ->
             "pricing_source": "legacy",
         },
     )
-    assert fake_free["ok"] is False
-    assert fake_free["blocker"] == "video_pricing_unavailable"
+    assert fake_free["ok"] is True
+    assert fake_free["total_price_xu"] == 100
+
+
+@pytest.mark.parametrize(
+    ("quality", "expected_xu"),
+    [("fast", 50), ("balanced", 100), ("beautiful", 200)],
+)
+def test_video_package_price_is_fixed_by_quality_not_duration(
+    quality: str,
+    expected_xu: int,
+) -> None:
+    state = flow.normalize_state(
+        {
+            "commercial_flow_version": "framevideo3",
+            "image_count": 20,
+            "photos": [{"file_id": str(index)} for index in range(20)],
+            "seconds_per_image": 8,
+            "duration_confirmed": True,
+            "quality": quality,
+        }
+    )
+    quote = commercial.video_quote(
+        state,
+        {"base": 9999, "addon_xu": 0, "music_xu": 0, "total": 9999},
+    )
+    assert quote["ok"] is True
+    assert quote["duration_seconds"] > 150
+    assert quote["base_xu"] == expected_xu
+    assert quote["total_price_xu"] == expected_xu
+    assert quote["pricing_source"] == "frame_video_fixed_quality_promo_v1"
 
 
 def test_timeline_changes_invalidate_the_confirmed_duration() -> None:
@@ -102,7 +132,7 @@ def test_timeline_changes_invalidate_the_confirmed_duration() -> None:
     assert state["duration_confirmed"] is False
 
 
-def test_public_image_manager_is_compact_and_duration_is_a_priced_step() -> None:
+def test_public_image_manager_is_compact_and_duration_precedes_fixed_packages() -> None:
     collect = _source_between("def frame_video_collect_keyboard", "FRAME_VIDEO_TRANSITION_LABELS")
     manager = _source_between("def frame_video_images_keyboard", "def frame_video_duration_menu_text")
     duration = _source_between("def frame_video_duration_menu_text", "def frame_video_ratio_menu_keyboard")
@@ -111,16 +141,14 @@ def test_public_image_manager_is_compact_and_duration_is_a_priced_step() -> None
     for removed in ("Ghi chú ảnh", "Thời lượng ảnh này", "Biên nhận ảnh", "Đổi nguồn"):
         assert removed not in collect
         assert removed not in manager
-    for label in (
-        "0–5 giây: 0 Xu",
-        "trên 5 đến 10 giây: 20 Xu/giây",
-        "trên 10 đến 20 giây: 15 Xu/giây",
-        "trên 20 giây: 10 Xu/giây",
-        "✅ Dùng thời lượng này",
-    ):
+    for label in ("50 Xu", "100 Xu", "200 Xu", "✅ Dùng thời lượng này"):
         assert label in duration
+    assert "0–5 giây: 0 Xu" not in duration
+    assert "20 Xu/giây" not in duration
     assert "⭐ <b>Hoàn thiện video</b>" in quality
     assert "✅ Bước tiếp theo" in quality
+    for label in ("Nhanh · 50 Xu", "Cân bằng · 100 Xu", "Đẹp · 200 Xu"):
+        assert label in quality
 
 
 def test_stale_callbacks_are_read_only_and_preflight_preserves_exact_reason() -> None:
@@ -154,6 +182,21 @@ def test_stale_callbacks_are_read_only_and_preflight_preserves_exact_reason() ->
     )
     assert 'str(value) != "video_package_unavailable"' in preflight
     assert 'result["message"] = frame_video_preflight_message(result)' in preflight
+    assert "candidate_ffmpeg = frame_video_ffmpeg_path()" in preflight
+    assert "direct_allowed = bool(candidate_ffmpeg and candidate_ffprobe)" in preflight
+    assert "FRAME_VIDEO_DIRECT_RENDER_ENABLED and not FRAME_VIDEO_REQUIRE_LOCAL_WORKER" not in preflight
+
+
+def test_framevideo_callback_answer_failure_cannot_surface_generic_x() -> None:
+    callback = _source_between(
+        "async def handle_frame_video_callback",
+        "async def handle_storyboard_callback",
+    )
+    prologue = callback[: callback.index('    data = query.data or ""')]
+    assert "try:" in prologue
+    assert "await query.answer()" in prologue
+    assert "except Exception as exc:" in prologue
+    assert "framevideo callback answer skipped" in prologue
 
 
 def test_video_delivery_and_charge_order_remains_final_only() -> None:
@@ -257,8 +300,7 @@ def test_assets_done_has_one_owner_and_falls_back_to_one_fresh_duration_panel() 
 def test_assets_done_duration_screen_renders_with_two_real_images() -> None:
     namespace = {
         "normalize_frame_video_state": flow.normalize_state,
-        "img2vid_slideshow_price_breakdown": _load_pricing_function(),
-        "xu_number": lambda value=0: f"{int(value or 0):,}".replace(",", "."),
+        "math": math,
     }
     numeric_helpers = _source_between("def _safe_int", "def video_v6_keyboard")
     duration_renderer = _source_between(
@@ -275,6 +317,7 @@ def test_assets_done_duration_screen_renders_with_two_real_images() -> None:
         }
     )
 
-    assert "Chọn thời lượng và xem giá" in text
+    assert "Chọn thời lượng mỗi ảnh" in text
     assert "Số ảnh: <b>2</b>" in text
     assert "Chưa chọn" in text
+    assert "Nhanh 50 Xu" in text

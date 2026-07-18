@@ -117,13 +117,15 @@ def test_ai_invoice_keeps_initial_image_count_and_video_price_cannot_fall_to_zer
     state["photos"] = runtime.canonical_image_manifest(
         [{"file_id": "local-image-1"}, {"file_id": "local-image-2"}]
     )
-    unavailable = commercial.video_quote(
+    fixed_package = commercial.video_quote(
         state,
         {"base": 0, "addon_xu": 0, "music_xu": 0, "total": 0, "free_trial_eligible": True},
     )
-    assert unavailable["ok"] is False
-    assert unavailable["blocker"] == "video_pricing_unavailable"
-    assert "free_trial_eligible" not in unavailable
+    assert fixed_package["ok"] is True
+    assert fixed_package["base_xu"] == 50
+    assert fixed_package["total_price_xu"] == 50
+    assert fixed_package["pricing_source"] == "frame_video_fixed_quality_promo_v1"
+    assert "free_trial_eligible" not in fixed_package
 
     ai_handler = BOT_SOURCE[
         BOT_SOURCE.index("async def handle_img2vid_lock1_callback") :
