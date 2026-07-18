@@ -397,7 +397,7 @@ def test_required_asset_gates_block_before_invoice() -> None:
     storyboard = _context("storyboard_prompt", count=2)
     self_shot = _context("self_shot_scene_change", count=2)
     assert video_flow6.asset_gate_status(frame)["blocker"] == "required_scene_images_missing"
-    assert video_flow6.asset_gate_status(storyboard)["blocker"] == "required_scene_images_missing"
+    assert video_flow6.asset_gate_status(storyboard)["blocker"] == "storyboard_start_images_missing"
     assert video_flow6.asset_gate_status(self_shot)["blocker"] == "source_video_missing"
     for context in (frame, storyboard, self_shot):
         result = video_flow6.preflight(
