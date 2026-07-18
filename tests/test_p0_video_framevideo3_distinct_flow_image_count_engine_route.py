@@ -64,6 +64,7 @@ def _state(paths: list[Path] | None = None, count: int = 0, **overrides) -> dict
             "ai_image_count": image_count or 2,
             "photos": photos,
             "seconds_per_image": 0.5,
+            "duration_confirmed": True,
             "transition": "none",
             "motion": "none",
             "ratio": "1x1",
