@@ -124,10 +124,11 @@ def test_public_image_manager_is_compact_and_duration_is_a_priced_step() -> None
 
 
 def test_stale_callbacks_are_read_only_and_preflight_preserves_exact_reason() -> None:
-    for action in ("image_caption", "image_receipt", "image_duration"):
+    for action in ("image_caption", "image_receipt", "image_duration", "ratio_first_recommend"):
         route = flow.FRAME_VIDEO_ROUTE_MATRIX[action]
-        assert route["screen"] == "images"
         assert route["mutation"] == "read_only_redirect"
+
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["ratio_first_recommend"]["screen"] == "ratio_first"
 
     handler = _source_between(
         "async def handle_frame_video_canonical_callback",
@@ -135,6 +136,17 @@ def test_stale_callbacks_are_read_only_and_preflight_preserves_exact_reason() ->
     )
     assert 'if action in {"image_caption", "image_receipt", "image_duration"}' in handler
     assert "Có lỗi khi xử lý lệnh" not in handler
+
+    public_callback = _source_between(
+        "async def handle_frame_video_callback",
+        "async def handle_storyboard_callback",
+    )
+    stale_branch = public_callback[
+        public_callback.index('if action == "ratio_first_recommend"') :
+        public_callback.index('if action == "ratio_first_set"')
+    ]
+    assert "set_frame_video_state" not in stale_branch
+    assert "không tự đổi lựa chọn" in stale_branch
 
     preflight = _source_between(
         "def frame_video_commercial_preflight",

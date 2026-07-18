@@ -16,7 +16,12 @@ FRAME_VIDEO_ROUTE_MATRIX = {
     "image_count_custom": {"owner": "handle_frame_video_callback", "screen": "image_count_input", "back": "image_count_menu"},
     "ratio_first_menu": {"owner": "handle_frame_video_callback", "screen": "ratio_first", "back": "image_count_menu"},
     "ratio_first_set": {"owner": "handle_frame_video_callback", "screen": "source_next", "back": "image_count_menu"},
-    "ratio_first_recommend": {"owner": "handle_frame_video_callback", "screen": "source_next", "back": "image_count_menu"},
+    "ratio_first_recommend": {
+        "owner": "handle_frame_video_callback",
+        "screen": "ratio_first",
+        "back": "image_count_menu",
+        "mutation": "read_only_redirect",
+    },
     "ratio_first_custom": {"owner": "handle_frame_video_callback", "screen": "ratio_first_input", "back": "ratio_first"},
     "done": {"owner": "handle_frame_video_canonical_callback", "screen": "images", "back": "collect"},
     "ai_stitch_generated": {
