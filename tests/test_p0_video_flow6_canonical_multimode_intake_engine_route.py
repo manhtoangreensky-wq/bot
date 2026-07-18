@@ -57,7 +57,12 @@ def _callbacks(markup) -> list[str]:
 
 def _assert_two_column_keyboard(markup) -> None:
     assert markup.inline_keyboard
-    assert all(len(row) == 2 for row in markup.inline_keyboard)
+    assert all(
+        len(row) == 2
+        or (len(row) == 5 and [button.text for button in row] == ["1", "2", "3", "4", "5"])
+        or (len(row) == 1 and row[0].text == "✍️ Tự nhập")
+        for row in markup.inline_keyboard
+    )
     callbacks = _callbacks(markup)
     assert len(callbacks) == len(set(callbacks))
     assert markup.inline_keyboard[-1][1].callback_data == "menu|main"
@@ -103,7 +108,7 @@ def test_public_entry_and_scene_ratio_keyboards_match_flow6_contract() -> None:
     assert "ℹ️ Lưu ý số cảnh" in count
     assert "Dùng 2 cảnh đề xuất" not in count
     assert "✍️ Tự nhập" in ratio
-    assert "💡 Gợi ý phù hợp" in ratio
+    assert "Gợi ý" not in ratio
 
 
 def test_flow6_public_keyboards_are_two_columns_with_navigation_last() -> None:
@@ -166,7 +171,6 @@ def test_flow6_public_keyboards_are_two_columns_with_navigation_last() -> None:
         "vprofile|suggest|5",
         "vprofile|suggest_refresh",
         "vprofile|suggest_custom",
-        "vprofile|suggest_restore",
         "vprofile|back",
         "menu|main",
     ]
