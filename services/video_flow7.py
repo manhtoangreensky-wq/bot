@@ -145,10 +145,10 @@ ENTRY_ROWS = {
          ("📖 Hướng dẫn", "menu|guide_video_ai")),
     ),
     "storyboard_prompt": (
-        (("🎞 Bắt đầu Storyboard", "vproduct|flow7_start|storyboard_prompt"),
-         ("💡 Ý tưởng video", "vproduct|idea_library|storyboard_prompt")),
-        (("🖼 Gửi storyboard cũ", "vproduct|storyboard_upload|storyboard_prompt"),
-         ("✨ Tạo ảnh theo panel", "vproduct|storyboard_suggest|storyboard_prompt")),
+        (("✍️ Bắt đầu Storyboard", "vstory|start"),
+         ("📎 Gửi storyboard có sẵn", "vstory|upload")),
+        (("✨ Tạo storyboard AI", "vstory|ai"),
+         ("ℹ️ Cách hoạt động", "vstory|help")),
     ),
     "self_shot_scene_change": (
         (("🎥 Gửi video tự quay", "vproduct|selfshot_source|upload"),

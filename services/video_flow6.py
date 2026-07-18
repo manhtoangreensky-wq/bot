@@ -238,7 +238,13 @@ def normalize_context(value: dict[str, Any] | None) -> dict[str, Any]:
     )
     base["content_choice"] = dict(base.get("content_choice") or base.get("selected_suggestion") or {})
     manifest = dict(base.get("asset_manifest") or {})
-    manifest["items"] = [dict(item) for item in manifest.get("items") or [] if isinstance(item, dict)][:MAX_SCENES]
+    # Storyboard keeps one required opening frame and an optional closing
+    # frame per scene.  The shared 20-scene limit must therefore not discard
+    # the second frame of a 20-scene board.
+    item_limit = MAX_SCENES * 2 if flow_kind == "storyboard" else MAX_SCENES
+    manifest["items"] = [
+        dict(item) for item in manifest.get("items") or [] if isinstance(item, dict)
+    ][:item_limit]
     manifest["source_video"] = dict(manifest.get("source_video") or {})
     manifest["probe"] = dict(manifest.get("probe") or {})
     base["asset_manifest"] = manifest
@@ -280,6 +286,16 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
             or context.get("trend_source")
             or {}
         ),
+        "required_capability": str(
+            source.get("required_capability")
+            or context.get("required_capability")
+            or ""
+        ),
+        "storyboard_manifest": dict(
+            source.get("storyboard_manifest")
+            or context.get("storyboard_manifest")
+            or {}
+        ),
         "source_fields": source_fields,
         "transitions": list(
             source.get("transitions")
@@ -291,6 +307,14 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
     })
     assets = dict(source.get("reference_assets") or source.get("assets") or {})
     manifest = dict(context.get("asset_manifest") or {})
+    storyboard_manifest = dict(
+        assets.get("storyboard_manifest")
+        or context.get("storyboard_manifest")
+        or source.get("storyboard_manifest")
+        or {}
+    )
+    if storyboard_manifest:
+        context["storyboard_manifest"] = storyboard_manifest
     if assets:
         asset_items = [dict(item) for item in assets.get("items") or [] if isinstance(item, dict)]
         manifest["items"] = asset_items
@@ -355,11 +379,79 @@ def asset_gate_status(value: dict[str, Any] | None) -> dict[str, Any]:
     context = normalize_context(value)
     requirement = str(context["asset_requirement"])
     manifest = dict(context["asset_manifest"])
-    items = [item for item in manifest.get("items") or [] if str(item.get("file_id") or item.get("path") or "")]
+    items = [
+        item for item in manifest.get("items") or []
+        if str(item.get("file_id") or item.get("path") or item.get("result_url") or "").strip()
+    ]
     source_video = dict(manifest.get("source_video") or {})
     if requirement in {"optional", "preset_dependent", "script_dependent", "series_dependent"}:
         return {"ok": True, "requirement": requirement, "required": 0, "received": len(items), "blocker": ""}
     if requirement == "images_required":
+        if str(context.get("flow_kind") or "") == "storyboard":
+            storyboard_manifest = dict(context.get("storyboard_manifest") or {})
+            def scene_index_of(item: dict[str, Any]) -> int:
+                try:
+                    return int(item.get("scene_index") or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            manifest_scenes = {
+                scene_index_of(item): dict(item)
+                for item in storyboard_manifest.get("scenes") or []
+                if isinstance(item, dict) and scene_index_of(item) > 0
+            }
+            by_scene_slot = {
+                (scene_index_of(item), str(item.get("slot") or "start")): item
+                for item in items
+                if scene_index_of(item) > 0
+            }
+
+            def ready(item: dict[str, Any] | None) -> bool:
+                current_item = dict(item or {})
+                return bool(
+                    str(
+                        current_item.get("file_id")
+                        or current_item.get("path")
+                        or current_item.get("result_url")
+                        or ""
+                    ).strip()
+                )
+
+            scene_count = max(1, int(context.get("scene_count") or 0))
+            missing_start = [
+                scene_index
+                for scene_index in range(1, scene_count + 1)
+                if not ready(by_scene_slot.get((scene_index, "start")))
+            ]
+            missing_required_end = [
+                scene_index
+                for scene_index in range(1, scene_count + 1)
+                if str(manifest_scenes.get(scene_index, {}).get("end_image_mode") or "optional") == "required"
+                and not ready(by_scene_slot.get((scene_index, "end")))
+            ]
+            mapped = all(
+                ready(by_scene_slot.get((scene_index, "start")))
+                for scene_index in range(1, scene_count + 1)
+            )
+            received = sum(1 for item in items if ready(item))
+            blockers = []
+            if missing_start:
+                blockers.append("storyboard_start_images_missing")
+            if missing_required_end:
+                blockers.append("storyboard_required_end_images_missing")
+            if not mapped:
+                blockers.append("storyboard_scene_asset_mapping_incomplete")
+            return {
+                "ok": not blockers,
+                "requirement": requirement,
+                "required": scene_count + len(missing_required_end),
+                "received": received,
+                "mapped_scene_count": scene_count - len(missing_start),
+                "missing_start": missing_start,
+                "missing_required_end": missing_required_end,
+                "blocker": blockers[0] if blockers else "",
+                "blockers": blockers,
+            }
         required = max(1, int(context.get("scene_count") or 0))
         image_items = [
             item
@@ -476,6 +568,14 @@ def execution_route_for(value: dict[str, Any] | None, *, prefer_ai_motion: bool 
         "delivery_contract": "valid_mp4_and_telegram_artifact_message_id",
         "charge_contract": "charge_once_after_successful_delivery_receipt",
     })
+    if route_key == "storyboard":
+        capability = str(context.get("required_capability") or "image_to_video")
+        route["required_capability"] = capability
+        route["capability_requirements"] = [
+            capability,
+            "scene_image_mapping",
+            "final_mp4",
+        ]
     return route
 
 
