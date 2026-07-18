@@ -190401,7 +190401,10 @@ def subdub_audio_layer_keyboard(state: dict | None, layer: str, lang: str = "vi"
         rows.append([InlineKeyboardButton("✏️ Nhập âm lượng" if is_vi else "✏️ Enter volume", callback_data="videodub|audio_original_input")])
     else:
         rows.append([InlineKeyboardButton("✏️ Nhập âm lượng" if is_vi else "✏️ Enter volume", callback_data="videodub|audio_dub_input")])
-    rows.append([InlineKeyboardButton("⬅️ Âm thanh" if is_vi else "⬅️ Audio", callback_data="videodub|audio_mix")])
+    rows.append([
+        InlineKeyboardButton("⬅️ Âm thanh" if is_vi else "⬅️ Audio", callback_data="videodub|audio_mix"),
+        InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="menu|main"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
@@ -202774,18 +202777,29 @@ async def video_dubbing_store_dialogue_text_and_route(
     )
     return next_state
 
+VIDEO_DUBBING_PENDING_TEXT_STEPS = frozenset({
+    "language_custom",
+    "voice_custom",
+    "voice_saved_select",
+    "voice_speed",
+    "link_input",
+    "subtitle_edit_line_number",
+    "subtitle_edit_line_text",
+    "subtitle_find_text",
+    "subtitle_replace_text",
+    "subtitle_time_shift",
+    "dialogue_text_input",
+    "subdub_original_volume_input",
+    "subdub_dub_volume_input",
+})
+
+
 async def handle_video_dubbing_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
     state = get_video_dubbing_pending(uid)
-    if not state or state.get("step") not in {
-        "language_custom", "voice_custom", "voice_saved_select",
-        "voice_speed",
-        "link_input", "subtitle_edit_line_number", "subtitle_edit_line_text",
-        "subtitle_find_text", "subtitle_replace_text", "subtitle_time_shift",
-        "dialogue_text_input", "subdub_original_volume_input", "subdub_dub_volume_input",
-    }:
+    if not state or state.get("step") not in VIDEO_DUBBING_PENDING_TEXT_STEPS:
         return False
     lang = get_user_language(uid) or "vi"
     mode = normalize_video_translate_mode(
@@ -210118,6 +210132,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_state_reset_slash_command(update, context, text):
         return
 
+    # A specific SubDub input state owns the message before generic product handlers.
+    pending_subdub = get_video_dubbing_pending(uid) or {}
+    if str(pending_subdub.get("step") or "") in VIDEO_DUBBING_PENDING_TEXT_STEPS:
+        if await handle_video_dubbing_pending_text(update, context):
+            return
+
     if await handle_manual_approval_pending_text(update, context):
         return
 
@@ -210206,9 +210226,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_video_downloader_pending_text(update, context):
-        return
-
-    if await handle_video_dubbing_pending_text(update, context):
         return
 
     if await handle_video_finalization_pending_text(update, context):
