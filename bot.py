@@ -72187,9 +72187,18 @@ def video_flow7_prepare_storyboard_prompts(state: dict) -> dict:
     return video_flow6.sync_scene_state(updated)
 
 
-async def video_flow7_open_idea_catalog_from_state(target, context, user_id: int, state: dict, lang: str):
+async def video_flow7_open_idea_catalog_from_state(
+    target,
+    context,
+    user_id: int,
+    state: dict,
+    lang: str,
+    *,
+    back_callback: str = "",
+):
     product_id = str(state.get("source_product_id") or "video_idea")
     assets = dict(state.get("reference_assets") or state.get("assets") or {})
+    return_callback = str(back_callback or f"vproduct|idea_back|{product_id}").strip()
     intake = {
         "origin_product": product_id,
         "scene_count": max(1, min(20, safe_int(state.get("scene_count"), 1))),
@@ -72197,11 +72206,13 @@ async def video_flow7_open_idea_catalog_from_state(target, context, user_id: int
         "trend_source": dict(state.get("trend_source") or {}),
         "source_media_refs": list(assets.get("source_media_refs") or [])[:20],
         "source_asset_items": [dict(item) for item in assets.get("items") or [] if isinstance(item, dict)][:20],
+        "return_callback": return_callback,
     }
     clear_developing_video_pending(user_id)
     context.user_data["video_idea_flow7_intake"] = intake
     context.user_data["video_idea_origin_product"] = product_id
     context.user_data["video_idea_source_media_refs"] = list(intake["source_media_refs"])
+    context.user_data["video_idea_return_callback"] = return_callback
     context.user_data["video_idea_catalog_page"] = 1
     return await safe_edit_or_send_long_html(
         target,
@@ -72209,7 +72220,7 @@ async def video_flow7_open_idea_catalog_from_state(target, context, user_id: int
         reply_markup=video_idea_dynamic_page_keyboard(
             1,
             lang,
-            back_callback=f"vproduct|idea_back|{product_id}",
+            back_callback=return_callback,
         ),
     )
 
@@ -82141,10 +82152,17 @@ def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
     lines = [f"🔥 <b>Trend mới nhất{title}</b>", ""]
     for index, item in enumerate(page, 1):
         stale_note = " · bản lưu gần nhất" if item.get("stale") else ""
-        lines.append(
-            f"{index}. <b>{html.escape(str(item.get('short_title') or item.get('title') or ''))}</b>"
-            f"\n   {html.escape(str(item.get('source_name') or 'Nguồn công khai'))}{stale_note}"
-        )
+        verified_at = str(item.get("last_verified_at") or item.get("collected_at") or "Chưa rõ")
+        summary = str(item.get("summary") or "Chưa có mô tả ngắn từ nguồn.")
+        lines.extend([
+            f"{index}. <b>{html.escape(str(item.get('short_title') or item.get('title') or ''))}</b>",
+            f"   Nền tảng: {html.escape(str(item.get('platform') or 'Chưa xác định'))}",
+            f"   Nhóm: {html.escape(str(item.get('category') or 'Đang thịnh hành'))}",
+            f"   Mô tả: {html.escape(summary[:220])}",
+            f"   Nguồn: {html.escape(str(item.get('source_name') or 'Nguồn công khai'))}{stale_note}",
+            f"   Kiểm tra gần nhất: {html.escape(verified_at[:19].replace('T', ' '))}",
+            "",
+        ])
     lines.extend([
         "",
         "Chọn một trend bằng hàng số. Sau đó mới chọn số cảnh, tỉ lệ và hướng nội dung.",
@@ -82691,7 +82709,27 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
             "trend_source": video_trend2_source_snapshot(state),
         })
         save_video_profile_studio_state(context, interim)
-        return await video_flow7_open_idea_catalog_from_state(query, context, uid, interim, lang)
+        return await video_flow7_open_idea_catalog_from_state(
+            query,
+            context,
+            uid,
+            interim,
+            lang,
+            back_callback="vtrend|idea_return",
+        )
+    if action == "idea_return":
+        clear_developing_video_pending(uid)
+        for key in (
+            "video_idea_origin_product",
+            "video_idea_source_media_refs",
+            "video_idea_flow7_intake",
+            "video_idea_return_callback",
+        ):
+            context.user_data.pop(key, None)
+        state = video_trend2_open_screen(state, "content_source", parent="aspect_ratio")
+        state.update({"pending_input": "", "screen": "content_source"})
+        state = save_video_trend2_state(context, state)
+        return await video_trend2_render(query, context, state, lang)
     if action == "continue":
         canonical = video_trend2_canonical_state(context, state)
         context.user_data.pop(VIDEO_TREND2_STATE_KEY, None)
@@ -83497,10 +83535,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "idea_back":
         requested_product = str(value or product_id).strip()
         flow7_intake = dict(context.user_data.get("video_idea_flow7_intake") or {})
+        if requested_product == "video_trend":
+            # Tin nhắn Trend cũ dùng callback Product chung. Chỉ hiển thị lại
+            # màn cha của Trend, không ghi đè phiên hiện tại.
+            trend_state = video_trend2_state(context)
+            trend_state["screen"] = "content_source"
+            return await video_trend2_render(query, context, trend_state, lang)
         clear_developing_video_pending(uid)
         context.user_data.pop("video_idea_origin_product", None)
         context.user_data.pop("video_idea_source_media_refs", None)
         context.user_data.pop("video_idea_flow7_intake", None)
+        context.user_data.pop("video_idea_return_callback", None)
         if requested_product != product_id:
             return await safe_edit_or_send(
                 query,
@@ -91696,6 +91741,11 @@ def video_idea_product_lane_origin(context=None, state: dict | None = None) -> s
 
 
 def video_idea_catalog_back_callback(context=None, state: dict | None = None) -> str:
+    user_data = getattr(context, "user_data", None)
+    if isinstance(user_data, dict):
+        explicit = str(user_data.get("video_idea_return_callback") or "").strip()
+        if explicit == "vtrend|idea_return":
+            return explicit
     product_id = video_idea_product_lane_origin(context, state)
     return f"vproduct|idea_back|{product_id}" if product_id else "videoidea|start"
 
@@ -95093,8 +95143,21 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
 
 async def handle_video_idea_dynamic_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
+    callback_query_id = str(getattr(query, "id", "") or "")
+    processed_ids = [
+        str(item)
+        for item in context.user_data.get("video_idea_processed_callback_ids") or []
+        if str(item or "")
+    ][-100:]
+    if callback_query_id and callback_query_id in processed_ids:
+        await query.answer("Đã nhận lựa chọn này.")
+        return None
+    if callback_query_id:
+        context.user_data["video_idea_processed_callback_ids"] = (
+            processed_ids + [callback_query_id]
+        )[-100:]
+    await query.answer()
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "page"
@@ -95429,6 +95492,40 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
                     ]]),
                 )
+            if origin_product == "video_trend":
+                logger.exception(
+                    "video_trend_idea_handoff_rejected | callback=%s preset=%s blocker=%s",
+                    sanitize_log_text(str(getattr(query, "data", "") or ""))[:120],
+                    safe_int(state.get("idea_preset_id"), 0),
+                    sanitize_log_text(str(exc))[:160],
+                )
+                restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+                return await safe_edit_or_send_long_html(
+                    query,
+                    "⚠️ <b>Ý tưởng này còn thiếu dữ liệu bắt buộc để mở phần câu lệnh.</b>\n\n"
+                    "Phiên Trend, số cảnh và tỉ lệ vẫn được giữ. Anh/chị có thể sửa nội dung "
+                    "hoặc quay lại chọn mẫu khác; hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
+                    + video_idea_dynamic_preview_text(state),
+                    reply_markup=video_idea_dynamic_preview_keyboard(lang),
+                )
+            raise
+        except Exception as exc:
+            if origin_product == "video_trend":
+                logger.exception(
+                    "video_trend_idea_handoff_failed | callback=%s preset=%s exception=%s",
+                    sanitize_log_text(str(getattr(query, "data", "") or ""))[:120],
+                    safe_int(state.get("idea_preset_id"), 0),
+                    type(exc).__name__,
+                )
+                restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+                return await safe_edit_or_send_long_html(
+                    query,
+                    "⚠️ <b>Ý tưởng này chưa đủ cấu hình để mở phần câu lệnh.</b>\n\n"
+                    "Phiên Trend, số cảnh và tỉ lệ vẫn được giữ. Anh/chị có thể sửa nội dung "
+                    "hoặc quay lại chọn mẫu khác; hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
+                    + video_idea_dynamic_preview_text(state),
+                    reply_markup=video_idea_dynamic_preview_keyboard(lang),
+                )
             raise
         save_developing_video_plan(uid, "videoidea", {
             **state,
@@ -95444,7 +95541,13 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             "xu_charged": 0,
         })
         clear_developing_video_pending(uid)
-        context.user_data.pop("video_idea_flow7_intake", None)
+        for key in (
+            "video_idea_flow7_intake",
+            "video_idea_origin_product",
+            "video_idea_source_media_refs",
+            "video_idea_return_callback",
+        ):
+            context.user_data.pop(key, None)
         handoff = save_video_profile_studio_state(context, handoff)
         return await video_profile_scene1_render(query, handoff, lang)
 

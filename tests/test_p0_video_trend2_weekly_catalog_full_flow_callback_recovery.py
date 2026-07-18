@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -241,8 +242,18 @@ def test_changed_bot_regions_compile_as_python_311_source() -> None:
         "def run_video_trend_catalog_refresh_once",
         "tg_polling_task:",
     )
+    catalog_region = "async def video_flow7_open_idea_catalog_from_state" + _between(
+        "async def video_flow7_open_idea_catalog_from_state",
+        "async def start_public_video_scene2_step",
+    )
+    idea_region = "async def handle_video_idea_dynamic_callback" + _between(
+        "async def handle_video_idea_dynamic_callback",
+        "async def handle_video_idea_admin_callback",
+    )
     compile(trend_region, "bot.py:trend2", "exec")
     compile(scheduler_region, "bot.py:trend2_scheduler", "exec")
+    compile(catalog_region, "bot.py:trend2_idea_catalog", "exec")
+    compile(idea_region, "bot.py:trend2_idea_callback", "exec")
 
 
 def test_public_layout_source_ratio_content_and_back_contracts_are_present() -> None:
@@ -257,6 +268,82 @@ def test_public_layout_source_ratio_content_and_back_contracts_are_present() -> 
     assert "[InlineKeyboardButton(str(index)" in source
     assert 'InlineKeyboardButton("⬅️ Quay lại"' in source
     assert 'InlineKeyboardButton("🏠 Menu chính"' in source
+
+
+def test_trend_idea_catalog_has_exact_return_owner() -> None:
+    trend_handler = _between(
+        "async def _handle_video_trend2_callback_impl",
+        "async def handle_video_trend2_callback",
+    )
+    assert 'back_callback="vtrend|idea_return"' in trend_handler
+    assert 'if action == "idea_return":' in trend_handler
+    assert 'video_trend2_open_screen(state, "content_source", parent="aspect_ratio")' in trend_handler
+    assert 'context.user_data.pop(key, None)' in trend_handler
+
+    catalog_helper = _between(
+        "async def video_flow7_open_idea_catalog_from_state",
+        "async def start_public_video_scene2_step",
+    )
+    assert 'back_callback: str = ""' in catalog_helper
+    assert '"return_callback": return_callback' in catalog_helper
+    assert 'context.user_data["video_idea_return_callback"] = return_callback' in catalog_helper
+
+
+def test_stale_trend_idea_back_is_read_only_and_does_not_clear_session() -> None:
+    product_handler = _between(
+        "async def handle_video_product_callback",
+        "async def handle_video_product_pending_text",
+    )
+    idea_back = product_handler.split('if action == "idea_back":', 1)[1].split(
+        'if action == "script_count_accept"', 1
+    )[0]
+    stale_branch = idea_back.split('if requested_product == "video_trend":', 1)[1].split(
+        "clear_developing_video_pending(uid)", 1
+    )[0]
+    assert 'trend_state["screen"] = "content_source"' in stale_branch
+    assert "save_video_trend2_state" not in stale_branch
+    assert "context.user_data.pop" not in stale_branch
+
+
+def test_idea_callback_is_idempotent_and_trend_errors_are_specific() -> None:
+    handler = _between(
+        "async def handle_video_idea_dynamic_callback",
+        "async def handle_video_idea_admin_callback",
+    )
+    assert "video_idea_processed_callback_ids" in handler
+    assert 'await query.answer("Đã nhận lựa chọn này.")' in handler
+    assert 'if origin_product == "video_trend":' in handler
+    assert "video_trend_idea_handoff_rejected" in handler
+    assert "video_trend_idea_handoff_failed" in handler
+    assert "Có lỗi khi xử lý lệnh" not in handler
+
+
+def test_trend_catalog_shows_source_platform_category_summary_and_freshness() -> None:
+    source = _between("def video_trend2_catalog_text", "def video_trend2_catalog_keyboard")
+    for label in (
+        "Nền tảng:",
+        "Nhóm:",
+        "Mô tả:",
+        "Nguồn:",
+        "Kiểm tra gần nhất:",
+    ):
+        assert label in source
+
+
+def test_every_public_trend_button_has_one_action_branch() -> None:
+    source = _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_trend2_callback")
+    declared = set(re.findall(r"vtrend\|([a-z_]+)", source))
+    expected = {
+        "back", "catalog", "categories", "category", "continue", "edit_content",
+        "entry", "freshness", "idea_catalog", "idea_return", "manual_content",
+        "manual_trend", "more", "pick", "profile", "profiles", "ratio",
+        "ratio_custom", "ratio_suggest", "restore_content", "resume", "scene_note",
+        "scenes", "scenes_custom", "sources", "suggestion", "suggestions_more",
+    }
+    assert declared == expected
+    for action in expected - {"manual_content", "edit_content"}:
+        assert f'action == "{action}"' in source
+    assert 'action in {"manual_content", "edit_content"}' in source
 
 
 def test_trend_handoff_persists_source_and_has_zero_preconfirm_side_effects() -> None:
