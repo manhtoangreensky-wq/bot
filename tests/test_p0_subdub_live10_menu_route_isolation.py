@@ -121,3 +121,41 @@ def test_live10_numeric_dub_volume_has_a_dedicated_pending_state():
     assert "dubbed_voice_volume_percent" in pending
     assert "handle_video_product_pending_text" not in pending
     assert "scene_count" not in pending
+
+
+def test_live10_product_video_text_handlers_do_not_steal_subdub_volume_input():
+    helper = _function_source("subdub_text_input_owns_message")
+    assert "get_video_dubbing_pending(user_id)" in helper
+    assert "VIDEO_DUBBING_PENDING_TEXT_STEPS" in helper
+
+    for name in (
+        "handle_video_product_pending_text",
+        "handle_video_finalization_pending_text",
+        "handle_developing_video_pending_text",
+        "handle_video_idea_dynamic_pending_text",
+    ):
+        source = _function_source(name)
+        guard = source.index("subdub_text_input_owns_message(uid)")
+        scene_refs = [
+            source.find('"b14_scene_custom"'),
+            source.find('"waiting_scene_count"'),
+            source.find('"scene_count_custom"'),
+            source.find('"idea2_scene_count_custom"'),
+        ]
+        scene_refs = [idx for idx in scene_refs if idx >= 0]
+        if scene_refs:
+            assert guard < min(scene_refs), f"{name} can still steal numeric SubDub volume input"
+
+
+def test_live10_terminal_panel_recovers_only_after_real_artifact_delivery():
+    source = _function_source("subdub_finalize_delivered_panel")
+    evidence = source.index("subdub_terminal_delivery_evidence")
+    missing_evidence_guard = source.index("if not job_key or not job or not delivery_message_id")
+    replacement = source.index('edit_method = "replacement_status_message"')
+    terminal_commit = source.rindex("update_subtitle_dub_pipeline_job(")
+
+    assert evidence < missing_evidence_guard < replacement < terminal_commit
+    assert "await message.reply_text(" in source
+    assert '"progress_percent": 100' in source
+    assert '"status_panel_terminalized": True' in source
+    assert "rendered is None or not effective_panel_message_id" in source

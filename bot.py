@@ -83597,6 +83597,8 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
+    if subdub_text_input_owns_message(uid):
+        return False
     session = get_video_session(uid)
     if (
         str(session.get("product_id") or "") in VIDEO_SCENE2_PUBLIC_PRODUCTS
@@ -90682,6 +90684,8 @@ async def handle_video_idea_dynamic_pending_text(
     if not pending.get("idea2") or pending.get("flow") != "videoidea":
         return False
     uid = update.effective_user.id
+    if subdub_text_input_owns_message(uid):
+        return False
     lang = get_user_language(uid) or "vi"
     raw_text = str(update.message.text or "").strip()[:20000]
     step = str(pending.get("step") or "")
@@ -91011,6 +91015,8 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
+    if subdub_text_input_owns_message(uid):
+        return False
     pending = get_developing_video_pending(uid)
     if not pending:
         return False
@@ -153740,6 +153746,8 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
     if not update.message or not update.message.text or not update.effective_user:
         return False
     uid = update.effective_user.id
+    if subdub_text_input_owns_message(uid):
+        return False
     state = get_video_finalization_state(uid)
     if not state:
         return False
@@ -193730,6 +193738,12 @@ async def subdub_finalize_delivered_panel(
     delivery_message_id = str(evidence.get("message_id") or "").strip()
     if not job_key or not job or not delivery_message_id:
         return None
+    if (
+        truthy_value(job.get("status_panel_terminal_edit_succeeded"), False)
+        and truthy_value(job.get("status_panel_terminalized"), False)
+        and _safe_int(job.get("panel_final_percent"), 0) == 100
+    ):
+        return getattr(query, "message", None) or job
 
     artifact_type = str(evidence.get("artifact_type") or "").strip().lower()
     is_video = bool(evidence.get("is_video"))
@@ -193799,47 +193813,84 @@ async def subdub_finalize_delivered_panel(
             bot_client = query.get_bot()
         except Exception:
             bot_client = None
-    if not (panel_message_id and panel_chat_id and bot_client is not None):
+    rendered = None
+    edit_method = "stored_message_id"
+    edit_error = ""
+    if panel_message_id and panel_chat_id and bot_client is not None:
+        try:
+            rendered = await bot_client.edit_message_text(
+                chat_id=int(panel_chat_id) if panel_chat_id.lstrip("-").isdigit() else panel_chat_id,
+                message_id=int(panel_message_id) if panel_message_id.isdigit() else panel_message_id,
+                text=delivered_text,
+                parse_mode="HTML",
+                reply_markup=subdub_progress_keyboard(job_id, lang),
+            )
+        except Exception as exc:
+            if "message is not modified" in str(exc).strip().lower():
+                rendered = getattr(query, "message", None) or job
+            else:
+                edit_error = sanitize_log_text(type(exc).__name__)[:120]
+                logger.warning("subtitle/dub stored terminal panel edit failed | %s", sanitize_log_text(str(exc))[:120])
+    else:
+        edit_error = "stored_status_panel_unavailable"
+
+    message = getattr(query, "message", None)
+    if rendered is None:
+        edit_method = "active_query"
+        try:
+            if query is not None and hasattr(query, "edit_message_text"):
+                rendered = await query.edit_message_text(
+                    delivered_text,
+                    parse_mode="HTML",
+                    reply_markup=subdub_progress_keyboard(job_id, lang),
+                )
+            elif message is not None and hasattr(message, "reply_text"):
+                edit_method = "replacement_status_message"
+                rendered = await message.reply_text(
+                    delivered_text,
+                    parse_mode="HTML",
+                    reply_markup=subdub_progress_keyboard(job_id, lang),
+                )
+        except Exception as exc:
+            if "message is not modified" in str(exc).strip().lower():
+                rendered = message or job
+            else:
+                edit_error = sanitize_log_text(type(exc).__name__)[:120]
+                logger.warning("subtitle/dub active terminal panel recovery failed | %s", sanitize_log_text(str(exc))[:120])
+
+    effective_panel_message_id = str(
+        getattr(rendered, "message_id", "")
+        or panel_message_id
+        or getattr(message, "message_id", "")
+        or ""
+    ).strip()
+    effective_panel_chat_id = str(
+        getattr(rendered, "chat_id", "")
+        or getattr(getattr(rendered, "chat", None), "id", "")
+        or panel_chat_id
+        or getattr(message, "chat_id", "")
+        or ""
+    ).strip()
+    if rendered is None or not effective_panel_message_id:
         update_subtitle_dub_pipeline_job(
             job_key,
-            status_panel_terminal_edit_method="stored_message_id",
+            panel_final_message_id=panel_message_id,
+            status_panel_terminal_edit_method=edit_method,
             status_panel_terminal_edit_succeeded=False,
             status_panel_edit_failed=True,
-            status_panel_terminal_edit_error="stored_status_panel_unavailable",
+            status_panel_terminal_edit_error=edit_error or "terminal_panel_recovery_failed",
             panel_finalized=False,
             status_panel_terminalized=False,
         )
         return None
-    try:
-        rendered = await bot_client.edit_message_text(
-            chat_id=int(panel_chat_id) if panel_chat_id.lstrip("-").isdigit() else panel_chat_id,
-            message_id=int(panel_message_id) if panel_message_id.isdigit() else panel_message_id,
-            text=delivered_text,
-            parse_mode="HTML",
-            reply_markup=subdub_progress_keyboard(job_id, lang),
-        )
-    except Exception as exc:
-        already_final = "message is not modified" in str(exc).strip().lower()
-        if not already_final:
-            update_subtitle_dub_pipeline_job(
-                job_key,
-                panel_final_message_id=panel_message_id,
-                status_panel_terminal_edit_method="stored_message_id",
-                status_panel_terminal_edit_succeeded=False,
-                status_panel_edit_failed=True,
-                status_panel_terminal_edit_error=sanitize_log_text(type(exc).__name__)[:120],
-                panel_finalized=False,
-                status_panel_terminalized=False,
-            )
-            logger.warning("subtitle/dub terminal panel edit skipped | %s", sanitize_log_text(str(exc))[:120])
-            return None
-        rendered = getattr(query, "message", None)
 
     update_subtitle_dub_pipeline_job(
         job_key,
         **delivered_fields,
-        panel_final_message_id=panel_message_id,
-        status_panel_terminal_edit_method="stored_message_id",
+        status_panel_message_id=effective_panel_message_id,
+        status_panel_chat_id=effective_panel_chat_id,
+        panel_final_message_id=effective_panel_message_id,
+        status_panel_terminal_edit_method=edit_method,
         status_panel_terminal_edit_succeeded=True,
         status_panel_edit_failed=False,
         status_panel_terminal_edit_error="",
@@ -200292,6 +200343,96 @@ def subdub_atempo_filters(ratio: float) -> list[str]:
         filters.append(f"atempo={remaining:.6f}")
     return filters
 
+def subdub_plan_canonical_tts_timeline(
+    chunks: list[dict],
+    total_duration: float,
+    *,
+    max_tempo_ratio: float = 1.15,
+) -> dict:
+    """Schedule one TTS track without overlap while preserving natural speech when possible."""
+    if not chunks:
+        return {"ok": False, "blocker": "canonical_tts_segments_empty", "scheduled": []}
+    timeline_end = max(
+        float(total_duration or 0),
+        max(float((item or {}).get("end") or 0) for item in chunks),
+    )
+    if timeline_end <= 0:
+        return {"ok": False, "blocker": "canonical_timeline_duration_invalid", "scheduled": []}
+    normalized = []
+    for position, item in enumerate(chunks, start=1):
+        item = dict(item or {})
+        cue_id = str(item.get("cue_id") or item.get("index") or position)
+        start = max(0.0, float(item.get("start") or 0))
+        end = max(start, float(item.get("end") or 0))
+        audio_duration = max(0.0, float(item.get("audio_duration") or 0))
+        if end <= start:
+            return {"ok": False, "blocker": f"canonical_cue_window_invalid:{cue_id}", "scheduled": []}
+        if audio_duration <= 0:
+            return {"ok": False, "blocker": f"canonical_tts_duration_unavailable:{cue_id}", "scheduled": []}
+        normalized.append({
+            **item,
+            "cue_id": cue_id,
+            "start": start,
+            "end": end,
+            "audio_duration": audio_duration,
+        })
+
+    def _schedule(tempo_ratio: float) -> tuple[list[dict], float, int]:
+        cursor = 0.0
+        shifted = 0
+        scheduled = []
+        for item in normalized:
+            planned_start = max(float(item["start"]), cursor)
+            if planned_start > float(item["start"]) + 0.001:
+                shifted += 1
+            planned_duration = float(item["audio_duration"]) / tempo_ratio
+            planned_end = planned_start + planned_duration
+            scheduled.append({
+                **item,
+                "scheduled_start": planned_start,
+                "scheduled_end": planned_end,
+                "scheduled_duration": planned_duration,
+                "tempo_ratio": tempo_ratio,
+            })
+            cursor = planned_end
+        return scheduled, cursor, shifted
+
+    max_tempo_ratio = max(1.0, min(2.0, float(max_tempo_ratio or 1.15)))
+    scheduled, final_end, shifted_count = _schedule(1.0)
+    tempo_ratio = 1.0
+    if final_end > timeline_end + 0.01:
+        fastest, fastest_end, _ = _schedule(max_tempo_ratio)
+        if fastest_end > timeline_end + 0.01:
+            return {
+                "ok": False,
+                "blocker": (
+                    "canonical_tts_timeline_exceeds_source:"
+                    f"required_end={fastest_end:.3f};source_duration={timeline_end:.3f};"
+                    f"max_tempo={max_tempo_ratio:.3f}"
+                ),
+                "scheduled": [],
+            }
+        low, high = 1.0, max_tempo_ratio
+        for _ in range(40):
+            candidate = (low + high) / 2.0
+            _, candidate_end, _ = _schedule(candidate)
+            if candidate_end > timeline_end:
+                low = candidate
+            else:
+                high = candidate
+        tempo_ratio = high
+        scheduled, final_end, shifted_count = _schedule(tempo_ratio)
+    return {
+        "ok": True,
+        "blocker": "",
+        "scheduled": scheduled,
+        "timeline_duration": timeline_end,
+        "final_audio_end": final_end,
+        "tempo_ratio": tempo_ratio,
+        "shifted_cue_count": shifted_count,
+        "overlap_count": 0,
+    }
+
 async def build_canonical_dub_timeline_audio(chunks: list[dict], total_duration: float = 0) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
     if not chunks:
@@ -200305,38 +200446,31 @@ async def build_canonical_dub_timeline_audio(chunks: list[dict], total_duration:
     if timeline_end <= 0:
         return b"", "canonical_timeline_duration_invalid"
     max_tempo_ratio = 1.15
-    for item in chunks:
-        start = max(0.0, float(item.get("start") or 0))
-        end = max(start, float(item.get("end") or 0))
-        slot = end - start
-        audio_duration = max(0.0, float(item.get("audio_duration") or 0))
-        if slot <= 0:
-            return b"", f"canonical_cue_window_invalid:{item.get('cue_id') or item.get('index') or 0}"
-        if audio_duration <= 0:
-            return b"", f"canonical_tts_duration_unavailable:{item.get('cue_id') or item.get('index') or 0}"
-        required_tempo = audio_duration / slot
-        if required_tempo > max_tempo_ratio + 0.001:
-            return b"", (
-                f"canonical_tts_segment_exceeds_cue:{item.get('cue_id') or item.get('index') or 0};"
-                f"required_tempo={required_tempo:.3f};max_tempo={max_tempo_ratio:.3f}"
-            )
+    plan = subdub_plan_canonical_tts_timeline(
+        chunks,
+        timeline_end,
+        max_tempo_ratio=max_tempo_ratio,
+    )
+    if not plan.get("ok"):
+        return b"", str(plan.get("blocker") or "canonical_timeline_plan_failed")
+    scheduled_chunks = list(plan.get("scheduled") or [])
     with tempfile.TemporaryDirectory(prefix="toanaas_canonical_dub_timeline_") as tmpdir:
         command = [ffmpeg, "-y"]
-        for index, item in enumerate(chunks):
+        for index, item in enumerate(scheduled_chunks):
             chunk_path = os.path.join(tmpdir, f"chunk_{index:03d}.mp3")
+            audio_bytes = bytes(item.get("audio_bytes") or b"")
+            if not audio_bytes:
+                return b"", f"canonical_tts_audio_empty:{item.get('cue_id') or item.get('index') or index + 1}"
             with open(chunk_path, "wb") as handle:
-                handle.write(bytes(item.get("audio_bytes") or b""))
+                handle.write(audio_bytes)
             command.extend(["-i", chunk_path])
         filters = []
         delayed_labels = []
-        for index, item in enumerate(chunks):
-            start = max(0.0, float(item.get("start") or 0))
-            end = max(start + 0.1, float(item.get("end") or 0))
-            slot = max(0.1, end - start)
-            audio_duration = max(0.0, float(item.get("audio_duration") or 0))
-            tempo_ratio = min(max_tempo_ratio, audio_duration / slot) if audio_duration > slot * 1.01 else 1.0
-            chain = [*subdub_atempo_filters(tempo_ratio), f"atrim=duration={slot:.3f}", f"apad=pad_dur={slot:.3f}", f"atrim=duration={slot:.3f}"]
-            delay_ms = max(0, int(round(start * 1000)))
+        for index, item in enumerate(scheduled_chunks):
+            scheduled_duration = max(0.1, float(item.get("scheduled_duration") or 0))
+            tempo_ratio = max(1.0, float(item.get("tempo_ratio") or 1.0))
+            chain = [*subdub_atempo_filters(tempo_ratio), f"atrim=duration={scheduled_duration:.3f}"]
+            delay_ms = max(0, int(round(float(item.get("scheduled_start") or 0) * 1000)))
             chain.append(f"adelay={delay_ms}|{delay_ms}")
             label = f"canonical_{index}"
             filters.append(f"[{index}:a]{','.join(chain)}[{label}]")
@@ -200359,8 +200493,10 @@ async def build_canonical_dub_timeline_audio(chunks: list[dict], total_duration:
             return b"", str(detail or "canonical_timeline_audio_failed")
         with open(output_path, "rb") as handle:
             return handle.read(), (
-                f"ffmpeg_canonical_timeline_audio:cues={len(chunks)};duration={timeline_end:.3f};"
-                "tts_tracks=1;overlap_count=0;absolute_timestamps=yes"
+                f"ffmpeg_canonical_timeline_audio:cues={len(scheduled_chunks)};duration={timeline_end:.3f};"
+                f"tempo={float(plan.get('tempo_ratio') or 1.0):.6f};"
+                f"shifted_cues={int(plan.get('shifted_cue_count') or 0)};"
+                "tts_tracks=1;overlap_count=0;absolute_timestamps=yes;sequential=yes"
             )
 
 def subdub_dub_audio_filter_chain(*, fallback: bool = False) -> str:
@@ -203959,6 +204095,11 @@ VIDEO_DUBBING_PENDING_TEXT_STEPS = frozenset({
     "subdub_original_volume_input",
     "subdub_dub_volume_input",
 })
+
+
+def subdub_text_input_owns_message(user_id: int) -> bool:
+    state = get_video_dubbing_pending(user_id) or {}
+    return str(state.get("step") or "") in VIDEO_DUBBING_PENDING_TEXT_STEPS
 
 
 async def handle_video_dubbing_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:

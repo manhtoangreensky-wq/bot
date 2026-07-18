@@ -112,6 +112,48 @@ def test_terminal_panel_does_not_fake_success_without_video_delivery_message_id(
     assert stored["progress_percent"] < 100
 
 
+def test_terminal_panel_recovers_with_replacement_when_stored_panel_is_unavailable():
+    key = "terminal-panel-replacement"
+    job = _fresh_job(key)
+    assert bot.mark_subtitle_dub_pipeline_output_sent(
+        key,
+        terminal_state="delivered",
+        delivery_message_id="8182",
+        terminal_artifact_type="video",
+        video_delivery_message_id="8182",
+    )
+    bot.SUBTITLE_DUB_PIPELINE_JOBS[key]["status_panel_message_id"] = ""
+    bot.SUBTITLE_DUB_PIPELINE_JOBS[key]["status_panel_chat_id"] = ""
+
+    capture_bot = CaptureBot()
+    message = CaptureMessage()
+    query = CaptureQuery(message, capture_bot)
+    finalized = asyncio.run(
+        bot.subdub_finalize_delivered_panel(
+            query,
+            SimpleNamespace(bot=capture_bot),
+            key,
+            job["job_id"],
+            "vi",
+            {"has_video": True, "video_delivery_message_id": "8182"},
+        )
+    )
+    receipt = asyncio.run(
+        bot.subdub_send_success_receipt_once(message, key, "receipt")
+    )
+
+    assert finalized is not None
+    assert capture_bot.edits == []
+    assert len(message.replies) == 2
+    assert "100%" in message.replies[0][0]
+    assert message.replies[1][0] == "receipt"
+    stored = bot.SUBTITLE_DUB_PIPELINE_JOBS[key]
+    assert stored["status_panel_terminal_edit_method"] == "replacement_status_message"
+    assert stored["status_panel_terminalized"] is True
+    assert stored["panel_final_percent"] == 100
+    assert stored["receipt_sent_once"] is True
+
+
 def test_success_receipt_is_sent_once_after_confirmed_mp4_delivery():
     key = "terminal-receipt-once"
     job = _fresh_job(key)
