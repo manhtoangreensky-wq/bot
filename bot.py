@@ -191549,6 +191549,16 @@ def subdub_terminal_delivery_evidence(
             current_job.get("final_mp4_delivered"),
         )
     )
+    artifact_message_id = str(
+        current_result.get("telegram_artifact_message_id")
+        or result_state.get("telegram_artifact_message_id")
+        or current_job.get("telegram_artifact_message_id")
+        or ""
+    ).strip()
+    if not video_message_id and artifact_message_id and (
+        artifact_type == "video" or final_video_delivered
+    ):
+        video_message_id = artifact_message_id
     # A lane-specific Telegram video message id is the delivery proof. Internal
     # success flags are diagnostic only and must neither create nor veto proof.
     if video_message_id:
@@ -193048,6 +193058,42 @@ def subdub_job_video_delivery_succeeded(job: dict | None = None) -> bool:
     return bool(evidence.get("is_video"))
 
 
+def subdub_existing_video_artifact_message_id(job: dict | None = None) -> str:
+    """Return only a lane-specific final video Telegram message id."""
+    current = dict(job or {})
+    evidence = subdub_terminal_delivery_evidence({}, current)
+    if evidence.get("is_video"):
+        return str(evidence.get("message_id") or "").strip()
+    return ""
+
+
+def subdub_prevent_duplicate_video_delivery(job: dict | None = None, reason: str = "") -> dict:
+    current = dict(job or {})
+    job_key = subdub_registry_key_for_job(current)
+    message_id = subdub_existing_video_artifact_message_id(current)
+    if not (job_key and message_id):
+        return current
+    updated = subdub_persist_recovery_fields(
+        current,
+        "subdub duplicate video delivery prevented",
+        duplicate_delivery_prevented=True,
+        duplicate_delivery_prevented_count=int(current.get("duplicate_delivery_prevented_count") or 0) + 1,
+        duplicate_success_prevented=True,
+        duplicate_success_prevented_count=int(current.get("duplicate_success_prevented_count") or 0) + 1,
+        duplicate_delivery_prevented_reason=str(reason or "video_artifact_already_delivered")[:160],
+        recovery_result="video_artifact_already_delivered_no_resend",
+        delivery_message_id=message_id,
+        video_delivery_message_id=message_id,
+        final_video_message_id=message_id,
+        subdub_final_video_message_id=message_id,
+        telegram_artifact_message_id=message_id,
+        delivery_success=True,
+        delivery_succeeded=True,
+        final_mp4_delivered=True,
+    )
+    return updated or current
+
+
 def subdub_restore_delivered_combo_result(
     mode: str,
     result: dict | None = None,
@@ -193316,6 +193362,9 @@ def subdub_begin_delivery_once(job_key: str) -> bool:
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
     if not job:
         return True
+    if subdub_existing_video_artifact_message_id(job):
+        subdub_prevent_duplicate_video_delivery(job, "begin_delivery_existing_video_artifact")
+        return False
     if subdub_terminal_blocks_late_delivery(job):
         job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
         job["duplicate_delivery_prevented"] = True
@@ -195984,7 +196033,8 @@ async def subdub_recover_existing_delivery(
     current = subdub_hydrate_registry_from_persisted(job)
     job_key = subdub_registry_key_for_job(current)
     delivery_message_id = str(
-        current.get("video_delivery_message_id")
+        subdub_existing_video_artifact_message_id(current)
+        or current.get("video_delivery_message_id")
         or current.get("final_video_message_id")
         or current.get("subdub_final_video_message_id")
         or current.get("delivery_message_id")
@@ -196055,7 +196105,8 @@ async def subdub_recover_persisted_job(
     lang = normalize_user_language(lang or subdub_recovery_language(current))
     terminal = str(current.get("terminal_state") or "").strip().lower()
     delivery_message_id = str(
-        current.get("video_delivery_message_id")
+        subdub_existing_video_artifact_message_id(current)
+        or current.get("video_delivery_message_id")
         or current.get("final_video_message_id")
         or current.get("delivery_message_id")
         or ""
@@ -196907,7 +196958,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
         style["subtitle_margin_v_after"] = max(6, min(14, int(round(style["play_res_y"] * 0.008))))
         side_margin = int(round(style["play_res_x"] * ((1.0 - float(style["subtitle_max_width_ratio"])) / 2.0)))
-        side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
+        side_margin = max(6, min(14, side_margin))
         style["subtitle_margin_l_after"] = side_margin
         style["subtitle_margin_r_after"] = side_margin
     if state.get("subdub_canonical_product_contract"):
@@ -197120,8 +197171,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         else:
             margin_v = max(6, min(14, int(round(play_res_y * 0.008))))
     if style.get("m4live1_style_renderer_only"):
-        margin_l = int(style.get("subtitle_margin_l_after") or max(32, int(play_res_x * 0.07)))
-        margin_r = int(style.get("subtitle_margin_r_after") or max(32, int(play_res_x * 0.07)))
+        margin_l = int(style.get("subtitle_margin_l_after") or max(6, min(14, int(play_res_x * 0.008))))
+        margin_r = int(style.get("subtitle_margin_r_after") or max(6, min(14, int(play_res_x * 0.008))))
     else:
         margin_l = max(32, int(play_res_x * 0.055))
         margin_r = max(32, int(play_res_x * 0.055))
