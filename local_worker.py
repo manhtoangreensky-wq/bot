@@ -1305,6 +1305,17 @@ def run_frame_video_render(job: dict) -> None:
         if len(photos) < frame_video_runtime.FRAME_VIDEO_MIN_IMAGES:
             update_job(job_id, "failed", "not_enough_images")
             return
+        state = dict(payload.get("state") or {})
+        expected_image_count = int(state.get("image_count") or payload.get("image_count") or 0)
+        framevideo3 = str(state.get("commercial_flow_version") or "") == "framevideo3"
+        if (
+            framevideo3
+            and expected_image_count >= frame_video_runtime.FRAME_VIDEO_MIN_IMAGES
+            and not payload.get("paid_preview")
+            and len(photos) != expected_image_count
+        ):
+            update_job(job_id, "failed", "image_count_mismatch")
+            return
         with tempfile.TemporaryDirectory() as tmpdir:
             image_paths = []
             for idx, item in enumerate(photos, start=1):
@@ -1314,7 +1325,6 @@ def run_frame_video_render(job: dict) -> None:
                 path = os.path.join(tmpdir, f"frame_input_{idx}.jpg")
                 telegram_download_file(file_id, path)
                 image_paths.append(path)
-            state = dict(payload.get("state") or {})
             state["photos"] = photos
             logo_path = ""
             music_path = ""
@@ -1335,6 +1345,14 @@ def run_frame_video_render(job: dict) -> None:
                     music_path = path
                 else:
                     voice_path = path
+            if (
+                framevideo3
+                and expected_image_count >= frame_video_runtime.FRAME_VIDEO_MIN_IMAGES
+                and not payload.get("paid_preview")
+                and len(image_paths) != expected_image_count
+            ):
+                update_job(job_id, "failed", "image_count_mismatch_downloaded")
+                return
             output_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
             render = frame_video_runtime.build_ffmpeg_command(
                 image_paths,
