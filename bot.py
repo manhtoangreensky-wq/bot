@@ -87991,6 +87991,12 @@ def _safe_int(value, default: int = 0) -> int:
     except Exception:
         return default
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
 def video_v6_keyboard(items: list, lang: str = "vi", back: tuple[str, str] | None = None, main: bool = True) -> InlineKeyboardMarkup:
     return build_2col_keyboard(items, nav_back=back, nav_main=main, lang=lang)
 
