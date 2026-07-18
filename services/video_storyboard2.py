@@ -11,7 +11,7 @@ from copy import deepcopy
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MIN_SCENES = 1
 MAX_SCENES = 20
 SCENE_SECONDS = 8
@@ -101,10 +101,12 @@ def default_state() -> dict[str, Any]:
         "aspect_ratio": "",
         "content_mode": "",
         "content": "",
+        "profile_page": 1,
         "suggestion_offset": 0,
         "scenes": [],
         "active_scene_index": 1,
         "active_slot": "start",
+        "asset_mode": "start_only",
         "awaiting_input": "",
         "processed_callback_ids": [],
         "processed_text_message_ids": [],
@@ -162,6 +164,10 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
         _safe_int(item, 0) for item in state.get("processed_media_message_ids") or [] if _safe_int(item, 0) > 0
     ][-100:]
     state["image_prompt_offset"] = max(0, min(15, _safe_int(state.get("image_prompt_offset"), 0)))
+    state["profile_page"] = max(1, _safe_int(state.get("profile_page"), 1))
+    state["profile"] = dict(state.get("profile") or {})
+    if state.get("asset_mode") not in {"start_only", "start_end"}:
+        state["asset_mode"] = "start_only"
     state["addons"] = dict(state.get("addons") or {})
     state["image_generation"] = dict(state.get("image_generation") or {})
     state["manifest"] = dict(state.get("manifest") or {})
@@ -204,16 +210,49 @@ def set_ratio(state: dict[str, Any], ratio: str) -> dict[str, Any]:
     return normalize_state({**state, "aspect_ratio": ratio})
 
 
+def set_profile(state: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    clean = dict(profile or {})
+    if not _clean_text(clean.get("profile_key"), 80) or not _clean_text(clean.get("public_name"), 160):
+        raise ValueError("storyboard_profile_invalid")
+    current["profile"] = {
+        "key": _clean_text(clean.get("profile_key"), 80),
+        "label": _clean_text(clean.get("public_name"), 160),
+        "description": _clean_text(clean.get("description"), 600),
+        "default_scene_pattern": [
+            _clean_text(item, 240)
+            for item in clean.get("default_scene_pattern") or []
+            if _clean_text(item, 240)
+        ][:12],
+    }
+    current["suggestion_offset"] = 0
+    return normalize_state(current)
+
+
 def suggestion_page(state: dict[str, Any]) -> list[dict[str, Any]]:
     current = normalize_state(state)
+    profile = dict(current.get("profile") or {})
+    profile_label = _clean_text(profile.get("label"), 160) or "loại nội dung đã chọn"
+    profile_description = _clean_text(profile.get("description"), 360)
+    pattern = [
+        _clean_text(item, 160)
+        for item in profile.get("default_scene_pattern") or []
+        if _clean_text(item, 160)
+    ]
+    pattern_copy = " → ".join(pattern[:5])
     offset = _safe_int(current.get("suggestion_offset"), 0) % len(STORYBOARD_SUGGESTIONS)
     rows = []
     for step in range(5):
         title, structure = STORYBOARD_SUGGESTIONS[(offset + step) % len(STORYBOARD_SUGGESTIONS)]
+        related = f"{structure} Triển khai theo {profile_label}"
+        if profile_description:
+            related += f": {profile_description}"
+        if pattern_copy:
+            related += f". Nhịp nội dung: {pattern_copy}"
         rows.append({
             "index": step + 1,
             "title": title,
-            "content": structure,
+            "content": related + ".",
         })
     return rows
 
@@ -224,28 +263,31 @@ def rotate_suggestions(state: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
-def _scene_beat(content: str, index: int, count: int) -> tuple[str, str, str]:
+def _scene_beat(content: str, index: int, count: int, pattern: list[str] | None = None) -> tuple[str, str, str]:
+    pattern = [item for item in (pattern or []) if item]
+    pattern_hint = pattern[min(index - 1, len(pattern) - 1)] if pattern else ""
+    action_hint = f" theo nhịp ‘{pattern_hint}’" if pattern_hint else ""
     if count == 1:
         return (
             f"Mở rõ chủ thể và mục tiêu: {content}",
-            f"Thực hiện một hành động chính trọn vẹn liên quan trực tiếp tới {content}",
+            f"Thực hiện một hành động chính trọn vẹn liên quan trực tiếp tới {content}{action_hint}",
             "Khép bằng kết quả rõ và camera đã hoàn tất chuyển động",
         )
     if index == 1:
         return (
             f"Giới thiệu chủ thể, bối cảnh và vấn đề của {content}",
-            "Mở câu chuyện bằng một hành động có đầu và có đích",
+            f"Mở câu chuyện bằng một hành động có đầu và có đích{action_hint}",
             "Kết ở trạng thái đã sẵn sàng cho bước phát triển tiếp theo",
         )
     if index == count:
         return (
             "Tiếp nhận đúng trạng thái cuối của cảnh trước",
-            f"Hoàn tất ý cuối cùng của {content} bằng một hành động cụ thể",
+            f"Hoàn tất ý cuối cùng của {content} bằng một hành động cụ thể{action_hint}",
             "Khép câu chuyện tự nhiên bằng kết quả hoặc lời mời rõ ràng",
         )
     return (
         "Tiếp nhận trạng thái và hướng chuyển động của cảnh trước",
-        f"Phát triển ý {index}/{count} của {content} bằng một hành động duy nhất",
+        f"Phát triển ý {index}/{count} của {content} bằng một hành động duy nhất{action_hint}",
         "Hoàn tất hành động rồi để lại trạng thái nối cảnh rõ ràng",
     )
 
@@ -256,10 +298,15 @@ def apply_content(state: dict[str, Any], content: str, *, mode: str) -> dict[str
         raise ValueError("storyboard_content_missing")
     current = normalize_state(state)
     current.update({"content": value, "content_mode": str(mode or "manual")})
+    profile_pattern = [
+        _clean_text(item, 160)
+        for item in dict(current.get("profile") or {}).get("default_scene_pattern") or []
+        if _clean_text(item, 160)
+    ]
     scenes = []
     for index in range(1, current["scene_count"] + 1):
         old = current["scenes"][index - 1]
-        start_state, action, end_state = _scene_beat(value, index, current["scene_count"])
+        start_state, action, end_state = _scene_beat(value, index, current["scene_count"], profile_pattern)
         scene = dict(old)
         scene.update({
             "content": f"Cảnh {index}: {action}",
@@ -415,6 +462,62 @@ def set_end_mode(state: dict[str, Any], scene_index: int, mode: str) -> dict[str
     return normalize_state(current)
 
 
+def set_asset_mode(state: dict[str, Any], mode: str) -> dict[str, Any]:
+    if mode not in {"start_only", "start_end"}:
+        raise ValueError("storyboard_asset_mode_invalid")
+    current = normalize_state(state)
+    current["asset_mode"] = mode
+    for scene in current["scenes"]:
+        if mode == "start_end":
+            scene["end_image_mode"] = "required"
+        else:
+            scene["end_image_mode"] = "none"
+            scene["end_image"] = _empty_image("end")
+            scene["end_image"]["status"] = "not_used"
+    return normalize_state(current)
+
+
+def image_targets(state: dict[str, Any], *, missing_only: bool = False) -> list[dict[str, Any]]:
+    """Return the deterministic batch order: every start frame, then every end frame."""
+
+    current = normalize_state(state)
+    slots = ["start"]
+    if current.get("asset_mode") == "start_end":
+        slots.append("end")
+    targets = []
+    for slot in slots:
+        for scene in current["scenes"]:
+            image = dict(scene.get(f"{slot}_image") or {})
+            if missing_only and image.get("status") == "ready":
+                continue
+            targets.append({
+                "scene_index": int(scene["scene_index"]),
+                "slot": slot,
+                "status": str(image.get("status") or "missing"),
+            })
+    return targets
+
+
+def next_missing_image_target(state: dict[str, Any]) -> dict[str, Any] | None:
+    targets = image_targets(state, missing_only=True)
+    return dict(targets[0]) if targets else None
+
+
+def assign_next_image(state: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    target = next_missing_image_target(state)
+    if not target:
+        raise ValueError("storyboard_image_batch_complete")
+    normalized_record = dict(record or {})
+    normalized_record["slot"] = target["slot"]
+    normalized_record["image_id"] = f"scene_{target['scene_index']}_{target['slot']}"
+    return assign_image(
+        state,
+        int(target["scene_index"]),
+        str(target["slot"]),
+        normalized_record,
+    )
+
+
 def asset_summary(state: dict[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
     ready_start = sum(1 for scene in current["scenes"] if scene["start_image"].get("status") == "ready")
@@ -426,6 +529,7 @@ def asset_summary(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "minimum_images": current["scene_count"],
         "maximum_images": current["scene_count"] * 2,
+        "required_images": current["scene_count"] * (2 if current.get("asset_mode") == "start_end" else 1),
         "ready_images": ready_start + ready_end,
         "ready_start": ready_start,
         "ready_end": ready_end,
