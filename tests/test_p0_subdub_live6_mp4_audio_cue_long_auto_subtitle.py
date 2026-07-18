@@ -1,4 +1,5 @@
 import asyncio
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -60,7 +61,7 @@ def test_rendered_dub_video_does_not_use_shortest(monkeypatch):
     assert commands[-1][commands[-1].index("-t") + 1] == "30.000"
 
 
-def test_combo_canonical_timeline_fits_each_tts_chunk_inside_its_cue(monkeypatch):
+def test_combo_canonical_timeline_schedules_tts_sequentially_without_overlap(monkeypatch):
     commands = []
 
     async def fake_run(command, timeout=0):
@@ -80,13 +81,19 @@ def test_combo_canonical_timeline_fits_each_tts_chunk_inside_its_cue(monkeypatch
 
     assert output == b"timeline-audio"
     assert "ffmpeg_canonical_timeline_audio" in detail
+    assert "overlap_count=0" in detail
+    assert "sequential=yes" in detail
     filter_value = commands[-1][commands[-1].index("-filter_complex") + 1]
-    assert filter_value.count("atrim=duration=2.000") >= 4
-    assert "atempo=1.100000" in filter_value
+    assert "atempo=" in filter_value
+    assert filter_value.count("apad") == 1
+    assert "adelay=0|0" in filter_value
+    delays = [int(value) for value in re.findall(r"adelay=(\d+)\|", filter_value)]
+    assert len(delays) == 2
+    assert delays[1] >= 2000
     assert commands[-1][commands[-1].index("-t") + 1] == "4.000"
 
 
-def test_canonical_timeline_rejects_tts_that_cannot_fit_without_overlap(monkeypatch):
+def test_canonical_timeline_rejects_tts_that_cannot_fit_source_duration(monkeypatch):
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
     output, detail = asyncio.run(
         bot.build_canonical_dub_timeline_audio(
@@ -96,8 +103,27 @@ def test_canonical_timeline_rejects_tts_that_cannot_fit_without_overlap(monkeypa
     )
 
     assert output == b""
-    assert "canonical_tts_segment_exceeds_cue:cue-1" in detail
+    assert "canonical_tts_timeline_exceeds_source" in detail
     assert "max_tempo=1.150" in detail
+
+
+def test_canonical_timeline_keeps_natural_speed_when_source_duration_has_room():
+    plan = bot.subdub_plan_canonical_tts_timeline(
+        [
+            {"cue_id": "cue-1", "start": 0.0, "end": 1.0, "audio_duration": 1.8},
+            {"cue_id": "cue-2", "start": 1.0, "end": 2.0, "audio_duration": 1.5},
+        ],
+        4.0,
+    )
+
+    assert plan["ok"] is True
+    assert plan["tempo_ratio"] == 1.0
+    assert plan["overlap_count"] == 0
+    assert plan["shifted_cue_count"] == 1
+    assert plan["scheduled"][0]["scheduled_start"] == 0.0
+    assert plan["scheduled"][0]["scheduled_end"] == 1.8
+    assert plan["scheduled"][1]["scheduled_start"] == 1.8
+    assert plan["scheduled"][1]["scheduled_end"] == 3.3
 
 
 def test_long_video_asr_chunks_keep_absolute_timestamps(monkeypatch):
