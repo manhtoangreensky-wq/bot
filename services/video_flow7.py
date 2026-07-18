@@ -112,8 +112,11 @@ PRODUCT_SPECS = {
     },
     "trend_video": {
         "sequence": (
-            "trend_source", "scene_count", "aspect_ratio", "short_edit",
-            "addons", "finish", "invoice", "confirm",
+            "trend_source", "scene_count", "aspect_ratio", "content_source",
+            "content_profile_or_preset", "content_choice", "character",
+            "reference_assets", "style", "preservation", "audio", "scene_plan",
+            "image_prompts_if_needed", "video_prompts", "review", "transitions",
+            "text", "addons", "finish", "invoice", "confirm",
         ),
         "required_assets": "optional",
         "job_type": "product_video",
@@ -130,10 +133,10 @@ ENTRY_ROWS = {
          ("💡 Gợi ý nội dung", "vproduct|scene3_mode|video_ai_real|suggestions")),
     ),
     "video_trend": (
-        (("🔥 Chọn trend có nguồn", "vproduct|trend_today"),
-         ("✍️ Tự nhập trend", "vproduct|trend_custom")),
-        (("💡 Ý tưởng video", "vproduct|idea_library|video_trend"),
-         ("📖 Hướng dẫn", "menu|guide_video_ai")),
+        (("🔥 Trend mới nhất", "vtrend|catalog|latest"),
+         ("🗂️ Trend theo nhóm", "vtrend|categories")),
+        (("✍️ Tự nhập trend", "vtrend|manual_trend"),
+         ("ℹ️ Nguồn & độ mới", "vtrend|freshness")),
     ),
     "script_image_video": (
         (("📄 Kịch bản có sẵn", "vproduct|script_existing|script_image_video"),
