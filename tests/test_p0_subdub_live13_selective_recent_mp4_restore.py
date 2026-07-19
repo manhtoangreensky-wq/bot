@@ -3,17 +3,19 @@ import inspect
 import bot
 
 
-def test_new_dub_jobs_use_direct_known_good_synthesizers():
+def test_new_dub_jobs_use_canonical_sequential_checkpoint_synthesizer():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
-    assert "result = await synthesize_dub_segment_chunks(*args" in source
     assert "prepare_subdub_combo_tts_segments(" in source
-    assert source.count("synthesize_dub_segment_chunks(") == 2
-    assert "synthesize_canonical_dub_segment_chunks(" not in source
-    assert "build_canonical_dub_timeline_audio(chunks, total_duration)" in source
-    assert "standalone_dub_synth_with_canonical_timeline" in source
-    assert "checkpoint_dir=" not in source
-    assert "tts_resume_context" not in source
+    assert source.count("synthesize_canonical_dub_segment_chunks(") == 1
+    assert "result = await synthesize_dub_segment_chunks" not in source
+    assert "mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}" in source
+    assert "return await build_canonical_dub_timeline_audio(chunks, total_duration)" in source
+    assert "checkpoint_dir=checkpoint_dir" in source
+    assert "checkpoint_entries=existing_checkpoints" in source
+    assert "checkpoint_callback=_persist_active_checkpoint" in source
+    assert "tts_resume_context=resume_context" in source
+    assert "canonical_sequential_tts_with_checkpoint" in source
 
 
 def test_combo_direct_synth_uses_translated_text_and_preserves_cue_windows():

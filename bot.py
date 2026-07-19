@@ -93,7 +93,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_canonical_cues, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackbox_contracts, subdub_canonical_cues, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -202982,7 +202982,7 @@ async def video_dubbing_render_video(
                 original_volume = subdub_original_audio_volume(original_audio_mode, keep_original_audio)
             else:
                 original_volume = subdub_percent_value(original_audio_volume_percent, SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT, 0, 100) / 100.0
-            if not keep_original_audio and original_audio_volume_percent is None:
+            if not keep_original_audio:
                 original_volume = 0.0
             if not source_has_audio:
                 original_volume = 0.0
@@ -204792,64 +204792,148 @@ async def _execute_video_dubbing_pipeline_core(
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not str(kwargs.get("voice_id") or "").strip():
             return {"provider": "", "chunks": []}
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
-        kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
-        kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
-        canonical_segments = []
+        base_speed = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
+        input_segments = list(args[0] if args else kwargs.get("segments") or [])
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            input_segments = list(args[0] if args else kwargs.get("segments") or [])
-            canonical_segments, combo_tts_segments = prepare_subdub_combo_tts_segments(
+            canonical_segments, _combo_tts_segments = prepare_subdub_combo_tts_segments(
                 input_segments,
                 source_language=str(state.get("source_language") or "auto"),
                 target_language=str(state.get("target_language") or ""),
             )
-            if args:
-                combo_args = (combo_tts_segments, *args[1:])
-            else:
-                combo_args = ()
-                kwargs["segments"] = combo_tts_segments
-            result = await synthesize_dub_segment_chunks(
-                *combo_args,
-                allow_admin=is_admin_user(uid),
-                **kwargs,
-            )
         else:
-            result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
+            canonical_segments = subdub_canonical_cues.canonicalize_segments(
+                input_segments,
+                extraction_source="dub_canonical_timeline",
+                source_language=str(state.get("source_language") or "auto"),
+                target_language=str(state.get("target_language") or ""),
+            )
+        if not canonical_segments:
+            raise RuntimeError("canonical_tts_segments_empty")
+
+        contract = subdub_blackbox_contracts.resolve_subdub_contract(
+            mode,
+            subdub_normalize_language_code(state.get("target_language") or "auto"),
+        )
+        job_key = str(state.get("_pipeline_job_key") or "")
+        active_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}) if job_key else {}
+        checkpoint_dir = os.path.join(workspace, "tts_checkpoints")
+        existing_checkpoints = list(active_job.get("tts_cue_checkpoints") or [])
+        voice_id = str(kwargs.get("voice_id") or "").strip()
+        voice_style = str(kwargs.get("voice_style") or "")
+        source_duration = max(
+            float(input_save.get("duration") or state.get("input_duration") or 0.0),
+            max((float(cue.get("end") or 0.0) for cue in canonical_segments), default=0.0),
+        )
+        resume_context = {
+            "mode": mode,
+            "source_path": str(input_save.get("path") or state.get("_pipeline_saved_source_path") or ""),
+            "workspace": workspace,
+            "voice_id": voice_id,
+            "voice_style": voice_style,
+            "base_speed": base_speed,
+            "canonical_cues": canonical_segments,
+            "source_language": str(state.get("source_language") or "auto"),
+            "target_language": str(state.get("target_language") or ""),
+            "source_duration": source_duration,
+            "subtitle_srt": video_dubbing_srt_from_segments(canonical_segments) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else "",
+            "keep_original_audio": bool(subdub_keep_original_audio_enabled(state)),
+            "original_audio_mode": str(state.get("original_audio_mode") or "mute"),
+            "original_audio_volume_percent": int(state.get("original_audio_volume_percent") or 0),
+            "dubbed_voice_volume_percent": int(state.get("dubbed_voice_volume_percent") or SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT),
+            "subtitle_style": subdub_output_style_state(state, mode) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else {},
+            **contract.debug_fields(),
+        }
+        if job_key:
+            now = time.time()
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                current_stage="generating_voice",
+                progress_stage="generating_voice",
+                stage_started_at=float(active_job.get("stage_started_at") or now),
+                last_heartbeat_at=now,
+                execution_owner=SUBDUB_RECOVERY_OWNER,
+                lease_expires_at=now + SUBDUB_TTS_CUE_LEASE_SECONDS,
+                tts_started=True,
+                tts_started_at=float(active_job.get("tts_started_at") or now),
+                current_cue_id=str(canonical_segments[0].get("cue_id") or canonical_segments[0].get("source_index") or ""),
+                total_tts_cues=len(canonical_segments),
+                completed_tts_cues=len(existing_checkpoints),
+                tts_cue_checkpoints=existing_checkpoints,
+                tts_resume_context=resume_context,
+                pipeline_blocker="",
+                blocker="",
+                error_code="",
+                **contract.debug_fields(),
+            )
+
+        async def _persist_active_checkpoint(entry: dict, checkpoints: list[dict], completed: int, total: int) -> None:
+            if not job_key:
+                return
+            next_cue_id = ""
+            if completed < len(canonical_segments):
+                next_cue = canonical_segments[completed]
+                next_cue_id = str(next_cue.get("cue_id") or next_cue.get("source_index") or "")
+            now = time.time()
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                current_stage="generating_voice",
+                progress_stage="generating_voice",
+                last_heartbeat_at=now,
+                lease_expires_at=now + SUBDUB_TTS_CUE_LEASE_SECONDS,
+                current_cue_id=next_cue_id or str(entry.get("cue_id") or ""),
+                current_cue_started_at=now if next_cue_id else 0,
+                current_tts_cue_attempt_count=int(entry.get("attempt_count") or 0),
+                total_tts_cues=total,
+                completed_tts_cues=completed,
+                tts_cue_checkpoints=checkpoints,
+                recovery_result="tts_checkpoint_in_progress",
+                pipeline_blocker="",
+                blocker="",
+                error_code="",
+            )
+
+        result = await synthesize_canonical_dub_segment_chunks(
+            canonical_segments,
+            voice_style=voice_style,
+            voice_id=voice_id,
+            base_speed=base_speed,
+            allow_admin=is_admin_user(uid),
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_entries=existing_checkpoints,
+            checkpoint_callback=_persist_active_checkpoint,
+            cue_timeout_seconds=SUBDUB_TTS_CUE_TIMEOUT_SECONDS,
+            max_attempts=SUBDUB_TTS_CUE_MAX_ATTEMPTS,
+        )
         if isinstance(result, dict):
-            if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-                chunks_by_index = {
-                    int((item or {}).get("index") or position): dict(item or {})
-                    for position, item in enumerate(result.get("chunks") or [], start=1)
-                }
-                aligned_chunks = []
-                for cue in canonical_segments:
-                    source_index = int(cue.get("source_index") or cue.get("index") or 0)
-                    chunk = chunks_by_index.get(source_index)
-                    if not chunk:
-                        raise RuntimeError(f"canonical_tts_chunk_missing:{source_index}")
-                    aligned_chunks.append({
-                        **chunk,
-                        "index": source_index,
-                        "cue_id": str(cue.get("cue_id") or ""),
-                        "source_start_ms": int(cue.get("source_start_ms") or 0),
-                        "source_end_ms": int(cue.get("source_end_ms") or 0),
-                        "start": float(cue.get("start") or 0),
-                        "end": float(cue.get("end") or 0),
-                        "text": str(cue.get("translated_text") or cue.get("text") or ""),
-                    })
-                if len(aligned_chunks) != len(canonical_segments):
-                    raise RuntimeError("canonical_tts_chunk_count_mismatch")
-                result["chunks"] = aligned_chunks
-                result["canonical_timeline_signature"] = subdub_canonical_cues.timeline_signature(canonical_segments)
-                result["canonical_cue_count"] = len(canonical_segments)
-                result["combo_synthesis_path"] = "standalone_dub_synth_with_canonical_timeline"
             result.update({
                 **speech_config,
                 "male_fallback_used": False,
+                "canonical_timeline_signature": subdub_canonical_cues.timeline_signature(canonical_segments),
+                "canonical_cue_count": len(canonical_segments),
+                "tts_tracks_count": 1,
+                "tts_overlap_count": 0,
+                "dub_synthesis_path": "canonical_sequential_tts_with_checkpoint",
+                "combo_synthesis_path": "canonical_sequential_tts_with_checkpoint" if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else "",
+                **contract.debug_fields(),
             })
+            if job_key:
+                update_subtitle_dub_pipeline_job(
+                    job_key,
+                    current_cue_id="",
+                    current_cue_started_at=0,
+                    current_tts_cue_attempt_count=0,
+                    total_tts_cues=len(canonical_segments),
+                    completed_tts_cues=len(canonical_segments),
+                    tts_cue_checkpoints=list(result.get("tts_cue_checkpoints") or []),
+                    tts_checkpoint_complete=True,
+                    last_heartbeat_at=time.time(),
+                    recovery_result="tts_checkpoint_complete_mux_pending",
+                    **contract.debug_fields(),
+                )
         return result
 
     async def _build_timeline_audio_for_blackbox(chunks: list[dict], total_duration: float = 0):
-        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await build_canonical_dub_timeline_audio(chunks, total_duration)
         return await build_dub_timeline_audio(chunks, total_duration)
 
