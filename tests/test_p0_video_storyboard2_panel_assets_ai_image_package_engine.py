@@ -61,13 +61,20 @@ def _ready_board(scene_count: int = 2) -> dict:
     return video_storyboard2.normalize_state(board)
 
 
-def test_storyboard_has_one_canonical_entry_and_no_nested_idea_video() -> None:
+def test_storyboard_has_one_canonical_entry_and_idea_only_at_content_source() -> None:
     rows = video_flow7.ENTRY_ROWS["storyboard_prompt"]
     callbacks = [callback for row in rows for _label, callback in row]
     labels = [label for row in rows for label, _callback in row]
-    assert callbacks == ["vstory|start", "vstory|upload", "vstory|ai", "vstory|help"]
+    assert callbacks == ["vstory|ai", "vstory|upload"]
     assert all("idea" not in callback for callback in callbacks)
     assert all("Ý tưởng video" not in label for label in labels)
+    entry_keyboard = _function_source("storyboard2_entry_keyboard")
+    profile_keyboard = _function_source("storyboard2_profiles_keyboard")
+    assert '"vstory|start"' not in entry_keyboard
+    assert '"vstory|help"' not in entry_keyboard
+    assert '"vstory|idea_source"' not in entry_keyboard
+    assert '"vstory|idea_source"' in profile_keyboard
+    assert '"vstory|content_manual"' in profile_keyboard
     assert BOT_SOURCE.count('CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\\|")') == 1
     assert BOT_SOURCE.count('CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\\|")') == 1
     legacy = _function_source("handle_storyboard_callback")

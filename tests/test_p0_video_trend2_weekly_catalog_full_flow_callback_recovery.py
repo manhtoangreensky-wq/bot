@@ -261,7 +261,7 @@ def test_public_layout_catalog_ratio_content_and_back_contracts_are_present() ->
     assert 'callback_data="vtrend|categories"' in source
     assert 'callback_data="vtrend|historical"' in source
     assert 'callback_data="vtrend|help"' in source
-    assert 'callback_data="vtrend|ratio_custom"' in source
+    assert 'callback_data="vtrend|ratio_custom"' not in source
     assert 'callback_data="vtrend|ratio_suggest"' not in source
     assert 'callback_data="vtrend|sources"' not in source
     assert 'callback_data="vtrend|freshness"' not in source
@@ -335,13 +335,14 @@ def test_every_public_trend_button_has_one_action_branch() -> None:
         "back", "catalog", "categories", "category", "continue", "edit_content",
         "entry", "help", "historical", "idea_catalog", "idea_return", "manual_content",
         "manual_trend", "more", "pick", "profile", "profiles", "ratio",
-        "ratio_custom", "resume", "scene_note", "scenes", "scenes_custom",
+        "resume", "scene_note", "scenes", "scenes_custom",
         "suggestion", "suggestions_more",
     }
     assert declared == expected
     for action in expected - {"manual_content", "edit_content"}:
         assert f'action == "{action}"' in source
     assert 'action in {"manual_content", "edit_content"}' in source
+    assert 'if action == "ratio_custom":' in source
 
 
 def test_trend_handoff_persists_source_and_has_zero_preconfirm_side_effects() -> None:

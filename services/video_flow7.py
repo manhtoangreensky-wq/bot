@@ -33,8 +33,8 @@ PRODUCT_KIND_BY_ID = {
 PRODUCT_SPECS = {
     "ai_real": {
         "sequence": (
-            "content_mode", "scene_count", "aspect_ratio", "technical_profile",
-            "content_choice", "character", "reference_assets", "style",
+            "scene_count", "aspect_ratio", "ai_input_type", "content_source",
+            "technical_profile_if_selected", "content_choice", "character", "reference_assets", "style",
             "audio", "scene_plan", "image_prompts_if_needed", "video_prompts",
             "addons", "finish", "invoice", "confirm",
         ),
@@ -129,8 +129,10 @@ PRODUCT_SPECS = {
 
 ENTRY_ROWS = {
     "video_ai_real": (
-        (("✍️ Tự nhập nội dung", "vproduct|scene3_mode|video_ai_real|manual"),
-         ("💡 Gợi ý nội dung", "vproduct|scene3_mode|video_ai_real|suggestions")),
+        (("✨ Prompt AI → Video", "vprofile|ai_input|prompt_video"),
+         ("🖼 Ảnh → Video AI", "vprofile|ai_input|image_video")),
+        (("🎞 Video mẫu → Video AI", "vprofile|ai_input|video_video"),
+         ("🔄 Chọn lại từ đầu", "vproduct|open|video_ai_real")),
     ),
     "video_trend": (
         (("🔥 Trend mới nhất", "vtrend|catalog|latest"),
@@ -145,10 +147,8 @@ ENTRY_ROWS = {
          ("📖 Hướng dẫn", "menu|guide_video_ai")),
     ),
     "storyboard_prompt": (
-        (("✍️ Bắt đầu Storyboard", "vstory|start"),
-         ("📎 Gửi storyboard có sẵn", "vstory|upload")),
         (("✨ Tạo storyboard AI", "vstory|ai"),
-         ("ℹ️ Cách hoạt động", "vstory|help")),
+         ("📎 Gửi storyboard có sẵn", "vstory|upload")),
     ),
     "self_shot_scene_change": (
         (("🎥 Gửi video tự quay", "vproduct|selfshot_source|upload"),

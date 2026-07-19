@@ -82,18 +82,25 @@ def _context(product_id: str, *, mode: str = "manual", count: int = 2) -> dict:
 
 
 def test_flow6_canonical_order_and_exact_back_contract() -> None:
-    assert video_scene3_flow.CANONICAL_STEPS[:6] == (
+    assert video_scene3_flow.CANONICAL_STEPS[:4] == (
         "content_mode",
         "scene_count",
         "aspect_ratio",
         "asset_gate",
-        "technical_profile",
-        "content_choice",
     )
     assert video_scene3_flow.BACK_STEP["scene_count"] == "content_mode"
     assert video_scene3_flow.BACK_STEP["aspect_ratio"] == "scene_count"
+    assert video_scene3_flow.BACK_STEP["ai_input_type"] == "aspect_ratio"
+    assert video_scene3_flow.BACK_STEP["content_source"] == "ai_input_type"
     assert video_scene3_flow.BACK_STEP["asset_gate"] == "aspect_ratio"
     assert video_scene3_flow.BACK_STEP["content_choice"] == "technical_profile"
+    assert video_scene3_flow.canonical_back_step(
+        {
+            "step": "asset_gate",
+            "flow8_direct_entry": True,
+            "ai_input_type": "image_video",
+        }
+    ) == "ai_input_type"
 
 
 def test_public_entry_and_scene_ratio_keyboards_match_flow6_contract() -> None:
@@ -107,7 +114,7 @@ def test_public_entry_and_scene_ratio_keyboards_match_flow6_contract() -> None:
     assert "✍️ Nhập số khác" in count
     assert "ℹ️ Lưu ý số cảnh" in count
     assert "Dùng 2 cảnh đề xuất" not in count
-    assert "✍️ Tự nhập" in ratio
+    assert "✍️ Tự nhập" not in ratio
     assert "Gợi ý" not in ratio
 
 
@@ -312,10 +319,9 @@ def test_public_idea_development_and_long_video_guard_keep_two_column_rows() -> 
     assert "videa|page|1" in callbacks
     assert callbacks[-2:] == ["vproduct|back", "menu|main"]
 
-    guard = BOT_SOURCE[
-        BOT_SOURCE.index('if value == "multi_scene_film":'):
-        BOT_SOURCE.index('if value in {"image_to_video", "frame_video_local"}:')
-    ]
+    guard_start = BOT_SOURCE.index('if flow_access.get("flow_block_reason") == "long_form_video_in_development":')
+    guard_end = BOT_SOURCE.index('if value in {"image_to_video", "frame_video_local"}:', guard_start)
+    guard = BOT_SOURCE[guard_start:guard_end]
     assert guard.count("InlineKeyboardButton(") == 2
     assert "menu|main_video" in guard
     assert "menu|main" in guard
