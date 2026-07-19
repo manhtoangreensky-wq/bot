@@ -300,14 +300,16 @@ def test_live8_scope_is_subdub_only():
     ).stdout.splitlines()
     allowed = {
         "bot.py",
+        "services/subdub_blackbox_contracts.py",
         "services/subdub_canonical_cues.py",
         "services/subtitle_dub_product_pipeline.py",
         "tests/test_p0_subdub_live5_subtitle_combo_canonical_cue_restore.py",
         "tests/test_p0_subdub_live6_mp4_audio_cue_long_auto_subtitle.py",
-            "tests/test_p0_subdub_live8_one_canonical_product_contract.py",
-            "tests/test_p0_subdub_live9_persistent_execution_recovery.py",
-            "tests/test_p0_subdub_live10_menu_route_isolation.py",
-            "tests/test_p0_subdub_live10_tts_checkpoint_resume.py",
-            "tests/test_p0_subdub_live13_selective_recent_mp4_restore.py",
-        }
+        "tests/test_p0_subdub_live8_one_canonical_product_contract.py",
+        "tests/test_p0_subdub_live9_persistent_execution_recovery.py",
+        "tests/test_p0_subdub_live10_menu_route_isolation.py",
+        "tests/test_p0_subdub_live10_tts_checkpoint_resume.py",
+        "tests/test_p0_subdub_live13_selective_recent_mp4_restore.py",
+        "tests/test_p0_subdub_live14_blackbox_lane_language_contract.py",
+    }
     assert set(changed) <= allowed
