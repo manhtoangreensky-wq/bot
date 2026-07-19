@@ -86,14 +86,19 @@ PRODUCT_SPECS = {
     },
     "self_shot": {
         "sequence": (
-            "source_video", "source_probe", "scene_count", "aspect_ratio",
-            "change_target", "identity_lock", "segment_prompts", "audio",
-            "addons", "finish", "invoice", "confirm",
+            "source_video", "source_analysis", "subject_selection",
+            "preserve_constraints", "scene_count", "aspect_ratio",
+            "content_source", "content_choice", "transformation_direction",
+            "scene_plan", "video_prompts", "audio", "review", "finish",
+            "package", "invoice", "confirm",
         ),
         "required_assets": "source_video",
         "job_type": "self_shot_scene_change",
         "execution_owner": "owner_product_video",
-        "capability_requirements": ("video_to_video", "source_video_probe", "final_mp4"),
+        "capability_requirements": (
+            "video_to_video", "source_video_probe", "person_object_continuity",
+            "per_scene_source_mapping", "final_mp4",
+        ),
         "route": "self_shot_scene_change",
         "fallback": "block_no_charge",
     },
@@ -169,8 +174,10 @@ ENTRY_ROWS = {
          ("📎 Gửi storyboard có sẵn", "vstory|upload")),
     ),
     "self_shot_scene_change": (
-        (("🎥 Gửi video tự quay", "vproduct|selfshot_source|upload"),
-         ("📖 Hướng dẫn", "menu|guide_video_ai")),
+        (("📎 Gửi video nguồn", "vproduct|ss2|source"),
+         ("ℹ️ Cách hoạt động", "vproduct|ss2|show|help")),
+        (("👁️ Dự án đang làm", "vproduct|ss2|show|project"),
+         ("🗑️ Xóa phiên hiện tại", "vproduct|ss2|reset")),
     ),
     "self_shot_cinematic_transform": (
         (("📎 Gửi video nguồn", "vproduct|ss3|source"),
