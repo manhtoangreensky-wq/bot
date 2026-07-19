@@ -78,6 +78,7 @@ PRODUCT_VIDEO_PROVIDER_REQUIRED_TYPES = {
     "script_to_video",
     "storyboard_prompt",
     "self_shot_scene_change",
+    "self_shot_cinematic_transform",
     "multi_scene_film",
 }
 PRODUCT_VIDEO_PROVIDER_ADAPTERS = {

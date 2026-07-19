@@ -44,7 +44,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from google import genai
 from google.genai import types
 from openai import OpenAI
@@ -109,7 +109,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_scene3_flow, video_scene_prompt_builder, video_semantic_scene_planner, video_storyboard2, video_trend_catalog
+from services import video_addon_planner, video_flow6, video_flow7, video_scene3_flow, video_scene_prompt_builder, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_trend_catalog
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
@@ -63947,7 +63947,20 @@ async def video_public_media_dedupe_guard(update: Update, context: ContextTypes.
             raise ApplicationHandlerStop
     user_data = getattr(context, "user_data", None)
     raw_state = dict(user_data.get(VIDEO_PROFILE_STUDIO_SESSION_KEY) or {}) if isinstance(user_data, dict) else {}
-    if str(raw_state.get("step") or "") not in {
+    profile_step = str(raw_state.get("step") or "")
+    active_step = profile_step
+    active_product = ""
+    if chat_id:
+        try:
+            active_session = get_video_session(chat_id)
+        except Exception:
+            active_session = {}
+        active_step = str(active_session.get("current_step") or active_step)
+        active_product = str(active_session.get("product_id") or "")
+    if active_step == "awaiting_selfshot3_video":
+        if active_product != video_selfshot3.PRODUCT_ID:
+            return
+    elif active_step not in {
         "await_material_upload",
         "await_post_asset_upload",
         "await_flow6_asset_upload",
@@ -71353,20 +71366,44 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "product_id": "frame_video_local",
     },
     "self_shot_scene_change": {
-        "label_vi": "🎥 Tự quay & đổi cảnh AI",
-        "label_en": "🎥 Self-shot scene AI",
-        "label_zh": "🎥 自拍换场景 AI",
+        "label_vi": "🎥 Video tự quay",
+        "label_en": "🎥 Self-shot video",
+        "label_zh": "🎥 自拍视频",
         "entry_callback": "vproduct|open|self_shot_scene_change",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|selfshot_source|upload",),
+        "expected_children": (
+            "vproduct|selfshot_product|scene_change",
+            "vproduct|selfshot_product|cinematic",
+        ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
-        "flow_type": "intro_then_profile",
+        "flow_type": "self_shot_product_hub",
         "first_step": "intro",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "self_shot_scene_change",
+    },
+    "self_shot_cinematic_transform": {
+        "label_vi": "🎥 Tự quay & biến đổi điện ảnh",
+        "label_en": "✨ One-take cinematic transform",
+        "label_zh": "✨ 一镜到底电影变换",
+        "entry_callback": "vproduct|selfshot_product|cinematic",
+        "handler": "handle_video_product_callback",
+        "expected_children": (
+            "vproduct|ss3|source",
+            "vproduct|ss3|show|types",
+            "vproduct|ss3|show|project",
+            "vproduct|ss3|show|help",
+        ),
+        "parent_menu": "vproduct|selfshot_hub",
+        "back_target": "vproduct|selfshot_hub",
+        "category": "video_product",
+        "flow_type": "one_take_cinematic_transform",
+        "first_step": "intro",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "self_shot_cinematic_transform",
     },
     "multi_scene_film": {
         "label_vi": "🎬 Video dài tập",
@@ -72850,6 +72887,7 @@ def video_microflow_audit_payload() -> dict:
                 "awaiting_multiple_images",
                 "awaiting_reference_video",
                 "awaiting_self_shot_video",
+                "awaiting_selfshot3_video",
                 "storyboard_upload_images",
             },
             "detail": ", ".join(sorted(VIDEO_MICROFLOW_MEDIA_INPUT_STEPS)),
@@ -73123,6 +73161,7 @@ def video_engine_route_audit_payload() -> dict:
         "script_to_video",
         "image_to_video",
         "self_shot_scene_change",
+        "self_shot_cinematic_transform",
         "multi_scene_film",
         "video_idea_to_product",
         "storyboard_prompt",
@@ -73917,6 +73956,7 @@ VIDEO_MICROFLOW_MEDIA_INPUT_STEPS = frozenset({
     "awaiting_multiple_images",
     "awaiting_reference_video",
     "awaiting_self_shot_video",
+    "awaiting_selfshot3_video",
     "storyboard_upload_images",
 })
 
@@ -80662,6 +80702,8 @@ def video_engine_product_type_for_session(session: dict | None = None) -> str:
         return "image_to_video"
     if product_id == "self_shot_scene_change":
         return "self_shot_scene_change"
+    if product_id == video_selfshot3.PRODUCT_ID:
+        return video_selfshot3.JOB_TYPE
     if product_id == "multi_scene_film":
         return "multi_scene_film"
     if product_id == "video_idea":
@@ -80741,6 +80783,66 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "public_user_confirmed": bool(draft.get("public_user_confirmed") or draft.get("b14_public_user_confirmed")),
         "charge_policy": "after_valid_mp4_delivery",
     })
+    if product_type == video_selfshot3.JOB_TYPE:
+        source_video = dict(draft.get("source_video") or draft.get("source_asset") or {})
+        source_analysis = dict(draft.get("source_analysis") or {})
+        source_segment = dict(draft.get("source_segment") or {})
+        subject_manifest = dict(draft.get("subject_manifest") or {})
+        relationship_locks = list(draft.get("relationship_locks") or [])
+        transformation_stages = list(draft.get("transformation_stages") or [])
+        prompt_bundle = dict(draft.get("prompt_bundle") or {})
+        audio_plan = dict(draft.get("audio_plan") or {})
+        preflight_snapshot = dict(draft.get("selfshot3_preflight") or {})
+        asset_pack_payload.update({
+            "source_video": source_video,
+            "source_file_id": str(source_video.get("file_id") or draft.get("source_file_id") or ""),
+            "source_video_id": str(source_video.get("file_id") or draft.get("source_file_id") or ""),
+            "source_materialization_required": True,
+            "source_probe_policy": str(draft.get("source_probe_policy") or "telegram_metadata_until_worker_probe"),
+            "source_hash": str(source_analysis.get("source_hash") or ""),
+            "source_analysis": source_analysis,
+            "shot_manifest": list(source_analysis.get("shot_manifest") or []),
+            "person_tracks": list(source_analysis.get("person_tracks") or []),
+            "face_tracks": list(source_analysis.get("face_tracks") or []),
+            "pet_tracks": list(source_analysis.get("pet_tracks") or []),
+            "object_tracks": list(source_analysis.get("object_tracks") or []),
+            "product_tracks": list(source_analysis.get("product_tracks") or []),
+            "interaction_graph": list(source_analysis.get("interaction_graph") or []),
+            "camera_motion": str(source_analysis.get("camera_motion") or ""),
+            "audio_manifest": dict(source_analysis.get("audio_manifest") or {}),
+            "analysis_version": str(source_analysis.get("analysis_version") or ""),
+            "source_segment": source_segment,
+            "subject_manifest": subject_manifest,
+            "interaction_locks": relationship_locks,
+            "layer_rules": dict(draft.get("layer_rules") or {}),
+            "transformation_group_id": str(draft.get("selected_group_id") or ""),
+            "transformation_preset": dict(draft.get("selected_preset") or {}),
+            "transformation_content": str(draft.get("transformation_content") or ""),
+            "transformation_stages": transformation_stages,
+            "wardrobe_plan": str(draft.get("wardrobe") or ""),
+            "environment_plan": str(draft.get("world") or ""),
+            "effect_layers": list(draft.get("selected_effects") or []),
+            "prompt_bundle": prompt_bundle,
+            "audio_plan": audio_plan,
+            "capability_snapshot": dict(preflight_snapshot.get("engine_route") or {}),
+            "route_selection": dict(preflight_snapshot.get("route_selection") or {}),
+            "one_take": True,
+            "scene_count": 1,
+            "duration_seconds": max(1, int((source_segment.get("duration_ms") or 0) / 1000)),
+            "continuity_validation_required": True,
+            "identity_continuity_required": True,
+            "object_continuity_required": bool(relationship_locks or subject_manifest.get("selection_type") in {"object", "person_object"}),
+            "receipt_once": True,
+        })
+        invoice.update({
+            "job_type": video_selfshot3.JOB_TYPE,
+            "source_hash": str(source_analysis.get("source_hash") or ""),
+            "one_take": True,
+            "scene_count": 1,
+            "duration_seconds": max(1, int((source_segment.get("duration_ms") or 0) / 1000)),
+            "engine_route": str((preflight_snapshot.get("engine_route") or {}).get("route") or ""),
+            "continuity_validation_required": True,
+        })
     invoice.update({
         "product_type": product_type,
         "engine_adapter": route.get("adapter") or "",
@@ -83468,6 +83570,200 @@ async def handle_video_trend2_legacy_callback(update: Update, context: ContextTy
         )
 
 
+def video_selfshot_product_hub_text() -> str:
+    return (
+        "🎥 <b>Video tự quay</b>\n\n"
+        "Chọn đúng sản phẩm cần dùng. Hai sản phẩm dùng video nguồn nhưng có cách dựng khác nhau:\n\n"
+        "• <b>Tự quay & đổi cảnh AI</b>: giữ chủ thể đã chọn rồi phát triển nhiều cảnh mới quanh chủ thể.\n"
+        "• <b>Tự quay & biến đổi điện ảnh</b>: giữ chuyển động trong cùng một cú máy, biến đổi dần trang phục, cảnh vật, ánh sáng và hiệu ứng.\n\n"
+        "Chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu."
+    )
+
+
+def video_selfshot_product_hub_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [
+            ("🎥 Tự quay & đổi cảnh AI", "vproduct|selfshot_product|scene_change"),
+            ("🎥 Tự quay & biến đổi điện ảnh", "vproduct|selfshot_product|cinematic"),
+        ],
+        [("⬅️ Quay lại", "menu|main_video"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_selfshot3_draft(session: dict | None = None) -> dict:
+    current = dict((session or {}).get("draft") or {})
+    defaults = video_selfshot3.initial_draft()
+    defaults.update(current)
+    defaults["product_id"] = video_selfshot3.PRODUCT_ID
+    defaults["selfshot_mode"] = video_selfshot3.MODE_ONE_TAKE
+    defaults.setdefault("provider_called", False)
+    defaults.setdefault("job_created", False)
+    defaults.setdefault("outbox_created", False)
+    defaults.setdefault("generated_files", 0)
+    defaults.setdefault("wallet_mutations", 0)
+    defaults.setdefault("xu_charged", 0)
+    return defaults
+
+
+def save_video_selfshot3_draft(user_id: int, draft: dict, *, step: str = "") -> dict:
+    session = get_video_session(user_id)
+    session["product_id"] = video_selfshot3.PRODUCT_ID
+    session["video_flow"] = video_selfshot3.PRODUCT_ID
+    session["video_tool"] = video_selfshot3.PRODUCT_ID
+    session["parent_menu_callback"] = "vproduct|selfshot_hub"
+    session["back_target"] = "vproduct|selfshot_hub"
+    session["return_to"] = "vproduct|selfshot_hub"
+    session["draft"] = video_selfshot3_draft({"draft": draft})
+    if step:
+        session["previous_step"] = str(session.get("current_step") or "")
+        session["current_step"] = str(step)
+    return save_video_session(user_id, session)
+
+
+async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: dict | None = None):
+    current = video_selfshot3_draft({"draft": draft} if draft is not None else get_video_session(user_id))
+    current["selfshot3_screen"] = str(screen)
+    if screen not in {"types", "project", "help", "analysis", "finish"}:
+        current["selfshot3_resume_screen"] = str(screen)
+    session = save_video_selfshot3_draft(user_id, current, step=f"selfshot3:{screen}")
+    model = video_selfshot3.screen_model(screen, session.get("draft"))
+    parent = video_selfshot3.screen_parent(screen)
+    expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|show|{parent}"
+    validation = video_selfshot3.validate_rows(model["rows"], back_callback=expected_back)
+    if not validation.get("ok"):
+        logger.error("selfshot3_keyboard_invalid | screen=%s errors=%s", screen, validation.get("errors"))
+        return await safe_edit_or_send(
+            target,
+            "⚠️ Màn này chưa có tuyến nút hợp lệ. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+            reply_markup=video_selfshot_product_hub_keyboard(),
+        )
+    return await safe_edit_or_send(
+        target,
+        model["text"],
+        parse_mode="HTML",
+        reply_markup=video_scene3_keyboard(model["rows"]),
+    )
+
+
+def video_selfshot3_input_keyboard(back_screen: str) -> InlineKeyboardMarkup:
+    target = str(back_screen or "intro").strip()
+    return video_scene3_keyboard([
+        [("⬅️ Quay lại", f"vproduct|ss3|show|{target}"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_selfshot3_source_request_keyboard() -> InlineKeyboardMarkup:
+    return video_selfshot3_input_keyboard("intro")
+
+
+def video_selfshot3_invoice_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("✅ Xác nhận tạo video", "vproduct|b14_confirm"), ("📋 Xem lại kế hoạch", "vproduct|ss3|show|review")],
+        [("⬅️ Quay lại", "vproduct|ss3|finish"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_selfshot3_build_timeline(draft: dict) -> list[dict]:
+    return video_selfshot3.build_timeline(
+        segment=dict(draft.get("source_segment") or {}),
+        stage_count=max(2, min(5, safe_int(draft.get("transformation_stage_count"), 4))),
+        preset=dict(draft.get("selected_preset") or {}),
+        wardrobe=str(draft.get("wardrobe") or ""),
+        world=str(draft.get("world") or ""),
+        effects=list(draft.get("selected_effects") or []),
+    )
+
+
+def video_selfshot3_compile_prompt(draft: dict) -> dict:
+    return video_selfshot3.compile_prompt(
+        mode=video_selfshot3.MODE_ONE_TAKE,
+        subject_manifest=dict(draft.get("subject_manifest") or {}),
+        relationship_locks=list(draft.get("relationship_locks") or []),
+        layer_rules=dict(draft.get("layer_rules") or {}),
+        segment=dict(draft.get("source_segment") or {}),
+        stages=list(draft.get("transformation_stages") or []),
+        wardrobe=str(draft.get("wardrobe") or ""),
+        world=str(draft.get("world") or ""),
+        effects=list(draft.get("selected_effects") or []),
+        content=str(draft.get("transformation_content") or ""),
+    )
+
+
+def video_selfshot3_preflight(draft: dict) -> dict:
+    requested_quality = safe_int(draft.get("b14_quality_xu"), 0)
+    quality_candidates = [requested_quality] if requested_quality else [200, 300, 400, 500, 600, 800, 1000, 1200, 1500]
+    segment = dict(draft.get("source_segment") or {})
+    duration_seconds = max(0.0, float(segment.get("duration_ms") or 0) / 1000.0)
+    resolutions = []
+    for quality in quality_candidates:
+        resolution = video_provider_catalog.resolve_product_video_model(
+            tier=max(200, quality),
+            scene_count=1,
+            required_capability="video_to_video",
+            requires_concat=False,
+        )
+        resolution = dict(resolution)
+        resolution["requested_quality_xu"] = int(quality)
+        if resolution.get("ok") and duration_seconds > 0:
+            clip_seconds = float(resolution.get("selected_clip_seconds") or 0)
+            if clip_seconds and duration_seconds > clip_seconds:
+                resolution["ok"] = False
+                resolution["blocker"] = "source_segment_exceeds_model_duration"
+                resolution["duration_seconds"] = duration_seconds
+                resolution["selected_clip_seconds"] = clip_seconds
+        resolutions.append(resolution)
+    resolution = next((item for item in resolutions if item.get("ok")), resolutions[0] if resolutions else {})
+    capabilities = set()
+    for item in resolutions:
+        if item.get("ok"):
+            capabilities.update(str(value) for value in (item.get("selected_capabilities") or []))
+    if capabilities:
+        capabilities.add("video_to_video")
+    dedicated_providers = []
+    for config in video_ai_edit_provider.configured_provider_chain(os.environ):
+        validation = video_ai_edit_provider.validate_provider_config(config)
+        contract = dict(validation.get("contract") or {})
+        max_seconds = safe_int(contract.get("max_single_task_seconds"), 0)
+        if validation.get("ok") and (not max_seconds or duration_seconds <= max_seconds):
+            dedicated_providers.append(config)
+    if dedicated_providers:
+        capabilities.add("video_to_video")
+    worker = product_video_worker_admission_status()
+    public_preflight = product_video_public_preflight_evaluation(1, explicit_public_final_confirm=True)
+    report = video_selfshot3.preflight(
+        draft,
+        capabilities=capabilities,
+        owner_ready=bool(
+            dedicated_providers
+            and video_flow6_worker_is_ready(worker)
+            and public_preflight.get("ready")
+        ),
+        package_available=bool(resolution.get("ok")),
+        delivery_ready=True,
+    )
+    report["route_selection"] = dict(resolution)
+    report["available_qualities"] = [
+        int(item.get("requested_quality_xu") or 0)
+        for item in resolutions
+        if item.get("ok") and int(item.get("requested_quality_xu") or 0) > 0
+    ]
+    report["duration_seconds"] = duration_seconds
+    report["dedicated_video_to_video_provider_ready"] = bool(dedicated_providers)
+    report["dedicated_video_to_video_providers"] = [config.provider_name for config in dedicated_providers]
+    if not dedicated_providers:
+        report["blocker"] = "selfshot3_video_to_video_provider_unavailable"
+        report["blockers"] = list(dict.fromkeys([
+            "selfshot3_video_to_video_provider_unavailable",
+            *(report.get("blockers") or []),
+        ]))
+    if not resolution.get("ok") and str(resolution.get("blocker") or ""):
+        report["blocker"] = str(resolution.get("blocker") or report.get("blocker") or "")
+        report["blockers"] = list(dict.fromkeys([report["blocker"], *(report.get("blockers") or [])]))
+    report["worker"] = dict(worker)
+    report["public_preflight"] = dict(public_preflight)
+    return report
+
+
 async def handle_video_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -83503,6 +83799,56 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         legacy_state = video_trend2_state(context)
         legacy_state["screen"] = "entry"
         return await video_trend2_render(query, context, legacy_state, lang)
+    if action == "selfshot_hub" or (action == "open" and value == "self_shot_scene_change"):
+        return await safe_edit_or_send(
+            query,
+            video_selfshot_product_hub_text(),
+            parse_mode="HTML",
+            reply_markup=video_selfshot_product_hub_keyboard(),
+        )
+    if action == "selfshot_product":
+        requested = str(value or "").strip()
+        if requested == "cinematic":
+            current_session = get_video_session(uid)
+            if str(current_session.get("product_id") or "") != video_selfshot3.PRODUCT_ID:
+                clear_video_session(uid)
+                current_session = save_video_selfshot3_draft(uid, video_selfshot3.initial_draft(), step="selfshot3:intro")
+            return await video_selfshot3_render(query, uid, "intro", draft=current_session.get("draft"))
+        if requested == "scene_change":
+            product = "self_shot_scene_change"
+            clear_video_session(uid)
+            first_step = video_flow_first_step(product)
+            route_fields = video_route_session_fields(product, first_step)
+            session = task3d_session_step(
+                uid,
+                "intro",
+                product_id=product,
+                return_to="vproduct|selfshot_hub",
+                provider_called=False,
+                xu_charged=0,
+                **route_fields,
+            )
+            session = go_video_screen(uid, f"{product}:{first_step}", product, **route_fields)
+            session.update(route_fields)
+            session["product_id"] = product
+            session["return_to"] = "vproduct|selfshot_hub"
+            save_video_session(uid, session)
+            return await safe_edit_or_send(
+                query,
+                task3d_product_intro_text(product, lang),
+                parse_mode="HTML",
+                reply_markup=task3d_product_intro_keyboard(
+                    product,
+                    lang,
+                    parent_callback_override="vproduct|selfshot_hub",
+                ),
+            )
+        return await safe_edit_or_send(
+            query,
+            video_selfshot_product_hub_text(),
+            parse_mode="HTML",
+            reply_markup=video_selfshot_product_hub_keyboard(),
+        )
     if action == "open":
         flow_access = video_public_product_flow_access(value)
         if not flow_access.get("flow_access_allowed") and value != "multi_scene_film":
@@ -83668,6 +84014,343 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if action == "legacy":
             await query.answer()
         return await safe_edit_or_send(query, "⌛ Phiên video đã hết hạn. Bot chưa trừ Xu.", reply_markup=main_video_keyboard(lang))
+    if action == "ss3":
+        # SELFSHOT3 owns its callbacks end-to-end.  A callback from another
+        # product or an old session is read-only and returns to the hub.
+        if product_id != video_selfshot3.PRODUCT_ID:
+            return await safe_edit_or_send(
+                query,
+                video_selfshot_product_hub_text(),
+                parse_mode="HTML",
+                reply_markup=video_selfshot_product_hub_keyboard(),
+            )
+        operation = str(value or "").strip()
+        argument = str(parts[3] if len(parts) > 3 else "").strip()
+        current = video_selfshot3_draft(session)
+        valid_screens = set(video_selfshot3.SCREEN_PARENTS) | {"intro", "package"}
+        try:
+            if operation == "show":
+                screen = argument if argument in valid_screens else "intro"
+                return await video_selfshot3_render(query, uid, screen, draft=current)
+            if operation == "audio_review":
+                return await video_selfshot3_render(query, uid, "audio", draft=current)
+            if operation == "finish_review":
+                return await video_selfshot3_render(query, uid, "review", draft=current)
+            if operation == "reset":
+                clear_video_session(uid)
+                save_video_selfshot3_draft(uid, video_selfshot3.initial_draft(), step="selfshot3:intro")
+                return await video_selfshot3_render(query, uid, "intro")
+            current_screen = str(current.get("selfshot3_screen") or "intro")
+            if not video_selfshot3.callback_operation_allowed(current_screen, operation):
+                return await video_selfshot3_render(query, uid, current_screen, draft=current)
+            if operation == "source":
+                session = task3d_session_step(
+                    uid,
+                    "awaiting_selfshot3_video",
+                    input_mode="media",
+                    input_purpose="source_video",
+                    provider_called=False,
+                    job_created=False,
+                    outbox_created=False,
+                    xu_charged=0,
+                )
+                session["awaiting_media"] = True
+                session["source_file_id"] = None
+                session["product_id"] = video_selfshot3.PRODUCT_ID
+                session["return_to"] = "vproduct|selfshot_hub"
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    "📎 <b>Gửi video mộc</b>\n\nGửi một video có người, vật hoặc thú cưng cần giữ. "
+                    "TOAN AAS chỉ đọc thông tin cục bộ để lập kế hoạch; chưa gọi nguồn dựng và chưa trừ Xu.",
+                    parse_mode="HTML",
+                    reply_markup=video_selfshot3_source_request_keyboard(),
+                )
+            if operation == "segment":
+                analysis = dict(current.get("source_analysis") or {})
+                if argument == "whole":
+                    current["source_segment"] = video_selfshot3.segment_selection(analysis)
+                    save_video_selfshot3_draft(uid, current, step="selfshot3:subject")
+                    return await video_selfshot3_render(query, uid, "subject", draft=current)
+                if argument == "preview":
+                    return await video_selfshot3_render(query, uid, "segment_preview", draft=current)
+                if argument == "reset":
+                    current.pop("source_segment", None)
+                    save_video_selfshot3_draft(uid, current, step="selfshot3:segment")
+                    return await video_selfshot3_render(query, uid, "segment", draft=current)
+                if argument == "accept":
+                    if not current.get("source_segment"):
+                        return await video_selfshot3_render(query, uid, "segment", draft=current)
+                    save_video_selfshot3_draft(uid, current, step="selfshot3:subject")
+                    return await video_selfshot3_render(query, uid, "subject", draft=current)
+                session = task3d_session_step(uid, "selfshot3_segment_input", input_mode="text", provider_called=False, xu_charged=0)
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    "✍️ <b>Nhập đoạn video cần dùng</b>\n\nGhi theo dạng <b>giây bắt đầu–giây kết thúc</b>, ví dụ: 2-12. "
+                    "Đoạn này vẫn là một cú máy liên tục.",
+                    parse_mode="HTML",
+                    reply_markup=video_selfshot3_input_keyboard("segment"),
+                )
+            if operation == "subject":
+                if argument == "custom":
+                    session = task3d_session_step(uid, "selfshot3_subject_input", input_mode="text", provider_called=False, xu_charged=0)
+                    save_video_session(uid, session)
+                    return await safe_edit_or_send(
+                        query,
+                        "✍️ <b>Mô tả chủ thể cần giữ</b>\n\nGhi rõ người/vật/thú cưng, đặc điểm nhận diện và mối tương tác cần giữ xuyên suốt.",
+                        parse_mode="HTML",
+                        reply_markup=video_selfshot3_input_keyboard("subject"),
+                    )
+                manifest = video_selfshot3.select_subjects(current.get("source_analysis"), argument)
+                relationship_locks = video_selfshot3.build_interaction_lock(manifest, current.get("source_analysis"))
+                subject_gate = video_selfshot3.subject_tracking_gate(
+                    current.get("source_analysis"), manifest, relationship_locks
+                )
+                if not subject_gate.get("ok"):
+                    current["selfshot3_subject_blocker"] = video_selfshot3.subject_blocker_text(subject_gate)
+                    save_video_selfshot3_draft(uid, current, step="selfshot3:subject")
+                    return await video_selfshot3_render(query, uid, "subject", draft=current)
+                current.pop("selfshot3_subject_blocker", None)
+                current["subject_manifest"] = manifest
+                current["relationship_locks"] = relationship_locks
+                save_video_selfshot3_draft(uid, current, step="selfshot3:layers")
+                return await video_selfshot3_render(query, uid, "layers", draft=current)
+            if operation == "layer":
+                key = argument
+                rules = dict(current.get("layer_rules") or video_selfshot3.default_layer_rules())
+                previous = str(rules.get(key) or "preserve")
+                cycle = ("preserve", "transform", "not_applicable")
+                next_state = cycle[(cycle.index(previous) + 1) % len(cycle)] if previous in cycle else "preserve"
+                current["layer_rules"] = video_selfshot3.update_layer_rule(rules, key, next_state)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:layers")
+                return await video_selfshot3_render(query, uid, "layers", draft=current)
+            if operation == "layers_reset":
+                current["layer_rules"] = video_selfshot3.default_layer_rules()
+                save_video_selfshot3_draft(uid, current, step="selfshot3:layers")
+                return await video_selfshot3_render(query, uid, "layers", draft=current)
+            if operation == "group_preview":
+                group = next((item for item in video_selfshot3.transformation_catalog() if item["group_id"] == argument), None)
+                if not group:
+                    return await video_selfshot3_render(query, uid, "types", draft=current)
+                examples = "\n".join(
+                    f"{index}. {html.escape(str(item.get('title') or ''))}"
+                    for index, item in enumerate(list(group.get("presets") or [])[:5], 1)
+                )
+                return await safe_edit_or_send(
+                    query,
+                    f"✨ <b>{html.escape(str(group.get('title') or 'Kiểu biến đổi'))}</b>\n\n"
+                    f"{html.escape(str(group.get('focus') or ''))}\n\n"
+                    f"<b>5 hướng mẫu:</b>\n{examples}\n\n"
+                    "Đây là màn xem trước. Hãy gửi video nguồn để bắt đầu; chưa tạo tác vụ và chưa trừ Xu.",
+                    parse_mode="HTML",
+                    reply_markup=video_scene3_keyboard([[('⬅️ Quay lại', 'vproduct|ss3|show|types'), ('🏠 Menu chính', 'menu|main')]]),
+                )
+            if operation == "group":
+                group = next((item for item in video_selfshot3.transformation_catalog() if item["group_id"] == argument), None)
+                if not group:
+                    return await video_selfshot3_render(query, uid, "groups", draft=current)
+                current["selected_group_id"] = argument
+                current["preset_page"] = 1
+                save_video_selfshot3_draft(uid, current, step="selfshot3:presets")
+                return await video_selfshot3_render(query, uid, "presets", draft=current)
+            if operation == "preset_page":
+                current["preset_page"] = (max(1, safe_int(current.get("preset_page"), 1)) % 4) + 1
+                save_video_selfshot3_draft(uid, current, step="selfshot3:presets")
+                return await video_selfshot3_render(query, uid, "presets", draft=current)
+            if operation == "content_profile_page":
+                current["content_profile_page"] = (max(1, safe_int(current.get("content_profile_page"), 1)) % 4) + 1
+                save_video_selfshot3_draft(uid, current, step="selfshot3:content_profiles")
+                return await video_selfshot3_render(query, uid, "content_profiles", draft=current)
+            if operation == "content_profile":
+                index = safe_int(argument, 0)
+                if index < 1 or index > len(video_selfshot3.CONTENT_PROFILES):
+                    return await video_selfshot3_render(query, uid, "content_profiles", draft=current)
+                current["content_profile"] = video_selfshot3.CONTENT_PROFILES[index - 1]
+                group = video_selfshot3.transformation_catalog()[(index - 1) % len(video_selfshot3.TRANSFORMATION_GROUPS)]
+                current["selected_group_id"] = str(group["group_id"])
+                current["preset_page"] = 1
+                current["preset_source"] = "content_profile"
+                save_video_selfshot3_draft(uid, current, step="selfshot3:presets")
+                return await video_selfshot3_render(query, uid, "presets", draft=current)
+            if operation == "idea_page":
+                current["idea_library_page"] = (max(1, safe_int(current.get("idea_library_page"), 1)) % 2) + 1
+                save_video_selfshot3_draft(uid, current, step="selfshot3:idea_library")
+                return await video_selfshot3_render(query, uid, "idea_library", draft=current)
+            if operation == "idea_pick":
+                index = safe_int(argument, 0)
+                catalog = video_selfshot3.transformation_catalog()
+                if index < 1 or index > len(catalog):
+                    return await video_selfshot3_render(query, uid, "idea_library", draft=current)
+                group = dict(catalog[index - 1])
+                current["selected_group_id"] = str(group.get("group_id") or "")
+                current["selected_preset"] = dict((group.get("presets") or [{}])[0])
+                current["preset_source"] = "idea_library"
+                current["transformation_content"] = str((current["selected_preset"] or {}).get("summary") or "")
+                save_video_selfshot3_draft(uid, current, step="selfshot3:structure")
+                return await video_selfshot3_render(query, uid, "structure", draft=current)
+            if operation == "preset_custom":
+                session = task3d_session_step(uid, "selfshot3_preset_input", input_mode="text", provider_called=False, xu_charged=0)
+                save_video_session(uid, session)
+                return await safe_edit_or_send(
+                    query,
+                    "✍️ <b>Nhập hướng biến đổi riêng</b>\n\nGhi ngắn gọn cách trang phục, thế giới và ánh sáng biến đổi trong cùng cú máy.",
+                    parse_mode="HTML",
+                    reply_markup=video_selfshot3_input_keyboard("presets"),
+                )
+            if operation == "preset":
+                index = safe_int(argument, 0)
+                options = video_selfshot3.catalog_page(str(current.get("selected_group_id") or ""), safe_int(current.get("preset_page"), 1))
+                if index < 1 or index > len(options):
+                    return await video_selfshot3_render(query, uid, "presets", draft=current)
+                current["selected_preset"] = dict(options[index - 1])
+                save_video_selfshot3_draft(uid, current, step="selfshot3:structure")
+                return await video_selfshot3_render(query, uid, "structure", draft=current)
+            if operation == "structure":
+                count = max(2, min(5, safe_int(argument, 4)))
+                current["transformation_stage_count"] = count
+                save_video_selfshot3_draft(uid, current, step="selfshot3:content")
+                return await video_selfshot3_render(query, uid, "content", draft=current)
+            if operation == "content":
+                if argument == "custom":
+                    session = task3d_session_step(uid, "selfshot3_content_input", input_mode="text", provider_called=False, xu_charged=0)
+                    save_video_session(uid, session)
+                    return await safe_edit_or_send(
+                        query,
+                        "✍️ <b>Nhập nội dung biến đổi</b>\n\nGhi mục tiêu và diễn biến chính của một cú máy; hệ thống sẽ chia thành các giai đoạn liền mạch.",
+                        parse_mode="HTML",
+                        reply_markup=video_selfshot3_input_keyboard("content"),
+                    )
+                current["transformation_content"] = str((current.get("selected_preset") or {}).get("summary") or "Biến đổi điện ảnh liên tục theo chuyển động nguồn")
+                current["transformation_stages"] = video_selfshot3_build_timeline(current)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:timeline")
+                return await video_selfshot3_render(query, uid, "timeline", draft=current)
+            if operation == "timeline":
+                if argument == "custom":
+                    session = task3d_session_step(uid, "selfshot3_timeline_input", input_mode="text", provider_called=False, xu_charged=0)
+                    save_video_session(uid, session)
+                    return await safe_edit_or_send(
+                        query,
+                        "✍️ <b>Sửa timeline</b>\n\nGhi điều chỉnh cho các giai đoạn, nhưng không được cắt sang clip khác hoặc làm đứt chuyển động.",
+                        parse_mode="HTML",
+                        reply_markup=video_selfshot3_input_keyboard("timeline"),
+                    )
+                current["transformation_stages"] = video_selfshot3_build_timeline(current)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:timeline")
+                return await video_selfshot3_render(query, uid, "timeline", draft=current)
+            if operation == "wardrobe":
+                if argument == "custom":
+                    session = task3d_session_step(uid, "selfshot3_wardrobe_input", input_mode="text", provider_called=False, xu_charged=0)
+                    save_video_session(uid, session)
+                    return await safe_edit_or_send(query, "✍️ <b>Nhập trang phục muốn biến đổi</b>", reply_markup=video_selfshot3_input_keyboard("wardrobe"))
+                index = safe_int(argument, 0)
+                options = video_selfshot3.WARDROBE_OPTIONS
+                if index < 1 or index > len(options):
+                    return await video_selfshot3_render(query, uid, "wardrobe", draft=current)
+                current["wardrobe"] = options[index - 1]
+                save_video_selfshot3_draft(uid, current, step="selfshot3:world")
+                return await video_selfshot3_render(query, uid, "world", draft=current)
+            if operation == "world":
+                if argument == "custom":
+                    session = task3d_session_step(uid, "selfshot3_world_input", input_mode="text", provider_called=False, xu_charged=0)
+                    save_video_session(uid, session)
+                    return await safe_edit_or_send(query, "✍️ <b>Nhập cảnh vật muốn biến đổi</b>", reply_markup=video_selfshot3_input_keyboard("world"))
+                index = safe_int(argument, 0)
+                options = video_selfshot3.WORLD_OPTIONS
+                if index < 1 or index > len(options):
+                    return await video_selfshot3_render(query, uid, "world", draft=current)
+                current["world"] = options[index - 1]
+                current["transformation_stages"] = video_selfshot3_build_timeline(current)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:effects")
+                return await video_selfshot3_render(query, uid, "effects", draft=current)
+            if operation == "effect":
+                effects = list(current.get("selected_effects") or [])
+                if argument in {"none", "clear"}:
+                    current["selected_effects"] = []
+                    save_video_selfshot3_draft(uid, current, step="selfshot3:effects")
+                    return await video_selfshot3_render(query, uid, "audio" if argument == "none" else "effects", draft=current)
+                index = safe_int(argument, 0)
+                if index < 1 or index > len(video_selfshot3.EFFECT_OPTIONS):
+                    return await video_selfshot3_render(query, uid, "effects", draft=current)
+                effect = video_selfshot3.EFFECT_OPTIONS[index - 1]
+                current["selected_effects"] = [item for item in effects if item != effect]
+                if effect not in effects:
+                    current["selected_effects"].append(effect)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:effects")
+                return await video_selfshot3_render(query, uid, "effects", draft=current)
+            if operation == "audio":
+                plan = dict(current.get("audio_plan") or video_selfshot3.initial_draft()["audio_plan"])
+                if argument == "skip":
+                    for key in ("voice", "music", "sfx", "subtitle", "source"):
+                        plan.setdefault(key, {})["enabled"] = False
+                elif argument in video_selfshot3.AUDIO_LABELS:
+                    item = dict(plan.get(argument) or {})
+                    item["enabled"] = not bool(item.get("enabled"))
+                    plan[argument] = item
+                current["audio_plan"] = plan
+                next_screen = "review" if argument == "skip" else "audio"
+                save_video_selfshot3_draft(uid, current, step=f"selfshot3:{next_screen}")
+                return await video_selfshot3_render(query, uid, next_screen, draft=current)
+            if operation == "volume":
+                target = argument if argument in video_selfshot3.AUDIO_LABELS else "source"
+                current["audio_volume_target"] = target
+                save_video_selfshot3_draft(uid, current, step="selfshot3:volume")
+                return await video_selfshot3_render(query, uid, "volume", draft=current)
+            if operation == "volume_set":
+                target = str(current.get("audio_volume_target") or "source")
+                plan = dict(current.get("audio_plan") or video_selfshot3.initial_draft()["audio_plan"])
+                item = dict(plan.get(target) or {})
+                item["volume"] = max(0, min(200, safe_int(argument, 100)))
+                plan[target] = item
+                current["audio_plan"] = plan
+                save_video_selfshot3_draft(uid, current, step="selfshot3:audio")
+                return await video_selfshot3_render(query, uid, "audio", draft=current)
+            if operation == "prompt":
+                current["prompt_bundle"] = video_selfshot3_compile_prompt(current)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:review")
+                prompt_text = json.dumps(current["prompt_bundle"], ensure_ascii=False, indent=2)
+                return await safe_edit_or_send(
+                    query,
+                    "📝 <b>Prompt biến đổi điện ảnh</b>\n\n<pre>" + html.escape(prompt_text[:12000]) + "</pre>\n\nChưa gọi nguồn dựng và chưa trừ Xu.",
+                    parse_mode="HTML",
+                    reply_markup=video_scene3_keyboard([[('⬅️ Quay lại', 'vproduct|ss3|show|review'), ('🏠 Menu chính', 'menu|main')]]),
+                )
+            if operation == "finish":
+                current["prompt_bundle"] = video_selfshot3_compile_prompt(current) if current.get("transformation_stages") else current.get("prompt_bundle")
+                current["selfshot3_preflight"] = video_selfshot3_preflight(current)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:finish")
+                return await video_selfshot3_render(query, uid, "finish", draft=current)
+            if operation == "quality":
+                report = dict(current.get("selfshot3_preflight") or {})
+                if not report.get("ok"):
+                    return await video_selfshot3_render(query, uid, "finish", draft=current)
+                quality = max(200, min(1500, safe_int(argument, 300)))
+                current["b14_quality_xu"] = quality
+                report = video_selfshot3_preflight(current)
+                current["selfshot3_preflight"] = report
+                if not report.get("ok"):
+                    save_video_selfshot3_draft(uid, current, step="selfshot3:finish")
+                    return await video_selfshot3_render(query, uid, "finish", draft=current)
+                current["b14_scene_count"] = 1
+                current["b14_scene_count_selected"] = True
+                current["b14_aspect_ratio"] = str((current.get("source_analysis") or {}).get("aspect_ratio") or "9:16").replace(":", ":")
+                current["b14_profile_id"] = "storytelling"
+                current["topic"] = str(current.get("transformation_content") or "Video tự quay biến đổi điện ảnh")
+                current["prompt_bundle"] = current.get("prompt_bundle") or video_selfshot3_compile_prompt(current)
+                session = save_video_selfshot3_draft(uid, current, step="selfshot3:invoice")
+                video_b14_prepare_project_for_invoice(uid, session)
+                session = get_video_session(uid)
+                session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="selfshot3:finish", provider_called=False, xu_charged=0)
+                return await safe_edit_or_send(
+                    query,
+                    video_b14_invoice_text(session, uid, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_selfshot3_invoice_keyboard(),
+                )
+            return await video_selfshot3_render(query, uid, "intro", draft=current)
+        except (ValueError, KeyError, TypeError) as exc:
+            logger.warning("selfshot3_callback_rejected | operation=%s argument=%s exception=%s", operation, argument, type(exc).__name__)
+            return await video_selfshot3_render(query, uid, str(current.get("selfshot3_screen") or "intro").replace("selfshot3:", ""), draft=current)
     if action == "scene3_mode":
         requested_product = str(value or "").strip()
         requested_mode = str(parts[3] if len(parts) > 3 else "").strip()
@@ -85393,6 +86076,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, prefix + video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
         draft = dict(session.get("draft") or {})
+        if product_id == video_selfshot3.PRODUCT_ID:
+            selfshot3_report = video_selfshot3_preflight(video_selfshot3_draft(session))
+            if not selfshot3_report.get("ok"):
+                current = video_selfshot3_draft(session)
+                current["selfshot3_preflight"] = selfshot3_report
+                save_video_selfshot3_draft(uid, current, step="selfshot3:finish")
+                return await video_selfshot3_render(query, uid, "finish", draft=current)
         if not draft.get("b14_scene_count_selected"):
             session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
@@ -85532,6 +86222,20 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
     if action == "b14_invoice_screen":
         draft = dict(session.get("draft") or {})
+        if product_id == video_selfshot3.PRODUCT_ID:
+            session = task3d_session_step(
+                uid,
+                "b14_invoice",
+                b14_invoice_return_step="selfshot3:finish",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(
+                query,
+                video_b14_invoice_text(session, uid, lang),
+                parse_mode="HTML",
+                reply_markup=video_selfshot3_invoice_keyboard(),
+            )
         if not draft.get("b14_scene_count_selected"):
             session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
@@ -85927,6 +86631,97 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
     if subdub_text_input_owns_message(uid):
         return False
     session = get_video_session(uid)
+    if str(session.get("product_id") or "") == video_selfshot3.PRODUCT_ID:
+        step = str(session.get("current_step") or "")
+        text = re.sub(r"\s+", " ", update.message.text.strip())[:5000]
+        if step == "selfshot3_segment_input":
+            parts = [item.strip() for item in re.split(r"\s*[-–—]\s*", text, maxsplit=1)]
+            if len(parts) != 2:
+                await update.message.reply_text(
+                    "⚠️ Hãy ghi theo dạng giây bắt đầu–giây kết thúc, ví dụ: 2-12. Video chưa được xử lý.",
+                    reply_markup=video_selfshot3_input_keyboard("segment"),
+                )
+                return True
+            try:
+                start_ms = int(float(parts[0]) * 1000)
+                end_ms = int(float(parts[1]) * 1000)
+                current = video_selfshot3_draft(session)
+                current["source_segment"] = video_selfshot3.segment_selection(current.get("source_analysis"), start_ms, end_ms)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:subject")
+                await video_selfshot3_render(update.message, uid, "subject", draft=current)
+            except (TypeError, ValueError):
+                await update.message.reply_text(
+                    "⚠️ Mốc thời gian chưa hợp lệ hoặc vượt thời lượng video. Video chưa được xử lý.",
+                    reply_markup=video_selfshot3_input_keyboard("segment"),
+                )
+            return True
+        if step == "selfshot3_subject_input":
+            if not text:
+                return True
+            current = video_selfshot3_draft(session)
+            manifest = video_selfshot3.select_subjects(
+                current.get("source_analysis"), "custom", description=text
+            )
+            subject_gate = video_selfshot3.subject_tracking_gate(
+                current.get("source_analysis"), manifest, ()
+            )
+            if not subject_gate.get("ok"):
+                current["selfshot3_subject_blocker"] = video_selfshot3.subject_blocker_text(subject_gate)
+                save_video_selfshot3_draft(uid, current, step="selfshot3:subject")
+                await video_selfshot3_render(update.message, uid, "subject", draft=current)
+                return True
+            current.pop("selfshot3_subject_blocker", None)
+            current["subject_manifest"] = manifest
+            current["relationship_locks"] = []
+            save_video_selfshot3_draft(uid, current, step="selfshot3:layers")
+            await video_selfshot3_render(update.message, uid, "layers", draft=current)
+            return True
+        if step == "selfshot3_preset_input":
+            if not text:
+                return True
+            current = video_selfshot3_draft(session)
+            current["selected_preset"] = {
+                "preset_id": "custom",
+                "title": "Hướng biến đổi riêng",
+                "summary": text,
+                "group_id": str(current.get("selected_group_id") or "custom"),
+            }
+            save_video_selfshot3_draft(uid, current, step="selfshot3:structure")
+            await video_selfshot3_render(update.message, uid, "structure", draft=current)
+            return True
+        if step == "selfshot3_content_input":
+            if not text:
+                return True
+            current = video_selfshot3_draft(session)
+            current["transformation_content"] = text
+            current["transformation_stages"] = video_selfshot3_build_timeline(current)
+            save_video_selfshot3_draft(uid, current, step="selfshot3:timeline")
+            await video_selfshot3_render(update.message, uid, "timeline", draft=current)
+            return True
+        if step == "selfshot3_timeline_input":
+            current = video_selfshot3_draft(session)
+            current["timeline_note"] = text
+            current["transformation_stages"] = video_selfshot3_build_timeline(current)
+            save_video_selfshot3_draft(uid, current, step="selfshot3:timeline")
+            await video_selfshot3_render(update.message, uid, "timeline", draft=current)
+            return True
+        if step == "selfshot3_wardrobe_input":
+            if not text:
+                return True
+            current = video_selfshot3_draft(session)
+            current["wardrobe"] = text
+            save_video_selfshot3_draft(uid, current, step="selfshot3:world")
+            await video_selfshot3_render(update.message, uid, "world", draft=current)
+            return True
+        if step == "selfshot3_world_input":
+            if not text:
+                return True
+            current = video_selfshot3_draft(session)
+            current["world"] = text
+            current["transformation_stages"] = video_selfshot3_build_timeline(current)
+            save_video_selfshot3_draft(uid, current, step="selfshot3:effects")
+            await video_selfshot3_render(update.message, uid, "effects", draft=current)
+            return True
     if (
         str(session.get("product_id") or "") in VIDEO_SCENE2_PUBLIC_PRODUCTS
         and str(session.get("current_step") or "") in {"b14_scene_custom", "waiting_scene_count"}
@@ -87014,7 +87809,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             return False
         lang = get_user_language(uid) or "vi"
         image_steps = {"awaiting_source_image", "awaiting_multiple_images", "storyboard_upload_images"}
-        video_steps = {"awaiting_reference_video", "awaiting_self_shot_video"}
+        video_steps = {"awaiting_reference_video", "awaiting_self_shot_video", "awaiting_selfshot3_video"}
         if current_step in image_steps and media_type != "image":
             await update.message.reply_text(video_microflow_missing_input_text(lang), reply_markup=video_microflow_keyboard(current_step, str(session.get("product_id") or ""), lang))
             return True
@@ -87028,6 +87823,55 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         if file_id and file_id not in refs:
             refs.append(file_id)
         refs = refs[:20]
+        if current_step == "awaiting_selfshot3_video" and product_id == video_selfshot3.PRODUCT_ID:
+            message_id = safe_int(getattr(update.message, "message_id", 0), 0)
+            if message_id and safe_int(draft.get("selfshot3_last_media_message_id"), 0) == message_id:
+                return True
+            source_asset = {
+                "media_kind": "video",
+                "file_id": file_id,
+                "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
+                "file_size": safe_int(getattr(media, "file_size", 0), 0),
+                "mime_type": mime_type or "video/mp4",
+                "file_name": str(getattr(media, "file_name", "") or ""),
+                "duration_seconds": float(getattr(media, "duration", 0) or 0),
+                "width": safe_int(getattr(media, "width", 0), 0),
+                "height": safe_int(getattr(media, "height", 0), 0),
+                "fps": 0,
+                "audio_streams": 0,
+                "probe_source": "telegram_video_metadata",
+            }
+            analysis = video_selfshot3.analyze_source(source_asset)
+            gate = video_selfshot3.source_gate(source_asset, analysis)
+            if not gate.get("ok"):
+                await update.message.reply_text(
+                    "⚠️ Video chưa có đủ thông tin thời lượng hoặc khung hình. Hãy gửi lại video dạng video, không gửi liên kết. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot3_source_request_keyboard(),
+                )
+                return True
+            current = video_selfshot3_draft(session)
+            current.update({
+                "source_video": source_asset,
+                "source_asset": source_asset,
+                "source_analysis": analysis,
+                "source_file_id": file_id,
+                "source_materialization_required": True,
+                "source_probe_policy": "telegram_metadata_until_worker_probe",
+                "source_media_ref": file_id,
+                "source_media_refs": [file_id],
+                "source_asset_items": [source_asset],
+                "awaiting_media": False,
+                "selfshot3_last_media_message_id": message_id,
+                "selfshot3_probe_count": 1,
+                "provider_called": False,
+                "job_created": False,
+                "outbox_created": False,
+                "xu_charged": 0,
+            })
+            save_video_selfshot3_draft(uid, current, step="selfshot3:source_ready")
+            await video_selfshot3_render(update.message, uid, "source_ready", draft=current)
+            return True
         if current_step in {"awaiting_multiple_images", "storyboard_upload_images"}:
             session = task3d_session_step(
                 uid,
@@ -217245,6 +218089,74 @@ async def api_worker_asset_download(asset_id: str, request: Request):
     if not candidate.startswith(os.path.abspath(asset_root)) or not os.path.exists(candidate) or not os.path.isfile(candidate):
         raise HTTPException(status_code=404, detail="asset_not_found")
     return FileResponse(candidate, filename=os.path.basename(candidate))
+
+
+@fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")
+async def api_worker_selfshot3_source_video(job_id: int, request: Request):
+    """Transfer a confirmed self-shot source to its authenticated worker only."""
+
+    verify_remote_worker_api_access(request)
+    conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, safe_int(job_id, 0))
+        hydrated = video_project_queue.hydrate_video_job_payload(conn, job)
+    finally:
+        conn.close()
+    if not hydrated:
+        raise HTTPException(status_code=404, detail="job_not_found")
+    job_status = str(hydrated.get("status") or "").strip().lower()
+    if job_status not in {"queued", "processing", "in_progress", "running", "claimed"}:
+        raise HTTPException(status_code=409, detail="source_transfer_requires_active_job")
+    project = dict(hydrated.get("project") or {})
+    try:
+        asset_pack = json.loads(str(project.get("asset_pack_json") or "{}"))
+    except Exception:
+        asset_pack = {}
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    product_type = str(
+        asset_pack.get("product_type")
+        or asset_pack.get("job_type")
+        or project.get("profile_id")
+        or ""
+    ).strip()
+    if product_type != video_selfshot3.JOB_TYPE:
+        raise HTTPException(status_code=404, detail="selfshot3_source_not_found")
+    source_video = dict(asset_pack.get("source_video") or asset_pack.get("source_asset") or {})
+    file_id = str(
+        asset_pack.get("source_file_id")
+        or asset_pack.get("source_video_id")
+        or source_video.get("file_id")
+        or ""
+    ).strip()
+    if not file_id:
+        raise HTTPException(status_code=404, detail="source_file_id_missing")
+    if tg_app is None or getattr(tg_app, "bot", None) is None:
+        raise HTTPException(status_code=503, detail="telegram_source_transfer_unavailable")
+    max_bytes = max(1, safe_int(os.getenv("SELFSHOT3_SOURCE_MAX_BYTES"), 20 * 1024 * 1024))
+    try:
+        telegram_file = await tg_app.bot.get_file(file_id)
+        declared_size = safe_int(getattr(telegram_file, "file_size", 0), 0)
+        if declared_size and declared_size > max_bytes:
+            raise HTTPException(status_code=413, detail="source_video_too_large")
+        content = bytes(await telegram_file.download_as_bytearray())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("selfshot3_source_transfer_failed | job_id=%s | error=%s", job_id, type(exc).__name__)
+        raise HTTPException(status_code=502, detail="source_video_download_failed") from exc
+    if not content:
+        raise HTTPException(status_code=502, detail="source_video_empty")
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="source_video_too_large")
+    filename = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(source_video.get("file_name") or "selfshot3-source.mp4"))[:120]
+    if not filename.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
+        filename += ".mp4"
+    return Response(
+        content=content,
+        media_type=str(source_video.get("mime_type") or "video/mp4"),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")

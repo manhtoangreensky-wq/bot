@@ -33,6 +33,7 @@ from services.multiscene_video_pipeline import (
     sync_multiscene_manifest,
 )
 from services import video_final_output
+from services import video_ai_edit_provider
 from services import video_project_queue as video_project_queue_service
 from services.video_provider_base import VideoGenerationRequest
 from services.video_provider_router import (
@@ -78,6 +79,7 @@ PROVIDER_VIDEO_SOURCE = "provider"
 PROVIDER_REQUIRED_PRODUCT_TYPES = {
     "video_ai_prompt",
     "prompt_vault_to_video",
+    "self_shot_cinematic_transform",
 }
 PROVIDER_REQUIRED_CAPABILITIES = {
     "text_to_video",
@@ -987,7 +989,12 @@ def _route_requires_provider(
         return False
     if fallback in PROVIDER_CLEAN_FAIL_FALLBACKS:
         return True
-    if provider_ready and product in {"video_ai_image", "video_ai_video_reference", "self_shot_scene_change"}:
+    if provider_ready and product in {
+        "video_ai_image",
+        "video_ai_video_reference",
+        "self_shot_scene_change",
+        "self_shot_cinematic_transform",
+    }:
         return True
     return False
 
@@ -1155,6 +1162,25 @@ def product_video_orchestration_mode(job: dict | None = None) -> str:
 def product_video_scene_duration_seconds(job: dict | None = None) -> int:
     job = dict(job or {})
     invoice = _invoice_payload(job)
+    product_type = str(
+        job.get("product_type")
+        or job.get("job_type")
+        or invoice.get("product_type")
+        or invoice.get("job_type")
+        or ""
+    ).strip()
+    if product_type == "self_shot_cinematic_transform":
+        asset_pack = _asset_pack_payload(job)
+        segment = dict(asset_pack.get("source_segment") or {})
+        segment_seconds = _safe_int((segment.get("duration_ms") or 0) / 1000, 0)
+        direct_seconds = _safe_int(
+            asset_pack.get("duration_seconds")
+            or job.get("expected_duration_seconds")
+            or job.get("duration_seconds")
+            or invoice.get("duration_seconds"),
+            0,
+        )
+        return max(1, segment_seconds or direct_seconds or PRODUCT_VIDEO_SCENE_SECONDS)
     scene_seconds = _safe_int(
         job.get("scene_duration_seconds")
         or job.get("scene_seconds")
@@ -2921,6 +2947,179 @@ def _download_output(source: str, destination: str) -> str:
     return target
 
 
+def _selfshot3_prompt_payload(asset_pack: dict[str, Any], fallback_prompt: str, job: dict[str, Any]) -> tuple[str, str]:
+    """Build the one-take prompt without falling back to text-only generation."""
+
+    bundle = asset_pack.get("prompt_bundle") if isinstance(asset_pack.get("prompt_bundle"), dict) else {}
+    stage_rows = bundle.get("stage_prompts") if isinstance(bundle, dict) else []
+    stage_text = []
+    for row in stage_rows if isinstance(stage_rows, list) else []:
+        if isinstance(row, dict) and str(row.get("prompt") or "").strip():
+            stage_text.append(str(row["prompt"]).strip())
+    preset = asset_pack.get("transformation_preset") if isinstance(asset_pack.get("transformation_preset"), dict) else {}
+    content = str(
+        asset_pack.get("transformation_content")
+        or preset.get("description")
+        or (job or {}).get("topic")
+        or fallback_prompt
+        or "Biến đổi điện ảnh liên tục trong một cú máy"
+    ).strip()
+    sections = [content]
+    if stage_text:
+        sections.append("Timeline stages:\n" + "\n\n".join(stage_text))
+    sections.append(
+        "Preserve the source person's/object's identity, body proportions, original motion, "
+        "camera continuity, contact points and audio timing. Apply only the approved wardrobe, "
+        "world and subtle effects transformations. No cuts, no replacement subject, no identity drift."
+    )
+    prompt = "\n\n".join(part for part in sections if part)
+    negative = str(
+        bundle.get("negative_prompt")
+        or "no face replacement, no identity drift, no duplicate subject, no abrupt cut, no temporal flicker"
+    ).strip()
+    return prompt[:12_000], negative[:8_000]
+
+
+def _selfshot3_provider_configs(provider_order: list[str], duration_seconds: int) -> list[Any]:
+    """Return only configured, contract-valid V2V providers in persisted order."""
+
+    configured = video_ai_edit_provider.configured_provider_chain(os.environ)
+    valid = []
+    for config in configured:
+        check = video_ai_edit_provider.validate_provider_config(config)
+        contract = dict(check.get("contract") or {})
+        max_seconds = _safe_int(contract.get("max_single_task_seconds"), 0)
+        if not check.get("ok") or (max_seconds and duration_seconds > max_seconds):
+            continue
+        valid.append(config)
+    aliases = {
+        "key4u": "key4u_video",
+        "shopaikey": "shopaikey_video",
+        "generic_http": "generic_http",
+    }
+    ordered_names = [aliases.get(str(name).strip().lower(), str(name).strip().lower()) for name in provider_order if str(name).strip()]
+    ordered = []
+    for name in ordered_names:
+        ordered.extend(item for item in valid if item.provider_name == name and item not in ordered)
+    ordered.extend(item for item in valid if item not in ordered)
+    return ordered
+
+
+def _render_selfshot3_video_to_video(
+    *,
+    job: dict[str, Any],
+    asset_pack: dict[str, Any],
+    raw_path: str,
+    provider_order: list[str],
+    fallback_prompt: str,
+    aspect_ratio: str,
+) -> dict[str, Any]:
+    """Render SELFSHOT3 through a real multipart video-to-video contract."""
+
+    source_path = str((job or {}).get("source_video_local_path") or (job or {}).get("source_video_path") or "").strip()
+    if not source_path or not os.path.isfile(source_path):
+        raise RealVideoRenderError(
+            "selfshot3_source_video_not_materialized",
+            diagnostics={"ok": False, "selfshot3": True, "provider_attempted": False, "no_charge": True, "blocker": "selfshot3_source_video_not_materialized"},
+        )
+    source_path = os.path.abspath(source_path)
+    if Path(source_path).suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm"}:
+        raise RealVideoRenderError(
+            "selfshot3_source_video_invalid",
+            diagnostics={"ok": False, "selfshot3": True, "provider_attempted": False, "no_charge": True, "blocker": "selfshot3_source_video_invalid"},
+        )
+    confirmed = bool(
+        asset_pack.get("public_user_confirmed")
+        or asset_pack.get("b14_public_user_confirmed")
+        or asset_pack.get("invoice_confirmed")
+        or (job or {}).get("public_user_confirmed")
+        or (job or {}).get("invoice_confirmed")
+    )
+    submit_source = str(asset_pack.get("submit_source") or (job or {}).get("submit_source") or "").strip()
+    if not confirmed or submit_source not in {"public_user_final_confirm", video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE}:
+        raise RealVideoRenderError(
+            "selfshot3_public_confirm_required",
+            diagnostics={"ok": False, "selfshot3": True, "provider_attempted": False, "no_charge": True, "blocker": "selfshot3_public_confirm_required"},
+        )
+    segment = dict(asset_pack.get("source_segment") or {})
+    duration_seconds = _safe_int((segment.get("duration_ms") or 0) / 1000, 0)
+    if duration_seconds <= 0:
+        duration_seconds = _safe_int(asset_pack.get("duration_seconds") or (job or {}).get("duration_seconds"), 1)
+    duration_seconds = max(1, duration_seconds)
+    configs = _selfshot3_provider_configs(provider_order, duration_seconds)
+    if not configs:
+        raise RealVideoRenderError(
+            "selfshot3_video_to_video_provider_unavailable",
+            diagnostics={"ok": False, "selfshot3": True, "provider_attempted": False, "no_charge": True, "blocker": "selfshot3_video_to_video_provider_unavailable"},
+        )
+    prompt, negative = _selfshot3_prompt_payload(asset_pack, fallback_prompt, job)
+    job_id = str((job or {}).get("job_id") or (job or {}).get("id") or "selfshot3")
+    selected = configs[0]
+    fallback = configs[1] if len(configs) > 1 else None
+    attempts = []
+    for index, config in enumerate((selected, fallback)):
+        if config is None:
+            break
+        try:
+            submitted = video_ai_edit_provider.submit_video_edit(
+                config,
+                source_video_path=source_path,
+                prompt=prompt,
+                negative_prompt=negative,
+                aspect_ratio=aspect_ratio,
+                duration_seconds=duration_seconds,
+                job_id=job_id,
+                submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+                public_user_confirmed=True,
+            )
+            task_id = str(submitted.get("provider_task_id") or "")
+            result = dict(submitted)
+            if not submitted.get("result_url_present"):
+                result = video_ai_edit_provider.wait_for_result(config, task_id)
+            result_url = str(result.get("result_url") or "").strip()
+            if not result_url:
+                raise video_ai_edit_provider.AiEditProviderError("provider_result_url_missing")
+            downloaded = video_ai_edit_provider.download_result(result_url, raw_path)
+            attempts.append({"provider": config.provider_name, "model": config.model, "task_id_present": bool(task_id), "fallback": bool(index)})
+            return {
+                "ok": True,
+                "selfshot3": True,
+                "provider_attempted": True,
+                "provider": config.provider_name,
+                "model": config.model,
+                "provider_task_ids": [task_id] if task_id else [],
+                "provider_video_ids": [],
+                "result_url_present": True,
+                "output_path": str(downloaded.get("path") or raw_path),
+                "duration": duration_seconds,
+                "scene_duration_seconds": duration_seconds,
+                "clip_duration_seconds": duration_seconds,
+                "expected_duration_seconds": duration_seconds,
+                "engine_route": "direct_video_to_video",
+                "selected_capability": "video_to_video",
+                "source_uploaded_multipart": True,
+                "fallback_used": bool(index),
+                "fallback_count": int(index),
+                "attempts": attempts,
+                "no_charge": False,
+            }
+        except video_ai_edit_provider.AiEditProviderError as exc:
+            attempts.append({"provider": config.provider_name, "model": config.model, "error": exc.reason, "fallback": bool(index)})
+            if index == 0:
+                decision = video_ai_edit_provider.controlled_fallback_decision(
+                    public_confirm_provenance=True,
+                    primary_status="timeout" if exc.reason == "provider_poll_timeout" else "failed",
+                    primary_task_alive=False,
+                    fallback_count=0,
+                    candidate=fallback,
+                )
+                if not decision.get("allowed"):
+                    raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot3": True, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
+                continue
+            raise RealVideoRenderError(exc.reason, diagnostics={"ok": False, "selfshot3": True, "provider_attempted": True, "attempts": attempts, "no_charge": True, "blocker": exc.reason}) from exc
+    raise RealVideoRenderError("selfshot3_video_to_video_failed", diagnostics={"ok": False, "selfshot3": True, "provider_attempted": bool(attempts), "attempts": attempts, "no_charge": True, "blocker": "selfshot3_video_to_video_failed"})
+
+
 async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -> dict:
     prompt = _safe_text(getattr(scene, "video_prompt", "") or getattr(scene, "visual_prompt", ""), 1200)
     aspect_ratio = str(getattr(scene, "aspect_ratio", "") or "9:16")
@@ -3219,7 +3418,17 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         provider_env["SHOPAIKEY_VIDEO_MODEL"] = str(provider_model_map.get("shopaikey_video") or "")
     if provider_model_map.get("key4u_video"):
         provider_env["KEY4U_VIDEO_MODEL"] = str(provider_model_map.get("key4u_video") or "")
-    result = run_provider_generation(request, output_dir=output_dir, environ=provider_env)
+    if product_type == "self_shot_cinematic_transform":
+        result = _render_selfshot3_video_to_video(
+            job=dict(job or {}),
+            asset_pack=dict(asset_pack or {}),
+            raw_path=raw_path,
+            provider_order=provider_order,
+            fallback_prompt=prompt,
+            aspect_ratio=aspect_ratio,
+        )
+    else:
+        result = run_provider_generation(request, output_dir=output_dir, environ=provider_env)
     result.setdefault("scene_index", scene_index)
     result.setdefault("scene_id", scene_index)
     result.setdefault("scene_duration_seconds", scene_duration_seconds)
