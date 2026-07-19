@@ -73,10 +73,10 @@ def test_product_kinds_keep_distinct_execution_contracts(
 
 def test_product_sequences_are_not_one_shared_wizard() -> None:
     assert video_flow7.product_sequence("video_ai_real")[:4] == (
-        "content_mode",
         "scene_count",
         "aspect_ratio",
-        "technical_profile",
+        "ai_input_type",
+        "content_source",
     )
     assert video_flow7.product_sequence("video_idea")[:4] == (
         "scene_count",

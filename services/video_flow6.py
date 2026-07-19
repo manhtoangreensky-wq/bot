@@ -19,6 +19,7 @@ MAX_SCENES = 20
 SCENE_SECONDS = 8
 SUPPORTED_RATIOS = frozenset({"9:16", "16:9", "1:1", "4:5"})
 CONTENT_MODES = frozenset({"manual", "suggestions"})
+AI_INPUT_TYPES = frozenset({"prompt_video", "image_video", "video_video"})
 
 FLOW_KIND_BY_PRODUCT = {
     **video_flow7.PRODUCT_KIND_BY_ID,
@@ -176,6 +177,25 @@ def flow_spec(flow_kind: str) -> dict[str, Any]:
     return deepcopy(FLOW_SPECS.get(str(flow_kind or ""), FLOW_SPECS["ai_real"]))
 
 
+def effective_asset_requirement(value: dict[str, Any] | None) -> str:
+    raw = dict(value or {})
+    product_id = str(
+        raw.get("product_id")
+        or raw.get("source_product_id")
+        or raw.get("product_type")
+        or "video_ai_real"
+    )
+    flow_kind = flow_kind_for_product(product_id)
+    source_fields = dict(raw.get("source_fields") or {})
+    ai_input_type = str(raw.get("ai_input_type") or source_fields.get("ai_input_type") or "")
+    if flow_kind == "ai_real":
+        if ai_input_type == "image_video":
+            return "single_image_required"
+        if ai_input_type == "video_video":
+            return "video_required"
+    return str(flow_spec(flow_kind)["asset_requirement"])
+
+
 def new_context(
     *,
     product_id: str,
@@ -193,6 +213,8 @@ def new_context(
         "content_mode": mode,
         "scene_count": 0,
         "aspect_ratio": "",
+        "ai_input_type": "",
+        "content_source": "",
         "asset_requirement": str(spec["asset_requirement"]),
         "primary_profile_key": "",
         "content_choice": {},
@@ -224,7 +246,16 @@ def normalize_context(value: dict[str, Any] | None) -> dict[str, Any]:
     flow_kind = flow_kind_for_product(product_id)
     base["flow_kind"] = flow_kind
     base["product_id"] = product_id
-    base["asset_requirement"] = str(flow_spec(flow_kind)["asset_requirement"])
+    source_fields = dict(base.get("source_fields") or {})
+    ai_input_type = str(base.get("ai_input_type") or source_fields.get("ai_input_type") or "")
+    base["ai_input_type"] = ai_input_type if ai_input_type in AI_INPUT_TYPES else ""
+    base["content_source"] = str(base.get("content_source") or source_fields.get("content_source") or "")
+    source_fields.update({
+        "ai_input_type": base["ai_input_type"],
+        "content_source": base["content_source"],
+    })
+    base["source_fields"] = source_fields
+    base["asset_requirement"] = effective_asset_requirement(base)
     if str(base.get("content_mode") or "") not in CONTENT_MODES:
         base["content_mode"] = ""
     try:
@@ -265,6 +296,18 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
         "content_mode": str(source.get("content_mode") or context.get("content_mode") or ""),
         "scene_count": source.get("scene_count", context.get("scene_count", 0)),
         "aspect_ratio": str(source.get("aspect_ratio") or context.get("aspect_ratio") or ""),
+        "ai_input_type": str(
+            source.get("ai_input_type")
+            or source_fields.get("ai_input_type")
+            or context.get("ai_input_type")
+            or ""
+        ),
+        "content_source": str(
+            source.get("content_source")
+            or source_fields.get("content_source")
+            or context.get("content_source")
+            or ""
+        ),
         "primary_profile_key": str(source.get("primary_profile_key") or source.get("primary_profile") or context.get("primary_profile_key") or ""),
         "content_choice": dict(source.get("content_choice") or source.get("selected_suggestion") or context.get("content_choice") or {}),
         "character_config": dict(source.get("character_config") or context.get("character_config") or {}),
@@ -365,6 +408,8 @@ def sync_scene_state(state: dict[str, Any]) -> dict[str, Any]:
     updated.update({
         "flow_kind": context["flow_kind"],
         "content_mode": context["content_mode"],
+        "ai_input_type": context["ai_input_type"],
+        "content_source": context["content_source"],
         "asset_requirement": context["asset_requirement"],
         "primary_profile_key": context["primary_profile_key"],
         "content_choice": dict(context["content_choice"]),
@@ -386,6 +431,20 @@ def asset_gate_status(value: dict[str, Any] | None) -> dict[str, Any]:
     source_video = dict(manifest.get("source_video") or {})
     if requirement in {"optional", "preset_dependent", "script_dependent", "series_dependent"}:
         return {"ok": True, "requirement": requirement, "required": 0, "received": len(items), "blocker": ""}
+    if requirement == "single_image_required":
+        image_items = [
+            item
+            for item in items
+            if str(item.get("media_kind") or "image").lower() in {"image", "photo", "storyboard"}
+        ]
+        received = len(image_items)
+        return {
+            "ok": received >= 1,
+            "requirement": requirement,
+            "required": 1,
+            "received": received,
+            "blocker": "" if received >= 1 else "reference_image_missing",
+        }
     if requirement == "images_required":
         if str(context.get("flow_kind") or "") == "storyboard":
             storyboard_manifest = dict(context.get("storyboard_manifest") or {})

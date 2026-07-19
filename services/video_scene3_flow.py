@@ -51,6 +51,8 @@ BACK_STEP = {
     "await_subject": "technical_profile",
     "scene_count": "content_mode",
     "aspect_ratio": "scene_count",
+    "ai_input_type": "aspect_ratio",
+    "content_source": "ai_input_type",
     "asset_gate": "aspect_ratio",
     "technical_profile": "aspect_ratio",
     "content_choice": "technical_profile",
@@ -129,12 +131,25 @@ def canonical_back_step(state: dict[str, Any] | None) -> str:
 
     current = dict(state or {})
     step = str(current.get("step") or "menu")
+    content_source = str(current.get("content_source") or "")
+    if (
+        step == "asset_gate"
+        and bool(current.get("flow8_direct_entry"))
+        and str(current.get("ai_input_type") or "") in {"image_video", "video_video"}
+    ):
+        return "ai_input_type"
+    if step == "technical_profile" and content_source == "profiles":
+        return "content_source"
+    if step == "await_suggestion" and content_source == "manual":
+        return "content_source"
     if step == "profile_links":
         return "technical_profile"
     if step == "profile_suggestions":
         return "technical_profile"
     if step == "technical_profile" and str(current.get("asset_requirement") or "") != "optional":
         return "asset_gate"
+    if step == "character" and content_source == "manual":
+        return "await_suggestion"
     if step == "character":
         return "content_choice"
     if step == "creative_controls" and str(current.get("image_source_mode") or "") in {"uploaded", "create"}:
