@@ -308,5 +308,7 @@ def test_live8_scope_is_subdub_only():
             "tests/test_p0_subdub_live9_persistent_execution_recovery.py",
             "tests/test_p0_subdub_live10_menu_route_isolation.py",
             "tests/test_p0_subdub_live10_tts_checkpoint_resume.py",
+            "tests/test_p0_subdub_live12_cross_video_determinism_dub_combo_recovery.py",
+            "tests/test_p0_subdub_live13_selective_recent_mp4_restore.py",
         }
     assert set(changed) <= allowed
