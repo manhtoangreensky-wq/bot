@@ -191408,8 +191408,6 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "keep_original_audio", "original_audio_volume_percent",
             "dubbed_voice_volume_percent", "audio_mix_mode",
             "volume_config_source", "audio_mix_return_step",
-            "input_content_hash", "subdub_pipeline_version",
-            "canonical_input_identity",
         }:
             state[key] = _short_pending_text(value)
     mode = normalize_video_translate_mode(
@@ -191830,13 +191828,6 @@ def video_dubbing_source_fields_from_upload(info: dict, *, subtitle_file: bool =
     info = dict(info or {})
     source_kind = "subtitle_file" if subtitle_file else "media"
     media_kind = "subtitle_file" if subtitle_file else str(info.get("media_kind") or "media")
-    input_fingerprint = "|".join((
-        str(info.get("file_unique_id") or ""),
-        str(info.get("file_id") or ""),
-        str(info.get("file_name") or ""),
-        str(info.get("file_size") or 0),
-        str(info.get("duration") or 0),
-    ))
     fields = {
         "source_file_id": str(info.get("file_id") or ""),
         "source_file_unique_id": str(info.get("file_unique_id") or ""),
@@ -191857,24 +191848,6 @@ def video_dubbing_source_fields_from_upload(info: dict, *, subtitle_file: bool =
         "pending_video_action": "confirm",
         "pending_confirm_token": hashlib.sha256(f"{info.get('file_id') or ''}:{time.time_ns()}".encode()).hexdigest()[:16],
         "last_video_flow": "video_dubbing",
-        "input_content_hash": hashlib.sha256(input_fingerprint.encode("utf-8")).hexdigest(),
-        "subdub_pipeline_version": subdub_canonical_cues.SUBDUB_PIPELINE_VERSION,
-        "canonical_input_identity": "",
-        "subtitle_ref": "",
-        "source_subtitle_ref": "",
-        "translated_subtitle_ref": "",
-        "translation_session_id": "",
-        "translated_segment_count": "",
-        "final_translation_asset_ids": "",
-        "final_subtitle_asset_ids": "",
-        "final_dub_asset_id": "",
-        "final_dub_video_asset_id": "",
-        "final_subtitle_available": "",
-        "final_audio_available": "",
-        "final_video_available": "",
-        "task2_job_id": "",
-        "last_ready_step": "",
-        "processing_error": "",
     }
     if not subtitle_file:
         fields.update({
@@ -195544,43 +195517,6 @@ def subdub_identity_fields(job: dict | None = None, *, job_key: str = "", mode: 
     public_code = subdub_existing_public_code(current) or subdub_public_code_value(visible_job_id or internal_job_id)
     product_type = subdub_product_type_from_mode(normalized_mode, state)
     mapped_mode = normalized_mode or str(current.get("mode") or state.get("mode") or "").strip()
-    input_content_hash = str(state.get("input_content_hash") or "").strip()
-    if not input_content_hash:
-        input_fingerprint = "|".join((
-            str(state.get("source_file_unique_id") or state.get("video_file_unique_id") or ""),
-            str(state.get("source_file_id") or state.get("video_file_id") or ""),
-            str(state.get("source_file_name") or ""),
-            str(state.get("source_file_size") or state.get("video_file_size") or 0),
-            str(state.get("source_duration") or state.get("video_duration") or 0),
-        ))
-        if any(part.strip() and part.strip() != "0" for part in input_fingerprint.split("|")):
-            input_content_hash = hashlib.sha256(input_fingerprint.encode("utf-8")).hexdigest()
-    pipeline_version = str(
-        state.get("subdub_pipeline_version")
-        or subdub_canonical_cues.SUBDUB_PIPELINE_VERSION
-    )
-    canonical_identity = ""
-    if input_content_hash:
-        canonical_identity = subdub_canonical_cues.canonical_input_identity(
-            input_content_hash=input_content_hash,
-            mode=mapped_mode,
-            source_language=str(state.get("source_language") or "auto"),
-            target_language=str(state.get("target_language") or state.get("selected_language") or ""),
-            voice_id=str(
-                state.get("resolved_voice_id")
-                or state.get("selected_voice_id")
-                or state.get("voice_id")
-                or ""
-            ),
-            voice_speed=state.get("voice_speed") or state.get("speed") or "1.0",
-            original_audio_mode=str(
-                state.get("original_audio_mode")
-                or ("keep_original" if state.get("keep_original_audio") else "mute")
-            ),
-            original_audio_volume_percent=state.get("original_audio_volume_percent") or 0,
-            dubbed_voice_volume_percent=state.get("dubbed_voice_volume_percent") or 100,
-            subdub_pipeline_version=pipeline_version,
-        )
     return {
         "feature": "subtitle_dub",
         "internal_job_id": internal_job_id,
@@ -195594,9 +195530,6 @@ def subdub_identity_fields(job: dict | None = None, *, job_key: str = "", mode: 
         "mapped_product_type": product_type,
         "mapped_mode": mapped_mode,
         "mode": mapped_mode,
-        "input_content_hash": input_content_hash,
-        "subdub_pipeline_version": pipeline_version,
-        "canonical_input_identity": canonical_identity,
     }
 
 def subdub_enrich_job_identity(job: dict | None = None, *, job_key: str = "", mode: str = "", state: dict | None = None) -> dict:
@@ -201944,18 +201877,7 @@ async def translate_canonical_subtitle_segments(
             allow_admin=allow_admin,
             updated_by=updated_by,
         )
-        raw_translated_text = translated.get("text")
-        validation = subdub_canonical_cues.validate_translation_text(
-            raw_translated_text,
-            target_language=target_language,
-        )
-        if not validation.get("accepted"):
-            raise RuntimeError(
-                "translation_text_invalid:"
-                f"{cue.get('cue_id') or cue.get('source_index') or ''}:"
-                f"{validation.get('reason') or 'invalid'}"
-            )
-        translated_text = subdub_canonical_cues.normalize_cue_text(raw_translated_text)
+        translated_text = subdub_canonical_cues.normalize_cue_text(translated.get("text"))
         providers.append(str(translated.get("provider") or ""))
         translated_items.append({
             "cue_id": str(cue.get("cue_id") or ""),
@@ -201966,7 +201888,6 @@ async def translate_canonical_subtitle_segments(
         source_cues,
         translated_items,
         target_language=target_language,
-        reject_invalid=True,
     )
     if not translated_cues or not subdub_canonical_cues.same_timeline(source_cues, translated_cues):
         raise RuntimeError("canonical_translation_timeline_mismatch")
@@ -202923,7 +202844,6 @@ async def subdub_resume_generating_voice_from_checkpoint(job: dict | None) -> di
             completed_tts_cues=len(canonical_cues),
             tts_cue_checkpoints=list(synthesized.get("tts_cue_checkpoints") or []),
             tts_checkpoint_complete=True,
-            tts_complete=True,
             recovery_result="tts_resume_complete_mux_pending",
         ) or active_job
         source_duration = max(
@@ -203143,7 +203063,7 @@ def subdub_plan_canonical_tts_timeline(
             return {
                 "ok": False,
                 "blocker": (
-                    "tts_cue_cannot_fit_without_overlap:"
+                    "canonical_tts_timeline_exceeds_source:"
                     f"required_end={fastest_end:.3f};source_duration={timeline_end:.3f};"
                     f"max_tempo={max_tempo_ratio:.3f}"
                 ),
@@ -203467,7 +203387,6 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                     source_segments,
                     parsed_output_segments,
                     target_language=target_language,
-                    reject_invalid=True,
                 )
                 output_subtitle = video_dubbing_srt_from_segments(output_segments) or output_subtitle
             else:
@@ -203852,45 +203771,50 @@ async def _execute_video_dubbing_pipeline_core(
             return {"provider": "", "chunks": []}
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
         kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
-        kwargs.pop("max_speed", None)
-        result = await synthesize_canonical_dub_segment_chunks(
-            *args,
-            allow_admin=is_admin_user(uid),
-            **kwargs,
-        )
-        if isinstance(result, dict):
-            input_segments = list(args[0] if args else kwargs.get("segments") or [])
-            canonical_segments = subdub_canonical_cues.canonicalize_segments(
-                input_segments,
-                extraction_source="dub_canonical_timeline",
-                source_language=str(state.get("source_language") or "auto"),
-                target_language=str(state.get("target_language") or ""),
+        kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            kwargs.pop("max_speed", None)
+            result = await synthesize_canonical_dub_segment_chunks(
+                *args,
+                allow_admin=is_admin_user(uid),
+                **kwargs,
             )
-            chunks_by_index = {
-                int((item or {}).get("index") or position): dict(item or {})
-                for position, item in enumerate(result.get("chunks") or [], start=1)
-            }
-            aligned_chunks = []
-            for cue in canonical_segments:
-                source_index = int(cue.get("source_index") or cue.get("index") or 0)
-                chunk = chunks_by_index.get(source_index)
-                if not chunk:
-                    raise RuntimeError(f"canonical_tts_chunk_missing:{source_index}")
-                aligned_chunks.append({
-                    **chunk,
-                    "index": source_index,
-                    "cue_id": str(cue.get("cue_id") or ""),
-                    "source_start_ms": int(cue.get("source_start_ms") or 0),
-                    "source_end_ms": int(cue.get("source_end_ms") or 0),
-                    "start": float(cue.get("start") or 0),
-                    "end": float(cue.get("end") or 0),
-                    "text": str(cue.get("translated_text") or cue.get("source_text") or cue.get("text") or ""),
-                })
-            if len(aligned_chunks) != len(canonical_segments):
-                raise RuntimeError("canonical_tts_chunk_count_mismatch")
-            result["chunks"] = aligned_chunks
-            result["canonical_timeline_signature"] = subdub_canonical_cues.timeline_signature(canonical_segments)
-            result["canonical_cue_count"] = len(canonical_segments)
+        else:
+            result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
+        if isinstance(result, dict):
+            if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+                input_segments = list(args[0] if args else kwargs.get("segments") or [])
+                canonical_segments = subdub_canonical_cues.canonicalize_segments(
+                    input_segments,
+                    extraction_source="combo_canonical_timeline",
+                    source_language=str(state.get("source_language") or "auto"),
+                    target_language=str(state.get("target_language") or ""),
+                )
+                chunks_by_index = {
+                    int((item or {}).get("index") or position): dict(item or {})
+                    for position, item in enumerate(result.get("chunks") or [], start=1)
+                }
+                aligned_chunks = []
+                for cue in canonical_segments:
+                    source_index = int(cue.get("source_index") or cue.get("index") or 0)
+                    chunk = chunks_by_index.get(source_index)
+                    if not chunk:
+                        raise RuntimeError(f"canonical_tts_chunk_missing:{source_index}")
+                    aligned_chunks.append({
+                        **chunk,
+                        "index": source_index,
+                        "cue_id": str(cue.get("cue_id") or ""),
+                        "source_start_ms": int(cue.get("source_start_ms") or 0),
+                        "source_end_ms": int(cue.get("source_end_ms") or 0),
+                        "start": float(cue.get("start") or 0),
+                        "end": float(cue.get("end") or 0),
+                        "text": str(cue.get("translated_text") or cue.get("text") or ""),
+                    })
+                if len(aligned_chunks) != len(canonical_segments):
+                    raise RuntimeError("canonical_tts_chunk_count_mismatch")
+                result["chunks"] = aligned_chunks
+                result["canonical_timeline_signature"] = subdub_canonical_cues.timeline_signature(canonical_segments)
+                result["canonical_cue_count"] = len(canonical_segments)
             result.update({
                 **speech_config,
                 "male_fallback_used": False,
@@ -203898,7 +203822,9 @@ async def _execute_video_dubbing_pipeline_core(
         return result
 
     async def _build_timeline_audio_for_blackbox(chunks: list[dict], total_duration: float = 0):
-        return await build_canonical_dub_timeline_audio(chunks, total_duration)
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            return await build_canonical_dub_timeline_audio(chunks, total_duration)
+        return await build_dub_timeline_audio(chunks, total_duration)
 
     render_supports_validation = True
 
