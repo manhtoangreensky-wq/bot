@@ -40,6 +40,7 @@ REQUIRED_VIDEO_PRODUCT_TYPES = (
     "storyboard_prompt",
     "image_to_video",
     "self_shot_scene_change",
+    "self_shot_cinematic_transform",
     "multi_scene_film",
     "video_idea_to_product",
 )
@@ -78,6 +79,20 @@ VIDEO_PRODUCT_ENGINE_ROUTES: dict[str, dict[str, Any]] = {
     "self_shot_scene_change": {
         "adapter": "video_to_video_scene_change_or_clean_fail",
         "input_requirements": ("source_video", "subject_preservation", "scene_change_direction"),
+        "engine_family": "reference_video",
+        "allow_clean_fail": True,
+    },
+    "self_shot_cinematic_transform": {
+        "adapter": "one_take_cinematic_video_to_video_or_clean_fail",
+        "input_requirements": (
+            "source_video",
+            "source_segment",
+            "subject_manifest",
+            "layer_rules",
+            "transformation_stages",
+            "prompt_bundle",
+            "audio_plan",
+        ),
         "engine_family": "reference_video",
         "allow_clean_fail": True,
     },

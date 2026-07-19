@@ -786,6 +786,68 @@ def render_real_video(job: dict, work_dir: str) -> str:
     return final_path
 
 
+def _selfshot3_job(job: dict | None) -> bool:
+    data = dict(job or {})
+    asset_pack = data.get("asset_pack") or {}
+    if isinstance(asset_pack, str):
+        try:
+            asset_pack = json.loads(asset_pack)
+        except Exception:
+            asset_pack = {}
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    return str(
+        data.get("product_type")
+        or data.get("job_type")
+        or asset_pack.get("product_type")
+        or asset_pack.get("job_type")
+        or ""
+    ).strip() == "self_shot_cinematic_transform"
+
+
+def download_selfshot3_source_video(job: dict, work_dir: str) -> str:
+    """Materialize the user source inside the disposable worker directory."""
+
+    if not _selfshot3_job(job):
+        return ""
+    job_id = str(job.get("job_id") or job.get("id") or "").strip()
+    if not job_id:
+        raise RuntimeError("selfshot3_source_job_id_missing")
+    max_bytes = max(1, int(os.getenv("SELFSHOT3_SOURCE_MAX_BYTES", str(20 * 1024 * 1024))))
+    request = urllib.request.Request(
+        endpoint(f"/api/v1/worker/jobs/{job_id}/source-video"),
+        headers=auth_headers(""),
+        method="GET",
+    )
+    target = (Path(work_dir).resolve() / "selfshot3-source.mp4").resolve()
+    root = Path(work_dir).resolve()
+    if root not in target.parents:
+        raise RuntimeError("selfshot3_source_path_unsafe")
+    received = 0
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            with target.open("wb") as handle:
+                while True:
+                    chunk = response.read(min(1024 * 1024, max_bytes - received + 1))
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise RuntimeError("selfshot3_source_too_large")
+                    handle.write(chunk)
+    except Exception:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    if received <= 0 or not target.exists():
+        raise RuntimeError("selfshot3_source_empty")
+    job["source_video_path"] = str(target)
+    job["source_video_local_path"] = str(target)
+    return str(target)
+
+
 def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
@@ -840,6 +902,9 @@ def process_claimed_job(job: dict) -> dict:
             }
             send_heartbeat(job_id, 90, "uploading ADMIN TEST PATTERN")
             return complete_job(job_id, result, final_path)
+        if _selfshot3_job(job):
+            send_heartbeat(job_id, 12, "downloading self-shot source")
+            download_selfshot3_source_video(job, work_dir)
         send_heartbeat(job_id, 20, "preparing product video")
         print(
             "[remote_worker] provider submit start "

@@ -26,6 +26,7 @@ PRODUCT_KIND_BY_ID = {
     "script_image_video": "script_to_video",
     "storyboard_prompt": "storyboard",
     "self_shot_scene_change": "self_shot",
+    "self_shot_cinematic_transform": "self_shot_cinematic",
     "multi_scene_film": "long_series",
     "video_trend": "trend_video",
 }
@@ -96,6 +97,23 @@ PRODUCT_SPECS = {
         "route": "self_shot_scene_change",
         "fallback": "block_no_charge",
     },
+    "self_shot_cinematic": {
+        "sequence": (
+            "source_video", "source_probe", "source_segment", "subject_selection",
+            "layer_rules", "transformation_type", "stage_structure", "content",
+            "transformation_timeline", "wardrobe", "world", "effects", "audio",
+            "review", "finish", "package", "invoice", "confirm",
+        ),
+        "required_assets": "source_video",
+        "job_type": "self_shot_cinematic_transform",
+        "execution_owner": "owner_product_video",
+        "capability_requirements": (
+            "video_to_video", "source_video_probe", "identity_continuity",
+            "motion_continuity", "final_mp4",
+        ),
+        "route": "self_shot_cinematic_transform",
+        "fallback": "block_no_charge",
+    },
     "long_series": {
         "sequence": (
             "series_bible", "episode_count", "scenes_per_episode", "aspect_ratio",
@@ -153,6 +171,12 @@ ENTRY_ROWS = {
     "self_shot_scene_change": (
         (("🎥 Gửi video tự quay", "vproduct|selfshot_source|upload"),
          ("📖 Hướng dẫn", "menu|guide_video_ai")),
+    ),
+    "self_shot_cinematic_transform": (
+        (("📎 Gửi video nguồn", "vproduct|ss3|source"),
+         ("✨ Xem kiểu biến đổi", "vproduct|ss3|show|types")),
+        (("📁 Dự án đang làm", "vproduct|ss3|show|project"),
+         ("ℹ️ Cách hoạt động", "vproduct|ss3|show|help")),
     ),
     "video_idea": (
         (("💡 Khám phá ý tưởng", "vproduct|scene3_mode|video_idea|suggestions"),
