@@ -202536,6 +202536,35 @@ async def video_dubbing_audio_duration_seconds(audio_bytes: bytes, suffix: str =
         except Exception:
             return 0.0
 
+
+def prepare_subdub_combo_tts_segments(
+    segments: list[dict],
+    *,
+    source_language: str = "auto",
+    target_language: str = "",
+) -> tuple[list[dict], list[dict]]:
+    canonical_segments = subdub_canonical_cues.canonicalize_segments(
+        segments,
+        extraction_source="combo_canonical_timeline",
+        source_language=source_language,
+        target_language=target_language,
+    )
+    if not canonical_segments:
+        raise RuntimeError("combo_canonical_tts_segments_empty")
+    tts_segments = []
+    for cue in canonical_segments:
+        source_index = int(cue.get("source_index") or cue.get("index") or 0)
+        translated_text = str(cue.get("translated_text") or cue.get("text") or "").strip()
+        if not translated_text:
+            raise RuntimeError(f"combo_translated_text_empty:{source_index}")
+        tts_segments.append({
+            "index": source_index,
+            "start": float(cue.get("start") or 0),
+            "end": float(cue.get("end") or 0),
+            "text": translated_text,
+        })
+    return canonical_segments, tts_segments
+
 async def synthesize_dub_segment_chunks(
     segments: list[dict],
     *,
@@ -203921,10 +203950,21 @@ async def _execute_video_dubbing_pipeline_core(
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
         kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
         kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        canonical_segments = []
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            kwargs.pop("max_speed", None)
-            result = await synthesize_canonical_dub_segment_chunks(
-                *args,
+            input_segments = list(args[0] if args else kwargs.get("segments") or [])
+            canonical_segments, combo_tts_segments = prepare_subdub_combo_tts_segments(
+                input_segments,
+                source_language=str(state.get("source_language") or "auto"),
+                target_language=str(state.get("target_language") or ""),
+            )
+            if args:
+                combo_args = (combo_tts_segments, *args[1:])
+            else:
+                combo_args = ()
+                kwargs["segments"] = combo_tts_segments
+            result = await synthesize_dub_segment_chunks(
+                *combo_args,
                 allow_admin=is_admin_user(uid),
                 **kwargs,
             )
@@ -203932,13 +203972,6 @@ async def _execute_video_dubbing_pipeline_core(
             result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
         if isinstance(result, dict):
             if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-                input_segments = list(args[0] if args else kwargs.get("segments") or [])
-                canonical_segments = subdub_canonical_cues.canonicalize_segments(
-                    input_segments,
-                    extraction_source="combo_canonical_timeline",
-                    source_language=str(state.get("source_language") or "auto"),
-                    target_language=str(state.get("target_language") or ""),
-                )
                 chunks_by_index = {
                     int((item or {}).get("index") or position): dict(item or {})
                     for position, item in enumerate(result.get("chunks") or [], start=1)
@@ -203964,6 +203997,7 @@ async def _execute_video_dubbing_pipeline_core(
                 result["chunks"] = aligned_chunks
                 result["canonical_timeline_signature"] = subdub_canonical_cues.timeline_signature(canonical_segments)
                 result["canonical_cue_count"] = len(canonical_segments)
+                result["combo_synthesis_path"] = "standalone_dub_synth_with_canonical_timeline"
             result.update({
                 **speech_config,
                 "male_fallback_used": False,
