@@ -57311,6 +57311,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command="/start",
         status="ok",
     )
+    # A Web portal deep-link proves the Telegram identity through this command
+    # before its one-time code is sent to the private Web callback.
+    if context.args and str(context.args[0]).startswith("web_"):
+        link_result = await confirm_web_link_from_telegram(globals(), str(uid), str(context.args[0])[4:])
+        await update.message.reply_text(link_result["message"])
     if context.args and context.args[0].startswith("ref_"):
         referrer = context.args[0].replace("ref_", "", 1)
         ref_result = register_referral(uid, referrer, user_existed_before=user_existed_before)
@@ -57339,6 +57344,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=localized_main_menu_keyboard(user_is_admin, lang),
     )
     await maybe_auto_grant_birthday_gift(update, context)
+
+
+async def cmd_linkweb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fallback for users who paste a code instead of opening the deep link."""
+    uid = str(update.effective_user.id) if update.effective_user else ""
+    code = str((context.args or [""])[0] or "").strip()
+    if not uid or not code:
+        await update.message.reply_text("Dùng: /linkweb <mã liên kết từ Web App>")
+        return
+    get_user(uid, update.effective_user.first_name if update.effective_user else "")
+    result = await confirm_web_link_from_telegram(globals(), uid, code)
+    await update.message.reply_text(result["message"])
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_start(update, context)
@@ -128358,6 +128375,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("support_ticket", cmd_support_ticket))
     tg_app.add_handler(CommandHandler("support_close", cmd_support_close))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
+    tg_app.add_handler(CommandHandler("linkweb",     cmd_linkweb))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
     tg_app.add_handler(CommandHandler("lang",        cmd_language))
@@ -129374,6 +129392,12 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Bot đã dừng an toàn.")
 
 fastapi_app = FastAPI(title="TOAN AAS V15.2", lifespan=lifespan)
+
+# COPYFAST Web App bridge.  This is a private, HMAC-protected adapter around
+# existing bot state; it deliberately does not replace PayOS, wallet, or the
+# Telegram product handlers.
+from webapp_core_bridge import build_core_bridge_router, confirm_web_link_from_telegram
+fastapi_app.include_router(build_core_bridge_router(globals()))
 
 def verify_runtime_access(request: Request):
     token = (
