@@ -92,9 +92,11 @@ def test_product_sequences_are_not_one_shared_wizard() -> None:
         "panel_images",
         "panel_mapping",
     )
-    assert video_flow7.product_sequence("self_shot_scene_change")[:4] == (
+    assert video_flow7.product_sequence("self_shot_scene_change")[:6] == (
         "source_video",
-        "source_probe",
+        "source_analysis",
+        "subject_selection",
+        "preserve_constraints",
         "scene_count",
         "aspect_ratio",
     )

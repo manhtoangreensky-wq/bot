@@ -786,7 +786,7 @@ def render_real_video(job: dict, work_dir: str) -> str:
     return final_path
 
 
-def _selfshot3_job(job: dict | None) -> bool:
+def _selfshot_job_type(job: dict | None) -> str:
     data = dict(job or {})
     asset_pack = data.get("asset_pack") or {}
     if isinstance(asset_pack, str):
@@ -802,7 +802,15 @@ def _selfshot3_job(job: dict | None) -> bool:
         or asset_pack.get("product_type")
         or asset_pack.get("job_type")
         or ""
-    ).strip() == "self_shot_cinematic_transform"
+    ).strip()
+
+
+def _selfshot3_job(job: dict | None) -> bool:
+    return _selfshot_job_type(job) == "self_shot_cinematic_transform"
+
+
+def _selfshot2_job(job: dict | None) -> bool:
+    return _selfshot_job_type(job) == "self_shot_scene_change"
 
 
 def download_selfshot3_source_video(job: dict, work_dir: str) -> str:
@@ -843,6 +851,56 @@ def download_selfshot3_source_video(job: dict, work_dir: str) -> str:
         raise
     if received <= 0 or not target.exists():
         raise RuntimeError("selfshot3_source_empty")
+    job["source_video_path"] = str(target)
+    job["source_video_local_path"] = str(target)
+    return str(target)
+
+
+def download_selfshot2_source_video(job: dict, work_dir: str) -> str:
+    """Materialize a SELFSHOT2 source without sharing another product's file."""
+
+    if not _selfshot2_job(job):
+        return ""
+    job_id = str(job.get("job_id") or job.get("id") or "").strip()
+    if not job_id:
+        raise RuntimeError("selfshot2_source_job_id_missing")
+    max_bytes = max(
+        1,
+        int(
+            os.getenv("SELFSHOT_SOURCE_MAX_BYTES")
+            or os.getenv("SELFSHOT2_SOURCE_MAX_BYTES")
+            or str(50 * 1024 * 1024)
+        ),
+    )
+    request = urllib.request.Request(
+        endpoint(f"/api/v1/worker/jobs/{job_id}/source-video"),
+        headers=auth_headers(""),
+        method="GET",
+    )
+    root = Path(work_dir).resolve()
+    target = (root / "selfshot2-source.mp4").resolve()
+    if root not in target.parents:
+        raise RuntimeError("selfshot2_source_path_unsafe")
+    received = 0
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            with target.open("wb") as handle:
+                while True:
+                    chunk = response.read(min(1024 * 1024, max_bytes - received + 1))
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise RuntimeError("selfshot2_source_too_large")
+                    handle.write(chunk)
+    except Exception:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    if received <= 0 or not target.exists():
+        raise RuntimeError("selfshot2_source_empty")
     job["source_video_path"] = str(target)
     job["source_video_local_path"] = str(target)
     return str(target)
@@ -905,6 +963,9 @@ def process_claimed_job(job: dict) -> dict:
         if _selfshot3_job(job):
             send_heartbeat(job_id, 12, "downloading self-shot source")
             download_selfshot3_source_video(job, work_dir)
+        elif _selfshot2_job(job):
+            send_heartbeat(job_id, 12, "downloading self-shot scene source")
+            download_selfshot2_source_video(job, work_dir)
         send_heartbeat(job_id, 20, "preparing product video")
         print(
             "[remote_worker] provider submit start "
@@ -917,7 +978,11 @@ def process_claimed_job(job: dict) -> dict:
         send_heartbeat(job_id, 88, "checking rendered video")
         connector_result = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
         visual_classification = str(connector_result.get("visual_classification") or connector_result.get("final_classification") or "")
-        force_no_charge = bool(visual_classification and visual_classification != "final_ai_video")
+        selfshot2_continuity_passed = connector_result.get("continuity_validation_passed") is True
+        force_no_charge = bool(
+            (visual_classification and visual_classification != "final_ai_video")
+            or (_selfshot2_job(job) and not selfshot2_continuity_passed)
+        )
         result = {
             "ok": True,
             **trace,
@@ -966,6 +1031,13 @@ def process_claimed_job(job: dict) -> dict:
             "logo_overlay_requested": bool(connector_result.get("logo_overlay_requested")),
             "logo_overlay_applied": bool(connector_result.get("logo_overlay_applied")),
             "logo_overlay_error": str(connector_result.get("logo_overlay_error") or ""),
+            "selfshot2_continuity_validation": connector_result.get("selfshot2_continuity_validation") or {},
+            "continuity_validation_passed": selfshot2_continuity_passed if _selfshot2_job(job) else connector_result.get("continuity_validation_passed"),
+            "continuity_blocker": str(connector_result.get("continuity_blocker") or ""),
+            "continuity_metrics": connector_result.get("continuity_metrics") or {},
+            "continuity_evidence_scene_indexes": connector_result.get("continuity_evidence_scene_indexes") or [],
+            "continuity_missing_scene_indexes": connector_result.get("continuity_missing_scene_indexes") or [],
+            "delivery_blocked": bool(connector_result.get("delivery_blocked") or (_selfshot2_job(job) and not selfshot2_continuity_passed)),
             "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
             "product_video": True,
             "test_pattern": False,
