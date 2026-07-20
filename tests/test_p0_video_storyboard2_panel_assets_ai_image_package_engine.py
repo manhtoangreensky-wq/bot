@@ -70,11 +70,15 @@ def test_storyboard_has_one_canonical_entry_and_idea_only_at_content_source() ->
     assert all("Ý tưởng video" not in label for label in labels)
     entry_keyboard = _function_source("storyboard2_entry_keyboard")
     profile_keyboard = _function_source("storyboard2_profiles_keyboard")
+    content_source_keyboard = _function_source("storyboard2_content_source_keyboard")
     assert '"vstory|start"' not in entry_keyboard
     assert '"vstory|help"' not in entry_keyboard
     assert '"vstory|idea_source"' not in entry_keyboard
-    assert '"vstory|idea_source"' in profile_keyboard
-    assert '"vstory|content_manual"' in profile_keyboard
+    assert '"vstory|idea_source"' not in profile_keyboard
+    assert '"vstory|content_manual"' not in profile_keyboard
+    assert '"vstory|idea_source"' in content_source_keyboard
+    assert '"vstory|content_manual"' in content_source_keyboard
+    assert 'storyboard2_nav("vstory|content_screen")' in profile_keyboard
     assert BOT_SOURCE.count('CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\\|")') == 1
     assert BOT_SOURCE.count('CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\\|")') == 1
     legacy = _function_source("handle_storyboard_callback")
@@ -482,7 +486,8 @@ def test_invalid_storyboard_inputs_are_idempotent_and_do_not_repeat_error_panels
     media_ledger = 'board["processed_media_message_ids"] = (processed + ([message_id] if message_id else []))[-100:]'
     assert media_handler.count(media_ledger) == 1
     assert media_handler.index(media_ledger) < media_handler.index("if media is None:")
-    assert '{"image_upload_batch", "image_upload_replace"}' in media_handler
+    assert '{"storyboard_upload", "image_upload_batch", "image_upload_replace"}' in media_handler
+    assert "video_storyboard2.add_uploaded_storyboard" in media_handler
     assert "video_storyboard2.assign_next_image" in media_handler
     assert "video_storyboard2.assign_image" in media_handler
     assert 'move(board, "asset_overview", push=False, awaiting_input="")' in media_handler
@@ -493,10 +498,11 @@ def test_entry_modes_split_after_ratio_and_keep_exact_back_targets() -> None:
     payload = _function_source("storyboard2_screen_payload")
     suggestion_keyboard = _function_source("storyboard2_suggestion_keyboard")
     assert 'if entry_mode == "existing"' in callback
-    assert 'move(board, "await_content", awaiting_input="content")' in callback
-    assert 'move(board, "profiles", awaiting_input="")' in callback
+    assert 'move(board, "content_source", awaiting_input="")' in callback
+    assert "video_storyboard2.apply_uploaded_storyboard(board)" in callback
+    assert 'move(board, "scene_review", awaiting_input="")' in callback
     assert 'if action == "profile_pick"' in callback
-    assert '"vstory|ratio_screen" if entry_mode == "existing"' in payload
+    assert '"vstory|upload_review" if entry_mode == "existing"' in payload
     assert 'storyboard2_nav("vstory|profiles_screen")' in suggestion_keyboard
 
 

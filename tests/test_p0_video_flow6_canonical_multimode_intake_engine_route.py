@@ -137,6 +137,9 @@ def test_flow6_public_keyboards_are_two_columns_with_navigation_last() -> None:
             "InlineKeyboardMarkup": _Markup,
             "video_scene3_flow": video_scene3_flow,
             "video_flow6": video_flow6,
+            "video_flow7_kind": lambda value: str(
+                video_flow6.context_from_scene_state(value).get("flow_kind") or "ai_real"
+            ),
             "safe_int": lambda value, default=0: int(value or default),
             "video_profile_catalog_page_rows": lambda _page: [
                 {

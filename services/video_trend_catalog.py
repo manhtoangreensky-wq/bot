@@ -49,6 +49,78 @@ SOURCE_REGISTRY = {
 }
 
 
+# Provider-free fallback formats keep the public catalog usable when a public
+# trend feed is unavailable. They are reusable media patterns, not claims about
+# live popularity; the weekly source refresh can rank fresh sourced items ahead
+# of them whenever it succeeds.
+FALLBACK_MEDIA_FORMATS = (
+    ("POV tình huống đời thường", "POV", "Kể một tình huống gần gũi từ góc nhìn người trong cuộc, có mở đầu, diễn biến và kết tự nhiên."),
+    ("Một ngày cùng nhân vật", "Nhật ký ngắn", "Theo các mốc trong một ngày, mỗi cảnh hoàn tất một hoạt động và cùng phục vụ một chủ đề."),
+    ("Mở hộp và hé lộ", "Review / unboxing", "Đi từ bao bì, chi tiết, thao tác thật đến điểm nổi bật và kết luận có căn cứ."),
+    ("Trước và sau", "Biến đổi", "Giữ cùng chủ thể và góc nhìn để thể hiện thay đổi rõ ràng, không phóng đại kết quả."),
+    ("Hướng dẫn ba bước", "Hướng dẫn", "Mỗi cảnh hoàn tất một bước; không cắt giữa thao tác, câu nói hoặc chuyển động camera."),
+    ("Demo sản phẩm trong tình huống thật", "Quảng cáo ngắn", "Đặt sản phẩm vào nhu cầu thật, chứng minh công dụng rồi kết bằng lời mời phù hợp."),
+    ("Phản ứng rồi giải thích", "Reaction / giải thích", "Mở bằng phản ứng đáng chú ý, giải thích nguyên nhân và chốt thông tin hữu ích."),
+    ("Phỏng vấn nhanh ngoài đường", "Phỏng vấn ngắn", "Một câu hỏi rõ, các câu trả lời ngắn và phần tổng kết không xuyên tạc ý người nói."),
+    ("Storytime có cao trào", "Kể chuyện", "Mở bằng tình huống, tăng dần xung đột và khép bằng kết quả trọn ý."),
+    ("Thử thách có kết quả", "Challenge", "Nêu luật chơi, thực hiện, quan sát và xác nhận kết quả mà không dựng thành tích giả."),
+    ("Đối đáp hai góc nhìn", "Duet / đối chiếu", "Đặt hai quan điểm cạnh nhau theo cùng tiêu chí rồi kết luận cân bằng."),
+    ("Biến đổi liên tục một cú máy", "One-take transformation", "Giữ nhận diện và chuyển động gốc trong khi trang phục, cảnh vật hoặc ánh sáng biến đổi theo nhịp."),
+    ("Vòng lặp chuyển động thỏa mãn", "Loop / satisfying", "Thiết kế điểm đầu và cuối khớp tự nhiên để video lặp mượt, không cắt cụt hành động."),
+    ("Âm thanh chân thực cận cảnh", "ASMR", "Ưu tiên thao tác, chất liệu và âm thanh môi trường; hạn chế lời nói không cần thiết."),
+    ("Tình huống hài có ngữ cảnh", "Meme / parody", "Dùng tình huống nhận biết được, nhịp gọn và không giả mạo người thật hoặc phát ngôn."),
+    ("Micro-vlog một địa điểm", "Vlog ngắn", "Dẫn người xem qua một địa điểm theo hướng liên tục và khép tại chi tiết đáng nhớ nhất."),
+    ("Chuỗi B-roll điện ảnh", "Cinematic B-roll", "Nối toàn, trung và cận cảnh cùng hướng chuyển động, ánh sáng và màu sắc nhất quán."),
+    ("Trải nghiệm người dùng thật", "UGC / testimonial", "Đi từ nhu cầu, cách dùng tới nhận xét cuối; không bịa đánh giá, số liệu hoặc danh tính."),
+    ("So sánh hai lựa chọn", "Comparison", "Dùng cùng tiêu chí cho hai lựa chọn, nêu điểm mạnh yếu và chốt theo nhu cầu cụ thể."),
+    ("Tin nhanh bằng dữ liệu", "News / data short", "Nêu điều mới, nguồn và bối cảnh; chỉ dùng số liệu kiểm chứng được và nói rõ giới hạn."),
+)
+
+
+def fallback_media_items(*, now: datetime | None = None) -> list[dict[str, Any]]:
+    current = now or utc_now()
+    fallback_verified_at = current - timedelta(days=365)
+    source_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    return [
+        {
+            "trend_id": f"tr_seed_media_{index:02d}",
+            "title": title,
+            "short_title": title,
+            "summary": summary,
+            "platform": "TikTok / Reels / Shorts",
+            "region": "VN",
+            "language": "vi",
+            "category": category,
+            "keywords": ["media trend", "video format", category, title],
+            "source_name": "TOAN AAS - mẫu media đã duyệt",
+            "source_url": source_url,
+            "source_published_at": "",
+            "collected_at": current,
+            # Fresh source-backed rows sort ahead of fallback formats.
+            "last_verified_at": fallback_verified_at,
+            "expires_at": current + timedelta(days=3650),
+            "evidence": "Mẫu định dạng media dự phòng; không đại diện cho số liệu thịnh hành trực tiếp.",
+            "popularity_signal": "",
+            "content_safety": "approved_fallback_media_format",
+            "is_active": True,
+            "version": SCHEMA_VERSION,
+        }
+        for index, (title, category, summary) in enumerate(FALLBACK_MEDIA_FORMATS, 1)
+    ]
+
+
+def seed_media_catalog(conn, *, now: datetime | None = None) -> dict[str, int]:
+    """Idempotently guarantee twenty safe media choices without network I/O."""
+
+    ensure_schema(conn)
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM trend_items WHERE is_active=1 AND content_safety='approved_fallback_media_format'"
+    ).fetchone()
+    if int((existing or [0])[0] or 0) >= len(FALLBACK_MEDIA_FORMATS):
+        return {"inserted": 0, "updated": 0}
+    return upsert_items(conn, fallback_media_items(now=now), now=now)
+
+
 def source_registry_from_json(raw_value: str | None) -> dict[str, dict[str, Any]]:
     """Load an optional admin registry without weakening source metadata."""
 
