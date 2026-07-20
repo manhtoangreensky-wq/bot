@@ -95,6 +95,11 @@ def _empty_scene(index: int) -> dict[str, Any]:
 def default_state() -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
+        "storyboard_session_id": "",
+        "flow": "storyboard",
+        "owner": "storyboard",
+        "revision": 0,
+        "return_to": "menu|main_video",
         "screen": "entry",
         "history": [],
         "entry_mode": "",
@@ -122,6 +127,7 @@ def default_state() -> dict[str, Any]:
         "addons": {},
         "addons_ready": False,
         "image_generation": {},
+        "generation_state": "planning",
         "uploaded_storyboard_files": [],
         "detected_panel_count": 0,
         "upload_confirmed": False,
@@ -135,6 +141,12 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     state = default_state()
     state.update(raw)
     state["schema_version"] = SCHEMA_VERSION
+    state["storyboard_session_id"] = _clean_text(state.get("storyboard_session_id"), 80)
+    state["flow"] = "storyboard"
+    state["owner"] = "storyboard"
+    state["revision"] = max(0, _safe_int(state.get("revision"), 0))
+    state["return_to"] = _clean_text(state.get("return_to") or "menu|main_video", 120)
+    state["generation_state"] = _clean_text(state.get("generation_state") or "planning", 40)
     count = max(0, min(MAX_SCENES, _safe_int(state.get("scene_count"), 0)))
     state["scene_count"] = count
     if state.get("aspect_ratio") not in SUPPORTED_RATIOS:
