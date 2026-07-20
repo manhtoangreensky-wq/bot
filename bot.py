@@ -1021,6 +1021,15 @@ ADMIN_TEST_MUSIC_AI = env_flag("ADMIN_TEST_MUSIC_AI", "0")
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
 DEEPL_API_KEY       = env_any("DEEPL_API_KEY", "DeepL_API_KEY", "DEEPL_KEY", "DEEPL_AUTH_KEY")
 DEEPL_API_URL       = env_any("DEEPL_API_URL", default="https://api-free.deepl.com/v2/translate")
+PUBLIC_TRANSLATION_FALLBACK_ENABLED = env_flag("PUBLIC_TRANSLATION_FALLBACK_ENABLED", "1")
+PUBLIC_TRANSLATION_FALLBACK_URL = env_any(
+    "PUBLIC_TRANSLATION_FALLBACK_URL",
+    default="https://translate.googleapis.com/translate_a/single",
+)
+PUBLIC_TRANSLATION_FALLBACK_TIMEOUT_SECONDS = max(
+    5.0,
+    env_float("PUBLIC_TRANSLATION_FALLBACK_TIMEOUT_SECONDS", 20.0),
+)
 FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
 ELEVENLABS_API_KEY  = _env("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
@@ -102098,6 +102107,27 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
                     return None
         raise
 
+def is_expired_callback_query_error(error: Exception) -> bool:
+    text = str(error or "").lower()
+    return any(fragment in text for fragment in (
+        "query is too old",
+        "response timeout expired",
+        "query id is invalid",
+    ))
+
+async def safe_answer_callback_query(query, *args, **kwargs) -> bool:
+    """A stale Telegram acknowledgement must not block the selected route."""
+    if not query or not hasattr(query, "answer"):
+        return False
+    try:
+        await query.answer(*args, **kwargs)
+        return True
+    except Exception as exc:
+        if not is_expired_callback_query_error(exc):
+            raise
+        logger.warning("callback acknowledgement expired; route continues | %s", sanitize_log_text(str(exc))[:240])
+        return False
+
 def html_message_to_plain_text(text: str) -> str:
     plain = re.sub(r"<a\s+href=\"([^\"]+)\"[^>]*>(.*?)</a>", r"\2: \1", str(text or ""), flags=re.I | re.S)
     plain = re.sub(r"<br\s*/?>", "\n", plain, flags=re.I)
@@ -103701,7 +103731,7 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await safe_answer_callback_query(query)
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
@@ -119761,6 +119791,90 @@ async def translate_with_openai(text: str, target_lang: str = "vi") -> str:
         raise RuntimeError("OpenAI empty_response")
     return translated
 
+PUBLIC_TRANSLATION_TARGET_CODES = {
+    "vi": "vi",
+    "en": "en",
+    "zh": "zh-CN",
+    "zh_cn": "zh-CN",
+    "zh_tw": "zh-TW",
+    "ja": "ja",
+    "ko": "ko",
+    "th": "th",
+    "fr": "fr",
+    "de": "de",
+    "es": "es",
+    "id": "id",
+    "ms": "ms",
+    "pt": "pt",
+    "ru": "ru",
+    "ar": "ar",
+    "hi": "hi",
+    "lo": "lo",
+    "km": "km",
+    "my": "my",
+    "fil": "tl",
+}
+
+def public_translation_target_code(target_lang: str) -> str:
+    target = normalize_translate_target(target_lang)
+    code = PUBLIC_TRANSLATION_TARGET_CODES.get(target, "")
+    if not code:
+        raise RuntimeError(f"public_translation_unsupported_target:{target or target_lang}")
+    return code
+
+def public_translation_chunks(text: str, limit: int = 3500) -> list[str]:
+    value = str(text or "")
+    if not value:
+        return []
+    chunks: list[str] = []
+    remaining = value
+    while len(remaining) > limit:
+        split_at = max(remaining.rfind("\n", 0, limit + 1), remaining.rfind(" ", 0, limit + 1))
+        if split_at < max(1, limit // 2):
+            split_at = limit
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+        if remaining.startswith("\n"):
+            remaining = remaining[1:]
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+def parse_public_translation_response(payload) -> str:
+    rows = payload[0] if isinstance(payload, list) and payload and isinstance(payload[0], list) else []
+    translated = "".join(
+        str(row[0] or "")
+        for row in rows
+        if isinstance(row, list) and row
+    ).strip()
+    if not translated:
+        raise RuntimeError("public_translation_empty_response")
+    return translated
+
+async def translate_with_public_fallback(text: str, target_lang: str = "vi") -> str:
+    if not PUBLIC_TRANSLATION_FALLBACK_ENABLED or not PUBLIC_TRANSLATION_FALLBACK_URL:
+        raise RuntimeError("public_translation_fallback_disabled")
+    target_code = public_translation_target_code(target_lang)
+    chunks = public_translation_chunks(text)
+    if not chunks:
+        raise RuntimeError("public_translation_empty_input")
+    translated_chunks = []
+    async with httpx.AsyncClient(
+        timeout=PUBLIC_TRANSLATION_FALLBACK_TIMEOUT_SECONDS,
+        follow_redirects=True,
+    ) as client:
+        for chunk in chunks:
+            response = await client.post(
+                PUBLIC_TRANSLATION_FALLBACK_URL,
+                data={"client": "gtx", "sl": "auto", "tl": target_code, "dt": "t", "q": chunk},
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"public_translation_http_{response.status_code}:{sanitize_log_text(response.text)[:240]}"
+                )
+            translated_chunks.append(parse_public_translation_response(response.json()))
+    return "\n".join(translated_chunks).strip()
+
 def key4u_translation_provider_available() -> bool:
     return bool(
         KEY4U_ENABLED
@@ -119808,7 +119922,7 @@ async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admi
     except TranslationProviderError as exc:
         statuses = dict(getattr(exc, "statuses", {}) or {})
         provider_errors = dict(getattr(exc, "errors", {}) or {})
-        for name in ("deepl", "key4u", "gemini", "openai"):
+        for name in ("deepl", "key4u", "public", "gemini", "openai"):
             status = str(statuses.get(name) or "MISSING")
             if status != "MISSING" or provider_errors.get(name):
                 errors.append(f"{name}={status}")
@@ -119817,7 +119931,7 @@ async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admi
             {
                 "called": bool(errors),
                 "provider": "translate_to_language",
-                "route": "deepl/key4u/gemini/openai",
+                "route": "deepl/key4u/public/gemini/openai",
                 "status": "FAIL" if errors else "BLOCKED",
                 "error": " | ".join(errors or [provider_error_summary(exc)])[:500],
             },
@@ -119884,7 +119998,7 @@ async def translate_with_key4u(text: str, target_lang: str = "vi") -> str:
 
 async def translate_to_language(text: str, target_lang: str = "vi") -> dict:
     target = normalize_translate_target(target_lang) or "vi"
-    statuses = {"deepl": "MISSING", "key4u": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
+    statuses = {"deepl": "MISSING", "key4u": "MISSING", "public": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
     errors = {}
     if DEEPL_API_KEY:
         try:
@@ -119898,6 +120012,18 @@ async def translate_to_language(text: str, target_lang: str = "vi") -> dict:
         except Exception as e:
             statuses["key4u"] = "FAIL"
             errors["key4u"] = provider_error_summary(e)
+    if PUBLIC_TRANSLATION_FALLBACK_ENABLED and PUBLIC_TRANSLATION_FALLBACK_URL:
+        try:
+            return {
+                "provider": "public",
+                "text": await translate_with_public_fallback(text, target),
+                "target": target,
+                "statuses": {**statuses, "public": "PASS"},
+                "errors": errors,
+            }
+        except Exception as e:
+            statuses["public"] = "FAIL"
+            errors["public"] = provider_error_summary(e)
     if gemini_client:
         try:
             return {"provider": "gemini", "text": await translate_with_gemini(text, target), "target": target, "statuses": {**statuses, "gemini": "PASS"}, "errors": errors}
@@ -209778,7 +209904,7 @@ async def handle_video_dubbing_callback(
 ):
     query = update.callback_query
     if not _subdub_background:
-        await query.answer()
+        await safe_answer_callback_query(query)
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
