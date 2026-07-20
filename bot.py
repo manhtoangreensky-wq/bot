@@ -874,7 +874,7 @@ SHOPAIKEY_IMAGE_ENDPOINT = _env("SHOPAIKEY_IMAGE_ENDPOINT", "/images/google/gene
 SHOPAIKEY_IMAGE_URL = _env("SHOPAIKEY_IMAGE_URL") or "https://api.shopaikey.com/images/google/generations"
 SHOPAIKEY_IMAGE_MODEL_PRIMARY = _env("SHOPAIKEY_IMAGE_MODEL_PRIMARY", _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana"))
 SHOPAIKEY_IMAGE_MODEL = SHOPAIKEY_IMAGE_MODEL_PRIMARY
-SHOPAIKEY_IMAGE_MODEL_FALLBACKS = _env("SHOPAIKEY_IMAGE_MODEL_FALLBACKS", "gemini-2.5-flash-image,gemini-2.0-flash-preview-image-generation")
+SHOPAIKEY_IMAGE_MODEL_FALLBACKS = _env("SHOPAIKEY_IMAGE_MODEL_FALLBACKS", "nano-banana-2,nano-banana-pro")
 SHOPAIKEY_IMAGE_STATUS = _env("SHOPAIKEY_IMAGE_STATUS", "not_ready/fail_group_no_channel")
 SHOPAIKEY_VIDEO_ENDPOINT = _env("SHOPAIKEY_VIDEO_ENDPOINT", "/video/generations")
 SHOPAIKEY_VIDEO_URL = _env("SHOPAIKEY_VIDEO_URL") or join_shopaikey_url(SHOPAIKEY_BASE_URL, SHOPAIKEY_VIDEO_ENDPOINT)
@@ -57261,6 +57261,43 @@ def image_editor_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 
+def prepare_telegram_image_delivery(
+    image_bytes: bytes,
+    *,
+    max_bytes: int = 4 * 1024 * 1024,
+    max_side: int = 4096,
+) -> tuple[bytes, str]:
+    """Return an image that satisfies Telegram's sendPhoto size/dimension limits."""
+    if not image_bytes:
+        raise ValueError("empty_image_output")
+    if Image is None:
+        return image_bytes, "png"
+    with Image.open(io.BytesIO(image_bytes)) as source:
+        source.load()
+        image = ImageOps.exif_transpose(source) if ImageOps is not None else source.copy()
+        image = image.convert("RGB")
+        longest = max(image.size)
+        if longest > max_side or sum(image.size) > 9000:
+            scale = min(max_side / max(1, longest), 9000 / max(1, sum(image.size)))
+            image = image.resize(
+                (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+        for quality in (92, 86, 80, 74, 68):
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+            payload = output.getvalue()
+            if len(payload) <= max_bytes:
+                return payload, "jpg"
+        image.thumbnail((2560, 2560), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=72, optimize=True, progressive=True)
+        payload = output.getvalue()
+        if len(payload) > max_bytes:
+            raise ValueError("telegram_image_output_too_large")
+        return payload, "jpg"
+
+
 async def send_local_edited_image(
     update_or_query,
     context: ContextTypes.DEFAULT_TYPE,
@@ -57297,22 +57334,33 @@ async def send_local_edited_image(
             await safe_edit_query_message(query, image_action_waiting_text(lang), parse_mode=None)
         else:
             await message.reply_text(image_action_waiting_text(lang))
-        image_bytes = await telegram_photo_file_bytes(context, file_id)
-        logo_bytes = await telegram_photo_file_bytes(context, logo_file_id) if logo_file_id else b""
-        ok, output_bytes, size_text, preset_used = await asyncio.to_thread(
-            process_image_local_editor_bytes,
-            image_bytes,
-            preset,
-            settings,
-            overlay_text,
-            logo_bytes,
-            overlay_position,
-            upscale,
-        )
-        if not ok:
-            raise RuntimeError(size_text)
-        photo = io.BytesIO(output_bytes)
-        photo.name = f"toan_aas_editor_{uid}_{int(time.time())}.png"
+        try:
+            image_bytes = await telegram_photo_file_bytes(context, file_id)
+            logo_bytes = await telegram_photo_file_bytes(context, logo_file_id) if logo_file_id else b""
+            ok, output_bytes, size_text, preset_used = await asyncio.to_thread(
+                process_image_local_editor_bytes,
+                image_bytes,
+                preset,
+                settings,
+                overlay_text,
+                logo_bytes,
+                overlay_position,
+                upscale,
+            )
+            if not ok:
+                raise RuntimeError(size_text)
+            delivery_bytes, delivery_extension = await asyncio.to_thread(
+                prepare_telegram_image_delivery,
+                output_bytes,
+            )
+        except Exception as exc:
+            logger.warning("local image editor processing failed | %s", sanitize_log_text(str(exc))[:220])
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ TOAN AAS chưa đọc hoặc xử lý được ảnh này. TOAN AAS chưa trừ Xu. Vui lòng gửi lại ảnh JPG/PNG/WebP hợp lệ.",
+                reply_markup=image_editor_start_keyboard(lang),
+            )
+            return True
         brightness_percent = max(20, min(200, int(round(float((settings or {}).get("brightness", 1.0)) * 100))))
         brightness_line = f"Độ sáng: <b>{brightness_percent}%</b>\n" if settings and "brightness" in settings else ""
         caption = (
@@ -57323,26 +57371,71 @@ async def send_local_edited_image(
             "Phí V1: <b>0 Xu</b>\n\n"
             "TOAN AAS chưa trừ Xu."
         )
-        sent = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode="HTML", reply_markup=image_editor_result_keyboard(lang))
-        output_file_id = sent.photo[-1].file_id if getattr(sent, "photo", None) else file_id
-        save_image_tool_result(uid, "editor", {
-            "file_id": output_file_id,
-            "source_file_id": file_id,
-            "preset": preset_used,
-            "size": size_text,
-            "overlay_text": overlay_text[:260],
-            "overlay_position": overlay_position,
-            "brightness_percent": brightness_percent,
-        })
-        set_image_menu_pending(uid, "image_editor_menu", file_id=output_file_id, source_name="edited_image.png", editor_mode="preset", editor_preset=preset_used, brightness_percent=brightness_percent)
-        return True
-    except Exception as exc:
-        logger.warning("local image editor failed | %s", sanitize_log_text(str(exc))[:220])
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="⚠️ TOAN AAS chưa xử lý được ảnh này. TOAN AAS chưa trừ Xu. Vui lòng thử ảnh JPG/PNG/WebP nhỏ hơn.",
-            reply_markup=image_editor_start_keyboard(lang),
+        sent = None
+        try:
+            photo = io.BytesIO(delivery_bytes)
+            photo.name = f"toan_aas_editor_{uid}_{int(time.time())}.{delivery_extension}"
+            sent = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=image_editor_result_keyboard(lang),
+                read_timeout=60,
+                write_timeout=60,
+                connect_timeout=30,
+                pool_timeout=30,
+            )
+        except Exception as photo_exc:
+            logger.warning("local image preview send_photo failed; trying document | %s", sanitize_log_text(str(photo_exc))[:220])
+            try:
+                document = io.BytesIO(delivery_bytes)
+                document.name = f"toan_aas_editor_{uid}_{int(time.time())}.{delivery_extension}"
+                sent = await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=document,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=image_editor_result_keyboard(lang),
+                    read_timeout=60,
+                    write_timeout=60,
+                    connect_timeout=30,
+                    pool_timeout=30,
+                )
+            except Exception as document_exc:
+                logger.warning("local image preview delivery failed | %s", sanitize_log_text(str(document_exc))[:220])
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="⚠️ Ảnh đã chỉnh xong nhưng Telegram chưa nhận được file kết quả. TOAN AAS chưa trừ Xu. Vui lòng bấm lại một lần sau ít phút.",
+                    reply_markup=image_editor_result_keyboard(lang),
+                )
+                return True
+        output_file_id = (
+            sent.photo[-1].file_id
+            if getattr(sent, "photo", None)
+            else getattr(getattr(sent, "document", None), "file_id", "") or file_id
         )
+        try:
+            save_image_tool_result(uid, "editor", {
+                "file_id": output_file_id,
+                "source_file_id": file_id,
+                "preset": preset_used,
+                "size": size_text,
+                "overlay_text": overlay_text[:260],
+                "overlay_position": overlay_position,
+                "brightness_percent": brightness_percent,
+            })
+            set_image_menu_pending(
+                uid,
+                "image_editor_menu",
+                file_id=output_file_id,
+                source_name=f"edited_image.{delivery_extension}",
+                editor_mode="preset",
+                editor_preset=preset_used,
+                brightness_percent=brightness_percent,
+            )
+        except Exception as state_exc:
+            logger.warning("local image editor result state save failed after delivery | %s", sanitize_log_text(str(state_exc))[:220])
         return True
     finally:
         release_image_action_lock(uid, "local_image_editor", source_id, cooldown_seconds=5)
@@ -57405,9 +57498,19 @@ def image_upload_outside_flow_keyboard(lang: str = "vi", admin: bool = False) ->
 
 async def telegram_photo_file_bytes(context: ContextTypes.DEFAULT_TYPE, file_id: str) -> bytes:
     tg_file = await context.bot.get_file(file_id)
-    buffer = io.BytesIO()
-    await tg_file.download_to_memory(out=buffer)
-    return buffer.getvalue()
+    payload = b""
+    download_as_bytearray = getattr(tg_file, "download_as_bytearray", None)
+    if callable(download_as_bytearray):
+        payload = bytes(await download_as_bytearray())
+    else:
+        buffer = io.BytesIO()
+        await tg_file.download_to_memory(out=buffer)
+        payload = buffer.getvalue()
+    if not payload:
+        raise ValueError("telegram_image_download_empty")
+    if len(payload) > 25 * 1024 * 1024:
+        raise ValueError("telegram_image_download_too_large")
+    return payload
 
 async def send_local_resized_image(update_or_query, context: ContextTypes.DEFAULT_TYPE, state: dict, ratio: str = "", method: str = "pad", pixel_size: str = "") -> bool:
     message = getattr(update_or_query, "message", None) or getattr(getattr(update_or_query, "callback_query", None), "message", None) or getattr(update_or_query, "message", None)
@@ -58309,6 +58412,10 @@ def shopaikey_image_model_invalid_error(http_status: int = 0, detail: str = "") 
     if status in {400, 404, 429} and "model" in value and ("invalid" in value or "not found" in value or "unknown" in value):
         return True
     return False
+
+def shopaikey_image_allows_model_fallback(http_status: int = 0, detail: str = "") -> bool:
+    error_class = shopaikey_classify_error(http_status, detail)
+    return error_class in {"FAIL_MODEL_INVALID", "FAIL_NO_AVAILABLE_CHANNEL"}
 
 async def shopaikey_chat_smoke_test() -> dict:
     models = shopaikey_chat_model_sequence()
@@ -60662,7 +60769,7 @@ async def shopaikey_image_generate(prompt: str, model: str = "", aspect_ratio: s
             }
             attempts.append({"model": payload["model"], "status": error_class, "http_status": int(res.status_code), "error_class": error_class, "provider_error_code": provider_code, "message": detail[:180]})
             last_result = result
-            if not shopaikey_image_model_invalid_error(res.status_code, f"{provider_code} {detail}") or index >= len(model_sequence) - 1:
+            if not shopaikey_image_allows_model_fallback(res.status_code, f"{provider_code} {detail}") or index >= len(model_sequence) - 1:
                 break
         except Exception as e:
             latency_ms = int((time.perf_counter() - started) * 1000)
@@ -71103,7 +71210,7 @@ def video_local_manual_options_keyboard(lang: str = "vi") -> InlineKeyboardMarku
         [("🎚️ Chỉnh âm thanh", "videoedit|manual_audio"), ("🎥 Hiệu ứng & chuyển động", "videoedit|manual_effects")],
         [("⏩ Đổi tốc độ", "videoedit|speed"), ("🔄 Xoay / lật", "videoedit|manual_rotate_flip")],
         [("☀️ Chỉnh độ sáng", "videoedit|brightness"), ("🎞 Thông tin video", "videoedit|source_info")],
-        [("✅ Xem lại", "videoedit|review")],
+        [("✅ Xem lại", "videoedit|review"), ("📎 Gửi video khác", "videoedit|upload|manual")],
         [(ui_text(lang, "common.back"), "videoedit|hub"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
@@ -101973,10 +102080,9 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(update, Update) and update.message and update.effective_user:
         try:
             video_edit_intake_error_state = dict(get_video_editor_pending(update.effective_user.id) or {})
-            if video_edit_state_machine.is_active_intake(video_edit_intake_error_state):
-                video_edit_intake_error_mode = video_edit_state_machine.normalize_edit_mode(
-                    video_edit_intake_error_state.get("edit_mode")
-                )
+            video_edit_intake_error_mode = video_edit_state_machine.normalize_edit_mode(
+                video_edit_intake_error_state.get("edit_mode")
+            )
         except Exception:
             video_edit_intake_error_mode = ""
             video_edit_intake_error_state = {}
@@ -102060,21 +102166,22 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     if video_edit_intake_error_mode and isinstance(update, Update) and update.effective_chat:
         try:
-            waiting = video_edit_state_machine.keep_waiting_after_invalid(
-                video_edit_intake_error_state,
-                "video_edit_intake_runtime_error",
-            )
-            save_video_edit_canonical_state(update.effective_user.id, waiting)
+            has_source = bool(video_edit_intake_error_state.get("source_file_id"))
+            if has_source:
+                save_video_edit_canonical_state(update.effective_user.id, video_edit_intake_error_state)
+            else:
+                waiting = video_edit_state_machine.keep_waiting_after_invalid(
+                    video_edit_intake_error_state,
+                    "video_edit_intake_runtime_error",
+                )
+                save_video_edit_canonical_state(update.effective_user.id, waiting)
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=(
-                    "⚠️ Hệ thống chưa đọc được video này. Phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên; "
-                    "anh/chị hãy gửi lại file MP4, MOV, MKV hoặc WebM.\n\n"
-                    "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
-                ),
-                reply_markup=video_edit_lane_upload_keyboard(
+                text=video_edit_runtime_recovery_text(has_source),
+                reply_markup=video_edit_runtime_recovery_keyboard(
                     video_edit_intake_error_mode,
-                    get_user_language(update.effective_user.id) or "vi",
+                    has_source=has_source,
+                    lang=get_user_language(update.effective_user.id) or "vi",
                 ),
             )
         except Exception:
@@ -212799,6 +212906,38 @@ async def handle_video_editor_invalid_intake_text(update: Update, context: Conte
         reply_markup=video_edit_lane_upload_keyboard(str(waiting.get("edit_mode") or ""), lang),
     )
     return True
+
+
+def video_edit_runtime_recovery_text(has_source: bool = False) -> str:
+    if has_source:
+        return (
+            "⚠️ Video đã được nhận và phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên, "
+            "nhưng Telegram chưa mở được bảng thao tác. Anh/chị bấm Mở lại để tiếp tục đúng công cụ đã chọn.\n\n"
+            "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
+        )
+    return (
+        "⚠️ Hệ thống chưa đọc được video này. Phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên; "
+        "anh/chị hãy gửi lại file MP4, MOV, MKV hoặc WebM.\n\n"
+        "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
+    )
+
+
+def video_edit_runtime_recovery_keyboard(
+    edit_mode: str,
+    *,
+    has_source: bool = False,
+    lang: str = "vi",
+) -> InlineKeyboardMarkup:
+    if not has_source:
+        return video_edit_lane_upload_keyboard(edit_mode, lang)
+    callback = video_edit_state_machine.lane_callback(edit_mode)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("➡️ Mở lại công cụ", callback_data=callback),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoedit|hub"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
 
 
 async def handle_video_editor_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:

@@ -535,7 +535,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_USAGE_ALERT_PERCENT=10" in env_example
     assert "SHOPAIKEY_IMAGE_URL=https://api.shopaikey.com/images/google/generations" in env_example
     assert "SHOPAIKEY_IMAGE_MODEL_PRIMARY=nano-banana" in env_example
-    assert "SHOPAIKEY_IMAGE_MODEL_FALLBACKS=gemini-2.5-flash-image,gemini-2.0-flash-preview-image-generation" in env_example
+    assert "SHOPAIKEY_IMAGE_MODEL_FALLBACKS=nano-banana-2,nano-banana-pro" in env_example
     assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
@@ -2239,13 +2239,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "size" not in google_payload
     assert bot.infer_image_aspect_ratio_from_prompt("Product scene. Aspect ratio 4:5. No watermark.") == "4:5"
     assert bot.infer_image_aspect_ratio_from_prompt("Wide cinematic banner 21:9") == "21:9"
-    assert bot.shopaikey_image_model_sequence("nano-banana", "gemini-2.5-flash-image,nano-banana,gemini-2.0-flash-preview-image-generation") == [
+    assert bot.shopaikey_image_model_sequence("nano-banana", "nano-banana-2,nano-banana,nano-banana-pro") == [
         "nano-banana",
-        "gemini-2.5-flash-image",
-        "gemini-2.0-flash-preview-image-generation",
+        "nano-banana-2",
+        "nano-banana-pro",
     ]
     assert bot.shopaikey_image_model_invalid_error(429, "Model not found or invalid")
     assert bot.shopaikey_classify_error(429, "Model not found or invalid") == "FAIL_MODEL_INVALID"
+    assert bot.shopaikey_image_allows_model_fallback(503, "No available channel")
+    assert not bot.shopaikey_image_allows_model_fallback(401, "Invalid API key")
     shopaikey_builder_source = source_between(bot_source_text(), "def build_shopaikey_google_image_payload", "def build_google_genai_image_payload")
     assert '"size": normalized_ratio' in shopaikey_builder_source
     assert '"aspect_ratio"' not in shopaikey_builder_source
@@ -2261,7 +2263,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "shopaikey_image_output_from_payload" in image_generate_source
     assert "models_tried" in image_generate_source
     assert "fallback_used" in image_generate_source
-    assert "shopaikey_image_model_invalid_error" in image_generate_source
+    assert "shopaikey_image_allows_model_fallback" in image_generate_source
     image_smoke_source = source_between(bot_source_text(), "async def cmd_tool_test_shopaikey_image", "async def cmd_tool_test_shopaikey_video")
     assert "context.args" in image_smoke_source
     assert "Ratio requested" in image_smoke_source
