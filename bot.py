@@ -55158,6 +55158,7 @@ IMAGE_MENU_PENDING_ACTIONS = {
     "image_resize_ratio_custom",
     "image_editor_wait_image",
     "image_editor_menu",
+    "image_editor_brightness_custom",
     "image_editor_custom_settings",
     "image_editor_text_position",
     "image_editor_text_input",
@@ -55202,6 +55203,8 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
                 payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:900]
             elif key in {"variants", "image_prompt_variants"} and isinstance(value, list):
                 payload[key] = [re.sub(r"\s+", " ", str(item or "").strip())[:1200] for item in value[:3]]
+            elif key == "brightness_percent":
+                payload[key] = max(20, min(200, safe_int(value, 100)))
     USER_PENDING[image_menu_pending_key(user_id)] = payload
 
 def get_image_menu_pending(user_id) -> dict | None:
@@ -56813,6 +56816,7 @@ IMAGE_EDITOR_PRESETS = {
     "cinematic_warm": {"brightness": 0.99, "contrast": 1.14, "saturation": 1.08, "sharpness": 1.12, "tone": "warm"},
     "fresh_blue": {"brightness": 1.03, "contrast": 1.08, "saturation": 1.12, "sharpness": 1.16, "tone": "cool"},
     "food_vivid": {"brightness": 1.04, "contrast": 1.12, "saturation": 1.24, "sharpness": 1.25, "tone": "warm"},
+    "brightness_only": {"brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0, "tone": "neutral"},
 }
 
 
@@ -56827,6 +56831,7 @@ def image_editor_preset_label(preset: str = "", lang: str = "vi") -> str:
         "upscale_basic": "Làm nét / nâng chất lượng cơ bản",
         "text_overlay": "Thêm chữ",
         "logo_overlay": "Logo / Watermark",
+        "brightness_only": "Điều chỉnh độ sáng",
     }
     labels_en = {
         "photo_clear_detail": "Clear detail",
@@ -56838,6 +56843,7 @@ def image_editor_preset_label(preset: str = "", lang: str = "vi") -> str:
         "upscale_basic": "Basic sharpen / upscale",
         "text_overlay": "Add text",
         "logo_overlay": "Logo / Watermark",
+        "brightness_only": "Brightness adjustment",
     }
     return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(preset or ""), str(preset or "local"))
 
@@ -57075,7 +57081,8 @@ def process_image_local_editor_bytes(
     config = dict(IMAGE_EDITOR_PRESETS.get(preset_code) or IMAGE_EDITOR_PRESETS["photo_clear_detail"])
     for key, value in dict(settings or {}).items():
         if key in {"brightness", "contrast", "saturation", "sharpness"}:
-            config[key] = max(0.5, min(2.0, float(value)))
+            minimum = 0.2 if key == "brightness" else 0.5
+            config[key] = max(minimum, min(2.0, float(value)))
     try:
         with Image.open(io.BytesIO(img_bytes)) as source:
             source.load()
@@ -57083,7 +57090,7 @@ def process_image_local_editor_bytes(
             image = image.convert("RGB")
             if image.width * image.height > 36_000_000:
                 image.thumbnail((6000, 6000), Image.Resampling.LANCZOS)
-            if ImageOps is not None:
+            if ImageOps is not None and preset_code != "brightness_only":
                 image = ImageOps.autocontrast(image, cutoff=1)
             image = ImageEnhance.Brightness(image).enhance(float(config.get("brightness", 1.0)))
             image = ImageEnhance.Contrast(image).enhance(float(config.get("contrast", 1.0)))
@@ -57143,6 +57150,7 @@ def image_editor_start_text(mode: str = "auto", lang: str = "vi") -> str:
         "preset": "công thức màu",
         "overlay": "thêm chữ hoặc logo/watermark",
         "upscale": "làm nét/nâng chất lượng cơ bản",
+        "brightness": "chỉnh độ sáng",
     }.get(str(mode or "auto"), "chỉnh ảnh")
     if normalize_user_language(lang) != "vi":
         return "🪄 <b>Image editor</b>\n\nSend or reply to an image. This screen prepares the edit and does not charge Xu."
@@ -57167,9 +57175,45 @@ def image_editor_action_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🔠 Thêm chữ" if is_vi else "🔠 Add text", "imgtool|editor_text"),
         ("🎭 Logo / Watermark", "imgtool|editor_logo"),
         ("🖼 Làm nét cơ bản" if is_vi else "🖼 Basic sharpen", "imgtool|editor_upscale"),
+        ("☀️ Chỉnh độ sáng" if is_vi else "☀️ Brightness", "imgtool|editor_brightness"),
         ("✍️ Nhập yêu cầu riêng" if is_vi else "✍️ Custom request", "imgtool|edit_type_custom"),
     ]
     return build_2col_keyboard(buttons, nav_back=("⬅️ Chỉnh sửa ảnh" if is_vi else "⬅️ Edit tools", "imgtool|edit_back_choice"), lang=lang)
+
+
+def image_editor_brightness_text(state: dict | None = None, lang: str = "vi") -> str:
+    percent = max(20, min(200, safe_int((state or {}).get("brightness_percent"), 100)))
+    if normalize_user_language(lang) != "vi":
+        return (
+            "☀️ <b>Image brightness</b>\n\n"
+            f"Current level: <b>{percent}%</b>\n"
+            "100% keeps the original brightness; lower values darken and higher values brighten. "
+            "This edit runs locally and does not charge Xu."
+        )
+    return (
+        "☀️ <b>Chỉnh độ sáng ảnh</b>\n\n"
+        f"Mức hiện tại: <b>{percent}%</b>\n"
+        "100% giữ nguyên; dưới 100% làm tối hơn, trên 100% làm sáng hơn. "
+        "Hệ thống xử lý trực tiếp trên ảnh, không gọi nguồn AI và không trừ Xu."
+    )
+
+
+def image_editor_brightness_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🌙 Giảm còn 80%" if is_vi else "🌙 Reduce to 80%", callback_data="imgtool|editor_brightness_set|80"),
+            InlineKeyboardButton("☀️ Tăng lên 120%" if is_vi else "☀️ Increase to 120%", callback_data="imgtool|editor_brightness_set|120"),
+        ],
+        [
+            InlineKeyboardButton("↩️ Giữ nguyên 100%" if is_vi else "↩️ Original 100%", callback_data="imgtool|editor_brightness_set|100"),
+            InlineKeyboardButton("✍️ Tự nhập" if is_vi else "✍️ Custom", callback_data="imgtool|editor_brightness_custom"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_choice"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
 
 
 def image_editor_preset_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -57232,7 +57276,8 @@ async def send_local_edited_image(
         overlay_position,
         "bottom_right" if logo_file_id else "bottom_center",
     )
-    source_id = f"{file_id}:{preset}:{overlay_text[:80]}:{logo_file_id}:{overlay_position}:{int(bool(upscale))}"
+    settings_signature = json.dumps(dict(settings or {}), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    source_id = f"{file_id}:{preset}:{settings_signature}:{overlay_text[:80]}:{logo_file_id}:{overlay_position}:{int(bool(upscale))}"
     if not acquire_image_action_lock(uid, "local_image_editor", source_id, 180):
         await context.bot.send_message(chat_id=chat_id, text=image_action_locked_text(lang))
         return True
@@ -57257,9 +57302,12 @@ async def send_local_edited_image(
             raise RuntimeError(size_text)
         photo = io.BytesIO(output_bytes)
         photo.name = f"toan_aas_editor_{uid}_{int(time.time())}.png"
+        brightness_percent = max(20, min(200, int(round(float((settings or {}).get("brightness", 1.0)) * 100))))
+        brightness_line = f"Độ sáng: <b>{brightness_percent}%</b>\n" if settings and "brightness" in settings else ""
         caption = (
             "✅ <b>Ảnh preview đã xử lý xong.</b>\n\n"
             f"Công thức: <b>{html.escape(image_editor_preset_label('upscale_basic' if upscale else ('logo_overlay' if logo_file_id or str(overlay_kind or '').lower() == 'logo' else ('text_overlay' if overlay_text else preset_used)), lang))}</b>\n"
+            f"{brightness_line}"
             f"Kích thước: <code>{html.escape(size_text)}</code>\n"
             "Phí V1: <b>0 Xu</b>\n\n"
             "TOAN AAS chưa trừ Xu."
@@ -57273,8 +57321,9 @@ async def send_local_edited_image(
             "size": size_text,
             "overlay_text": overlay_text[:260],
             "overlay_position": overlay_position,
+            "brightness_percent": brightness_percent,
         })
-        set_image_menu_pending(uid, "image_editor_menu", file_id=output_file_id, source_name="edited_image.png", editor_mode="preset", editor_preset=preset_used)
+        set_image_menu_pending(uid, "image_editor_menu", file_id=output_file_id, source_name="edited_image.png", editor_mode="preset", editor_preset=preset_used, brightness_percent=brightness_percent)
         return True
     except Exception as exc:
         logger.warning("local image editor failed | %s", sanitize_log_text(str(exc))[:220])
@@ -65342,7 +65391,7 @@ VIDEO_EDITOR_NUMBER_FIELDS = {
     "source_file_size", "source_duration", "source_duration_ms", "job_id",
     "split_part_count", "split_segment_ms", "delivered_count",
     "target_duration_seconds", "price_xu",
-    "audio_volume_percent",
+    "audio_volume_percent", "brightness_percent",
     "last_media_message_id", "probe_count",
 }
 
@@ -71030,8 +71079,43 @@ def video_local_manual_options_keyboard(lang: str = "vi") -> InlineKeyboardMarku
         [("✂️ Cắt & chia đoạn", "videoedit|manual_cut"), ("➕ Ghép & sắp xếp", "videoedit|manual_join")],
         [("🎚️ Chỉnh âm thanh", "videoedit|manual_audio"), ("🎥 Hiệu ứng & chuyển động", "videoedit|manual_effects")],
         [("⏩ Đổi tốc độ", "videoedit|speed"), ("🔄 Xoay / lật", "videoedit|manual_rotate_flip")],
-        [("✅ Xem lại", "videoedit|review"), ("🎞 Thông tin video", "videoedit|source_info")],
+        [("☀️ Chỉnh độ sáng", "videoedit|brightness"), ("🎞 Thông tin video", "videoedit|source_info")],
+        [("✅ Xem lại", "videoedit|review")],
         [(ui_text(lang, "common.back"), "videoedit|hub"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_local_brightness_text(state: dict | None = None, lang: str = "vi") -> str:
+    plan = dict((state or {}).get("manual_edit_plan") or {})
+    percent = max(20, min(200, safe_int(plan.get("brightness_percent"), 100)))
+    if normalize_user_language(lang) != "vi":
+        return (
+            "☀️ <b>Video brightness</b>\n\n"
+            f"Current level: <b>{percent}%</b>\n"
+            "100% keeps the original brightness; lower values darken and higher values brighten. "
+            "The final edit is rendered locally after confirmation."
+        )
+    return (
+        "☀️ <b>Chỉnh độ sáng video</b>\n\n"
+        f"Mức hiện tại: <b>{percent}%</b>\n"
+        "100% giữ nguyên; dưới 100% làm tối hơn, trên 100% làm sáng hơn. "
+        "Có thể nhập từ 20 đến 200. Hệ thống chỉ lưu kế hoạch ở màn này; "
+        "video được xử lý local sau bước xác nhận."
+    )
+
+
+def video_local_brightness_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_scene3_keyboard([
+        [
+            ("🌙 Giảm còn 80%" if is_vi else "🌙 Reduce to 80%", "videoedit|brightness_set|80"),
+            ("☀️ Tăng lên 120%" if is_vi else "☀️ Increase to 120%", "videoedit|brightness_set|120"),
+        ],
+        [
+            ("↩️ Giữ nguyên 100%" if is_vi else "↩️ Original 100%", "videoedit|brightness_set|100"),
+            ("✍️ Tự nhập" if is_vi else "✍️ Custom", "videoedit|brightness_custom"),
+        ],
+        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -83270,6 +83354,15 @@ def storyboard2_prepare_quick_image(user_id: int, board: dict, prompt: str, nega
     board = video_storyboard2.normalize_state(board)
     scene_index = int(board.get("active_scene_index") or 1)
     slot = str(board.get("active_slot") or "start")
+    targets = video_storyboard2.image_targets(board)
+    target_keys = [
+        (int(item.get("scene_index") or 1), str(item.get("slot") or "start"))
+        for item in targets
+    ]
+    try:
+        target_index = target_keys.index((scene_index, slot)) + 1
+    except ValueError:
+        target_index = 1
     slot_label = "ảnh đầu" if slot == "start" else "ảnh cuối"
     scene = (board.get("scenes") or [])[scene_index - 1] if board.get("scenes") else {}
     image = dict(scene.get(f"{slot}_image") or {})
@@ -83302,7 +83395,38 @@ def storyboard2_prepare_quick_image(user_id: int, board: dict, prompt: str, nega
         storyboard_scene_index=scene_index,
         storyboard_slot=slot,
         storyboard_prompt_version=max(1, int(image.get("prompt_version") or 1)),
+        storyboard_target_index=target_index,
+        storyboard_target_count=len(targets),
     )
+
+
+def storyboard2_select_ai_image_target(user_id: int, board: dict, target_number: int | None = None) -> tuple[dict, dict]:
+    board = video_storyboard2.normalize_state(board)
+    targets = video_storyboard2.image_targets(board)
+    if not targets:
+        raise ValueError("storyboard_image_target_missing")
+    if target_number is None:
+        target = video_storyboard2.next_missing_image_target(board) or targets[0]
+    else:
+        index = max(1, min(len(targets), int(target_number)))
+        target = targets[index - 1]
+    scene_index = int(target.get("scene_index") or 1)
+    slot = str(target.get("slot") or "start")
+    board["active_scene_index"] = scene_index
+    board["active_slot"] = slot
+    prompt = video_storyboard2.image_prompt(board, scene_index, slot, 0)
+    scene = dict(board["scenes"][scene_index - 1])
+    image = dict(scene.get(f"{slot}_image") or {})
+    image.update({
+        "prompt": prompt["prompt"],
+        "negative_prompt": prompt["negative_prompt"],
+        "prompt_version": max(1, int(image.get("prompt_version") or 0) + 1),
+    })
+    scene[f"{slot}_image"] = image
+    board["scenes"][scene_index - 1] = scene
+    board = video_storyboard2.normalize_state(board)
+    flow = storyboard2_prepare_quick_image(user_id, board, prompt["prompt"], prompt["negative_prompt"])
+    return board, flow
 
 
 async def _handle_storyboard2_callback_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83656,26 +83780,11 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         board = video_storyboard2.move(board, "asset_overview", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "asset_ai_missing":
-        target = video_storyboard2.next_missing_image_target(board)
-        if not target:
+        if not video_storyboard2.next_missing_image_target(board):
             return await query.answer("Đã đủ ảnh theo chế độ Storyboard đang chọn.", show_alert=True)
         await query.answer()
-        scene_index = int(target.get("scene_index") or 1)
-        slot = str(target.get("slot") or "start")
-        board["active_scene_index"] = scene_index
-        board["active_slot"] = slot
-        prompt = video_storyboard2.image_prompt(board, scene_index, slot, 0)
-        scene = board["scenes"][scene_index - 1]
-        image = dict(scene.get(f"{slot}_image") or {})
-        image.update({
-            "prompt": prompt["prompt"],
-            "negative_prompt": prompt["negative_prompt"],
-            "prompt_version": max(1, int(image.get("prompt_version") or 0) + 1),
-        })
-        scene[f"{slot}_image"] = image
-        board["scenes"][scene_index - 1] = scene
+        board, flow = storyboard2_select_ai_image_target(uid, board)
         persist(board)
-        flow = storyboard2_prepare_quick_image(uid, board, prompt["prompt"], prompt["negative_prompt"])
         return await safe_edit_or_send(
             query,
             quick_image_prepared_prompt_text(flow, get_user_language(uid) or "vi"),
@@ -83683,10 +83792,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             reply_markup=quick_image_prepared_prompt_keyboard(
                 get_user_language(uid) or "vi",
                 state=flow,
-                back_callback="vstory|assets_screen",
-                back_label="⬅️ Ảnh Storyboard",
-                context_return_callback="vstory|image_return",
-                context_return_label="🖼️ Ảnh Storyboard",
+                back_callback="vstoryimg|cancel",
             ),
         )
     if action in {
@@ -117203,6 +117309,44 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="upscale")
             return await safe_edit_query_message(query, image_editor_start_text("upscale", lang), reply_markup=image_editor_start_keyboard(lang))
         return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+    if action == "editor_brightness":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="brightness")
+            return await safe_edit_query_message(query, image_editor_start_text("brightness", lang), reply_markup=image_editor_start_keyboard(lang))
+        state["brightness_percent"] = max(20, min(200, safe_int(state.get("brightness_percent"), 100)))
+        set_image_menu_pending(uid, "image_editor_menu", **state)
+        return await safe_edit_query_message(
+            query,
+            image_editor_brightness_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=image_editor_brightness_keyboard(lang),
+        )
+    if action == "editor_brightness_set":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="brightness")
+            return await safe_edit_query_message(query, image_editor_start_text("brightness", lang), reply_markup=image_editor_start_keyboard(lang))
+        percent = max(20, min(200, safe_int(parts[2] if len(parts) > 2 else 100, 100)))
+        return await send_local_edited_image(
+            update,
+            context,
+            state,
+            preset="brightness_only",
+            settings={"brightness": percent / 100.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0},
+        )
+    if action == "editor_brightness_custom":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="brightness")
+            return await safe_edit_query_message(query, image_editor_start_text("brightness", lang), reply_markup=image_editor_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_editor_brightness_custom", **state)
+        return await safe_edit_query_message(
+            query,
+            "✍️ Nhập độ sáng từ 20 đến 200. Ví dụ: 85 để làm tối nhẹ, 130 để làm sáng hơn. 100 giữ nguyên. Xử lý local và không trừ Xu.",
+            parse_mode=None,
+            reply_markup=image_editor_brightness_keyboard(lang),
+        )
     if action == "editor_preset":
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
         if not state.get("file_id"):
@@ -117955,6 +118099,27 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
         return False
     lang = get_user_language(uid) or "vi"
     action = str(pending.get("pending_action") or "")
+    if action == "image_editor_brightness_custom":
+        if not re.fullmatch(r"\d{1,3}", text):
+            await update.message.reply_text(
+                "⚠️ Hãy nhập một số từ 20 đến 200. Ví dụ: 80, 100 hoặc 125. Bot chưa xử lý ảnh và chưa trừ Xu.",
+                reply_markup=image_editor_brightness_keyboard(lang),
+            )
+            return True
+        percent = int(text)
+        if percent < 20 or percent > 200:
+            await update.message.reply_text(
+                "⚠️ Độ sáng chỉ nhận từ 20 đến 200. 100 là mức gốc.",
+                reply_markup=image_editor_brightness_keyboard(lang),
+            )
+            return True
+        return await send_local_edited_image(
+            update,
+            context,
+            pending,
+            preset="brightness_only",
+            settings={"brightness": percent / 100.0, "contrast": 1.0, "saturation": 1.0, "sharpness": 1.0},
+        )
     if action == "image_editor_custom_settings":
         settings = parse_image_editor_settings(text)
         if not settings:
@@ -118122,6 +118287,15 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
         if mode == "upscale":
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode == "brightness":
+            state["brightness_percent"] = 100
+            set_image_menu_pending(uid, "image_editor_menu", **state)
+            await update.message.reply_text(
+                image_editor_brightness_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_brightness_keyboard(lang),
+            )
+            return True
         if mode in {"text", "logo"}:
             origin_action = str(pending.get("editor_source") or ("editor_text_menu" if mode == "text" else "editor_logo_menu"))
             back_callback = image_editor_origin_back_callback(origin_action, mode)
@@ -118233,6 +118407,15 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
         if mode == "upscale":
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode == "brightness":
+            state["brightness_percent"] = 100
+            set_image_menu_pending(uid, "image_editor_menu", **state)
+            await update.message.reply_text(
+                image_editor_brightness_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_brightness_keyboard(lang),
+            )
+            return True
         if mode in {"text", "logo"}:
             origin_action = str(pending.get("editor_source") or ("editor_text_menu" if mode == "text" else "editor_logo_menu"))
             back_callback = image_editor_origin_back_callback(origin_action, mode)
@@ -153321,7 +153504,10 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
             payload[key] = str(value or "").strip()[:120]
         elif key == "logo_watermark_position":
             payload[key] = logo_watermark_normalize_position(value) if str(value or "").strip() else ""
-        elif key in {"suggest_offset", "prompt_variant", "storyboard_scene_index", "storyboard_prompt_version", "revision"}:
+        elif key in {
+            "suggest_offset", "prompt_variant", "storyboard_scene_index", "storyboard_prompt_version",
+            "storyboard_target_index", "storyboard_target_count", "revision",
+        }:
             payload[key] = max(0, _safe_int(value, 0))
         elif key in {"logo_watermark_enabled", "logo_watermark_decided"}:
             payload[key] = bool(value)
@@ -153720,8 +153906,18 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
             if normalize_user_language(lang) == "vi"
             else "\nThe original request was brief. TOAN AAS prepared a structured draft; edit it if you need a more specific subject, context, or style.\n"
         )
+    is_storyboard = quick_image_callback_namespace(state) == "vstoryimg"
+    storyboard_heading = ""
+    storyboard_instruction = ""
+    if is_storyboard:
+        current_target = max(1, _safe_int(state.get("storyboard_target_index"), 1))
+        target_count = max(current_target, _safe_int(state.get("storyboard_target_count"), current_target))
+        storyboard_heading = f"🖼 <b>Storyboard image {current_target}/{target_count}</b>\n\n"
+        storyboard_instruction = "When the prompt, ratio, and logo are ready, choose Finish image to select quality and review the invoice before generation."
     if normalize_user_language(lang) != "vi":
         return (
+            storyboard_heading
+            +
             "✨ <b>Optimized image prompt</b>\n\n"
             f"Purpose: <b>{html.escape(purpose_label)}</b>\n"
             f"Idea: <b>{html.escape(topic or original_request)}</b>\n"
@@ -153729,9 +153925,20 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
             f"Main prompt:\n<code>{html.escape(prompt)}</code>\n\n"
             f"Negative prompt:\n<code>{html.escape(negative)}</code>\n"
             f"{html.escape(caution)}{vague_note}\n"
-            "Choose the aspect ratio when this prompt is ready, or rewrite it first. TOAN AAS has not started processing and has not charged Xu."
+            + (storyboard_instruction if is_storyboard else "Choose the aspect ratio when this prompt is ready, or rewrite it first.")
+            + " TOAN AAS has not started processing and has not charged Xu."
+        )
+    if is_storyboard:
+        current_target = max(1, _safe_int(state.get("storyboard_target_index"), 1))
+        target_count = max(current_target, _safe_int(state.get("storyboard_target_count"), current_target))
+        storyboard_heading = f"🖼 <b>Ảnh Storyboard {current_target}/{target_count}</b>\n\n"
+        storyboard_instruction = (
+            "Khi prompt, tỉ lệ và logo đã đúng, bấm <b>Hoàn thành ảnh</b> để chọn chất lượng, "
+            "xem hóa đơn rồi mới xác nhận tạo ảnh."
         )
     return (
+        storyboard_heading
+        +
         "✨ <b>Prompt ảnh đã được soạn và tối ưu</b>\n\n"
         f"Mục tiêu: <b>{html.escape(purpose_label)}</b>\n"
         f"Ý tưởng: <b>{html.escape(topic or original_request)}</b>\n"
@@ -153740,7 +153947,8 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
         f"Negative prompt:\n<code>{html.escape(negative)}</code>\n\n"
         + (f"Lưu ý: {html.escape(caution)}\n\n" if caution else "")
         + vague_note
-        + "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc đổi ý tưởng.\n"
+        + (storyboard_instruction if is_storyboard else "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc đổi ý tưởng.")
+        + "\n"
         "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
@@ -153763,6 +153971,32 @@ def quick_image_prepared_prompt_keyboard(
         else "create_media"
     )
     callback_for = lambda action: f"{callback_prefix}|{action}"
+    if callback_prefix == "vstoryimg":
+        target_count = max(1, _safe_int(state_data.get("storyboard_target_count"), 1))
+        current_target = max(1, min(target_count, _safe_int(state_data.get("storyboard_target_index"), 1)))
+        target_buttons = [
+            InlineKeyboardButton(
+                f"{'✅ ' if index == current_target else ''}Ảnh {index}",
+                callback_data=callback_for(f"qi_target_{index}"),
+            )
+            for index in range(1, target_count + 1)
+        ]
+        target_rows = [target_buttons[index:index + 2] for index in range(0, len(target_buttons), 2)]
+        return InlineKeyboardMarkup(target_rows + [
+            [
+                InlineKeyboardButton("📐 Chọn tỉ lệ", callback_data=callback_for("qi_choose_ratio")),
+                InlineKeyboardButton("🎭 Logo / Watermark", callback_data=callback_for("qi_logo_choice")),
+            ],
+            [
+                InlineKeyboardButton("🔄 Tối ưu lại prompt", callback_data=callback_for("qi_rewrite")),
+                InlineKeyboardButton("✍️ Sửa prompt", callback_data=callback_for("qi_custom")),
+            ],
+            [InlineKeyboardButton("✅ Hoàn thành ảnh", callback_data=callback_for("qi_finish_image"))],
+            [
+                InlineKeyboardButton("⬅️ Quay lại", callback_data=callback_for("cancel")),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
+        ])
     back_text = back_label or ("⬅️ Quay lại" if vi else "⬅️ Back")
     context_text = context_return_label or ("🖼 Menu ảnh" if vi else "🖼 Image menu")
     return InlineKeyboardMarkup([
@@ -168599,6 +168833,90 @@ async def handle_storyboard_image_callback(update: Update, context: ContextTypes
         if isinstance(getattr(context, "user_data", None), dict):
             context.user_data["video_scene3_image_handoff_active"] = False
         return await storyboard2_render(query, context, board)
+    if suffix.startswith("qi_target_"):
+        try:
+            target_number = int(suffix.rsplit("_", 1)[1])
+            board, flow = storyboard2_select_ai_image_target(uid, storyboard2_state(context), target_number)
+        except (TypeError, ValueError):
+            return await query.answer("Ảnh Storyboard này không còn trong phiên hiện tại.", show_alert=True)
+        await query.answer()
+        save_storyboard2_state(context, board)
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(flow, get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(get_user_language(uid) or "vi", state=flow),
+        )
+    if suffix.startswith("qi_ratio_"):
+        await query.answer()
+        aspect = media_aspect_ratio_from_token(suffix.replace("qi_ratio_", "", 1), "image")
+        state = set_quick_image_flow(uid, "prepared_prompt", aspect_ratio=aspect, suggested_ratio=aspect)
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(state, get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(get_user_language(uid) or "vi", state=state),
+        )
+    if suffix == "qi_logo_skip":
+        await query.answer()
+        state = set_quick_image_flow(
+            uid,
+            "prepared_prompt",
+            logo_watermark_enabled=False,
+            logo_watermark_text="",
+            logo_watermark_position="",
+            logo_watermark_source="",
+            logo_watermark_decided=True,
+        )
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(state, get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(get_user_language(uid) or "vi", state=state),
+        )
+    if suffix == "qi_logo_confirm":
+        await query.answer()
+        text = logo_watermark_clean_text(state.get("logo_watermark_text") or "")
+        if not text:
+            state = set_quick_image_flow(uid, "logo_input")
+            return await safe_edit_or_send(
+                query,
+                quick_image_logo_input_text(get_user_language(uid) or "vi"),
+                parse_mode="HTML",
+                reply_markup=quick_image_logo_input_keyboard(get_user_language(uid) or "vi", state),
+            )
+        state = set_quick_image_flow(
+            uid,
+            "prepared_prompt",
+            logo_watermark_enabled=True,
+            logo_watermark_text=text,
+            logo_watermark_position=logo_watermark_normalize_position(state.get("logo_watermark_position") or "", "bottom_right"),
+            logo_watermark_source="text",
+            logo_watermark_decided=True,
+        )
+        return await safe_edit_or_send(
+            query,
+            quick_image_prepared_prompt_text(state, get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=quick_image_prepared_prompt_keyboard(get_user_language(uid) or "vi", state=state),
+        )
+    if suffix in {"qi_finish_image", "qi_back_ratio"}:
+        await query.answer()
+        if suffix == "qi_back_ratio":
+            state = set_quick_image_flow(uid, "prepared_prompt", confirm_token="")
+            return await safe_edit_or_send(
+                query,
+                quick_image_prepared_prompt_text(state, get_user_language(uid) or "vi"),
+                parse_mode="HTML",
+                reply_markup=quick_image_prepared_prompt_keyboard(get_user_language(uid) or "vi", state=state),
+            )
+        state = set_quick_image_flow(uid, "tier", confirm_token="")
+        return await safe_edit_or_send(
+            query,
+            quick_image_tier_text(state, get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=quick_image_tier_keyboard(get_user_language(uid) or "vi", state),
+        )
     return await _handle_create_media_callback_impl(
         update,
         context,
@@ -212277,6 +212595,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
         "await_ai_intent",
         "await_ai_duration",
         "await_audio_volume",
+        "await_brightness",
         "await_concat_order",
         "await_trim_edges",
         "await_trim_range",
@@ -212291,6 +212610,35 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
     if not raw_text or raw_text.startswith("/"):
         return False
     lang = get_user_language(uid) or "vi"
+    if step == "await_brightness":
+        if not re.fullmatch(r"\d{1,3}", raw_text):
+            await update.message.reply_text(
+                "⚠️ Vui lòng nhập một số từ 20 đến 200. 100 giữ nguyên độ sáng.",
+                reply_markup=video_local_brightness_keyboard(lang),
+            )
+            return True
+        percent = safe_int(raw_text, 0)
+        if percent < 20 or percent > 200:
+            await update.message.reply_text(
+                "⚠️ Độ sáng cần từ 20 đến 200%. 100% giữ nguyên.",
+                reply_markup=video_local_brightness_keyboard(lang),
+            )
+            return True
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = percent
+        current = update_video_editor_pending(
+            uid,
+            "brightness",
+            manual_edit_plan=plan,
+            brightness_percent=percent,
+            last_section="manual",
+        )
+        await update.message.reply_text(
+            video_local_brightness_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_local_brightness_keyboard(lang),
+        )
+        return True
     if step == "await_audio_volume":
         audio_back = "videoedit|manual_audio" if str(state.get("last_section") or "") == "manual" else "videoedit|audio"
         if not re.fullmatch(r"\d{1,3}", raw_text):
@@ -215822,6 +216170,41 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     if action == "manual_rotate_flip":
         update_video_editor_pending(uid, "manual_rotate_flip", selected_tool="manual", last_section="manual")
         return await safe_edit_or_send(query, video_local_rotate_flip_text(lang), parse_mode="HTML", reply_markup=video_local_rotate_flip_keyboard(lang))
+    if action == "brightness":
+        current = update_video_editor_pending(uid, "brightness", selected_tool="manual", last_section="manual")
+        return await safe_edit_or_send(
+            query,
+            video_local_brightness_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_local_brightness_keyboard(lang),
+        )
+    if action == "brightness_set":
+        percent = safe_int(parts[2] if len(parts) > 2 else 100, 100)
+        if percent < 20 or percent > 200:
+            return await query.answer("Độ sáng cần từ 20 đến 200%.", show_alert=True)
+        plan = dict(state.get("manual_edit_plan") or {})
+        plan["brightness_percent"] = percent
+        current = update_video_editor_pending(
+            uid,
+            "brightness",
+            manual_edit_plan=plan,
+            brightness_percent=percent,
+            selected_tool="manual",
+            last_section="manual",
+        )
+        return await safe_edit_or_send(
+            query,
+            video_local_brightness_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_local_brightness_keyboard(lang),
+        )
+    if action == "brightness_custom":
+        update_video_editor_pending(uid, "await_brightness", selected_tool="manual", last_section="manual")
+        return await safe_edit_or_send(
+            query,
+            "✍️ Nhập độ sáng từ 20 đến 200. Ví dụ: 85 để làm tối nhẹ, 130 để làm sáng hơn; 100 giữ nguyên.",
+            reply_markup=video_local_brightness_keyboard(lang),
+        )
     if action == "manual_done":
         current = update_video_editor_pending(uid, "options", selected_tool="manual", last_section="manual")
         return await safe_edit_or_send(query, video_local_manual_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang))
