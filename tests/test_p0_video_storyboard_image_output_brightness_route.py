@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
-from services import video_local_editing
+from services import video_local_editing, video_storyboard2
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +114,89 @@ def test_storyboard_generation_sends_one_image_and_reopens_asset_board() -> None
     assert "scene3_return_state = video_scene3_record_generated_image" in confirmation
     assert "panel_text, panel_keyboard = video_scene3_image_handoff_panel(scene3_return_state)" in confirmation
     assert "Ảnh hợp lệ đã được gửi và đưa về đúng phiên Video" in confirmation
+
+
+def test_storyboard_ai_and_upload_entries_keep_one_non_empty_session() -> None:
+    fresh = video_storyboard2.ensure_session(
+        video_storyboard2.default_state(),
+        "storyboard-session-1",
+    )
+    assert fresh["storyboard_session_id"] == "storyboard-session-1"
+    assert fresh["revision"] == 1
+    moved = video_storyboard2.move(fresh, "count", push=True)
+    assert moved["storyboard_session_id"] == "storyboard-session-1"
+
+    callback = _function_source("_handle_storyboard2_callback_impl")
+    assert 'storyboard2_fresh_board(entry_mode="ai")' in callback
+    assert 'storyboard2_fresh_board(entry_mode="existing")' in callback
+    assert callback.count("video_storyboard2.default_state()") == 0
+
+
+def test_storyboard_legacy_empty_session_is_upgraded_but_mismatch_is_blocked() -> None:
+    board = video_storyboard2.set_scene_count(video_storyboard2.default_state(), 2)
+    saved = {}
+    validator = _compiled_function(
+        "storyboard_quick_image_owner_valid",
+        {
+            "storyboard2_state": lambda _context: saved.get("board", board),
+            "save_storyboard2_state": lambda _context, value: saved.update(board=value),
+            "video_storyboard2": video_storyboard2,
+            "_safe_int": lambda value, default=0: int(value or default),
+            "uuid": SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="migrated-session")),
+        },
+    )
+    state = {
+        "owner": "storyboard_image",
+        "flow": "storyboard",
+        "product": "storyboard_prompt",
+        "return_to": "vstory|image_return",
+        "session_id": "",
+        "storyboard_scene_index": 1,
+        "storyboard_slot": "start",
+    }
+    assert validator(SimpleNamespace(), state) is True
+    assert state["session_id"] == "migrated-session"
+    assert saved["board"]["storyboard_session_id"] == "migrated-session"
+
+    mismatched = {**state, "session_id": "older-session"}
+    assert validator(SimpleNamespace(), mismatched) is False
+
+
+def test_storyboard_confirmation_keeps_session_and_rejects_stale_pending_image() -> None:
+    fields = _compiled_function(
+        "quick_image_video_scene3_confirmation_fields",
+        {"_safe_int": lambda value, default=0: int(value or default)},
+    )({
+        "source_flow": "video_scene3",
+        "return_to": "vstory|image_return",
+        "return_label": "Ảnh Storyboard",
+        "session_id": "storyboard-session-1",
+        "storyboard_scene_id": "scene_1",
+        "storyboard_scene_index": 1,
+        "storyboard_slot": "start",
+        "storyboard_prompt_version": 2,
+    })
+    assert fields["storyboard_session_id"] == "storyboard-session-1"
+
+    board = video_storyboard2.set_scene_count(
+        video_storyboard2.ensure_session(video_storyboard2.default_state(), "storyboard-session-1"),
+        2,
+    )
+    validator = _compiled_function(
+        "storyboard_pending_image_owner_valid",
+        {
+            "storyboard2_state": lambda _context: board,
+            "_safe_int": lambda value, default=0: int(value or default),
+        },
+    )
+    assert validator(SimpleNamespace(), fields) is True
+    assert validator(SimpleNamespace(), {**fields, "storyboard_session_id": "old-session"}) is False
+
+    confirmation = _function_source("handle_shopaikey_public_image_confirm_delivery_first")
+    guard_position = confirmation.index("storyboard_pending_image_owner_valid(context, pending)")
+    assert guard_position < confirmation.index("create_shopaikey_job(")
+    assert guard_position < confirmation.index("shopaikey_preview_final_cost(")
+    assert "Bot chưa gọi nguồn tạo ảnh và chưa trừ Xu" in confirmation
 
 
 def test_image_brightness_is_real_local_pixel_processing() -> None:
