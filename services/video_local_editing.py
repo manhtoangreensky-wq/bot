@@ -81,6 +81,7 @@ def default_manual_edit_plan(input_video: str = "") -> dict[str, Any]:
         "flip": "none",
         "speed": 1.0,
         "volume": 1.0,
+        "brightness_percent": 100,
         "text_overlay": {},
         "logo_overlay": {},
         "subtitle_file": "",
@@ -143,6 +144,9 @@ def normalize_manual_edit_plan(
     volume = _number(raw.get("volume"), 1.0)
     if not 0.0 <= volume <= 2.0:
         raise LocalVideoEditError("volume_invalid")
+    brightness_percent = _integer(raw.get("brightness_percent"), 100)
+    if not 20 <= brightness_percent <= 200:
+        raise LocalVideoEditError("brightness_invalid")
     color = str(raw.get("color_preset") or "keep").strip().lower()
     if color not in COLOR_PRESETS:
         raise LocalVideoEditError("color_preset_invalid")
@@ -195,6 +199,7 @@ def normalize_manual_edit_plan(
         "flip": flip,
         "speed": speed,
         "volume": volume,
+        "brightness_percent": brightness_percent,
         "text_overlay": text,
         "logo_overlay": logo,
         "subtitle_file": subtitle_file,
@@ -343,6 +348,9 @@ def build_manual_ffmpeg_command(
     color = COLOR_PRESETS.get(str(plan.get("color_preset") or "keep"), "")
     if color:
         filters.append(color)
+    brightness_percent = int(plan.get("brightness_percent") or 100)
+    if brightness_percent != 100:
+        filters.append(f"eq=brightness={(brightness_percent - 100) / 200:.3f}")
     text = _text_filter(dict(plan.get("text_overlay") or {}))
     if text:
         filters.append(text)
@@ -648,6 +656,8 @@ def public_plan_summary(plan: dict[str, Any]) -> list[str]:
         lines.append(f"Tốc độ {float(plan['speed']):g}x")
     if float(plan.get("volume") or 1.0) != 1.0:
         lines.append("Tắt tiếng" if float(plan.get("volume") or 0) == 0 else f"Âm lượng {float(plan['volume']) * 100:g}%")
+    if int(plan.get("brightness_percent") or 100) != 100:
+        lines.append(f"Độ sáng {int(plan['brightness_percent'])}%")
     if plan.get("text_overlay"):
         lines.append("Chèn chữ")
     if plan.get("logo_overlay"):
