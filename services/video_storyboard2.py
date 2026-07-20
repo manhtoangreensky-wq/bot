@@ -136,6 +136,18 @@ def default_state() -> dict[str, Any]:
     }
 
 
+def ensure_session(value: dict[str, Any] | None, session_id: str) -> dict[str, Any]:
+    """Return a normalized board with one stable, non-empty session owner."""
+    state = normalize_state(value)
+    if not state.get("storyboard_session_id"):
+        normalized_session_id = _clean_text(session_id, 80)
+        if not normalized_session_id:
+            raise ValueError("storyboard_session_id_required")
+        state["storyboard_session_id"] = normalized_session_id
+    state["revision"] = max(1, _safe_int(state.get("revision"), 1))
+    return state
+
+
 def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
     raw = deepcopy(value or {})
     state = default_state()

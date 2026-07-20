@@ -65839,12 +65839,24 @@ def storyboard2_state(context) -> dict:
     return video_storyboard2.normalize_state(dict(outer.get("storyboard2") or {}))
 
 
+def storyboard2_fresh_board(*, entry_mode: str = "") -> dict:
+    board = video_storyboard2.ensure_session(
+        video_storyboard2.default_state(),
+        uuid.uuid4().hex,
+    )
+    board["entry_mode"] = str(entry_mode or "")
+    return board
+
+
+def storyboard2_ensure_board_session(board: dict) -> dict:
+    clean = video_storyboard2.normalize_state(board)
+    session_id = str(clean.get("storyboard_session_id") or "") or uuid.uuid4().hex
+    return video_storyboard2.ensure_session(clean, session_id)
+
+
 def storyboard2_new_outer_state(context, *, entry_mode: str = "") -> dict:
     outer = video_scene3_flow.default_state(product_type="storyboard_prompt")
-    board = video_storyboard2.default_state()
-    board["storyboard_session_id"] = uuid.uuid4().hex
-    board["revision"] = 1
-    board["entry_mode"] = str(entry_mode or "")
+    board = storyboard2_fresh_board(entry_mode=entry_mode)
     outer.update({
         "step": "storyboard2",
         "source_product_id": "storyboard_prompt",
@@ -65864,7 +65876,7 @@ def storyboard2_new_outer_state(context, *, entry_mode: str = "") -> dict:
 
 
 def save_storyboard2_state(context, board: dict, outer: dict | None = None) -> dict:
-    clean = video_storyboard2.normalize_state(board)
+    clean = storyboard2_ensure_board_session(board)
     current = dict(outer or video_profile_studio_state(context))
     current.update({
         "step": "storyboard2",
@@ -83476,13 +83488,11 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         board = video_storyboard2.move(board, "entry", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action in {"start", "ai"}:
-        fresh = video_storyboard2.default_state()
-        fresh["entry_mode"] = "ai"
+        fresh = storyboard2_fresh_board(entry_mode="ai")
         board = video_storyboard2.move(fresh, "count", push=True)
         return await storyboard2_render(query, context, persist(board))
     if action == "upload":
-        fresh = video_storyboard2.default_state()
-        fresh["entry_mode"] = "existing"
+        fresh = storyboard2_fresh_board(entry_mode="existing")
         board = video_storyboard2.move(
             fresh,
             "await_storyboard_upload",
@@ -83940,7 +83950,13 @@ async def handle_storyboard2_legacy_callback(update: Update, context: ContextTyp
     # Legacy callbacks are read-only redirects.  Do not reset or mutate an
     # active Storyboard session just because an old Telegram message was
     # pressed.
-    return await storyboard2_render(query, context, video_storyboard2.default_state())
+    outer = video_profile_studio_state(context)
+    if dict(outer.get("storyboard2") or {}):
+        board = storyboard2_state(context)
+    else:
+        storyboard2_new_outer_state(context)
+        board = storyboard2_state(context)
+    return await storyboard2_render(query, context, board)
 
 
 async def handle_video_trend2_legacy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84372,7 +84388,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         }
     ):
         await query.answer("Nút cũ đã được chuyển sang Storyboard hiện tại.")
-        return await storyboard2_render(query, context, video_storyboard2.default_state())
+        outer = video_profile_studio_state(context)
+        if not dict(outer.get("storyboard2") or {}):
+            storyboard2_new_outer_state(context)
+        return await storyboard2_render(query, context, storyboard2_state(context))
     # Delegated legacy handlers answer their own callback. Answering here as
     # well can produce a Telegram "query is too old/already answered" error.
     if action not in {"legacy", "prompt_image_execute"}:
@@ -118677,6 +118696,12 @@ async def handle_shopaikey_public_image_confirm_delivery_first(
     scene3_return_callback = str(pending.get("return_to") or "vprofile|image_ai_return") if scene3_handoff else ""
     scene3_return_label = str(pending.get("return_label") or "⬅️ Nguồn hình ảnh") if scene3_handoff else ""
     scene3_return_state = None
+    if scene3_handoff and not storyboard_pending_image_owner_valid(context, pending):
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Phiên ảnh Storyboard này không còn thuộc bảng hiện tại. "
+            "Bot chưa gọi nguồn tạo ảnh và chưa trừ Xu.",
+        )
     final_preview_cost = int(shopaikey_preview_final_cost(uid, base_cost, "shopaikey_image") or base_cost)
     if package_used:
         package_item = active_package_item_for_user(uid, package_item_type)
@@ -153569,12 +153594,30 @@ def quick_image_video_scene3_confirmation_fields(state: dict | None = None) -> d
     }
     if str(state.get("return_to") or "") == "vstory|image_return":
         fields.update({
+            "storyboard_session_id": str(state.get("session_id") or "")[:80],
             "storyboard_scene_id": str(state.get("storyboard_scene_id") or "")[:80],
             "storyboard_scene_index": max(1, _safe_int(state.get("storyboard_scene_index"), 1)),
             "storyboard_slot": str(state.get("storyboard_slot") or "start")[:20],
             "storyboard_prompt_version": max(1, _safe_int(state.get("storyboard_prompt_version"), 1)),
         })
     return fields
+
+
+def storyboard_pending_image_owner_valid(context, pending: dict | None = None) -> bool:
+    pending = dict(pending or {})
+    if str(pending.get("return_to") or "") != "vstory|image_return":
+        return True
+    board = storyboard2_state(context)
+    session_id = str(pending.get("storyboard_session_id") or "")
+    board_session_id = str(board.get("storyboard_session_id") or "")
+    scene_index = _safe_int(pending.get("storyboard_scene_index"), 0)
+    slot = str(pending.get("storyboard_slot") or "")
+    return bool(
+        session_id
+        and session_id == board_session_id
+        and 1 <= scene_index <= int(board.get("scene_count") or 0)
+        and slot in {"start", "end"}
+    )
 
 
 def video_scene3_image_handoff_target_step(pending: dict | None, state: dict | None = None) -> str:
@@ -167955,22 +167998,32 @@ async def handle_quick_media_pending_text(update: Update, context: ContextTypes.
 
 
 def storyboard_quick_image_owner_valid(context, state: dict | None = None) -> bool:
-    quick_state = dict(state or {})
+    quick_state = state if isinstance(state, dict) else {}
     board = storyboard2_state(context)
     session_id = str(quick_state.get("session_id") or "")
     board_session_id = str(board.get("storyboard_session_id") or "")
     scene_index = _safe_int(quick_state.get("storyboard_scene_index"), 0)
     slot = str(quick_state.get("storyboard_slot") or "")
-    return bool(
+    owner_matches = bool(
         str(quick_state.get("owner") or "") == "storyboard_image"
         and str(quick_state.get("flow") or "") == "storyboard"
         and str(quick_state.get("product") or "") == "storyboard_prompt"
         and str(quick_state.get("return_to") or "") == "vstory|image_return"
-        and session_id
-        and session_id == board_session_id
         and 1 <= scene_index <= int(board.get("scene_count") or 0)
         and slot in {"start", "end"}
     )
+    if not owner_matches:
+        return False
+    if session_id and board_session_id and session_id != board_session_id:
+        return False
+    if not board_session_id:
+        board = video_storyboard2.ensure_session(board, session_id or uuid.uuid4().hex)
+        save_storyboard2_state(context, board)
+        board_session_id = str(board.get("storyboard_session_id") or "")
+    if not session_id:
+        quick_state["session_id"] = board_session_id
+        session_id = board_session_id
+    return bool(session_id and session_id == board_session_id)
 
 async def _handle_create_media_callback_impl(
     update: Update,
