@@ -93,6 +93,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
+from services import subdub_canonical_cues
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
@@ -192676,6 +192677,16 @@ def normalize_video_translate_mode(value: str) -> str:
     mode = aliases.get(raw_value, aliases.get(raw_lower, raw_value))
     return mode if mode in VIDEO_TRANSLATE_MODES else ""
 
+
+def subdub_mode_uses_canonical_cues(mode: str = "") -> bool:
+    """Report the shared cue contract without changing lane routing."""
+    return normalize_video_translate_mode(mode) in {
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    }
+
 def video_dubbing_is_video_only_mode(mode: str) -> bool:
     return normalize_video_translate_mode(mode) in VIDEO_ONLY_TRANSLATE_MODES
 
@@ -200827,6 +200838,35 @@ SUBDUB_SUBTITLE_FONT_CANDIDATES = (
     },
 )
 
+SUBDUB_SUBTITLE_FONT_FALLBACKS = {
+    "latin": (
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",), "vietnamese": True, "cjk": False},
+        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
+    ),
+    "chinese": (
+        {"family": "Noto Sans CJK SC", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf"), "vietnamese": True, "cjk": True},
+    ),
+    "japanese": (
+        {"family": "Noto Sans CJK JP", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf"), "vietnamese": False, "cjk": True},
+    ),
+    "korean": (
+        {"family": "Noto Sans CJK KR", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf"), "vietnamese": False, "cjk": True},
+    ),
+    "thai": (
+        {"family": "Noto Sans Thai", "paths": ("/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",), "vietnamese": False, "cjk": False},
+    ),
+    "arabic": (
+        {"family": "Noto Sans Arabic", "paths": ("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",), "vietnamese": False, "cjk": False},
+    ),
+    "devanagari": (
+        {"family": "Noto Sans Devanagari", "paths": ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",), "vietnamese": False, "cjk": False},
+    ),
+    "cyrillic": (
+        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",), "vietnamese": True, "cjk": False},
+        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
+    ),
+}
+
 SUBDUB_BROKEN_GLYPH_CHARS = {
     "\ufffd", "□", "▯", "■", "�", "▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩",
 }
@@ -201399,6 +201439,35 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
         style["subtitle_margin_l_after"] = side_margin
         style["subtitle_margin_r_after"] = side_margin
+    if state.get("subdub_canonical_product_contract"):
+        canonical_size = subdub_clamp_int(int(style.get("render_size") or style.get("size") or 40) + 2, 42, 30, 72)
+        style["render_size"] = canonical_size
+        style["size"] = canonical_size
+        style["subtitle_font_size_after"] = canonical_size
+        style["translated_font_size_final"] = canonical_size
+        style["subtitle_alignment"] = "bottom_center"
+        style["position"] = "bottom"
+        style["align"] = "center"
+        style["max_lines"] = 2
+        style["subtitle_max_lines"] = 2
+        style["subtitle_wrap_lines_max"] = 2
+        style["text_color"] = "#FFFFFF"
+        style["outline_color"] = "#000000"
+        style["outline"] = max(4, int(style.get("outline") or 0))
+        style["shadow"] = max(1, int(style.get("shadow") or 0))
+        style["background"] = "box"
+        style["boxed_background"] = True
+        style["uppercase_text"] = True
+        style["bold_text"] = True
+        style["cover_original"] = False
+        style["hardsub_cover_enabled"] = False
+        raise_px = max(2, int(round(8.0 * float(style["play_res_y"]) / 1080.0)))
+        style["subtitle_margin_v_after"] = max(2, int(style.get("subtitle_margin_v_after") or 0) + raise_px)
+        side_margin = max(6, min(14, int(round(float(style["play_res_x"]) * 0.006))))
+        style["subtitle_margin_l_after"] = side_margin
+        style["subtitle_margin_r_after"] = side_margin
+        style["canonical_bottom_raise_px"] = raise_px
+        style["subdub_canonical_product_contract"] = True
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -203075,6 +203144,7 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
         duration = max(0.1, end - start)
         if preserve_timestamps:
             qc_segments.append({
+                **dict(source or {}),
                 "index": int((source or {}).get("index") or len(qc_segments) + 1),
                 "start": round(start, 3),
                 "end": round(end, 3),
@@ -203237,16 +203307,25 @@ async def translate_subtitle_segments(
         except Exception:
             translated = {}
         translated_text = str(translated.get("text") or "").strip()
+        translation_quality = subdub_canonical_cues.evaluate_translation_quality(
+            translated_text,
+            target_language=target_language,
+        )
+        if translated_text and not translation_quality.get("accepted"):
+            translated_text = ""
         translate_missing = not bool(translated_text)
         if not translated_text:
             translated_text = text
             missing_count += 1
         providers.append(str(translated.get("provider") or ""))
         translated_segments.append({
+            **dict(item or {}),
             "index": int((item or {}).get("index") or index),
             "start": float((item or {}).get("start") or 0),
             "end": float((item or {}).get("end") or 0),
             "text": translated_text,
+            "translated_text_full": translated_text,
+            "translation_quality": translation_quality,
             "translate_missing": translate_missing,
         })
     if not translated_segments:
@@ -204656,7 +204735,12 @@ async def _execute_video_dubbing_pipeline_core(
     mode = subdub_resolved_route_mode("", state) or normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
-    state = {**dict(state or {}), "_pipeline_is_admin": bool(is_admin_user(uid))}
+    canonical_cue_mode = subdub_mode_uses_canonical_cues(mode)
+    state = {
+        **dict(state or {}),
+        "_pipeline_is_admin": bool(is_admin_user(uid)),
+        "canonical_cue_mode": bool(canonical_cue_mode),
+    }
     workspace = str(state.get("_pipeline_workspace") or "")
     if not workspace:
         workspace = create_subtitle_dub_pipeline_workspace(f"direct_{uid}_{time.time_ns()}")
@@ -205744,7 +205828,8 @@ async def _execute_video_dubbing_pipeline_core(
             missing_detail,
             stage="delivery",
         )
-    await _progress("delivered")
+    # Artifact delivery is only evidence. The shared terminal function owns the
+    # delivered/100% panel transition and the exactly-once receipt.
     delivered_video = int(delivery.get("video") or 0) + int(delivery.get("video_document") or 0) > 0
     partial_audio_delivered = bool(delivery.get("partial_audio_delivered"))
     delivery_partial_result = False
