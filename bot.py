@@ -55286,13 +55286,13 @@ def image_edit_menu_start_text(lang: str = "vi") -> str:
         return (
             "🧩 <b>Edit image</b>\n\n"
             "Send or reply to the image you want to edit.\n\n"
-            "Local crop/resize, text, logo/watermark, color presets and image enhancement are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
+            "Local crop/resize, brightness, text, logo/watermark, color presets and image enhancement are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
             "TOAN AAS has not started processing and has not charged Xu on this screen."
         )
     return (
         "🧩 <b>Chỉnh sửa ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply vào ảnh cần sửa.\n\n"
-        "Sau khi nhận ảnh, TOAN AAS sẽ mở các công cụ: cắt/resize, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n"
+        "Sau khi nhận ảnh, TOAN AAS sẽ mở các công cụ: cắt/resize, chỉnh độ sáng, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n"
         "Chỉnh sửa AI là flow riêng ở menu Hình ảnh chính.\n\n"
         "TOAN AAS chưa xử lý ảnh và chưa trừ Xu ở màn này."
     )
@@ -55303,18 +55303,20 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
             "✅ Image received.\n\n"
             "How do you want to edit it?\n\n"
             "1. Crop/ratio and pixel resize: local processing.\n"
-            "2. Text, logo/watermark and color presets: stable local editor.\n"
-            "3. AI upscale: sharpen/upscale when this feature is available.\n"
-            "4. Custom request: describe what you need and TOAN AAS will guide or move to AI flow if needed.\n\n"
+            "2. Brightness from 20% to 200%: real local processing.\n"
+            "3. Text, logo/watermark and color presets: stable local editor.\n"
+            "4. AI upscale: sharpen/upscale when this feature is available.\n"
+            "5. Custom request: describe what you need and TOAN AAS will guide or move to AI flow if needed.\n\n"
             "TOAN AAS has not started processing and has not charged Xu until you confirm."
         )
     return (
         "✅ Đã nhận ảnh.\n\n"
         "Bạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. Cắt / đổi tỉ lệ và resize pixel: xử lý local.\n"
-        "2. Thêm chữ, Logo/Watermark và công thức màu: dùng editor local đang chạy.\n"
-        "3. Nâng chất lượng AI: làm nét/nâng cấp ảnh khi tính năng sẵn sàng.\n"
-        "4. Nhập yêu cầu riêng: mô tả yêu cầu để TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần.\n\n"
+        "2. Chỉnh độ sáng từ 20% đến 200%: xử lý local thật.\n"
+        "3. Thêm chữ, Logo/Watermark và công thức màu: dùng editor local đang chạy.\n"
+        "4. Nâng chất lượng AI: làm nét/nâng cấp ảnh khi tính năng sẵn sàng.\n"
+        "5. Nhập yêu cầu riêng: mô tả yêu cầu để TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần.\n\n"
         "TOAN AAS chưa xử lý ảnh và chưa trừ Xu nếu bạn chưa xác nhận."
     )
 
@@ -55347,7 +55349,7 @@ def image_menu_v5_text(lang: str = "vi") -> str:
             "• Quick image: choose from suggestions or enter a prompt, then select ratio and tier.\n"
             "• Prompt from image: send an image so the bot writes a matching prompt.\n"
             "• AI edit: edit an image with AI request/confirmation guard.\n"
-            "• Edit image: crop/resize, text, logo/watermark, color presets and upscale.\n\n"
+            "• Edit image: crop/resize, brightness, text, logo/watermark, color presets and upscale.\n\n"
             "All real image create/edit steps ask for confirmation before charging Xu."
         )
     return (
@@ -55356,7 +55358,7 @@ def image_menu_v5_text(lang: str = "vi") -> str:
         "• Tạo ảnh nhanh: nhập prompt hoặc chọn gợi ý để tạo ảnh.\n"
         "• Tạo prompt từ ảnh: gửi ảnh để bot viết prompt phù hợp.\n"
         "• Chỉnh sửa AI: sửa ảnh bằng AI theo yêu cầu, có xác nhận trước khi xử lý.\n"
-        "• Chỉnh sửa ảnh: crop/resize, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n\n"
+        "• Chỉnh sửa ảnh: crop/resize, chỉnh độ sáng, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n\n"
         "Các bước tạo/chỉnh ảnh thật đều có xác nhận trước khi trừ Xu."
     )
 
@@ -55840,7 +55842,7 @@ def image_edit_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("✂️ 裁剪/比例", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 调整像素", callback_data="imgtool|resize_task|pixels")],
             [InlineKeyboardButton("🔤 添加文字", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
             [InlineKeyboardButton("🎨 色彩预设", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ AI 画质增强", callback_data="imgtool|ai_upscale_start")],
-            [InlineKeyboardButton("✍️ 自定义要求", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("☀️ 调整亮度", callback_data="imgtool|editor_brightness"), InlineKeyboardButton("✍️ 自定义要求", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("⬅️ 返回图片菜单", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     if lang == "en":
@@ -55848,14 +55850,14 @@ def image_edit_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("✂️ Crop / ratio", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixels", callback_data="imgtool|resize_task|pixels")],
             [InlineKeyboardButton("🔤 Add text", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
             [InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start")],
-            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("☀️ Brightness", callback_data="imgtool|editor_brightness"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✂️ Cắt / đổi tỉ lệ", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixel", callback_data="imgtool|resize_task|pixels")],
         [InlineKeyboardButton("🔤 Thêm chữ", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
         [InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start")],
-        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("☀️ Chỉnh độ sáng", callback_data="imgtool|editor_brightness"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -101966,6 +101968,18 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         shopaikey_image_error_already_notified = callback_data.startswith("shopai|") and notified_at and (time.time() - notified_at) < 30
     except Exception:
         shopaikey_image_error_already_notified = False
+    video_edit_intake_error_mode = ""
+    video_edit_intake_error_state = {}
+    if isinstance(update, Update) and update.message and update.effective_user:
+        try:
+            video_edit_intake_error_state = dict(get_video_editor_pending(update.effective_user.id) or {})
+            if video_edit_state_machine.is_active_intake(video_edit_intake_error_state):
+                video_edit_intake_error_mode = video_edit_state_machine.normalize_edit_mode(
+                    video_edit_intake_error_state.get("edit_mode")
+                )
+        except Exception:
+            video_edit_intake_error_mode = ""
+            video_edit_intake_error_state = {}
     if error:
         logger.error(
             "Telegram handler error\n%s",
@@ -102042,6 +102056,29 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception:
                 logger.exception("Failed to suppress SubDub clean runtime failure")
+        return
+
+    if video_edit_intake_error_mode and isinstance(update, Update) and update.effective_chat:
+        try:
+            waiting = video_edit_state_machine.keep_waiting_after_invalid(
+                video_edit_intake_error_state,
+                "video_edit_intake_runtime_error",
+            )
+            save_video_edit_canonical_state(update.effective_user.id, waiting)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    "⚠️ Hệ thống chưa đọc được video này. Phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên; "
+                    "anh/chị hãy gửi lại file MP4, MOV, MKV hoặc WebM.\n\n"
+                    "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
+                ),
+                reply_markup=video_edit_lane_upload_keyboard(
+                    video_edit_intake_error_mode,
+                    get_user_language(update.effective_user.id) or "vi",
+                ),
+            )
+        except Exception:
+            logger.exception("Failed to recover canonical Video Edit intake")
         return
 
     if shopaikey_image_error_already_notified:
