@@ -110,7 +110,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_trend_catalog
+from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_trend_catalog
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
@@ -65768,6 +65768,8 @@ def storyboard2_state(context) -> dict:
 def storyboard2_new_outer_state(context, *, entry_mode: str = "") -> dict:
     outer = video_scene3_flow.default_state(product_type="storyboard_prompt")
     board = video_storyboard2.default_state()
+    board["storyboard_session_id"] = uuid.uuid4().hex
+    board["revision"] = 1
     board["entry_mode"] = str(entry_mode or "")
     outer.update({
         "step": "storyboard2",
@@ -71359,6 +71361,8 @@ VIDEO_IDEA_PRODUCT_LANE_PRODUCTS = frozenset({
     "motion_prompt",
     "storyboard_prompt",
     "self_shot_scene_change",
+    "self_shot_cinematic_transform",
+    "multi_scene_film",
 })
 
 
@@ -72124,9 +72128,11 @@ VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("videoidea|", "handle_video_idea_callback"),
     ("video_upload|", "handle_video_upload_callback"),
     ("videoedit|", "handle_video_editor_callback"),
+    ("vstory|", "handle_storyboard2_callback"),
     ("storyboard|", "handle_storyboard_callback"),
     ("vfinal|", "handle_video_finalization_callback"),
     ("videoaddon|", "handle_video_addon_callback"),
+    ("vstoryimg|", "handle_storyboard_image_callback"),
     ("create_media|", "handle_create_media_callback"),
     ("framevideo|", "handle_frame_video_callback"),
     ("video|status|", "handle_public_video_status_callback"),
@@ -72524,19 +72530,24 @@ async def video_flow7_open_idea_catalog_from_state(
     back_callback: str = "",
 ):
     product_id = str(state.get("source_product_id") or "video_idea")
-    assets = dict(state.get("reference_assets") or state.get("assets") or {})
     return_callback = str(back_callback or f"vproduct|idea_back|{product_id}").strip()
+    parent_handoff = video_idea_handoff.build_parent_handoff(
+        state,
+        product_id=product_id,
+        return_callback=return_callback,
+    )
     intake = {
-        "origin_product": product_id,
-        "scene_count": max(1, min(20, safe_int(state.get("scene_count"), 1))),
-        "aspect_ratio": str(state.get("aspect_ratio") or "9:16"),
-        "trend_source": dict(state.get("trend_source") or {}),
-        "source_media_refs": list(assets.get("source_media_refs") or [])[:20],
-        "source_asset_items": [dict(item) for item in assets.get("items") or [] if isinstance(item, dict)][:20],
-        "return_callback": return_callback,
+        "origin_product": parent_handoff["origin_product"],
+        "scene_count": parent_handoff["scene_count"],
+        "aspect_ratio": parent_handoff["aspect_ratio"],
+        "trend_source": dict(parent_handoff["trend_source"]),
+        "source_media_refs": list(parent_handoff["source_media_refs"]),
+        "source_asset_items": [dict(item) for item in parent_handoff["source_asset_items"]],
+        "return_callback": parent_handoff["return_callback"],
     }
     clear_developing_video_pending(user_id)
     context.user_data["video_idea_flow7_intake"] = intake
+    context.user_data["video_idea_parent_handoff"] = parent_handoff
     context.user_data["video_idea_origin_product"] = product_id
     context.user_data["video_idea_source_media_refs"] = list(intake["source_media_refs"])
     context.user_data["video_idea_return_callback"] = return_callback
@@ -83252,6 +83263,14 @@ def storyboard2_prepare_quick_image(user_id: int, board: dict, prompt: str, nega
         aspect_ratio=str(board.get("aspect_ratio") or "9:16"),
         ratio_back_target="vstory|assets_screen",
         source_flow="video_scene3",
+        flow="storyboard",
+        product="storyboard_prompt",
+        owner="storyboard_image",
+        session_id=str(board.get("storyboard_session_id") or ""),
+        return_step="storyboard_asset_board",
+        generation_state="planning",
+        idea_id=str(image.get("idea_id") or board.get("selected_suggestion") or ""),
+        revision=max(1, int(board.get("revision") or 1)),
         return_to="vstory|image_return",
         return_label="⬅️ Ảnh Storyboard",
         storyboard_scene_id=f"scene_{scene_index}",
@@ -83638,6 +83657,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             parse_mode="HTML",
             reply_markup=quick_image_prepared_prompt_keyboard(
                 get_user_language(uid) or "vi",
+                state=flow,
                 back_callback="vstory|assets_screen",
                 back_label="⬅️ Ảnh Storyboard",
                 context_return_callback="vstory|image_return",
@@ -83849,6 +83869,10 @@ def video_selfshot2_draft(session: dict | None = None) -> dict:
     defaults["product_id"] = video_selfshot2.PRODUCT_ID
     defaults["job_type"] = video_selfshot2.JOB_TYPE
     defaults["selfshot_mode"] = video_selfshot2.MODE
+    defaults["flow"] = "selfshot2"
+    defaults["owner"] = "selfshot2"
+    defaults["session_id"] = str(defaults.get("session_id") or uuid.uuid4().hex)
+    defaults["revision"] = max(1, safe_int(defaults.get("revision"), 1))
     defaults.setdefault("provider_called", False)
     defaults.setdefault("job_created", False)
     defaults.setdefault("outbox_created", False)
@@ -83867,6 +83891,9 @@ def save_video_selfshot2_draft(user_id: int, draft: dict, *, step: str = "") -> 
     session["back_target"] = "vproduct|selfshot_hub"
     session["return_to"] = "vproduct|selfshot_hub"
     session["draft"] = video_selfshot2_draft({"draft": draft})
+    session["flow_owner"] = "selfshot2"
+    session["flow_session_id"] = str(session["draft"].get("session_id") or "")
+    session["flow_revision"] = safe_int(session["draft"].get("revision"), 1)
     if step:
         session["previous_step"] = str(session.get("current_step") or "")
         session["current_step"] = str(step)
@@ -84002,6 +84029,10 @@ def video_selfshot3_draft(session: dict | None = None) -> dict:
     defaults.update(current)
     defaults["product_id"] = video_selfshot3.PRODUCT_ID
     defaults["selfshot_mode"] = video_selfshot3.MODE_ONE_TAKE
+    defaults["flow"] = "selfshot3"
+    defaults["owner"] = "selfshot3"
+    defaults["session_id"] = str(defaults.get("session_id") or uuid.uuid4().hex)
+    defaults["revision"] = max(1, safe_int(defaults.get("revision"), 1))
     defaults.setdefault("provider_called", False)
     defaults.setdefault("job_created", False)
     defaults.setdefault("outbox_created", False)
@@ -84020,10 +84051,28 @@ def save_video_selfshot3_draft(user_id: int, draft: dict, *, step: str = "") -> 
     session["back_target"] = "vproduct|selfshot_hub"
     session["return_to"] = "vproduct|selfshot_hub"
     session["draft"] = video_selfshot3_draft({"draft": draft})
+    session["flow_owner"] = "selfshot3"
+    session["flow_session_id"] = str(session["draft"].get("session_id") or "")
+    session["flow_revision"] = safe_int(session["draft"].get("revision"), 1)
     if step:
         session["previous_step"] = str(session.get("current_step") or "")
         session["current_step"] = str(step)
     return save_video_session(user_id, session)
+
+
+def video_selfshot_media_owner_valid(session: dict, *, owner: str, product_id: str, step: str) -> bool:
+    draft = dict(session.get("draft") or {})
+    session_id = str(draft.get("session_id") or "")
+    return bool(
+        str(session.get("product_id") or "") == product_id
+        and str(session.get("current_step") or "") == step
+        and str(session.get("flow_owner") or "") == owner
+        and str(session.get("flow_session_id") or "") == session_id
+        and str(session.get("media_owner") or "") == owner
+        and str(session.get("media_session_id") or "") == session_id
+        and str(draft.get("owner") or "") == owner
+        and session_id
+    )
 
 
 async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: dict | None = None):
@@ -84433,6 +84482,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 reset = save_video_selfshot2_draft(uid, video_selfshot2.initial_draft(), step="selfshot2:intro")
                 return await video_selfshot2_render(query, uid, "intro", draft=reset.get("draft"))
             if operation == "source":
+                current = video_selfshot2_draft({"draft": current})
+                save_video_selfshot2_draft(uid, current, step="selfshot2:source")
                 session = task3d_session_step(
                     uid,
                     "awaiting_selfshot2_video",
@@ -84444,6 +84495,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     xu_charged=0,
                 )
                 session["draft"] = current
+                session["flow_owner"] = "selfshot2"
+                session["flow_session_id"] = str(current.get("session_id") or "")
+                session["flow_revision"] = safe_int(current.get("revision"), 1)
+                session["media_owner"] = "selfshot2"
+                session["media_session_id"] = str(current.get("session_id") or "")
                 session["awaiting_media"] = True
                 session["source_file_id"] = None
                 session["product_id"] = video_selfshot2.PRODUCT_ID
@@ -84599,6 +84655,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             if not video_selfshot3.callback_operation_allowed(current_screen, operation):
                 return await video_selfshot3_render(query, uid, current_screen, draft=current)
             if operation == "source":
+                current = video_selfshot3_draft({"draft": current})
+                save_video_selfshot3_draft(uid, current, step="selfshot3:source")
                 session = task3d_session_step(
                     uid,
                     "awaiting_selfshot3_video",
@@ -84609,6 +84667,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     outbox_created=False,
                     xu_charged=0,
                 )
+                session["draft"] = current
+                session["flow_owner"] = "selfshot3"
+                session["flow_session_id"] = str(current.get("session_id") or "")
+                session["flow_revision"] = safe_int(current.get("revision"), 1)
+                session["media_owner"] = "selfshot3"
+                session["media_session_id"] = str(current.get("session_id") or "")
                 session["awaiting_media"] = True
                 session["source_file_id"] = None
                 session["product_id"] = video_selfshot3.PRODUCT_ID
@@ -87942,6 +88006,7 @@ async def handle_storyboard2_pending_text(update: Update, context: ContextTypes.
                 parse_mode="HTML",
                 reply_markup=quick_image_prepared_prompt_keyboard(
                     get_user_language(update.effective_user.id) or "vi",
+                    state=flow,
                     back_callback="vstory|image_prompt_screen",
                     back_label="⬅️ Prompt ảnh",
                     context_return_callback="vstory|image_return",
@@ -88600,7 +88665,14 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             await update.message.reply_text(video_microflow_missing_input_text(lang), reply_markup=video_microflow_keyboard(current_step, str(session.get("product_id") or ""), lang))
             return True
         if current_step in video_steps and media_type != "video":
-            await update.message.reply_text(video_microflow_missing_input_text(lang), reply_markup=video_microflow_keyboard(current_step, str(session.get("product_id") or ""), lang))
+            active_product = str(session.get("product_id") or "")
+            if current_step == "awaiting_selfshot2_video" and active_product == video_selfshot2.PRODUCT_ID:
+                keyboard = video_selfshot2_input_keyboard("intro")
+            elif current_step == "awaiting_selfshot3_video" and active_product == video_selfshot3.PRODUCT_ID:
+                keyboard = video_selfshot3_source_request_keyboard()
+            else:
+                keyboard = video_microflow_keyboard(current_step, active_product, lang)
+            await update.message.reply_text(video_microflow_missing_input_text(lang), reply_markup=keyboard)
             return True
         product_id = str(session.get("product_id") or "")
         draft = dict(session.get("draft") or {})
@@ -88644,19 +88716,40 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             await video_selfshot2_render(update.message, uid, "addons", draft=current)
             return True
         if current_step == "awaiting_selfshot2_video" and product_id == video_selfshot2.PRODUCT_ID:
+            if not video_selfshot_media_owner_valid(
+                session,
+                owner="selfshot2",
+                product_id=video_selfshot2.PRODUCT_ID,
+                step="awaiting_selfshot2_video",
+            ):
+                await update.message.reply_text(
+                    "⚠️ Phiên nhận video Tự quay & đổi cảnh AI đã cũ. Hãy mở lại đúng sản phẩm rồi gửi video. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot_product_hub_keyboard(),
+                )
+                return True
             message_id = safe_int(getattr(update.message, "message_id", 0), 0)
             if message_id and safe_int(draft.get("selfshot2_last_media_message_id"), 0) == message_id:
                 return True
-            local_probe = await inspect_video_editor_source(
-                context,
-                {
-                    "source_file_id": file_id,
-                    "source_file_name": str(getattr(media, "file_name", "") or "selfshot2-source.mp4"),
-                    "source_mime_type": mime_type or "video/mp4",
-                    "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
-                    "source_duration": safe_int(getattr(media, "duration", 0), 0),
-                },
-            )
+            try:
+                local_probe = await inspect_video_editor_source(
+                    context,
+                    {
+                        "source_file_id": file_id,
+                        "source_file_name": str(getattr(media, "file_name", "") or "selfshot2-source.mp4"),
+                        "source_mime_type": mime_type or "video/mp4",
+                        "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
+                        "source_duration": safe_int(getattr(media, "duration", 0), 0),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("selfshot2_local_probe_failed | exception=%s", type(exc).__name__)
+                await update.message.reply_text(
+                    "⚠️ Chưa đọc được video nguồn. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                )
+                return True
             if not local_probe.get("ok"):
                 reason = str(local_probe.get("reason") or "invalid_video_metadata")
                 await update.message.reply_text(
@@ -88680,8 +88773,17 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "video_codec": str(local_probe.get("video_codec") or ""),
                 "probe_source": "local_ffprobe",
             }
-            analysis = video_selfshot2.analyze_source(source_asset)
-            gate = video_selfshot2.source_gate(source_asset, analysis)
+            try:
+                analysis = video_selfshot2.analyze_source(source_asset)
+                gate = video_selfshot2.source_gate(source_asset, analysis)
+            except Exception as exc:
+                logger.warning("selfshot2_source_analysis_failed | exception=%s", type(exc).__name__)
+                await update.message.reply_text(
+                    "⚠️ Chưa phân tích được video nguồn. Anh/chị có thể gửi lại video khác; phiên Tự quay & đổi cảnh AI vẫn được giữ. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                )
+                return True
             if not gate.get("ok"):
                 await update.message.reply_text(
                     "⚠️ Video chưa có đủ thời lượng hoặc kích thước. Hãy gửi lại dưới dạng video/tệp video, không gửi liên kết. "
@@ -88714,25 +88816,74 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             await video_selfshot2_render(update.message, uid, "analysis", draft=current)
             return True
         if current_step == "awaiting_selfshot3_video" and product_id == video_selfshot3.PRODUCT_ID:
+            if not video_selfshot_media_owner_valid(
+                session,
+                owner="selfshot3",
+                product_id=video_selfshot3.PRODUCT_ID,
+                step="awaiting_selfshot3_video",
+            ):
+                await update.message.reply_text(
+                    "⚠️ Phiên nhận video Tự quay & biến đổi điện ảnh đã cũ. Hãy mở lại đúng sản phẩm rồi gửi video. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot_product_hub_keyboard(),
+                )
+                return True
             message_id = safe_int(getattr(update.message, "message_id", 0), 0)
             if message_id and safe_int(draft.get("selfshot3_last_media_message_id"), 0) == message_id:
+                return True
+            try:
+                local_probe = await inspect_video_editor_source(
+                    context,
+                    {
+                        "source_file_id": file_id,
+                        "source_file_name": str(getattr(media, "file_name", "") or "selfshot3-source.mp4"),
+                        "source_mime_type": mime_type or "video/mp4",
+                        "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
+                        "source_duration": safe_int(getattr(media, "duration", 0), 0),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("selfshot3_local_probe_failed | exception=%s", type(exc).__name__)
+                await update.message.reply_text(
+                    "⚠️ Chưa đọc được video mộc. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot3_source_request_keyboard(),
+                )
+                return True
+            if not local_probe.get("ok"):
+                reason = str(local_probe.get("reason") or "invalid_video_metadata")
+                await update.message.reply_text(
+                    f"{video_local_public_error(reason)} TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot3_source_request_keyboard(),
+                )
                 return True
             source_asset = {
                 "media_kind": "video",
                 "file_id": file_id,
                 "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
-                "file_size": safe_int(getattr(media, "file_size", 0), 0),
+                "file_size": safe_int(local_probe.get("bytes"), safe_int(getattr(media, "file_size", 0), 0)),
                 "mime_type": mime_type or "video/mp4",
                 "file_name": str(getattr(media, "file_name", "") or ""),
-                "duration_seconds": float(getattr(media, "duration", 0) or 0),
-                "width": safe_int(getattr(media, "width", 0), 0),
-                "height": safe_int(getattr(media, "height", 0), 0),
-                "fps": 0,
-                "audio_streams": 0,
-                "probe_source": "telegram_video_metadata",
+                "duration_seconds": float(local_probe.get("duration") or getattr(media, "duration", 0) or 0),
+                "width": safe_int(local_probe.get("width"), safe_int(getattr(media, "width", 0), 0)),
+                "height": safe_int(local_probe.get("height"), safe_int(getattr(media, "height", 0), 0)),
+                "fps": float(local_probe.get("fps") or 0),
+                "audio_streams": safe_int(local_probe.get("audio_stream_count"), 0),
+                "format": str(local_probe.get("format_name") or mime_type or "video/mp4"),
+                "video_codec": str(local_probe.get("video_codec") or ""),
+                "probe_source": "local_ffprobe",
             }
-            analysis = video_selfshot3.analyze_source(source_asset)
-            gate = video_selfshot3.source_gate(source_asset, analysis)
+            try:
+                analysis = video_selfshot3.analyze_source(source_asset)
+                gate = video_selfshot3.source_gate(source_asset, analysis)
+            except Exception as exc:
+                logger.warning("selfshot3_source_analysis_failed | exception=%s", type(exc).__name__)
+                await update.message.reply_text(
+                    "⚠️ Chưa phân tích được video mộc. Anh/chị có thể gửi lại video khác; phiên biến đổi điện ảnh vẫn được giữ. "
+                    "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                    reply_markup=video_selfshot3_source_request_keyboard(),
+                )
+                return True
             if not gate.get("ok"):
                 await update.message.reply_text(
                     "⚠️ Video chưa có đủ thông tin thời lượng hoặc khung hình. Hãy gửi lại video dạng video, không gửi liên kết. "
@@ -88747,7 +88898,7 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "source_analysis": analysis,
                 "source_file_id": file_id,
                 "source_materialization_required": True,
-                "source_probe_policy": "telegram_metadata_until_worker_probe",
+                "source_probe_policy": "local_ffprobe_once_then_worker_revalidate",
                 "source_media_ref": file_id,
                 "source_media_refs": [file_id],
                 "source_asset_items": [source_asset],
@@ -93787,15 +93938,29 @@ def video_idea_product_lane_origin(context=None, state: dict | None = None) -> s
     if not candidate:
         user_data = getattr(context, "user_data", None)
         if isinstance(user_data, dict):
-            candidate = str(user_data.get("video_idea_origin_product") or "").strip()
+            parent = video_idea_handoff.normalize_parent_handoff(
+                user_data.get("video_idea_parent_handoff")
+            )
+            candidate = str(
+                parent.get("origin_product")
+                or user_data.get("video_idea_origin_product")
+                or ""
+            ).strip()
     return candidate if candidate in VIDEO_IDEA_PRODUCT_LANE_PRODUCTS else ""
 
 
 def video_idea_catalog_back_callback(context=None, state: dict | None = None) -> str:
     user_data = getattr(context, "user_data", None)
     if isinstance(user_data, dict):
-        explicit = str(user_data.get("video_idea_return_callback") or "").strip()
-        if explicit in {"vtrend|idea_return", "vstory|idea_return"}:
+        parent = video_idea_handoff.normalize_parent_handoff(
+            user_data.get("video_idea_parent_handoff")
+        )
+        explicit = str(
+            parent.get("return_callback")
+            or user_data.get("video_idea_return_callback")
+            or ""
+        ).strip()
+        if explicit:
             return explicit
     product_id = video_idea_product_lane_origin(context, state)
     return f"vproduct|idea_back|{product_id}" if product_id else "videoidea|start"
@@ -96705,8 +96870,7 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
-    if action == "public_guard" or not is_admin_user(uid):
-        clear_developing_video_pending(uid)
+    if action == "public_guard" or not video_long_planning.public_access_allowed(is_admin=is_admin_user(uid)):
         return await safe_edit_query_message(
             query,
             MULTISCENE_LONG_VIDEO_GUARD_TEXT,
@@ -97192,6 +97356,107 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
     return video_scene3_flow.normalize_state(handoff)
 
 
+async def video_idea_render_exact_parent(
+    query,
+    context,
+    user_id: int,
+    handoff: dict,
+    idea_state: dict,
+    lang: str,
+):
+    """Render an approved idea in the component that owns its parent flow."""
+
+    product_id = str(handoff.get("source_product_id") or handoff.get("idea_origin_product") or "")
+    parent_state = dict(handoff.get("idea_parent_state") or {})
+    scene_drafts = [
+        dict(item)
+        for item in idea_state.get("scene_drafts") or []
+        if isinstance(item, dict)
+    ]
+    subject = str(handoff.get("subject") or idea_state.get("subject") or "Ý tưởng video").strip()
+
+    if product_id == "storyboard_prompt":
+        board = video_storyboard2.normalize_state(
+            parent_state.get("storyboard2") or storyboard2_state(context)
+        )
+        board = video_storyboard2.set_scene_count(
+            board,
+            max(1, min(20, safe_int(handoff.get("scene_count"), 1))),
+        )
+        ratio = str(handoff.get("aspect_ratio") or "9:16")
+        if ratio in video_storyboard2.SUPPORTED_RATIOS:
+            board = video_storyboard2.set_ratio(board, ratio)
+        board = video_storyboard2.apply_content(board, subject, mode="idea_catalog")
+        for index, draft in enumerate(scene_drafts[: int(board.get("scene_count") or 0)], 1):
+            content = str(
+                draft.get("content")
+                or draft.get("main_action")
+                or draft.get("idea")
+                or ""
+            ).strip()
+            if content:
+                board = video_storyboard2.set_scene_content(board, index, content)
+        board = video_storyboard2.approve_content(board)
+        board["content_source"] = "idea_catalog"
+        board["history"] = ["content_source"]
+        board = video_storyboard2.move(board, "scene_review", push=False, awaiting_input="")
+        save_storyboard2_state(context, board)
+        return await storyboard2_render(query, context, board)
+
+    if product_id == video_selfshot2.PRODUCT_ID:
+        draft = video_selfshot2_draft({"draft": parent_state})
+        assets = dict(handoff.get("reference_assets") or {})
+        source_ref = str(assets.get("source_media_ref") or "").strip()
+        if source_ref and not draft.get("source_video"):
+            draft["source_video"] = {"file_id": source_ref, "source": "idea_parent"}
+        draft["scene_count"] = max(1, min(20, safe_int(handoff.get("scene_count"), 1)))
+        draft["aspect_ratio"] = str(handoff.get("aspect_ratio") or "9:16")
+        draft["selected_content"] = {
+            "id": str((idea_state.get("idea_preset") or {}).get("preset_key") or "idea_catalog"),
+            "title": subject,
+            "summary": subject,
+            "scene_drafts": scene_drafts,
+        }
+        draft["content_source"] = "ideas"
+        draft["content_return_screen"] = "ideas"
+        if not draft.get("direction_contract"):
+            draft["direction_contract"] = video_selfshot2.direction_contract("source_camera")
+            draft["selected_direction"] = "source_camera"
+        draft["scene_plan"] = video_selfshot2_build_plan(draft)
+        draft["video_prompts"] = []
+        save_video_selfshot2_draft(user_id, draft, step="selfshot2:scene_plan")
+        return await video_selfshot2_render(query, user_id, "scene_plan", draft=draft)
+
+    if product_id == video_selfshot3.PRODUCT_ID:
+        draft = video_selfshot3_draft({"draft": parent_state})
+        assets = dict(handoff.get("reference_assets") or {})
+        source_ref = str(assets.get("source_media_ref") or "").strip()
+        if source_ref and not draft.get("source_video"):
+            draft["source_video"] = {"file_id": source_ref, "source": "idea_parent"}
+        preset = dict(idea_state.get("idea_preset") or {})
+        draft["selected_preset"] = {
+            "preset_id": str(preset.get("preset_key") or preset.get("id") or "idea_catalog"),
+            "title": str(preset.get("title") or subject),
+            "summary": subject,
+        }
+        draft["preset_source"] = "idea_library"
+        draft["transformation_content"] = subject
+        if not draft.get("source_segment"):
+            analysis = dict(draft.get("source_analysis") or {})
+            if float(analysis.get("duration_seconds") or 0) > 0:
+                draft["source_segment"] = video_selfshot3.segment_selection(analysis)
+        if draft.get("source_segment"):
+            draft["transformation_stages"] = video_selfshot3_build_timeline(draft)
+            target_screen = "timeline"
+        else:
+            target_screen = "segment"
+        save_video_selfshot3_draft(user_id, draft, step=f"selfshot3:{target_screen}")
+        return await video_selfshot3_render(query, user_id, target_screen, draft=draft)
+
+    handoff = save_video_profile_studio_state(context, handoff)
+    return await video_profile_scene1_render(query, handoff, lang)
+
+
 async def handle_video_idea_dynamic_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -97250,6 +97515,9 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             )
         presets = video_idea_dynamic_presets(category_id, offset=0, limit=5)
         intake = dict(context.user_data.get("video_idea_flow7_intake") or {})
+        parent_handoff = video_idea_handoff.normalize_parent_handoff(
+            context.user_data.get("video_idea_parent_handoff")
+        )
         state = {
             "idea2": True,
             "idea_category_id": category_id,
@@ -97266,6 +97534,7 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             "scene_count": safe_int(intake.get("scene_count"), 0),
             "recommended_aspect_ratio": str(intake.get("aspect_ratio") or ""),
             "trend_source": dict(intake.get("trend_source") or {}),
+            "idea_parent_handoff": parent_handoff,
             "provider_called": False,
             "image_provider_called": False,
             "music_provider_calls": 0,
@@ -97346,6 +97615,10 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             )
         state = video_idea_dynamic_state(uid)
         intake = dict(context.user_data.get("video_idea_flow7_intake") or {})
+        parent_handoff = video_idea_handoff.normalize_parent_handoff(
+            context.user_data.get("video_idea_parent_handoff")
+            or state.get("idea_parent_handoff")
+        )
         origin_product = video_idea_product_lane_origin(context, state)
         state.update({
             "idea2": True,
@@ -97354,6 +97627,24 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             "idea_preset_version": safe_int(preset.get("version"), 1),
             "idea_preset": preset,
             "idea_source": "preset_auto",
+            "idea_source_flow": str(
+                parent_handoff.get("idea_source_flow")
+                or parent_handoff.get("source_flow")
+                or origin_product
+                or "video_idea"
+            ),
+            "idea_return_step": str(
+                parent_handoff.get("idea_return_step")
+                or parent_handoff.get("return_step")
+                or "video_prompts"
+            ),
+            "idea_content": str(preset.get("description") or preset.get("title") or "Ý tưởng video"),
+            "idea_prompt": str(
+                preset.get("user_prompt_template")
+                or preset.get("system_guidance")
+                or preset.get("title")
+                or "Ý tưởng video"
+            ),
             "subject": str(preset.get("title") or "Ý tưởng video"),
             "recommended_aspect_ratio": str(preset.get("recommended_aspect_ratio") or preset.get("aspect_ratio") or "9:16"),
             "idea_origin_product": origin_product,
@@ -97372,6 +97663,7 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 if isinstance(item, dict)
             ][:20],
             "trend_source": dict(intake.get("trend_source") or state.get("trend_source") or {}),
+            "idea_parent_handoff": parent_handoff,
         })
         if origin_product:
             state["scene_count"] = max(
@@ -97527,12 +97819,28 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 reply_markup=video_idea_dynamic_preset_keyboard(preset, lang),
             )
         origin_product = video_idea_product_lane_origin(context, state)
+        parent_handoff = video_idea_handoff.normalize_parent_handoff(
+            state.get("idea_parent_handoff")
+            or context.user_data.get("video_idea_parent_handoff")
+        )
+        if origin_product and not parent_handoff:
+            compatibility_state = {
+                **dict(context.user_data.get("video_idea_flow7_intake") or {}),
+                **state,
+            }
+            parent_handoff = video_idea_handoff.build_parent_handoff(
+                compatibility_state,
+                product_id=origin_product,
+                return_callback=video_idea_catalog_back_callback(context, state),
+            )
         try:
             handoff = (
                 video_idea_dynamic_scene3_state(state, origin_product=origin_product)
                 if origin_product
                 else video_idea_dynamic_scene3_state(state)
             )
+            if origin_product:
+                handoff = video_idea_handoff.apply_parent_handoff(handoff, parent_handoff)
         except ValueError as exc:
             if str(exc) == "self_shot_source_video_required":
                 return await safe_edit_or_send(
@@ -97543,41 +97851,36 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
                     ]]),
                 )
-            if origin_product == "video_trend":
-                logger.exception(
-                    "video_trend_idea_handoff_rejected | callback=%s preset=%s blocker=%s",
-                    sanitize_log_text(str(getattr(query, "data", "") or ""))[:120],
-                    safe_int(state.get("idea_preset_id"), 0),
-                    sanitize_log_text(str(exc))[:160],
-                )
-                restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
-                return await safe_edit_or_send_long_html(
-                    query,
-                    "⚠️ <b>Ý tưởng này còn thiếu dữ liệu bắt buộc để mở phần câu lệnh.</b>\n\n"
-                    "Phiên Trend, số cảnh và tỉ lệ vẫn được giữ. Anh/chị có thể sửa nội dung "
-                    "hoặc quay lại chọn mẫu khác; hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
-                    + video_idea_dynamic_preview_text(state),
-                    reply_markup=video_idea_dynamic_preview_keyboard(lang),
-                )
-            raise
+            logger.warning(
+                "video_idea_parent_handoff_rejected | product=%s preset=%s blocker=%s",
+                sanitize_log_text(origin_product)[:80],
+                safe_int(state.get("idea_preset_id"), 0),
+                sanitize_log_text(str(exc))[:160],
+            )
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+            return await safe_edit_or_send_long_html(
+                query,
+                "⚠️ <b>Ý tưởng này còn thiếu dữ liệu để quay lại đúng bước của video.</b>\n\n"
+                "Phiên cha, số cảnh, tỉ lệ và nội dung vẫn được giữ. Anh/chị có thể sửa nội dung "
+                "hoặc quay lại chọn mẫu khác; hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
+                + video_idea_dynamic_preview_text(state),
+                reply_markup=video_idea_dynamic_preview_keyboard(lang),
+            )
         except Exception as exc:
-            if origin_product == "video_trend":
-                logger.exception(
-                    "video_trend_idea_handoff_failed | callback=%s preset=%s exception=%s",
-                    sanitize_log_text(str(getattr(query, "data", "") or ""))[:120],
-                    safe_int(state.get("idea_preset_id"), 0),
-                    type(exc).__name__,
-                )
-                restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
-                return await safe_edit_or_send_long_html(
-                    query,
-                    "⚠️ <b>Ý tưởng này chưa đủ cấu hình để mở phần câu lệnh.</b>\n\n"
-                    "Phiên Trend, số cảnh và tỉ lệ vẫn được giữ. Anh/chị có thể sửa nội dung "
-                    "hoặc quay lại chọn mẫu khác; hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
-                    + video_idea_dynamic_preview_text(state),
-                    reply_markup=video_idea_dynamic_preview_keyboard(lang),
-                )
-            raise
+            logger.exception(
+                "video_idea_parent_handoff_failed | product=%s preset=%s exception=%s",
+                sanitize_log_text(origin_product)[:80],
+                safe_int(state.get("idea_preset_id"), 0),
+                type(exc).__name__,
+            )
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+            return await safe_edit_or_send_long_html(
+                query,
+                "⚠️ <b>Chưa thể mở bước tiếp theo từ ý tưởng này.</b>\n\n"
+                "TOAN AAS đã giữ nguyên phiên và chưa tạo tác vụ, chưa gọi nguồn dựng, chưa trừ Xu.\n\n"
+                + video_idea_dynamic_preview_text(state),
+                reply_markup=video_idea_dynamic_preview_keyboard(lang),
+            )
         save_developing_video_plan(uid, "videoidea", {
             **state,
             "final_confirmed": False,
@@ -97591,16 +97894,49 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
             "wallet_mutations": 0,
             "xu_charged": 0,
         })
+        try:
+            if origin_product in {
+                "storyboard_prompt",
+                video_selfshot2.PRODUCT_ID,
+                video_selfshot3.PRODUCT_ID,
+            }:
+                rendered = await video_idea_render_exact_parent(
+                    query,
+                    context,
+                    uid,
+                    handoff,
+                    state,
+                    lang,
+                )
+            else:
+                handoff = save_video_profile_studio_state(context, handoff)
+                rendered = await video_profile_scene1_render(query, handoff, lang)
+        except Exception as exc:
+            logger.exception(
+                "video_idea_exact_parent_render_failed | product=%s preset=%s exception=%s",
+                sanitize_log_text(origin_product)[:80],
+                safe_int(state.get("idea_preset_id"), 0),
+                type(exc).__name__,
+            )
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+            return await safe_edit_or_send_long_html(
+                query,
+                "⚠️ <b>Chưa thể quay lại đúng bước của sản phẩm.</b>\n\n"
+                "TOAN AAS giữ nguyên ý tưởng, số cảnh, tỉ lệ và phiên cha; chưa tạo tác vụ, "
+                "chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+                + video_idea_dynamic_preview_text(state),
+                reply_markup=video_idea_dynamic_preview_keyboard(lang),
+            )
         clear_developing_video_pending(uid)
         for key in (
             "video_idea_flow7_intake",
+            "video_idea_parent_handoff",
             "video_idea_origin_product",
             "video_idea_source_media_refs",
             "video_idea_return_callback",
         ):
             context.user_data.pop(key, None)
-        handoff = save_video_profile_studio_state(context, handoff)
-        return await video_profile_scene1_render(query, handoff, lang)
+        return rendered
 
     return await safe_edit_or_send_long_html(
         query,
@@ -118590,7 +118926,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 reply_markup=(video_finalization_tier_keyboard(lang) if get_video_finalization_state(uid) else public_video_tier_keyboard(lang)),
             )
         if str(pending.get("source") or "") == "quick_image_v6":
-            block_markup = quick_image_confirm_keyboard(token, lang)
+            quick_state = get_quick_image_flow(uid) or {}
+            block_markup = quick_image_confirm_keyboard(token, lang, quick_state)
         elif str(pending.get("source") or "") in {"image_prompt_tool", "image_edit_create_new"}:
             block_markup = image_prompt_confirm_keyboard(token, image_tier, lang, str(pending.get("source") or "image_prompt_tool"))
         else:
@@ -152947,7 +153284,8 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
             "prompt", "prompt_source", "selected_topic", "negative_prompt", "original_request",
             "image_purpose", "purpose_label", "style", "suggested_ratio", "text_logo_caution",
             "logo_watermark_text", "ratio_back_target", "return_to", "return_label", "source_flow",
-            "storyboard_scene_id", "storyboard_slot",
+            "storyboard_scene_id", "storyboard_slot", "flow", "product", "owner", "session_id", "return_step",
+            "generation_state", "idea_id",
         }:
             limit = 300 if key == "logo_watermark_text" else 1400
             payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:limit]
@@ -152955,7 +153293,7 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
             payload[key] = str(value or "").strip()[:120]
         elif key == "logo_watermark_position":
             payload[key] = logo_watermark_normalize_position(value) if str(value or "").strip() else ""
-        elif key in {"suggest_offset", "prompt_variant", "storyboard_scene_index", "storyboard_prompt_version"}:
+        elif key in {"suggest_offset", "prompt_variant", "storyboard_scene_index", "storyboard_prompt_version", "revision"}:
             payload[key] = max(0, _safe_int(value, 0))
         elif key in {"logo_watermark_enabled", "logo_watermark_decided"}:
             payload[key] = bool(value)
@@ -152987,6 +153325,23 @@ def quick_image_context_return_label(state: dict | None = None, lang: str = "vi"
     if str(state.get("source_flow") or "") == "video_scene3":
         return str(state.get("return_label") or ("⬅️ Nguồn hình ảnh" if normalize_user_language(lang) == "vi" else "⬅️ Image source"))
     return "⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back"
+
+
+def quick_image_callback_namespace(state: dict | None = None) -> str:
+    state = dict(state or {})
+    if (
+        str(state.get("owner") or "") == "storyboard_image"
+        and str(state.get("flow") or "") == "storyboard"
+        and str(state.get("return_to") or "") == "vstory|image_return"
+    ):
+        return "vstoryimg"
+    return "create_media"
+
+
+def quick_image_callback(state: dict | None, action: str, value: str = "") -> str:
+    prefix = quick_image_callback_namespace(state)
+    suffix = f"|{value}" if str(value or "") else ""
+    return f"{prefix}|{action}{suffix}"
 
 
 def quick_image_video_scene3_confirmation_fields(state: dict | None = None) -> dict:
@@ -153256,10 +153611,19 @@ def quick_image_entry_text(lang: str = "vi") -> str:
 def quick_image_entry_keyboard(
     lang: str = "vi",
     *,
+    state: dict | None = None,
     back_callback: str = "menu|main_image",
     back_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
+    state_data = dict(state or {})
+    callback_prefix = (
+        "vstoryimg"
+        if str(state_data.get("owner") or "") == "storyboard_image"
+        and str(state_data.get("flow") or "") == "storyboard"
+        and str(state_data.get("product") or "") == "storyboard_prompt"
+        else "create_media"
+    )
     back_text = back_label or ("⬅️ Quay lại" if vi else "⬅️ Back")
     back_button = (
         InlineKeyboardButton(back_text, callback_data="menu|main_image")
@@ -153268,8 +153632,8 @@ def quick_image_entry_keyboard(
     )
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💡 Chọn từ 5 gợi ý" if vi else "💡 Choose from 5 ideas", callback_data="create_media|qi_suggest"),
-            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
+            InlineKeyboardButton("💡 Chọn từ 5 gợi ý" if vi else "💡 Choose from 5 ideas", callback_data=f"{callback_prefix}|qi_suggest"),
+            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data=f"{callback_prefix}|qi_custom"),
         ],
         [
             back_button,
@@ -153288,19 +153652,19 @@ def quick_image_suggestions_text(state: dict | None = None, lang: str = "vi") ->
     lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
     return "\n".join(lines)
 
-def quick_image_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_suggestions_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(str(index), callback_data=f"create_media|qi_pick_{index}")
+            InlineKeyboardButton(str(index), callback_data=quick_image_callback(state, f"qi_pick_{index}"))
             for index in range(1, 6)
         ],
         [
-            InlineKeyboardButton("🔄 Đổi gợi ý" if vi else "🔄 More ideas", callback_data="create_media|qi_refresh"),
-            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data="create_media|qi_custom"),
+            InlineKeyboardButton("🔄 Đổi gợi ý" if vi else "🔄 More ideas", callback_data=quick_image_callback(state, "qi_refresh")),
+            InlineKeyboardButton("✍️ Tự nhập prompt" if vi else "✍️ Custom prompt", callback_data=quick_image_callback(state, "qi_custom")),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
+            InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data=quick_image_callback(state, "qi_entry")),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -153355,25 +153719,35 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
 def quick_image_prepared_prompt_keyboard(
     lang: str = "vi",
     *,
+    state: dict | None = None,
     back_callback: str = "create_media|qi_back_source",
     back_label: str | None = None,
     context_return_callback: str = "menu|main_image",
     context_return_label: str | None = None,
 ) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
+    state_data = dict(state or {})
+    callback_prefix = (
+        "vstoryimg"
+        if str(state_data.get("owner") or "") == "storyboard_image"
+        and str(state_data.get("flow") or "") == "storyboard"
+        and str(state_data.get("product") or "") == "storyboard_prompt"
+        else "create_media"
+    )
+    callback_for = lambda action: f"{callback_prefix}|{action}"
     back_text = back_label or ("⬅️ Quay lại" if vi else "⬅️ Back")
     context_text = context_return_label or ("🖼 Menu ảnh" if vi else "🖼 Image menu")
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
-            InlineKeyboardButton("🎭 Logo / Watermark", callback_data="create_media|qi_logo_choice"),
+            InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data=callback_for("qi_choose_ratio")),
+            InlineKeyboardButton("🎭 Logo / Watermark", callback_data=callback_for("qi_logo_choice")),
         ],
         [
-            InlineKeyboardButton("🔄 Tối ưu lại prompt" if vi else "🔄 Re-optimize prompt", callback_data="create_media|qi_rewrite"),
-            InlineKeyboardButton("✍️ Sửa prompt" if vi else "✍️ Edit prompt", callback_data="create_media|qi_custom"),
+            InlineKeyboardButton("🔄 Tối ưu lại prompt" if vi else "🔄 Re-optimize prompt", callback_data=callback_for("qi_rewrite")),
+            InlineKeyboardButton("✍️ Sửa prompt" if vi else "✍️ Edit prompt", callback_data=callback_for("qi_custom")),
         ],
         [
-            InlineKeyboardButton("🔄 Đổi ý tưởng" if vi else "🔄 Change idea", callback_data="create_media|qi_topics"),
+            InlineKeyboardButton("🔄 Đổi ý tưởng" if vi else "🔄 Change idea", callback_data=callback_for("qi_topics")),
             InlineKeyboardButton(back_text, callback_data=back_callback),
         ],
         [
@@ -153402,10 +153776,10 @@ def quick_image_custom_prompt_text(lang: str = "vi", prompt: str = "") -> str:
         f"{current}\n\nTOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
-def quick_image_custom_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_custom_prompt_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data="create_media|qi_entry"),
+        InlineKeyboardButton("⬅️ Quay lại" if vi else "⬅️ Back", callback_data=quick_image_callback(state, "qi_back_prompt")),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ]])
 
@@ -153420,19 +153794,19 @@ def quick_image_ratio_text(state: dict | None = None, lang: str = "vi") -> str:
         return f"📐 <b>Choose aspect ratio</b>\n\nSelected prompt:\n<code>{html.escape(prompt)}</code>{logo_line_en}\nTOAN AAS has not started processing and has not charged Xu."
     return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nPrompt đã chọn:\n<code>{html.escape(prompt)}</code>{logo_line_vi}\nBạn muốn tạo theo tỉ lệ nào?\nTOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
 
-def quick_image_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_ratio_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     rows = []
     options = media_aspect_ratio_options("image")
     for idx in range(0, len(options), 2):
         rows.append([
             InlineKeyboardButton(
                 media_aspect_ratio_label(aspect, "image", lang),
-                callback_data=f"create_media|qi_ratio_{media_aspect_ratio_token(aspect)}",
+                callback_data=quick_image_callback(state, f"qi_ratio_{media_aspect_ratio_token(aspect)}"),
             )
             for aspect in options[idx:idx + 2]
         ])
     rows.append([
-        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_prompt"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_back_prompt")),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -153463,28 +153837,28 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
         "Xu chỉ được trừ sau bước xác nhận cuối."
     )
 
-def quick_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_tier_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     tier_buttons = [
-        InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=f"create_media|qi_tier_{tier}")
+        InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=quick_image_callback(state, f"qi_tier_{tier}"))
         for tier in IMAGE_TIER_ORDER
     ]
     rows = [tier_buttons[index:index + 2] for index in range(0, len(tier_buttons), 2)]
     if len(rows[-1]) == 1:
-        rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_ratio"))
+        rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_back_ratio")))
     else:
-        rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_ratio")])
+        rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_back_ratio"))])
     rows.append([
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel"),
+        InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=quick_image_callback(state, "cancel")),
     ])
     return InlineKeyboardMarkup(rows)
 
-def quick_image_confirm_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_confirm_keyboard(token: str, lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Xác nhận tạo" if vi else "✅ Confirm generation", callback_data=f"shopai|confirm|{token}"),
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_tier"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_back_tier")),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -153637,18 +154011,18 @@ def quick_image_logo_choice_text(state: dict | None = None, lang: str = "vi") ->
     state = state or {}
     return media_logo_watermark_choice_text("image", state.get("prompt") or "", lang)
 
-def quick_image_logo_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_logo_choice_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     is_vi = lang == "vi"
     add_label = "🎭 添加 Logo/Watermark" if lang == "zh" else "🎭 Gắn Logo/Watermark" if is_vi else "🎭 Add Logo/Watermark"
     skip_label = "⏭ 跳过" if lang == "zh" else "⏭ Bỏ qua" if is_vi else "⏭ Skip"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(add_label, callback_data="create_media|qi_logo_add"),
-            InlineKeyboardButton(skip_label, callback_data="create_media|qi_logo_skip"),
+            InlineKeyboardButton(add_label, callback_data=quick_image_callback(state, "qi_logo_add")),
+            InlineKeyboardButton(skip_label, callback_data=quick_image_callback(state, "qi_logo_skip")),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_prompt"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_back_prompt")),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -153656,26 +154030,33 @@ def quick_image_logo_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def quick_image_logo_input_text(lang: str = "vi") -> str:
     return media_logo_watermark_input_text("image", lang)
 
-def quick_image_logo_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_logo_input_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_logo_choice"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_logo_choice")),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ]])
 
 def quick_image_logo_position_text(state: dict | None = None, lang: str = "vi") -> str:
     return media_logo_watermark_position_text((state or {}).get("logo_watermark_text") or "", lang)
 
-def quick_image_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return media_logo_watermark_position_keyboard("image", lang, "qi_logo_pos", "create_media|qi_logo_add")
+def quick_image_logo_position_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
+    namespace = quick_image_callback_namespace(state)
+    return media_logo_watermark_position_keyboard(
+        "image",
+        lang,
+        "qi_logo_pos",
+        quick_image_callback(state, "qi_logo_add"),
+        callback_namespace=namespace,
+    )
 
 def quick_image_logo_confirm_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     return media_logo_watermark_confirm_text(state.get("logo_watermark_text") or "", lang, state.get("logo_watermark_position") or "")
 
-def quick_image_logo_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def quick_image_logo_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data="create_media|qi_logo_confirm"),
-        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_logo_add"),
+        InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=quick_image_callback(state, "qi_logo_confirm")),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=quick_image_callback(state, "qi_logo_add")),
     ]])
 
 def media_logo_watermark_input_text(kind: str = "image", lang: str = "vi") -> str:
@@ -153743,28 +154124,35 @@ def media_logo_watermark_position_text(text: str = "", lang: str = "vi") -> str:
         "Bạn muốn đặt Logo / Watermark ở đâu? TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
-def media_logo_watermark_position_keyboard(kind: str = "image", lang: str = "vi", action_prefix: str = "image_logo_pos", back_callback: str = "") -> InlineKeyboardMarkup:
+def media_logo_watermark_position_keyboard(
+    kind: str = "image",
+    lang: str = "vi",
+    action_prefix: str = "image_logo_pos",
+    back_callback: str = "",
+    *,
+    callback_namespace: str = "create_media",
+) -> InlineKeyboardMarkup:
     kind_norm = "image" if str(kind or "").lower() == "image" else "video"
     default_back = f"create_media|{'image_logo_add' if kind_norm == 'image' else 'video_logo_add'}"
     back = back_callback or default_back
     rows = [
         [
-            InlineKeyboardButton("↖️ " + logo_watermark_position_label("top_left", lang), callback_data=f"create_media|{action_prefix}|top_left"),
-            InlineKeyboardButton("⬆️ " + logo_watermark_position_label("top_center", lang), callback_data=f"create_media|{action_prefix}|top_center"),
+            InlineKeyboardButton("↖️ " + logo_watermark_position_label("top_left", lang), callback_data=f"{callback_namespace}|{action_prefix}|top_left"),
+            InlineKeyboardButton("⬆️ " + logo_watermark_position_label("top_center", lang), callback_data=f"{callback_namespace}|{action_prefix}|top_center"),
         ],
         [
-            InlineKeyboardButton("↗️ " + logo_watermark_position_label("top_right", lang), callback_data=f"create_media|{action_prefix}|top_right"),
-            InlineKeyboardButton("⬅️ " + logo_watermark_position_label("center_left", lang), callback_data=f"create_media|{action_prefix}|center_left"),
+            InlineKeyboardButton("↗️ " + logo_watermark_position_label("top_right", lang), callback_data=f"{callback_namespace}|{action_prefix}|top_right"),
+            InlineKeyboardButton("⬅️ " + logo_watermark_position_label("center_left", lang), callback_data=f"{callback_namespace}|{action_prefix}|center_left"),
         ],
         [
-            InlineKeyboardButton("⏺ " + logo_watermark_position_label("center", lang), callback_data=f"create_media|{action_prefix}|center"),
-            InlineKeyboardButton("➡️ " + logo_watermark_position_label("center_right", lang), callback_data=f"create_media|{action_prefix}|center_right"),
+            InlineKeyboardButton("⏺ " + logo_watermark_position_label("center", lang), callback_data=f"{callback_namespace}|{action_prefix}|center"),
+            InlineKeyboardButton("➡️ " + logo_watermark_position_label("center_right", lang), callback_data=f"{callback_namespace}|{action_prefix}|center_right"),
         ],
         [
-            InlineKeyboardButton("↙️ " + logo_watermark_position_label("bottom_left", lang), callback_data=f"create_media|{action_prefix}|bottom_left"),
-            InlineKeyboardButton("⬇️ " + logo_watermark_position_label("bottom_center", lang), callback_data=f"create_media|{action_prefix}|bottom_center"),
+            InlineKeyboardButton("↙️ " + logo_watermark_position_label("bottom_left", lang), callback_data=f"{callback_namespace}|{action_prefix}|bottom_left"),
+            InlineKeyboardButton("⬇️ " + logo_watermark_position_label("bottom_center", lang), callback_data=f"{callback_namespace}|{action_prefix}|bottom_center"),
         ],
-        [InlineKeyboardButton("↘️ " + logo_watermark_position_label("bottom_right", lang), callback_data=f"create_media|{action_prefix}|bottom_right")],
+        [InlineKeyboardButton("↘️ " + logo_watermark_position_label("bottom_right", lang), callback_data=f"{callback_namespace}|{action_prefix}|bottom_right")],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
@@ -167251,7 +167639,7 @@ async def handle_quick_image_flow_pending_text(update: Update, context: ContextT
         await update.message.reply_text(
             quick_image_logo_position_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_logo_position_keyboard(lang),
+            reply_markup=quick_image_logo_position_keyboard(lang, state),
         )
         return True
     if pending.get("step") != "custom_prompt":
@@ -167279,6 +167667,7 @@ async def handle_quick_image_flow_pending_text(update: Update, context: ContextT
         parse_mode="HTML",
         reply_markup=quick_image_prepared_prompt_keyboard(
             lang,
+            state=state,
             context_return_callback=quick_image_context_return_callback(state),
             context_return_label=quick_image_context_return_label(state, lang),
         ),
@@ -167302,44 +167691,39 @@ async def handle_quick_media_pending_text(update: Update, context: ContextTypes.
     await run_quick_image_admin_smoke(update, context, prompt)
     return True
 
-async def handle_create_media_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+def storyboard_quick_image_owner_valid(context, state: dict | None = None) -> bool:
+    quick_state = dict(state or {})
+    board = storyboard2_state(context)
+    session_id = str(quick_state.get("session_id") or "")
+    board_session_id = str(board.get("storyboard_session_id") or "")
+    scene_index = _safe_int(quick_state.get("storyboard_scene_index"), 0)
+    slot = str(quick_state.get("storyboard_slot") or "")
+    return bool(
+        str(quick_state.get("owner") or "") == "storyboard_image"
+        and str(quick_state.get("flow") or "") == "storyboard"
+        and str(quick_state.get("product") or "") == "storyboard_prompt"
+        and str(quick_state.get("return_to") or "") == "vstory|image_return"
+        and session_id
+        and session_id == board_session_id
+        and 1 <= scene_index <= int(board.get("scene_count") or 0)
+        and slot in {"start", "end"}
+    )
+
+async def _handle_create_media_callback_impl(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    callback_data: str | None = None,
+    confirmation_context_fields: dict | None = None,
+):
     query = update.callback_query
     await query.answer()
-    callback_parts = str(query.data or "").split("|")
+    callback_parts = str(callback_data if callback_data is not None else (query.data or "")).split("|")
     action = callback_parts[1] if len(callback_parts) > 1 else ""
     value = callback_parts[2] if len(callback_parts) > 2 else ""
     uid = query.from_user.id if query.from_user else 0
     lang = get_user_language(uid) or "vi"
-    if action == "cancel":
-        quick_state = get_quick_image_flow(uid) or {}
-        if str(quick_state.get("source_flow") or "") == "video_scene3":
-            return_pending = {**quick_state, "origin_flow": "video_scene3"}
-            scene_state = video_scene3_record_generated_image(
-                context,
-                uid,
-                return_pending,
-                delivered=False,
-            )
-            clear_quick_image_flow(uid)
-            if isinstance(getattr(context, "user_data", None), dict):
-                context.user_data["video_scene3_image_handoff_active"] = False
-            if scene_state:
-                panel_text, panel_keyboard = video_scene3_image_handoff_panel(scene_state)
-                return await safe_edit_or_send(
-                    query,
-                    panel_text,
-                    parse_mode="HTML",
-                    reply_markup=panel_keyboard,
-                )
-            scene_state = video_profile_studio_state(context)
-            scene_state = video_profile_studio_step(context, scene_state, "image_source", push=False)
-            return await video_profile_scene1_render(query, scene_state, lang)
-        clear_media_creator_pending_states(uid)
-        return await safe_edit_or_send(
-            query,
-            ui_text(lang, "media.cancelled"),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")]]),
-        )
     if action == "main":
         notice = clear_pending_start_notice(uid)
         text = (notice or (ui_text(lang, "media.open_main") + "\n\n")) + localized_start_menu_text(uid, lang)
@@ -167387,6 +167771,21 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         )
     if action == "qi_entry":
         state = get_quick_image_flow(uid) or {}
+        if quick_image_callback_namespace(state) == "vstoryimg" and state.get("prompt"):
+            state = set_quick_image_flow(uid, "prepared_prompt", confirm_token="")
+            return await safe_edit_or_send(
+                query,
+                quick_image_prepared_prompt_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_prepared_prompt_keyboard(
+                    lang,
+                    state=state,
+                    back_callback="vstory|assets_screen",
+                    back_label="⬅️ Ảnh Storyboard",
+                    context_return_callback="vstory|image_return",
+                    context_return_label="🖼️ Ảnh Storyboard",
+                ),
+            )
         token = str(state.get("confirm_token") or "")
         if token:
             pop_shopaikey_pending_confirmation(token, uid)
@@ -167397,6 +167796,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=quick_image_entry_keyboard(
                 lang,
+                state=state,
                 back_callback=quick_image_context_return_callback(state),
                 back_label=quick_image_context_return_label(state, lang),
             ),
@@ -167411,7 +167811,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_suggestions_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_suggestions_keyboard(lang),
+            reply_markup=quick_image_suggestions_keyboard(lang, state),
         )
     if action == "qi_custom":
         state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
@@ -167419,13 +167819,14 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_custom_prompt_text(lang, state.get("prompt") or ""),
             parse_mode="HTML",
-            reply_markup=quick_image_custom_prompt_keyboard(lang),
+            reply_markup=quick_image_custom_prompt_keyboard(lang, state),
         )
     if action.startswith("qi_pick_"):
         state = get_quick_image_flow(uid)
         if not state:
             set_quick_image_flow(uid, "entry", suggest_offset=0)
-            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+            state = set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang, state=state))
         try:
             index = max(1, min(5, int(action.rsplit("_", 1)[1])))
         except Exception:
@@ -167454,6 +167855,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=quick_image_prepared_prompt_keyboard(
                 lang,
+                state=state,
                 context_return_callback=quick_image_context_return_callback(state),
                 context_return_label=quick_image_context_return_label(state, lang),
             ),
@@ -167463,7 +167865,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         topic = str(state.get("selected_topic") or "").strip()
         if not topic:
             state = set_quick_image_flow(uid, "suggestions")
-            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang, state))
         variant = _safe_int(state.get("prompt_variant"), 0) + 1
         prompt, negative_prompt = quick_image_prompt_from_topic(topic, lang, variant)
         state = set_quick_image_flow(uid, "prepared_prompt", prompt=prompt, negative_prompt=negative_prompt, prompt_variant=variant)
@@ -167473,58 +167875,83 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=quick_image_prepared_prompt_keyboard(
                 lang,
+                state=state,
                 context_return_callback=quick_image_context_return_callback(state),
                 context_return_label=quick_image_context_return_label(state, lang),
             ),
         )
     if action in {"qi_topics", "qi_back_suggestions"}:
+        current = get_quick_image_flow(uid) or {}
+        if quick_image_callback_namespace(current) == "vstoryimg":
+            state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
+            return await safe_edit_or_send(
+                query,
+                quick_image_custom_prompt_text(lang, state.get("original_request") or state.get("prompt") or ""),
+                parse_mode="HTML",
+                reply_markup=quick_image_custom_prompt_keyboard(lang, state),
+            )
         state = set_quick_image_flow(uid, "suggestions")
         return await safe_edit_or_send(
             query,
             quick_image_suggestions_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_suggestions_keyboard(lang),
+            reply_markup=quick_image_suggestions_keyboard(lang, state),
         )
     if action == "qi_back_source":
         state = get_quick_image_flow(uid) or {}
+        if quick_image_callback_namespace(state) == "vstoryimg" and state.get("prompt"):
+            state = set_quick_image_flow(uid, "prepared_prompt")
+            return await safe_edit_or_send(
+                query,
+                quick_image_prepared_prompt_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_prepared_prompt_keyboard(
+                    lang,
+                    state=state,
+                    back_callback="vstory|assets_screen",
+                    back_label="⬅️ Ảnh Storyboard",
+                    context_return_callback="vstory|image_return",
+                    context_return_label="🖼️ Ảnh Storyboard",
+                ),
+            )
         if state.get("prompt_source") == "custom":
             state = set_quick_image_flow(uid, "custom_prompt", prompt_source="custom")
             return await safe_edit_or_send(
                 query,
                 quick_image_custom_prompt_text(lang, state.get("original_request") or state.get("selected_topic") or ""),
                 parse_mode="HTML",
-                reply_markup=quick_image_custom_prompt_keyboard(lang),
+                reply_markup=quick_image_custom_prompt_keyboard(lang, state),
             )
         state = set_quick_image_flow(uid, "suggestions", prompt_source="suggestion")
         return await safe_edit_or_send(
             query,
             quick_image_suggestions_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_suggestions_keyboard(lang),
+            reply_markup=quick_image_suggestions_keyboard(lang, state),
         )
     if action == "qi_choose_ratio":
         state = get_quick_image_flow(uid) or {}
         if not state.get("prompt"):
             state = set_quick_image_flow(uid, "suggestions")
-            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang, state))
         state = set_quick_image_flow(uid, "ratio", ratio_back_target="prepared_prompt")
         return await safe_edit_or_send(
             query,
             quick_image_ratio_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_ratio_keyboard(lang),
+            reply_markup=quick_image_ratio_keyboard(lang, state),
         )
     if action == "qi_logo_choice":
         state = get_quick_image_flow(uid) or {}
         if not state.get("prompt"):
             state = set_quick_image_flow(uid, "suggestions")
-            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang, state))
         state = set_quick_image_flow(uid, "logo_choice")
         return await safe_edit_or_send(
             query,
             quick_image_logo_choice_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_logo_choice_keyboard(lang),
+            reply_markup=quick_image_logo_choice_keyboard(lang, state),
         )
     if action == "qi_logo_add":
         state = set_quick_image_flow(uid, "logo_input")
@@ -167532,7 +167959,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_logo_input_text(lang),
             parse_mode="HTML",
-            reply_markup=quick_image_logo_input_keyboard(lang),
+            reply_markup=quick_image_logo_input_keyboard(lang, state),
         )
     if action == "qi_logo_skip":
         state = set_quick_image_flow(
@@ -167549,21 +167976,21 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_ratio_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_ratio_keyboard(lang),
+            reply_markup=quick_image_ratio_keyboard(lang, state),
         )
     if action == "qi_logo_pos":
         state = get_quick_image_flow(uid) or {}
         text = logo_watermark_clean_text(state.get("logo_watermark_text") or "")
         if not text:
             state = set_quick_image_flow(uid, "logo_input")
-            return await safe_edit_or_send(query, quick_image_logo_input_text(lang), parse_mode="HTML", reply_markup=quick_image_logo_input_keyboard(lang))
+            return await safe_edit_or_send(query, quick_image_logo_input_text(lang), parse_mode="HTML", reply_markup=quick_image_logo_input_keyboard(lang, state))
         position = logo_watermark_normalize_position(value, "bottom_right")
         state = set_quick_image_flow(uid, "logo_confirm", logo_watermark_position=position)
         return await safe_edit_or_send(
             query,
             quick_image_logo_confirm_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_logo_confirm_keyboard(lang),
+            reply_markup=quick_image_logo_confirm_keyboard(lang, state),
         )
     if action == "qi_logo_confirm":
         state = get_quick_image_flow(uid) or {}
@@ -167571,7 +167998,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         position = logo_watermark_normalize_position(state.get("logo_watermark_position") or "", "bottom_right")
         if not text:
             state = set_quick_image_flow(uid, "logo_input")
-            return await safe_edit_or_send(query, quick_image_logo_input_text(lang), parse_mode="HTML", reply_markup=quick_image_logo_input_keyboard(lang))
+            return await safe_edit_or_send(query, quick_image_logo_input_text(lang), parse_mode="HTML", reply_markup=quick_image_logo_input_keyboard(lang, state))
         state = set_quick_image_flow(
             uid,
             "ratio",
@@ -167586,17 +168013,32 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_ratio_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_ratio_keyboard(lang),
+            reply_markup=quick_image_ratio_keyboard(lang, state),
         )
     if action == "qi_back_prompt":
         state = get_quick_image_flow(uid) or {}
+        if quick_image_callback_namespace(state) == "vstoryimg" and state.get("prompt"):
+            state = set_quick_image_flow(uid, "prepared_prompt")
+            return await safe_edit_or_send(
+                query,
+                quick_image_prepared_prompt_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_prepared_prompt_keyboard(
+                    lang,
+                    state=state,
+                    back_callback="vstory|assets_screen",
+                    back_label="⬅️ Ảnh Storyboard",
+                    context_return_callback="vstory|image_return",
+                    context_return_label="🖼️ Ảnh Storyboard",
+                ),
+            )
         if state.get("step") == "ratio" and state.get("prompt") and state.get("ratio_back_target") == "logo_choice":
             state = set_quick_image_flow(uid, "logo_choice")
             return await safe_edit_or_send(
                 query,
                 quick_image_logo_choice_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=quick_image_logo_choice_keyboard(lang),
+                reply_markup=quick_image_logo_choice_keyboard(lang, state),
             )
         if state.get("prompt_source") == "suggestion":
             state = set_quick_image_flow(uid, "prepared_prompt")
@@ -167606,6 +168048,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 parse_mode="HTML",
                 reply_markup=quick_image_prepared_prompt_keyboard(
                     lang,
+                    state=state,
                     context_return_callback=quick_image_context_return_callback(state),
                     context_return_label=quick_image_context_return_label(state, lang),
                 ),
@@ -167618,6 +168061,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 parse_mode="HTML",
                 reply_markup=quick_image_prepared_prompt_keyboard(
                     lang,
+                    state=state,
                     back_callback="aichat|back_active",
                     back_label="⬅️ AI Chatbot" if normalize_user_language(lang) == "vi" else "⬅️ AI Chatbot",
                 ),
@@ -167627,33 +168071,35 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             query,
             quick_image_custom_prompt_text(lang, state.get("prompt") or ""),
             parse_mode="HTML",
-            reply_markup=quick_image_custom_prompt_keyboard(lang),
+            reply_markup=quick_image_custom_prompt_keyboard(lang, state),
         )
     if action.startswith("qi_ratio_"):
         state = get_quick_image_flow(uid) or {}
         prompt = str(state.get("prompt") or "").strip()
         if not prompt:
             set_quick_image_flow(uid, "entry", suggest_offset=0)
-            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+            state = set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang, state=state))
         aspect = media_aspect_ratio_from_token(action.replace("qi_ratio_", "", 1), "image")
         state = set_quick_image_flow(uid, "tier", aspect_ratio=aspect)
         return await safe_edit_or_send(
             query,
             quick_image_tier_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_tier_keyboard(lang),
+            reply_markup=quick_image_tier_keyboard(lang, state),
         )
     if action == "qi_back_ratio":
         state = get_quick_image_flow(uid) or {}
         if not state.get("prompt"):
             set_quick_image_flow(uid, "entry", suggest_offset=0)
-            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+            state = set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang, state=state))
         state = set_quick_image_flow(uid, "ratio")
         return await safe_edit_or_send(
             query,
             quick_image_ratio_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_ratio_keyboard(lang),
+            reply_markup=quick_image_ratio_keyboard(lang, state),
         )
     if action == "qi_back_tier":
         state = get_quick_image_flow(uid) or {}
@@ -167662,13 +168108,14 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             pop_shopaikey_pending_confirmation(token, uid)
         if not state.get("prompt") or not state.get("aspect_ratio"):
             set_quick_image_flow(uid, "entry", suggest_offset=0)
-            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+            state = set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang, state=state))
         state = set_quick_image_flow(uid, "tier", confirm_token="")
         return await safe_edit_or_send(
             query,
             quick_image_tier_text(state, lang),
             parse_mode="HTML",
-            reply_markup=quick_image_tier_keyboard(lang),
+            reply_markup=quick_image_tier_keyboard(lang, state),
         )
     if action.startswith("qi_tier_"):
         state = get_quick_image_flow(uid) or {}
@@ -167677,7 +168124,8 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         aspect = normalize_media_aspect_ratio(state.get("aspect_ratio"), "1:1", "image")
         if not prompt:
             set_quick_image_flow(uid, "entry", suggest_offset=0)
-            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang))
+            state = set_quick_image_flow(uid, "entry", suggest_offset=0)
+            return await safe_edit_or_send(query, quick_image_entry_text(lang), parse_mode="HTML", reply_markup=quick_image_entry_keyboard(lang, state=state))
         tier = normalize_image_tier(action.replace("qi_tier_", "", 1))
         payload = image_tier_payload(tier)
         if not payload.get("enabled"):
@@ -167707,15 +168155,25 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "package_item_type": package_item_type,
             "source": "quick_image_v6",
             "provider_submit_source": "public_user_final_confirm",
-            **quick_image_video_scene3_confirmation_fields(state),
+            **(
+                confirmation_context_fields
+                if confirmation_context_fields is not None
+                else quick_image_video_scene3_confirmation_fields(state)
+            ),
             **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
         })
-        set_quick_image_flow(uid, "confirm", tier=tier, confirm_token=token)
+        state = set_quick_image_flow(uid, "confirm", tier=tier, confirm_token=token)
         confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect, logo_text, logo_position)
-        confirm_markup = quick_image_confirm_keyboard(token, lang)
+        confirm_markup = quick_image_confirm_keyboard(token, lang, state)
         if package_item:
             confirm_text = package_offer_text(package_item, confirm_text, lang)
-            confirm_markup = package_use_choice_keyboard("image", token, tier, lang)
+            confirm_markup = package_use_choice_keyboard(
+                "image",
+                token,
+                tier,
+                lang,
+                quick_image_callback(state, "qi_back_tier"),
+            )
         return await safe_edit_or_send(
             query,
             confirm_text,
@@ -168042,6 +168500,83 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         set_public_video_prompt_pending(uid, tier)
         return await safe_edit_or_send(query, public_video_prompt_request_text(tier, lang), parse_mode="HTML")
     await safe_edit_or_send(query, create_media_menu_text(lang), reply_markup=create_media_menu_keyboard(lang))
+
+
+async def handle_create_media_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    callback_parts = str(query.data or "").split("|")
+    action = callback_parts[1] if len(callback_parts) > 1 else ""
+    if action == "cancel":
+        await query.answer()
+        uid = query.from_user.id if query.from_user else 0
+        lang = get_user_language(uid) or "vi"
+        quick_state = get_quick_image_flow(uid) or {}
+        if str(quick_state.get("source_flow") or "") == "video_scene3":
+            return_pending = {**quick_state, "origin_flow": "video_scene3"}
+            scene_state = video_scene3_record_generated_image(
+                context,
+                uid,
+                return_pending,
+                delivered=False,
+            )
+            clear_quick_image_flow(uid)
+            if isinstance(getattr(context, "user_data", None), dict):
+                context.user_data["video_scene3_image_handoff_active"] = False
+            if scene_state:
+                panel_text, panel_keyboard = video_scene3_image_handoff_panel(scene_state)
+                return await safe_edit_or_send(
+                    query,
+                    panel_text,
+                    parse_mode="HTML",
+                    reply_markup=panel_keyboard,
+                )
+            scene_state = video_profile_studio_state(context)
+            scene_state = video_profile_studio_step(context, scene_state, "image_source", push=False)
+            return await video_profile_scene1_render(query, scene_state, lang)
+        clear_media_creator_pending_states(uid)
+        return await safe_edit_or_send(
+            query,
+            ui_text(lang, "media.cancelled"),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")]]),
+        )
+    state = get_quick_image_flow(query.from_user.id if query.from_user else 0) or {}
+    return await _handle_create_media_callback_impl(
+        update,
+        context,
+        confirmation_context_fields={**quick_image_video_scene3_confirmation_fields(state)},
+    )
+
+
+async def handle_storyboard_image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    uid = query.from_user.id if query and query.from_user else 0
+    state = get_quick_image_flow(uid) or {}
+    if not storyboard_quick_image_owner_valid(context, state):
+        await query.answer("Phiên ảnh Storyboard đã cũ. Đã quay lại đúng bảng ảnh hiện tại.", show_alert=True)
+        board = storyboard2_state(context)
+        readonly = {**board, "screen": "assets", "awaiting_input": ""}
+        return await storyboard2_render(query, context, readonly)
+    suffix = str(query.data or "").split("|", 1)[1] if "|" in str(query.data or "") else ""
+    if suffix == "cancel":
+        await query.answer()
+        board = storyboard2_state(context)
+        board["active_scene_index"] = _safe_int(
+            state.get("storyboard_scene_index"),
+            int(board.get("active_scene_index") or 1),
+        )
+        board["active_slot"] = str(state.get("storyboard_slot") or board.get("active_slot") or "start")
+        board = video_storyboard2.move(board, "assets", push=False, awaiting_input="")
+        save_storyboard2_state(context, board)
+        clear_quick_image_flow(uid)
+        if isinstance(getattr(context, "user_data", None), dict):
+            context.user_data["video_scene3_image_handoff_active"] = False
+        return await storyboard2_render(query, context, board)
+    return await _handle_create_media_callback_impl(
+        update,
+        context,
+        callback_data=f"create_media|{suffix}",
+        confirmation_context_fields={**quick_image_video_scene3_confirmation_fields(state)},
+    )
 
 async def cmd_tool_test_workflow_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -217343,6 +217878,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_finalization_callback, pattern=r"^vfinal\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_addon_callback, pattern=r"^videoaddon\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_storyboard_image_callback, pattern=r"^vstoryimg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_frame_video_callback, pattern=r"^framevideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
