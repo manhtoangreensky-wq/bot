@@ -11,8 +11,9 @@ from copy import deepcopy
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIN_SCENES = 1
+MIN_PUBLIC_SCENES = 2
 MAX_SCENES = 20
 SCENE_SECONDS = 8
 SUPPORTED_RATIOS = ("9:16", "16:9", "1:1", "4:5")
@@ -100,6 +101,7 @@ def default_state() -> dict[str, Any]:
         "scene_count": 0,
         "aspect_ratio": "",
         "content_mode": "",
+        "content_source": "",
         "content": "",
         "profile_page": 1,
         "suggestion_offset": 0,
@@ -120,6 +122,10 @@ def default_state() -> dict[str, Any]:
         "addons": {},
         "addons_ready": False,
         "image_generation": {},
+        "uploaded_storyboard_files": [],
+        "detected_panel_count": 0,
+        "upload_confirmed": False,
+        "upload_panel_index": 1,
         "manifest": {},
     }
 
@@ -170,6 +176,32 @@ def normalize_state(value: dict[str, Any] | None) -> dict[str, Any]:
         state["asset_mode"] = "start_only"
     state["addons"] = dict(state.get("addons") or {})
     state["image_generation"] = dict(state.get("image_generation") or {})
+    uploaded_files = []
+    for item in state.get("uploaded_storyboard_files") or []:
+        if not isinstance(item, dict):
+            continue
+        file_id = _clean_text(item.get("file_id"), 512)
+        if not file_id:
+            continue
+        uploaded_files.append({
+            "file_id": file_id,
+            "file_unique_id": _clean_text(item.get("file_unique_id"), 256),
+            "file_name": _clean_text(item.get("file_name"), 320),
+            "mime_type": _clean_text(item.get("mime_type"), 160),
+            "caption": _clean_text(item.get("caption"), 1200),
+            "message_id": max(0, _safe_int(item.get("message_id"), 0)),
+            "panel_count": max(1, min(MAX_SCENES, _safe_int(item.get("panel_count"), 1))),
+        })
+    state["uploaded_storyboard_files"] = uploaded_files[:MAX_SCENES]
+    detected = _safe_int(state.get("detected_panel_count"), 0)
+    if uploaded_files and detected <= 0:
+        detected = sum(_safe_int(item.get("panel_count"), 1) for item in uploaded_files)
+    state["detected_panel_count"] = max(0, min(MAX_SCENES, detected))
+    state["upload_confirmed"] = bool(state.get("upload_confirmed"))
+    state["upload_panel_index"] = max(
+        1,
+        min(max(1, len(uploaded_files)), _safe_int(state.get("upload_panel_index"), 1)),
+    )
     state["manifest"] = dict(state.get("manifest") or {})
     state["transitions"] = [dict(item) for item in state.get("transitions") or [] if isinstance(item, dict)][: max(0, count - 1)]
     return state
@@ -208,6 +240,100 @@ def set_ratio(state: dict[str, Any], ratio: str) -> dict[str, Any]:
     if ratio not in SUPPORTED_RATIOS:
         raise ValueError("aspect_ratio_unsupported")
     return normalize_state({**state, "aspect_ratio": ratio})
+
+
+def storyboard_upload_record(
+    *,
+    file_id: str,
+    file_unique_id: str = "",
+    file_name: str = "",
+    mime_type: str = "",
+    caption: str = "",
+    message_id: int = 0,
+    panel_count: int = 1,
+) -> dict[str, Any]:
+    clean_file_id = _clean_text(file_id, 512)
+    if not clean_file_id:
+        raise ValueError("storyboard_upload_file_missing")
+    return {
+        "file_id": clean_file_id,
+        "file_unique_id": _clean_text(file_unique_id, 256),
+        "file_name": _clean_text(file_name, 320),
+        "mime_type": _clean_text(mime_type, 160),
+        "caption": _clean_text(caption, 1200),
+        "message_id": max(0, _safe_int(message_id, 0)),
+        "panel_count": max(1, min(MAX_SCENES, _safe_int(panel_count, 1))),
+    }
+
+
+def add_uploaded_storyboard(state: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    clean = storyboard_upload_record(**dict(record or {}))
+    identity = clean.get("file_unique_id") or clean.get("file_id")
+    files = list(current.get("uploaded_storyboard_files") or [])
+    if any((item.get("file_unique_id") or item.get("file_id")) == identity for item in files):
+        return current
+    files.append(clean)
+    current["uploaded_storyboard_files"] = files[:MAX_SCENES]
+    current["detected_panel_count"] = min(
+        MAX_SCENES,
+        sum(_safe_int(item.get("panel_count"), 1) for item in current["uploaded_storyboard_files"]),
+    )
+    current["upload_panel_index"] = len(current["uploaded_storyboard_files"])
+    current["upload_confirmed"] = False
+    return normalize_state(current)
+
+
+def clear_uploaded_storyboard(state: dict[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    current.update({
+        "uploaded_storyboard_files": [],
+        "detected_panel_count": 0,
+        "upload_confirmed": False,
+        "upload_panel_index": 1,
+    })
+    return normalize_state(current)
+
+
+def set_detected_panel_count(state: dict[str, Any], count: int) -> dict[str, Any]:
+    value = _safe_int(count, 0)
+    if value < MIN_PUBLIC_SCENES or value > MAX_SCENES:
+        raise ValueError("storyboard_panel_count_out_of_range")
+    current = set_scene_count(state, value)
+    current["detected_panel_count"] = value
+    current["upload_confirmed"] = False
+    return normalize_state(current)
+
+
+def apply_uploaded_storyboard(state: dict[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    files = list(current.get("uploaded_storyboard_files") or [])
+    if not files:
+        raise ValueError("storyboard_upload_missing")
+    count = _safe_int(current.get("scene_count"), 0) or _safe_int(current.get("detected_panel_count"), 0)
+    if count < MIN_PUBLIC_SCENES or count > MAX_SCENES:
+        raise ValueError("storyboard_panel_count_out_of_range")
+    current = set_scene_count(current, count)
+    labels = []
+    for item in files:
+        labels.append(
+            _clean_text(item.get("caption"), 600)
+            or _clean_text(item.get("file_name"), 240)
+            or "panel storyboard đã gửi"
+        )
+    summary = "; ".join(labels[:6])
+    current = apply_content(
+        current,
+        f"Storyboard có sẵn gồm {count} cảnh. Tư liệu nguồn: {summary}",
+        mode="existing_upload",
+    )
+    for index, scene in enumerate(current.get("scenes") or [], start=1):
+        source = labels[min(index - 1, len(labels) - 1)]
+        scene["content"] = f"Cảnh {index}: triển khai trọn vẹn panel {index} từ {source}"
+        scene["main_action"] = f"Hoàn thành diễn biến của panel {index} trước khi chuyển cảnh"
+    current["content_source"] = "uploaded_storyboard"
+    current["upload_confirmed"] = True
+    return normalize_state(current)
 
 
 def set_profile(state: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:

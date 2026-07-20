@@ -114,7 +114,7 @@ def test_refresh_without_valid_media_preserves_last_media_cache() -> None:
 
 def test_public_entry_catalog_and_ratio_contract_are_exact() -> None:
     labels = [label for row in video_flow7.entry_rows("video_trend") for label, _callback in row]
-    assert labels == ["🔥 Trend mới nhất", "🗂️ Trend đã xu hướng", "✍️ Tự nhập trend", "📖 Hướng dẫn"]
+    assert labels == ["🔥 Trend mới nhất", "✍️ Tự nhập trend"]
 
     entry = _between("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows")
     assert "Trend theo nhóm" not in entry
@@ -122,9 +122,10 @@ def test_public_entry_catalog_and_ratio_contract_are_exact() -> None:
     assert "Ý tưởng video" not in entry
 
     ratio = _between("def video_trend2_ratio_keyboard", "def video_trend2_content_source_keyboard")
-    for label in ("Dọc 9:16", "Ngang 16:9", "Vuông 1:1", "Dọc 4:5", "✍️ Tự nhập"):
+    for label in ("Dọc 9:16", "Ngang 16:9", "Vuông 1:1", "Dọc 4:5"):
         assert label in ratio
     assert "Gợi ý" not in ratio
+    assert "Tự nhập" not in ratio
     assert "ratio_suggest" not in ratio
 
     shared_ratio = _between("def video_scene3_aspect_keyboard", "def video_scene3_quality_keyboard")

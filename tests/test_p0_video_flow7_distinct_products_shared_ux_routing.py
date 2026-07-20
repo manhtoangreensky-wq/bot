@@ -84,7 +84,12 @@ def test_product_sequences_are_not_one_shared_wizard() -> None:
         "idea_category",
         "idea_preset",
     )
-    assert "scene_count_confirm" in video_flow7.product_sequence("script_image_video")
+    assert video_flow7.product_sequence("script_image_video")[:3] == (
+        "scene_count",
+        "aspect_ratio",
+        "content_source",
+    )
+    assert "scene_count_confirm" not in video_flow7.product_sequence("script_image_video")
     assert video_flow7.product_sequence("storyboard_prompt")[:5] == (
         "panel_count",
         "aspect_ratio",
@@ -342,8 +347,10 @@ def test_back_matrix_is_exact_for_every_product_sequence() -> None:
 
 def test_bot_routes_storyboard_self_shot_and_trend_without_generic_profile_fallthrough() -> None:
     after_ratio = _function_source("video_flow7_after_ratio")
-    assert 'flow_kind == "trend_video"' in after_ratio
-    assert 'video_scene3_flow.build_planning_package' in after_ratio
+    assert 'flow_kind in {"script_to_video", "trend_video"}' in after_ratio
+    assert 'return updated, "content_source"' in after_ratio
+    assert 'return updated, "ai_input_type"' in after_ratio
+    assert 'video_scene3_flow.build_planning_package' not in after_ratio
     assert "video_flow6.next_after_ratio" in after_ratio
 
     character_route = _function_source("video_flow7_after_character_step")

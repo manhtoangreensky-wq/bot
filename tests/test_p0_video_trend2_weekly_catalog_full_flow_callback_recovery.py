@@ -173,7 +173,7 @@ def test_trend_entry_and_sequence_are_canonical() -> None:
     rows = video_flow7.ENTRY_ROWS["video_trend"]
     labels = [label for row in rows for label, _callback in row]
     callbacks = [callback for row in rows for _label, callback in row]
-    assert labels == ["🔥 Trend mới nhất", "🗂️ Trend đã xu hướng", "✍️ Tự nhập trend", "📖 Hướng dẫn"]
+    assert labels == ["🔥 Trend mới nhất", "✍️ Tự nhập trend"]
     assert all("idea" not in callback for callback in callbacks)
     sequence = video_flow7.PRODUCT_SPECS["trend_video"]["sequence"]
     assert sequence[:6] == (
@@ -225,7 +225,6 @@ def test_trend_screen_parent_stack_preserves_exact_back_target() -> None:
     source = _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_trend2_callback")
     assert "def video_trend2_open_screen" in source
     assert 'video_trend2_open_screen(state, "catalog")' in source
-    assert 'video_trend2_open_screen(state, "categories")' in source
     assert 'video_trend2_open_screen(state, "scene_count", parent="catalog")' in source
     assert 'video_trend2_open_screen(state, "aspect_ratio", parent="scene_count")' in source
     assert 'video_trend2_open_screen(state, "content_source", parent="aspect_ratio")' in source
@@ -258,9 +257,11 @@ def test_changed_bot_regions_compile_as_python_311_source() -> None:
 
 def test_public_layout_catalog_ratio_content_and_back_contracts_are_present() -> None:
     source = _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_trend2_callback")
-    assert 'callback_data="vtrend|categories"' in source
-    assert 'callback_data="vtrend|historical"' in source
-    assert 'callback_data="vtrend|help"' in source
+    entry = _between("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows")
+    catalog = _between("def video_trend2_catalog_keyboard", "def video_trend2_scene_count_text")
+    assert 'callback_data="vtrend|categories"' not in entry + catalog
+    assert 'callback_data="vtrend|historical"' not in entry + catalog
+    assert 'callback_data="vtrend|help"' not in entry + catalog
     assert 'callback_data="vtrend|ratio_custom"' not in source
     assert 'callback_data="vtrend|ratio_suggest"' not in source
     assert 'callback_data="vtrend|sources"' not in source
@@ -329,20 +330,28 @@ def test_public_trend_catalog_hides_internal_source_and_freshness_details() -> N
 
 
 def test_every_public_trend_button_has_one_action_branch() -> None:
-    source = _between("VIDEO_TREND2_STATE_KEY", "async def handle_video_trend2_callback")
-    declared = set(re.findall(r"vtrend\|([a-z_]+)", source))
-    expected = {
-        "back", "catalog", "categories", "category", "continue", "edit_content",
-        "entry", "help", "historical", "idea_catalog", "idea_return", "manual_content",
-        "manual_trend", "more", "pick", "profile", "profiles", "ratio",
-        "resume", "scene_note", "scenes", "scenes_custom",
-        "suggestion", "suggestions_more",
-    }
-    assert declared == expected
-    for action in expected - {"manual_content", "edit_content"}:
-        assert f'action == "{action}"' in source
-    assert 'action in {"manual_content", "edit_content"}' in source
-    assert 'if action == "ratio_custom":' in source
+    public_keyboards = "".join(
+        _between(start, end)
+        for start, end in (
+            ("def video_trend2_entry_keyboard", "def video_trend2_catalog_rows"),
+            ("def video_trend2_catalog_keyboard", "def video_trend2_scene_count_text"),
+            ("def video_trend2_scene_count_keyboard", "def video_trend2_ratio_keyboard"),
+            ("def video_trend2_ratio_keyboard", "def video_trend2_content_source_keyboard"),
+            ("def video_trend2_content_source_keyboard", "def video_trend2_profile_rows"),
+            ("def video_trend2_profiles_keyboard", "def video_trend2_profile_record"),
+            ("def video_trend2_suggestions_keyboard", "def video_trend2_preview_text"),
+            ("def video_trend2_preview_keyboard", "def video_trend2_source_snapshot"),
+        )
+    )
+    handler = _between(
+        "async def _handle_video_trend2_callback_impl",
+        "async def handle_video_trend2_callback",
+    )
+    declared = set(re.findall(r"vtrend\|([a-z_]+)", public_keyboards))
+    for action in declared - {"manual_content", "edit_content", "back"}:
+        assert f'action == "{action}"' in handler
+    assert 'action in {"manual_content", "edit_content"}' in handler
+    assert 'if action == "ratio_custom":' in handler
 
 
 def test_trend_handoff_persists_source_and_has_zero_preconfirm_side_effects() -> None:

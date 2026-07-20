@@ -65831,19 +65831,54 @@ def storyboard2_entry_keyboard() -> InlineKeyboardMarkup:
 
 def storyboard2_count_keyboard() -> InlineKeyboardMarkup:
     return storyboard2_keyboard([
-        [("1 cảnh", "vstory|count|1"), ("2 cảnh", "vstory|count|2")],
-        [("3 cảnh", "vstory|count|3"), ("5 cảnh", "vstory|count|5")],
-        [("10 cảnh", "vstory|count|10"), ("20 cảnh", "vstory|count|20")],
-        [("✍️ Nhập số khác", "vstory|count_custom"), ("ℹ️ Lưu ý số cảnh", "vstory|count_help")],
+        [("2 cảnh", "vstory|count|2"), ("3 cảnh", "vstory|count|3")],
+        [("4 cảnh", "vstory|count|4"), ("5 cảnh", "vstory|count|5")],
+        [("6 cảnh", "vstory|count|6"), ("8 cảnh", "vstory|count|8")],
+        [("10 cảnh", "vstory|count|10"), ("✍️ Nhập số khác", "vstory|count_custom")],
         *storyboard2_nav("vstory|entry"),
     ])
 
 
-def storyboard2_ratio_keyboard() -> InlineKeyboardMarkup:
+def storyboard2_upload_wait_keyboard() -> InlineKeyboardMarkup:
+    return storyboard2_keyboard([
+        [("📎 Gửi storyboard", "vstory|upload_again"), ("❌ Hủy file", "vstory|upload_cancel")],
+        *storyboard2_nav("vstory|entry"),
+    ])
+
+
+def storyboard2_upload_review_keyboard() -> InlineKeyboardMarkup:
+    return storyboard2_keyboard([
+        [("✅ Dùng các cảnh phát hiện", "vstory|upload_use"), ("✍️ Sửa số cảnh", "vstory|upload_count")],
+        [("👁️ Xem từng panel", "vstory|upload_panels"), ("🔄 Gửi lại file", "vstory|upload_again")],
+        *storyboard2_nav("vstory|entry"),
+    ])
+
+
+def storyboard2_upload_panels_keyboard() -> InlineKeyboardMarkup:
+    return storyboard2_keyboard([
+        [("⬅️ Panel trước", "vstory|upload_panel_prev"), ("➡️ Panel sau", "vstory|upload_panel_next")],
+        *storyboard2_nav("vstory|upload_review"),
+    ])
+
+
+def storyboard2_ratio_keyboard(board: dict | None = None) -> InlineKeyboardMarkup:
+    back_callback = (
+        "vstory|upload_review"
+        if str((board or {}).get("entry_mode") or "") == "existing"
+        else "vstory|count_screen"
+    )
     return storyboard2_keyboard([
         [("Dọc 9:16", "vstory|ratio|9x16"), ("Ngang 16:9", "vstory|ratio|16x9")],
         [("Vuông 1:1", "vstory|ratio|1x1"), ("Dọc 4:5", "vstory|ratio|4x5")],
-        *storyboard2_nav("vstory|count_screen"),
+        *storyboard2_nav(back_callback),
+    ])
+
+
+def storyboard2_content_source_keyboard() -> InlineKeyboardMarkup:
+    return storyboard2_keyboard([
+        [("🎯 32 loại nội dung", "vstory|profiles_screen"), ("💡 Kho Ý tưởng video", "vstory|idea_source")],
+        [("✍️ Tự nhập nội dung", "vstory|content_manual"), ("🔄 Chọn lại tỉ lệ", "vstory|ratio_screen")],
+        *storyboard2_nav("vstory|ratio_screen"),
     ])
 
 
@@ -65870,8 +65905,7 @@ def storyboard2_profiles_keyboard(board: dict) -> InlineKeyboardMarkup:
     next_page = 1 if selected_page == page_count else selected_page + 1
     keyboard_rows.extend([
         [("⬅️ Nhóm trước", f"vstory|profile_page|{previous_page}"), ("➡️ Nhóm sau", f"vstory|profile_page|{next_page}")],
-        [("💡 Kho Ý tưởng video", "vstory|idea_source"), ("✍️ Tự nhập nội dung", "vstory|content_manual")],
-        *storyboard2_nav("vstory|ratio_screen"),
+        *storyboard2_nav("vstory|content_screen"),
     ])
     return storyboard2_keyboard(keyboard_rows)
 
@@ -65889,8 +65923,8 @@ def storyboard2_scene_review_keyboard(board: dict) -> InlineKeyboardMarkup:
     index = max(1, min(count, int(board.get("active_scene_index") or 1)))
     entry_mode = str(board.get("entry_mode") or "guided")
     content_mode = str(board.get("content_mode") or "")
-    back_callback = "vstory|ratio_screen" if entry_mode == "existing" else (
-        "vstory|suggestions_screen" if content_mode == "suggestion" else "vstory|profiles_screen"
+    back_callback = "vstory|upload_review" if entry_mode == "existing" else (
+        "vstory|suggestions_screen" if content_mode == "suggestion" else "vstory|content_screen"
     )
     return storyboard2_keyboard([
         [("⬅️ Cảnh trước", "vstory|scene_prev"), ("➡️ Cảnh sau", "vstory|scene_next")],
@@ -65997,9 +66031,11 @@ def storyboard2_review_keyboard() -> InlineKeyboardMarkup:
 
 STORYBOARD2_CALLBACK_ACTIONS = frozenset({
     "entry", "start", "upload", "ai", "help", "idea_source", "idea_return",
+    "upload_use", "upload_count", "upload_panels", "upload_panel_prev", "upload_panel_next",
+    "upload_again", "upload_cancel", "upload_review",
     "count_screen", "count_help", "count", "count_custom",
     "ratio_screen", "ratio", "profiles_screen", "profile_page", "profile_pick", "profile_help",
-    "content_screen", "content_manual", "content_suggest", "suggestions_screen",
+    "content_screen", "content_config", "content_manual", "content_suggest", "suggestions_screen",
     "suggest_more", "suggest_pick",
     "scene_screen", "scene_prev", "scene_next", "scene_edit", "content_approve",
     "assets_screen", "image_return", "asset_view", "asset_upload_all", "asset_ai_missing", "asset_mode",
@@ -66119,6 +66155,38 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
     scene = board.get("scenes", [video_storyboard2.default_state()])[index - 1] if count else {}
     if screen == "entry":
         return storyboard2_entry_text(), storyboard2_entry_keyboard()
+    if screen == "await_storyboard_upload":
+        return (
+            "📎 <b>Gửi storyboard có sẵn</b>\n\n"
+            "Gửi ảnh, tài liệu hoặc PDF storyboard. Có thể gửi nhiều ảnh liên tiếp; hệ thống giữ nguyên phiên và "
+            "đếm panel đã nhận để anh/chị xác nhận trước khi chọn tỉ lệ.\n\n"
+            "Bước này chỉ lưu tham chiếu Telegram, chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+            storyboard2_upload_wait_keyboard(),
+        )
+    if screen in {"upload_review", "await_upload_count"}:
+        files = list(board.get("uploaded_storyboard_files") or [])
+        detected = int(board.get("detected_panel_count") or 0)
+        suffix = "\n\nHãy gửi số cảnh từ 2 đến 20." if screen == "await_upload_count" else ""
+        return (
+            "📎 <b>Đã nhận storyboard</b>\n\n"
+            f"• Tệp/ảnh đã nhận: <b>{len(files)}</b>\n"
+            f"• Số panel/cảnh phát hiện: <b>{detected or 'Chưa xác định'}</b>\n\n"
+            "Xác nhận số cảnh phát hiện hoặc sửa lại trước khi chọn tỉ lệ. Các panel chưa tạo video và chưa trừ Xu."
+            + suffix,
+            storyboard2_upload_review_keyboard(),
+        )
+    if screen == "upload_panels":
+        files = list(board.get("uploaded_storyboard_files") or [])
+        panel_index = max(1, min(max(1, len(files)), int(board.get("upload_panel_index") or 1)))
+        item = dict(files[panel_index - 1]) if files else {}
+        return (
+            f"👁️ <b>Panel/tệp {panel_index}/{max(1, len(files))}</b>\n\n"
+            f"• Tên: <b>{html.escape(str(item.get('file_name') or 'Ảnh storyboard'))}</b>\n"
+            f"• Loại: <b>{html.escape(str(item.get('mime_type') or 'image'))}</b>\n"
+            f"• Ghi chú: {html.escape(str(item.get('caption') or 'Không có'))}\n\n"
+            "Đây là bản xem mapping, chưa tạo file đầu ra và chưa trừ Xu.",
+            storyboard2_upload_panels_keyboard(),
+        )
     if screen == "help":
         return (
             "ℹ️ <b>Storyboard hoạt động thế nào?</b>\n\n"
@@ -66128,7 +66196,7 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             storyboard2_keyboard(storyboard2_nav("vstory|entry")),
         )
     if screen in {"count", "await_count"}:
-        suffix = "\n\nHãy gửi một số từ 1 đến 20." if screen == "await_count" else ""
+        suffix = "\n\nHãy gửi một số từ 2 đến 20." if screen == "await_count" else ""
         return (
             "🔢 <b>Chọn số cảnh Storyboard</b>\n\n"
             "Mỗi cảnh là một ý hoặc hành động trọn vẹn khoảng 8 giây. Số cảnh ảnh hưởng trực tiếp tới thời lượng và tổng giá video; "
@@ -66141,7 +66209,15 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
             "📐 <b>Chọn tỉ lệ Storyboard</b>\n\n"
             f"• Số cảnh: <b>{count}</b>\n"
             "Tỉ lệ này được giữ cho prompt ảnh, ảnh tạo AI và clip của toàn bộ cảnh. Bước này chưa gọi dịch vụ.",
-            storyboard2_ratio_keyboard(),
+            storyboard2_ratio_keyboard(board),
+        )
+    if screen == "content_source":
+        return (
+            "🎯 <b>Chọn nguồn nội dung Storyboard</b>\n\n"
+            f"• Số cảnh: <b>{count}</b> · Tỉ lệ: <b>{html.escape(ratio)}</b>\n\n"
+            "Chọn đúng một nguồn. 32 loại nội dung, Kho Ý tưởng video và Tự nhập là ba nhánh riêng; "
+            "không trộn preset vào màn profile.",
+            storyboard2_content_source_keyboard(),
         )
     if screen == "profiles":
         profile_rows, selected_page, page_count = storyboard2_profile_rows(safe_int(board.get("profile_page"), 1))
@@ -66158,13 +66234,13 @@ def storyboard2_screen_payload(board: dict) -> tuple[str, InlineKeyboardMarkup]:
         )
     if screen == "content_choice":
         # Read-only compatibility for sessions created by the old duplicate
-        # content-choice screen. The canonical destination is the profile list.
-        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
+        # content-choice screen. The canonical destination is the source menu.
+        board = video_storyboard2.move(board, "content_source", push=False, awaiting_input="")
         return storyboard2_screen_payload(board)
     if screen == "await_content":
         entry_mode = str(board.get("entry_mode") or "guided")
         title = "Gửi storyboard có sẵn" if entry_mode == "existing" else "Nhập nội dung Storyboard"
-        back_callback = "vstory|ratio_screen" if entry_mode == "existing" else "vstory|profiles_screen"
+        back_callback = "vstory|upload_review" if entry_mode == "existing" else "vstory|content_screen"
         return (
             f"✍️ <b>{title}</b>\n\n"
             "Mô tả chủ thể, mục tiêu, diễn biến và điều người xem cần ghi nhớ. Hệ thống sẽ chia đúng số cảnh đã chọn, "
@@ -66795,26 +66871,47 @@ def video_profile_scene1_subject_keyboard(lang: str = "vi") -> InlineKeyboardMar
 
 
 def video_profile_scene1_count_text(state: dict, lang: str = "vi") -> str:
+    flow_kind = video_flow7_kind(state)
+    is_script = flow_kind == "script_to_video"
     content_mode = str(state.get("content_mode") or "")
     mode = {
         "suggestions": "Gợi ý nội dung",
         "manual": "Tự nhập nội dung",
     }.get(content_mode, "Chưa chọn nguồn nội dung")
+    range_line = (
+        "• Kịch bản dài dùng 5–20 cảnh, tương ứng khoảng 40–160 giây.\n"
+        if is_script
+        else "• Bộ lập kế hoạch hỗ trợ 1–20 cảnh, tối đa lý thuyết 160 giây.\n"
+    )
     return (
         "🎞 <b>Chọn số cảnh</b>\n\n"
         f"• Cách bắt đầu: <b>{html.escape(mode)}</b>\n"
         "• 1 cảnh = một nhịp nội dung hoàn chỉnh, mục tiêu khoảng 8 giây.\n"
-        "• Bộ lập kế hoạch hỗ trợ 1–20 cảnh, tối đa lý thuyết 160 giây.\n"
+        f"{range_line}"
         "• Nhiều cảnh hơn sẽ cần nhiều nội dung và chi phí dựng cao hơn. Chất lượng và giá chỉ được chọn gần cuối.\n\n"
         "Hãy chọn đúng số cảnh cần dùng. Hệ thống không tự tăng số cảnh, không cắt cụt ý cuối và chưa tạo tác vụ ở bước này."
     )
 
 
-def video_profile_scene1_count_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_profile_scene_count_bounds(state: dict | None = None) -> tuple[int, int]:
+    return (5, 20) if video_flow7_kind(state or {}) == "script_to_video" else (1, 20)
+
+
+def video_profile_scene1_count_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
+    if video_flow7_kind(state or {}) == "script_to_video":
+        count_rows = [
+            [("5 cảnh", "vprofile|count|5"), ("6 cảnh", "vprofile|count|6")],
+            [("8 cảnh", "vprofile|count|8"), ("10 cảnh", "vprofile|count|10")],
+            [("15 cảnh", "vprofile|count|15"), ("20 cảnh", "vprofile|count|20")],
+        ]
+    else:
+        count_rows = [
+            [("1 cảnh", "vprofile|count|1"), ("2 cảnh", "vprofile|count|2")],
+            [("3 cảnh", "vprofile|count|3"), ("5 cảnh", "vprofile|count|5")],
+            [("10 cảnh", "vprofile|count|10"), ("20 cảnh", "vprofile|count|20")],
+        ]
     return video_scene3_keyboard([
-        [("1 cảnh", "vprofile|count|1"), ("2 cảnh", "vprofile|count|2")],
-        [("3 cảnh", "vprofile|count|3"), ("5 cảnh", "vprofile|count|5")],
-        [("10 cảnh", "vprofile|count|10"), ("20 cảnh", "vprofile|count|20")],
+        *count_rows,
         [("✍️ Nhập số khác", "vprofile|count_custom"), ("ℹ️ Lưu ý số cảnh", "vprofile|count_note")],
         *video_scene3_nav_rows(),
     ])
@@ -67016,9 +67113,9 @@ def video_scene3_content_mode_keyboard() -> InlineKeyboardMarkup:
 
 
 VIDEO_SCENE3_AI_INPUT_LABELS = {
-    "prompt_video": "✨ Prompt AI → Video",
-    "image_video": "🖼 Ảnh → Video AI",
-    "video_video": "🎞 Video mẫu → Video AI",
+    "prompt_video": "✨ Prompt → Video",
+    "image_video": "🖼 Ảnh → Video",
+    "video_video": "🎞 Video → Video",
 }
 
 
@@ -67036,17 +67133,22 @@ def video_scene3_ai_input_text(state: dict) -> str:
 
 def video_scene3_ai_input_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✨ Prompt AI → Video", "vprofile|ai_input|prompt_video"), ("🖼 Ảnh → Video AI", "vprofile|ai_input|image_video")],
-        [("🎞 Video mẫu → Video AI", "vprofile|ai_input|video_video"), ("🔄 Chọn lại tỉ lệ", "vprofile|ai_input|back")],
+        [("✨ Prompt → Video", "vprofile|ai_input|prompt_video"), ("🖼 Ảnh → Video", "vprofile|ai_input|image_video")],
+        [("🎞 Video → Video", "vprofile|ai_input|video_video"), ("🔄 Chọn lại tỉ lệ", "vprofile|ai_input|back")],
         *video_scene3_nav_rows(),
     ])
 
 
 def video_scene3_content_source_text(state: dict) -> str:
     input_label = VIDEO_SCENE3_AI_INPUT_LABELS.get(str(state.get("ai_input_type") or ""), "Chưa chọn")
+    input_line = (
+        f"• Loại đầu vào: <b>{html.escape(input_label)}</b>\n"
+        if video_flow7_kind(state) == "ai_real"
+        else ""
+    )
     return (
         "🧭 <b>Chọn cách xây nội dung</b>\n\n"
-        f"• Loại đầu vào: <b>{html.escape(input_label)}</b>\n"
+        f"{input_line}"
         f"• Số cảnh: <b>{max(1, safe_int(state.get('scene_count'), 1))}</b>\n"
         f"• Tỉ lệ: <b>{html.escape(str(state.get('aspect_ratio') or 'Chưa chọn'))}</b>\n\n"
         "Chọn một trong ba nguồn riêng biệt: 32 loại nội dung, Kho Ý tưởng video hoặc nội dung tự nhập. "
@@ -67054,10 +67156,11 @@ def video_scene3_content_source_text(state: dict) -> str:
     )
 
 
-def video_scene3_content_source_keyboard() -> InlineKeyboardMarkup:
+def video_scene3_content_source_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
+    change_label = "🔄 Đổi loại đầu vào" if video_flow7_kind(state or {}) == "ai_real" else "🔄 Chọn lại tỉ lệ"
     return video_scene3_keyboard([
         [("🎯 Chọn loại nội dung", "vprofile|source|profiles"), ("💡 Kho Ý tưởng video", "vprofile|source|idea")],
-        [("✍️ Tự nhập nội dung", "vprofile|source|manual"), ("🔄 Đổi loại đầu vào", "vprofile|source|back")],
+        [("✍️ Tự nhập nội dung", "vprofile|source|manual"), (change_label, "vprofile|source|back")],
         *video_scene3_nav_rows(),
     ])
 
@@ -69477,7 +69580,13 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         ),
         "await_profile_custom": "✍️ <b>Nhập profile riêng</b>\n\nMô tả loại video hoặc chuyên ngành cần thể hiện. Profile này chỉ định hướng cách viết cảnh và câu lệnh.",
         "await_character_description": "✍️ <b>Mô tả nhân vật</b>\n\nMô tả nhận diện, giới tính nếu có, trang phục và đặc điểm phải giữ nhất quán. Hệ thống không tự đoán giới tính khi mô tả chưa rõ.",
-        "await_suggestion": "✍️ <b>Nhập hướng nội dung riêng</b>\n\nMô tả hook, mạch kể và kết quả mong muốn. Hệ thống sẽ phân bổ đúng số cảnh đã chọn.",
+        "await_suggestion": (
+            "✍️ <b>Nhập kịch bản dài</b>\n\n"
+            "Gửi kịch bản hoàn chỉnh cho 5–20 cảnh, tương ứng khoảng 40–160 giây. "
+            "Hệ thống giữ đúng ý, chia thành các cảnh trọn vẹn và cho xem lại trước khi dựng."
+            if video_flow7_kind(state) == "script_to_video"
+            else "✍️ <b>Nhập hướng nội dung riêng</b>\n\nMô tả hook, mạch kể và kết quả mong muốn. Hệ thống sẽ phân bổ đúng số cảnh đã chọn."
+        ),
         "await_requirement": (
             "✍️ <b>Nhập yêu cầu riêng cho mục đang chọn</b>\n\n"
             "Nói rõ chi tiết cần giữ nhất quán giữa các cảnh. Có thể quay lại để chọn một trong 5 gợi ý thay vì tự nhập."
@@ -69516,10 +69625,10 @@ async def video_profile_scene1_render(query, state: dict, lang: str = "vi"):
         "content_mode": lambda: (video_scene3_content_mode_text(state), video_scene3_content_mode_keyboard()),
         "subject": lambda: (video_profile_scene1_subject_text(lang), video_profile_scene1_subject_keyboard(lang)),
         "await_subject": lambda: (video_profile_scene1_subject_text(lang), video_profile_scene1_subject_keyboard(lang)),
-        "scene_count": lambda: (video_profile_scene1_count_text(state, lang), video_profile_scene1_count_keyboard(lang)),
+        "scene_count": lambda: (video_profile_scene1_count_text(state, lang), video_profile_scene1_count_keyboard(lang, state)),
         "aspect_ratio": lambda: (video_scene3_aspect_text(state), video_scene3_aspect_keyboard()),
         "ai_input_type": lambda: (video_scene3_ai_input_text(state), video_scene3_ai_input_keyboard()),
-        "content_source": lambda: (video_scene3_content_source_text(state), video_scene3_content_source_keyboard()),
+        "content_source": lambda: (video_scene3_content_source_text(state), video_scene3_content_source_keyboard(state)),
         "asset_gate": lambda: (video_scene3_asset_gate_text(state), video_scene3_asset_gate_keyboard(state)),
         # Old sessions may still persist this step; render the canonical profile
         # screen so users never see the removed duplicate taxonomy menu.
@@ -72384,11 +72493,8 @@ def video_flow7_after_ratio(state: dict) -> tuple[dict, str]:
     flow_kind = video_flow7_kind(updated)
     if flow_kind == "ai_real" and bool(updated.get("flow8_direct_entry")):
         return updated, "ai_input_type"
-    if flow_kind == "trend_video":
-        updated = video_flow7_seed_internal_planning_state(updated)
-        updated = video_scene3_flow.set_image_source_mode(updated, "none")
-        updated = video_scene3_flow.build_planning_package(updated)
-        return video_flow6.sync_scene_state(updated), "scene_plan"
+    if flow_kind in {"script_to_video", "trend_video"} and bool(updated.get("flow8_direct_entry")):
+        return updated, "content_source"
     return updated, video_flow6.next_after_ratio(video_flow6.context_from_scene_state(updated))
 
 
@@ -82492,6 +82598,7 @@ def video_trend2_db(read_fn):
     conn = db_connect()
     try:
         video_trend_catalog.ensure_schema(conn)
+        video_trend_catalog.seed_media_catalog(conn)
         return read_fn(conn)
     finally:
         conn.close()
@@ -82507,12 +82614,8 @@ def video_trend2_nav(back_callback: str) -> list[InlineKeyboardButton]:
 def video_trend2_entry_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔥 Trend mới nhất", callback_data="vtrend|catalog|latest"),
-            InlineKeyboardButton("🗂️ Trend đã xu hướng", callback_data="vtrend|historical"),
-        ],
-        [
+            InlineKeyboardButton("🔥 Xem 5 trend media", callback_data="vtrend|catalog|latest"),
             InlineKeyboardButton("✍️ Tự nhập trend", callback_data="vtrend|manual_trend"),
-            InlineKeyboardButton("📖 Hướng dẫn", callback_data="vtrend|help"),
         ],
         video_trend2_nav("menu|main_video"),
     ])
@@ -82533,19 +82636,15 @@ def video_trend2_catalog_rows(state: dict) -> list[dict]:
 
 
 def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
-    category = str(state.get("category") or "")
-    historical = str(state.get("catalog_mode") or "latest") == "historical"
     offset = max(0, safe_int(state.get("catalog_offset"), 0))
     page = rows[offset:offset + 5]
-    title = f" trong nhóm {html.escape(category)}" if category else ""
-    catalog_title = "Trend đã xu hướng" if historical else "Trend mới nhất"
     if not page:
         return (
-            f"{'🗂️' if historical else '🔥'} <b>{catalog_title}</b>\n\n"
+            "🔥 <b>Trend media</b>\n\n"
             "Chưa có media trend phù hợp trong bộ nhớ. Anh/chị có thể tự nhập trend; "
             "hệ thống chưa tạo video, chưa gọi nguồn dựng và chưa trừ Xu."
         )
-    lines = [f"{'🗂️' if historical else '🔥'} <b>{catalog_title}{title}</b>", ""]
+    lines = ["🔥 <b>5 trend media để chọn</b>", ""]
     for index, item in enumerate(page, 1):
         stale_note = " · bản lưu gần nhất" if item.get("stale") else ""
         summary = str(item.get("summary") or "Chưa có mô tả ngắn từ nguồn.")
@@ -82558,7 +82657,7 @@ def video_trend2_catalog_text(state: dict, rows: list[dict]) -> str:
         ])
     lines.extend([
         "",
-        "Chọn một trend bằng hàng số. Sau đó mới chọn số cảnh, tỉ lệ và hướng nội dung.",
+        "Chọn một trend bằng hàng số hoặc đổi sang 5 trend khác. Sau đó mới chọn số cảnh, tỉ lệ và nguồn nội dung.",
         "Bước này chưa tạo tác vụ và chưa trừ Xu.",
     ])
     return "\n".join(lines)
@@ -82574,15 +82673,8 @@ def video_trend2_catalog_keyboard(state: dict, rows: list[dict]) -> InlineKeyboa
             for index, item in enumerate(page, 1)
         ])
         keyboard.append([
-            InlineKeyboardButton("🔄 5 trend tiếp", callback_data="vtrend|more"),
-            InlineKeyboardButton("🔎 Lọc trend", callback_data="vtrend|categories"),
-        ])
-        keyboard.append([
+            InlineKeyboardButton("🔄 Đổi 5 trend", callback_data="vtrend|more"),
             InlineKeyboardButton("✍️ Tự nhập trend", callback_data="vtrend|manual_trend"),
-            InlineKeyboardButton(
-                "🔥 Trend mới nhất" if str(state.get("catalog_mode") or "latest") == "historical" else "🗂️ Trend đã xu hướng",
-                callback_data="vtrend|catalog|latest" if str(state.get("catalog_mode") or "latest") == "historical" else "vtrend|historical",
-            ),
         ])
     else:
         keyboard.append([
@@ -82892,28 +82984,19 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
         state = save_video_trend2_state(context, state)
         return await video_trend2_render(query, context, state, lang)
     if action == "historical":
-        state = video_trend2_open_screen(state, "catalog", parent="entry")
-        state.update({"category": "", "catalog_mode": "historical", "catalog_offset": 0, "pending_input": ""})
-        state = save_video_trend2_state(context, state)
-        return await video_trend2_render(query, context, state, lang)
+        # Read-only compatibility for old Telegram messages. The public flow
+        # now has one twenty-item media catalog shown five at a time.
+        readonly = dict(state)
+        readonly.update({"screen": "catalog", "category": "", "catalog_mode": "latest", "catalog_offset": 0})
+        return await video_trend2_render(query, context, readonly, lang)
     if action == "categories":
-        state = video_trend2_open_screen(state, "categories")
-        state["pending_input"] = ""
-        state = save_video_trend2_state(context, state)
-        return await video_trend2_render(query, context, state, lang)
+        readonly = dict(state)
+        readonly.update({"screen": "catalog", "category": "", "catalog_mode": "latest"})
+        return await video_trend2_render(query, context, readonly, lang)
     if action == "category":
-        historical = str(state.get("catalog_mode") or "latest") == "historical"
-        categories = video_trend2_db(
-            lambda conn: video_trend_catalog.list_media_categories(conn, historical=historical)
-        )
-        index = safe_int(value, -1)
-        if index < 0 or index >= len(categories):
-            state["screen"] = "categories"
-        else:
-            state = video_trend2_open_screen(state, "catalog", parent="categories")
-            state.update({"category": categories[index], "catalog_offset": 0})
-        state = save_video_trend2_state(context, state)
-        return await video_trend2_render(query, context, state, lang)
+        readonly = dict(state)
+        readonly.update({"screen": "catalog", "category": "", "catalog_mode": "latest"})
+        return await video_trend2_render(query, context, readonly, lang)
     if action == "more":
         rows = video_trend2_catalog_rows(state)
         offset = safe_int(state.get("catalog_offset"), 0) + 5
@@ -83212,7 +83295,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     deferred_answer_actions = {
         "count_help", "count", "ratio", "profile_help", "profile_pick", "suggest_pick", "content_approve",
         "assets_done", "asset_ai_missing", "video_full", "video_done",
-        "transition_pick", "addon", "finish",
+        "transition_pick", "addon", "finish", "content_config", "upload_use",
     }
     if action not in deferred_answer_actions:
         await query.answer()
@@ -83224,11 +83307,58 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     if action == "entry":
         board = video_storyboard2.move(board, "entry", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
-    if action in {"start", "upload", "ai"}:
-        entry_mode = {"start": "guided", "upload": "existing", "ai": "ai"}[action]
+    if action in {"start", "ai"}:
         fresh = video_storyboard2.default_state()
-        fresh["entry_mode"] = entry_mode
+        fresh["entry_mode"] = "ai"
         board = video_storyboard2.move(fresh, "count", push=True)
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload":
+        fresh = video_storyboard2.default_state()
+        fresh["entry_mode"] = "existing"
+        board = video_storyboard2.move(
+            fresh,
+            "await_storyboard_upload",
+            push=True,
+            awaiting_input="storyboard_upload",
+        )
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload_review":
+        board = video_storyboard2.move(board, "upload_review", push=False, awaiting_input="storyboard_upload")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload_again":
+        board = video_storyboard2.clear_uploaded_storyboard(board)
+        board = video_storyboard2.move(
+            board,
+            "await_storyboard_upload",
+            push=False,
+            awaiting_input="storyboard_upload",
+        )
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload_cancel":
+        board = video_storyboard2.clear_uploaded_storyboard(board)
+        board = video_storyboard2.move(board, "entry", push=False, awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload_count":
+        board = video_storyboard2.move(board, "await_upload_count", awaiting_input="upload_count")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload_use":
+        try:
+            detected = safe_int(board.get("scene_count"), 0) or safe_int(board.get("detected_panel_count"), 0)
+            board = video_storyboard2.set_detected_panel_count(board, detected)
+        except ValueError:
+            return await query.answer("Storyboard cần từ 2 đến 20 cảnh. Hãy sửa số cảnh trước.", show_alert=True)
+        await query.answer()
+        board = video_storyboard2.move(board, "ratio", awaiting_input="")
+        return await storyboard2_render(query, context, persist(board))
+    if action == "upload_panels":
+        board = video_storyboard2.move(board, "upload_panels", awaiting_input="storyboard_upload")
+        return await storyboard2_render(query, context, persist(board))
+    if action in {"upload_panel_prev", "upload_panel_next"}:
+        total = max(1, len(board.get("uploaded_storyboard_files") or []))
+        current = max(1, safe_int(board.get("upload_panel_index"), 1))
+        delta = -1 if action.endswith("prev") else 1
+        board["upload_panel_index"] = ((current - 1 + delta) % total) + 1
+        board = video_storyboard2.move(board, "upload_panels", push=False, awaiting_input="storyboard_upload")
         return await storyboard2_render(query, context, persist(board))
     if action == "help":
         board = video_storyboard2.move(board, "help")
@@ -83238,14 +83368,17 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         return await storyboard2_render(query, context, persist(board))
     if action == "count_help":
         return await query.answer(
-            "1 cảnh ≈ 8 giây. Số cảnh càng nhiều thì nội dung và tổng giá càng cao; giá/gói được chọn gần cuối.",
+            "Storyboard public cần 2–20 cảnh, mỗi cảnh khoảng 8 giây. Giá/gói được chọn gần cuối.",
             show_alert=True,
         )
     if action == "count":
         try:
-            board = video_storyboard2.set_scene_count(board, int(value))
+            selected_count = int(value)
+            if selected_count < video_storyboard2.MIN_PUBLIC_SCENES:
+                raise ValueError("storyboard_public_scene_count_too_small")
+            board = video_storyboard2.set_scene_count(board, selected_count)
         except (TypeError, ValueError):
-            return await query.answer("Số cảnh cần từ 1 đến 20.", show_alert=True)
+            return await query.answer("Số cảnh cần từ 2 đến 20.", show_alert=True)
         await query.answer()
         board = video_storyboard2.move(board, "ratio")
         return await storyboard2_render(query, context, persist(board))
@@ -83261,13 +83394,16 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             board = video_storyboard2.set_ratio(board, ratio)
         except ValueError:
             return await query.answer("Tỉ lệ này chưa được hỗ trợ.", show_alert=True)
-        await query.answer()
         entry_mode = str(board.get("entry_mode") or "guided")
         if entry_mode == "existing":
-            board = video_storyboard2.move(board, "await_content", awaiting_input="content")
+            try:
+                board = video_storyboard2.apply_uploaded_storyboard(board)
+            except ValueError as exc:
+                return await query.answer(f"Chưa thể dùng storyboard: {str(exc)}", show_alert=True)
+            board = video_storyboard2.move(board, "scene_review", awaiting_input="")
         else:
-            board["profile_page"] = 1
-            board = video_storyboard2.move(board, "profiles", awaiting_input="")
+            board = video_storyboard2.move(board, "content_source", awaiting_input="")
+        await query.answer()
         return await storyboard2_render(query, context, persist(board))
     if action == "idea_source":
         interim = video_scene3_flow.default_state(
@@ -83308,9 +83444,11 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
             "video_idea_return_callback",
         ):
             context.user_data.pop(key, None)
-        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
+        board["content_source"] = ""
+        board = video_storyboard2.move(board, "content_source", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "profiles_screen":
+        board["content_source"] = "profiles"
         board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "profile_page":
@@ -83338,11 +83476,15 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         board = video_storyboard2.move(board, "suggestions", awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
     if action == "content_screen":
-        # Old content-choice callbacks are read-only redirects to the one
-        # canonical profile catalog; they do not restore the duplicate screen.
-        board = video_storyboard2.move(board, "profiles", push=False, awaiting_input="")
+        board = video_storyboard2.move(board, "content_source", push=False, awaiting_input="")
         return await storyboard2_render(query, context, persist(board))
+    if action == "content_config":
+        return await query.answer(
+            f"Storyboard: {int(board.get('scene_count') or 0)} cảnh · tỉ lệ {str(board.get('aspect_ratio') or 'chưa chọn')}. Chưa tạo tác vụ và chưa trừ Xu.",
+            show_alert=True,
+        )
     if action == "content_manual":
+        board["content_source"] = "manual"
         board = video_storyboard2.move(board, "await_content", awaiting_input="content")
         return await storyboard2_render(query, context, persist(board))
     if action == "content_suggest":
@@ -84172,7 +84314,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 duration=architecture_draft.get("duration") or 0,
                 input_collected=True,
             )
-        if value in {"video_ai_real", "video_reference", "motion_prompt"}:
+        if value in {"video_ai_real", "video_reference", "motion_prompt", "script_image_video"}:
             return await start_public_video_scene2_step(
                 query,
                 context,
@@ -87747,7 +87889,7 @@ async def handle_storyboard2_pending_text(update: Update, context: ContextTypes.
         return False
     board = video_storyboard2.normalize_state(dict(outer.get("storyboard2") or {}))
     pending = str(board.get("awaiting_input") or "")
-    if pending not in {"count", "content", "scene_content", "image_prompt", "image_negative", "video_prompt", "video_negative"}:
+    if pending not in {"count", "upload_count", "content", "scene_content", "image_prompt", "image_negative", "video_prompt", "video_negative"}:
         return False
     text = str(update.message.text or "").strip()
     message_id = safe_int(getattr(update.message, "message_id", 0), 0)
@@ -87757,8 +87899,14 @@ async def handle_storyboard2_pending_text(update: Update, context: ContextTypes.
     board["processed_text_message_ids"] = (processed + ([message_id] if message_id else []))[-100:]
     try:
         if pending == "count":
-            board = video_storyboard2.set_scene_count(board, int(text))
+            selected_count = int(text)
+            if selected_count < video_storyboard2.MIN_PUBLIC_SCENES:
+                raise ValueError("storyboard_public_scene_count_too_small")
+            board = video_storyboard2.set_scene_count(board, selected_count)
             board = video_storyboard2.move(board, "ratio", push=False, awaiting_input="")
+        elif pending == "upload_count":
+            board = video_storyboard2.set_detected_panel_count(board, int(text))
+            board = video_storyboard2.move(board, "upload_review", push=False, awaiting_input="storyboard_upload")
         elif pending == "content":
             board = video_storyboard2.apply_content(board, text, mode="manual")
             board = video_storyboard2.move(board, "scene_review", push=False, awaiting_input="")
@@ -87815,9 +87963,13 @@ async def handle_storyboard2_pending_text(update: Update, context: ContextTypes.
         save_storyboard2_state(context, board, outer)
         await update.message.reply_text(
             "⚠️ Nội dung chưa hợp lệ cho bước hiện tại. Dữ liệu Storyboard vẫn được giữ; vui lòng gửi lại đúng yêu cầu.",
-            reply_markup=storyboard2_keyboard(storyboard2_nav("vstory|entry" if pending == "count" else (
-                "vstory|content_screen" if pending == "content" else "vstory|scene_screen"
-            ))),
+            reply_markup=storyboard2_keyboard(storyboard2_nav(
+                "vstory|entry" if pending == "count" else (
+                    "vstory|upload_review" if pending == "upload_count" else (
+                        "vstory|content_screen" if pending == "content" else "vstory|scene_screen"
+                    )
+                )
+            )),
         )
         return True
     save_storyboard2_state(context, board, outer)
@@ -87834,7 +87986,7 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
         return False
     board = video_storyboard2.normalize_state(dict(outer.get("storyboard2") or {}))
     pending_image_action = str(board.get("awaiting_input") or "")
-    if pending_image_action not in {"image_upload_batch", "image_upload_replace"}:
+    if pending_image_action not in {"storyboard_upload", "image_upload_batch", "image_upload_replace"}:
         return False
     message_id = safe_int(getattr(update.message, "message_id", 0), 0)
     processed = [safe_int(item, 0) for item in board.get("processed_media_message_ids") or [] if safe_int(item, 0) > 0]
@@ -87842,6 +87994,70 @@ async def handle_storyboard2_pending_media(update: Update, context: ContextTypes
         return True
     board["processed_media_message_ids"] = (processed + ([message_id] if message_id else []))[-100:]
     save_storyboard2_state(context, board, outer)
+    if pending_image_action == "storyboard_upload":
+        upload_media = None
+        mime_type = ""
+        file_name = ""
+        if getattr(update.message, "photo", None):
+            upload_media = update.message.photo[-1]
+            mime_type = "image/jpeg"
+            file_name = f"storyboard-panel-{message_id or 1}.jpg"
+        elif getattr(update.message, "document", None):
+            document = update.message.document
+            document_mime = str(getattr(document, "mime_type", "") or "").lower()
+            allowed_document_types = {
+                "application/pdf",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "text/plain",
+            }
+            if document_mime.startswith("image/") or document_mime in allowed_document_types:
+                upload_media = document
+                mime_type = document_mime or "application/octet-stream"
+                file_name = str(getattr(document, "file_name", "") or "storyboard")
+        if upload_media is None:
+            await update.message.reply_text(
+                "⚠️ Hãy gửi ảnh, PDF, Word, PowerPoint hoặc tệp văn bản Storyboard. Phiên và tệp đã nhận trước đó vẫn được giữ; chưa tạo tác vụ và chưa trừ Xu.",
+                reply_markup=storyboard2_keyboard(storyboard2_nav("vstory|upload_review" if board.get("uploaded_storyboard_files") else "vstory|entry")),
+            )
+            return True
+        file_id = str(getattr(upload_media, "file_id", "") or "")
+        if not file_id:
+            await update.message.reply_text(
+                "⚠️ Không đọc được mã tệp Telegram. Hãy gửi lại; Storyboard hiện tại vẫn được giữ và chưa trừ Xu.",
+                reply_markup=storyboard2_keyboard(storyboard2_nav("vstory|upload_review" if board.get("uploaded_storyboard_files") else "vstory|entry")),
+            )
+            return True
+        caption = str(getattr(update.message, "caption", "") or "").strip()
+        panel_match = re.search(r"\b(\d{1,2})\s*(?:cảnh|canh|panel)\b", caption, flags=re.IGNORECASE)
+        panel_count = safe_int(panel_match.group(1), 1) if panel_match else 1
+        record = video_storyboard2.storyboard_upload_record(
+            file_id=file_id,
+            file_unique_id=str(getattr(upload_media, "file_unique_id", "") or ""),
+            file_name=file_name,
+            mime_type=mime_type,
+            caption=caption,
+            message_id=message_id,
+            panel_count=panel_count,
+        )
+        board = video_storyboard2.add_uploaded_storyboard(board, record)
+        board = video_storyboard2.move(
+            board,
+            "upload_review",
+            push=False,
+            awaiting_input="storyboard_upload",
+        )
+        save_storyboard2_state(context, board, outer)
+        payload, keyboard = storyboard2_screen_payload(board)
+        await update.message.reply_text(
+            "✅ Đã nhận tệp Storyboard. Có thể gửi thêm ảnh/panel hoặc xác nhận số cảnh. "
+            "Chưa gọi provider và chưa trừ Xu.\n\n" + payload,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return True
     media = None
     mime_type = ""
     if getattr(update.message, "photo", None):
@@ -211834,15 +212050,19 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
             "reference_assets": dict(state.get("reference_assets") or state.get("assets") or {}),
         })
         state = save_video_profile_studio_state(context, fresh)
-        await update.message.reply_text(video_profile_scene1_count_text(state, lang), parse_mode="HTML", reply_markup=video_profile_scene1_count_keyboard(lang))
+        await update.message.reply_text(video_profile_scene1_count_text(state, lang), parse_mode="HTML", reply_markup=video_profile_scene1_count_keyboard(lang, state))
         return True
     if step == "await_count_custom":
         try:
             count = int(user_text)
         except ValueError:
             count = 0
-        if count < 1 or count > 20:
-            await update.message.reply_text("⚠️ Vui lòng nhập số cảnh từ 1 đến 20.", reply_markup=video_profile_scene1_count_keyboard(lang))
+        minimum, maximum = video_profile_scene_count_bounds(state)
+        if count < minimum or count > maximum:
+            await update.message.reply_text(
+                f"⚠️ Vui lòng nhập số cảnh từ {minimum} đến {maximum}.",
+                reply_markup=video_profile_scene1_count_keyboard(lang, state),
+            )
             return True
         state = video_scene3_flow.invalidate_scene_outputs(state, count)
         content_type_id = video_scene3_flow.suggested_content_type(state)
@@ -212322,7 +212542,8 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action == "source":
         selected = str(parts[2] if len(parts) > 2 else "").strip()
         if selected == "back":
-            state = video_profile_studio_step(context, state, "ai_input_type", push=False)
+            back_step = "ai_input_type" if video_flow7_kind(state) == "ai_real" else "aspect_ratio"
+            state = video_profile_studio_step(context, state, back_step, push=False)
             return await video_profile_scene1_render(query, state, lang)
         if selected == "profiles":
             state = video_profile_studio_step(
@@ -212394,7 +212615,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             query,
             video_profile_scene1_count_text(state, lang),
             parse_mode="HTML",
-            reply_markup=video_profile_scene1_count_keyboard(lang),
+            reply_markup=video_profile_scene1_count_keyboard(lang, state),
         )
     if action == "count_recommended":
         parts = [parts[0], "count", "2"]
@@ -212407,13 +212628,15 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         ):
             state = video_profile_studio_step(context, state, "content_mode", push=False)
             return await video_profile_scene1_render(query, state, lang)
-        if count < 1 or count > 20:
+        minimum, maximum = video_profile_scene_count_bounds(state)
+        if count < minimum or count > maximum:
             state = video_profile_studio_step(context, state, "scene_count", push=False)
             return await safe_edit_or_send(
                 query,
-                "⚠️ Số cảnh hợp lệ là 1–20. Hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n" + video_profile_scene1_count_text(state, lang),
+                f"⚠️ Số cảnh hợp lệ là {minimum}–{maximum}. Hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
+                + video_profile_scene1_count_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=video_profile_scene1_count_keyboard(lang),
+                reply_markup=video_profile_scene1_count_keyboard(lang, state),
             )
         state = video_scene3_flow.invalidate_scene_outputs(state, count)
         content_type_id = video_scene3_flow.suggested_content_type(state)

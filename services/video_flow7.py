@@ -60,9 +60,11 @@ PRODUCT_SPECS = {
     },
     "script_to_video": {
         "sequence": (
-            "script_mode", "script_input", "parse_preview", "scene_count_confirm",
-            "aspect_ratio", "technical_profile_if_needed", "required_assets",
-            "video_prompts", "addons", "finish", "invoice", "confirm",
+            "scene_count", "aspect_ratio", "content_source",
+            "technical_profile_if_selected", "content_choice", "character",
+            "reference_assets", "style", "audio", "scene_plan",
+            "image_prompts_if_needed", "video_prompts", "addons", "finish",
+            "invoice", "confirm",
         ),
         "required_assets": "script_dependent",
         "job_type": "product_video",
@@ -152,21 +154,17 @@ PRODUCT_SPECS = {
 
 ENTRY_ROWS = {
     "video_ai_real": (
-        (("✨ Prompt AI → Video", "vprofile|ai_input|prompt_video"),
-         ("🖼 Ảnh → Video AI", "vprofile|ai_input|image_video")),
-        (("🎞 Video mẫu → Video AI", "vprofile|ai_input|video_video"),
+        (("✨ Prompt → Video", "vprofile|ai_input|prompt_video"),
+         ("🖼 Ảnh → Video", "vprofile|ai_input|image_video")),
+        (("🎞 Video → Video", "vprofile|ai_input|video_video"),
          ("🔄 Chọn lại từ đầu", "vproduct|open|video_ai_real")),
     ),
     "video_trend": (
         (("🔥 Trend mới nhất", "vtrend|catalog|latest"),
-         ("🗂️ Trend đã xu hướng", "vtrend|historical")),
-        (("✍️ Tự nhập trend", "vtrend|manual_trend"),
-         ("📖 Hướng dẫn", "vtrend|help")),
+         ("✍️ Tự nhập trend", "vtrend|manual_trend")),
     ),
     "script_image_video": (
-        (("📄 Kịch bản có sẵn", "vproduct|script_existing|script_image_video"),
-         ("💡 AI hỗ trợ viết", "vproduct|script_ideas|script_image_video")),
-        (("💡 Ý tưởng video", "vproduct|idea_library|script_image_video"),
+        (("🎬 Bắt đầu lập kịch bản", "vproduct|open|script_image_video"),
          ("📖 Hướng dẫn", "menu|guide_video_ai")),
     ),
     "storyboard_prompt": (
