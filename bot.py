@@ -110,7 +110,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
+from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
@@ -72409,6 +72409,7 @@ VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("selfscene|", "handle_self_scene_ai_callback"),
     ("longvideo|", "handle_long_video_callback"),
     ("storypack|", "handle_storyboard_pack_callback"),
+    ("idea_video|", "handle_video_idea_prompt_callback"),
     ("videa|", "handle_video_idea_dynamic_callback"),
     ("videoidea|", "handle_video_idea_callback"),
     ("video_upload|", "handle_video_upload_callback"),
@@ -72823,9 +72824,18 @@ async def video_flow7_open_idea_catalog_from_state(
     )
     intake = {
         "origin_product": parent_handoff["origin_product"],
+        "idea_parent_product": parent_handoff["idea_parent_product"],
+        "idea_parent_flow": parent_handoff["idea_parent_flow"],
+        "idea_parent_session_id": parent_handoff["idea_parent_session_id"],
+        "idea_parent_revision": parent_handoff["idea_parent_revision"],
+        "idea_return_step": parent_handoff["idea_return_step"],
         "scene_count": parent_handoff["scene_count"],
         "aspect_ratio": parent_handoff["aspect_ratio"],
+        "ratio": parent_handoff["ratio"],
         "trend_source": dict(parent_handoff["trend_source"]),
+        "trend_id": str(parent_handoff.get("trend_id") or ""),
+        "source_video_id": str(parent_handoff.get("source_video_id") or ""),
+        "storyboard_session_id": str(parent_handoff.get("storyboard_session_id") or ""),
         "source_media_refs": list(parent_handoff["source_media_refs"]),
         "source_asset_items": [dict(item) for item in parent_handoff["source_asset_items"]],
         "return_callback": parent_handoff["return_callback"],
@@ -95386,6 +95396,129 @@ def video_idea_dynamic_edit_text(state: dict) -> str:
     )
 
 
+def video_idea_prompt_selection_text(state: dict) -> str:
+    candidates = [
+        dict(item)
+        for item in state.get("idea_prompt_candidates") or []
+        if isinstance(item, dict)
+    ][:5]
+    product = str(state.get("idea_parent_product") or "")
+    product_label = {
+        "video_ai_real": "Video AI chân thật",
+        "video_trend": "Video theo trend",
+        "script_image_video": "Kịch bản → Video",
+        "storyboard_prompt": "Storyboard",
+        "self_shot_scene_change": "Tự quay & đổi cảnh AI",
+        "self_shot_cinematic_transform": "Tự quay & biến đổi điện ảnh",
+        "multi_scene_film": "Video dài tập",
+        "video_reference": "Video tham chiếu",
+        "motion_prompt": "Prompt chuyển động",
+    }.get(product, "Video")
+    lines = [
+        "🎬 <b>Chọn prompt video</b>",
+        "",
+        f"• Sản phẩm: <b>{html.escape(product_label)}</b>",
+        f"• Số cảnh: {max(1, safe_int(state.get('scene_count'), 1))}",
+        f"• Tỉ lệ: {html.escape(str(state.get('ratio') or state.get('recommended_aspect_ratio') or '9:16'))}",
+        "",
+        "Mỗi prompt giữ nguyên ý tưởng và nội dung từng cảnh, chỉ đổi cách kể, camera và nhịp chuyển tiếp.",
+        "",
+    ]
+    for index, candidate in enumerate(candidates, 1):
+        lines.append(
+            f"{index}. <b>{html.escape(str(candidate.get('title') or f'Prompt {index}'))}</b>\n"
+            f"{html.escape(str(candidate.get('summary') or ''))}"
+        )
+    if product == "storyboard_prompt":
+        lines.extend([
+            "",
+            "Storyboard bắt buộc chọn hoặc sửa prompt trước khi mở kế hoạch và bảng ảnh.",
+        ])
+    else:
+        lines.extend([
+            "",
+            "Bỏ qua sẽ dùng prompt mặc định đã biên soạn, không để prompt rỗng.",
+        ])
+    lines.extend(["", "Bước này chưa gọi nguồn dựng, chưa tạo tác vụ và chưa trừ Xu."])
+    return "\n".join(lines)
+
+
+def video_idea_prompt_selection_keyboard(state: dict) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [[
+        InlineKeyboardButton(str(index), callback_data=f"idea_video|prompt|select|{index}")
+        for index in range(1, 6)
+    ]]
+    rows.append([
+        InlineKeyboardButton("🔄 Đổi 5 prompt", callback_data="idea_video|prompt|refresh"),
+        InlineKeyboardButton("✍️ Sửa prompt", callback_data="idea_video|prompt|edit"),
+    ])
+    if str(state.get("idea_parent_product") or "") == "storyboard_prompt":
+        rows.append([
+            InlineKeyboardButton("👁 Xem nội dung", callback_data="idea_video|prompt|view"),
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton("⏭️ Bỏ qua", callback_data="idea_video|prompt|skip"),
+            InlineKeyboardButton("👁 Xem nội dung", callback_data="idea_video|prompt|view"),
+        ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Quay lại", callback_data="idea_video|prompt|back"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_idea_prompt_edit_text(state: dict) -> str:
+    candidates = [
+        dict(item)
+        for item in state.get("idea_prompt_candidates") or []
+        if isinstance(item, dict)
+    ]
+    example = str((candidates[0] if candidates else {}).get("prompt") or "").strip()
+    return (
+        "✍️ <b>Sửa prompt video</b>\n\n"
+        "Gửi prompt hoàn chỉnh muốn dùng. Prompt phải mô tả đúng số cảnh, giữ continuity và không làm mất nội dung đã chọn.\n\n"
+        f"<b>Prompt tham khảo:</b>\n<code>{html.escape(example[:8000])}</code>\n\n"
+        "Sau khi gửi, hệ thống sẽ cho xem lại trước khi tiếp tục. Chưa gọi nguồn dựng và chưa trừ Xu."
+    )
+
+
+def video_idea_prompt_custom_review_text(state: dict) -> str:
+    prompt = str(state.get("idea_selected_prompt") or "").strip()
+    return (
+        "🎬 <b>Prompt video đã sửa</b>\n\n"
+        f"<code>{html.escape(prompt)}</code>\n\n"
+        "Bấm <b>Dùng prompt này</b> để quay đúng flow cha. Bước này chưa gọi nguồn dựng, chưa tạo tác vụ và chưa trừ Xu."
+    )
+
+
+def video_idea_prompt_custom_review_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Dùng prompt này", callback_data="idea_video|prompt|continue"),
+            InlineKeyboardButton("✍️ Sửa lại", callback_data="idea_video|prompt|edit"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Chọn prompt", callback_data="idea_video|prompt|back"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_idea_prompt_edit_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Chọn prompt", callback_data="idea_video|prompt|back"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ]])
+
+
+def video_idea_prompt_content_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Chọn prompt", callback_data="idea_video|prompt|back"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ]])
+
+
 def video_idea_catalog_categories_text(lang: str = "vi") -> str:
     lines = [
         "🔎 <b>Khám phá ý tưởng video</b>",
@@ -96330,6 +96463,23 @@ async def handle_video_idea_dynamic_pending_text(
             ),
         )
         clear_developing_video_pending(uid)
+        return True
+
+    if step == "idea2_prompt_edit":
+        try:
+            state = video_idea_prompt.set_custom_prompt(state, raw_text)
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ Prompt đang trống. Hãy gửi prompt video hoàn chỉnh; nội dung và flow cha vẫn được giữ nguyên.",
+                reply_markup=video_idea_prompt_edit_keyboard(),
+            )
+            return True
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt_custom_review")
+        await safe_reply_long_html(
+            update.message,
+            video_idea_prompt_custom_review_text(state),
+            reply_markup=video_idea_prompt_custom_review_keyboard(),
+        )
         return True
 
     if step == "idea2_scene_count_custom":
@@ -98382,11 +98532,20 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
     preset = dict(source.get("idea_preset") or {})
     drafts = [dict(item) for item in source.get("scene_drafts") or [] if isinstance(item, dict)]
     count = max(1, min(20, len(drafts) or safe_int(source.get("scene_count"), 1)))
+    selected_prompt = str(source.get("idea_selected_prompt") or "").strip()
+    custom_note = "\n\n".join(
+        item
+        for item in (
+            str(source.get("customer_brief") or "").strip(),
+            selected_prompt,
+        )
+        if item
+    )
     plan = video_idea_catalog.build_plan(
         preset,
         scene_count=count,
         source_mode="text_prompt",
-        custom_note=str(source.get("customer_brief") or ""),
+        custom_note=custom_note,
     )
     plan.update({
         "idea_category_id": safe_int(source.get("idea_category_id"), 0),
@@ -98396,6 +98555,16 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "subject": str(source.get("subject") or preset.get("title") or "Ý tưởng video"),
         "manual_script_raw": str(source.get("manual_script_raw") or ""),
         "scene_drafts": drafts,
+        "idea_scene_content": [dict(item) for item in source.get("idea_scene_content") or [] if isinstance(item, dict)],
+        "idea_prompt_candidates": [dict(item) for item in source.get("idea_prompt_candidates") or [] if isinstance(item, dict)],
+        "idea_selected_prompt": selected_prompt,
+        "idea_selected_prompt_record": dict(source.get("idea_selected_prompt_record") or {}),
+        "idea_prompt_skipped": bool(source.get("idea_prompt_skipped")),
+        "idea_parent_product": str(source.get("idea_parent_product") or origin_product or ""),
+        "idea_parent_flow": str(source.get("idea_parent_flow") or ""),
+        "idea_parent_session_id": str(source.get("idea_parent_session_id") or ""),
+        "idea_parent_revision": safe_int(source.get("idea_parent_revision"), 1),
+        "idea_return_step": str(source.get("idea_return_step") or ""),
         "recommended_aspect_ratio": str(
             source.get("recommended_aspect_ratio")
             or preset.get("recommended_aspect_ratio")
@@ -98415,6 +98584,9 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
             if str(item or "").strip()
         ][:20],
         "trend_source": dict(source.get("trend_source") or {}),
+        "trend_id": str(source.get("trend_id") or ""),
+        "source_video_id": str(source.get("source_video_id") or ""),
+        "storyboard_session_id": str(source.get("storyboard_session_id") or ""),
     })
     lane_product = str(origin_product or source.get("idea_origin_product") or "").strip()
     handoff = video_idea_catalog.build_scene3_handoff_state(
@@ -98429,6 +98601,16 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "subject": plan["subject"],
         "manual_script_raw": plan["manual_script_raw"],
         "scene_drafts": drafts,
+        "idea_scene_content": list(plan.get("idea_scene_content") or []),
+        "idea_prompt_candidates": list(plan.get("idea_prompt_candidates") or []),
+        "idea_selected_prompt": selected_prompt,
+        "idea_selected_prompt_record": dict(plan.get("idea_selected_prompt_record") or {}),
+        "idea_prompt_skipped": bool(plan.get("idea_prompt_skipped")),
+        "idea_parent_product": str(plan.get("idea_parent_product") or lane_product or ""),
+        "idea_parent_flow": str(plan.get("idea_parent_flow") or ""),
+        "idea_parent_session_id": str(plan.get("idea_parent_session_id") or ""),
+        "idea_parent_revision": safe_int(plan.get("idea_parent_revision"), 1),
+        "idea_return_step": str(plan.get("idea_return_step") or ""),
         "scene_count": count,
         "recommended_aspect_ratio": plan["recommended_aspect_ratio"],
         "aspect_ratio": plan["recommended_aspect_ratio"],
@@ -98441,6 +98623,8 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_origin_product": lane_product,
         "idea_return_callback": f"videa|preset|{plan['idea_preset_id']}",
         "trend_source": dict(plan.get("trend_source") or {}),
+        "trend_id": str(plan.get("trend_id") or ""),
+        "source_video_id": str(plan.get("source_video_id") or ""),
         "final_confirmed": False,
         "provider_called": False,
         "image_provider_called": False,
@@ -98481,6 +98665,18 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "origin": "video_idea_product_lane" if lane_product else "video_idea_dynamic_catalog",
         "idea_origin_product": lane_product,
         "idea_return_callback": f"videa|preset|{plan['idea_preset_id']}",
+        "idea_scene_content": list(plan.get("idea_scene_content") or []),
+        "idea_prompt_candidates": list(plan.get("idea_prompt_candidates") or []),
+        "idea_selected_prompt": selected_prompt,
+        "idea_selected_prompt_record": dict(plan.get("idea_selected_prompt_record") or {}),
+        "idea_prompt_skipped": bool(plan.get("idea_prompt_skipped")),
+        "idea_parent_product": str(plan.get("idea_parent_product") or lane_product or ""),
+        "idea_parent_flow": str(plan.get("idea_parent_flow") or ""),
+        "idea_parent_session_id": str(plan.get("idea_parent_session_id") or ""),
+        "idea_parent_revision": safe_int(plan.get("idea_parent_revision"), 1),
+        "idea_return_step": str(plan.get("idea_return_step") or ""),
+        "trend_id": str(plan.get("trend_id") or ""),
+        "source_video_id": str(plan.get("source_video_id") or ""),
         "final_confirmed": False,
         "provider_called": False,
         "image_provider_called": False,
@@ -98513,6 +98709,11 @@ async def video_idea_render_exact_parent(
         if isinstance(item, dict)
     ]
     subject = str(handoff.get("subject") or idea_state.get("subject") or "Ý tưởng video").strip()
+    selected_prompt = str(
+        handoff.get("idea_selected_prompt")
+        or idea_state.get("idea_selected_prompt")
+        or ""
+    ).strip()
 
     if product_id == "storyboard_prompt":
         board = video_storyboard2.normalize_state(
@@ -98537,6 +98738,9 @@ async def video_idea_render_exact_parent(
                 board = video_storyboard2.set_scene_content(board, index, content)
         board = video_storyboard2.approve_content(board)
         board["content_source"] = "idea_catalog"
+        board["idea_preset_id"] = safe_int(idea_state.get("idea_preset_id"), 0)
+        board["idea_selected_prompt"] = selected_prompt
+        board["idea_scene_content"] = list(idea_state.get("idea_scene_content") or [])
         board["history"] = ["content_source"]
         board = video_storyboard2.move(board, "scene_review", push=False, awaiting_input="")
         save_storyboard2_state(context, board)
@@ -98555,6 +98759,7 @@ async def video_idea_render_exact_parent(
             "title": subject,
             "summary": subject,
             "scene_drafts": scene_drafts,
+            "prompt": selected_prompt,
         }
         draft["content_source"] = "ideas"
         draft["content_return_screen"] = "ideas"
@@ -98562,7 +98767,8 @@ async def video_idea_render_exact_parent(
             draft["direction_contract"] = video_selfshot2.direction_contract("source_camera")
             draft["selected_direction"] = "source_camera"
         draft["scene_plan"] = video_selfshot2_build_plan(draft)
-        draft["video_prompts"] = []
+        draft["video_prompts"] = video_selfshot2_compile_prompts(draft)
+        draft["idea_selected_prompt"] = selected_prompt
         save_video_selfshot2_draft(user_id, draft, step="selfshot2:scene_plan")
         return await video_selfshot2_render(query, user_id, "scene_plan", draft=draft)
 
@@ -98579,21 +98785,309 @@ async def video_idea_render_exact_parent(
             "summary": subject,
         }
         draft["preset_source"] = "idea_library"
-        draft["transformation_content"] = subject
+        draft["transformation_content"] = selected_prompt or subject
+        draft["idea_selected_prompt"] = selected_prompt
         if not draft.get("source_segment"):
             analysis = dict(draft.get("source_analysis") or {})
             if float(analysis.get("duration_seconds") or 0) > 0:
                 draft["source_segment"] = video_selfshot3.segment_selection(analysis)
         if draft.get("source_segment"):
             draft["transformation_stages"] = video_selfshot3_build_timeline(draft)
+            draft["compiled_prompt"] = video_selfshot3_compile_prompt(draft)
             target_screen = "timeline"
         else:
             target_screen = "segment"
         save_video_selfshot3_draft(user_id, draft, step=f"selfshot3:{target_screen}")
         return await video_selfshot3_render(query, user_id, target_screen, draft=draft)
 
+    if product_id == "multi_scene_film":
+        # The internal long-video lane still uses the canonical planning/tail
+        # renderer.  Its parent marker is not a public renderer step, so open
+        # the chapter prompt review while preserving the long-video product
+        # and executor route.
+        handoff.update({
+            "step": "video_prompts",
+            "long_form_prompt_mode": True,
+            "chapter_duration_minutes": 5,
+            "idea_selected_prompt": selected_prompt,
+        })
+
     handoff = save_video_profile_studio_state(context, handoff)
     return await video_profile_scene1_render(query, handoff, lang)
+
+
+async def video_idea_continue_to_exact_parent(
+    target,
+    context,
+    user_id: int,
+    state: dict,
+    lang: str,
+):
+    """Return one selected idea prompt to its exact parent and existing tail."""
+
+    current = dict(state or {})
+    drafts = [dict(item) for item in current.get("scene_drafts") or [] if isinstance(item, dict)]
+    origin_product = video_idea_product_lane_origin(context, current)
+    parent_handoff = video_idea_handoff.normalize_parent_handoff(
+        current.get("idea_parent_handoff")
+        or context.user_data.get("video_idea_parent_handoff")
+    )
+    if origin_product and not parent_handoff:
+        compatibility_state = {
+            **dict(context.user_data.get("video_idea_flow7_intake") or {}),
+            **current,
+        }
+        parent_handoff = video_idea_handoff.build_parent_handoff(
+            compatibility_state,
+            product_id=origin_product,
+            return_callback=video_idea_catalog_back_callback(context, current),
+        )
+    if origin_product:
+        validation = video_idea_prompt.validate_return_state(current)
+        if not validation.get("ok"):
+            logger.warning(
+                "video_idea_prompt_return_state_incomplete | product=%s missing=%s",
+                sanitize_log_text(origin_product)[:80],
+                sanitize_log_text(",".join(validation.get("missing") or []))[:240],
+            )
+            restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
+            return await safe_edit_or_send_long_html(
+                target,
+                "⚠️ <b>Phiên prompt chưa đủ dữ liệu để tiếp tục.</b>\n\n"
+                "TOAN AAS giữ nguyên ý tưởng, số cảnh, tỉ lệ và flow cha; chưa tạo tác vụ, "
+                "chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+                + video_idea_prompt_selection_text(current),
+                reply_markup=video_idea_prompt_selection_keyboard(current),
+            )
+    try:
+        handoff = video_idea_dynamic_scene3_state(current, origin_product=origin_product)
+        if origin_product:
+            handoff = video_idea_handoff.apply_parent_handoff(handoff, parent_handoff)
+            handoff.update({
+                "idea_parent_product": str(current.get("idea_parent_product") or origin_product),
+                "idea_parent_flow": str(current.get("idea_parent_flow") or ""),
+                "idea_parent_session_id": str(current.get("idea_parent_session_id") or ""),
+                "idea_parent_revision": safe_int(current.get("idea_parent_revision"), 1),
+                "idea_return_step": str(current.get("idea_return_step") or ""),
+                "idea_scene_content": list(current.get("idea_scene_content") or []),
+                "idea_prompt_candidates": list(current.get("idea_prompt_candidates") or []),
+                "idea_selected_prompt": str(current.get("idea_selected_prompt") or ""),
+                "idea_selected_prompt_record": dict(current.get("idea_selected_prompt_record") or {}),
+                "idea_prompt_skipped": bool(current.get("idea_prompt_skipped")),
+                "trend_id": str(current.get("trend_id") or ""),
+                "source_video_id": str(current.get("source_video_id") or ""),
+            })
+    except ValueError as exc:
+        if str(exc) == "self_shot_source_video_required":
+            return await safe_edit_or_send(
+                target,
+                "⚠️ Tự quay & đổi cảnh AI cần video nguồn trước khi dùng ý tưởng. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Gửi video nguồn", callback_data="vproduct|idea_back|self_shot_scene_change"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ]]),
+            )
+        logger.warning(
+            "video_idea_prompt_handoff_rejected | product=%s preset=%s blocker=%s",
+            sanitize_log_text(origin_product)[:80],
+            safe_int(current.get("idea_preset_id"), 0),
+            sanitize_log_text(str(exc))[:160],
+        )
+        restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
+        return await safe_edit_or_send_long_html(
+            target,
+            "⚠️ <b>Chưa thể trả prompt về đúng sản phẩm.</b>\n\n"
+            "Phiên cha và lựa chọn hiện tại vẫn được giữ; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            + video_idea_prompt_selection_text(current),
+            reply_markup=video_idea_prompt_selection_keyboard(current),
+        )
+    except Exception as exc:
+        logger.exception(
+            "video_idea_prompt_handoff_failed | product=%s preset=%s exception=%s",
+            sanitize_log_text(origin_product)[:80],
+            safe_int(current.get("idea_preset_id"), 0),
+            type(exc).__name__,
+        )
+        restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
+        return await safe_edit_or_send_long_html(
+            target,
+            "⚠️ <b>Chưa thể mở bước tiếp theo của sản phẩm.</b>\n\n"
+            "TOAN AAS giữ nguyên prompt và flow cha; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            + video_idea_prompt_selection_text(current),
+            reply_markup=video_idea_prompt_selection_keyboard(current),
+        )
+
+    save_developing_video_plan(user_id, "videoidea", {
+        **current,
+        "final_confirmed": False,
+        "provider_called": False,
+        "image_provider_called": False,
+        "music_provider_calls": 0,
+        "voice_provider_calls": 0,
+        "files_generated": 0,
+        "job_created": False,
+        "outbox_created": False,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    })
+    try:
+        rendered = await video_idea_render_exact_parent(
+            target,
+            context,
+            user_id,
+            handoff,
+            current,
+            lang,
+        )
+    except Exception as exc:
+        logger.exception(
+            "video_idea_prompt_parent_render_failed | product=%s preset=%s exception=%s",
+            sanitize_log_text(origin_product)[:80],
+            safe_int(current.get("idea_preset_id"), 0),
+            type(exc).__name__,
+        )
+        restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
+        return await safe_edit_or_send_long_html(
+            target,
+            "⚠️ <b>Chưa thể mở đúng màn kế tiếp.</b>\n\n"
+            "TOAN AAS giữ nguyên prompt, số cảnh, tỉ lệ và flow cha; chưa tạo tác vụ, "
+            "chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            + video_idea_prompt_selection_text(current),
+            reply_markup=video_idea_prompt_selection_keyboard(current),
+        )
+
+    clear_developing_video_pending(user_id)
+    for key in (
+        "video_idea_flow7_intake",
+        "video_idea_parent_handoff",
+        "video_idea_origin_product",
+        "video_idea_source_media_refs",
+        "video_idea_return_callback",
+    ):
+        context.user_data.pop(key, None)
+    return rendered
+
+
+async def handle_video_idea_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    uid = query.from_user.id
+    callback_query_id = str(getattr(query, "id", "") or "")
+    processed_ids = [
+        str(item)
+        for item in context.user_data.get("video_idea_processed_callback_ids") or []
+        if str(item or "")
+    ][-100:]
+    if callback_query_id and callback_query_id in processed_ids:
+        await query.answer("Đã nhận lựa chọn này.")
+        return None
+    if callback_query_id:
+        context.user_data["video_idea_processed_callback_ids"] = (processed_ids + [callback_query_id])[-100:]
+    await query.answer()
+    lang = get_user_language(uid) or "vi"
+    state = video_idea_dynamic_state(uid)
+    if not state or not str(state.get("idea_parent_product") or ""):
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Phiên chọn prompt đã hết hạn. Hãy quay lại đúng sản phẩm và mở Kho Ý tưởng video lần nữa. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Quay lại", callback_data=video_idea_catalog_back_callback(context, state)),
+                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            ]]),
+        )
+
+    parts = str(query.data or "").split("|")
+    action = parts[2] if len(parts) > 2 else ""
+    value = parts[3] if len(parts) > 3 else ""
+
+    if action == "select":
+        try:
+            state = video_idea_prompt.select_prompt(state, safe_int(value, 0))
+        except ValueError:
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_prompt_selection_text(state),
+                reply_markup=video_idea_prompt_selection_keyboard(state),
+            )
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt_selected")
+        return await video_idea_continue_to_exact_parent(query, context, uid, state, lang)
+
+    if action == "refresh":
+        state = video_idea_prompt.refresh_prompt_candidates(state)
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_prompt_selection_text(state),
+            reply_markup=video_idea_prompt_selection_keyboard(state),
+        )
+
+    if action == "edit":
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt_edit")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_prompt_edit_text(state),
+            reply_markup=video_idea_prompt_edit_keyboard(),
+        )
+
+    if action == "skip":
+        try:
+            state = video_idea_prompt.skip_prompt(state)
+        except ValueError as exc:
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+            notice = (
+                "⚠️ Storyboard bắt buộc chọn một prompt hoặc sửa prompt trước khi mở kế hoạch và bảng ảnh.\n\n"
+                if str(exc) == "storyboard_prompt_required"
+                else "⚠️ Flow này không hỗ trợ bỏ qua prompt.\n\n"
+            )
+            return await safe_edit_or_send_long_html(
+                query,
+                notice + video_idea_prompt_selection_text(state),
+                reply_markup=video_idea_prompt_selection_keyboard(state),
+            )
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt_selected")
+        return await video_idea_continue_to_exact_parent(query, context, uid, state, lang)
+
+    if action == "view":
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt_view")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_prompt_content_keyboard(),
+        )
+
+    if action == "continue":
+        if not str(state.get("idea_selected_prompt") or "").strip():
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_prompt_selection_text(state),
+                reply_markup=video_idea_prompt_selection_keyboard(state),
+            )
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt_selected")
+        return await video_idea_continue_to_exact_parent(query, context, uid, state, lang)
+
+    if action == "back":
+        current_step = str(state.get("step") or "")
+        if current_step in {"idea2_prompt_edit", "idea2_prompt_custom_review", "idea2_prompt_view"}:
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_prompt_selection_text(state),
+                reply_markup=video_idea_prompt_selection_keyboard(state),
+            )
+        restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_dynamic_preview_text(state),
+            reply_markup=video_idea_dynamic_preview_keyboard(lang),
+        )
+
+    restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+    return await safe_edit_or_send_long_html(
+        query,
+        video_idea_prompt_selection_text(state),
+        reply_markup=video_idea_prompt_selection_keyboard(state),
+    )
 
 
 async def handle_video_idea_dynamic_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -98971,6 +99465,33 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
                 compatibility_state,
                 product_id=origin_product,
                 return_callback=video_idea_catalog_back_callback(context, state),
+            )
+        if origin_product:
+            try:
+                state = video_idea_prompt.prepare_prompt_selection(state, parent_handoff)
+            except ValueError as exc:
+                logger.warning(
+                    "video_idea_prompt_prepare_rejected | product=%s preset=%s blocker=%s",
+                    sanitize_log_text(origin_product)[:80],
+                    safe_int(state.get("idea_preset_id"), 0),
+                    sanitize_log_text(str(exc))[:160],
+                )
+                restore_developing_video_pending(uid, "videoidea", state, "idea2_preview")
+                return await safe_edit_or_send_long_html(
+                    query,
+                    "⚠️ <b>Chưa thể mở phần chọn prompt video.</b>\n\n"
+                    "TOAN AAS giữ nguyên nội dung, số cảnh, tỉ lệ và flow cha; chưa tạo tác vụ, "
+                    "chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+                    + video_idea_dynamic_preview_text(state),
+                    reply_markup=video_idea_dynamic_preview_keyboard(lang),
+                )
+            state["idea_parent_handoff"] = dict(parent_handoff)
+            context.user_data["video_idea_parent_handoff"] = dict(parent_handoff)
+            restore_developing_video_pending(uid, "videoidea", state, "idea2_prompt")
+            return await safe_edit_or_send_long_html(
+                query,
+                video_idea_prompt_selection_text(state),
+                reply_markup=video_idea_prompt_selection_keyboard(state),
             )
         try:
             handoff = (
@@ -220823,6 +221344,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\|"))
     tg_app.add_handler(CommandHandler("video_idea_admin", cmd_video_idea_admin))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_admin_callback, pattern=r"^viadm\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_idea_prompt_callback, pattern=r"^idea_video\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_dynamic_callback, pattern=r"^videa\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_upload_callback, pattern=r"^video_upload\|"))

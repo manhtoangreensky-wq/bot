@@ -54,6 +54,10 @@ PARENT_STATE_KEYS = frozenset({
     "world",
     "selected_effects",
     "audio_plan",
+    "trend_id",
+    "idea_scene_content",
+    "idea_prompt_candidates",
+    "idea_selected_prompt",
 })
 
 
@@ -83,11 +87,17 @@ def build_parent_handoff(
         for item in assets.get("items") or []
         if isinstance(item, dict)
     ][:20]
+    session_id = str(source.get("flow_session_id") or source.get("session_id") or uuid4())
+    revision = _bounded_int(source.get("flow_revision") or source.get("revision"), 1, 1, 1_000_000)
+    source_flow = str(source.get("flow_kind") or source.get("flow") or product)
+    return_step = str(source.get("idea_return_step") or NEXT_STEPS[product])
+    ratio = str(source.get("ratio") or source.get("aspect_ratio") or "9:16")
+    trend_source = deepcopy(dict(source.get("trend_source") or {}))
     return {
         "owner": "video_idea_parent_handoff",
-        "session_id": str(source.get("flow_session_id") or source.get("session_id") or uuid4()),
-        "revision": _bounded_int(source.get("flow_revision") or source.get("revision"), 1, 1, 1_000_000),
-        "source_flow": str(source.get("flow_kind") or source.get("flow") or product),
+        "session_id": session_id,
+        "revision": revision,
+        "source_flow": source_flow,
         "idea_source_flow": str(
             source.get("idea_source_flow")
             or source.get("flow_kind")
@@ -95,8 +105,12 @@ def build_parent_handoff(
             or product
         ),
         "origin_product": product,
+        "idea_parent_product": product,
+        "idea_parent_flow": source_flow,
+        "idea_parent_session_id": session_id,
+        "idea_parent_revision": revision,
         "return_step": NEXT_STEPS[product],
-        "idea_return_step": str(source.get("idea_return_step") or NEXT_STEPS[product]),
+        "idea_return_step": return_step,
         "return_callback": str(return_callback or "videoidea|start").strip(),
         "idea_preset_id": _bounded_int(source.get("idea_preset_id"), 0, 0, 2_147_483_647),
         "idea_content": str(source.get("idea_content") or source.get("subject") or ""),
@@ -106,9 +120,14 @@ def build_parent_handoff(
             or source.get("manual_script_raw")
             or ""
         ),
+        "idea_scene_content": deepcopy(list(source.get("idea_scene_content") or [])),
+        "idea_prompt_candidates": deepcopy(list(source.get("idea_prompt_candidates") or [])),
+        "idea_selected_prompt": str(source.get("idea_selected_prompt") or ""),
         "scene_count": _bounded_int(source.get("scene_count"), 1, 1, 20),
-        "aspect_ratio": str(source.get("aspect_ratio") or "9:16"),
-        "trend_source": deepcopy(dict(source.get("trend_source") or {})),
+        "aspect_ratio": ratio,
+        "ratio": ratio,
+        "trend_source": trend_source,
+        "trend_id": str(source.get("trend_id") or trend_source.get("trend_id") or trend_source.get("id") or ""),
         "storyboard_session_id": str(source.get("storyboard_session_id") or ""),
         "source_video_id": str(
             assets.get("source_media_ref")
@@ -136,16 +155,25 @@ def normalize_parent_handoff(value: dict | None) -> dict:
     if source.get("owner") != "video_idea_parent_handoff" or product not in SUPPORTED_PRODUCTS:
         return {}
     source["origin_product"] = product
+    source["idea_parent_product"] = product
     source["return_step"] = NEXT_STEPS[product]
     source["idea_source_flow"] = str(source.get("idea_source_flow") or source.get("source_flow") or product)
+    source["idea_parent_flow"] = str(source.get("idea_parent_flow") or source["idea_source_flow"])
     source["idea_return_step"] = str(source.get("idea_return_step") or NEXT_STEPS[product])
     source["idea_preset_id"] = _bounded_int(source.get("idea_preset_id"), 0, 0, 2_147_483_647)
     source["idea_content"] = str(source.get("idea_content") or "")
     source["idea_prompt"] = str(source.get("idea_prompt") or "")
     source["scene_count"] = _bounded_int(source.get("scene_count"), 1, 1, 20)
     source["aspect_ratio"] = str(source.get("aspect_ratio") or "9:16")
+    source["ratio"] = str(source.get("ratio") or source["aspect_ratio"])
     source["revision"] = _bounded_int(source.get("revision"), 1, 1, 1_000_000)
+    source["idea_parent_session_id"] = str(source.get("idea_parent_session_id") or source.get("session_id") or "")
+    source["idea_parent_revision"] = _bounded_int(source.get("idea_parent_revision") or source["revision"], 1, 1, 1_000_000)
     source["trend_source"] = deepcopy(dict(source.get("trend_source") or {}))
+    source["trend_id"] = str(source.get("trend_id") or source["trend_source"].get("trend_id") or source["trend_source"].get("id") or "")
+    source["idea_scene_content"] = deepcopy(list(source.get("idea_scene_content") or []))
+    source["idea_prompt_candidates"] = deepcopy(list(source.get("idea_prompt_candidates") or []))
+    source["idea_selected_prompt"] = str(source.get("idea_selected_prompt") or "")
     source["source_media_refs"] = [
         str(item).strip()
         for item in source.get("source_media_refs") or []
@@ -175,8 +203,11 @@ def apply_parent_handoff(scene_state: dict, handoff: dict) -> dict:
     updated.update({
         "source_product_id": product,
         "idea_origin_product": product,
+        "idea_parent_product": product,
+        "idea_parent_flow": restored["idea_parent_flow"],
         "scene_count": restored["scene_count"],
         "aspect_ratio": restored["aspect_ratio"],
+        "ratio": restored["ratio"],
         "recommended_aspect_ratio": restored["aspect_ratio"],
         "trend_source": deepcopy(restored["trend_source"]),
         "storyboard_session_id": restored.get("storyboard_session_id", ""),
@@ -195,6 +226,10 @@ def apply_parent_handoff(scene_state: dict, handoff: dict) -> dict:
         ),
         "idea_content": str(updated.get("idea_content") or restored.get("idea_content") or ""),
         "idea_prompt": str(updated.get("idea_prompt") or restored.get("idea_prompt") or ""),
+        "idea_scene_content": deepcopy(updated.get("idea_scene_content") or restored.get("idea_scene_content") or []),
+        "idea_prompt_candidates": deepcopy(updated.get("idea_prompt_candidates") or restored.get("idea_prompt_candidates") or []),
+        "idea_selected_prompt": str(updated.get("idea_selected_prompt") or restored.get("idea_selected_prompt") or ""),
+        "trend_id": str(updated.get("trend_id") or restored.get("trend_id") or ""),
         "step": restored["return_step"],
     })
     assets = deepcopy(dict(updated.get("reference_assets") or updated.get("assets") or {}))
