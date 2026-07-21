@@ -40877,7 +40877,7 @@ def owner_and_admin_ids() -> list[str]:
 def broadcast_lite_admin_menu_text() -> str:
     return (
         "📣 Thông báo khách hàng\n\n"
-        "Soạn nội dung, chọn nút hành động và người nhận. "
+        "Soạn nội dung → chọn người nhận → bấm Gửi thông báo.\n\n"
         "Tin chỉ được đưa vào hàng đợi sau khi Admin xác nhận."
     )
 
@@ -40888,16 +40888,24 @@ def broadcast_lite_admin_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
-def broadcast_lite_compose_keyboard() -> InlineKeyboardMarkup:
+def broadcast_lite_navigation_keyboard(back_label: str, back_callback: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Gửi văn bản", callback_data="broadcast_lite|compose_text")],
-        [InlineKeyboardButton("🖼️ Gửi ảnh + nội dung", callback_data="broadcast_lite|compose_photo")],
-        [InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back")],
+        [
+            InlineKeyboardButton(back_label, callback_data=back_callback),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
     ])
 
 def broadcast_lite_template_keyboard() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(str(item["label"]), callback_data=f"broadcast_lite|template|{key}")] for key, item in BROADCAST_LITE_TEMPLATES.items()]
-    rows.append([InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back")])
+    buttons = [
+        InlineKeyboardButton(str(item["label"]), callback_data=f"broadcast_lite|template|{key}")
+        for key, item in BROADCAST_LITE_TEMPLATES.items()
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 def _broadcast_lite_cta_buttons(draft: dict) -> list[list[InlineKeyboardButton]]:
@@ -40910,12 +40918,49 @@ def _broadcast_lite_cta_buttons(draft: dict) -> list[list[InlineKeyboardButton]]
 
 def broadcast_lite_draft_keyboard(draft: dict) -> InlineKeyboardMarkup:
     draft_id = str(draft.get("draft_id") or "")
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👀 Xem trước", callback_data=f"broadcast_lite|preview|{draft_id}")],
-        [InlineKeyboardButton("🔘 Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"), InlineKeyboardButton("👥 Chọn người nhận", callback_data=f"broadcast_lite|audience|{draft_id}")],
-        [InlineKeyboardButton("✅ Xác nhận gửi", callback_data=f"broadcast_lite|confirm|{draft_id}")],
-        [InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back")],
+    audience_selected = bool(str(draft.get("audience_kind") or "").strip())
+    if audience_selected:
+        rows = [
+            [
+                InlineKeyboardButton("👀 Xem trước", callback_data=f"broadcast_lite|preview|{draft_id}"),
+                InlineKeyboardButton("✅ Gửi thông báo", callback_data=f"broadcast_lite|confirm|{draft_id}"),
+            ],
+            [
+                InlineKeyboardButton("🔘 Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
+                InlineKeyboardButton("👥 Đổi người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
+            ],
+        ]
+    else:
+        rows = [[
+            InlineKeyboardButton("👥 Chọn người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
+            InlineKeyboardButton("🔘 Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
+        ]]
+    rows.append([
+        InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
     ])
+    return InlineKeyboardMarkup(rows)
+
+
+def broadcast_lite_preview_keyboard(draft: dict) -> InlineKeyboardMarkup:
+    draft_id = str(draft.get("draft_id") or "")
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Gửi thông báo", callback_data=f"broadcast_lite|confirm|{draft_id}"),
+            InlineKeyboardButton("⬅️ Quay lại soạn", callback_data=f"broadcast_lite|draft|{draft_id}"),
+        ],
+        [
+            InlineKeyboardButton("👥 Đổi người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+
+def broadcast_lite_cta_keyboard(draft: dict) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(_broadcast_lite_cta_buttons(draft) + [[
+        InlineKeyboardButton("✅ Xong", callback_data=f"broadcast_lite|ctas_done|{draft['draft_id']}"),
+        InlineKeyboardButton("⬅️ Quay lại soạn", callback_data=f"broadcast_lite|draft|{draft['draft_id']}"),
+    ]])
 
 def broadcast_lite_audience_label(draft: dict) -> str:
     kind = str(draft.get("audience_kind") or "")
@@ -40950,7 +40995,7 @@ def broadcast_lite_draft_text(draft: dict) -> str:
     message = str(draft.get("message_text") or "").strip()
     audience = broadcast_lite_audience_label(draft)
     ctas = draft.get("ctas") or []
-    cta_labels = ", ".join(str(BROADCAST_LITE_CTA_REGISTRY[key]["label"]) for key in ctas) or "chưa chọn"
+    cta_labels = ", ".join(str(BROADCAST_LITE_CTA_REGISTRY[key]["label"]) for key in ctas)
     state = str(draft.get("state") or "draft")
     if state == "awaiting_message":
         return "📝 Gửi nội dung văn bản tiếp theo.\n\nCó thể nhập thông báo tùy ý."
@@ -40959,9 +41004,11 @@ def broadcast_lite_draft_text(draft: dict) -> str:
     if state == "awaiting_caption":
         return "🖼️ Đã nhận ảnh. Gửi nội dung caption tiếp theo để hoàn tất."
     media_hint = "🖼️ Đã đính kèm ảnh\n\n" if draft.get("media_file_id") else ""
+    action_hint = "✅ Sẵn sàng gửi. Chạm Gửi thông báo." if draft.get("audience_kind") else "➡️ Bước tiếp theo: Chọn người nhận."
+    cta_hint = f"\n🔘 Nút: {cta_labels}" if cta_labels else ""
     return (
         "📝 Soạn thông báo\n\n" + media_hint + (message or "(chưa có nội dung)") + "\n\n"
-        f"🔘 Nút: {cta_labels}\n👥 Người nhận: {audience}{broadcast_lite_audience_estimate(draft)}\n📌 Trạng thái: {state}"
+        f"👥 Người nhận: {audience}{broadcast_lite_audience_estimate(draft)}{cta_hint}\n\n{action_hint}"
     )
 
 
@@ -40969,10 +41016,15 @@ def broadcast_lite_audience_keyboard(draft: dict) -> InlineKeyboardMarkup:
     draft_id = str(draft.get("draft_id") or "")
     all_selected = str(draft.get("audience_kind") or "") == "all"
     rows = [
-        [InlineKeyboardButton(("✅ " if all_selected else "") + "🌐 Toàn bộ khách đã dùng bot", callback_data=f"broadcast_lite|aud_all|{draft_id}")],
-        [InlineKeyboardButton("🏷 Chọn theo hạng thành viên", callback_data=f"broadcast_lite|aud_tiers|{draft_id}")],
+        [
+            InlineKeyboardButton(("✅ " if all_selected else "") + "🌐 Toàn bộ bot", callback_data=f"broadcast_lite|aud_all|{draft_id}"),
+            InlineKeyboardButton("🏷 Hạng thành viên", callback_data=f"broadcast_lite|aud_tiers|{draft_id}"),
+        ],
         [InlineKeyboardButton("👤 Nhập user ID", callback_data=f"broadcast_lite|aud_mode|{draft_id}|user"), InlineKeyboardButton("🧪 User test", callback_data=f"broadcast_lite|aud_mode|{draft_id}|test_list")],
-        [InlineKeyboardButton("⬅️ Soạn thông báo", callback_data=f"broadcast_lite|draft|{draft_id}")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại soạn", callback_data=f"broadcast_lite|draft|{draft_id}"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -40981,14 +41033,19 @@ def broadcast_lite_tier_keyboard(draft: dict) -> InlineKeyboardMarkup:
     draft_id = str(draft.get("draft_id") or "")
     selected = set(draft.get("tiers") or [])
     all_selected = len(selected) == len(BROADCAST_LITE_TIER_ORDER)
-    rows = [[InlineKeyboardButton(("✅ " if all_selected else "") + "Tất cả hạng", callback_data=f"broadcast_lite|tier|{draft_id}|all")]]
+    rows = [[
+        InlineKeyboardButton(("✅ " if all_selected else "") + "Tất cả hạng", callback_data=f"broadcast_lite|tier|{draft_id}|all"),
+        InlineKeyboardButton("✅ Xong", callback_data=f"broadcast_lite|tier_done|{draft_id}"),
+    ]]
     tier_buttons = []
     for tier in BROADCAST_LITE_TIER_ORDER:
         item = BROADCAST_LITE_TIER_REGISTRY[tier]
         tier_buttons.append(InlineKeyboardButton(("✅ " if tier in selected else "") + str(item["label"]), callback_data=f"broadcast_lite|tier|{draft_id}|{tier}"))
     rows.extend(tier_buttons[index:index + 2] for index in range(0, len(tier_buttons), 2))
-    rows.append([InlineKeyboardButton("✅ Xong", callback_data=f"broadcast_lite|tier_done|{draft_id}")])
-    rows.append([InlineKeyboardButton("⬅️ Chọn người nhận", callback_data=f"broadcast_lite|audience|{draft_id}")])
+    rows.append([
+        InlineKeyboardButton("⬅️ Chọn người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 def broadcast_lite_stats_text(stats: dict) -> str:
@@ -41002,8 +41059,14 @@ def broadcast_lite_stats_text(stats: dict) -> str:
 
 def broadcast_lite_campaign_keyboard(campaign_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Cập nhật thống kê", callback_data=f"broadcast_lite|campaign_stats|{int(campaign_id)}")],
-        [InlineKeyboardButton("📊 Lịch sử gửi", callback_data="broadcast_lite|history"), InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back")],
+        [
+            InlineKeyboardButton("🔄 Cập nhật thống kê", callback_data=f"broadcast_lite|campaign_stats|{int(campaign_id)}"),
+            InlineKeyboardButton("📊 Lịch sử gửi", callback_data="broadcast_lite|history"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
     ])
 
 async def cmd_broadcast_lite(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41027,14 +41090,13 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
     try:
         if action in {"back", "menu"}:
             return await _broadcast_lite_edit(query, broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard())
-        if action == "compose":
-            return await _broadcast_lite_edit(query, "📝 Soạn thông báo\n\nChọn loại nội dung:", broadcast_lite_compose_keyboard())
-        if action == "compose_text":
+        if action in {"compose", "compose_text", "compose_photo"}:
             draft = create_broadcast_lite_draft(DB_FILE, uid, state="awaiting_message")
-            return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
-        if action == "compose_photo":
-            draft = create_broadcast_lite_draft(DB_FILE, uid, state="awaiting_photo")
-            return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
+            return await _broadcast_lite_edit(
+                query,
+                "📝 Soạn thông báo\n\nGửi văn bản hoặc ảnh kèm nội dung ngay tin nhắn tiếp theo.",
+                broadcast_lite_navigation_keyboard("⬅️ Thông báo", "broadcast_lite|back"),
+            )
         if action == "templates":
             return await _broadcast_lite_edit(query, "🎁 Chọn mẫu tin nhắn", broadcast_lite_template_keyboard())
         if action == "template" and len(parts) >= 3:
@@ -41052,10 +41114,10 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             title = "🔘 Chọn tối đa 4 nút hành động\n\nĐang chọn: " + ", ".join(draft.get("ctas") or [])
             if not draft.get("ctas"):
                 title = "🔘 Chọn tối đa 4 nút hành động\n\nChưa chọn"
-            return await _broadcast_lite_edit(query, title, InlineKeyboardMarkup(_broadcast_lite_cta_buttons(draft) + [[InlineKeyboardButton("✅ Xong", callback_data=f"broadcast_lite|ctas_done|{draft['draft_id']}")], [InlineKeyboardButton("⬅️ Draft", callback_data=f"broadcast_lite|draft|{draft['draft_id']}")]]))
+            return await _broadcast_lite_edit(query, title, broadcast_lite_cta_keyboard(draft))
         if action == "cta" and len(parts) >= 4:
             draft = toggle_broadcast_lite_cta(DB_FILE, parts[2], uid, parts[3])
-            return await _broadcast_lite_edit(query, "🔘 Chọn tối đa 4 nút hành động\n\nChạm để bật/tắt:", InlineKeyboardMarkup(_broadcast_lite_cta_buttons(draft) + [[InlineKeyboardButton("✅ Xong", callback_data=f"broadcast_lite|ctas_done|{draft['draft_id']}")], [InlineKeyboardButton("⬅️ Draft", callback_data=f"broadcast_lite|draft|{draft['draft_id']}")]]))
+            return await _broadcast_lite_edit(query, "🔘 Chọn tối đa 4 nút hành động\n\nChạm để bật/tắt:", broadcast_lite_cta_keyboard(draft))
         if action == "ctas_done" and len(parts) >= 3:
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid) or {}
             return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
@@ -41063,7 +41125,12 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             draft_id = parts[2] if len(parts) >= 3 else ""
             draft = get_broadcast_lite_draft(DB_FILE, draft_id, uid) if draft_id else get_latest_broadcast_lite_draft(DB_FILE, uid)
             if not draft:
-                return await _broadcast_lite_edit(query, "Hãy soạn thông báo trước.", broadcast_lite_admin_menu_keyboard())
+                create_broadcast_lite_draft(DB_FILE, uid, state="awaiting_message")
+                return await _broadcast_lite_edit(
+                    query,
+                    "📝 Hãy soạn nội dung trước. Gửi văn bản hoặc ảnh kèm nội dung ngay tin nhắn tiếp theo.",
+                    broadcast_lite_navigation_keyboard("⬅️ Thông báo", "broadcast_lite|back"),
+                )
             return await _broadcast_lite_edit(
                 query,
                 "👥 Chọn người nhận\n\n"
@@ -41075,7 +41142,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             draft = set_broadcast_lite_audience(DB_FILE, parts[2], uid, "all")
             return await _broadcast_lite_edit(
                 query,
-                "✅ Đã chọn toàn bộ khách đã dùng bot.\n\n" + broadcast_lite_draft_text(draft),
+                "✅ Đã chọn toàn bộ khách đã dùng bot. Bây giờ có thể bấm Gửi thông báo.\n\n" + broadcast_lite_draft_text(draft),
                 broadcast_lite_draft_keyboard(draft),
             )
         if action == "aud_tiers" and len(parts) >= 3:
@@ -41102,13 +41169,17 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             kind = parts[3]
             set_broadcast_lite_state(DB_FILE, draft["draft_id"], uid, f"awaiting_audience_{kind}")
             prompt = "Nhập một user ID Telegram hợp lệ:" if kind == "user" else "Nhập danh sách user ID, cách nhau bằng dấu phẩy hoặc khoảng trắng:"
-            return await _broadcast_lite_edit(query, "✍️ " + prompt, InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Chọn người nhận", callback_data=f"broadcast_lite|audience|{draft['draft_id']}")]]))
+            return await _broadcast_lite_edit(
+                query,
+                "✍️ " + prompt,
+                broadcast_lite_navigation_keyboard("⬅️ Chọn người nhận", f"broadcast_lite|audience|{draft['draft_id']}"),
+            )
         if action == "preview" and len(parts) >= 3:
             preview = preview_broadcast_lite_draft(DB_FILE, parts[2], uid)
             set_broadcast_lite_state(DB_FILE, parts[2], uid, "previewed")
             stats = preview.get("audience") or {}
             text = render_broadcast_lite_preview(preview) + f"\n\n📊 Đủ điều kiện gửi: {stats.get('eligible', 0)} | Bỏ qua: {stats.get('blocked', 0) + stats.get('invalid', 0)}"
-            return await _broadcast_lite_edit(query, text, broadcast_lite_draft_keyboard(preview))
+            return await _broadcast_lite_edit(query, text, broadcast_lite_preview_keyboard(preview))
         if action == "confirm" and len(parts) >= 3:
             campaign = confirm_broadcast_lite_draft(DB_FILE, parts[2], uid)
             stats = broadcast_lite_campaign_stats(DB_FILE, int(campaign["campaign_id"]))
@@ -41133,6 +41204,14 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             return await _broadcast_lite_edit(query, text, broadcast_lite_admin_menu_keyboard())
         return await _broadcast_lite_edit(query, "Thao tác thông báo không hợp lệ.", broadcast_lite_admin_menu_keyboard())
     except ValueError as error:
+        draft_id = parts[2] if len(parts) >= 3 else ""
+        draft = get_broadcast_lite_draft(DB_FILE, draft_id, uid) if draft_id else get_latest_broadcast_lite_draft(DB_FILE, uid)
+        if draft:
+            return await _broadcast_lite_edit(
+                query,
+                "⚠️ " + str(error)[:300] + "\n\n" + broadcast_lite_draft_text(draft),
+                broadcast_lite_draft_keyboard(draft),
+            )
         return await _broadcast_lite_edit(query, str(error)[:400], broadcast_lite_admin_menu_keyboard())
     except Exception as error:
         logger.warning("broadcast lite callback failed | error=%s", type(error).__name__)
@@ -41141,12 +41220,12 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
 async def handle_broadcast_lite_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return False
-    draft = get_latest_broadcast_lite_draft(DB_FILE, update.effective_user.id, states=("awaiting_message", "awaiting_caption", "awaiting_audience_user", "awaiting_audience_test_list"))
+    draft = get_latest_broadcast_lite_draft(DB_FILE, update.effective_user.id, states=("awaiting_message", "awaiting_photo", "awaiting_caption", "awaiting_audience_user", "awaiting_audience_test_list"))
     if not draft:
         return False
     text = str(update.message.text or "").strip()
     try:
-        if draft["state"] in {"awaiting_message", "awaiting_caption"}:
+        if draft["state"] in {"awaiting_message", "awaiting_photo", "awaiting_caption"}:
             draft = set_broadcast_lite_message(DB_FILE, draft["draft_id"], update.effective_user.id, text)
             await update.message.reply_text("✅ Đã lưu nội dung. Bước tiếp theo: chọn người nhận.", reply_markup=broadcast_lite_draft_keyboard(draft))
         elif draft["state"] == "awaiting_audience_user":
@@ -41162,7 +41241,7 @@ async def handle_broadcast_lite_pending_text(update: Update, context: ContextTyp
 async def handle_broadcast_lite_pending_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return False
-    draft = get_latest_broadcast_lite_draft(DB_FILE, update.effective_user.id, states=("awaiting_photo",))
+    draft = get_latest_broadcast_lite_draft(DB_FILE, update.effective_user.id, states=("awaiting_message", "awaiting_photo"))
     if not draft or not update.message.photo:
         return False
     photo = update.message.photo[-1]
@@ -193408,8 +193487,10 @@ def admin_control_center_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🤖 Provider / Worker", callback_data="menu|admin_provider_worker"), InlineKeyboardButton("💰 Tài chính", callback_data="menu|admin_finance")],
         [InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support"), InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook")],
     ]
-    rows.append([InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")])
-    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([
+        InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 ADMIN_CONTROL_MODULES = {
