@@ -60,3 +60,7 @@ Rules:
 - Rank channels and campaigns by revenue, clicks, orders, and conversion.
 - Remix winning formats.
 - Reduce manual steps only after stable measurement.
+
+## Backlog Notes
+
+- TODO WEB SYNC: Later add/update pricing page in app.toanaas.vn. Vocal AI full song price should sync to 800 Xu. Landing page toanaas.vn remains introduction page.

@@ -1,0 +1,1520 @@
+"""Remote VPS worker for TOAN AAS heavy local/video processing.
+
+This process runs on the VPS and talks to the Railway bot only through the
+authenticated /api/v1/worker/* bridge. It never opens the Railway SQLite DB and
+does not need PayOS, wallet, or Telegram webhook authority.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+WORKER_PARSER_VERSION = "r8d_product_video_canonical_parser"
+PRODUCT_VIDEO_CANONICAL_CAPABILITY = "canonical_multiscene_b13_r18c_v1"
+WORKER_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+ACTIVE_WORKER_SERVICE_MODE = "general"
+ACTIVE_WORKER_CAPABILITIES: list[str] = ["ffmpeg", "video_postprocess"]
+
+
+def product_video_worker_capabilities() -> list[str]:
+    return [
+        "product_video",
+        "owner_product_video",
+        "ffmpeg",
+        "video_postprocess",
+        PRODUCT_VIDEO_CANONICAL_CAPABILITY,
+    ]
+
+
+def load_dotenv(path: str) -> None:
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as exc:
+        print(f"[remote_worker] .env load skipped: {type(exc).__name__}")
+
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
+load_dotenv(os.path.join(os.getcwd(), ".env"))
+
+
+def env_flag(name: str, default: str = "0") -> bool:
+    return str(os.environ.get(name, default) or default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name, str(default)) or str(default)).strip())
+    except Exception:
+        return int(default)
+
+
+def normalize_base_url(value: str) -> str:
+    value = str(value or "").strip().rstrip("/")
+    if not value:
+        return "http://127.0.0.1:8000"
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return "https://" + value
+
+
+BOT_API_URL = normalize_base_url(
+    os.environ.get("BOT_API_URL")
+    or os.environ.get("LOCAL_WORKER_BOT_URL")
+    or os.environ.get("TOAN_AAS_BOT_URL")
+    or os.environ.get("PUBLIC_BASE_URL")
+    or "https://bot-production-2dd7.up.railway.app"
+)
+LOCAL_WORKER_TOKEN = str(os.environ.get("LOCAL_WORKER_TOKEN", "")).strip()
+WORKER_ID = str(os.environ.get("WORKER_ID") or os.environ.get("LOCAL_WORKER_ID") or "vps-1").strip()
+WORKER_HOSTNAME = str(socket.gethostname() or "").strip()
+WORKER_PID = int(os.getpid() or 0)
+WORKER_GENERATION_ID = uuid.uuid4().hex
+WORKER_INSTANCE_ID = str(
+    os.environ.get("WORKER_INSTANCE_ID")
+    or f"{WORKER_ID}:{WORKER_HOSTNAME or 'host'}:{WORKER_PID}"
+).strip()
+WORKER_HEARTBEAT_LEASE_SECONDS = max(
+    30,
+    min(300, env_int("PRODUCT_VIDEO_WORKER_HEARTBEAT_TTL_SECONDS", 90)),
+)
+WORKER_POLL_INTERVAL_SECONDS = max(1, env_int("WORKER_POLL_INTERVAL_SECONDS", 5))
+WORKER_CONCURRENCY = max(1, env_int("WORKER_CONCURRENCY", 1))
+WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).strip()
+FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
+
+
+def worker_git_head_info(cwd: str | None = None) -> dict[str, str]:
+    process_cwd = os.path.abspath(str(cwd or os.getcwd()))
+    candidates = [process_cwd]
+    script_cwd = os.path.abspath(SCRIPT_DIR)
+    if script_cwd not in candidates:
+        candidates.append(script_cwd)
+    for candidate in candidates:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=candidate,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except Exception:
+            continue
+        git_sha = str(result.stdout or "").strip()[:40]
+        if result.returncode == 0 and re.fullmatch(r"[0-9A-Fa-f]{7,40}", git_sha):
+            return {
+                "worker_sha": git_sha,
+                "worker_git_sha": git_sha,
+                "worker_git_head_sha": git_sha,
+                "worker_sha_source": "git_rev_parse_head",
+                "worker_cwd": process_cwd,
+            }
+    return {
+        "worker_sha": "",
+        "worker_git_sha": "",
+        "worker_git_head_sha": "",
+        "worker_sha_source": "unknown",
+        "worker_cwd": process_cwd,
+    }
+
+
+def worker_git_sha() -> str:
+    return str(worker_git_head_info().get("worker_git_head_sha") or "")[:40]
+
+
+def worker_identity_payload(service_mode: str, capabilities: list[str] | None = None) -> dict[str, object]:
+    git_info = worker_git_head_info()
+    git_sha = str(git_info.get("worker_git_head_sha") or "")[:40]
+    heartbeat_updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    lease_expires_at = time.strftime(
+        "%Y-%m-%d %H:%M:%S",
+        time.localtime(time.time() + WORKER_HEARTBEAT_LEASE_SECONDS),
+    )
+    capability_list = list(capabilities or [])
+    return {
+        **git_info,
+        "worker_id": WORKER_ID,
+        "worker_instance_id": WORKER_INSTANCE_ID,
+        "generation_id": WORKER_GENERATION_ID,
+        "worker_generation_id": WORKER_GENERATION_ID,
+        "worker_service_mode": str(service_mode or "general"),
+        "service_mode": str(service_mode or "general"),
+        "git_sha": git_sha,
+        "runtime_target_sha": git_sha,
+        "heartbeat_at": heartbeat_updated_at,
+        "heartbeat_updated_at": heartbeat_updated_at,
+        "worker_capability_version": (
+            PRODUCT_VIDEO_CANONICAL_CAPABILITY
+            if PRODUCT_VIDEO_CANONICAL_CAPABILITY in capability_list
+            else ""
+        ),
+        "capability_version": (
+            PRODUCT_VIDEO_CANONICAL_CAPABILITY
+            if PRODUCT_VIDEO_CANONICAL_CAPABILITY in capability_list
+            else ""
+        ),
+        "worker_process_started_at": WORKER_STARTED_AT,
+        "process_started_at": WORKER_STARTED_AT,
+        "worker_lease_expires_at": lease_expires_at,
+        "lease_expires_at": lease_expires_at,
+        "worker_hostname": WORKER_HOSTNAME,
+        "hostname": WORKER_HOSTNAME,
+        "worker_pid": WORKER_PID,
+        "pid": WORKER_PID,
+        "capabilities": capability_list,
+    }
+FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
+LAST_CLAIM_RESPONSE: dict = {}
+LAST_IDLE_REASON = ""
+LAST_REAL_VIDEO_RENDER_RESULT: dict = {}
+LAST_CLAIMED_JOB: dict = {}
+LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
+REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
+RENDER_MODE_REAL = "real"
+RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
+RENDER_MODE_UNAVAILABLE = "unavailable"
+REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
+REMOTE_WORKER_PRODUCT_VIDEO_SOURCE = "product_video"
+
+
+def mask_secret(value: str) -> str:
+    secret = str(value or "").strip()
+    if not secret:
+        return "no"
+    if len(secret) <= 8:
+        return f"<configured len={len(secret)}>"
+    return f"{secret[:4]}...{secret[-4:]} len={len(secret)}"
+
+
+def remote_worker_config() -> dict:
+    return {
+        "bot_api_url": BOT_API_URL,
+        "worker_id": WORKER_ID,
+        "poll_interval_seconds": WORKER_POLL_INTERVAL_SECONDS,
+        "worker_concurrency": WORKER_CONCURRENCY,
+        "worker_tmp_dir": WORKER_TMP_DIR,
+        "ffmpeg_max_concurrent": FFMPEG_MAX_CONCURRENT,
+        "local_worker_token_configured": bool(LOCAL_WORKER_TOKEN),
+        "direct_sqlite_required": False,
+    }
+
+
+def endpoint(path: str) -> str:
+    return BOT_API_URL.rstrip("/") + "/" + path.lstrip("/")
+
+
+def auth_headers(content_type: str = "application/json") -> dict[str, str]:
+    headers = {"Authorization": "Bearer " + LOCAL_WORKER_TOKEN, "User-Agent": f"toan-aas-remote-worker/{WORKER_ID}"}
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def http_json(method: str, path: str, payload: dict | None = None, timeout: int = 30) -> dict:
+    data = None
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(endpoint(path), data=data, headers=auth_headers(), method=method.upper())
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8", errors="replace")
+        return json.loads(body or "{}")
+
+
+def _multipart_body(fields: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
+    boundary = "----toanaasworker" + uuid.uuid4().hex
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    for name, (filename, content, content_type) in files.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode(),
+                f"Content-Type: {content_type}\r\n\r\n".encode(),
+                content,
+                b"\r\n",
+            ]
+        )
+    chunks.append(f"--{boundary}--\r\n".encode())
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+
+
+def http_multipart(path: str, fields: dict[str, str], files: dict[str, tuple[str, bytes, str]], timeout: int = 120) -> dict:
+    body, content_type = _multipart_body(fields, files)
+    request = urllib.request.Request(endpoint(path), data=body, headers=auth_headers(content_type), method="POST")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read().decode("utf-8", errors="replace")
+        return json.loads(raw or "{}")
+
+
+def claim_job(
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> dict | None:
+    global LAST_CLAIM_RESPONSE, LAST_CLAIMED_JOB
+    LAST_CLAIMED_JOB = {}
+    if product_video_only or owner_product_video_only:
+        capabilities = product_video_worker_capabilities()
+    elif admin_video_only:
+        capabilities = ["admin_video", "ffmpeg"]
+    elif admin_canary_only:
+        capabilities = ["admin_canary", "ffmpeg"]
+    elif canary_only:
+        capabilities = ["canary", "ffmpeg"]
+    else:
+        capabilities = ["ffmpeg", "video_postprocess"]
+    service_mode = "owner_product_video" if owner_product_video_only else ("product_video" if product_video_only else "general")
+    payload = {
+        **worker_identity_payload(service_mode, capabilities),
+        "worker_id": WORKER_ID,
+        "capabilities": capabilities,
+        "max_jobs": 1,
+        "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video_only or owner_product_video_only) else "",
+    }
+    if canary_only:
+        payload["canary_only"] = True
+    if admin_canary_only:
+        payload["admin_canary_only"] = True
+    if admin_video_only:
+        payload["admin_video_only"] = True
+    if product_video_only:
+        payload["product_video_only"] = True
+    if owner_product_video_only:
+        payload["owner_product_video_only"] = True
+    global LAST_CLAIM_RESPONSE
+    try:
+        data = http_json("POST", "/api/v1/worker/claim", payload, timeout=30)
+    except Exception as exc:
+        LAST_CLAIM_RESPONSE = {"ok": False, "reason": type(exc).__name__}
+        raise
+    LAST_CLAIM_RESPONSE = data if isinstance(data, dict) else {}
+    if owner_product_video_only:
+        print(
+            "[remote_worker] owner heartbeat "
+            f"accepted={'yes' if data.get('heartbeat_accepted') else 'no'} "
+            f"generation={data.get('authoritative_generation_id') or data.get('caller_generation_id') or WORKER_GENERATION_ID} "
+            f"lease_expires_at={data.get('lease_expires_at') or '-'} "
+            f"source={data.get('heartbeat_refresh_source') or 'claim_request'} "
+            f"reject_reason={data.get('owner_heartbeat_reject_reason') or '-'}"
+        )
+    job = data.get("job") if isinstance(data, dict) and data.get("ok") else None
+    if isinstance(job, dict) and job:
+        service_mode = claim_mode_label(
+            canary_only=canary_only,
+            admin_canary_only=admin_canary_only,
+            admin_video_only=admin_video_only,
+            product_video_only=product_video_only,
+            owner_product_video_only=owner_product_video_only,
+        )
+        trace = worker_process_trace(job, service_mode=service_mode, claim_status="claimed")
+        job.update(trace)
+        LAST_CLAIMED_JOB = dict(job)
+        print(
+            "[remote_worker] claim job "
+            f"job_id={job.get('job_id') or '-'} "
+            f"job_type={job.get('job_type') or '-'} "
+            f"product_type={job.get('product_type') or job.get('profile_id') or '-'} "
+            f"service_mode={service_mode} "
+            f"provider_call={'yes' if job.get('provider_call') else 'no'}"
+        )
+    return job
+
+
+def claim_idle_reason(
+    *,
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> str:
+    response = LAST_CLAIM_RESPONSE if isinstance(LAST_CLAIM_RESPONSE, dict) else {}
+    reason = str(response.get("reason") or "").strip()
+    if reason:
+        return reason
+    if admin_canary_only:
+        return "no_matching_jobs_or_job_already_failed_or_filter_mismatch_or_api_no_job"
+    if owner_product_video_only:
+        return "no_matching_owner_product_jobs_or_public_gate_mismatch_or_api_no_job"
+    if product_video_only:
+        return "no_matching_product_jobs_or_public_gate_mismatch_or_api_no_job"
+    if admin_video_only:
+        return "no_matching_admin_video_jobs_or_job_already_failed_or_filter_mismatch_or_api_no_job"
+    if canary_only:
+        return "no_matching_canary_jobs_or_job_already_failed_or_filter_mismatch_or_api_no_job"
+    return "api_no_job"
+
+
+def claim_debug_lines() -> list[str]:
+    response = LAST_CLAIM_RESPONSE if isinstance(LAST_CLAIM_RESPONSE, dict) else {}
+    debug = response.get("debug") if isinstance(response.get("debug"), dict) else {}
+    if not debug:
+        return []
+    lines: list[str] = []
+    claim_route = str(debug.get("claim_route") or "").strip()
+    if claim_route:
+        lines.append(f"[remote_worker] once claim_route={claim_route}")
+    if "public_worker_enabled" in debug:
+        lines.append(f"[remote_worker] once public_worker_enabled={'yes' if debug.get('public_worker_enabled') else 'no'}")
+    counts = debug.get("lane_counts") if isinstance(debug.get("lane_counts"), dict) else {}
+    if counts:
+        ordered = ["admin_canary", "owner_product_video", "admin_video", "public_product_video", "public_gate_blocked"]
+        parts = []
+        for key in ordered:
+            if key in counts:
+                parts.append(f"{key}={counts.get(key)}")
+        for key in sorted(k for k in counts if k not in ordered):
+            parts.append(f"{key}={counts.get(key)}")
+        lines.append(f"[remote_worker] once lane_counts {' '.join(parts)}")
+    reason = str(debug.get("not_claimable_reason") or "").strip()
+    if reason:
+        lines.append(f"[remote_worker] once not_claimable_reason={reason}")
+    return lines
+
+
+def ping_server(
+    canary: bool = False,
+    admin_canary: bool = False,
+    admin_video: bool = False,
+    product_video: bool = False,
+    owner_product_video: bool = False,
+) -> dict:
+    if product_video or owner_product_video:
+        capabilities = product_video_worker_capabilities()
+    elif admin_video:
+        capabilities = ["admin_video", "ffmpeg"]
+    elif admin_canary:
+        capabilities = ["admin_canary", "ffmpeg"]
+    elif canary:
+        capabilities = ["canary", "ffmpeg"]
+    else:
+        capabilities = ["ffmpeg", "video_postprocess"]
+    service_mode = "owner_product_video" if owner_product_video else ("product_video" if product_video else "general")
+    payload = {
+        **worker_identity_payload(service_mode, capabilities),
+        "worker_id": WORKER_ID,
+        "capabilities": capabilities,
+        "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_capability_version": PRODUCT_VIDEO_CANONICAL_CAPABILITY if (product_video or owner_product_video) else "",
+        "dry_run": True,
+    }
+    if canary:
+        payload["canary_only"] = True
+    if admin_canary:
+        payload["admin_canary_only"] = True
+    if admin_video:
+        payload["admin_video_only"] = True
+    if product_video:
+        payload["product_video_only"] = True
+    if owner_product_video:
+        payload["owner_product_video_only"] = True
+    return http_json("POST", "/api/v1/worker/ping", payload, timeout=20)
+
+
+def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") -> None:
+    payload = {
+        **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
+        "worker_id": WORKER_ID,
+        "job_id": str(job_id),
+        "progress_percent": int(progress_percent or 0),
+        "message": str(message or "")[:500],
+        "worker_parser_version": WORKER_PARSER_VERSION,
+        "capabilities": list(ACTIVE_WORKER_CAPABILITIES),
+        "worker_capability_version": (
+            PRODUCT_VIDEO_CANONICAL_CAPABILITY
+            if PRODUCT_VIDEO_CANONICAL_CAPABILITY in ACTIVE_WORKER_CAPABILITIES
+            else ""
+        ),
+    }
+    http_json("POST", "/api/v1/worker/heartbeat", payload, timeout=20)
+
+
+def complete_job(job_id: str, result: dict, final_video_path: str = "") -> dict:
+    metadata = {
+        **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
+        "worker_id": WORKER_ID,
+        "job_id": str(job_id),
+        "result": result or {},
+    }
+    if final_video_path and os.path.exists(final_video_path) and os.path.getsize(final_video_path) > 0:
+        with open(final_video_path, "rb") as handle:
+            content = handle.read()
+        return http_multipart(
+            "/api/v1/worker/complete",
+            {"metadata": json.dumps(metadata, ensure_ascii=False)},
+            {"file": (os.path.basename(final_video_path) or "result.mp4", content, "video/mp4")},
+            timeout=180,
+        )
+    return http_json("POST", "/api/v1/worker/complete", metadata, timeout=60)
+
+
+def fail_job(job_id: str, safe_error: str, retryable: bool = True, partial_artifacts: list | None = None) -> dict:
+    payload = {
+        **worker_identity_payload(ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES),
+        "worker_id": WORKER_ID,
+        "job_id": str(job_id),
+        "safe_error": str(safe_error or "remote_worker_failed")[:500],
+        "retryable": bool(retryable),
+        "partial_artifacts": partial_artifacts or [],
+    }
+    if LAST_REAL_VIDEO_RENDER_RESULT:
+        payload["diagnostics"] = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
+    return http_json("POST", "/api/v1/worker/fail", payload, timeout=30)
+
+
+def first_line(text: str) -> str:
+    for line in str(text or "").splitlines():
+        clean = line.strip()
+        if clean:
+            return clean[:300]
+    return ""
+
+
+def worker_process_trace(job: dict | None = None, *, service_mode: str = "", claim_status: str = "") -> dict:
+    data = dict(job or {})
+    mode = str(service_mode or data.get("worker_service_mode") or data.get("claimed_by_service_mode") or "unknown").strip()
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = ""
+    return {
+        "actual_processor": "remote_worker",
+        "worker_id": WORKER_ID,
+        "worker_service_mode": mode[:80],
+        "claimed_by_service_mode": mode[:80],
+        "worker_claim_route": str(data.get("worker_claim_route") or "/api/v1/worker/claim")[:160],
+        "worker_claim_status": str(claim_status or data.get("worker_claim_status") or "claimed")[:80],
+        "worker_claim_reason": str(data.get("worker_claim_reason") or "")[:300],
+        "process_hostname": str(hostname or "")[:160],
+        "process_pid": int(os.getpid() or 0),
+        "worker_git_sha": worker_git_sha(),
+        "worker_parser_version": WORKER_PARSER_VERSION,
+        "worker_started_at": WORKER_STARTED_AT,
+        "worker_code_matches_runtime": str(data.get("worker_code_matches_runtime") or "unknown")[:40],
+    }
+
+
+def normalize_render_mode(job: dict | None = None) -> str:
+    data = dict(job or {})
+    mode = str(data.get("render_mode") or "").strip().lower().replace("-", "_")
+    if mode in {"test_pattern", "admin_test", "admin_test_pattern"}:
+        return RENDER_MODE_ADMIN_TEST_PATTERN
+    if mode == RENDER_MODE_UNAVAILABLE:
+        return RENDER_MODE_UNAVAILABLE
+    return RENDER_MODE_REAL
+
+
+def admin_test_pattern_allowed(job: dict | None = None) -> bool:
+    data = dict(job or {})
+    if normalize_render_mode(data) != RENDER_MODE_ADMIN_TEST_PATTERN:
+        return False
+    return bool(
+        data.get("admin_video_delivery")
+        and str(data.get("source") or "") == REMOTE_WORKER_ADMIN_VIDEO_SOURCE
+        and data.get("admin_only")
+        and data.get("no_charge")
+        and not data.get("provider_call")
+        and not data.get("public_user")
+    )
+
+
+def product_video_job_allowed(job: dict | None = None) -> bool:
+    data = dict(job or {})
+    return bool(
+        str(data.get("job_type") or "") == "video_render"
+        and str(data.get("source") or "") == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE
+        and normalize_render_mode(data) == RENDER_MODE_REAL
+        and not data.get("test_pattern")
+        and not data.get("admin_video_delivery")
+        and not data.get("canary")
+        and not data.get("worker_admin_canary")
+        and (data.get("provider_call") or data.get("claim_only_diagnostic"))
+    )
+
+
+def product_video_provider_hint(job: dict | None = None) -> str:
+    data = dict(job or {})
+    for key in ("selected_provider", "submit_provider_key", "selected_provider_before_submit", "provider"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        from services.video_provider_router import provider_status_payload
+
+        status = provider_status_payload(os.environ)
+        return str(status.get("first_ready_provider") or status.get("selected_provider") or "").strip()
+    except Exception:
+        return ""
+
+
+def local_ffmpeg_path() -> str:
+    if FFMPEG_PATH and os.path.exists(FFMPEG_PATH):
+        return FFMPEG_PATH
+    return shutil.which(FFMPEG_PATH) or shutil.which("ffmpeg") or FFMPEG_PATH
+
+
+def ffmpeg_available() -> bool:
+    candidate = local_ffmpeg_path()
+    return bool(candidate and (os.path.exists(candidate) or shutil.which(candidate)))
+
+
+def local_doctor_lines() -> tuple[list[str], bool]:
+    token_ok = bool(LOCAL_WORKER_TOKEN)
+    ffmpeg_ok = ffmpeg_available()
+    tmp_ok = bool(WORKER_TMP_DIR)
+    lines = [
+        "[remote_worker] doctor",
+        f"Worker ID: {WORKER_ID}",
+        f"BOT_API_URL: {BOT_API_URL}",
+        f"token configured: {'yes' if token_ok else 'no'} ({mask_secret(LOCAL_WORKER_TOKEN)})",
+        f"ffmpeg found: {'yes' if ffmpeg_ok else 'no'}",
+        f"tmp dir configured: {'yes' if tmp_ok else 'no'}",
+    ]
+    return lines, bool(token_ok and ffmpeg_ok and tmp_ok)
+
+
+def run_doctor() -> int:
+    lines, ok = local_doctor_lines()
+    for line in lines:
+        print(line)
+    print(f"doctor: {'OK' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
+def render_fake_video(job: dict, work_dir: str) -> str:
+    output_path = os.path.join(work_dir, f"remote_worker_job_{job.get('job_id') or 'test'}.mp4")
+    ffmpeg = local_ffmpeg_path()
+    if ffmpeg and shutil.which(ffmpeg) or (ffmpeg and os.path.exists(ffmpeg)):
+        command = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x1E88E5:s=540x960:r=24:d=2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "28",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+        raise RuntimeError(first_line(result.stderr or result.stdout) or "fake_renderer_ffmpeg_failed")
+    Path(output_path).write_bytes(b"TOAN_AAS_REMOTE_WORKER_FAKE_MP4")
+    return output_path
+
+
+def render_canary_video(job: dict, work_dir: str) -> str:
+    output_path = os.path.join(work_dir, f"remote_worker_canary_{job.get('job_id') or 'test'}.mp4")
+    ffmpeg = local_ffmpeg_path()
+    ffmpeg_ok = bool(ffmpeg and (os.path.exists(ffmpeg) or shutil.which(ffmpeg)))
+    if not ffmpeg_ok:
+        raise RuntimeError("ffmpeg_missing")
+    command = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=320x180:rate=24",
+        "-t",
+        "2",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "30",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(first_line(result.stderr or result.stdout) or "canary_ffmpeg_failed")
+    if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+        raise RuntimeError("canary_output_empty")
+    return output_path
+
+
+def render_admin_canary_video(job: dict, work_dir: str) -> str:
+    output_path = os.path.join(work_dir, f"remote_worker_admin_canary_{job.get('job_id') or 'test'}.mp4")
+    ffmpeg = local_ffmpeg_path()
+    ffmpeg_ok = bool(ffmpeg and (os.path.exists(ffmpeg) or shutil.which(ffmpeg)))
+    if not ffmpeg_ok:
+        raise RuntimeError("ffmpeg_missing")
+    duration = max(1, min(10, int(job.get("expected_duration_seconds") or 3)))
+    command = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=320x180:rate=24",
+        "-t",
+        str(duration),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "30",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(first_line(result.stderr or result.stdout) or "admin_canary_ffmpeg_failed")
+    if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+        raise RuntimeError("admin_canary_output_empty")
+    return output_path
+
+
+def render_admin_video_delivery(job: dict, work_dir: str) -> str:
+    output_path = os.path.join(work_dir, f"remote_worker_admin_video_{job.get('job_id') or 'test'}.mp4")
+    ffmpeg = local_ffmpeg_path()
+    ffmpeg_ok = bool(ffmpeg and (os.path.exists(ffmpeg) or shutil.which(ffmpeg)))
+    if not ffmpeg_ok:
+        raise RuntimeError("ffmpeg_missing")
+    duration = max(1, min(30, int(job.get("expected_duration_seconds") or 6)))
+    command = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=540x960:rate=24",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=880:sample_rate=44100",
+        "-t",
+        str(duration),
+        "-shortest",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "28",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(first_line(result.stderr or result.stdout) or "admin_video_ffmpeg_failed")
+    if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+        raise RuntimeError("admin_video_output_empty")
+    return output_path
+
+
+def render_real_video(job: dict, work_dir: str) -> str:
+    """Render a normal product video through the real provider connector."""
+    global LAST_REAL_VIDEO_RENDER_RESULT
+    trace = worker_process_trace(job)
+    LAST_REAL_VIDEO_RENDER_RESULT = dict(trace)
+    try:
+        from services.video_real_render_connector import LAST_RENDER_DIAGNOSTICS, RealVideoRenderError, render_real_video_job
+    except Exception as exc:
+        raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_import_failed:{type(exc).__name__}") from exc
+    try:
+        result = render_real_video_job(job, work_dir)
+        LAST_REAL_VIDEO_RENDER_RESULT = {**trace, **dict(result or {})}
+    except RealVideoRenderError as exc:
+        LAST_REAL_VIDEO_RENDER_RESULT = {**trace, **dict(getattr(exc, "diagnostics", {}) or LAST_RENDER_DIAGNOSTICS or {})}
+        raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
+    final_path = str(result.get("final_video_path") or "")
+    if not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
+        raise RuntimeError(REAL_VIDEO_RENDER_UNAVAILABLE)
+    return final_path
+
+
+def _selfshot_job_type(job: dict | None) -> str:
+    data = dict(job or {})
+    asset_pack = data.get("asset_pack") or {}
+    if isinstance(asset_pack, str):
+        try:
+            asset_pack = json.loads(asset_pack)
+        except Exception:
+            asset_pack = {}
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    return str(
+        data.get("product_type")
+        or data.get("job_type")
+        or asset_pack.get("product_type")
+        or asset_pack.get("job_type")
+        or ""
+    ).strip()
+
+
+def _selfshot3_job(job: dict | None) -> bool:
+    return _selfshot_job_type(job) == "self_shot_cinematic_transform"
+
+
+def _selfshot2_job(job: dict | None) -> bool:
+    return _selfshot_job_type(job) == "self_shot_scene_change"
+
+
+def download_selfshot3_source_video(job: dict, work_dir: str) -> str:
+    """Materialize the user source inside the disposable worker directory."""
+
+    if not _selfshot3_job(job):
+        return ""
+    job_id = str(job.get("job_id") or job.get("id") or "").strip()
+    if not job_id:
+        raise RuntimeError("selfshot3_source_job_id_missing")
+    max_bytes = max(1, int(os.getenv("SELFSHOT3_SOURCE_MAX_BYTES", str(20 * 1024 * 1024))))
+    request = urllib.request.Request(
+        endpoint(f"/api/v1/worker/jobs/{job_id}/source-video"),
+        headers=auth_headers(""),
+        method="GET",
+    )
+    target = (Path(work_dir).resolve() / "selfshot3-source.mp4").resolve()
+    root = Path(work_dir).resolve()
+    if root not in target.parents:
+        raise RuntimeError("selfshot3_source_path_unsafe")
+    received = 0
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            with target.open("wb") as handle:
+                while True:
+                    chunk = response.read(min(1024 * 1024, max_bytes - received + 1))
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise RuntimeError("selfshot3_source_too_large")
+                    handle.write(chunk)
+    except Exception:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    if received <= 0 or not target.exists():
+        raise RuntimeError("selfshot3_source_empty")
+    job["source_video_path"] = str(target)
+    job["source_video_local_path"] = str(target)
+    return str(target)
+
+
+def download_selfshot2_source_video(job: dict, work_dir: str) -> str:
+    """Materialize a SELFSHOT2 source without sharing another product's file."""
+
+    if not _selfshot2_job(job):
+        return ""
+    job_id = str(job.get("job_id") or job.get("id") or "").strip()
+    if not job_id:
+        raise RuntimeError("selfshot2_source_job_id_missing")
+    max_bytes = max(
+        1,
+        int(
+            os.getenv("SELFSHOT_SOURCE_MAX_BYTES")
+            or os.getenv("SELFSHOT2_SOURCE_MAX_BYTES")
+            or str(50 * 1024 * 1024)
+        ),
+    )
+    request = urllib.request.Request(
+        endpoint(f"/api/v1/worker/jobs/{job_id}/source-video"),
+        headers=auth_headers(""),
+        method="GET",
+    )
+    root = Path(work_dir).resolve()
+    target = (root / "selfshot2-source.mp4").resolve()
+    if root not in target.parents:
+        raise RuntimeError("selfshot2_source_path_unsafe")
+    received = 0
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            with target.open("wb") as handle:
+                while True:
+                    chunk = response.read(min(1024 * 1024, max_bytes - received + 1))
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise RuntimeError("selfshot2_source_too_large")
+                    handle.write(chunk)
+    except Exception:
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    if received <= 0 or not target.exists():
+        raise RuntimeError("selfshot2_source_empty")
+    job["source_video_path"] = str(target)
+    job["source_video_local_path"] = str(target)
+    return str(target)
+
+
+def process_claimed_job(job: dict) -> dict:
+    job_id = str(job.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("job_id_missing")
+    trace = worker_process_trace(job)
+    if job.get("claim_only_diagnostic"):
+        if str(job.get("source") or "") != REMOTE_WORKER_PRODUCT_VIDEO_SOURCE:
+            raise RuntimeError("claim_only_product_video_required")
+        if job.get("test_pattern") or job.get("admin_video_delivery") or job.get("provider_call") or job.get("public_user"):
+            raise RuntimeError("unsafe_claim_only_diagnostic_metadata")
+        send_heartbeat(job_id, 20, "product diagnostic claimed")
+        result = {
+            "ok": True,
+            **trace,
+            "claim_only_diagnostic": True,
+            "diagnostic_claim_only": True,
+            "renderer": "remote_worker_claim_only",
+            "render_mode": RENDER_MODE_REAL,
+            "test_pattern": False,
+            "admin_video_delivery": False,
+            "bytes": 0,
+            "admin_only": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
+        }
+        send_heartbeat(job_id, 100, "product diagnostic claim pass")
+        return complete_job(job_id, result)
+    with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
+        send_heartbeat(job_id, 5, "claimed")
+        mode = normalize_render_mode(job)
+        if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
+            if not admin_test_pattern_allowed(job):
+                raise RuntimeError("unsafe_test_pattern_route")
+            if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
+                raise RuntimeError("admin_test_pattern_renderer_disabled")
+            send_heartbeat(job_id, 35, "rendering ADMIN TEST PATTERN")
+            final_path = render_fake_video(job, work_dir)
+            result = {
+                "ok": True,
+                "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN,
+                "test_pattern": True,
+                "renderer": "remote_worker_fake_admin_test",
+                "final_video_name": os.path.basename(final_path),
+                "bytes": os.path.getsize(final_path),
+                "admin_only": True,
+                "no_charge": True,
+                "provider_call": False,
+                "public_user": False,
+                "warning": "ADMIN TEST PATTERN - not real rendered video",
+            }
+            send_heartbeat(job_id, 90, "uploading ADMIN TEST PATTERN")
+            return complete_job(job_id, result, final_path)
+        if _selfshot3_job(job):
+            send_heartbeat(job_id, 12, "downloading self-shot source")
+            download_selfshot3_source_video(job, work_dir)
+        elif _selfshot2_job(job):
+            send_heartbeat(job_id, 12, "downloading self-shot scene source")
+            download_selfshot2_source_video(job, work_dir)
+        send_heartbeat(job_id, 20, "preparing product video")
+        print(
+            "[remote_worker] provider submit start "
+            f"job_id={job_id} "
+            f"provider={product_video_provider_hint(job) or '-'} "
+            f"service_mode={trace.get('worker_service_mode') or '-'}"
+        )
+        final_path = render_real_video(job, work_dir)
+        send_heartbeat(job_id, 80, "product video rendered")
+        send_heartbeat(job_id, 88, "checking rendered video")
+        connector_result = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
+        visual_classification = str(connector_result.get("visual_classification") or connector_result.get("final_classification") or "")
+        selfshot2_continuity_passed = connector_result.get("continuity_validation_passed") is True
+        force_no_charge = bool(
+            (visual_classification and visual_classification != "final_ai_video")
+            or (_selfshot2_job(job) and not selfshot2_continuity_passed)
+        )
+        result = {
+            "ok": True,
+            **trace,
+            "render_mode": RENDER_MODE_REAL,
+            "renderer": "remote_worker_real_render_route",
+            "final_video_name": os.path.basename(final_path),
+            "final_video_path": final_path,
+            "bytes": os.path.getsize(final_path),
+            "output_bytes": int(connector_result.get("output_bytes") or os.path.getsize(final_path)),
+            "output_duration": connector_result.get("output_duration") or connector_result.get("duration") or connector_result.get("duration_sec") or 0,
+            "has_video": connector_result.get("has_video"),
+            "has_audio": connector_result.get("has_audio"),
+            "validation_status": str(connector_result.get("validation_status") or "worker_candidate_ready"),
+            "raw_provider_video_path": str(connector_result.get("raw_provider_video_path") or ""),
+            "raw_duration_seconds": connector_result.get("raw_duration_seconds") or 0,
+            "expected_duration_seconds": connector_result.get("expected_duration_seconds") or job.get("expected_duration_seconds") or 0,
+            "final_duration_seconds": connector_result.get("final_duration_seconds") or connector_result.get("output_duration") or 0,
+            "orchestration_mode": str(connector_result.get("orchestration_mode") or job.get("orchestration_mode") or ""),
+            "provider_orchestration_mode": str(connector_result.get("provider_orchestration_mode") or connector_result.get("orchestration_mode") or job.get("provider_orchestration_mode") or ""),
+            "scene_duration_seconds": connector_result.get("scene_duration_seconds") or job.get("scene_duration_seconds") or 0,
+            "scene_tasks": connector_result.get("scene_tasks") or [],
+            "provider_scene_tasks": connector_result.get("scene_tasks") or connector_result.get("provider_scene_tasks") or [],
+            "scene_tasks_total": connector_result.get("scene_tasks_total") or 0,
+            "scene_tasks_created_count": connector_result.get("scene_tasks_created_count") or connector_result.get("scene_tasks_total") or 0,
+            "scene_tasks_submitted": connector_result.get("scene_tasks_submitted") or 0,
+            "scene_tasks_submitted_count": connector_result.get("scene_tasks_submitted_count") or connector_result.get("scene_tasks_submitted") or 0,
+            "scene_tasks_completed": connector_result.get("scene_tasks_completed") or 0,
+            "scenes_total": connector_result.get("scenes_total") or connector_result.get("scene_tasks_total") or 0,
+            "scenes_done": connector_result.get("scenes_done") or connector_result.get("scene_tasks_completed") or 0,
+            "scenes_pending": connector_result.get("scenes_pending") or 0,
+            "scenes_running": connector_result.get("scenes_running") or 0,
+            "current_scene_index": connector_result.get("current_scene_index") or 0,
+            "current_scene": connector_result.get("current_scene") or connector_result.get("current_scene_index") or 0,
+            "current_scene_status": str(connector_result.get("current_scene_status") or ""),
+            "scene_not_start_elapsed": connector_result.get("scene_not_start_elapsed") or 0,
+            "stall_threshold": connector_result.get("stall_threshold") or 0,
+            "provider_stalled_not_start": bool(connector_result.get("provider_stalled_not_start")),
+            "fallback_scene_index": connector_result.get("fallback_scene_index") or 0,
+            "fallback_allowed": bool(connector_result.get("fallback_allowed")),
+            "fallback_block_reason": str(connector_result.get("fallback_block_reason") or connector_result.get("fallback_blocked_reason") or ""),
+            "final_concat_required": bool(connector_result.get("final_concat_required")),
+            "concat_ready": bool(connector_result.get("concat_ready")),
+            "finalizer_invoked": bool(connector_result.get("finalizer_invoked")),
+            "finalizer_error": str(connector_result.get("finalizer_error") or ""),
+            "final_duration_contract": connector_result.get("final_duration_contract") or {},
+            "logo_overlay_requested": bool(connector_result.get("logo_overlay_requested")),
+            "logo_overlay_applied": bool(connector_result.get("logo_overlay_applied")),
+            "logo_overlay_error": str(connector_result.get("logo_overlay_error") or ""),
+            "selfshot2_continuity_validation": connector_result.get("selfshot2_continuity_validation") or {},
+            "continuity_validation_passed": selfshot2_continuity_passed if _selfshot2_job(job) else connector_result.get("continuity_validation_passed"),
+            "continuity_blocker": str(connector_result.get("continuity_blocker") or ""),
+            "continuity_metrics": connector_result.get("continuity_metrics") or {},
+            "continuity_evidence_scene_indexes": connector_result.get("continuity_evidence_scene_indexes") or [],
+            "continuity_missing_scene_indexes": connector_result.get("continuity_missing_scene_indexes") or [],
+            "delivery_blocked": bool(connector_result.get("delivery_blocked") or (_selfshot2_job(job) and not selfshot2_continuity_passed)),
+            "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
+            "product_video": True,
+            "test_pattern": False,
+            "admin_video_delivery": False,
+            "provider_call": bool(job.get("provider_call")),
+            "public_user": bool(job.get("public_user")),
+            "admin_only": bool(job.get("admin_only")),
+            "no_charge": bool(job.get("no_charge")) or force_no_charge,
+            "connector_renderer": str(connector_result.get("renderer") or ""),
+            "route_requires_provider": bool(connector_result.get("route_requires_provider")),
+            "local_fallback_allowed": bool(connector_result.get("local_fallback_allowed")),
+            "provider_router_called": bool(connector_result.get("provider_router_called")),
+            "provider_candidates_count": int(connector_result.get("provider_candidates_count") or 0),
+            "selected_provider": str(connector_result.get("selected_provider") or ""),
+            "selected_provider_before_submit": str(connector_result.get("selected_provider_before_submit") or ""),
+            "submit_provider_key": str(connector_result.get("submit_provider_key") or ""),
+            "provider_selection_blocker": str(connector_result.get("provider_selection_blocker") or ""),
+            "provider_config_source": str(connector_result.get("provider_config_source") or ""),
+            "provider_config_namespaces_checked": connector_result.get("provider_config_namespaces_checked") or [],
+            "selected_provider_env_prefix": str(connector_result.get("selected_provider_env_prefix") or ""),
+            "selected_provider_alias_prefixes_checked": connector_result.get("selected_provider_alias_prefixes_checked") or [],
+            "selected_provider_config_source": str(connector_result.get("selected_provider_config_source") or ""),
+            "claim_payload_provider_key": str(connector_result.get("claim_payload_provider_key") or ""),
+            "claim_payload_has_provider_config": bool(connector_result.get("claim_payload_has_provider_config")),
+            "worker_local_hydration_attempted": bool(connector_result.get("worker_local_hydration_attempted")),
+            "worker_local_hydration_success": bool(connector_result.get("worker_local_hydration_success")),
+            "provider_attempted": bool(connector_result.get("provider_attempted")),
+            "provider_route_selected": bool(connector_result.get("provider_route_selected")),
+            "provider_submit_called": bool(connector_result.get("provider_submit_called")),
+            "submit_source": str(connector_result.get("submit_source") or job.get("submit_source") or ""),
+            "provider_submit_source": str(connector_result.get("provider_submit_source") or connector_result.get("submit_source") or job.get("provider_submit_source") or ""),
+            "public_user_confirmed": bool(connector_result.get("public_user_confirmed") or job.get("public_user_confirmed")),
+            "provider_submit_allowed": bool(connector_result.get("provider_submit_allowed")),
+            "provider_submit_block_reason": str(connector_result.get("provider_submit_block_reason") or ""),
+            "poll_existing_task_allowed": bool(connector_result.get("poll_existing_task_allowed")),
+            "charge_policy": str(connector_result.get("charge_policy") or job.get("charge_policy") or "after_valid_mp4_delivery"),
+            "provider_submit_http_status": connector_result.get("provider_submit_http_status") or 0,
+            "submit_accepted": bool(connector_result.get("submit_accepted")),
+            "provider_submit_exception_class": str(connector_result.get("provider_submit_exception_class") or connector_result.get("exception_class") or ""),
+            "provider_submit_exception_message_safe": str(connector_result.get("provider_submit_exception_message_safe") or connector_result.get("exception_message_safe") or "")[:220],
+            "provider_submit_url_configured": bool(connector_result.get("provider_submit_url_configured") or connector_result.get("submit_url_configured")),
+            "submit_url_present": bool(connector_result.get("submit_url_present") or connector_result.get("provider_submit_url_configured") or connector_result.get("submit_url_configured")),
+            "provider_submit_url_host": str(connector_result.get("provider_submit_url_host") or ""),
+            "provider_auth_header_name": str(connector_result.get("provider_auth_header_name") or ""),
+            "provider_auth_value_present": bool(connector_result.get("provider_auth_value_present") or connector_result.get("auth_configured")),
+            "provider_auth_scheme_prefix": str(connector_result.get("provider_auth_scheme_prefix") or ""),
+            "auth_present": bool(connector_result.get("auth_present") or connector_result.get("provider_auth_value_present") or connector_result.get("auth_configured")),
+            "auth_scheme": str(connector_result.get("auth_scheme") or connector_result.get("provider_auth_scheme_prefix") or ""),
+            "auth_header_name_present": bool(connector_result.get("auth_header_name_present") or connector_result.get("provider_auth_header_name")),
+            "auth_header_value_present": bool(connector_result.get("auth_header_value_present") or connector_result.get("provider_auth_value_present") or connector_result.get("auth_present") or connector_result.get("auth_configured")),
+            "provider_model_present": bool(connector_result.get("provider_model_present")),
+            "model_present": bool(connector_result.get("model_present") or connector_result.get("provider_model_present")),
+            "provider_env_namespace_mismatch": bool(connector_result.get("provider_env_namespace_mismatch")),
+            "provider_chain_fallback_attempted": bool(connector_result.get("provider_chain_fallback_attempted")),
+            "fallback_provider_attempts": connector_result.get("fallback_provider_attempts") or connector_result.get("provider_attempts") or [],
+            "provider_payload_keys": connector_result.get("provider_payload_keys") or connector_result.get("payload_keys") or [],
+            "provider_payload_model": str(connector_result.get("provider_payload_model") or ""),
+            "provider_response_http_status": connector_result.get("provider_response_http_status") or connector_result.get("provider_submit_http_status") or 0,
+            "provider_response_body_shape": connector_result.get("provider_response_body_shape") or connector_result.get("submit_response_shape") or {},
+            "provider_task_id_saved": bool(connector_result.get("provider_task_id_saved")),
+            "provider_poll_called": bool(connector_result.get("provider_poll_called")),
+            "poll_allowed": bool(connector_result.get("poll_allowed")),
+            "poll_skipped_reason": str(connector_result.get("poll_skipped_reason") or ""),
+            "provider_result_url_present": bool(connector_result.get("provider_result_url_present")),
+            "continue_polling": bool(connector_result.get("continue_polling")),
+            "normalized_provider_status": str(connector_result.get("normalized_provider_status") or ""),
+            "provider_events": connector_result.get("provider_events") or [],
+            "provider_task_ids": connector_result.get("provider_task_ids") or [],
+            "provider_video_ids": connector_result.get("provider_video_ids") or [],
+            "provider_models": connector_result.get("provider_models") or [],
+            "provider_modes": connector_result.get("provider_modes") or [],
+            "provider_status": str(connector_result.get("provider_status") or ""),
+            "provider_error": str(connector_result.get("provider_error") or ""),
+            "chunk_count": connector_result.get("chunk_count") or 0,
+            "downloaded_clip_paths": connector_result.get("downloaded_clip_paths") or [],
+            "stitch_attempted": bool(connector_result.get("stitch_attempted")),
+            "fallback_used": bool(connector_result.get("fallback_used")),
+            "fallback_reason": str(connector_result.get("fallback_reason") or ""),
+            "visual_source": str(connector_result.get("visual_source") or ""),
+            "base_video_source": str(connector_result.get("base_video_source") or ""),
+            "placeholder_forbidden": bool(connector_result.get("placeholder_forbidden")),
+            "fallback_policy": str(connector_result.get("fallback_policy") or connector_result.get("fallback_capability") or ""),
+            "visual_classification": visual_classification,
+            "final_classification": visual_classification,
+            "placeholder_detected": bool(connector_result.get("placeholder_detected") or connector_result.get("placeholder_visual")),
+            "raw_prompt_burned_into_frame": bool(connector_result.get("raw_prompt_burned_into_frame")),
+            "partial_addons": bool(connector_result.get("partial_addons")),
+            "addon_degrade_notes": connector_result.get("addon_degrade_notes") or [],
+        }
+        send_heartbeat(job_id, 90, "uploading final video")
+        return complete_job(job_id, result, final_path)
+
+
+def process_admin_video_job(job: dict) -> dict:
+    job_id = str(job.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("job_id_missing")
+    if str(job.get("job_type") or "") != "video_render" or not job.get("admin_video_delivery"):
+        raise RuntimeError("admin_video_job_required")
+    if str(job.get("source") or "") != REMOTE_WORKER_ADMIN_VIDEO_SOURCE:
+        raise RuntimeError("admin_video_route_source_required")
+    if not job.get("admin_only") or not job.get("no_charge") or job.get("provider_call") or job.get("public_user"):
+        raise RuntimeError("unsafe_admin_video_metadata")
+    with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
+        send_heartbeat(job_id, 10, "admin video claimed")
+        mode = normalize_render_mode(job)
+        if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
+            if not admin_test_pattern_allowed(job):
+                raise RuntimeError("unsafe_test_pattern_route")
+            send_heartbeat(job_id, 35, "rendering ADMIN TEST PATTERN")
+            final_path = render_admin_video_delivery(job, work_dir)
+            renderer = "remote_worker_admin_test_pattern_ffmpeg"
+            test_pattern = True
+            queue_label = "OWNER/ADMIN TEST PATTERN - video delivery only, no Xu"
+        else:
+            send_heartbeat(job_id, 35, "admin video real rendering")
+            final_path = render_real_video(job, work_dir)
+            renderer = "remote_worker_real_render_route"
+            test_pattern = False
+            queue_label = "OWNER/ADMIN VIDEO REAL RENDER - no Xu"
+        send_heartbeat(job_id, 85, "admin video uploading")
+        result = {
+            "ok": True,
+            "admin_video_delivery": True,
+            "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN if test_pattern else RENDER_MODE_REAL,
+            "test_pattern": bool(test_pattern),
+            "renderer": renderer,
+            "final_video_name": os.path.basename(final_path),
+            "bytes": os.path.getsize(final_path),
+            "admin_only": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "queue_label": queue_label,
+        }
+        send_heartbeat(job_id, 100, "admin test pattern completed" if test_pattern else "admin real video completed")
+        return complete_job(job_id, result, final_path)
+
+
+def process_admin_canary_job(job: dict) -> dict:
+    job_id = str(job.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("job_id_missing")
+    if str(job.get("job_type") or "") != "video_render" or not job.get("worker_admin_canary"):
+        raise RuntimeError("admin_canary_job_required")
+    if not job.get("admin_only") or not job.get("no_charge") or job.get("provider_call") or job.get("public_user"):
+        raise RuntimeError("unsafe_admin_canary_metadata")
+    with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
+        send_heartbeat(job_id, 10, "admin canary claimed")
+        send_heartbeat(job_id, 30, "admin canary preparing")
+        final_path = render_admin_canary_video(job, work_dir)
+        send_heartbeat(job_id, 60, "admin canary rendering")
+        send_heartbeat(job_id, 85, "admin canary uploading")
+        result = {
+            "ok": True,
+            "admin_canary": True,
+            "worker_admin_canary": True,
+            "renderer": "remote_worker_admin_canary_ffmpeg",
+            "final_video_name": os.path.basename(final_path),
+            "bytes": os.path.getsize(final_path),
+            "admin_only": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "queue_label": "OWNER/ADMIN WORKER CANARY - no Xu",
+        }
+        send_heartbeat(job_id, 100, "admin canary completed")
+        return complete_job(job_id, result, final_path)
+
+
+def process_canary_job(job: dict) -> dict:
+    job_id = str(job.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("job_id_missing")
+    if str(job.get("job_type") or "") != "remote_worker_canary" or not job.get("canary"):
+        raise RuntimeError("canary_job_required")
+    if not job.get("admin_only") or not job.get("no_charge") or job.get("provider_call") or job.get("public_user"):
+        raise RuntimeError("unsafe_canary_metadata")
+    with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
+        send_heartbeat(job_id, 10, "canary claimed")
+        final_path = render_canary_video(job, work_dir)
+        send_heartbeat(job_id, 70, "canary uploading")
+        result = {
+            "ok": True,
+            "canary": True,
+            "renderer": "remote_worker_canary_ffmpeg",
+            "final_video_name": os.path.basename(final_path),
+            "bytes": os.path.getsize(final_path),
+            "admin_only": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+        }
+        return complete_job(job_id, result, final_path)
+
+
+def claim_mode_label(
+    *,
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> str:
+    if owner_product_video_only:
+        return "owner_product_video"
+    if product_video_only:
+        return "product_video"
+    if admin_video_only:
+        return "admin_video"
+    if admin_canary_only:
+        return "admin_canary"
+    if canary_only:
+        return "canary"
+    return "default_video"
+
+
+def last_claim_reason() -> str:
+    response = LAST_CLAIM_RESPONSE if isinstance(LAST_CLAIM_RESPONSE, dict) else {}
+    reason = str(response.get("reason") or "").strip()
+    if reason:
+        return first_line(reason)[:160]
+    if response.get("ok") is False:
+        return "claim_api_not_ok"
+    if response:
+        return "api_returned_no_job"
+    return "no_claim_response"
+
+
+def run_once(
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> str:
+    global LAST_CLAIM_RESPONSE, LAST_IDLE_REASON
+    LAST_CLAIM_RESPONSE = {}
+    LAST_IDLE_REASON = ""
+    if product_video_only or owner_product_video_only:
+        job = claim_job(product_video_only=product_video_only, owner_product_video_only=owner_product_video_only)
+    elif admin_video_only:
+        job = claim_job(admin_video_only=True)
+    elif admin_canary_only:
+        job = claim_job(admin_canary_only=True)
+    elif canary_only:
+        job = claim_job(canary_only=True)
+    else:
+        job = claim_job()
+    if not job:
+        LAST_IDLE_REASON = claim_idle_reason(
+            canary_only=canary_only,
+            admin_canary_only=admin_canary_only,
+            admin_video_only=admin_video_only,
+            product_video_only=product_video_only,
+            owner_product_video_only=owner_product_video_only,
+        )
+        print(
+            "[remote_worker] claim idle "
+            f"mode={claim_mode_label(canary_only=canary_only, admin_canary_only=admin_canary_only, admin_video_only=admin_video_only, product_video_only=product_video_only, owner_product_video_only=owner_product_video_only)} "
+            "route=/api/v1/worker/claim "
+            "status=idle "
+            f"reason={LAST_IDLE_REASON}"
+        )
+        return "idle"
+    job_id = str(job.get("job_id") or "")
+    try:
+        if admin_canary_only or job.get("worker_admin_canary"):
+            process_admin_canary_job(job)
+        elif admin_video_only or job.get("admin_video_delivery"):
+            process_admin_video_job(job)
+        elif product_video_only or owner_product_video_only:
+            if not product_video_job_allowed(job):
+                raise RuntimeError("product_video_job_required")
+            process_claimed_job(job)
+        elif canary_only or job.get("canary"):
+            process_canary_job(job)
+        else:
+            process_claimed_job(job)
+        return "completed"
+    except Exception as exc:
+        if job_id:
+            message = first_line(str(exc))
+            unavailable = REAL_VIDEO_RENDER_UNAVAILABLE in message
+            diagnostics = {**worker_process_trace(job), **dict(LAST_REAL_VIDEO_RENDER_RESULT or {})}
+            print(
+                "[remote_worker] provider submit/render failed "
+                f"job_id={job_id} "
+                f"provider={diagnostics.get('submit_provider_key') or diagnostics.get('selected_provider_before_submit') or diagnostics.get('selected_provider') or diagnostics.get('provider') or '-'} "
+                f"submit_url_host={diagnostics.get('provider_submit_url_host') or '-'} "
+                f"exception_class={type(exc).__name__} "
+                f"exception_message_safe={first_line(message)}"
+            )
+            continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
+            fail_result = fail_job(
+                job_id,
+                f"{type(exc).__name__}:{message}",
+                retryable=bool(continue_polling)
+                or not bool(
+                    unavailable
+                    or canary_only
+                    or admin_canary_only
+                    or admin_video_only
+                    or product_video_only
+                    or owner_product_video_only
+                    or job.get("canary")
+                    or job.get("worker_admin_canary")
+                    or job.get("admin_video_delivery")
+                    or job.get("product_video")
+                ),
+            )
+            if continue_polling and (fail_result.get("deferred") or fail_result.get("continue_polling")):
+                return "pending"
+        return "failed"
+
+
+def run_ping_mode(
+    *,
+    dry_run: bool = False,
+    canary: bool = False,
+    admin_canary: bool = False,
+    admin_video: bool = False,
+    product_video: bool = False,
+    owner_product_video: bool = False,
+) -> int:
+    lines, local_ok = local_doctor_lines()
+    for line in lines:
+        print(line)
+    if not LOCAL_WORKER_TOKEN:
+        print("ping: FAIL (LOCAL_WORKER_TOKEN missing)")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    try:
+        if product_video or owner_product_video:
+            payload = ping_server(product_video=product_video, owner_product_video=owner_product_video)
+        elif admin_video:
+            payload = ping_server(admin_video=True)
+        elif admin_canary:
+            payload = ping_server(admin_canary=True)
+        elif canary:
+            payload = ping_server(canary=True)
+        else:
+            payload = ping_server()
+    except urllib.error.HTTPError as exc:
+        print(f"ping: FAIL (HTTP {exc.code})")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"ping: FAIL ({type(exc.reason).__name__})")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    except Exception as exc:
+        print(f"ping: FAIL ({type(exc).__name__})")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    ping_ok = bool(payload.get("ok") and payload.get("dry_run") and payload.get("can_claim_jobs") is False)
+    print(f"ping: {'OK' if ping_ok else 'FAIL'}")
+    print(f"server build: {payload.get('build') or '-'}")
+    print(f"remote mode supported: {'yes' if payload.get('remote_worker_mode_supported') else 'no'}")
+    if dry_run:
+        print("claim skipped because dry-run: yes")
+    return 0 if (local_ok and ping_ok) else 1
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="TOAN AAS remote VPS worker")
+    parser.add_argument("--doctor", action="store_true", help="run local environment checks and exit")
+    parser.add_argument("--ping", action="store_true", help="ping Railway worker API and exit")
+    parser.add_argument("--once", action="store_true", help="run one polling cycle and exit")
+    parser.add_argument("--dry-run", action="store_true", help="ping only; never claim or complete real jobs")
+    parser.add_argument("--canary", action="store_true", help="claim only safe remote_worker_canary jobs")
+    parser.add_argument("--admin-canary", action="store_true", help="claim only admin production canary video_render jobs")
+    parser.add_argument("--admin-video", action="store_true", help="claim only owner/admin no-charge video_render delivery jobs")
+    parser.add_argument("--product-video", action="store_true", help="claim product video real-render jobs")
+    parser.add_argument("--owner-product-video", action="store_true", help="claim only owner/admin no-charge product video real-render jobs")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    global ACTIVE_WORKER_SERVICE_MODE, ACTIVE_WORKER_CAPABILITIES
+    args = build_arg_parser().parse_args(argv)
+    special_modes = [bool(args.canary), bool(args.admin_canary), bool(args.admin_video), bool(args.product_video), bool(args.owner_product_video)]
+    if sum(1 for item in special_modes if item) > 1:
+        print("[remote_worker] choose only one of --canary, --admin-canary, --admin-video, --product-video, or --owner-product-video")
+        return 2
+    ACTIVE_WORKER_SERVICE_MODE = claim_mode_label(
+        canary_only=args.canary,
+        admin_canary_only=args.admin_canary,
+        admin_video_only=args.admin_video,
+        product_video_only=args.product_video,
+        owner_product_video_only=args.owner_product_video,
+    )
+    ACTIVE_WORKER_CAPABILITIES = (
+        product_video_worker_capabilities()
+        if args.product_video or args.owner_product_video
+        else ["ffmpeg", "video_postprocess"]
+    )
+    if args.doctor:
+        return run_doctor()
+    if args.ping:
+        return run_ping_mode(
+            dry_run=args.dry_run,
+            canary=args.canary,
+            admin_canary=args.admin_canary,
+            admin_video=args.admin_video,
+            product_video=args.product_video,
+            owner_product_video=args.owner_product_video,
+        )
+    if args.dry_run:
+        return run_ping_mode(
+            dry_run=True,
+            canary=args.canary,
+            admin_canary=args.admin_canary,
+            admin_video=args.admin_video,
+            product_video=args.product_video,
+            owner_product_video=args.owner_product_video,
+        )
+    if args.once:
+        status = run_once(
+            canary_only=args.canary,
+            admin_canary_only=args.admin_canary,
+            admin_video_only=args.admin_video,
+            product_video_only=args.product_video,
+            owner_product_video_only=args.owner_product_video,
+        )
+        print(
+            f"[remote_worker] once status={status} "
+            f"canary_only={'yes' if args.canary else 'no'} "
+            f"admin_canary_only={'yes' if args.admin_canary else 'no'} "
+            f"admin_video_only={'yes' if args.admin_video else 'no'} "
+            f"product_video_only={'yes' if args.product_video else 'no'} "
+            f"owner_product_video_only={'yes' if args.owner_product_video else 'no'}"
+        )
+        if status == "idle":
+            print(f"[remote_worker] once idle_reason={LAST_IDLE_REASON or 'api_no_job'}")
+            for line in claim_debug_lines():
+                print(line)
+        return 1 if status == "failed" else 0
+
+    print("[remote_worker] TOAN AAS Remote Worker starting")
+    print(f"[remote_worker] base_url={BOT_API_URL}")
+    print(f"[remote_worker] worker_id={WORKER_ID}")
+    print(f"[remote_worker] token_configured={'yes' if bool(LOCAL_WORKER_TOKEN) else 'no'}")
+    print(f"[remote_worker] concurrency={WORKER_CONCURRENCY} ffmpeg_max={FFMPEG_MAX_CONCURRENT}")
+    print(f"[remote_worker] canary_only={'yes' if args.canary else 'no'}")
+    print(f"[remote_worker] admin_canary_only={'yes' if args.admin_canary else 'no'}")
+    print(f"[remote_worker] admin_video_only={'yes' if args.admin_video else 'no'}")
+    print(f"[remote_worker] product_video_only={'yes' if args.product_video else 'no'}")
+    print(f"[remote_worker] owner_product_video_only={'yes' if args.owner_product_video else 'no'}")
+    while True:
+        try:
+            status = run_once(
+                canary_only=args.canary,
+                admin_canary_only=args.admin_canary,
+                admin_video_only=args.admin_video,
+                product_video_only=args.product_video,
+                owner_product_video_only=args.owner_product_video,
+            )
+            if status == "idle":
+                time.sleep(WORKER_POLL_INTERVAL_SECONDS)
+        except KeyboardInterrupt:
+            print("[remote_worker] stopped")
+            return 0
+        except urllib.error.HTTPError as exc:
+            print(f"[remote_worker] HTTP {exc.code}; check BOT_API_URL/LOCAL_WORKER_TOKEN")
+            time.sleep(WORKER_POLL_INTERVAL_SECONDS)
+        except urllib.error.URLError as exc:
+            print(f"[remote_worker] connection error: {type(exc.reason).__name__}")
+            time.sleep(WORKER_POLL_INTERVAL_SECONDS)
+        except Exception as exc:
+            print(f"[remote_worker] loop error: {type(exc).__name__}")
+            time.sleep(WORKER_POLL_INTERVAL_SECONDS)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

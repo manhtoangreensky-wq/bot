@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import inspect
+
 import bot
 
 
@@ -22,7 +24,7 @@ def test_public_voice_labels_use_nghe_not_nghe_xem():
     labels = _labels(bot.voice_clone_preview_entry_keyboard(1, "vi"))
     labels += _labels(bot.audio_voice_preview_keyboard("vi"))
     joined = "\n".join(labels)
-    assert "▶️ Nghe thử" in labels
+    assert "▶️ Nghe thử 6 giây" in labels
     assert "✅ Tạo giọng đọc" in labels
     assert "✏️ Sửa nội dung" in labels
     assert "nghe/xem" not in joined.lower()
@@ -98,9 +100,9 @@ def test_paid_voice_real_route_or_admin_blocker_only():
 
 
 def test_voice_preview_failure_copy_voice_specific():
-    source = _source_between("async def create_minimax_voice_profile_preview", "async def handle_music_quick_callback")
-    assert "Bản nghe thử giọng chưa tạo được" in source
-    assert "dùng giọng mặc định miễn phí hoặc thử lại sau" in source
+    source = inspect.getsource(bot.voice_clone_product_failure_text)
+    assert "TOAN AAS chưa tạo được voice hợp lệ" in source
+    assert "dùng giọng nam/nữ mặc định" in source
 
 
 def test_custom_voice_no_600_label():
@@ -131,7 +133,8 @@ def test_background_music_guided_flow_purpose_style_mood_duration_options():
 def test_song_seconds_half_full_guided_flow_complete():
     mode_labels = _labels(bot.music_song_product_keyboard("vi"))
     assert "⏱ Theo số giây" not in mode_labels
-    assert {"1️⃣ Nửa bài", "2️⃣ Full bài"}.issubset(set(mode_labels))
+    assert "🎤 Bài hát có lời AI" in mode_labels
+    assert "1️⃣ Nửa bài" not in mode_labels
     genre_labels = _labels(bot.music_song_options_keyboard("genre", "vi"))
     mood_labels = _labels(bot.music_song_options_keyboard("mood", "vi"))
     vocal_labels = _labels(bot.music_song_options_keyboard("vocal", "vi"))
@@ -140,19 +143,19 @@ def test_song_seconds_half_full_guided_flow_complete():
     assert {"Giọng nam", "Giọng nữ", "Song ca", "Không lời", "Tự nhập giọng hát"}.issubset(set(vocal_labels))
 
 
-def test_song_preview_6s_not_duration():
+def test_song_preview_12s_not_duration():
     result = {"song_product": "full", "guided_duration": "120s"}
     assert bot.music_result_duration_seconds(result) == 120
-    assert bot.paid_preview_seconds(bot.music_result_duration_seconds(result)) == 6
+    assert bot.music_preview_seconds() == 12
 
 
 def test_music_preview_labels_match_selected_product():
     background = {"song_product": ""}
     song = {"song_product": "full"}
-    assert "▶️ Nghe thử" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=background))
-    assert "✅ Tạo nhạc" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=background))
-    assert "▶️ Nghe thử" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=song))
-    assert "✅ Tạo bài hát" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=song))
+    assert "▶️ Nghe thử 12 giây" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=background))
+    assert "✅ Dùng bản đầy đủ" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=background))
+    assert "▶️ Nghe thử 12 giây" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=song))
+    assert "✅ Dùng bản đầy đủ 800 Xu" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=song))
     public_music_text = bot.suno_user_guard_text("vi").lower()
     assert "nhạc/giọng" not in public_music_text
     assert "nghe thử/guard" not in public_music_text
@@ -163,8 +166,10 @@ def test_subtitle_and_translation_flow_no_voice_selection():
     assert not bot.video_dubbing_requires_voice(bot.VIDEO_SUBTITLE_MODE_TRANSLATE)
     subtitle_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
     translate_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert "👁 Xem thử" in subtitle_labels
-    assert "👁 Xem thử" in translate_labels
+    assert "👁 Xem thử" not in subtitle_labels
+    assert "👁 Xem thử" not in translate_labels
+    assert "✅ Tạo phụ đề gốc" in subtitle_labels
+    assert "✅ Xác nhận dịch" in translate_labels
     assert "✅ Xác nhận tạo đầy đủ" in _labels(bot.video_dubbing_preview_ready_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
     assert "✅ Xác nhận tạo đầy đủ" in _labels(bot.video_dubbing_preview_ready_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
     assert not any("giọng" in label.lower() for label in subtitle_labels)
@@ -177,8 +182,12 @@ def test_dubbing_flow_requires_voice_selection_and_clean_guard():
     assert any("Giọng nữ" in label for label in labels)
     assert any("Giọng nam" in label for label in labels)
     assert any("Kho voice" in label for label in labels)
+    assert any("Tạo voice riêng" in label for label in labels)
+    admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
+    assert any("Kho voice" in label for label in admin_labels)
     confirm_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
-    assert "▶️ Nghe thử" in confirm_labels
+    assert "▶️ Nghe thử" not in confirm_labels
+    assert "✅ Xác nhận lồng tiếng" in confirm_labels
     assert "✅ Xác nhận tạo đầy đủ" in _labels(bot.video_dubbing_preview_ready_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
     assert "Admin blocker" not in guard

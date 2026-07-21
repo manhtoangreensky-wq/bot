@@ -1,0 +1,26 @@
+{
+  "profile_id": "animation_character",
+  "title_vi": "Hoạt hình và nhân vật 2D/3D",
+  "aliases": ["hoạt hình", "nhân vật", "animation", "character animation", "2D animation", "3D animation", "motion capture", "rigging"],
+  "intent_keywords": ["cartoon", "mascot", "character", "rig", "mocap", "pose", "biểu cảm", "keyframe", "lip sync", "model sheet"],
+  "suitable_outputs": ["image", "video", "character_sheet", "animation_plan"],
+  "subjects": ["nhân vật 2D", "nhân vật 3D", "mascot", "sinh vật", "đạo cụ"],
+  "environments": ["animation set", "stylized world", "studio stage", "game-like scene"],
+  "visual_styles": ["original stylized 2D", "clean 3D", "stop-motion inspired", "graphic animation"],
+  "materials": ["toon shading", "painted texture", "PBR material", "fabric", "character props"],
+  "lighting": ["readable key light", "soft rim light", "stylized color script", "consistent scene light"],
+  "camera": ["character medium shot", "full-body action", "reaction close-up", "wide staging"],
+  "motion": ["clean pose-to-pose", "weight transfer", "facial acting", "controlled mocap", "camera follow"],
+  "scene_templates": [
+    {"role": "establish", "title": "Giới thiệu nhân vật", "prompt": "Khóa model sheet, tỷ lệ, trang phục và đạo cụ."},
+    {"role": "action", "title": "Hành động", "prompt": "Một hành động chính có trọng lượng và đường chuyển động rõ."},
+    {"role": "reaction", "title": "Phản ứng", "prompt": "Biểu cảm đọc được, không đổi thiết kế nhân vật."},
+    {"role": "ending", "title": "Kết", "prompt": "Pose kết thúc rõ silhouette và continuity."}
+  ],
+  "negative_prompt": ["model drift", "wrong costume", "extra limbs", "foot sliding", "limb jitter", "broken rig", "unreadable pose", "copyrighted character imitation"],
+  "clarifying_questions": ["Nhân vật là 2D hay 3D, có model/reference nào phải giữ, và hành động chính là gì?", "Phong cách chuyển động cần tự nhiên, hoạt hình cường điệu hay motion capture?"],
+  "image_prompt_template": "Original character design/keyframe for: {user_request}. Preserve supplied model sheet, proportions, colors, costume and props. Clear silhouette and production-ready pose.",
+  "video_prompt_template": "Plan {scene_count} animation scenes for: {user_request}. Maintain character model consistency and one clear action per shot. {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["cut on completed poses", "keep screen direction", "clean mocap feet and hands", "use color script across scenes"],
+  "source_reference_ids": ["AQPnuyfM..."]
+}

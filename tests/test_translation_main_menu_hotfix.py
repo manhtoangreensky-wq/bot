@@ -49,17 +49,19 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
     assert "Dịch ngôn ngữ" in language_text
     assert {
         "menu|translation_text",
-        "menu|translation_voice",
+        "menu|translation_media_file",
+        "menu|translation_media_audio",
         "menu|translation_two_way",
         "menu|translation_live_conversation",
-        "menu|translation_document",
-        "menu|translation_transcript",
         "menu|translation_language",
         "menu|translation_auto_target",
+        "menu|translation_stop_session",
         "menu|main",
         "menu|translate",
-        "menu|translation_stop_session",
     }.issubset(language_callbacks)
+    assert "menu|translation_voice" not in language_callbacks
+    assert "menu|translation_document" not in language_callbacks
+    assert "menu|translation_transcript" not in language_callbacks
 
 
 def test_translation_child_callbacks_have_handlers_or_existing_routes():
@@ -127,12 +129,14 @@ def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     assert "menu|translation_language_hub" in callbacks
     assert "menu|translation_video_factory" in callbacks
     assert "menu|translation_video_dub_menu" not in callbacks
+    assert "menu|translation_document" not in callbacks
     assert "menu|translation_voice" not in callbacks
+    assert "menu|translation_subtitle_file" not in callbacks
     assert "videodub|type|subtitle_translate" not in callbacks
 
     _, language_markup = bot.localized_menu_content("translation_language_hub", False, "vi", user_id=123)
     language_callbacks = _callbacks(language_markup)
-    assert "menu|translation_voice" in language_callbacks
+    assert "menu|translation_voice" not in language_callbacks
     assert "menu|translation_two_way" in language_callbacks
     assert "menu|translation_live_conversation" in language_callbacks
 

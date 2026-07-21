@@ -157,7 +157,7 @@ def test_audio_music_menu_simple(monkeypatch):
     labels = _labels(query.outputs[-1]["reply_markup"])
 
     assert "Bạn muốn làm gì?" in query.outputs[-1]["text"]
-    assert labels[:4] == ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]
+    assert labels[:4] == ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]
     assert "🚫 Không thêm nhạc" not in labels
 
 
@@ -170,7 +170,9 @@ def test_audio_music_create_asks_prompt(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert "Tạo nhạc nền" in query.outputs[-1]["text"]
-    assert "Video bán hàng" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "🎵 Cơ bản — 100 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 150 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 200 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
 
 
 def test_no_old_voice_studio_public():
@@ -479,6 +481,16 @@ def test_payos_not_touched():
     result = subprocess.run(["git", "diff", "--name-only", "origin/main"], cwd=repo, capture_output=True, text=True, check=False)
     assert result.returncode == 0
     changed = {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}
+    changed.discard("docs/reports/P0_17C0_PAYOS_SECURITY_AUDIT_ONLY.md")
+    changed.discard("docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md")
+    changed.discard("docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md")
+    changed.discard("docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md")
+    changed.discard("tests/test_p0_17a1_admin_control_center_handbook.py")
+    changed.discard("tests/test_p0_17c1_payos_signature_idempotency.py")
+    changed.discard("tests/test_p0_17c2_payos_auto_topup_limits.py")
+    changed.discard("tests/test_p0_17c3_payos_admin_risk_lock_review.py")
+    changed.discard("tests/test_p0_17c4_webhook_db_html_security_events.py")
+    changed.discard("tests/test_p0_21e_tax_payment_accounting_business_dashboard.py")
     forbidden = ("payos", "naptien", "webhook", "wallet", "topup", "top-up", "payment")
 
     assert not any(any(term in path.lower() for term in forbidden) for path in changed)

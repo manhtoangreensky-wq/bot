@@ -190,7 +190,7 @@ def test_video_200_tier_selection_discards_stale_multiscene_state(monkeypatch):
     assert current["selected_scene_count"] == 1
     assert current["source_payload"]["selected_scene_count"] == 1
     assert current["video_project"]["selected_scene_count"] == 1
-    assert "1 cảnh ≈ 6s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
+    assert "1 cảnh ≈ 8s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
     assert "đã hết lượt" not in query.outputs[-1]["text"]
     bot.clear_video_finalization_state(user_id)
 
@@ -248,7 +248,7 @@ def test_video_200_invoice_back_to_package_200_detail():
     current = bot.get_video_finalization_state(user_id)
     assert current["step"] == "scene_count"
     assert current["selected_video_tier"] == "low"
-    assert "1 cảnh ≈ 6s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
+    assert "1 cảnh ≈ 8s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
     assert not bot.get_video_addon_state(user_id)
     bot.clear_video_finalization_state(user_id)
 
@@ -392,7 +392,7 @@ def test_video_200_blocks_only_confirmed_paid_addon():
 
 
 def test_public_maintenance_copy_standard():
-    assert bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT == bot.PUBLIC_PRODUCT_MAINTENANCE_VI
+    assert bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT == "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
     assert set(bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS.values()) == {bot.PUBLIC_PRODUCT_MAINTENANCE_VI}
 
 
@@ -447,7 +447,7 @@ def test_video_final_result_sent_once(monkeypatch, tmp_path):
 
         async def send_video(self, **kwargs):
             self.video_calls += 1
-            return SimpleNamespace(video=SimpleNamespace(file_id="file_once"))
+            return SimpleNamespace(message_id=4501, video=SimpleNamespace(file_id="file_once"))
 
         async def send_message(self, **kwargs):
             raise AssertionError("link fallback should not be used")

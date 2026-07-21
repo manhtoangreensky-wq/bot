@@ -1,0 +1,24 @@
+{
+  "catalog_version": 1,
+  "canonical_root": "knowledge",
+  "description": "Central index for TOAN AAS reusable knowledge. Existing runtime vaults remain in place and are indexed here to avoid breaking their loaders.",
+  "video_stores": [
+    "knowledge/video/manual_editing.json",
+    "knowledge/video/ai_edit_vfx.json",
+    "knowledge/video/animation_motion_3d.json",
+    "knowledge/video/product_3d_visualization.json",
+    "knowledge/video/creator_ai_tools.json",
+    "knowledge/video/creator_productivity.json"
+  ],
+  "profile_root": "knowledge/profiles",
+  "reference_manifest": "knowledge/references/uploaded_video_reference_manifest.json",
+  "legacy_stores_indexed": [
+    "config/video_prompt_vault",
+    "data/prompt_vault",
+    "data/prompt_library",
+    "docs/prompt_vault",
+    "config/cskh_knowledge_base.json",
+    "docs/knowledge"
+  ],
+  "migration_policy": "Do not move legacy stores until every runtime loader has been migrated and regression-tested. New reusable video/profile knowledge belongs under knowledge/."
+}

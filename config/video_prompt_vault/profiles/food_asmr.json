@@ -1,0 +1,32 @@
+{
+  "profile_id": "food_asmr",
+  "profile_name_vi": "Video ẩm thực / ASMR",
+  "product_goal": "Làm món ăn/đồ uống trông ngon, rõ texture và âm thanh cue.",
+  "script_formulas": ["sensory hook -> ingredient/action -> texture close-up -> craving CTA"],
+  "hook_templates": ["Nghe tiếng này là thấy thèm", "Cận cảnh khoảnh khắc ngon nhất"],
+  "scene_role_templates": [{"role": "beauty", "purpose": "food hero shot"}, {"role": "action", "purpose": "pour/cut/sizzle"}, {"role": "texture", "purpose": "macro texture"}, {"role": "CTA", "purpose": "craving close"}],
+  "shot_templates": ["macro food hero", "top-down preparation", "side close-up bite"],
+  "camera_templates": ["macro close-up and top-down prep"],
+  "motion_templates": ["slow pour, cut, steam, sizzle, bite"],
+  "visual_style_templates": ["vibrant 4k food photography"],
+  "color_tone_templates": ["warm appetizing color"],
+  "transition_templates": ["object close-up to next scene"],
+  "voice_cues": ["ASMR whisper or fun food reviewer"],
+  "music_cues": ["very low cozy beat"],
+  "subtitle_cues": ["short tasty words"],
+  "logo_cues": ["restaurant/product logo at ending"],
+  "negative_prompt_blocks": ["no unappetizing texture"],
+  "do_rules": ["make texture and steam visible"],
+  "avoid_rules": ["avoid cluttered table"],
+  "example_story_bibles": ["dish, texture, sound cue, craving"],
+  "example_scene_cards": ["pour, sizzle, bite"],
+  "example_provider_prompts": ["macro pour shot with steam and sound cue"],
+  "product_domains": {
+    "street_food": {"keywords": ["street food", "bánh", "phở", "bún", "xiên"], "visual_style": "street food macro realism"},
+    "drink": {"keywords": ["nước", "trà", "cafe", "coffee", "drink", "sữa"], "camera": "macro pour and condensation close-up", "motion": "ice drop, pour, swirl", "transition": "sound bridge"},
+    "dessert": {"keywords": ["bánh ngọt", "dessert", "kem", "chocolate"], "motion": "slice, cream pull, spoon close-up"},
+    "cooking_process": {"keywords": ["nấu", "cooking", "chiên", "xào"], "camera": "top-down prep then macro sizzle"},
+    "restaurant_promo": {"keywords": ["nhà hàng", "quán ăn", "menu"], "visual_style": "restaurant promo with hero dish"},
+    "general": {"keywords": ["ẩm thực", "món ăn", "ASMR"], "transition": "object close-up to next scene"}
+  }
+}

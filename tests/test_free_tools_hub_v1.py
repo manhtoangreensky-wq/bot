@@ -151,10 +151,13 @@ def test_free_tools_main_keyboard_is_compact_placeholder():
         "freehub|library",
         "menu|main_memory",
         "freehub|upload",
+        "freehub|hook",
+        "freehub|lib_music",
+        "support|start",
+        "feedback|start",
         "menu|main",
     }.issubset(callbacks)
     assert "freehub|chat" not in callbacks
-    assert "freehub|hook" not in callbacks
     assert "freehub|byok" not in callbacks
     assert not any(callback.startswith("videoref|") for callback in callbacks)
 
@@ -266,6 +269,7 @@ def test_free_prompt_library_back_to_free_hub():
     assert "freehub|main" in callbacks
     assert "🎬 Prompt video" in labels
     assert "🖼 Prompt ảnh" in labels
+    assert "🎵 Nhạc/SFX" in labels
     assert "🔁 Gợi ý ngẫu nhiên" in labels
 
 
@@ -322,8 +326,8 @@ def test_prompt_create_video_ai_guard_has_no_local_export():
 def test_free_hub_back_routing():
     assert "freehub|main" in _callbacks(bot.free_hub_input_keyboard("vi"))
     assert "freehub|main" in _callbacks(bot.free_hub_prompts_keyboard("vi"))
-    assert "freehub|library" in _callbacks(bot.free_hub_library_suggestions_keyboard("vi"))
-    assert "freehub|lib_back" in _callbacks(bot.free_hub_library_item_keyboard("vi"))
+    assert "freehub|main" in _callbacks(bot.free_hub_library_suggestions_keyboard("vi"))
+    assert "freehub|main" in _callbacks(bot.free_hub_library_item_keyboard("vi"))
     assert "freehub|meta_back_goal" in _callbacks(bot.free_hub_meta_choice_keyboard("meta_platform", "vi"))
     assert "freehub|meta_back_platform" in _callbacks(bot.free_hub_meta_choice_keyboard("meta_ratio", "vi"))
     assert "freehub|meta_back_ratio" in _callbacks(bot.free_hub_meta_choice_keyboard("meta_style", "vi"))

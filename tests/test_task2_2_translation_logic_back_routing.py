@@ -90,7 +90,11 @@ def test_language_tools_not_deleted():
     assert "menu|translation_two_way" in callbacks
     assert "menu|translation_live_conversation" in callbacks
     assert "menu|translation_text" in callbacks
-    assert "menu|translation_voice" in callbacks
+    assert "menu|translation_voice" not in callbacks
+    _, media_markup = bot.localized_menu_content("translation_video_factory", False, "vi", user_id=822004)
+    media_callbacks = _callbacks(media_markup)
+    assert "menu|translation_media_file" in media_callbacks
+    assert "menu|translation_media_audio" in media_callbacks
 
 
 def test_auto_subtitle_capcut_style_original_language(monkeypatch):
@@ -113,7 +117,7 @@ def test_auto_subtitle_capcut_style_original_language(monkeypatch):
 
 def test_auto_subtitle_no_translate_no_voice():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}
-    capability_source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    capability_source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
     assert bot.video_dubbing_requires_voice(state["mode"]) is False
     assert "mode == VIDEO_SUBTITLE_MODE_TRANSLATE" in inspect.getsource(bot.video_dubbing_prepare_subtitles)
     assert "mode in {VIDEO_SUBTITLE_MODE_DUB" in capability_source
@@ -167,9 +171,12 @@ def test_auto_dubbing_target_language_voice_speed():
 
 
 def test_auto_dubbing_tts_reads_transcript():
-    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
-    assert 'output_text = str(prepared.get("output_script")' in source
-    assert "video_dubbing_tts_bytes(\n            output_text" in source
+    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    service_source = inspect.getsource(bot.subtitle_dub_product_pipeline.process_subtitle_dub_job)
+    assert "subtitle_dub_product_pipeline.process_subtitle_dub_job" in source
+    assert 'output_text = str(prepared.get("output_script")' in service_source
+    assert "synthesize_segments" in service_source
+    assert "output_segments" in service_source
 
 
 def test_auto_dubbing_preview_back_invoice():
@@ -198,7 +205,7 @@ def test_subtitle_plus_dubbing_translate_first(monkeypatch):
         return {"subtitle": "1\n00:00:00,000 --> 00:00:02,000\nHello", "script": "Hello", "asr_provider": "test"}
 
     async def fake_translate(*args, **kwargs):
-        return {"text": "1\n00:00:00,000 --> 00:00:02,000\nXin chào"}
+        return {"text": "Xin chào"}
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_resolve_source_script", fake_source)
@@ -212,16 +219,17 @@ def test_subtitle_plus_dubbing_export_before_voice():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", state))
     assert "videodub|output|srt" not in callbacks
-    assert "videodub|final" in callbacks
+    assert "videodub|final" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
     ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
         **state,
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }))
-    assert "videodub|output|srt" in ready_callbacks
-    assert "videodub|continue_dubbing" in ready_callbacks
+    assert "videodub|output|srt" not in ready_callbacks
+    assert "videodub|combo_dub_translated" in ready_callbacks
+    assert "videodub|continue_dubbing" not in ready_callbacks
     ready_state = {**state, "translated_subtitle_ref": "video_dubbing_artifact:ready:translated"}
-    assert "videodub|continue_dubbing" in _callbacks(bot.video_dubbing_output_keyboard("vi", ready_state))
+    assert "videodub|combo_dub_translated" in _callbacks(bot.video_dubbing_output_keyboard("vi", ready_state))
     assert not any(callback.startswith("videodub|voice|") for callback in callbacks)
 
 
@@ -268,15 +276,15 @@ def test_task2_back_language_to_source():
 def test_task2_back_voice_to_language_or_subtitle_output():
     assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_voice") == "language"
     combo = {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-    assert bot.video_dubbing_back_route(combo, "back_voice") == "output"
+    assert bot.video_dubbing_back_route(combo, "back_voice") == "language"
 
 
 def test_task2_back_speed_to_voice():
     assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_speed") == "voice"
 
 
-def test_task2_back_invoice_to_speed():
-    assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_confirm") == "voice_speed"
+def test_task2_back_invoice_to_voice():
+    assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_confirm") == "voice"
 
 
 def test_task2_back_preview_to_invoice():

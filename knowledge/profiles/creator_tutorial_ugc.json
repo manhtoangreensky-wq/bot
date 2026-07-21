@@ -1,0 +1,27 @@
+{
+  "profile_id": "creator_tutorial_ugc",
+  "title_vi": "Tutorial, giải thích và UGC creator",
+  "aliases": ["tutorial", "hướng dẫn", "giải thích", "UGC", "social creator", "talking head", "review công cụ", "creator", "how to"],
+  "intent_keywords": ["mẹo", "cách làm", "giải thích", "review", "demo", "screen record", "caption", "TikTok", "Reels", "YouTube Shorts", "productivity"],
+  "suitable_outputs": ["video", "edit", "tutorial", "ugc_reel", "talking_head"],
+  "subjects": ["người trình bày", "màn hình", "công cụ", "quy trình", "sản phẩm được review"],
+  "environments": ["talking-head setup", "desk", "mobile screen", "desktop screen", "casual creator space"],
+  "visual_styles": ["clean talking head", "authentic UGC", "screen tutorial", "fast social explainer"],
+  "materials": ["real footage", "screen capture", "captions", "B-roll", "customer assets"],
+  "lighting": ["soft face light", "natural room light", "clean screen exposure"],
+  "camera": ["eye-level medium close-up", "screen crop", "B-roll close-up", "top-down demo"],
+  "motion": ["clean jump cut", "screen punch-in", "B-roll insert", "step-by-step reveal"],
+  "scene_templates": [
+    {"role": "hook", "title": "Hook", "prompt": "Nêu vấn đề hoặc kết quả cụ thể trong một câu."},
+    {"role": "context", "title": "Bối cảnh", "prompt": "Giải thích ngắn vì sao người xem cần biết."},
+    {"role": "steps", "title": "Các bước", "prompt": "Demo đúng thứ tự bằng footage/screen thật."},
+    {"role": "proof", "title": "Kết quả", "prompt": "Cho thấy output hoặc giới hạn thực tế."},
+    {"role": "cta", "title": "CTA", "prompt": "Đề xuất một bước tiếp theo rõ ràng."}
+  ],
+  "negative_prompt": ["fake result", "invented tool feature", "unreadable captions", "excessive jump cuts", "misleading claim", "copied creator identity"],
+  "clarifying_questions": ["Anh/chị muốn tutorial, giải thích hay UGC; chủ đề và kết quả người xem cần đạt là gì?", "Có footage talking-head, screen recording hoặc sản phẩm tham chiếu không?"],
+  "image_prompt_template": "Original creator/tutorial key visual for: {user_request}. Preserve supplied person, product and brand constraints. Clear educational composition, no copied creator identity.",
+  "video_prompt_template": "Plan a {scene_count}-scene tutorial/UGC video for: {user_request}. Hook, concise context, real ordered steps, proof and CTA. {aspect_ratio}, {duration_seconds}s.",
+  "editing_recommendations": ["caption key phrases", "cut on complete sentences", "use B-roll only when relevant", "show real screen/result", "keep public copy nontechnical"],
+  "source_reference_ids": ["AQNCUL6g...", "AQMZQfPV...", "AQNLl3x8...", "AQP9EzHP..."]
+}

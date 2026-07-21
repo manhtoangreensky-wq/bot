@@ -12,6 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -98,6 +99,40 @@ GROUP_UNAVAILABLE_MARKERS = (
     "distributor",
 )
 
+KEY4U_USER_APIKEY_BALANCE_DISCOVERY_CANDIDATES = (
+    "/user/wallet/balance",
+    "/wallet/balance",
+    "/user/balance",
+    "/api/user/wallet/balance",
+    "/api/wallet/balance",
+    "/user-api-key/wallet/balance",
+    "/userapikey/wallet/balance",
+    "/userApiKey/wallet/balance",
+    "/logs/usage",
+    "/user/usage",
+    "/groups",
+    "/health",
+)
+
+KEY4U_USAGE_DISCOVERY_HTTP_STATUSES = {401, 403, 404}
+KEY4U_USAGE_AUTH_MODES = (
+    "authorization_bearer",
+    "x_api_key",
+    "api_key",
+    "authorization_raw",
+)
+KEY4U_BALANCE_FIELD_PATHS = (
+    ("balance",),
+    ("data", "balance"),
+    ("data", "credit"),
+    ("data", "amount"),
+    ("data", "wallet", "balance"),
+    ("data", "usd"),
+    ("credit",),
+    ("remaining",),
+    ("amount",),
+)
+
 
 def _is_group_or_channel_unavailable(status_code: int, message: Any) -> bool:
     if int(status_code or 0) != 503:
@@ -160,6 +195,111 @@ def is_placeholder_task_id(value: str | None) -> bool:
     if compact and len(compact) < 8:
         return True
     return False
+
+
+SUNO_RESULT_FIELD_KEYS = (
+    "status", "state", "result", "output",
+    "audio_url", "url", "file_url", "download_url", "stream_url",
+)
+SUNO_AUDIO_URL_KEYS = {
+    "audio_url", "audiourl", "audio", "download_url", "downloadurl",
+    "stream_url", "streamurl", "file_url", "fileurl", "output_url",
+    "outputurl", "source_audio_url", "sourceaudiourl", "url",
+}
+SUNO_STATUS_KEYS = {"status", "state", "task_status", "taskstatus"}
+SUNO_FAILURE_KEYS = {"fail_reason", "failreason", "error", "message", "reason"}
+SUNO_TEXT_KEYS = {"prompt", "text", "lyrics", "lyric"}
+SUNO_ID_KEYS = {"clip_id", "clipid", "id"}
+SUNO_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+
+
+def _suno_payload_field_presence(payload: Any) -> dict[str, bool]:
+    fields = {key: False for key in SUNO_RESULT_FIELD_KEYS}
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered = str(key or "").strip().lower()
+                for field in fields:
+                    if lowered == field:
+                        fields[field] = True
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return fields
+
+
+def _suno_first_string_for_keys(payload: Any, keys: set[str]) -> str:
+    found = ""
+
+    def visit(value: Any) -> None:
+        nonlocal found
+        if found:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered = str(key or "").strip().lower()
+                if lowered in keys and isinstance(child, (str, int, float)):
+                    found = str(child).strip()
+                    return
+                visit(child)
+                if found:
+                    return
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+                if found:
+                    return
+
+    visit(payload)
+    return found
+
+
+def _suno_audio_urls_from_payload(payload: Any) -> list[str]:
+    urls: list[str] = []
+
+    def add_candidate(key: str, raw: Any) -> None:
+        if not isinstance(raw, str):
+            return
+        value = raw.strip()
+        if not value.startswith(("http://", "https://")):
+            return
+        lowered_key = str(key or "").strip().lower()
+        lowered_url = value.lower().split("?", 1)[0]
+        key_supports_audio = lowered_key in SUNO_AUDIO_URL_KEYS or "audio" in lowered_key
+        url_supports_audio = lowered_url.endswith(SUNO_AUDIO_EXTENSIONS) or "/audio" in lowered_url
+        if (key_supports_audio or url_supports_audio) and value not in urls:
+            urls.append(value)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                add_candidate(key, child)
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return urls
+
+
+def _normalize_suno_query_status(raw_status: str, *, has_audio: bool, http_status: int = 0) -> str:
+    lowered = str(raw_status or "").strip().lower()
+    if has_audio:
+        return "SUCCESS"
+    if lowered in {"success", "ok", "complete", "completed", "succeeded", "done", "finish", "finished"}:
+        return "SUCCESS"
+    if lowered in {"submitted", "queued", "queue", "pending", "processing", "running", "in_progress", "generating", "process"}:
+        return "PROCESSING"
+    if lowered in {"fail", "failed", "error", "cancelled", "canceled", "timeout"}:
+        return "FAILED"
+    if http_status and int(http_status or 0) >= 400:
+        return _classify_http(int(http_status or 0), raw_status)
+    return raw_status.upper() if raw_status else "PROCESSING"
 
 
 def should_try_model_fallback(result: dict[str, Any]) -> bool:
@@ -249,6 +389,11 @@ def _result(
 class Key4UConfig:
     enabled: bool = True
     api_key: str = ""
+    video_auth_header_value: str = ""
+    system_api_key: str = ""
+    usage_auth_header_name: str = "Authorization"
+    usage_auth_header_value: str = ""
+    usage_auth_mode: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
     minimax_base_url: str = "https://api.key4u.shop/minimax"
@@ -258,7 +403,11 @@ class Key4UConfig:
     public_enabled: bool = False
     admin_smoke_enabled: bool = True
     usage_endpoint: str = ""
+    usage_check_url: str = ""
     balance_endpoint: str = ""
+    balance_url: str = ""
+    wallet_balance_url: str = ""
+    usage_discovery_enabled: bool = False
     models_endpoint: str = ""
     chat_endpoint: str = "/v1/chat/completions"
     image_edit_endpoint: str = "/v1/images/edits"
@@ -294,9 +443,18 @@ class Key4UConfig:
 
 def config_from_env() -> Key4UConfig:
     api_base = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
+    usage_url = _env("KEY4U_USAGE_ENDPOINT", _env("KEY4U_USAGE_URL", _env("KEY4U_USAGE_CHECK_URL", "")))
+    balance_url = _env("KEY4U_BALANCE_URL", "")
+    wallet_balance_url = _env("KEY4U_WALLET_BALANCE_URL", "")
+    balance_endpoint = _env("KEY4U_BALANCE_ENDPOINT", balance_url or wallet_balance_url or _env("KEY4U_USAGE_CHECK_URL", _env("KEY4U_USAGE_URL", "")))
     return Key4UConfig(
         enabled=_flag("KEY4U_ENABLED", "false"),
         api_key=_env("KEY4U_TOKEN", _env("KEY4U_API_KEY", "")),
+        video_auth_header_value=_env("KEY4U_VIDEO_AUTH_HEADER_VALUE", ""),
+        system_api_key=_env("KEY4U_SYSTEM_API_KEY", ""),
+        usage_auth_header_name=_env("KEY4U_USAGE_AUTH_HEADER_NAME", "Authorization"),
+        usage_auth_header_value=_env("KEY4U_USAGE_AUTH_HEADER_VALUE", ""),
+        usage_auth_mode=_env("KEY4U_USAGE_AUTH_MODE", ""),
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
@@ -305,8 +463,12 @@ def config_from_env() -> Key4UConfig:
         smart_routing=_flag("KEY4U_SMART_ROUTING", "true"),
         public_enabled=_flag("KEY4U_PUBLIC_ENABLED", "false"),
         admin_smoke_enabled=_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true"),
-        usage_endpoint=_env("KEY4U_USAGE_ENDPOINT", ""),
-        balance_endpoint=_env("KEY4U_BALANCE_ENDPOINT", ""),
+        usage_endpoint=usage_url,
+        usage_check_url=_env("KEY4U_USAGE_CHECK_URL", ""),
+        balance_endpoint=balance_endpoint,
+        balance_url=balance_url,
+        wallet_balance_url=wallet_balance_url,
+        usage_discovery_enabled=_flag("KEY4U_USAGE_DISCOVERY_ENABLED", "false"),
         models_endpoint=_env("KEY4U_MODELS_ENDPOINT", ""),
         chat_endpoint=_env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions")),
         image_edit_endpoint=_env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits")),
@@ -348,6 +510,12 @@ class Key4UProvider:
     def is_configured(self) -> bool:
         return bool(self.config.enabled and self.config.admin_smoke_enabled and self.config.api_key)
 
+    def usage_auth_configured(self) -> bool:
+        return bool(self._usage_auth_info()["value"])
+
+    def usage_configured(self) -> bool:
+        return bool(self.config.enabled and self.usage_auth_configured())
+
     def get_status(self) -> dict[str, Any]:
         return {
             "provider": "key4u",
@@ -357,6 +525,11 @@ class Key4UProvider:
             "smart_routing": bool(self.config.smart_routing),
             "api_key": mask_key(self.config.api_key),
             "configured": self.is_configured(),
+            "usage_auth_configured": self.usage_auth_configured(),
+            "usage_auth_source": self._usage_auth_info()["source"],
+            "usage_auth_header_name": self._usage_auth_info()["header_name"],
+            "usage_auth_scheme_prefix": self._usage_auth_info()["scheme_prefix"],
+            "usage_auth_mode": self._usage_auth_info()["auth_mode"],
             "base_url": self.config.base_url,
             "openai_base_url": self.config.openai_base_url,
             "minimax_base_url": self.config.minimax_base_url,
@@ -369,7 +542,11 @@ class Key4UProvider:
             "suno_fetch_final_url": self._suno_url(self._path_with_id(self.config.suno_query_endpoint, "{taskId}", "taskId", "task_id")) if self.config.suno_query_endpoint else "",
             "suno_lyrics_final_url": self._suno_url(self.config.suno_lyrics_endpoint) if self.config.suno_lyrics_endpoint else "",
             "usage_endpoint": "configured" if self.config.usage_endpoint else "NEED_ENDPOINT",
+            "usage_check_url": "configured" if self.config.usage_check_url else "NEED_ENDPOINT",
             "balance_endpoint": "configured" if self.config.balance_endpoint else "NEED_ENDPOINT",
+            "balance_url": "configured" if self.config.balance_url else "NEED_ENDPOINT",
+            "wallet_balance_url": "configured" if self.config.wallet_balance_url else "NEED_ENDPOINT",
+            "usage_discovery_enabled": bool(self.config.usage_discovery_enabled),
             "models_endpoint": "configured" if self.config.models_endpoint else "NEED_ENDPOINT",
             "chat_model": self.config.chat_model or "",
             "vision_model": self.config.vision_model or "",
@@ -413,10 +590,367 @@ class Key4UProvider:
         }
 
     def _headers(self) -> dict[str, str]:
+        auth_value = str(self.config.api_key or self.config.video_auth_header_value or "").strip()
+        if auth_value and not auth_value.lower().startswith(("bearer ", "apikey ", "key ")):
+            auth_value = f"Bearer {auth_value}"
         return {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": auth_value,
             "Accept": "application/json",
         }
+
+    def _normalize_usage_auth_mode(self, mode: str = "") -> str:
+        selected = str(mode or self.config.usage_auth_mode or "").strip().lower().replace("-", "_")
+        if selected in {"x_api_key", "xapikey", "x_api"}:
+            return "x_api_key"
+        if selected in {"api_key", "apikey"}:
+            return "api_key"
+        if selected in {"authorization_raw", "raw", "authorization"}:
+            return "authorization_raw"
+        if selected in {"authorization_bearer", "bearer"}:
+            return "authorization_bearer"
+        header = str(self.config.usage_auth_header_name or "Authorization").strip().lower()
+        if header == "x-api-key":
+            return "x_api_key"
+        if header == "api-key":
+            return "api_key"
+        return "authorization_bearer"
+
+    def _usage_auth_info(self, mode: str = "") -> dict[str, str]:
+        candidates = (
+            ("usage_auth_header_value", self.config.usage_auth_header_value),
+            ("system_api_key", self.config.system_api_key),
+            ("api_key", self.config.api_key),
+            ("video_auth_header_value", self.config.video_auth_header_value),
+        )
+        source = "missing"
+        raw_value = ""
+        for candidate_source, candidate_value in candidates:
+            value = str(candidate_value or "").strip()
+            if value:
+                source = candidate_source
+                raw_value = value
+                break
+        auth_mode = self._normalize_usage_auth_mode(mode)
+        if auth_mode == "x_api_key":
+            header_name = "x-api-key"
+        elif auth_mode == "api_key":
+            header_name = "api-key"
+        else:
+            header_name = "Authorization"
+        header_value = raw_value
+        if auth_mode == "authorization_bearer" and header_value and not header_value.lower().startswith(("bearer ", "apikey ", "key ", "basic ")):
+            header_value = f"Bearer {header_value}"
+        scheme_prefix = "missing"
+        if header_value:
+            scheme_prefix = header_value.split(" ", 1)[0] if " " in header_value else "raw"
+        return {
+            "source": source,
+            "header_name": header_name,
+            "value": header_value,
+            "scheme_prefix": scheme_prefix,
+            "auth_mode": auth_mode,
+        }
+
+    def _usage_headers(self, mode: str = "") -> dict[str, str]:
+        auth_info = self._usage_auth_info(mode)
+        headers = {"Accept": "application/json"}
+        if auth_info["value"]:
+            headers[auth_info["header_name"]] = auth_info["value"]
+        return headers
+
+    def _usage_endpoint_debug(self, endpoint_path: str, mode: str = "") -> dict[str, Any]:
+        endpoint = safe_join_url(self.config.base_url, endpoint_path)
+        parsed = urlparse(endpoint)
+        auth_info = self._usage_auth_info(mode)
+        return {
+            "usage_auth_source": auth_info["source"],
+            "usage_auth_header_name": auth_info["header_name"],
+            "usage_auth_scheme_prefix": auth_info["scheme_prefix"],
+            "usage_auth_mode": auth_info["auth_mode"],
+            "usage_endpoint_host": parsed.netloc or "",
+            "usage_endpoint_path": parsed.path or "",
+        }
+
+    @staticmethod
+    def _response_shape(data: Any) -> str:
+        if isinstance(data, dict):
+            keys = [str(key) for key in sorted(data.keys())[:10]]
+            nested = data.get("data")
+            if isinstance(nested, dict):
+                keys.extend(f"data.{key}" for key in sorted(str(key) for key in nested.keys())[:8])
+                wallet = nested.get("wallet")
+                if isinstance(wallet, dict):
+                    keys.extend(f"data.wallet.{key}" for key in sorted(str(key) for key in wallet.keys())[:6])
+            return ",".join(keys) or "dict_empty"
+        if isinstance(data, list):
+            return "list"
+        return type(data).__name__
+
+    @staticmethod
+    def _usage_endpoint_type(endpoint_path: str) -> str:
+        path = urlparse(safe_join_url("https://key4u.local", endpoint_path)).path.lower()
+        if "wallet" in path or "balance" in path:
+            return "balance"
+        if "log" in path or "usage" in path:
+            return "usage_log"
+        if "group" in path:
+            return "groups"
+        if "health" in path:
+            return "health"
+        return "unknown"
+
+    @staticmethod
+    def _numeric_balance_from_data(data: Any) -> tuple[float | None, str]:
+        if not isinstance(data, dict):
+            return None, ""
+        for path in KEY4U_BALANCE_FIELD_PATHS:
+            current: Any = data
+            for key in path:
+                if not isinstance(current, dict):
+                    current = None
+                    break
+                current = current.get(key)
+            if isinstance(current, bool) or current is None:
+                continue
+            if isinstance(current, (int, float)):
+                return float(current), ".".join(path)
+            if isinstance(current, str):
+                text = current.replace("$", "").replace(",", "").strip()
+                if not text:
+                    continue
+                try:
+                    return float(text), ".".join(path)
+                except ValueError:
+                    continue
+        return None, ""
+
+    @staticmethod
+    def _safe_endpoint_host_path(base_url: str, endpoint_path: str) -> str:
+        parsed = urlparse(safe_join_url(base_url, endpoint_path))
+        return (parsed.netloc or "") + (parsed.path or "")
+
+    @staticmethod
+    def _dedupe(items: list[str]) -> list[str]:
+        out = []
+        seen = set()
+        for item in items:
+            safe = str(item or "").strip()
+            if not safe or safe in seen:
+                continue
+            seen.add(safe)
+            out.append(safe)
+        return out
+
+    def _usage_candidate_endpoints(self, primary_endpoint: str, capability: str) -> list[str]:
+        candidates = []
+        if capability == "balance":
+            candidates.extend([
+                primary_endpoint,
+                self.config.balance_endpoint,
+                self.config.wallet_balance_url,
+                self.config.balance_url,
+                self.config.usage_check_url,
+                self.config.usage_endpoint,
+            ])
+        else:
+            candidates.extend([
+                primary_endpoint,
+                self.config.usage_endpoint,
+                self.config.usage_check_url,
+                self.config.balance_endpoint,
+                self.config.wallet_balance_url,
+                self.config.balance_url,
+            ])
+        if self.config.usage_discovery_enabled:
+            candidates.extend(KEY4U_USER_APIKEY_BALANCE_DISCOVERY_CANDIDATES)
+        return self._dedupe(candidates)
+
+    def _usage_attempt_label(self, endpoint_path: str, auth_mode: str, result: dict[str, Any]) -> str:
+        return f"{self._safe_endpoint_host_path(self.config.base_url, endpoint_path)}|{auth_mode}|{int(result.get('http_status') or 0)}"
+
+    def _apply_usage_debug(
+        self,
+        result: dict[str, Any],
+        endpoint_path: str,
+        auth_mode: str = "",
+        *,
+        candidates_tried: list[str] | None = None,
+        auth_modes_tried: list[str] | None = None,
+        success_endpoint_host_path: str = "",
+        success_auth_mode: str = "",
+        extra_debug: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        debug = dict(result.get("raw_debug_admin_only") or {})
+        debug.update(self._usage_endpoint_debug(endpoint_path, auth_mode))
+        debug["usage_http_status"] = int(result.get("http_status") or 0)
+        debug["usage_response_shape"] = self._response_shape(result.get("data"))
+        debug["usage_reason"] = str(result.get("error_class") or result.get("status") or "-")
+        debug["usage_endpoint_candidates_tried"] = list(candidates_tried or [])
+        debug["usage_auth_modes_tried"] = list(auth_modes_tried or [])
+        debug["usage_last_http_status"] = int(result.get("http_status") or 0)
+        debug["usage_last_error_message_safe"] = str(result.get("error_message_safe") or "")[:220]
+        debug["usage_success_endpoint_host_path"] = success_endpoint_host_path
+        debug["usage_success_auth_mode"] = success_auth_mode
+        debug.update(extra_debug or {})
+        result["raw_debug_admin_only"] = debug
+        return result
+
+    async def _request_usage_or_balance(self, capability: str, primary_endpoint: str) -> dict[str, Any]:
+        if not primary_endpoint:
+            return _result(ok=False, capability=capability, status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
+        primary_mode = self._usage_auth_info()["auth_mode"]
+        candidates_tried: list[str] = []
+        auth_modes_tried: list[str] = []
+        diag: dict[str, Any] = {
+            "usage_connectivity_status": "UNKNOWN",
+            "usage_balance_status": "UNKNOWN",
+            "usage_balance_value": "",
+            "usage_success_endpoint_type": "",
+            "usage_health_status": "UNKNOWN",
+            "usage_health_http": 0,
+            "usage_health_endpoint_host_path": "",
+            "usage_balance_http": 0,
+            "usage_balance_parse_endpoint_host_path": "",
+            "usage_balance_parse_fields": "",
+            "usage_log_status": "UNKNOWN",
+            "usage_log_endpoint_host_path": "",
+            "usage_groups_status": "UNKNOWN",
+            "usage_groups_endpoint_host_path": "",
+            "usage_connectivity_endpoint_host_path": "",
+        }
+        last_result: dict[str, Any] | None = None
+        last_endpoint = primary_endpoint
+        last_mode = primary_mode
+        last_success_result: dict[str, Any] | None = None
+        last_success_endpoint = ""
+        last_success_mode = ""
+
+        def classify_attempt(endpoint: str, auth_mode: str, result: dict[str, Any]) -> bool:
+            nonlocal last_success_result, last_success_endpoint, last_success_mode
+            endpoint_type = self._usage_endpoint_type(endpoint)
+            http_status = int(result.get("http_status") or 0)
+            if endpoint_type == "balance":
+                diag["usage_balance_http"] = http_status
+            if not result.get("ok"):
+                return False
+            host_path = self._safe_endpoint_host_path(self.config.base_url, endpoint)
+            diag["usage_connectivity_status"] = "PASS"
+            diag["usage_connectivity_endpoint_host_path"] = host_path
+            diag["usage_success_endpoint_type"] = endpoint_type
+            last_success_result = result
+            last_success_endpoint = endpoint
+            last_success_mode = auth_mode
+            if endpoint_type == "health":
+                diag["usage_health_status"] = "PASS"
+                diag["usage_health_http"] = http_status
+                diag["usage_health_endpoint_host_path"] = host_path
+            elif endpoint_type == "usage_log":
+                diag["usage_log_status"] = "PASS"
+                diag["usage_log_endpoint_host_path"] = host_path
+            elif endpoint_type == "groups":
+                diag["usage_groups_status"] = "PASS"
+                diag["usage_groups_endpoint_host_path"] = host_path
+            balance_value, balance_field = self._numeric_balance_from_data(result.get("data"))
+            if balance_value is None:
+                return False
+            diag["usage_balance_status"] = "PASS"
+            diag["usage_balance_value"] = f"{balance_value:.6f}".rstrip("0").rstrip(".")
+            diag["usage_balance_parse_endpoint_host_path"] = host_path
+            diag["usage_balance_parse_fields"] = balance_field
+            result["usage_balance_value"] = balance_value
+            result["usage_balance_field"] = balance_field
+            return True
+
+        result = await self.request_json("GET", primary_endpoint, headers=self._usage_headers(primary_mode))
+        result["capability"] = capability
+        candidates_tried.append(self._usage_attempt_label(primary_endpoint, primary_mode, result))
+        auth_modes_tried.append(primary_mode)
+        last_result = result
+        balance_found = classify_attempt(primary_endpoint, primary_mode, result)
+        if balance_found:
+            return self._apply_usage_debug(
+                result,
+                primary_endpoint,
+                primary_mode,
+                candidates_tried=candidates_tried,
+                auth_modes_tried=self._dedupe(auth_modes_tried),
+                success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, primary_endpoint),
+                success_auth_mode=primary_mode,
+                extra_debug=diag,
+            )
+        http_status = int(result.get("http_status") or 0)
+        should_discover = self.config.usage_discovery_enabled and (
+            bool(result.get("ok")) or http_status in KEY4U_USAGE_DISCOVERY_HTTP_STATUSES
+        )
+        if not should_discover:
+            if diag["usage_connectivity_status"] == "PASS":
+                result = dict(result)
+                result.update({
+                    "ok": False,
+                    "status": "UNKNOWN",
+                    "error_class": "KEY4U_HEALTH_OK_BALANCE_ENDPOINT_NOT_FOUND"
+                    if diag.get("usage_health_status") == "PASS"
+                    else "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN",
+                    "error_message_safe": "balance_not_found",
+                })
+            return self._apply_usage_debug(
+                result,
+                primary_endpoint,
+                primary_mode,
+                candidates_tried=candidates_tried,
+                auth_modes_tried=self._dedupe(auth_modes_tried),
+                success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, primary_endpoint) if diag["usage_connectivity_status"] == "PASS" else "",
+                success_auth_mode=primary_mode if diag["usage_connectivity_status"] == "PASS" else "",
+                extra_debug=diag,
+            )
+        for endpoint in self._usage_candidate_endpoints(primary_endpoint, capability):
+            for auth_mode in KEY4U_USAGE_AUTH_MODES:
+                if endpoint == primary_endpoint and auth_mode == primary_mode:
+                    continue
+                current = await self.request_json("GET", endpoint, headers=self._usage_headers(auth_mode))
+                current["capability"] = capability
+                candidates_tried.append(self._usage_attempt_label(endpoint, auth_mode, current))
+                auth_modes_tried.append(auth_mode)
+                if classify_attempt(endpoint, auth_mode, current):
+                    return self._apply_usage_debug(
+                        current,
+                        endpoint,
+                        auth_mode,
+                        candidates_tried=candidates_tried,
+                        auth_modes_tried=self._dedupe(auth_modes_tried),
+                        success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, endpoint),
+                        success_auth_mode=auth_mode,
+                        extra_debug=diag,
+                    )
+                last_result = current
+                last_endpoint = endpoint
+                last_mode = auth_mode
+        if diag["usage_connectivity_status"] == "PASS":
+            last_result = dict(last_success_result or last_result or {})
+            last_endpoint = last_success_endpoint or last_endpoint
+            last_mode = last_success_mode or last_mode
+            last_result.update({
+                "ok": False,
+                "status": "UNKNOWN",
+                "error_class": "KEY4U_HEALTH_OK_BALANCE_ENDPOINT_NOT_FOUND"
+                if diag.get("usage_health_status") == "PASS"
+                else "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN",
+                "error_message_safe": "balance_not_found",
+                "capability": capability,
+            })
+        else:
+            last_result = last_result or _result(ok=False, capability=capability, status="FAIL", error_class="KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN")
+            last_result["error_class"] = "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN"
+        return self._apply_usage_debug(
+            last_result,
+            last_endpoint,
+            last_mode,
+            candidates_tried=candidates_tried,
+            auth_modes_tried=self._dedupe(auth_modes_tried),
+            success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, last_success_endpoint) if last_success_endpoint else "",
+            success_auth_mode=last_success_mode,
+            extra_debug=diag,
+        )
 
     def _minimax_url(self, endpoint: str) -> str:
         return scoped_join_url(self.config.base_url, self.config.minimax_base_url, endpoint, "/minimax/v1")
@@ -449,16 +983,18 @@ class Key4UProvider:
         *,
         use_openai_base: bool = False,
         timeout_seconds: float = 30.0,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         base_url = self.config.openai_base_url if use_openai_base else self.config.base_url
         endpoint = safe_join_url(base_url, endpoint_path)
+        request_headers = headers or self._headers()
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 if str(method or "GET").upper() == "POST":
-                    response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload or {})
+                    response = await client.post(endpoint, headers={**request_headers, "Content-Type": "application/json"}, json=payload or {})
                 else:
-                    response = await client.get(endpoint, headers=self._headers())
+                    response = await client.get(endpoint, headers=request_headers)
             latency_ms = int((time.perf_counter() - started) * 1000)
             try:
                 data = response.json()
@@ -526,22 +1062,18 @@ class Key4UProvider:
         }
 
     async def get_usage(self) -> dict[str, Any]:
-        if not self.is_configured():
+        if not self.usage_configured():
             return self._missing_result("usage", "")
         if not self.config.usage_endpoint:
-            return _result(ok=False, capability="usage", status="NEED_ENDPOINT", error_class="NEED_ENDPOINT", error_message_safe="KEY4U_USAGE_ENDPOINT is not configured")
-        result = await self.request_json("GET", self.config.usage_endpoint)
-        result["capability"] = "usage"
-        return result
+            return _result(ok=False, capability="usage", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
+        return await self._request_usage_or_balance("usage", self.config.usage_endpoint)
 
     async def get_balance(self) -> dict[str, Any]:
-        if not self.is_configured():
+        if not self.usage_configured():
             return self._missing_result("balance", "")
         if not self.config.balance_endpoint:
-            return _result(ok=False, capability="balance", status="NEED_ENDPOINT", error_class="NEED_ENDPOINT", error_message_safe="KEY4U_BALANCE_ENDPOINT is not configured")
-        result = await self.request_json("GET", self.config.balance_endpoint)
-        result["capability"] = "balance"
-        return result
+            return _result(ok=False, capability="balance", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
+        return await self._request_usage_or_balance("balance", self.config.balance_endpoint)
 
     def get_local_estimated_usage(self) -> dict[str, Any]:
         return {"status": "BOT_DB_SUMMARY", "note": "Computed in bot from provider_usage_events."}
@@ -815,6 +1347,7 @@ class Key4UProvider:
         prompt: str = "6-second jade green TOAN AAS logo reveal, clean tech style, smooth camera movement, no watermark.",
         model: str = "",
         timeout_seconds: float = 60.0,
+        aspect_ratio: str = "16:9",
     ) -> dict[str, Any]:
         selected_model = model or self.config.video_model
         if not self.is_configured():
@@ -823,7 +1356,7 @@ class Key4UProvider:
         payload = {
             "model": selected_model,
             "prompt": str(prompt or "")[:1000],
-            "aspect_ratio": "16:9",
+            "aspect_ratio": str(aspect_ratio or "16:9")[:20],
             "enhance_prompt": True,
             "enable_upsample": False,
         }
@@ -944,7 +1477,7 @@ class Key4UProvider:
                         audio_bytes = base64.b64decode(audio_value, validate=False)
                 except Exception:
                     audio_bytes = b""
-                if len(audio_bytes) > 512:
+                if len(audio_bytes) > 0:
                     return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes, final_url=endpoint)
             return _result(ok=False, capability="tts", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, final_url=endpoint, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
@@ -996,7 +1529,7 @@ class Key4UProvider:
                     audio_bytes = bytes.fromhex(audio_value) if re.fullmatch(r"[0-9a-fA-F]+", audio_value) and len(audio_value) % 2 == 0 else base64.b64decode(audio_value, validate=False)
                 except Exception:
                     audio_bytes = b""
-                if len(audio_bytes) > 512:
+                if len(audio_bytes) > 0:
                     return _result(ok=True, capability="voice_tts_fallback", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes)
             return _result(ok=False, capability="voice_tts_fallback", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
@@ -1319,29 +1852,42 @@ class Key4UProvider:
                 data = response.json()
             except Exception:
                 data = {}
-            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
-            items = (body or {}).get("data") if isinstance(body, dict) else []
-            if isinstance(items, dict):
-                items = [items]
-            output_url = ""
-            output_id = ""
-            lyrics_text = ""
-            for item in items or []:
-                if isinstance(item, dict) and (item.get("audio_url") or item.get("url")):
-                    output_url = str(item.get("audio_url") or item.get("url") or "")
-                    output_id = str(item.get("clip_id") or item.get("id") or "")
-                    lyrics_text = str(item.get("prompt") or item.get("text") or "")
-                    break
-                if isinstance(item, dict) and item.get("text") and not lyrics_text:
-                    lyrics_text = str(item.get("text") or "")
-                    output_id = str(item.get("id") or "")
-            if not output_url and isinstance(body, dict):
-                output_url = str(body.get("audio_url") or body.get("url") or "")
-            status = str((body or {}).get("status") or data.get("status") or "") if isinstance(data, dict) else ""
-            fail_reason = str((body or {}).get("fail_reason") or (body or {}).get("failReason") or data.get("message") or "") if isinstance(data, dict) and isinstance(body, dict) else ""
-            result = _result(ok=bool(output_url or (status.upper() == "SUCCESS" and lyrics_text)), capability="suno_query", model=selected_model, status="SUCCESS" if (output_url or (status.upper() == "SUCCESS" and lyrics_text)) else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, output_url=output_url, final_url=endpoint, error_message_safe=fail_reason)
+            audio_urls = _suno_audio_urls_from_payload(data)
+            output_url = audio_urls[0] if audio_urls else ""
+            status = _suno_first_string_for_keys(data, SUNO_STATUS_KEYS)
+            fail_reason = _suno_first_string_for_keys(data, SUNO_FAILURE_KEYS)
+            output_id = _suno_first_string_for_keys(data, SUNO_ID_KEYS)
+            lyrics_text = _suno_first_string_for_keys(data, SUNO_TEXT_KEYS)
+            parsed_fields = _suno_payload_field_presence(data)
+            normalized_status = _normalize_suno_query_status(
+                status,
+                has_audio=bool(output_url),
+                http_status=int(response.status_code or 0),
+            )
+            ok = bool(200 <= response.status_code < 300 and output_url)
+            result = _result(
+                ok=ok,
+                capability="suno_query",
+                model=selected_model,
+                status=normalized_status,
+                http_status=response.status_code,
+                latency_ms=latency_ms,
+                task_id=safe_task_id,
+                output_url=output_url,
+                final_url=endpoint,
+                error_class="" if ok else _classify_http(response.status_code, fail_reason or normalized_status),
+                error_message_safe=fail_reason,
+                raw_debug_admin_only={
+                    "parsed_fields": parsed_fields,
+                    "audio_url_count": len(audio_urls),
+                    "response_shape": sorted(data.keys())[:12] if isinstance(data, dict) else [],
+                },
+            )
+            result["raw_provider_result"] = data if isinstance(data, dict) else {}
+            result["audio_url_candidates"] = list(audio_urls)
             result["clip_id"] = output_id
             result["text"] = lyrics_text
+            result["parsed_fields"] = parsed_fields
             return result
         except httpx.TimeoutException as exc:
             return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)

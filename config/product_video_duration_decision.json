@@ -1,0 +1,46 @@
+{
+  "provider": "shopaikey_video",
+  "model": "veo3.1-fast",
+  "public_mode": "scene_clip",
+  "short_clip_seconds": 8,
+  "supported_exact_durations": [],
+  "arbitrary_seconds_supported": false,
+  "max_single_video_seconds": 8,
+  "multi_scene_enabled": false,
+  "concat_enabled": false,
+  "seconds_pricing_enabled": false,
+  "last_smoke_status": "not_run_cost_locked",
+  "last_smoke_at": "",
+  "scene_pricing": {
+    "promo_until": "2026-12-31",
+    "scenes": {
+      "1": {
+        "list_price": 300,
+        "promo_price": 200,
+        "public_enabled": true
+      },
+      "2": {
+        "list_price": 600,
+        "promo_price": 400,
+        "public_enabled": false
+      },
+      "3": {
+        "list_price": 900,
+        "promo_price": 600,
+        "public_enabled": false
+      }
+    }
+  },
+  "seconds_pricing": {
+    "minimum_seconds": 8,
+    "list_price_per_second": 40,
+    "promo_price_per_second": 25,
+    "promo_until": "2026-12-31"
+  },
+  "smoke_policy": {
+    "admin_only": true,
+    "requires_explicit_toan_approval": true,
+    "provider_submit_in_tests": false,
+    "blocked_reason": "REAL_PROVIDER_BLOCKED_BY_COST_INCIDENT"
+  }
+}

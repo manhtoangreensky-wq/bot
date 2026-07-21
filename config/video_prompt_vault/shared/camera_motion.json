@@ -1,0 +1,12 @@
+{
+  "name": "camera_motion",
+  "blocks": [
+    "slow stable push-in",
+    "smooth dolly forward",
+    "handheld smartphone follow",
+    "FPV fly-through reveal",
+    "macro slide across texture",
+    "beat-synced quick cuts",
+    "locked-off calm loop"
+  ]
+}

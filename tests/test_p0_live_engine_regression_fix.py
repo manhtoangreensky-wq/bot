@@ -8,19 +8,20 @@ def _admin_only(monkeypatch, admin_id=1):
     monkeypatch.setattr(bot, "is_admin_user", lambda uid: str(uid) == str(admin_id))
 
 
-def test_song_half_full_copy_uses_length_mode_not_legacy_60s():
+def test_song_legacy_half_normalizes_to_full_without_short_mode(monkeypatch):
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
     half = {"song_product": "half", "guided_duration_seconds": 60, "selected_prompt": "bài hát có lời"}
     full = {"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát có lời"}
 
     half_text = bot.music_ai_preview_text(half, "vi")
     full_text = bot.music_ai_preview_text(full, "vi")
 
-    assert "Đã chọn: Nửa bài." in half_text
-    assert "TOAN AAS sẽ tạo một đoạn/bài ngắn hoàn chỉnh, không cắt giữa câu." in half_text
-    assert f"Giá dự kiến: {bot.music_result_price_xu(half)} Xu." in half_text
-    assert "Đã chọn: Full bài." in full_text
-    assert "TOAN AAS sẽ tạo một bài hoàn chỉnh có cấu trúc rõ ràng." in full_text
-    assert f"Giá dự kiến: {bot.music_result_price_xu(full)} Xu." in full_text
+    assert "Nghe thử bài hát có lời AI" in half_text
+    assert "Nửa bài." not in half_text
+    assert f"Bản đầy đủ bài hát có lời AI: <b>{bot.music_result_price_xu(half)} Xu</b>" in half_text
+    assert "Nghe thử bài hát có lời AI" in full_text
+    assert "Bản đầy đủ được lưu trong kho" in full_text
+    assert f"Bản đầy đủ bài hát có lời AI: <b>{bot.music_result_price_xu(full)} Xu</b>" in full_text
     assert "Thời lượng bản đầy đủ" not in half_text
     assert "Thời lượng bản đầy đủ" not in full_text
     assert "60 giây" not in half_text
@@ -37,11 +38,11 @@ def test_song_half_full_new_state_uses_song_length_mode():
     assert '"guided_duration":' not in block
 
 
-def test_admin_subtitle_feature_flag_is_public_blocker_not_missing(monkeypatch):
+def test_admin_subtitle_mode_disabled_is_exact_blocker_not_adapter_missing(monkeypatch):
     _admin_only(monkeypatch)
 
     def feature_flag_capability(_mode, _state=None, public=True):
-        return {"ok": False, "reason": "mode_disabled", "missing": ["feature_flag"]}
+        return {"ok": False, "reason": "mode_disabled", "missing": ["mode_disabled"]}
 
     monkeypatch.setattr(bot, "video_dubbing_capability", feature_flag_capability)
     monkeypatch.setattr(bot, "VIDEO_ASR_ENABLED", True)
@@ -56,10 +57,12 @@ def test_admin_subtitle_feature_flag_is_public_blocker_not_missing(monkeypatch):
         is_provider_call=True,
     )
 
-    assert decision["status"] == "allowed_admin"
-    assert bot.engine_technical_missing(decision["readiness"]) == []
-    assert "feature_flag" in bot.engine_public_blockers(decision["readiness"])
+    assert decision["status"] == "blocked_admin_missing_provider_config"
+    assert bot.engine_technical_missing(decision["readiness"]) == ["mode_disabled"]
     admin_text = bot.admin_product_engine_missing_text("subtitle_translate", decision["readiness"])
+    assert "mode_disabled" in admin_text
+    assert "asr_adapter_missing" not in admin_text
+    assert "video_dub_tts_adapter_missing" not in admin_text
     assert "feature_flag" not in admin_text
 
 
@@ -71,6 +74,10 @@ def test_video_multiscene_public_flag_does_not_render_generic_adapter_blocker(mo
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "model")
     monkeypatch.setattr(bot, "KEY4U_ENABLED", False)
     monkeypatch.setattr(bot, "video_multiscene_stitching_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_stitching_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_queue_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_scene_tested", lambda _scene_count: True)
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
     monkeypatch.setattr(bot, "video_multiscene_public_ready", lambda _scene_count: False)
 
     admin_decision = bot.can_user_access_product_engine(1, "video_multiscene", "3", is_provider_call=True)

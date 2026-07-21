@@ -45,7 +45,7 @@ def test_suno_pass_submitted_not_public_ready():
 def test_music_public_guard_no_admin_blocker():
     text = bot.music_ai_public_guard_text("vi")
     assert "Admin blocker" not in text
-    assert "bảo trì/nâng cấp" in text
+    assert text == "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 
 def test_music_public_guard_no_xu_charge():
@@ -62,31 +62,31 @@ def test_music_menu_still_visible():
     assert any("Cắt/ghép nhạc" in label for label in labels)
 
 
-def test_video_subtitle_public_action_guarded_if_pipeline_not_ready(monkeypatch):
+def test_video_subtitle_public_action_allows_real_srt_without_mux(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
+    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
 
 
-def test_video_dub_public_action_guarded_if_pipeline_not_ready(monkeypatch):
+def test_video_dub_public_action_allows_real_audio_without_mux(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_dub_ready", lambda: True)
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_DUB)
+    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_DUB)
 
 
-def test_subtitle_plus_dub_public_action_guarded_if_pipeline_not_ready(monkeypatch):
+def test_subtitle_plus_dub_public_action_allows_partial_outputs_without_mux(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_translate_ready", lambda: True)
     monkeypatch.setattr(bot, "is_dub_ready", lambda: True)
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
 
 
-def test_translation_public_ready_requires_smoke_ffmpeg_and_mux(monkeypatch):
+def test_translation_public_ready_does_not_require_mux_for_partial_outputs(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_translate_ready", lambda: True)
@@ -100,13 +100,13 @@ def test_translation_public_ready_requires_smoke_ffmpeg_and_mux(monkeypatch):
     monkeypatch.setattr(bot, "is_subtitle_burn_ready", lambda: True)
     monkeypatch.setattr(bot, "is_voice_mux_ready", lambda: True)
     monkeypatch.setattr(bot, "preferred_tool_test_status_text", lambda *_args: "NOT_TESTED")
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
 
     monkeypatch.setattr(bot, "preferred_tool_test_status_text", lambda *_args: "PASS")
     assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
 
     monkeypatch.setattr(bot, "is_voice_mux_ready", lambda: False)
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
 
 
 def test_translation_public_guard_no_admin_blocker():
@@ -127,8 +127,16 @@ def test_translation_public_guard_no_xu_charge():
 
 def test_translation_menu_still_visible():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    for label in ("👁 Tạo phụ đề tự động", "🗣 Lồng tiếng tự động", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"):
+    for label in (
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
+        "🎞 Phụ đề + Lồng tiếng",
+    ):
         assert label in labels
+    assert "📄 Dịch file phụ đề" not in labels
+    assert "🧾 Bóc lời thoại" not in labels
+    assert "🔗 Tải video từ link" not in labels
 
 
 def test_completed_add_voice_guard_if_mux_unready():
@@ -174,9 +182,9 @@ def test_preview_6_seconds_not_changed():
     assert bot.VOICE_TTS_PREVIEW_MAX_SECONDS == 6
 
 
-def test_scene_6_seconds_not_changed():
-    assert bot.TASK3D_SCENE_SECONDS == 6
-    assert "1 cảnh ≈ 6 giây" in bot.video_finalization_scene_count_text({"selected_video_tier": "basic"}, "vi")
+def test_product_video_scene_uses_canonical_eight_seconds():
+    assert bot.TASK3D_SCENE_SECONDS == 8
+    assert "1 cảnh khoảng <b>8 giây</b>" in bot.video_finalization_scene_count_text({"selected_video_tier": "basic"}, "vi")
 
 
 def test_no_public_15_second_product_default_remaining():

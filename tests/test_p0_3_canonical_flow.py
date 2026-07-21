@@ -157,11 +157,13 @@ def test_audio_studio_music_prompt_does_not_show_suno_or_provider(monkeypatch):
 
     text = query.outputs[-1]["text"]
     assert "Tạo nhạc nền" in text
-    assert "Video bán hàng" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert "🎵 Cơ bản — 100 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert "🎶 Tiêu chuẩn — 150 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert "💎 Cao cấp — 200 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
     assert "Suno" not in text
     assert "provider" not in text.lower()
     assert "api" not in text.lower()
-    assert bot.get_music_guided_result(user_id)["guided_step"] == "purpose"
+    assert bot.get_music_guided_result(user_id)["music_product_mode"] == "background"
 
 
 def test_no_public_choose_music_voice_step():

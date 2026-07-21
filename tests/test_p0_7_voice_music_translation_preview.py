@@ -188,22 +188,24 @@ def test_music_duration_menu_uses_18_30_60_and_custom_not_preview_length():
     assert bot.paid_preview_seconds(120) == 6
 
 
-def test_longer_music_costs_more_and_full_song_is_half_times_1_8():
-    assert bot.music_ai_output_price_xu(60) > bot.music_ai_output_price_xu(30)
+def test_music_quote_prices_are_product_fixed(monkeypatch):
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
+    assert bot.music_ai_output_price_xu(60) == bot.MUSIC_BACKGROUND_FULL_PRICE_XU
     half = bot.music_ai_output_price_xu(60, "song_half")
     full = bot.music_ai_output_price_xu(120, "song_full")
 
-    assert half == bot.HALF_SONG_PRICE_XU
-    assert full == bot.round_video_xu(half * 1.8, bot.MUSIC_AI_PRICE_ROUND_TO_XU)
+    assert half == bot.MUSIC_VOCAL_FULL_PRICE_XU
+    assert full == bot.MUSIC_VOCAL_FULL_PRICE_XU
 
 
-def test_song_product_has_half_and_full_complete_lyrics_choices():
+def test_song_product_removes_half_until_verified():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     text = bot.music_song_product_text("vi")
 
-    assert "1️⃣ Nửa bài" in labels
-    assert "2️⃣ Full bài" in labels
-    assert "không cắt giữa câu" in text
+    assert "🎤 Bài hát có lời AI" in labels
+    assert "1️⃣ Nửa bài" not in labels
+    assert "Không bán nửa bài" not in text
+    assert "Nửa bài" not in text
 
 
 def test_change_music_suggestion_preserves_duration_and_song_product(monkeypatch):
@@ -236,6 +238,7 @@ def test_music_preview_submits_preview_job_and_confirm_submits_full_job(monkeypa
         "music_ai_kind": "guided",
     })
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "get_member_profile", lambda *_args, **_kwargs: {"tier": "silver"})
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
         "public_enabled": True,
         "ready": True,
@@ -270,7 +273,8 @@ def test_music_preview_submits_preview_job_and_confirm_submits_full_job(monkeypa
     assert len(submitted) == 2
     assert submitted[1]["preview"] is False
     assert bot.get_music_guided_result(user_id)["music_task_id"] == "music-task-1"
-    assert "Đã xác nhận tạo bản đầy đủ" in confirm.outputs[-1]["text"]
+    assert "TOAN AAS đang tạo nhạc" in confirm.outputs[-1]["text"]
+    assert "Mã xử lý:" in confirm.outputs[-1]["text"]
 
 
 def test_translation_admin_blockers_are_exact_but_public_copy_is_clean(monkeypatch):
@@ -294,9 +298,8 @@ def test_translation_admin_blockers_are_exact_but_public_copy_is_clean(monkeypat
         admin=False,
     )
 
-    assert "VIDEO_TRANSLATE_SUBTITLE_ENABLED" in blockers
-    assert "VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED" in blockers
-    assert any("Key4U qwen-mt-turbo smoke or ShopAIKey chat smoke" in item for item in blockers)
+    assert "Subtitle translation provider missing" in blockers
+    assert not any("API" in item or "KEY" in item for item in blockers)
     _assert_public_copy_safe(public)
 
 

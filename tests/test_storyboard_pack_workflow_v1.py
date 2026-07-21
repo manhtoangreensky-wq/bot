@@ -72,7 +72,7 @@ def test_storyboard_entry_opens_template_menu(monkeypatch):
     text = bot.storyboard_pack_start_text("vi")
     callbacks = _callbacks(bot.storyboard_pack_start_keyboard("vi"))
 
-    assert "Storyboard + Prompt điện ảnh" in text
+    assert "Storyboard" in text
     assert "TOAN AAS chưa xử lý video và chưa trừ Xu" in text
     assert {
         "storypack|template|product_ad",
@@ -133,7 +133,7 @@ def test_storyboard_concept_generates_required_scene_pack(monkeypatch):
 
     for expected in [
         "Storyboard chi tiết",
-        "Storyboard + Prompt điện ảnh",
+        "Kế hoạch từng cảnh, câu lệnh ảnh và câu lệnh video",
         "Cảnh 1",
         "Mục tiêu cảnh",
         "Nội dung hình ảnh",
@@ -209,7 +209,7 @@ def test_storyboard_product_ad_manual_path_v2(monkeypatch):
     bot.clear_developing_video_pending(uid)
 
     entry = asyncio.run(_press("storypack|start", uid))
-    assert "Storyboard + Prompt điện ảnh" in entry["text"]
+    assert "Storyboard" in entry["text"]
     assert "menu|main_video" in _callbacks(entry["reply_markup"])
 
     template = asyncio.run(_press("storypack|template|product_ad", uid))

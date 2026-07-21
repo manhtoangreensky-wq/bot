@@ -70,7 +70,7 @@ class _TelegramBot:
         self.video_calls += 1
         if self.video_fails:
             raise RuntimeError("telegram URL fetch failed")
-        return SimpleNamespace(video=SimpleNamespace(file_id="telegram_file_1"))
+        return SimpleNamespace(message_id=321, video=SimpleNamespace(file_id="telegram_file_1"))
 
     async def send_message(self, **kwargs):
         self.message_calls += 1
@@ -300,32 +300,40 @@ def test_public_unready_guards_are_clean_and_have_no_admin_blocker():
         bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {"origin": "video_addon"}, "vi", admin=False),
     ]
     for text in texts:
-        assert "bảo trì/nâng cấp" in text
         assert "chưa xử lý" in text and "chưa trừ Xu" in text
         assert "Admin blocker" not in text
         assert "API" not in text and "ENV" not in text
 
 
-def test_voice_clone_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.voice_clone_provider_not_ready_public_text("vi")
+def test_voice_clone_public_guard_verified_copy():
+    assert bot.voice_clone_provider_not_ready_public_text("vi") == bot.VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
+    text = bot.voice_clone_provider_not_ready_public_text("vi")
+    assert "Tạo voice riêng đang tạm khóa" in text
+    assert "chưa xử lý và chưa trừ Xu" in text
 
 
-def test_ai_music_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.music_ai_public_guard_text("vi")
+def test_ai_music_public_guard_verified_copy():
+    assert bot.music_ai_public_guard_text("vi") == "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 
 def test_video_dub_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {"origin": "video_addon"}, "vi", admin=False)
+    text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {"origin": "video_addon"}, "vi", admin=False)
+    assert "TOAN AAS chưa thể" in text
+    assert "chưa trừ Xu" in text
 
 
 def test_subtitle_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {"origin": "video_addon"}, "vi", admin=False)
+    text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {"origin": "video_addon"}, "vi", admin=False)
+    assert "TOAN AAS chưa thể" in text
+    assert "chưa trừ Xu" in text
 
 
 def test_public_buttons_stay_visible_for_unready_products():
     main_callbacks = _callbacks(bot.main_video_keyboard("vi"))
     final_callbacks = _callbacks(bot.video_finalization_menu_keyboard("vi"))
-    assert "vproduct|open|audio_addons" in main_callbacks
+    assert "vproduct|open|audio_addons" not in main_callbacks
+    assert "vproduct|open|video_reference" not in main_callbacks
+    assert "vproduct|open|motion_prompt" not in main_callbacks
     assert "vfinal|voice" in final_callbacks
     assert "vfinal|music" in final_callbacks
     assert "vfinal|addon" in final_callbacks
@@ -334,12 +342,15 @@ def test_public_buttons_stay_visible_for_unready_products():
 def test_video_flow_lock_snapshots_are_unchanged():
     assert bot.VIDEO_FLOW_LOCKED_AFTER_TASK3D7 is True
     menu = bot.main_video_keyboard("vi")
-    assert len(menu.inline_keyboard) == 7
-    assert sum(len(row) for row in menu.inline_keyboard) == 14  # 13 products + Menu chính
-    assert len([item for item in _callbacks(menu) if item.startswith("vproduct|open|")]) == 13
+    assert len(menu.inline_keyboard) == 6
+    assert sum(len(row) for row in menu.inline_keyboard) == 12  # 9 public products + prompt library + downloader utility + Menu chính
+    assert len([item for item in _callbacks(menu) if item.startswith("vproduct|open|")]) == 9
+    assert "vpromptlib|start" in _callbacks(menu)
+    assert "vdownload|start" in _callbacks(menu)
     assert _labels(bot.task3d_result_keyboard("storyboard_prompt", "vi")) == [
         ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
-        ["📦 Xuất bộ prompt", "🔁 Đổi phong cách"],
+        ["📦 Xuất bộ prompt", "💾 Lưu Kho prompt"],
+        ["🔁 Đổi phong cách"],
         ["🎬 Dùng để tạo video"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]

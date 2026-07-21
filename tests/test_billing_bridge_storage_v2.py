@@ -77,7 +77,8 @@ def test_storage_addon_paid_creates_entitlement_event_not_xu(monkeypatch):
             duration_days=30,
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
-        processed, desc, info = bot.process_payos_paid_order("930001", 10000)
+        _invoice, total = bot.payos_invoice_total_for_order("930001", 10000)
+        processed, desc, info = bot.process_payos_paid_order("930001", total)
         assert processed is True
         assert desc == "storage_addon_success"
         assert info["payment_type"] == "storage_addon"

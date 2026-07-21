@@ -93,17 +93,20 @@ def test_paid_voice_profile_first_free_then_50_xu(monkeypatch):
     assert bot.voice_profile_storage_price_xu(123, bot.PRODUCT_CONTEXT_SHOWROOM, 11) == bot.VOICE_PROFILE_PRICE_XU == 50
 
 
-def test_text_to_voice_generates_audio_with_selected_default_voice(monkeypatch):
+def test_text_to_voice_prepares_default_free_confirmation(monkeypatch):
     user_id = 960601
     _reset_user(user_id)
     calls = {}
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True, "reason": "ok", "product_type": "voice_ai", "quota": {}})
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {"ok": True})
 
     async def fake_tts(text, voice_id="", voice_style="", speed="normal"):
         calls.update(text=text, voice_id=voice_id, voice_style=voice_style, speed=speed)
         return True, b"mp3-bytes", "ok"
 
     monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", fake_tts)
+    monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", lambda audio_bytes, seconds=6: asyncio.sleep(0, result=(b"preview-bytes", "ok")))
 
     query = CaptureQuery("music_quick|showroom|voice_default_female", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -113,10 +116,15 @@ def test_text_to_voice_generates_audio_with_selected_default_voice(monkeypatch):
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert handled is True
-    assert calls["text"] == "Xin chào khách hàng TOAN AAS."
-    assert calls["voice_id"] == bot.default_tts_voice_id("female")
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
-    assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
+    assert calls == {}
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
+    callbacks = [
+        button.callback_data
+        for row in message.outputs[-1]["reply_markup"].inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert any("voice_default_confirm:female" in callback for callback in callbacks)
 
 
 def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypatch):
@@ -124,6 +132,9 @@ def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypa
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
     monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", lambda *args, **kwargs: asyncio.sleep(0, result=(True, b"ok", "ok")))
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True, "reason": "ok", "product_type": "voice_ai", "quota": {}})
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", lambda audio_bytes, seconds=6: asyncio.sleep(0, result=(b"preview-bytes", "ok")))
 
     query = CaptureQuery("music_quick|showroom|voice_default_male", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -131,7 +142,7 @@ def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypa
     asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert "Chọn kiểu giọng" not in "\n".join(str(item.get("text") or item.get("caption") or "") for item in message.outputs)
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
 
 
 def test_speech_to_text_upload_transcribes_public_audio(monkeypatch):
@@ -161,20 +172,20 @@ def test_guided_music_creation_reaches_three_prompt_choices(monkeypatch):
     start = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(start, user_id), SimpleNamespace()))
     assert "Tạo nhạc nền" in start.outputs[-1]["text"]
-    assert "Video bán hàng" in _joined(start.outputs[-1]["reply_markup"])
+    assert "🎵 Cơ bản — 100 Xu" in _joined(start.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 150 Xu" in _joined(start.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 200 Xu" in _joined(start.outputs[-1]["reply_markup"])
 
-    for data in [
-        "music_quick|showroom|music_ai_purpose_sales_video",
-        "music_quick|showroom|music_ai_style_cinematic",
-        "music_quick|showroom|music_ai_mood_cheerful",
-    ]:
-        query = CaptureQuery(data, user_id)
-        asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
+    tier = CaptureQuery("music_quick|showroom|music_tier_background:standard", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(tier, user_id), SimpleNamespace()))
+    assert "Ý tưởng nhạc nền" in tier.outputs[-1]["text"]
+    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_product_background_idea"
 
-    duration = CaptureQuery("music_quick|showroom|music_ai_duration_30s", user_id)
-    asyncio.run(bot.handle_music_quick_callback(_callback_update(duration, user_id), SimpleNamespace()))
-    assert "3 prompt nhạc gợi ý" in duration.outputs[-1]["text"]
-    assert "Chọn gợi ý 1" in _joined(duration.outputs[-1]["reply_markup"])
+    message = CaptureMessage("Nhạc nền công nghệ AI vui tươi cho video TikTok", user_id)
+    handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
+    assert handled is True
+    assert "3 gợi ý nhạc nền" in message.outputs[-1]["text"]
+    assert len(bot.get_music_guided_result(user_id)["music_suggestions"]) == 3
 
 
 def test_video_voice_choice_asks_script_and_saves_to_draft(monkeypatch):
@@ -210,5 +221,6 @@ def test_translation_public_flow_has_upload_language_and_no_provider_words():
     ]).lower()
     for term in ["provider", "api", "suno", "minimax", "key4u", "shopaikey", "env", "http", "raw error", "bot chưa gọi api"]:
         assert term not in text
-    assert "gửi hoặc reply video/audio" in text
+    assert "gửi video" in text or "video đã có phụ đề" in text
+    assert "video/audio" not in text
     assert "ngôn ngữ" in text

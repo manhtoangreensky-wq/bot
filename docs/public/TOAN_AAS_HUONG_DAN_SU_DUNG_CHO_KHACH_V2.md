@@ -2,212 +2,604 @@
 
 **Phiên bản:** V2
 
-**Cập nhật:** 23/06/2026
+**Cập nhật nền:** 23/06/2026
+
+**Cập nhật bảng giá/hướng dẫn:** 28/06/2026
 
 **Bot Telegram:** @toanaasbot
 
 **Website:** www.toanaas.vn
 
-**Định hướng:** AI Automation System / Content Factory / Bot hỗ trợ công việc
+**Định hướng:** Công cụ AI hỗ trợ sáng tạo nội dung và công việc hằng ngày
 
-## 1. TOAN AAS là gì?
+TOAN AAS giúp anh/chị tạo ảnh, video, âm thanh, phụ đề, dịch, lồng tiếng, xử lý tài liệu và xem chi phí trước khi dùng.
 
-TOAN AAS là hệ thống AI vận hành chủ yếu qua Telegram. Hệ thống hỗ trợ tạo ảnh, video, âm thanh, phụ đề, dịch, lồng tiếng, xử lý tài liệu, nội dung AI và hỗ trợ khách hàng theo từng bước rõ ràng.
+## Bảng giá nhanh
 
-Bạn không cần tự nhớ nhiều lệnh phức tạp. Hãy mở menu, chọn tính năng, gửi mô tả, xem chi phí nếu có và xác nhận trước khi hệ thống xử lý.
-
-TOAN AAS không yêu cầu người dùng gửi mật khẩu mạng xã hội, thông tin thẻ thanh toán, mã OTP hoặc dữ liệu bảo mật cá nhân qua bot.
-
-## 2. Bắt đầu nhanh
-
-1. Mở Telegram và tìm @toanaasbot.
-2. Bấm Start hoặc gửi `/start`.
-3. Chọn tính năng muốn dùng: Tạo ảnh, Tạo video, Âm thanh, Tài liệu hoặc Dịch thuật.
-4. Gửi mô tả rõ mục tiêu, sản phẩm, phong cách, nền tảng đăng và yêu cầu riêng.
-5. Chọn gói phù hợp nếu tính năng có nhiều mức giá.
-6. Kiểm tra bản xem trước, bảng giá và thông tin xác nhận.
-7. Chỉ khi bạn xác nhận, hệ thống mới xử lý và mới trừ Xu nếu bước đó có phí.
-8. Nhận kết quả trong bot, tải về hoặc tiếp tục bước kế tiếp.
-
-Lệnh hữu ích:
-
-- `/help` - xem hướng dẫn nhanh.
-- `/huongdan` hoặc `/guide` - mở hướng dẫn chi tiết.
-- `/profile` - xem số dư Xu.
-- `/pricing` hoặc `/banggia` - xem bảng giá.
-- `/naptien` - nạp Xu.
-
-## 3. Tạo ảnh AI
-
-Quy trình tạo ảnh:
-
-1. Mở mục Tạo ảnh.
-2. Gửi mô tả ảnh: sản phẩm, bối cảnh, ánh sáng, màu sắc, bố cục, tỉ lệ và phong cách.
-3. Chọn gói ảnh theo nhu cầu.
-4. Xem giá Xu và xác nhận.
-5. Hệ thống xử lý ảnh sau khi bạn xác nhận.
-6. Nhận ảnh trong bot, tải về hoặc dùng tiếp để tạo video.
-
-Ví dụ mô tả tốt:
-
-`Ảnh sản phẩm máy xay sinh tố mini màu xanh ngọc trên bàn bếp sáng, ánh sáng tự nhiên, phong cách quảng cáo thương mại, không thêm chữ, không watermark.`
-
-Bảng giá tạo ảnh:
-
+- Bảng giá tạo ảnh: 50, 150, 200, 300, 400, 500 và 600 Xu.
+- Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu.
 - Tiết kiệm: 50 Xu.
-- Chuẩn: 150 Xu.
-- Chuẩn + bảo hành: 200 Xu.
-- Phổ thông: 300 Xu.
-- Phổ thông + bảo hành: 400 Xu.
-- Cao: 500 Xu.
 - Cao + bảo hành: 600 Xu.
-
-Gói có bảo hành phù hợp khi bạn cần ảnh ổn định hơn. Nếu kết quả chưa sát yêu cầu trong cùng mô tả, bạn có thể yêu cầu hỗ trợ tạo lại theo chính sách của gói.
-
-Lưu ý: hãy kiểm tra kỹ chữ, logo, khuôn mặt, bàn tay, chi tiết sản phẩm và thông tin thương mại trước khi dùng ảnh để đăng bán hàng.
-
-## 4. Tạo video AI
-
-Quy trình tạo video:
-
-1. Mở mục Tạo video.
-2. Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có.
-3. Gửi mô tả video: chủ thể, chuyển động, bối cảnh, ánh sáng, tỉ lệ, thời lượng và cảm xúc.
-4. Chọn gói video.
-5. Chọn số cảnh nếu muốn làm video dài hơn.
-6. Xem tổng chi phí, kiểm tra nội dung và xác nhận.
-7. Hệ thống xử lý và gửi video về bot khi hoàn tất.
-8. Sau khi có video, bạn có thể dùng thêm Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng nếu cần.
-
-Bảng giá video theo gói:
-
 - Trải nghiệm: 200 Xu.
-- Cơ bản: 300 Xu.
-- Phổ thông: 400 Xu.
-- Nâng cao: 500 Xu.
-- Bán hàng: 600 Xu.
-- Cao cấp: 800 Xu.
-- Chuyên nghiệp: 1000 Xu.
 - Pro Plus: 1200 Xu.
 - Premium: 1500 Xu.
+- Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.
 
-Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.
+## Hướng dẫn chi tiết
 
-Cách tính theo cảnh:
+📚 HƯỚNG DẪN TOAN AAS
 
-- 1 cảnh khoảng 6 giây.
-- 3 cảnh khoảng 18 giây.
-- 5 cảnh khoảng 30 giây.
-- 10 cảnh khoảng 60 giây.
-- 20 cảnh khoảng 120 giây.
+Chọn mục bạn muốn xem:
 
-Ưu đãi theo số cảnh:
+1. Bắt đầu nhanh — /huongdan 1
+2. Tạo voice riêng — /huongdan 2
+3. Tạo audio từ voice — /huongdan 3
+4. Tạo nhạc nền AI — /huongdan 4
+5. Tạo bài hát có lời — /huongdan 5
+6. Âm thanh — /huongdan 6
+7. Tạo video — /huongdan 7
+8. Tạo phụ đề tự động — /huongdan 8
+9. Dịch phụ đề — /huongdan 9
+10. Lồng tiếng — /huongdan 10
+11. Phụ đề / Dịch / Lồng tiếng — /huongdan 11
+12. Tạo/chỉnh ảnh — /huongdan 12
+13. Dùng tài nguyên tự có — /huongdan 13
+14. Nạp Xu và xem hóa đơn — /huongdan 14
+15. FAQ / Hoàn Xu — /huongdan 15
 
-- 1 cảnh: giá gốc.
-- 2-9 cảnh: giảm 10%.
-- 10-19 cảnh: giảm 15%.
-- 20 cảnh: giảm 20%.
+Người mới nên bắt đầu với /huongdan 1.
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
-Ví dụ: gói Cơ bản 300 Xu, làm 3 cảnh: 300 x 90% = 270 Xu/cảnh, tổng 270 x 3 = 810 Xu.
+-----
 
-Nếu hệ thống đang bảo trì/nâng cấp, TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
+📘 Hướng dẫn 1: Bắt đầu nhanh
 
-## 5. Âm thanh
+🚀 BẮT ĐẦU NHANH
+
+1. Chọn tính năng muốn dùng: Tạo ảnh, Tạo video, Studio âm thanh, Phụ đề / Dịch / Lồng tiếng hoặc Tài liệu.
+2. Gửi mô tả rõ mục tiêu, sản phẩm, phong cách, nền tảng đăng và yêu cầu riêng.
+3. Chọn gói phù hợp nếu tính năng có nhiều mức giá.
+4. Kiểm tra bản xem trước, bảng giá và thông tin xác nhận.
+5. Chỉ khi anh/chị xác nhận, hệ thống mới xử lý và mới trừ Xu nếu bước đó có phí.
+6. Nhận kết quả trong bot, tải về hoặc tiếp tục bước kế tiếp.
+
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
+Ví dụ: muốn tạo video bán hàng, anh/chị có thể tạo ảnh sản phẩm trước, sau đó dùng ảnh đó để tạo video.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 2: Tạo voice riêng
+
+🎙 HƯỚNG DẪN TẠO VOICE RIÊNG
+
+Dùng khi: anh/chị muốn có giọng riêng đã lưu để dùng cho nội dung sau này.
+
+Cách làm:
+1. Vào Studio âm thanh.
+2. Chọn tạo voice riêng.
+3. Gửi mẫu giọng rõ, đủ dài và ít tạp âm.
+4. Xem điều kiện và hóa đơn nếu đây không phải voice đầu tiên.
+5. Xác nhận tạo voice.
+
+Cách tính: voice riêng đầu tiên tạo thành công miễn phí; từ voice thứ 2 là 50 Xu / voice thành công.
+Ví dụ: tạo voice riêng lần đầu = 0 Xu; tạo voice riêng lần thứ 2 = 50 Xu nếu tạo thành công.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 3: Tạo audio từ voice
+
+📘 TẠO AUDIO TỪ VOICE
+
+Dùng khi: anh/chị muốn biến văn bản thành file giọng đọc.
+
+Cách làm:
+1. Vào Studio âm thanh.
+2. Chọn Kho voice hoặc giọng mặc định.
+3. Bấm Tạo audio.
+4. Nhập nội dung từ 20 từ trở lên.
+5. Chỉnh tốc độ/âm lượng nếu cần.
+6. Xem hóa đơn.
+7. Xác nhận tạo audio.
+
+Cách tính: 0.10 Xu / từ, tối thiểu 1 Xu; từ 100 từ được giảm số lượng 10%.
+Ví dụ: 100 từ = 10 Xu, giảm 10%, tổng còn 9 Xu; 20 từ = 2 Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 4: Tạo nhạc nền AI
+
+🎵 HƯỚNG DẪN TẠO NHẠC NỀN AI
+
+Dùng khi: anh/chị cần nhạc không lời cho video, intro, quảng cáo hoặc nội dung sản phẩm.
+
+Cách làm:
+1. Vào Studio âm thanh.
+2. Chọn Nhạc nền AI.
+3. Mô tả phong cách, cảm xúc và mục đích sử dụng.
+4. Chọn Cơ bản, Tiêu chuẩn hoặc Cao cấp.
+5. Xem hóa đơn và xác nhận.
+
+Cách tính: Cơ bản 100 Xu, Tiêu chuẩn 150 Xu, Cao cấp 200 Xu.
+Ví dụ: chọn Nhạc nền Tiêu chuẩn = 150 Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 5: Tạo bài hát có lời
+
+🎤 HƯỚNG DẪN TẠO BÀI HÁT CÓ LỜI
+
+Dùng khi: anh/chị muốn bài hát ngắn cho thương hiệu, sản phẩm hoặc chiến dịch.
+
+Cách làm:
+1. Vào Studio âm thanh.
+2. Chọn Bài hát có lời.
+3. Nhập chủ đề, phong cách, cảm xúc và chọn giọng hát.
+4. Xem 3 gợi ý.
+5. Chọn gợi ý phù hợp, xem hóa đơn và xác nhận.
+
+Cách tính: Cơ bản 200 Xu, Tiêu chuẩn 250 Xu, Cao cấp 300 Xu.
+Ví dụ: bài hát có lời Cao cấp, giọng nữ = 300 Xu.
+Đổi gợi ý: không trừ Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 6: Âm thanh
+
+🎧 HƯỚNG DẪN ÂM THANH
 
 Âm thanh giúp video dễ nghe, dễ bán hàng và chuyên nghiệp hơn.
 
 Bạn có thể dùng:
+• Tạo giọng đọc từ nội dung đã viết.
+• Tạo voice riêng.
+• Tạo nhạc nền theo phong cách mong muốn.
+• Tạo bài hát ngắn cho thương hiệu, sản phẩm hoặc chiến dịch.
 
-- Tạo giọng đọc từ nội dung đã viết.
-- Tạo nhạc nền theo phong cách mong muốn.
-- Tạo bài hát ngắn cho thương hiệu, sản phẩm hoặc chiến dịch.
-- Tìm ý tưởng nhạc, hiệu ứng âm thanh hoặc đoạn mở đầu phù hợp video.
+Giá cần nhớ:
+• Audio từ voice: 0.10 Xu / từ, tối thiểu 1 Xu.
+• Voice riêng đầu tiên: 0 Xu; từ voice thứ 2: 50 Xu nếu tạo thành công.
+• Nhạc nền AI: 100 / 150 / 200 Xu.
+• Bài hát có lời: 200 / 250 / 300 Xu.
 
-Quy trình:
+Ví dụ: audio 100 từ = 9 Xu sau giảm số lượng; nhạc nền Tiêu chuẩn = 150 Xu.
+Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
 
-1. Mở mục Âm thanh.
-2. Chọn giọng đọc, nhạc nền hoặc bài hát.
-3. Gửi nội dung hoặc mô tả phong cách.
-4. Kiểm tra chi phí nếu bước đó có phí.
-5. Xác nhận rồi nhận kết quả trong bot.
+Mục lục: /huongdan
 
-Mẹo: nội dung đọc nên ngắn, câu rõ, ít từ khó và có nhịp nghỉ tự nhiên.
+-----
 
-Nếu hệ thống đang bảo trì/nâng cấp, TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
+📘 Hướng dẫn 7: Tạo video
 
-## 6. Phụ đề / Dịch / Lồng tiếng
+🎬 HƯỚNG DẪN TẠO VIDEO AI
+
+Dùng khi: anh/chị muốn tạo video từ mô tả, ảnh có sẵn hoặc concept bán hàng.
+
+Quy trình tạo video:
+1. Mở mục Tạo video.
+2. Chọn chủ đề hoặc nguồn video và gửi ý tưởng chính.
+3. Chọn số cảnh trước để hệ thống phân bổ đúng số ý; hỗ trợ 1-20 cảnh.
+4. Chọn profile và ngữ cảnh phù hợp.
+5. Bổ sung yêu cầu chi tiết và các add-on ảnh hưởng nội dung, bố cục hoặc lời thoại.
+6. Kiểm tra kế hoạch và prompt riêng của từng cảnh.
+7. Chọn gói chất lượng video.
+8. Xem tổng chi phí, kiểm tra nội dung và xác nhận cuối.
+9. Hệ thống tạo, kiểm tra từng cảnh rồi ghép video.
+10. Add-on được thực hiện sau khi ghép; video hoàn chỉnh được kiểm tra và gửi về bot.
+
+Bảng giá video theo gói:
+• Trải nghiệm — 200 Xu.
+• Cơ bản — 300 Xu.
+• Phổ thông — 400 Xu.
+• Nâng cao — 500 Xu.
+• Bán hàng — 600 Xu.
+• Cao cấp — 800 Xu.
+• Chuyên nghiệp — 1000 Xu.
+• Pro Plus — 1200 Xu.
+• Premium — 1500 Xu.
+
+Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.
+
+Cách tính theo cảnh:
+• 1 cảnh khoảng 8 giây.
+• 3 cảnh khoảng 24 giây.
+• 5 cảnh khoảng 40 giây.
+• 10 cảnh khoảng 80 giây.
+• 20 cảnh khoảng 160 giây.
+
+Ưu đãi theo số cảnh:
+• 1 cảnh: giá gốc.
+• 2-9 cảnh: giảm 10%.
+• 10-19 cảnh: giảm 15%.
+• 20 cảnh: giảm 20%.
+
+Ví dụ: gói Cơ bản 300 Xu, làm 3 cảnh: 300 × 90% = 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 8: Tạo phụ đề tự động
+
+📝 HƯỚNG DẪN TẠO PHỤ ĐỀ TỰ ĐỘNG
+
+Dùng khi: anh/chị cần phụ đề gốc từ video/audio/lời đọc.
+Cách làm: mở Phụ đề / Dịch / Lồng tiếng, gửi video hoặc audio, chọn tạo phụ đề gốc, nhận kết quả để kiểm tra.
+Cách tính: miễn phí nếu chỉ tạo phụ đề gốc.
+Ví dụ: tạo phụ đề gốc cho video rõ tiếng = 0 Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 9: Dịch phụ đề
+
+🌐 HƯỚNG DẪN DỊCH PHỤ ĐỀ
+
+Dùng khi: anh/chị muốn chuyển phụ đề sang ngôn ngữ khác.
+Cách làm: gửi video/audio hoặc phụ đề, chọn ngôn ngữ đích, xem số ký tự tính phí, xem hóa đơn và xác nhận.
+Cách tính: 0.1 Xu / ký tự; trên 1.000 ký tự giảm 10%; trên 10.000 ký tự giảm 20%.
+Ví dụ: 2.000 ký tự = 200 Xu, giảm 10%, tổng còn 180 Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 10: Lồng tiếng
+
+🎙 HƯỚNG DẪN LỒNG TIẾNG
+
+Dùng khi: anh/chị muốn tạo bản giọng đọc mới cho nội dung.
+Cách làm: gửi nội dung hoặc video, chọn giọng mặc định hoặc voice riêng, xem hóa đơn và xác nhận.
+Cách tính: giọng mặc định 0.10 Xu / ký tự; voice riêng 0.20 Xu / ký tự. Trên 1.000 ký tự giảm 10%, trên 10.000 ký tự giảm 20%.
+Ví dụ: lồng tiếng giọng mặc định 2.000 ký tự = 200 Xu, giảm 10%, tổng còn 180 Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 11: Phụ đề / Dịch / Lồng tiếng
+
+📝 HƯỚNG DẪN PHỤ ĐỀ / DỊCH / LỒNG TIẾNG
 
 Bạn có thể dùng:
+• Tạo phụ đề từ video hoặc audio.
+• Dịch nội dung sang ngôn ngữ khác.
+• Lồng tiếng lại video bằng giọng phù hợp.
+• Tạo phụ đề + lồng tiếng trong cùng quy trình.
 
-- Tạo phụ đề từ video hoặc audio.
-- Dịch nội dung sang ngôn ngữ khác.
-- Lồng tiếng lại video bằng giọng phù hợp.
-- Chuẩn bị bản phụ đề để đăng TikTok, Reels, Shorts hoặc YouTube.
+Giá cần nhớ:
+• Tạo phụ đề gốc tự động: miễn phí.
+• Dịch phụ đề: 0.1 Xu / ký tự.
+• Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.
+• Lồng tiếng voice riêng: 0.20 Xu / ký tự.
 
-Quy trình:
+Ví dụ phụ đề + lồng tiếng: dịch phụ đề 2.000 ký tự = 180 Xu; lồng tiếng giọng mặc định 2.000 ký tự = 180 Xu; tổng 360 Xu.
+Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
 
-1. Mở mục Phụ đề / Dịch / Lồng tiếng.
-2. Gửi video, audio hoặc nội dung cần xử lý.
-3. Chọn tạo phụ đề, dịch hoặc lồng tiếng.
-4. Chọn ngôn ngữ đích nếu cần.
-5. Kiểm tra nội dung, chi phí và xác nhận.
-6. Nhận kết quả, xem lại tên riêng, thuật ngữ sản phẩm và câu bán hàng trước khi đăng.
+Mục lục: /huongdan
 
-Mẹo: video có âm thanh rõ, ít tạp âm và ít người nói cùng lúc sẽ cho kết quả tốt hơn.
+-----
 
-Nếu hệ thống đang bảo trì/nâng cấp, TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
+📘 Hướng dẫn 12: Tạo/chỉnh ảnh
 
-## 7. Xu & bảng giá
+🖼 HƯỚNG DẪN TẠO/CHỈNH ẢNH
 
-Xu là đơn vị nội bộ dùng để sử dụng công cụ và dịch vụ trong TOAN AAS.
+Dùng khi: anh/chị cần ảnh sản phẩm, ảnh quảng cáo, ảnh minh họa, ảnh dùng làm khung cho video.
 
-- 1 Xu = 100đ.
-- 1.000 Xu = 100.000đ giá trị sử dụng nội bộ.
-- Xu không phải tiền điện tử, token, coin, ví điện tử, chứng khoán hoặc phương tiện thanh toán bên ngoài TOAN AAS.
-- Xu không dùng để rút tiền, chuyển nhượng hoặc mua bán giữa người dùng.
+Cách làm:
+1. Mở mục Tạo ảnh.
+2. Gửi mô tả ảnh: sản phẩm, bối cảnh, ánh sáng, màu sắc, bố cục, tỉ lệ và phong cách.
+3. Chọn gói ảnh theo nhu cầu.
+4. Xem hóa đơn và xác nhận.
+5. Nhận ảnh trong bot, tải về hoặc dùng tiếp để tạo video.
 
-Nạp Xu:
+Bảng giá tạo ảnh:
+• Tiết kiệm — 50 Xu.
+• Chuẩn — 150 Xu.
+• Chuẩn + bảo hành — 200 Xu.
+• Phổ thông — 300 Xu.
+• Phổ thông + bảo hành — 400 Xu.
+• Cao — 500 Xu.
+• Cao + bảo hành — 600 Xu.
 
-1. Gõ `/naptien`.
+Ví dụ: chọn gói ảnh 200 Xu để tạo ảnh sản phẩm. Nếu ảnh không tạo được hợp lệ, hệ thống không trừ Xu.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 13: Dùng tài nguyên tự có
+
+🎁 HƯỚNG DẪN DÙNG TÀI NGUYÊN TỰ CÓ
+
+Dùng khi: anh/chị đã có ảnh, nhạc, voice/audio, logo hoặc nội dung riêng.
+
+Cách làm:
+1. Gửi tài nguyên vào đúng bước hệ thống yêu cầu.
+2. Chọn dùng tài nguyên đã gửi.
+3. Xem hóa đơn nếu có phần xử lý mới.
+4. Xác nhận trước khi xử lý.
+
+Cách tính: tài nguyên tự có không tính phí tạo mới. Nếu yêu cầu TOAN AAS tạo mới ảnh, nhạc, voice, phụ đề dịch, lồng tiếng hoặc video thì phần tạo mới tính theo bảng giá tương ứng.
+Ví dụ: dùng ảnh do anh/chị gửi lên trong video không tính phí tạo ảnh.
+
+Mục lục: /huongdan
+
+-----
+
+📘 Hướng dẫn 14: Nạp Xu và xem hóa đơn
+
+💰 HƯỚNG DẪN XU, HÓA ĐƠN VÀ BẢNG GIÁ
+
+Quy đổi: 1 Xu = 100đ. Ví dụ 1.000 Xu tương đương 100.000đ giá trị sử dụng nội bộ trong TOAN AAS.
+
+Cách nạp Xu:
+1. Gõ /naptien.
 2. Chọn mệnh giá.
 3. Thanh toán theo hướng dẫn trong bot.
-4. Gõ `/profile` để kiểm tra số dư.
+4. Gõ /profile để kiểm tra số dư.
 
-Khuyến mãi nạp:
+Cách xem hóa đơn:
+1. Chọn công cụ cần dùng.
+2. Nhập nội dung hoặc chọn gói.
+3. Xem tổng Xu, chiết khấu nếu có và nút xác nhận.
+4. Chỉ xác nhận khi nội dung và giá đã đúng.
 
-- Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.
-- Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.
-- Người dùng quốc tế vẫn có thể nhận quyền lợi hạng thành viên, chiết khấu theo hạng hoặc ưu đãi không gắn với nạp nội địa nếu đủ điều kiện.
+Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.
+Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.
 
-## 8. FAQ / Hoàn Xu
+Mục lục: /huongdan
 
-**1. Tôi chỉ mở menu có bị trừ Xu không?**
+-----
 
-Không. Xem menu, hướng dẫn, bảng giá hoặc thử nhập mô tả chưa làm mất Xu nếu chưa đến bước xác nhận có phí.
+📘 Hướng dẫn 15: FAQ / Hoàn Xu
 
-**2. Khi nào TOAN AAS trừ Xu?**
+❓ FAQ / HOÀN XU
 
-TOAN AAS chỉ trừ Xu khi bạn chọn bước có phí, xem giá và xác nhận xử lý.
+1. Mở menu có bị trừ Xu không? Không.
+2. Khi nào TOAN AAS trừ Xu? Sau khi anh/chị xem hóa đơn và xác nhận bước có phí.
+3. Khi nào được hoàn Xu? Nếu đã trừ Xu nhưng lỗi trước khi có kết quả hợp lệ theo chính sách.
+4. Thiếu Xu thì sao? Bot sẽ báo thiếu Xu và hướng dẫn nạp thêm.
+5. Có nên bấm tạo nhiều lần khi đang chờ không? Không nên; hãy chờ kết quả hoặc liên hệ hỗ trợ.
+6. Cần hỗ trợ thì gửi gì? Gửi ID Telegram, ảnh chụp màn hình, thời gian giao dịch hoặc nội dung yêu cầu gần nhất.
 
-**3. Khi nào được hoàn Xu?**
+Mục lục: /huongdan
 
-Nếu đã trừ Xu nhưng hệ thống lỗi trước khi có kết quả hợp lệ theo chính sách, phần Xu của bước lỗi sẽ được hoàn lại.
+## Bảng giá chi tiết
 
-**4. Thiếu Xu thì sao?**
+💰 Bảng giá tổng TOAN AAS
 
-Bot sẽ báo thiếu Xu và hướng dẫn nạp thêm. Bạn có thể dùng `/naptien` hoặc xem số dư bằng `/profile`.
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
-**5. Có nên bấm tạo nhiều lần khi đang chờ không?**
+• Giọng nói: từ 0.10 Xu / từ.
+• Tạo voice riêng: lần đầu miễn phí, từ lần 2: 50 Xu / voice thành công.
+• Nhạc nền AI: 100 / 150 / 200 Xu.
+• Bài hát có lời: 200 / 250 / 300 Xu.
+• Video AI: theo gói video đang chọn.
+• Tạo phụ đề tự động: miễn phí.
+• Dịch phụ đề: 0.1 Xu / ký tự.
+• Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.
+• Lồng tiếng voice riêng: 0.20 Xu / ký tự.
+• Hình ảnh: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.
+• Tài nguyên tự có của anh/chị: miễn phí nếu hệ thống không cần tạo mới.
 
-Không nên. Hãy chờ kết quả hoặc dùng nút kiểm tra trạng thái nếu bot hiển thị, để tránh tạo trùng yêu cầu.
+Nhóm giá chính
+1. Giọng nói.
+2. Nhạc AI.
+3. Video.
+4. Phụ đề / Lồng tiếng.
+5. Hình ảnh.
+6. Tài liệu / file nếu công cụ đang mở.
+7. Miễn phí / không tính Xu.
+8. Chiết khấu / thành viên.
 
-**6. Cần hỗ trợ thì gửi gì?**
+TOAN AAS sẽ báo giá chi tiết trước khi xử lý.
 
-Hãy gửi ID Telegram, ảnh chụp màn hình, thời gian giao dịch hoặc nội dung yêu cầu gần nhất để TOAN AAS kiểm tra nhanh hơn.
+-----
 
-## 9. Liên hệ
+🎙 Bảng giá Giọng nói
 
-- Admin: @toanaas
-- Bot: @toanaasbot
-- Website: www.toanaas.vn
-- Khi cần hỗ trợ thanh toán hoặc lỗi xử lý, hãy gửi thông tin rõ ràng để TOAN AAS kiểm tra nhanh hơn.
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
+A. Tạo voice riêng
+• Voice riêng đầu tiên tạo thành công: miễn phí.
+• Từ voice riêng thứ 2 trở đi: 50 Xu / voice tạo thành công.
+• Chỉ tính Xu khi tạo voice thành công.
+• Nếu mẫu lỗi, quá ngắn hoặc không tạo được voice hợp lệ: không trừ Xu.
+• Nếu tài khoản vận hành được miễn phí nội bộ, phần hiển thị cho khách vẫn giữ cùng cách báo giá.
+
+B. Tạo audio từ voice
+• 0.10 Xu / từ.
+• Nội dung tối thiểu: 20 từ.
+• Tối thiểu thanh toán: 1 Xu.
+• Không giới hạn từ nếu hệ thống cho phép.
+• Có chỉnh tốc độ 0.1x-2.0x.
+• Có chỉnh âm lượng 0%-200%.
+• 100% là mức âm lượng đã chốt hiện tại.
+• 0% cần xác nhận riêng nếu tạo audio im lặng.
+
+Ví dụ
+• Anh/chị tạo audio 100 từ: 100 × 0.10 = 10 Xu, giảm số lượng 10%, tổng còn 9 Xu.
+• Anh/chị nhập 20 từ: 20 × 0.10 = 2 Xu.
+• Anh/chị tạo voice riêng lần đầu: 0 Xu.
+• Anh/chị tạo voice riêng lần thứ 2: 50 Xu nếu tạo thành công.
+
+-----
+
+🎵 Bảng giá Nhạc AI
+
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
+A. Nhạc nền / không lời
+• Cơ bản: 100 Xu.
+• Tiêu chuẩn: 150 Xu.
+• Cao cấp: 200 Xu.
+
+B. Bài hát có lời
+• Cơ bản: 200 Xu.
+• Tiêu chuẩn: 250 Xu.
+• Cao cấp: 300 Xu.
+
+Nhạc nền dùng cho video quảng cáo, intro, nền TikTok/Facebook hoặc nội dung giới thiệu sản phẩm. Mặc định không có giọng hát.
+Bài hát có lời dùng để tạo bài hát có giọng hát, có thể chọn giọng nam, giọng nữ, song ca hoặc tự động. TOAN AAS sẽ tạo 3 gợi ý để anh/chị chọn trước khi tạo nhạc.
+
+Cách tính
+• Tính theo mỗi lần tạo file nhạc thành công.
+• Không trừ Xu trước khi xác nhận.
+• Không trừ Xu nếu hệ thống không tạo được file nhạc hợp lệ.
+• Nếu tài khoản vận hành được miễn phí nội bộ, phần hiển thị cho khách vẫn giữ cùng cách báo giá.
+
+Ví dụ
+• Nhạc nền Tiêu chuẩn: tổng thanh toán 150 Xu.
+• Bài hát có lời Cao cấp, giọng nữ: tổng thanh toán 300 Xu.
+• Bấm Đổi gợi ý: không trừ Xu, chỉ tạo gợi ý mới.
+
+-----
+
+🎬 Bảng giá Video
+
+Bảng này giữ nguyên các gói video hiện có trong hệ thống.
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
+• Video 200 Xu: gói trải nghiệm.
+• Video 300 Xu: gói cơ bản.
+• Video 400 Xu: gói phổ thông.
+• Video 500 Xu: gói nâng cao.
+• Video 600 Xu: gói bán hàng.
+• Video 800 Xu: gói cao cấp.
+• Video 1000 Xu: gói chuyên nghiệp.
+• Video 1200 Xu: gói Pro Plus.
+• Video 1500 Xu: gói Premium.
+
+Miễn phí trong video khi dùng tài nguyên có sẵn
+• Watermark/logo chữ có sẵn nếu không tạo mới: miễn phí.
+• Dùng ảnh của khách: miễn phí phần tài nguyên ảnh.
+• Dùng nhạc của khách: miễn phí phần tài nguyên nhạc.
+• Dùng voice/audio có sẵn của khách: miễn phí phần tài nguyên có sẵn.
+• Tạo phụ đề gốc tự động từ voice/lời đọc có sẵn trong quy trình video: miễn phí nếu chỉ tạo phụ đề gốc.
+• Logo tự tạo bằng công cụ ảnh riêng: tính theo bảng giá Hình ảnh, không tính trong video nếu khách tự đưa tài nguyên.
+
+Ví dụ
+• Anh/chị chọn gói video 300 Xu, bật voice mặc định và nhạc mặc định miễn phí theo gói. Tổng thanh toán vẫn là 300 Xu nếu không chọn thêm tác vụ tạo mới tính phí.
+• Nếu anh/chị chọn tạo ảnh/logo AI riêng bên ngoài, phần ảnh sẽ tính theo bảng giá Hình ảnh.
+
+-----
+
+🌐 Bảng giá Phụ đề / Lồng tiếng
+
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
+A. Tạo phụ đề tự động
+• Miễn phí.
+• Chỉ tạo phụ đề gốc từ video/audio/lời đọc.
+• Không dịch, không lồng tiếng nếu chưa chọn thêm tác vụ.
+
+B. Dịch phụ đề
+• 0.1 Xu / ký tự.
+• Trên 1.000 ký tự: giảm 10%.
+• Trên 10.000 ký tự: giảm 20%.
+• Hệ thống hiển thị rõ số ký tự tính phí trước khi xử lý.
+
+C. Lồng tiếng giọng mặc định
+• 0.10 Xu / ký tự.
+• Trên 1.000 ký tự: giảm 10%.
+• Trên 10.000 ký tự: giảm 20%.
+
+D. Lồng tiếng voice riêng
+• 0.20 Xu / ký tự.
+• Trên 1.000 ký tự: giảm 10%.
+• Trên 10.000 ký tự: giảm 20%.
+
+E. Phụ đề + Lồng tiếng
+Tổng = giá dịch phụ đề + giá lồng tiếng.
+
+Ví dụ
+• Dịch phụ đề 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
+• Lồng tiếng giọng mặc định 2.000 ký tự: giá gốc 100 Xu, giảm 10%, tổng còn 90 Xu.
+• Lồng tiếng voice riêng 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
+• Phụ đề + lồng tiếng: 180 Xu + 90 Xu = 270 Xu.
+
+-----
+
+🖼 Bảng giá Hình ảnh
+
+TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
+
+• Ảnh 50 Xu: tác vụ ảnh nhẹ / cơ bản.
+• Ảnh 150-200 Xu: tạo hoặc chỉnh ảnh tiêu chuẩn.
+• Ảnh 300-400 Xu: ảnh chất lượng cao, nhiều chi tiết hơn.
+• Ảnh 500-600 Xu: ảnh cao cấp, nhiều ảnh hoặc tác vụ nặng nếu hệ thống có.
+
+Gợi ý chọn gói
+• 50 Xu: tác vụ ảnh nhẹ / cơ bản nếu hệ thống đang hỗ trợ.
+• 150-200 Xu: tạo/chỉnh ảnh tiêu chuẩn.
+• 300-400 Xu: ảnh chất lượng cao / nhiều chi tiết.
+• 500-600 Xu: ảnh cao cấp / nhiều ảnh / tác vụ nặng nếu hệ thống có.
+
+Ví dụ
+Anh/chị chọn gói ảnh 200 Xu để tạo ảnh sản phẩm. TOAN AAS hiển thị hóa đơn 200 Xu trước khi xử lý. Nếu ảnh không tạo được hợp lệ, hệ thống không trừ Xu.
+
+-----
+
+📄 Bảng giá Tài liệu / File
+
+• Ảnh sang PDF: 0 Xu.
+• PDF sang ảnh: 0 Xu.
+• PDF sang Word text: 0 Xu nếu công cụ đang mở.
+• Nén PDF: 0 Xu.
+• Tách PDF: 0 Xu.
+• Gộp PDF: 0 Xu.
+• Các công cụ tài liệu đang thử nghiệm vẫn hiển thị rõ giá trước khi xử lý.
+
+TOAN AAS vẫn hiển thị rõ trước khi xử lý nếu một công cụ tài liệu có phí trong tương lai.
+
+-----
+
+🎁 Những phần miễn phí
+
+• Xem demo voice: miễn phí.
+• Đổi gợi ý nhạc: miễn phí.
+• Tạo gợi ý bài hát/nhạc: miễn phí.
+• Tạo phụ đề gốc tự động: miễn phí.
+• Dùng ảnh do anh/chị gửi lên: không tính phí tạo ảnh.
+• Dùng nhạc do anh/chị gửi lên: không tính phí tạo nhạc.
+• Dùng voice/audio có sẵn của anh/chị: không tính phí tạo voice mới.
+• Watermark/logo chữ có sẵn trong video: miễn phí nếu không tạo ảnh/logo mới.
+• Xem hóa đơn/tính thử giá: miễn phí.
+• Hủy trước xác nhận: không trừ Xu.
+
+Nếu anh/chị yêu cầu TOAN AAS tạo mới ảnh, voice, nhạc, phụ đề dịch, lồng tiếng hoặc video thì phần tạo mới sẽ tính theo bảng giá tương ứng.
+
+-----
+
+🎁 Khuyến mãi & Thành viên
+
+Chiết khấu thành viên hiện tại
+• Chiết khấu thành viên: chưa kích hoạt.
+
+Cách cộng dồn
+1. Tính giá gốc theo sản phẩm.
+2. Áp dụng chiết khấu theo số lượng/ký tự nếu có.
+3. Áp dụng chiết khấu thành viên trên số còn lại.
+4. Áp dụng voucher/khuyến mãi nếu hệ thống có, theo chính sách hiện có.
+5. Làm tròn theo đơn vị Xu hiện tại của ví.
+6. Hiển thị tổng cuối trước xác nhận.
+
+Ví dụ có thành viên giảm 10%
+Dịch phụ đề 2.000 ký tự: giá gốc 200 Xu, giảm số lượng 10% còn 180 Xu, thành viên giảm thêm 10% còn 162 Xu. Tổng thanh toán: 162 Xu.
+
+Ví dụ không có thành viên
+Dịch phụ đề 2.000 ký tự: tổng thanh toán sau giảm số lượng là 180 Xu.
+
+Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam theo điều kiện từng chương trình.

@@ -751,8 +751,8 @@
           </ul>
         </div>
         <div class="card-grid">
-          <article class="compact-card"><span class="mini-label">TTS</span><h3>Văn bản thành giọng nói</h3><p>Chọn giọng, nhập nội dung, kiểm tra cấu hình và nghe bản thử ngắn trước khi xác nhận.</p></article>
-          <article class="compact-card"><span class="mini-label">STT</span><h3>Giọng nói thành văn bản</h3><p>Chuyển audio thành nội dung chữ để làm phụ đề, ghi chú hoặc tái sử dụng nội dung.</p></article>
+          <article class="compact-card"><span class="mini-label">Giọng đọc</span><h3>Văn bản thành giọng nói</h3><p>Chọn giọng, nhập nội dung, kiểm tra cấu hình và nghe bản thử ngắn trước khi xác nhận.</p></article>
+          <article class="compact-card"><span class="mini-label">Ghi âm</span><h3>Giọng nói thành văn bản</h3><p>Chuyển audio thành nội dung chữ để làm phụ đề, ghi chú hoặc tái sử dụng nội dung.</p></article>
           <article class="compact-card"><span class="mini-label">Voice</span><h3>Kho voice &amp; voice riêng</h3><p>Chọn voice có sẵn hoặc tạo voice riêng theo phạm vi sử dụng hợp lệ và được kiểm soát.</p></article>
           <article class="compact-card"><span class="mini-label">Music</span><h3>Nhạc nền AI</h3><p>Tạo nhạc theo phong cách và thời lượng 15, 30, 60 giây hoặc tùy chỉnh.</p></article>
           <article class="compact-card"><span class="mini-label">Song</span><h3>Bài hát có lời</h3><p>Chuẩn bị ý tưởng, lời và phạm vi theo giây, nửa bài hoặc full bài trước khi xử lý.</p></article>
@@ -812,16 +812,22 @@
         <div class="pricing-card">
           <h3>Nguyên tắc rõ ràng</h3>
           <ul class="pricing-list">
-            <li>Bot luôn báo giá trước khi xử lý.</li>
-            <li>Tác vụ trả phí chỉ xử lý sau khi xác nhận.</li>
+            <li>Bot luôn báo giá trước khi xử lý; chỉ trừ Xu sau khi khách xác nhận và có kết quả hợp lệ.</li>
+            <li>Giọng nói: audio từ voice 0.10 Xu/từ, tối thiểu 20 từ; voice riêng đầu tiên miễn phí, từ voice thứ 2 là 50 Xu.</li>
+            <li>Nhạc nền AI: 100 / 150 / 200 Xu. Bài hát có lời: 200 / 250 / 300 Xu.</li>
+            <li>Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu. Gói Trải nghiệm 200 Xu dùng để thử ý tưởng nhanh.</li>
+            <li>Phụ đề gốc tự động miễn phí; dịch phụ đề 0.1 Xu/ký tự; lồng tiếng giọng mặc định 0.10 Xu/ký tự; lồng tiếng voice riêng 0.20 Xu/ký tự.</li>
             <li>Bảng giá tạo ảnh: 50, 150, 200, 300, 400, 500 và 600 Xu.</li>
-            <li>Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu.</li>
-            <li>Gói Trải nghiệm 200 Xu dùng để test ý tưởng nhanh hoặc tạo bản nháp ngắn.</li>
+            <li>Chiết khấu theo số lượng/ký tự: trên 1.000 ký tự giảm 10%, trên 10.000 ký tự giảm 20%; chiết khấu thành viên áp dụng theo hạng hiện có nếu đang mở.</li>
+            <li>Ví dụ: dịch phụ đề 2.000 ký tự = 200 Xu, giảm 10%, còn 180 Xu; gói video Cơ bản 300 Xu làm 3 cảnh giảm 10% còn 810 Xu.</li>
             <li>Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam; không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.</li>
           </ul>
           <div class="pricing-actions">
             <a class="button light" href="https://t.me/toanaasbot" target="_blank" rel="noopener">💰 Nạp Xu trong bot</a>
-            <a class="button" href="/download/huong-dan-toan-aas.docx">📘 Hướng dẫn V2 cập nhật</a>
+            <a class="button" href="/pricing">📊 Xem bảng giá</a>
+            <a class="button" href="/guide">📘 Xem hướng dẫn</a>
+            <a class="button subtle" href="/download/bang-gia-toan-aas.md">📥 Tải bảng giá</a>
+            <a class="button subtle" href="/download/huong-dan-su-dung-toan-aas.md">📘 Tải hướng dẫn</a>
           </div>
         </div>
       </div>
@@ -901,12 +907,16 @@
   <footer>
     <div class="container footer-row">
       <div>
-        <strong class="footer-title">TOAN AAS — AI Automation System</strong>
+        <strong class="footer-title">TOAN AAS — Trợ lý AI cho nội dung và công việc</strong>
         <p class="footer-copy">Hệ thống AI cho nội dung, video, âm thanh, hình ảnh, tài liệu và vận hành số — bắt đầu đơn giản từ Telegram.</p>
       </div>
       <div class="footer-links">
         <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">Bot Telegram</a>
         <a href="https://t.me/toanaas" target="_blank" rel="noopener">Admin</a>
+        <a href="/pricing">Bảng giá</a>
+        <a href="/guide">Hướng dẫn</a>
+        <a href="/download/bang-gia-toan-aas.md">Tải bảng giá</a>
+        <a href="/download/huong-dan-su-dung-toan-aas.md">Tải hướng dẫn</a>
         <a href="/download/huong-dan-toan-aas.docx">Hướng dẫn V2 cập nhật</a>
         <a href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener">Điều khoản</a>
       </div>

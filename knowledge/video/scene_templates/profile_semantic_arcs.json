@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0.0",
+  "profiles": {
+    "architecture": [
+      {"role": "establish_space", "idea": "Thiết lập toàn cảnh không gian và quan hệ hình khối", "action": "Camera hoàn tất một chuyển động mở để người xem hiểu toàn bộ không gian", "completion": "Bố cục tổng thể đã được nhận diện rõ"},
+      {"role": "geometry_material", "idea": "Làm rõ hình học, vật liệu và chi tiết chủ đạo", "action": "Camera tiến gần có chủ đích và dừng sau khi vật liệu chính được nhìn rõ", "completion": "Hình học và vật liệu chủ đạo đã được xác lập"},
+      {"role": "spatial_movement", "idea": "Dẫn người xem di chuyển hợp lý qua không gian", "action": "Camera đi hết một tuyến không gian liên tục và kết thúc tại điểm chuyển tiếp", "completion": "Tuyến di chuyển đã hoàn tất tại điểm nối tự nhiên"},
+      {"role": "transformation_reveal", "idea": "Thể hiện thay đổi hoặc hé lộ giá trị thiết kế", "action": "Không gian chuyển từ trạng thái ban đầu sang trạng thái thiết kế hoàn chỉnh", "completion": "Sự thay đổi đã hiện rõ và ổn định"},
+      {"role": "hero_result", "idea": "Khép lại bằng góc nhìn anh hùng của công trình", "action": "Camera hoàn tất cú reveal cuối và giữ khung hình đủ lâu để ghi nhớ", "completion": "Kết quả kiến trúc hoàn chỉnh được trình bày trọn vẹn"}
+    ],
+    "real_estate": [
+      {"role": "exterior_entry", "idea": "Giới thiệu ngoại thất và lối vào tài sản", "action": "Camera đi từ mốc nhận diện bên ngoài tới cửa vào và dừng tự nhiên", "completion": "Vị trí và lối vào đã được xác lập"},
+      {"role": "living_areas", "idea": "Trình bày khu sinh hoạt chính", "action": "Camera đi hết khu sinh hoạt để thể hiện công năng và độ thoáng", "completion": "Khu sinh hoạt chính đã được trình bày đầy đủ"},
+      {"role": "key_rooms", "idea": "Làm rõ một phòng quan trọng", "action": "Camera hoàn thành một vòng nhìn có chủ đích quanh phòng", "completion": "Công năng và điểm mạnh của phòng đã rõ"},
+      {"role": "amenity_detail", "idea": "Nêu bật tiện ích hoặc chi tiết có giá trị", "action": "Camera tập trung và hoàn tất phần chứng minh tiện ích", "completion": "Giá trị tiện ích đã được chứng minh"},
+      {"role": "listing_hero_cta", "idea": "Kết luận bằng hình ảnh tài sản và lời mời hành động", "action": "Camera ổn định ở góc đẹp nhất khi CTA được nói hết", "completion": "Tài sản và CTA đã khép lại trọn vẹn"}
+    ],
+    "product": [
+      {"role": "problem_context", "idea": "Nêu một vấn đề hoặc nhu cầu cụ thể của người dùng", "action": "Tình huống vấn đề diễn ra và kết thúc ở nhu cầu rõ ràng", "completion": "Vấn đề đã được hiểu đầy đủ"},
+      {"role": "product_introduction", "idea": "Giới thiệu sản phẩm như câu trả lời cho nhu cầu", "action": "Sản phẩm xuất hiện trọn vẹn và dừng ở góc nhận diện rõ", "completion": "Sản phẩm đã được nhận diện chính xác"},
+      {"role": "feature_proof", "idea": "Chứng minh một tính năng hoặc lợi ích chính", "action": "Tính năng được thực hiện từ đầu tới kết quả nhìn thấy được", "completion": "Lợi ích chính đã được chứng minh"},
+      {"role": "usage", "idea": "Thể hiện cách dùng sản phẩm trong bối cảnh thật", "action": "Người dùng hoàn tất một lần sử dụng có kết quả", "completion": "Cách dùng và kết quả đã rõ"},
+      {"role": "result_cta", "idea": "Khép lại bằng thành quả và CTA", "action": "Kết quả được giữ đủ lâu trong khi CTA được nói hết", "completion": "Thành quả và CTA đã kết thúc trọn vẹn"}
+    ],
+    "fashion": [
+      {"role": "look_introduction", "idea": "Giới thiệu tổng thể bộ trang phục", "action": "Nhân vật vào vị trí và hoàn tất tư thế mở đầu", "completion": "Tổng thể look đã được nhận diện"},
+      {"role": "outfit_detail", "idea": "Làm rõ một chi tiết chất liệu hoặc kiểu dáng", "action": "Camera đi hết chi tiết và dừng ở điểm nhấn", "completion": "Chi tiết trang phục đã được nhìn rõ"},
+      {"role": "movement", "idea": "Thể hiện trang phục trong chuyển động tự nhiên", "action": "Nhân vật hoàn tất một chuỗi chuyển động và dừng đúng nhịp", "completion": "Độ rủ và chuyển động trang phục đã được thể hiện"},
+      {"role": "environment_lookbook", "idea": "Kết nối trang phục với bối cảnh lookbook", "action": "Nhân vật đi hết điểm diễn trong bối cảnh và vào vị trí cuối", "completion": "Phong cách và bối cảnh đã hòa làm một"},
+      {"role": "hero_pose", "idea": "Khép lại bằng tư thế hero hoàn chỉnh", "action": "Nhân vật hoàn tất tư thế cuối và giữ khung hình ổn định", "completion": "Hình ảnh thời trang cuối đã trọn vẹn"}
+    ],
+    "vfx": [
+      {"role": "normal_state", "idea": "Thiết lập trạng thái bình thường trước hiệu ứng", "action": "Chủ thể hoàn tất hành động nền để trạng thái ban đầu rõ ràng", "completion": "Trạng thái ban đầu đã được xác lập"},
+      {"role": "effect_buildup", "idea": "Tích lũy tín hiệu cho hiệu ứng chính", "action": "Năng lượng hoặc dấu hiệu tăng dần và chạm điểm kích hoạt", "completion": "Hiệu ứng đã sẵn sàng bùng nổ"},
+      {"role": "main_transformation", "idea": "Thực hiện biến đổi VFX chính", "action": "Biến đổi diễn ra từ đầu tới khi hình thái mới ổn định", "completion": "Biến đổi chính đã hoàn tất"},
+      {"role": "impact", "idea": "Thể hiện tác động của biến đổi lên bối cảnh", "action": "Sóng tác động đi hết không gian và lắng lại", "completion": "Tác động đã kết thúc và bối cảnh ổn định"},
+      {"role": "resolved_state", "idea": "Khép lại ở trạng thái sau hiệu ứng", "action": "Camera reveal kết quả cuối rồi dừng tự nhiên", "completion": "Trạng thái VFX cuối đã rõ và trọn vẹn"}
+    ],
+    "animation": [
+      {"role": "character_setup", "idea": "Giới thiệu nhân vật và trạng thái ban đầu", "action": "Nhân vật hoàn tất hành động giới thiệu ngắn", "completion": "Nhân vật và hoàn cảnh đã rõ"},
+      {"role": "motivation", "idea": "Làm rõ mục tiêu hoặc động lực của nhân vật", "action": "Nhân vật nhận ra mục tiêu và đưa ra quyết định", "completion": "Động lực hành động đã được xác lập"},
+      {"role": "action", "idea": "Thực hiện hành động trung tâm", "action": "Nhân vật thực hiện trọn một hành động có đầu và cuối", "completion": "Hành động chính đã hoàn tất"},
+      {"role": "consequence", "idea": "Cho thấy hệ quả trực tiếp của hành động", "action": "Hệ quả diễn ra và đi đến trạng thái ổn định", "completion": "Hệ quả đã được hiểu rõ"},
+      {"role": "resolution", "idea": "Giải quyết câu chuyện của nhân vật", "action": "Nhân vật hoàn tất phản ứng cuối và câu chuyện khép lại", "completion": "Mạch nhân vật đã kết thúc trọn vẹn"}
+    ],
+    "tutorial": [
+      {"role": "problem", "idea": "Nêu vấn đề cần giải quyết", "action": "Minh họa vấn đề hoàn chỉnh và dừng ở câu hỏi rõ", "completion": "Vấn đề đã được xác định"},
+      {"role": "step", "idea": "Giới thiệu một bước xử lý cụ thể", "action": "Bước được trình bày từ điểm bắt đầu đến điều kiện hoàn tất", "completion": "Người xem hiểu điều cần làm"},
+      {"role": "demonstration", "idea": "Thực hiện minh họa thực tế", "action": "Thao tác được làm trọn vẹn không cắt giữa chừng", "completion": "Thao tác minh họa đã hoàn tất"},
+      {"role": "result", "idea": "Đối chiếu kết quả sau thao tác", "action": "Kết quả được kiểm tra và xác nhận rõ", "completion": "Kết quả đã được chứng minh"},
+      {"role": "recap", "idea": "Tóm tắt và khép lại hướng dẫn", "action": "Các điểm chính được nhắc đủ và câu kết được nói hết", "completion": "Hướng dẫn đã kết thúc trọn vẹn"}
+    ]
+  }
+}

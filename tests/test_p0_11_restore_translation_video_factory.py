@@ -14,32 +14,58 @@ def test_translation_gateway_has_language_and_video_factory():
     labels = _labels(bot.translation_menu_keyboard("vi"))
     assert "Trung tâm dịch" in text
     assert "🌐 Dịch ngôn ngữ" in labels
-    assert "🎬 Dịch phụ đề, lồng tiếng" in labels
+    assert "🎬 Phụ đề / Lồng tiếng" in labels
     assert "menu|translation_language_hub" in _callbacks(bot.translation_menu_keyboard("vi"))
     assert "menu|translation_video_factory" in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_document" not in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_voice" not in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_subtitle_file" not in _callbacks(bot.translation_menu_keyboard("vi"))
 
 
 def test_language_translation_menu_restored():
     labels = _labels(bot.translation_language_hub_keyboard("vi"))
+    assert labels == [
+        "📝 Văn bản",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "💬 Hội thoại",
+        "🔁 Dịch 2 chiều",
+        "🌐 Dịch tự động",
+        "⚙️ Ngôn ngữ",
+        "⏹ Tắt dịch tự động",
+        "⬅️ Trung tâm",
+        "🏠 Menu chính",
+    ]
     assert "🔁 Dịch 2 chiều" in labels
     assert "💬 Hội thoại" in labels
     assert "📝 Văn bản" in labels
-    assert "📄 Tài liệu" in labels
-    assert "🎧 Audio" in labels
+    assert "📄 Dịch file" in labels
+    assert "🎧 Dịch audio" in labels
     assert "⚙️ Ngôn ngữ" in labels
     assert "🌐 Dịch tự động" in labels
+    assert "⏹ Tắt dịch tự động" in labels
+    assert "📄 Tài liệu" not in labels
+    assert "🎧 Audio" not in labels
     assert "⬅️ Trung tâm" in labels
 
 
 def test_video_factory_menu_from_gateway():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert "👁 Tạo phụ đề tự động" in labels
-    assert "🗣 Lồng tiếng tự động" in labels
-    assert "🎬 Phụ đề + lồng tiếng" in labels
-    assert "🔗 Tải video từ link" in labels
-    assert "📂 Media" in labels
-    assert "📝 Chỉnh phụ đề" in labels
-    assert "⬅️ Trung tâm" in labels
+    for label in (
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
+        "🎞 Phụ đề + Lồng tiếng",
+    ):
+        assert label in labels
+    assert "📄 Dịch file" not in labels
+    assert "🎧 Dịch audio" not in labels
+    assert "📄 Dịch file phụ đề" not in labels
+    assert "🧾 Bóc lời thoại" not in labels
+    assert "🔗 Tải video từ link" not in labels
+    assert "📂 Media" not in labels
+    assert "📝 Chỉnh phụ đề" not in labels
+    assert "⬅️ Trung tâm dịch" in labels
 
 
 def test_back_language_menu_to_gateway():
@@ -122,7 +148,7 @@ def test_social_link_rights_notice():
 
 def test_subtitle_flow_no_voice_selection():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert "👁 Xem thử" in labels
+    assert "👁 Xem thử" not in labels
     assert "✅ Xác nhận tạo đầy đủ" in labels
     assert "📄 Xuất SRT" not in labels
     assert not any("giọng" in label.lower() for label in labels)
@@ -135,7 +161,7 @@ def test_subtitle_export_after_generation():
         "subtitle_ref": "video_dubbing_artifact:test:subtitle",
     }))
     assert "videodub|output|srt" in callbacks
-    assert "videodub|output|burn" in callbacks
+    assert "videodub|output|burn" not in callbacks
     assert "videodub|output|both" not in callbacks
 
 
@@ -146,7 +172,7 @@ def test_subtitle_continue_to_dubbing_option():
 
 def test_translate_subtitle_no_voice_selection():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert "✅ Xác nhận tạo đầy đủ" in labels
+    assert "✅ Xác nhận tạo đầy đủ" not in labels
     assert "📄 Xuất SRT" not in labels
     assert not any("lồng tiếng" in label.lower() for label in labels)
     assert not any("giọng" in label.lower() for label in labels)
@@ -155,7 +181,7 @@ def test_translate_subtitle_no_voice_selection():
 def test_translate_subtitle_export_before_dubbing():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
     assert "videodub|output|srt" not in callbacks
-    assert "videodub|final" in callbacks
+    assert "videodub|final" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
 
 
@@ -172,8 +198,11 @@ def test_auto_dubbing_voice_selection_required():
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "👩 Giọng nữ mặc định" in labels
     assert "👨 Giọng nam mặc định" in labels
-    assert "📂 Kho voice" in labels
+    assert "📚 Kho voice" in labels
     assert "🎙 Tạo voice riêng" in labels
+    admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
+    assert "📚 Kho voice" in admin_labels
+    assert "🎙 Tạo voice riêng" in admin_labels
 
 
 def test_auto_dubbing_voice_settings():
@@ -186,10 +215,11 @@ def test_auto_dubbing_voice_settings():
 
 def test_auto_dubbing_public_confirmation_clean():
     text = bot.video_dubbing_confirm_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_duration": 61, "voice_style": "Giọng nữ"}, "vi")
-    assert "Video đã sẵn sàng lồng tiếng" in text
-    assert "Chi phí dự kiến" not in text
+    assert "Lồng tiếng video" in text
+    assert "Xuất video MP4 lồng tiếng" in text
+    assert "Tổng:" in text
     assert "Tác vụ:" not in text
-    assert "TOAN AAS chưa xử lý và chưa trừ Xu" in text
+    assert "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận" in text
 
 
 def test_translate_dub_translate_first_then_voice():
@@ -200,8 +230,8 @@ def test_translate_dub_translate_first_then_voice():
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "📄 Xuất SRT" in labels
-    assert "🗣 Tiếp tục lồng tiếng" in labels
+    assert "📄 Tải SRT" not in labels
+    assert "🎙 Lồng tiếng từ bản dịch này" in labels
 
 
 def test_translate_dub_can_export_srt_before_voice():
@@ -210,14 +240,15 @@ def test_translate_dub_can_export_srt_before_voice():
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }))
     assert "videodub|output|srt" not in callbacks
-    assert "videodub|final" in callbacks
+    assert "videodub|final" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
     ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }))
-    assert "videodub|continue_dubbing" in ready_callbacks
+    assert "videodub|combo_dub_translated" in ready_callbacks
+    assert "videodub|continue_dubbing" not in ready_callbacks
 
 
 def test_subtitle_editor_line_number_edit():

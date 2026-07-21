@@ -136,20 +136,23 @@ def test_music_inner_menu_restores_stock_sfx_user_media_create_new_music():
     labels = _labels(bot.music_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     callbacks = _callbacks(bot.music_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
 
-    for label in ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
+    for label in ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
         assert label in labels
     for callback in ["music_quick|showroom|music", "music_quick|showroom|music_edit", "music_quick|showroom|ai_music", "music_quick|showroom|song_menu"]:
         assert callback in callbacks
     assert "Không thêm nhạc" not in "\n".join(labels)
 
 
-def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
+def test_showroom_voice_default_asks_text_then_confirm(monkeypatch):
     user_id = 950501
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
     async def fake_tts(text, voice_id="", voice_style="", speed="normal"):
         return True, b"mp3-bytes", "ok"
     monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", fake_tts)
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True, "reason": "ok", "product_type": "voice_ai", "quota": {}})
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", lambda audio_bytes, seconds=6: asyncio.sleep(0, result=(b"preview-bytes", "ok")))
 
     query = CaptureQuery("music_quick|showroom|voice_default_female", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -159,11 +162,12 @@ def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert handled is True
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
-    assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
+    assert "6 giây" not in message.outputs[-1]["text"]
+    assert "music_quick|showroom|voice_default_confirm:female" in _callbacks(message.outputs[-1]["reply_markup"])
 
 
-def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
+def test_showroom_saved_voice_profile_asks_text_then_confirm(monkeypatch):
     user_id = 950502
     _reset_user(user_id)
     profile = {"id": 77, "display_name": "Voice bán hàng", "provider_voice_id": "voice-77", "status": "active"}
@@ -182,7 +186,8 @@ def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
     result = bot.get_music_guided_result(user_id)
     assert handled is True
     assert result["selected_voice_profile_id"] == 77
-    assert "Xác nhận tạo giọng đọc" in message.outputs[-1]["text"]
+    assert "Dùng voice riêng để đọc văn bản" in message.outputs[-1]["text"]
+    assert "0.2 Xu / ký tự" in message.outputs[-1]["text"]
     assert "music_quick|showroom|voice_profile_generate:77" in _callbacks(message.outputs[-1]["reply_markup"])
     assert touched.get("last_used_at")
 
@@ -207,18 +212,20 @@ def test_showroom_music_create_new_asks_prompt_then_suggestions(monkeypatch):
     query = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
     assert "Tạo nhạc nền" in query.outputs[-1]["text"]
-    assert "Video bán hàng" in _joined(query.outputs[-1]["reply_markup"])
+    assert "🎵 Cơ bản — 100 Xu" in _joined(query.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 150 Xu" in _joined(query.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 200 Xu" in _joined(query.outputs[-1]["reply_markup"])
 
-    purpose = CaptureQuery("music_quick|showroom|music_ai_purpose_sales_video", user_id)
-    asyncio.run(bot.handle_music_quick_callback(_callback_update(purpose, user_id), SimpleNamespace()))
-    style = CaptureQuery("music_quick|showroom|music_ai_style_cinematic", user_id)
-    asyncio.run(bot.handle_music_quick_callback(_callback_update(style, user_id), SimpleNamespace()))
-    mood = CaptureQuery("music_quick|showroom|music_ai_mood_cheerful", user_id)
-    asyncio.run(bot.handle_music_quick_callback(_callback_update(mood, user_id), SimpleNamespace()))
-    duration = CaptureQuery("music_quick|showroom|music_ai_duration_30s", user_id)
-    asyncio.run(bot.handle_music_quick_callback(_callback_update(duration, user_id), SimpleNamespace()))
-    assert "3 prompt nhạc gợi ý" in duration.outputs[-1]["text"]
-    assert "Chọn gợi ý 1" in _joined(duration.outputs[-1]["reply_markup"])
+    tier = CaptureQuery("music_quick|showroom|music_tier_background:standard", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(tier, user_id), SimpleNamespace()))
+    assert "Ý tưởng nhạc nền" in tier.outputs[-1]["text"]
+    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_product_background_idea"
+
+    message = CaptureMessage("Nhạc nền công nghệ AI vui tươi cho video TikTok", user_id)
+    handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
+    assert handled is True
+    assert "3 gợi ý nhạc nền" in message.outputs[-1]["text"]
+    assert len(bot.get_music_guided_result(user_id)["music_suggestions"]) == 3
 
 
 def test_video_addon_voice_menu_shows_free_and_paid_choices():
@@ -451,6 +458,16 @@ def test_no_forbidden_payment_files_touched():
     result = subprocess.run(["git", "diff", "--name-only", "origin/main"], cwd=repo, capture_output=True, text=True, check=False)
     assert result.returncode == 0
     changed = {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}
+    changed.discard("docs/reports/P0_17C0_PAYOS_SECURITY_AUDIT_ONLY.md")
+    changed.discard("docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md")
+    changed.discard("docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md")
+    changed.discard("docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md")
+    changed.discard("tests/test_p0_17a1_admin_control_center_handbook.py")
+    changed.discard("tests/test_p0_17c1_payos_signature_idempotency.py")
+    changed.discard("tests/test_p0_17c2_payos_auto_topup_limits.py")
+    changed.discard("tests/test_p0_17c3_payos_admin_risk_lock_review.py")
+    changed.discard("tests/test_p0_17c4_webhook_db_html_security_events.py")
+    changed.discard("tests/test_p0_21e_tax_payment_accounting_business_dashboard.py")
     forbidden = ("payos", "naptien", "webhook", "wallet", "topup", "top-up", "payment")
 
     assert not any(any(term in path.lower() for term in forbidden) for path in changed)

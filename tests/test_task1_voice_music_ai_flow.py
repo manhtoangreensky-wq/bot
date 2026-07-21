@@ -30,7 +30,7 @@ def test_voice_menu_compact(monkeypatch):
 
 def test_music_menu_compact():
     assert _rows(bot.music_hub_keyboard("vi")) == [
-        ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời"],
+        ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời"],
         ["📂 Kho nhạc", "🎚 Cắt/ghép nhạc"],
         ["⬅️ Studio âm thanh", "🏠 Menu chính"],
     ]
@@ -97,7 +97,8 @@ def test_saved_voice_uses_real_voice_id():
     assert bot.get_tts_voice_id("saved_voice", profile) == "toanaas-real-voice-123"
     source = inspect.getsource(bot.send_paid_saved_voice_tts_result)
     assert 'profile.get("provider_voice_id")' in source
-    assert "refund_charged_credit" in source
+    assert "spend_fixed_credit_info" in source
+    assert source.index("execute_engine(") < source.index("spend_fixed_credit_info")
 
 
 def test_voice_vault_number_select(monkeypatch):
@@ -161,7 +162,7 @@ def test_music_preview_6s_not_full_duration():
     result = {"guided_duration_seconds": 60, "music_ai_kind": "guided", "selected_prompt": "nhạc nền"}
     text = bot.music_ai_preview_text(result, "vi")
     assert "Thời lượng bản đầy đủ: <b>60 giây</b>" in text
-    assert "tối đa 6 giây" in text
+    assert "Preview: <b>12 giây đầu</b>" in text
     callbacks = _callbacks(bot.music_ai_preview_keyboard("vi", result=result))
     assert "music_quick|showroom|music_ai_preview" in callbacks
     assert "music_quick|showroom|music_ai_confirm" in callbacks
@@ -175,9 +176,9 @@ def test_music_provider_guard_clean():
 
 
 def test_song_seconds_full_guided_flow():
-    assert _rows(bot.music_song_product_keyboard("vi"))[0] == ["1️⃣ Nửa bài", "2️⃣ Full bài"]
+    assert _rows(bot.music_song_product_keyboard("vi"))[0] == ["🎤 Bài hát có lời AI"]
     assert "⏱ Theo số giây" not in _labels(bot.music_song_product_keyboard("vi"))
-    assert "2️⃣ Full bài" in _labels(bot.music_song_product_keyboard("vi"))
+    assert "🎤 Bài hát có lời AI" in _labels(bot.music_song_product_keyboard("vi"))
     assert [item[0] for item in bot.MUSIC_SONG_GENRES] == ["pop", "ballad", "rap", "edm", "acoustic", "bolero", "custom"]
     assert "music_quick|showroom|song_back_topic" in _callbacks(bot.music_song_options_keyboard("genre", "vi"))
     assert "music_quick|showroom|song_back_genre" in _callbacks(bot.music_song_options_keyboard("mood", "vi"))
@@ -196,24 +197,23 @@ def test_song_half_structure():
         "guided_mood": "inspiring",
         "guided_duration": "60s",
     }, "vi")
-    assert "Nửa bài" in text
-    assert "verse" in text
+    assert "nửa bài đủ lời" not in text.lower()
+    assert "Bài hoàn chỉnh" in text
     assert "điệp khúc" in text
-    assert "không cắt giữa câu" in text
 
 
 def test_song_full_price_half_plus_80_percent(monkeypatch):
-    monkeypatch.setattr(bot, "HALF_SONG_PRICE_XU", 300)
-    monkeypatch.setattr(bot, "FULL_SONG_MULTIPLIER", 1.8)
-    assert bot.music_ai_output_price_xu(60, "song_half") == 300
-    assert bot.music_ai_output_price_xu(120, "song_full") == 540
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
+    monkeypatch.setattr(bot, "MUSIC_VOCAL_FULL_PRICE_XU", 500)
+    assert bot.music_ai_output_price_xu(60, "song_half") == 500
+    assert bot.music_ai_output_price_xu(120, "song_full") == 500
 
 
 def test_song_no_nghe_xem_label():
     result = {"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}
     labels = _labels(bot.music_ai_preview_keyboard("vi", result=result))
-    assert "▶️ Nghe thử" in labels
-    assert "✅ Tạo bài hát" in labels
+    assert "▶️ Nghe thử 12 giây" in labels
+    assert "✅ Dùng bản đầy đủ 800 Xu" in labels
     assert not any("nghe/xem" in label.lower() for label in labels)
 
 
@@ -295,12 +295,13 @@ def test_no_public_provider_terms_voice_music():
 
 
 def test_no_public_nghe_xem_combo():
-    surfaces = "\n".join([
+    labels = "\n".join([
         "\n".join(_labels(bot.saved_voice_tts_confirm_keyboard(1, "vi"))),
         "\n".join(_labels(bot.music_ai_preview_keyboard("vi", result={"song_product": "full"}))),
-        bot.music_ai_preview_text({"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}, "vi"),
     ]).lower()
-    assert "nghe/xem" not in surfaces
+    assert "nghe/xem" not in labels
+    text = bot.music_ai_preview_text({"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}, "vi")
+    assert "nghe/xem thử 1 lần trong 15 ngày" in text
 
 
 def test_shopaikey_minimax_clone_payload_matches_documented_voice_id_rules():
@@ -443,11 +444,13 @@ def test_key4u_adapter_supports_scoped_voice_music_routes():
 def test_voice_music_provider_fallbacks_are_registered():
     tts_source = inspect.getsource(bot.synthesize_standalone_tts_audio)
     clone_source = inspect.getsource(bot.create_minimax_voice_profile_preview)
+    clone_route_source = inspect.getsource(bot.voice_clone_provider_route_attempts)
     music_source = inspect.getsource(bot.submit_music_generation_job)
     assert "shopaikey_minimax_tts_bytes" in tts_source
     assert "key4u_minimax_tts_bytes" in tts_source
     assert "voice_tts_fallback" in inspect.getsource(bot.key4u_minimax_tts_bytes)
-    assert "shopaikey_minimax_upload_voice_sample" in clone_source
-    assert "key4u_minimax_upload_voice_sample" in clone_source
+    assert "voice_clone_provider_route_attempts" in clone_source
+    assert "shopaikey_minimax_upload_voice_sample" in clone_route_source
+    assert "key4u_minimax_upload_voice_sample" in clone_route_source
     assert 'route_order = ["key4u_suno", "shopaikey_music"]' in music_source
     assert 'else ["shopaikey_music", "key4u_suno"]' in music_source

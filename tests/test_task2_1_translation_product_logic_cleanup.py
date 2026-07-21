@@ -60,11 +60,13 @@ def _source_markup(mode):
 
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:4] == [
-        "👁 Tạo phụ đề tự động",
-        "🗣 Lồng tiếng tự động",
-        "🎬 Phụ đề + lồng tiếng",
-        "🔗 Tải video từ link",
+    assert labels == [
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
+        "🎞 Phụ đề + Lồng tiếng",
+        "⬅️ Trung tâm dịch",
+        "🏠 Menu chính",
     ]
 
 
@@ -74,13 +76,13 @@ def test_create_subtitle_auto_label():
 
 
 def test_auto_dubbing_label():
-    assert bot.VIDEO_TRANSLATE_MODES[bot.VIDEO_SUBTITLE_MODE_DUB] == "Lồng tiếng tự động"
-    assert "Lồng tiếng tự động" in bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "vi")
+    assert bot.VIDEO_TRANSLATE_MODES[bot.VIDEO_SUBTITLE_MODE_DUB] == "Lồng tiếng video"
+    assert "Lồng tiếng video" in bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "vi")
 
 
 def test_link_import_only_top_level():
     top = bot.video_dubbing_menu_keyboard("vi", "translation")
-    assert "videodub|link_start" in _callbacks(top)
+    assert "videodub|link_start" not in _callbacks(top)
     for mode in (
         bot.VIDEO_SUBTITLE_MODE_CREATE,
         bot.VIDEO_SUBTITLE_MODE_DUB,
@@ -90,18 +92,18 @@ def test_link_import_only_top_level():
 
 
 def test_no_copied_source_menu_inside_product_flows():
-    for mode in (
-        bot.VIDEO_SUBTITLE_MODE_CREATE,
-        bot.VIDEO_SUBTITLE_MODE_DUB,
-        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    ):
-        assert _labels(_source_markup(mode))[:2] == ["📎 Gửi video/audio", "📂 Chọn từ Media"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📤 Gửi video"
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Phụ đề / Lồng tiếng", "🏠 Menu chính"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:2] == [
+        "📤 Gửi video cần lồng tiếng",
+        "⬅️ Phụ đề / Lồng tiếng",
+    ]
 
 
 def test_auto_subtitle_only_original_language():
     text = bot.video_dubbing_upload_text({"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}, "vi")
-    assert "đúng ngôn ngữ đang nói" in text
-    assert "không dịch" in text
+    assert "phụ đề gốc" in text
+    assert "video" in text.lower()
 
 
 def test_auto_subtitle_no_translation_no_voice():
@@ -123,13 +125,16 @@ def test_auto_subtitle_output_no_dubbing_button_basic_product():
 
 def test_auto_subtitle_output_srt_burn_edit():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert callbacks == ["videodub|confirm_subtitle_create", "videodub|final", "videodub|output_back", "menu|main"]
+    assert callbacks == ["videodub|final", "videodub|output_back", "menu|main"]
     assert not {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.intersection(callbacks)
     ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
         "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
         "subtitle_ref": "video_dubbing_artifact:test:subtitle",
     }))
-    assert {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.issubset(ready_callbacks)
+    assert {"videodub|final", "videodub|output|srt"}.issubset(ready_callbacks)
+    assert not {"videodub|output|vtt", "videodub|output|txt"}.intersection(ready_callbacks)
+    assert "videodub|output|burn" not in ready_callbacks
+    assert "videodub|subtitle_editor" not in ready_callbacks
 
 
 def test_auto_dubbing_input_no_link_button():
@@ -171,7 +176,7 @@ def test_auto_dubbing_invoice_after_speed():
         },
         "vi",
     )
-    assert "Tốc độ: <b>1.5</b>" in text
+    assert "Tốc độ:" not in text
     assert "Chi phí dự kiến" not in text
 
 
@@ -181,19 +186,23 @@ def test_auto_dubbing_preview_6s():
 
 
 def test_auto_dubbing_no_fake_output_when_provider_off(monkeypatch):
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False, "reason": "public_disabled"})
-    query = CaptureQuery("unused", 991202)
-    result = asyncio.run(
-        bot.execute_video_dubbing_preview(
-            query,
-            SimpleNamespace(),
-            {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_file_id": "video"},
-            "vi",
-        )
+    uid = 991202
+    bot.clear_video_dubbing_pending(uid)
+    bot.set_video_dubbing_pending(
+        uid,
+        "confirm",
+        mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+        source_file_id="video",
+        video_file_id="video",
+        target_language="English",
+        voice_style="giọng nữ mặc định",
+        voice_speed="1.0",
     )
-    assert result["ok"] is False
-    assert result["guard"] is True
-    assert query.outputs == []
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "video_dubbing_engine_access_decision", lambda *_args, **_kwargs: {"allowed": False})
+    query = asyncio.run(_press("videodub|confirm_dub", uid))
+    assert "TOAN AAS chưa thể" in query.outputs[-1]["text"]
+    assert "chưa trừ Xu" in query.outputs[-1]["text"]
 
 
 def test_subtitle_dubbing_input_no_link_button():
@@ -210,7 +219,8 @@ def test_subtitle_dubbing_translate_subtitle_first():
     }
     state, text, _markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     assert state["step"] == "language"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in text
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    assert "ngôn ngữ" in text.lower()
 
 
 def test_subtitle_dubbing_export_before_voice(monkeypatch):
@@ -225,10 +235,10 @@ def test_subtitle_dubbing_export_before_voice(monkeypatch):
         "target_language": "Tiếng Việt",
     }
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-    assert state["step"] == "output"
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in text
-    assert "✅ Xác nhận tạo đầy đủ" in _labels(markup)
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    assert state["step"] == "language"
+    assert "ngôn ngữ" in text.lower()
+    assert "✅ Xác nhận tạo đầy đủ" not in _labels(markup)
     assert "📄 Xuất SRT" not in _labels(markup)
     assert not any("Giọng nữ" in label for label in _labels(markup))
 
@@ -240,7 +250,7 @@ def test_subtitle_dubbing_continue_voice_after_output():
         "target_language": "English",
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
-    assert "🗣 Tiếp tục lồng tiếng" in _labels(bot.video_dubbing_output_keyboard("vi", state))
+    assert "🎙 Lồng tiếng từ bản dịch này" in _labels(bot.video_dubbing_output_keyboard("vi", state))
 
 
 def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
@@ -249,7 +259,13 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
     async def fake_download(_context, _state):
         return b"video", "video/mp4"
 
+    async def fake_extract_audio(data, content_type="application/octet-stream", max_seconds=0):
+        assert data == b"video"
+        assert content_type == "video/mp4"
+        return b"audio-from-video", "audio/mpeg", "ffmpeg_audio_extract"
+
     async def fake_transcribe(_data, _context, _content_type="application/octet-stream"):
+        assert _data == b"audio-from-video"
         return "ASR", "hello world", "ok"
 
     async def fake_translate(text, target, **_kwargs):
@@ -261,11 +277,21 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
         captured.update({"text": text, "voice_style": voice_style, "voice_id": voice_id, "voice_speed": voice_speed})
         return "TTS", b"audio", "ok"
 
+    async def fake_render_video(*_args, **_kwargs):
+        return b"\x00\x00\x00\x18ftypmp42-task21" + b"x" * 4096, "fake_render"
+
+    async def fake_validate_video(*_args, **_kwargs):
+        return {"ok": True, "detail": "test_valid"}
+
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
+    monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_dubbing_extract_audio", fake_extract_audio)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "video_dubbing_render_video", fake_render_video)
+    monkeypatch.setattr(bot, "subdub_validate_video_output", fake_validate_video)
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     monkeypatch.setattr(bot, "apply_member_service_discount", lambda _uid, amount, _event: {"final_cost": amount})
@@ -277,6 +303,9 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 
         async def reply_audio(self, **_kwargs):
             return None
+
+        async def reply_video(self, **_kwargs):
+            return SimpleNamespace(message_id=991203)
 
     query = SimpleNamespace(from_user=SimpleNamespace(id=991203), message=OutputMessage())
     result = asyncio.run(
@@ -302,7 +331,8 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 def test_public_guard_no_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi", admin=False)
     assert "Admin blocker" not in text
-    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in text
+    assert "TOAN AAS chưa thể" in text
+    assert "chưa trừ Xu" in text
 
 
 def test_admin_guard_can_show_blocker():
@@ -373,7 +403,7 @@ def test_dubbing_back_invoice_to_speed(monkeypatch):
         video_file_id="video",
     )
     asyncio.run(_press("videodub|back_confirm", uid))
-    assert bot.get_video_dubbing_pending(uid)["step"] == "voice_speed"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "voice"
 
 
 def test_subtitle_dubbing_back_continue_voice_to_subtitle_output(monkeypatch):
@@ -390,9 +420,9 @@ def test_subtitle_dubbing_back_continue_voice_to_subtitle_output(monkeypatch):
     )
     query = asyncio.run(_press("videodub|back_voice", uid))
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "output"
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in query.outputs[-1]["text"]
+    assert state["step"] == "choosing_voice"
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    assert "Chọn giọng lồng tiếng" in query.outputs[-1]["text"]
 
 
 def test_translation_provider_curl_appendix_complete():

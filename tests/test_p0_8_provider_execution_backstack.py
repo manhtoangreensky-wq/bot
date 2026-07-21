@@ -145,8 +145,8 @@ def test_selected_voice_text_generates_audio_without_style_chooser(monkeypatch):
     message = CaptureMessage(user_id, "Nội dung cần đọc")
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
     assert handled is True
-    assert calls[0][3] == bot.get_tts_voice_id("default_female")
-    assert not message.outputs
+    assert calls == []
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
 
 
 def test_public_tts_no_admin_blocker_terms():
@@ -172,8 +172,8 @@ def test_background_music_duration_menu_unchanged():
 
 
 def test_music_price_increases_with_duration():
-    assert bot.music_ai_output_price_xu(15) <= bot.music_ai_output_price_xu(30)
-    assert bot.music_ai_output_price_xu(60) > bot.music_ai_output_price_xu(30)
+    assert bot.music_ai_output_price_xu(15) == bot.MUSIC_BACKGROUND_FULL_PRICE_XU
+    assert bot.music_ai_output_price_xu(60) == bot.MUSIC_BACKGROUND_FULL_PRICE_XU
 
 
 def test_song_with_lyrics_menu_has_no_by_seconds_button():
@@ -185,7 +185,7 @@ def test_song_with_lyrics_menu_has_no_by_seconds_button():
 
 def test_song_with_lyrics_menu_has_half_and_full_only():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert labels == ["1️⃣ Nửa bài", "2️⃣ Full bài", "⬅️ Nhạc", "🏠 Menu chính"]
+    assert labels == ["🎤 Bài hát có lời AI", "⬅️ Nhạc", "🏠 Menu chính"]
 
 
 def test_song_seconds_has_18_30_60_custom():
@@ -193,11 +193,12 @@ def test_song_seconds_has_18_30_60_custom():
     assert labels[:4] == ["18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"]
 
 
-def test_half_song_price_and_full_song_multiplier():
+def test_song_price_uses_real_full_quote_without_fake_half(monkeypatch):
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
     half = bot.music_ai_output_price_xu(60, "song_half")
     full = bot.music_ai_output_price_xu(120, "song_full")
-    assert half == bot.HALF_SONG_PRICE_XU
-    assert full == bot.round_video_xu(half * bot.FULL_SONG_MULTIPLIER, bot.MUSIC_AI_PRICE_ROUND_TO_XU)
+    assert half == bot.MUSIC_VOCAL_FULL_PRICE_XU
+    assert full == bot.MUSIC_VOCAL_FULL_PRICE_XU
 
 
 def test_song_seconds_pricing_uses_duration_product():
@@ -216,6 +217,7 @@ def test_create_music_reaches_real_preview_job(monkeypatch):
         "music_ai_kind": "guided",
     })
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "get_member_profile", lambda *_args, **_kwargs: {"tier": "silver"})
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
         "public_enabled": True,
         "ready": True,
@@ -287,6 +289,12 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
     async def download(context, state):
         return b"video", "video/mp4"
 
+    async def extract_audio(data, content_type="application/octet-stream", max_seconds=0):
+        assert data == b"video"
+        assert content_type == "video/mp4"
+        assert max_seconds == 6
+        return b"audio-from-video", "audio/mpeg", "ffmpeg_audio_extract"
+
     async def cap(data, seconds):
         assert seconds == 6
         return b"preview-audio", "ok"
@@ -301,6 +309,8 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
         raise AssertionError("preview must not deduct final Xu")
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", download)
+    monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_dubbing_extract_audio", extract_audio)
     monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", cap)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", translate)

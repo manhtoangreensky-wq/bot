@@ -132,7 +132,8 @@ def test_dubbing_voice_selection_passes_voice_id_to_minimax(monkeypatch):
     callbacks = _callbacks(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "👩 Giọng nữ mặc định" in labels
     assert "👨 Giọng nam mặc định" in labels
-    assert "📂 Kho voice" in labels
+    assert "📚 Kho voice" in labels
+    assert "🎙 Tạo voice riêng" in labels
     assert "videodub|voice|default_female" in callbacks
     assert "videodub|voice_saved" in callbacks
 
@@ -153,8 +154,9 @@ def test_dubbing_confirm_shows_voice_text_pricing():
         "vi",
     )
 
-    assert "Video đã sẵn sàng lồng tiếng" in text
+    assert "Phụ đề + Lồng tiếng" in text
     assert "Tác vụ:" not in text
-    assert "Ngôn ngữ lồng tiếng: <b>Tiếng Anh</b>" in text
+    assert "Xuất video MP4 hoàn chỉnh" in text
+    assert "Tổng cộng:" in text
     assert "Chi phí dự kiến" not in text
-    assert "TOAN AAS chưa xử lý và chưa trừ Xu" in text
+    assert "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận" in text

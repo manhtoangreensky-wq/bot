@@ -1,0 +1,15 @@
+{
+  "store_id": "animation_motion_3d",
+  "title_vi": "Hoạt hình, motion capture và nhân vật 3D",
+  "description": "Quy trình từ nhân vật đến chuyển động có kiểm soát.",
+  "production_patterns": [
+    "Tách character bible, rig/motion và camera thành ba lớp.",
+    "Giữ silhouette, tỷ lệ cơ thể, trang phục và palette nhất quán giữa cảnh.",
+    "Mỗi shot chỉ nên có một hành động chính có điểm bắt đầu và kết thúc rõ.",
+    "Motion capture cần cleanup chân, tay, trọng tâm và va chạm vật thể."
+  ],
+  "workflow": ["character brief", "model/style sheet", "rig", "motion capture hoặc keyframe", "camera", "lighting", "render", "continuity review"],
+  "prompt_concepts": ["character consistency", "clean rig motion", "expressive pose", "2D/3D animation staging"],
+  "negative_patterns": ["limb jitter", "foot sliding", "model drift", "inconsistent proportions", "unreadable silhouette"],
+  "source_reference_ids": ["AQPnuyfM..."]
+}

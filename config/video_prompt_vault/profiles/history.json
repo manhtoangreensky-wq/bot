@@ -1,0 +1,29 @@
+{
+  "profile_id": "history",
+  "profile_name_vi": "Video lịch sử",
+  "product_goal": "Kể lịch sử hấp dẫn nhưng không bịa dữ kiện.",
+  "script_formulas": ["context -> figure/event -> turning point -> consequence -> lesson"],
+  "hook_templates": ["Bối cảnh lúc đó đã tạo ra một bước ngoặt", "Một quyết định làm thay đổi cục diện"],
+  "scene_role_templates": [{"role": "context", "purpose": "time/place context"}, {"role": "turning_point", "purpose": "main change"}, {"role": "consequence", "purpose": "what changed"}],
+  "shot_templates": ["archival wide shot", "careful historical close-up"],
+  "camera_templates": ["epic wide shot with controlled close-up"],
+  "motion_templates": ["slow dramatic movement"],
+  "visual_style_templates": ["vintage cinematic historical recreation"],
+  "color_tone_templates": ["sepia or solemn cinematic palette"],
+  "transition_templates": ["archival fade"],
+  "voice_cues": ["strong historical narrator"],
+  "music_cues": ["solemn orchestral ambience"],
+  "subtitle_cues": ["classic lower-third"],
+  "logo_cues": ["logo only at ending"],
+  "negative_prompt_blocks": ["no fake maps, dates, flags or quotes"],
+  "do_rules": ["mark dramatized parts"],
+  "avoid_rules": ["avoid unsupported names/dates"],
+  "example_story_bibles": ["facts and dramatized boundaries"],
+  "example_scene_cards": ["context to consequence"],
+  "example_provider_prompts": ["historical recreation without fake text"],
+  "product_domains": {
+    "vietnam": {"keywords": ["Việt Nam", "vua", "triều", "lịch sử Việt"], "visual_style": "Vietnamese historical atmosphere"},
+    "war": {"keywords": ["chiến tranh", "battle", "trận"], "motion": "slow dramatic movement without gore"},
+    "general": {"keywords": ["lịch sử", "history"], "transition": "archival fade"}
+  }
+}

@@ -13,7 +13,15 @@ def test_execute_engine_blocks_missing_adapter_without_fake_success(monkeypatch)
     monkeypatch.setattr(
         bot,
         "get_suno_music_readiness",
-        lambda: {"ready": False, "public_enabled": False, "missing_env": ["SUNO_API_KEY"], "reason": "missing"},
+        lambda: {
+            "ready": False,
+            "public_enabled": False,
+            "missing_env": ["SUNO_API_KEY"],
+            "fetch_ready": False,
+            "download_ready": False,
+            "full_result_ok": False,
+            "reason": "missing",
+        },
     )
     monkeypatch.setattr(bot, "music_ai_public_processing_ready", lambda _readiness=None: False)
 
@@ -35,7 +43,8 @@ def test_execute_engine_blocks_missing_adapter_without_fake_success(monkeypatch)
     assert result["status"] == "GATE_BLOCKED"
     assert result.get("job_created") is not True
     assert "music_song" in result["message"]
-    assert "adapter chưa sẵn sàng hoặc thiếu cấu hình thật" in result["message"]
+    assert "music_song thiếu component thật" in result["message"]
+    assert "music_status_route_missing" in result["message"]
     assert bot.ADMIN_PAID_CONFIRM_FLAG not in result["message"]
 
 
@@ -74,7 +83,15 @@ def test_slash_smoke_requires_confirm_but_interactive_product_does_not(monkeypat
     monkeypatch.setattr(
         bot,
         "get_suno_music_readiness",
-        lambda: {"ready": True, "public_enabled": False, "missing_env": [], "reason": "public gate closed"},
+        lambda: {
+            "ready": True,
+            "public_enabled": False,
+            "missing_env": [],
+            "fetch_ready": True,
+            "download_ready": True,
+            "full_result_ok": True,
+            "reason": "public gate closed",
+        },
     )
     monkeypatch.setattr(bot, "music_ai_public_processing_ready", lambda _readiness=None: False)
 
@@ -103,7 +120,7 @@ def test_slash_smoke_requires_confirm_but_interactive_product_does_not(monkeypat
 
 def test_product_and_smoke_sources_use_shared_executor():
     assert 'execute_engine(\n        "voice_tts"' in inspect.getsource(bot.send_standalone_tts_result)
-    assert 'execute_engine(\n        "voice_saved_tts"' in inspect.getsource(bot.send_paid_saved_voice_tts_result)
+    assert "voice_clone_pipeline.process_voice_tts" in inspect.getsource(bot.send_paid_saved_voice_tts_result)
     music_source = inspect.getsource(bot.handle_music_quick_callback)
     assert "music_engine_feature_for_result(result)" in music_source
     assert "execute_engine(" in music_source

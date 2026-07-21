@@ -1,0 +1,15 @@
+{
+  "store_id": "video_ai_edit_vfx",
+  "title_vi": "Biến đổi cảnh và VFX bằng AI",
+  "description": "Mẫu biến đổi footage thành cảnh mới trong khi vẫn giữ chủ thể và hành động chính.",
+  "production_patterns": [
+    "Khóa nhận dạng chủ thể, trang phục, hướng nhìn và quỹ đạo chuyển động trước khi đổi cảnh.",
+    "Mô tả trạng thái trước, khoảnh khắc chuyển đổi và trạng thái sau.",
+    "Dùng camera bridge hoặc match cut để chuyển cảnh không bị đứt.",
+    "VFX điện ảnh cần ánh sáng tương tác, bóng đổ và vật liệu nhất quán."
+  ],
+  "workflow": ["nhận footage", "chọn yếu tố phải giữ", "chọn thế giới mới", "lập transition beat", "tạo từng shot", "kiểm tra continuity", "hậu kỳ"],
+  "prompt_concepts": ["subject lock", "environment replacement", "cinematic transformation", "before-after reveal", "camera continuity"],
+  "negative_patterns": ["identity drift", "random costume change", "broken anatomy", "lighting mismatch", "unmotivated camera jump"],
+  "source_reference_ids": ["AQM0Pnhl...", "AQMyZIud...", "AQOzWGkF..."]
+}

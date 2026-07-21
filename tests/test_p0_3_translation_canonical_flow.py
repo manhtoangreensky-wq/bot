@@ -139,12 +139,15 @@ def test_standalone_translate_menu_no_api_text():
     assert "🌐 <b>Trung tâm dịch</b>" in text
     assert labels == [
         "🌐 Dịch ngôn ngữ",
-        "🎬 Dịch phụ đề, lồng tiếng",
+        "🎬 Phụ đề / Lồng tiếng",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
     assert "menu|translation_language_hub" in callbacks
     assert "menu|translation_video_factory" in callbacks
+    assert "menu|translation_document" not in callbacks
+    assert "menu|translation_voice" not in callbacks
+    assert "menu|translation_subtitle_file" not in callbacks
     assert not any(callback.startswith(("vfinal|", "videoaddon|")) for callback in callbacks)
     _assert_public_clean("\n".join([text, *labels]))
 
@@ -161,13 +164,14 @@ def test_standalone_subtitle_asks_upload(monkeypatch):
     assert state["origin"] == "translation"
     assert state["step"] == "source"
     assert "Tạo phụ đề tự động" in query.outputs[-1]["text"]
-    assert "đúng ngôn ngữ đang nói" in query.outputs[-1]["text"]
+    assert "tạo phụ đề gốc" in query.outputs[-1]["text"].lower()
     assert "videodub|link_start" not in _callbacks(query.outputs[-1]["reply_markup"])
 
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "await_video"
-    assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]
+    assert "gửi video" in query.outputs[-1]["text"].lower()
+    assert "video/audio" not in query.outputs[-1]["text"].lower()
     assert bot.current_product_context(user_id) == bot.PRODUCT_CONTEXT_SHOWROOM
     _assert_public_clean(query.outputs[-1]["text"])
 
@@ -179,11 +183,34 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+
+    prepare_calls = {"count": 0}
+
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        prepare_calls["count"] += 1
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(
+            user_id,
+            state.get("step") or "creating_original_subtitle",
+            subtitle_ref=subtitle_ref,
+        )
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao"}],
+            "detected_language": "vi",
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_TRANSLATE}", user_id))
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     assert bot.get_video_dubbing_pending(user_id)["step"] == "await_video"
-    assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]
+    assert "video đã có phụ đề" in query.outputs[-1]["text"].lower()
+    assert "video/audio" not in query.outputs[-1]["text"].lower()
 
     message = CaptureMessage(file_id="translate-video")
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(
@@ -194,9 +221,18 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     assert handled is True
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "language"
+    assert not state["subtitle_ref"]
     assert state["video_file_id"] == "translate-video"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Dịch phụ đề" in message.outputs[-1]["text"]
+    assert prepare_calls["count"] == 0
     _assert_public_clean(message.outputs[-1]["text"])
+
+    confirm = asyncio.run(_press_videodub("videodub|language|English", user_id))
+    state = bot.get_video_dubbing_pending(user_id)
+    assert state["step"] == "confirm"
+    assert "Xác nhận dịch phụ đề video" in confirm.outputs[-1]["text"]
+    assert prepare_calls["count"] == 0
+    _assert_public_clean(confirm.outputs[-1]["text"])
 
 
 def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
@@ -205,10 +241,28 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+
+    async def fake_prepare(_context, passed_state, user_id, allow_admin=False):
+        assert passed_state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
+        assert passed_state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_DUB
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao tu video"
+        ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(user_id, passed_state.get("step") or "creating_original_subtitle", subtitle_ref=ref)
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao tu video"}],
+            "detected_language": "vi",
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_DUB}", user_id))
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
-    assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]
+    assert "gửi video" in query.outputs[-1]["text"].lower()
+    assert "video/audio" not in query.outputs[-1]["text"].lower()
 
     message = CaptureMessage(file_id="dub-video")
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(
@@ -218,8 +272,14 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
 
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "language"
-    assert "Bạn muốn lồng tiếng sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "ngôn ngữ" in message.outputs[-1]["text"].lower()
     _assert_public_clean(message.outputs[-1]["text"])
+
+    confirm = asyncio.run(_press_videodub("videodub|language|English", user_id))
+    state = bot.get_video_dubbing_pending(user_id)
+    assert state["step"] == "voice"
+    assert "Chọn giọng lồng tiếng" in confirm.outputs[-1]["text"]
+    _assert_public_clean(confirm.outputs[-1]["text"])
 
 
 def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
@@ -229,41 +289,51 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
-        translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
-        state = bot.set_video_dubbing_pending(user_id, state.get("step") or "output", translated_subtitle_ref=translated_ref)
-        return {"state": state, "output_subtitle": "Translated subtitle", "output_script": "Translated subtitle"}
+        mode = bot.normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
+        if mode == bot.VIDEO_SUBTITLE_MODE_CREATE:
+            source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+            subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+            saved = bot.set_video_dubbing_pending(user_id, state.get("step") or "creating_original_subtitle", subtitle_ref=subtitle_ref)
+            return {
+                "state": saved,
+                "source_subtitle": source,
+                "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+                "detected_language": "vi",
+            }
+        translated = "1\n00:00:00,000 --> 00:00:02,000\nHello"
+        translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", translated)
+        state = bot.set_video_dubbing_pending(user_id, state.get("step") or "translating_subtitle", translated_subtitle_ref=translated_ref)
+        return {
+            "state": state,
+            "output_subtitle": translated,
+            "output_script": "Hello",
+            "output_segments": [{"start": 0, "end": 2, "text": "Hello"}],
+        }
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}", user_id))
-    asyncio.run(_press_videodub("videodub|source_upload", user_id))
+    asyncio.run(_press_videodub(f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}", user_id))
     message = CaptureMessage(file_id="combo-video")
     asyncio.run(bot.handle_video_dubbing_pending_upload(
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
         SimpleNamespace(),
     ))
     assert bot.get_video_dubbing_pending(user_id)["step"] == "language"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
-
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
     state = bot.get_video_dubbing_pending(user_id)
-    assert state["step"] == "output"
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in lang_query.outputs[-1]["text"]
-    assert "🗣 Tiếp tục lồng tiếng" not in _labels(lang_query.outputs[-1]["reply_markup"])
-
-    translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
-    bot.set_video_dubbing_pending(user_id, "output", translated_subtitle_ref=translated_ref)
-
-    continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
-    assert "Chọn giọng lồng tiếng" in continue_query.outputs[-1]["text"]
+    assert state["step"] == "voice"
+    assert "Chọn giọng lồng tiếng" in lang_query.outputs[-1]["text"]
 
     voice_query = asyncio.run(_press_videodub("videodub|voice|default_female", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["voice_style"]
-    assert state["step"] == "voice_speed"
-    assert "Tốc độ giọng" in voice_query.outputs[-1]["text"]
+    assert state["step"] in {"confirm", "dub_confirmation"}
+    assert "Xác nhận" in voice_query.outputs[-1]["text"]
     _assert_public_clean(voice_query.outputs[-1]["text"])
 
 
@@ -275,7 +345,7 @@ def test_translation_public_guard_no_api_provider_words():
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ]:
         text = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert "bảo trì/nâng cấp" in text
+        assert "TOAN AAS chưa thể" in text or "bảo trì" in text
         assert "chưa trừ Xu" in text
         _assert_public_clean(text)
 
@@ -474,6 +544,7 @@ def test_admin_diagnostics_can_show_sanitized_provider_status():
     source = inspect.getsource(bot.cmd_subtitle_dub_status)
     assert "is_admin_user" in source
     text = bot.subtitle_dub_status_text()
-    assert "subtitle/dub" in text.lower()
+    assert "subtitle" in text.lower()
+    assert "dub status" in text.lower()
     for secret_marker in ["API_KEY", "SECRET", "TOKEN=", "sk-"]:
         assert secret_marker not in text

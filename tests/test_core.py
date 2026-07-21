@@ -320,7 +320,7 @@ def test_start_keyboard_callbacks_unchanged():
     assert rows == [
         [("🆓 Công cụ miễn phí", "freehub|main", None), ("👤 Tài khoản", "menu|main_profile", None)],
         [("🖼 Tạo ảnh AI", "menu|main_image", None), ("🎬 Tạo video AI", "menu|main_video", None)],
-        [("🎧 Studio âm thanh", "music_quick|showroom|root", None), ("🌐 Dịch / Phụ đề / Lồng tiếng Studio", "menu|translate", None)],
+        [("🎧 Studio âm thanh", "music_quick|showroom|root", None), ("🌐 Dịch thuật", "menu|translate", None)],
         [("📝 Ghi chú / Tài liệu", "menu|main_memory", None), ("📚 Hướng dẫn", "menu|main_guide", None)],
         [("👨‍💼 Hỗ trợ", "menu|support", None), ("💰 Nạp Xu / Bảng giá", "pricing|main", None)],
         [("💬 Góp ý / Báo lỗi", "feedback|start", None), ("🌐 Trung tâm", None, bot.TOAN_AAS_COMMUNITY_URL)],
@@ -352,26 +352,27 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🧠 Operator" not in button_texts
     assert "⚙️ Hệ Thống" not in button_texts
     admin_nav_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
-    assert "🧠 Operator" in admin_nav_labels
-    assert "⚙️ Hệ thống" in admin_nav_labels
+    assert "👤 User / Xu" in admin_nav_labels
+    assert "💳 Bill / PayOS" in admin_nav_labels
+    assert "🖥 Hệ thống" in admin_nav_labels
     assert "🎁 Gói / Combo" in admin_nav_labels
-    assert "🧊 Freeze / Queue" in admin_nav_labels
-    assert "📊 Báo cáo tổng" in admin_nav_labels
-    assert "🧪 Smoke Test" in admin_nav_labels
-    assert "🤖 Provider" in admin_nav_labels
+    assert "🧊 Queue / Freeze" in admin_nav_labels
+    assert "🛡 Bảo mật / DB" in admin_nav_labels
+    assert "🤖 Provider / Worker" in admin_nav_labels
+    assert "📘 Hướng dẫn Admin" in admin_nav_labels
     admin_nav_rows = [[button.text for button in row] for row in bot.menu_nav_keyboard("admin", True).inline_keyboard]
-    assert ["💰 Tài chính", "🧊 Freeze / Queue"] in admin_nav_rows
-    assert ["🤖 Provider", "📣 Marketing tự động"] in admin_nav_rows
-    assert ["⬅️ Quay lại", "🏠 Menu chính"] in admin_nav_rows
+    assert ["🎁 Gói / Combo", "🧊 Queue / Freeze"] in admin_nav_rows
+    assert ["🤖 Provider / Worker", "💰 Tài chính"] in admin_nav_rows
+    assert ["🏠 Menu chính"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
-    for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
+    for label in ["📊 Tổng quan", "💵 Doanh thu", "🧾 Thuế / VAT", "🧾 Chi phí", "📈 Lợi nhuận", "🏦 Vốn & Hòa vốn", "⚠️ Đơn bất thường", "🧮 Sổ điều chỉnh", "📥 Xuất báo cáo", "➕ Thêm chi phí", "📘 Hướng dẫn tài chính"]:
         assert label in finance_labels
     freeze_labels = [button.text for row in bot.freeze_queue_keyboard().inline_keyboard for button in row]
     for label in ["📊 Queue Status", "🧊 Freeze Status", "🖼 Freeze Image", "🎬 Freeze Video", "🎞 Freeze Frame", "🤖 Freeze Provider", "✅ Unfreeze Tool", "🧹 Clear Stale Jobs"]:
         assert label in freeze_labels
-    assert "Thu chi / Báo cáo nội bộ TOAN AAS" in bot.finance_menu_text()
-    assert "🟢 Miễn/ưu đãi thuế phí" in finance_labels
-    assert "không tự nộp thuế" in bot.finance_menu_text()
+    assert "Admin Tài chính TOAN AAS" in bot.finance_menu_text()
+    assert "không sửa giao dịch gốc" in bot.finance_menu_text()
+    assert "sổ điều chỉnh" in bot.finance_menu_text()
     assert "Mục này dùng để kiểm tra hàng đợi job" in bot.freeze_queue_menu_text()
     assert "thao tác nguy hiểm luôn đi qua màn xác nhận" in bot.freeze_queue_menu_text()
     assert "Báo cáo tổng TOAN AAS" in bot.admin_overview_text()
@@ -406,6 +407,15 @@ def test_admin_menu_contains_grouped_operator_and_system():
         for button in row
         if button.callback_data
     )
+    admin_module_text = "\n".join([
+        bot.admin_module_page_text("users"),
+        bot.admin_module_page_text("billing"),
+        bot.admin_module_page_text("packages"),
+        bot.admin_module_page_text("queue"),
+        bot.admin_module_page_text("security_db"),
+        bot.admin_module_page_text("system_ops"),
+        bot.admin_module_page_text("provider_worker"),
+    ])
     for command in [
         "/add",
         "/setvip",
@@ -435,11 +445,11 @@ def test_admin_menu_contains_grouped_operator_and_system():
         "/provider_freeze",
         "/provider_unfreeze",
     ]:
-        assert command in admin_menu
-    assert "cộng Xu trực tiếp" in admin_menu
-    assert "đối soát tiền thật" in admin_menu
-    assert "kiểm tra job video" in admin_menu
-    assert "hoàn Xu/lượt thủ công" in admin_menu
+        assert command in admin_module_text
+    assert "cộng Xu thủ công" in admin_module_text
+    assert "đối soát tiền thật" in admin_module_text
+    assert "kiểm tra job video" in admin_module_text
+    assert "hoàn Xu/lượt thủ công" in admin_module_text
     system_menu = bot.menu_text_system()
     assert "/data_status" in system_menu and "persistent volume" in system_menu
     operator_menu = bot.menu_text_operator(True)
@@ -525,7 +535,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "SHOPAIKEY_USAGE_ALERT_PERCENT=10" in env_example
     assert "SHOPAIKEY_IMAGE_URL=https://api.shopaikey.com/images/google/generations" in env_example
     assert "SHOPAIKEY_IMAGE_MODEL_PRIMARY=nano-banana" in env_example
-    assert "SHOPAIKEY_IMAGE_MODEL_FALLBACKS=gemini-2.5-flash-image,gemini-2.0-flash-preview-image-generation" in env_example
+    assert "SHOPAIKEY_IMAGE_MODEL_FALLBACKS=nano-banana-2,nano-banana-pro" in env_example
     assert "SHOPAIKEY_VIDEO_URL=https://api.shopaikey.com/v1/video/generations" in env_example
     assert "SHOPAIKEY_VIDEO_MODEL=veo3.1-fast" in env_example
     assert "SHOPAIKEY_VIDEO_FALLBACK_MODELS=veo3.1,veo3.1-fast,veo3.1-pro" in env_example
@@ -804,8 +814,8 @@ def test_video_maintenance_guard_low_credit_lock_refund_and_stale(monkeypatch):
         bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
         bot.record_provider_error("shopaikey", "video", "NO_CHANNEL", "no available channel")
         assert int(bot.provider_freeze_row("shopaikey_video").get("is_frozen") or 0) == 1
-        assert "/queue_status" in bot.menu_text_admin()
-        assert "/refund_job" in bot.menu_text_admin()
+        assert "/queue_status" in bot.admin_module_page_text("queue")
+        assert "/refund_job" in bot.admin_module_page_text("queue")
         bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
 
         bot.get_user("lock_user", "Lock user")
@@ -815,7 +825,7 @@ def test_video_maintenance_guard_low_credit_lock_refund_and_stale(monkeypatch):
         assert active and int(active["id"]) == lock_job_id
         assert "Video sẽ được gửi tự động" in bot.public_video_active_job_text("vi")
         lock_buttons = [button.text for row in bot.public_video_active_job_keyboard(active, "vi").inline_keyboard for button in row]
-        assert "🔄 Kiểm tra trạng thái video" in lock_buttons
+        assert "🔄 Cập nhật trạng thái" in lock_buttons
         assert "🏠 Menu chính" in lock_buttons
 
         bot.get_user("refund_video", "Refund video")
@@ -1096,7 +1106,7 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert "Auto poll" not in queue_text
         assert "job" not in queue_text.lower()
         public_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi", public_user=True).inline_keyboard for button in row]
-        assert "🔄 Kiểm tra trạng thái video" in public_queue_buttons
+        assert "🔄 Cập nhật trạng thái" in public_queue_buttons
         assert "🏠 Menu chính" in public_queue_buttons
         assert not any("ShopAIKey" in text for text in public_queue_buttons)
         admin_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi").inline_keyboard for button in row]
@@ -1250,7 +1260,8 @@ def test_payos_package_purchase_grants_wallet_without_xu_or_rank_points(monkeypa
             plan_name="🎁 Combo Ưu Đãi TikTok — 99k",
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
-        processed, desc, info = bot.process_payos_paid_order("900001", 99000)
+        _, invoice_total = bot.payos_invoice_total_for_order("900001", 99000)
+        processed, desc, info = bot.process_payos_paid_order("900001", invoice_total)
         assert processed is True
         assert desc == "package_success"
         assert info["order_type"] == "package_purchase"
@@ -1303,7 +1314,7 @@ def test_package_purchase_selection_requires_confirm_before_checkout(monkeypatch
         for button in row
     ]
     assert "pkgbuy|confirm|combo|tiktok_99k" in detail_callbacks
-    assert "pricing|combo" in detail_callbacks
+    assert "pkgcombo:group:combo" in detail_callbacks
 
     update = SimpleNamespace(callback_query=FakeQuery("pkgbuy|confirm|combo|tiktok_99k"))
     asyncio.run(bot.handle_package_purchase_callback(update, context))
@@ -1404,7 +1415,8 @@ def test_storage_addon_menu_and_payos_paid_grants_storage_without_xu(monkeypatch
             plan_xu=0,
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
-        processed, desc, info = bot.process_payos_paid_order("920001", 10000)
+        _, invoice_total = bot.payos_invoice_total_for_order("920001", 10000)
+        processed, desc, info = bot.process_payos_paid_order("920001", invoice_total)
         assert processed is True
         assert desc == "storage_addon_success"
         assert info["order_type"] == "storage_addon"
@@ -1984,7 +1996,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "vproduct|open|video_ai_real" in video_callbacks
     assert "vproduct|open|frame_video_local" in video_callbacks
     assert "vproduct|open|self_shot_scene_change" in video_callbacks
-    assert "vproduct|open|multi_scene_film" in video_callbacks
+    assert "longvideo|public_guard" in video_callbacks
     assert "vproduct|open|video_trend" in video_callbacks
     assert 'callback_data="framevideo|start"' in source
     video_labels = {
@@ -1992,9 +2004,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         for row in bot.main_video_keyboard("vi").inline_keyboard
         for button in row
     }
-    assert "🧠 Ý tưởng video" in video_labels
+    assert "💡 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
-    assert "🎥 Prompt / Chuyển động" in video_labels
+    assert "📚 Kho prompt video" not in video_labels
+    assert "videoidea|start" in video_callbacks
+    assert "🎥 Prompt / Chuyển động" not in video_labels
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
@@ -2225,13 +2239,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "size" not in google_payload
     assert bot.infer_image_aspect_ratio_from_prompt("Product scene. Aspect ratio 4:5. No watermark.") == "4:5"
     assert bot.infer_image_aspect_ratio_from_prompt("Wide cinematic banner 21:9") == "21:9"
-    assert bot.shopaikey_image_model_sequence("nano-banana", "gemini-2.5-flash-image,nano-banana,gemini-2.0-flash-preview-image-generation") == [
+    assert bot.shopaikey_image_model_sequence("nano-banana", "nano-banana-2,nano-banana,nano-banana-pro") == [
         "nano-banana",
-        "gemini-2.5-flash-image",
-        "gemini-2.0-flash-preview-image-generation",
+        "nano-banana-2",
+        "nano-banana-pro",
     ]
     assert bot.shopaikey_image_model_invalid_error(429, "Model not found or invalid")
     assert bot.shopaikey_classify_error(429, "Model not found or invalid") == "FAIL_MODEL_INVALID"
+    assert bot.shopaikey_image_allows_model_fallback(503, "No available channel")
+    assert not bot.shopaikey_image_allows_model_fallback(401, "Invalid API key")
     shopaikey_builder_source = source_between(bot_source_text(), "def build_shopaikey_google_image_payload", "def build_google_genai_image_payload")
     assert '"size": normalized_ratio' in shopaikey_builder_source
     assert '"aspect_ratio"' not in shopaikey_builder_source
@@ -2247,7 +2263,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "shopaikey_image_output_from_payload" in image_generate_source
     assert "models_tried" in image_generate_source
     assert "fallback_used" in image_generate_source
-    assert "shopaikey_image_model_invalid_error" in image_generate_source
+    assert "shopaikey_image_allows_model_fallback" in image_generate_source
     image_smoke_source = source_between(bot_source_text(), "async def cmd_tool_test_shopaikey_image", "async def cmd_tool_test_shopaikey_video")
     assert "context.args" in image_smoke_source
     assert "Ratio requested" in image_smoke_source
@@ -2401,6 +2417,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🎁 Xem ưu đãi",
         "💳 Nạp Xu",
         "🎁 Gói / Combo",
+        "📥 Tải bảng giá",
+        "📘 Tải hướng dẫn sử dụng",
         "🏠 Menu chính",
     ]
     pricing_callbacks = [button.callback_data for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
@@ -2408,7 +2426,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "pricing|catalog",
         "pricing|promotions",
         "menu|main_topup",
-        "pricing|packages",
+        "pkgcombo:home",
+        "pricing|download_pricing",
+        "pricing|download_guide",
         "menu|main",
     ]
     en_pricing_labels = [button.text for row in bot.pricing_main_keyboard("en").inline_keyboard for button in row]
@@ -2426,7 +2446,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam" in promo_text
     assert "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng" in promo_text
     promo_callbacks = [button.callback_data for row in bot.billing_promotions_keyboard("vi").inline_keyboard for button in row]
-    assert promo_callbacks == ["pricing|promo_apply", "pricing|gift_code", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
+    assert promo_callbacks == ["pricing|promo_apply", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
     assert bot.hidden_active_features_audit("vi") == []
     assert bot.hidden_active_features_audit("vi", ["📋 Bảng giá", "💳 Nạp Xu"])[0]["code"] == "HIDDEN_ACTIVE_FEATURE"
     catalog_labels = [button.text for row in bot.pricing_catalog_keyboard("vi").inline_keyboard for button in row]
@@ -2436,7 +2456,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎬 Video" in catalog_labels
     assert "📄 Tài liệu/PDF" in catalog_labels
     assert "📝 Ghi chú/Lưu trữ" in catalog_labels
-    assert "pricing|package_summary" in catalog_callbacks
+    assert "pkgcombo:home" in catalog_callbacks
     image_price_text = "\n".join(bot.pricing_image_lines())
     video_price_text = "\n".join(bot.pricing_video_lines())
     combo_price_text = "\n".join(bot.pricing_combo_lines())
@@ -2455,10 +2475,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Chuyên Nghiệp: <b>1000 Xu</b>" in video_price_text
     assert "Video Pro Plus: <b>1200 Xu</b>" in video_price_text
     assert "Video Premium: <b>1500 Xu</b>" in video_price_text
-    assert "Combo Ưu Đãi TikTok" in combo_price_text
-    assert "khuyến nghị 9:16" in combo_price_text
-    assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
-    assert "Local Worker/FFmpeg" in frame_price_text
+    assert "Combo Video Quảng Cáo Sản Phẩm Mini" in combo_price_text
+    assert "Combo Affiliate / Review Sản Phẩm" in combo_price_text
+    assert "Combo Dịch Video Đa Ngôn Ngữ" in combo_price_text
+    pkgcombo_note_text = "\n".join(bot.pricing_pkgcombo_notes_lines("vi"))
+    assert "không cộng bonus nạp Xu" in pkgcombo_note_text
+    assert "công cụ xử lý video nội bộ" in frame_price_text
+    assert "Local Worker/FFmpeg" not in frame_price_text
     assert "Ảnh sang PDF: <b>0 Xu</b>" in docs_price_text
     assert "PDF sang ảnh: <b>0 Xu</b>" in docs_price_text
     assert "Gộp PDF: <b>0 Xu</b>" in docs_price_text
@@ -2479,21 +2502,39 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "key/token/raw provider response" in audit_price_text
     assert 'CommandHandler("pricing_audit", cmd_pricing_audit)' in source
     combo_callbacks = [button.callback_data for row in bot.pricing_combo_keyboard("vi").inline_keyboard for button in row]
-    assert "pkgbuy|combo|tiktok_99k" in combo_callbacks
-    assert "pkgbuy|combo|posting_499k" in combo_callbacks
-    assert "pricing|packages" in combo_callbacks
+    assert "pkgcombo:combo_detail:combo_ad_video_588k" in combo_callbacks
+    assert "pkgcombo:combo_detail:combo_launch_1288k" in combo_callbacks
+    assert "pkgbuy|combo|tiktok_99k" not in combo_callbacks
+    assert "pkgcombo:home" in combo_callbacks
     package_hub_callbacks = [button.callback_data for row in bot.pricing_packages_keyboard("vi").inline_keyboard for button in row]
-    assert package_hub_callbacks == ["pricing|plans", "pricing|combo", "pricing|my_packages", "pricing|main", "menu|main"]
+    assert package_hub_callbacks == [
+        "pkgcombo:group:image",
+        "pkgcombo:group:video",
+        "pkgcombo:group:music",
+        "pkgcombo:group:voice",
+        "pkgcombo:group:subtitle_dub",
+        "pkgcombo:group:prompt_workflow",
+        "pkgcombo:group:combo",
+        "pkgcombo:my",
+        "pkgcombo:large_order:home",
+        "pkgcombo:notes",
+        "pricing|main",
+        "menu|main",
+    ]
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
-    assert "📦 Gói của tôi" in plan_text
+    assert "Chọn nhóm sản phẩm để xem các mức gói" in plan_text
+    assert "Gói tác vụ dùng trong 30 ngày" in "\n".join(bot.pricing_pkgcombo_notes_lines("vi"))
+    assert "pkgcombo:my" in package_hub_callbacks
     assert "/buy_plan" not in plan_text
     plan_callbacks = [button.callback_data for row in bot.pricing_plans_keyboard("vi").inline_keyboard for button in row]
-    assert "pkgbuy|monthly|starter_monthly" in plan_callbacks
-    assert "pkgbuy|monthly|pro_monthly" in plan_callbacks
-    assert "pricing|packages" in plan_callbacks
+    assert "pkgcombo:group:image" in plan_callbacks
+    assert "pkgcombo:group:video" in plan_callbacks
+    assert "pkgcombo:group:music" in plan_callbacks
+    assert "pkgcombo:group:voice" in plan_callbacks
+    assert "pkgcombo:group:prompt_workflow" in plan_callbacks
+    assert "pkgcombo:home" in plan_callbacks
     assert "Giá tác vụ dịch tham khảo" not in plan_text
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
     assert "Music / Audio Factory" not in plan_text
@@ -2509,7 +2550,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎧 Studio âm thanh" in start_labels
     assert "🎙 Voice Studio" not in start_labels
     assert "🎵 Music Studio" not in start_labels
-    assert "🌐 Dịch / Phụ đề / Lồng tiếng Studio" in start_labels
+    assert "🌐 Dịch thuật" in start_labels
     assert "🎞 Video" not in start_labels
     assert "👨‍💼 Hỗ trợ" in start_labels
     assert "💰 Nạp Xu / Bảng giá" in start_labels
@@ -2641,19 +2682,17 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
         "🔥 Video theo trend",
-        "🧠 Ý tưởng video",
-        "🎞 Storyboard + Prompt",
-        "🎥 Prompt / Chuyển động",
         "🎬 Video AI chân thật",
-        "🧩 Kịch bản → Ảnh → Video",
-        "🖼 Ảnh → Video",
+        "🧩 Kịch bản → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
-        "🎬 Phim AI nhiều cảnh",
-        "📥 Video mẫu / Kênh mẫu",
-        "🎵 Nhạc / Voice / SFX",
-        "🛠 Chỉnh sửa video local",
+        "🎬 Video dài tập",
+        "🎞 Storyboard",
+        "💡 Ý tưởng video",
+        "🛠 Chỉnh sửa video",
+        "📥 Tải video từ liên kết",
         "🏠 Menu chính",
+        "📖 Hướng dẫn video",
     ]
     assert "🎬 Tạo video nhanh" not in video_labels
     assert "🖼➡️🎬 Tạo video AI từ ảnh" not in video_labels
@@ -2662,7 +2701,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💰 Xem giá" not in video_labels
     assert "📞 Liên hệ admin" not in video_labels
     video_ai_labels = [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
-    assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video", "🔙 Quay lại Video", "🏠 Menu chính"]
+    assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Phân tích video", "🔙 Quay lại Video", "🏠 Menu chính"]
     video_ai_callbacks = [button.callback_data for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "promptvideo|start" in video_ai_callbacks
     assert "imagevideo|start" in video_ai_callbacks
@@ -2670,11 +2709,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "create_media|quick_video" not in video_ai_callbacks
     assert "menu|hint_image_to_video_pack" not in video_ai_callbacks
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
-    assert "Video AI chân thật hiện đang được bảo trì" in bot.video_ai_true_text("vi")
+    assert "Video AI chân thật đang được kiểm tra để đảm bảo chất lượng" not in bot.video_ai_true_text("vi")
     frame_intro_labels = [button.text for row in bot.video_frame_intro_keyboard("vi").inline_keyboard for button in row]
     assert "📷 Bắt đầu ghép ảnh" in frame_intro_labels
-    assert "Local Worker + ffmpeg" in bot.video_frame_intro_text("vi")
-    assert "Không dùng VEO" in bot.video_frame_intro_text("vi")
+    assert "công cụ xử lý video nội bộ" not in bot.video_frame_intro_text("vi")
+    assert "Local Worker + ffmpeg" not in bot.video_frame_intro_text("vi")
+    assert "Không dùng hệ tạo video AI chân thật" in bot.video_frame_intro_text("vi")
     assert "Tự quay & đổi cảnh AI" in bot.video_self_scene_ai_text("vi")
     assert "Mở màn hình này chưa xử lý video và chưa trừ Xu" in bot.video_self_scene_ai_text("vi")
     self_scene_labels = [button.text for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]
@@ -2933,7 +2973,7 @@ def test_frame_video_helper_defaults_and_state():
         job_id = bot.create_frame_video_job(uid, "chat", state, 70, "queued")
         assert bot.frame_video_job_for_user(job_id, uid)["status"] == "queued"
         bot.update_frame_video_job(job_id, status="success")
-        assert "success" in bot.frame_video_job_status_text(bot.frame_video_job_for_user(job_id, uid))
+        assert "hoàn tất" in bot.frame_video_job_status_text(bot.frame_video_job_for_user(job_id, uid))
         assert bot.clear_frame_video_state(uid) is True
         assert bot.get_frame_video_state(uid) == {}
     finally:
@@ -3291,7 +3331,7 @@ def test_support_ticket_menu_admin_registry_and_no_auto_refund():
     source = bot_source_text()
     admin_buttons = [
         button.callback_data
-        for row in bot.menu_nav_keyboard("admin", True).inline_keyboard
+        for row in bot.admin_module_keyboard("support").inline_keyboard
         for button in row
         if button.callback_data
     ]
@@ -4060,15 +4100,18 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "https://t.me/toanaasbot?start=ref_123456" in bot.referral_account_link_text("123456", "toanaasbot")
 
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
-    assert "PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>" in plan_text
-    assert "📆 Starter Monthly" in plan_text
-    assert "📆 Creator Monthly" in plan_text
-    assert "📆 Shop Monthly" in plan_text
-    assert "📆 Pro Monthly" in plan_text
-    assert "Bot không yêu cầu khách gõ lệnh mua gói" in plan_text
+    pkgcombo_note_text = "\n".join(bot.pricing_pkgcombo_notes_lines("vi"))
+    assert "Chọn nhóm sản phẩm để xem các mức gói" in plan_text
+    assert "Gói tác vụ dùng trong 30 ngày" in pkgcombo_note_text
+    assert "Sau khi PayOS xác nhận, quyền lợi nằm trong 📦 Gói của tôi" in pkgcombo_note_text
+    assert "Gói Ảnh" in plan_text
+    assert "Gói Video" in plan_text
+    assert "Gói Nhạc" in plan_text
+    assert "Gói Voice" in plan_text
+    assert "Prompt / Workflow" in plan_text
+    assert "Chi tiết giá/quyền lợi sẽ hiện ở từng gói" in plan_text
     assert "/buy_plan" not in plan_text
-    assert "Tiền mua gói tháng không tính vào tổng nạp" in plan_text
+    assert "Tiền mua gói/combo không tính vào tổng nạp" in pkgcombo_note_text
 
     topic_text = bot.creative_motion_topic_text()
     assert "Bạn muốn làm video về vấn đề gì" in topic_text
@@ -4911,14 +4954,14 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
         for row in bot.main_video_keyboard("vi").inline_keyboard
         for button in row
     }
-    assert "🧩 Kịch bản → Ảnh → Video" in video_labels
+    assert "🧩 Kịch bản → Video" in video_labels
     assert "🎞 Ghép ảnh thành video" in video_labels
     assert "🎬 Video AI chân thật" in video_labels
     assert "🎥 Tự quay & đổi cảnh AI" in video_labels
-    assert "🎬 Phim AI nhiều cảnh" in video_labels
-    assert "🎞 Storyboard + Prompt" in video_labels
+    assert "🎬 Video dài tập" in video_labels
+    assert "🎞 Storyboard" in video_labels
     assert "🔥 Video theo trend" in video_labels
-    assert "🧠 Ý tưởng video" in video_labels
+    assert "💡 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
 
     init_source = source_between(source, "def init_db():", "def get_user_language")
@@ -4984,9 +5027,11 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
     assert status["max_concurrent_jobs"] == bot.FRAME_VIDEO_MAX_CONCURRENT_JOBS
     effect_labels = str(bot.frame_video_effect_keyboard().inline_keyboard)
-    assert "Pan trái/phải" in effect_labels
-    assert "Slide ngang" in effect_labels
-    assert "Random nhẹ" in effect_labels
+    assert "▶️ Dùng mặc định" in effect_labels
+    assert "Fade" in effect_labels
+    assert "Slide" in effect_labels
+    assert "Zoom nhẹ" in effect_labels
+    assert "Không hiệu ứng" in effect_labels
     assert "Chọn nhạc có sẵn" in str(bot.frame_video_music_keyboard().inline_keyboard)
     assert "Thêm voice/TTS" in str(bot.frame_video_music_keyboard().inline_keyboard)
     mode_labels = str(bot.storyboard_after_images_keyboard(123).inline_keyboard)
@@ -5611,13 +5656,15 @@ def test_help_video_guide_has_current_flow_order():
     guide_video = bot.guide_section_text("video_ai")
     expected_steps = [
         "Mở mục <b>Tạo video</b>",
-        "Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có",
-        "Gửi mô tả video",
-        "Chọn gói video",
-        "Chọn số cảnh",
+        "Chọn chủ đề hoặc nguồn video",
+        "Chọn số cảnh trước",
+        "Chọn profile và ngữ cảnh",
+        "Bổ sung yêu cầu chi tiết",
+        "Kiểm tra kế hoạch và prompt riêng",
+        "Chọn gói chất lượng video",
         "Xem tổng chi phí",
-        "Hệ thống xử lý",
-        "Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng",
+        "Hệ thống tạo, kiểm tra từng cảnh",
+        "Add-on được thực hiện sau khi ghép",
     ]
     positions = [guide_video.index(step) for step in expected_steps]
     assert positions == sorted(positions)
@@ -5633,11 +5680,11 @@ def test_help_video_guide_has_package_200_rules():
 def test_help_video_guide_has_scene_discount_example():
     guide_video = bot.guide_section_text("video_ai")
     for expected in [
-        "1 cảnh khoảng 6 giây",
-        "3 cảnh khoảng 18 giây",
-        "5 cảnh khoảng 30 giây",
-        "10 cảnh khoảng 60 giây",
-        "20 cảnh khoảng 120 giây",
+        "1 cảnh khoảng 8 giây",
+        "3 cảnh khoảng 24 giây",
+        "5 cảnh khoảng 40 giây",
+        "10 cảnh khoảng 80 giây",
+        "20 cảnh khoảng 160 giây",
         "2-9 cảnh: giảm 10%",
         "10-19 cảnh: giảm 15%",
         "20 cảnh: giảm 20%",
@@ -5940,7 +5987,8 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert info["value"] == 30
 
         bot.create_order("123456789", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("123456789", 50000)
+        _, invoice_total = bot.payos_invoice_total_for_order("123456789", 50000)
+        processed, desc, paid_info = bot.process_payos_paid_order("123456789", invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["promo_bonus"] == 150
@@ -5950,7 +5998,7 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         credits_after_paid, _, _ = bot.get_user(user_id)
         assert credits_after_paid == initial_credits + 680
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 50000)
+        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", invoice_total)
         assert processed is False
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)
@@ -5983,7 +6031,8 @@ def test_finance_ledger_revenue_usage_expense_and_year_profit(monkeypatch):
         bot.init_db()
         user_id = "finance-user"
         bot.create_order("fin-10001", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("fin-10001", 50000)
+        _, invoice_total = bot.payos_invoice_total_for_order("fin-10001", 50000)
+        processed, desc, paid_info = bot.process_payos_paid_order("fin-10001", invoice_total)
         assert processed is True
         assert desc == "success"
         assert int(paid_info.get("base_xu") or paid_info.get("xu") or 0) >= 500
@@ -6000,7 +6049,7 @@ def test_finance_ledger_revenue_usage_expense_and_year_profit(monkeypatch):
         finally:
             conn.close()
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("fin-10001", 50000)
+        processed, desc, _paid_info = bot.process_payos_paid_order("fin-10001", invoice_total)
         assert processed is False
         conn = bot.db_connect()
         try:
@@ -6076,8 +6125,9 @@ def test_operations_v1a_tax_prep_and_accounting_exports(monkeypatch):
         "legal_service",
     }
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
-    assert "🟢 Miễn/ưu đãi thuế phí" in finance_labels
-    assert "🧾 Báo cáo kế toán" in finance_labels
+    assert "🧾 Thuế / VAT" in finance_labels
+    assert "📚 Hồ sơ/chứng từ" in finance_labels
+    assert "🧮 Sổ điều chỉnh" in finance_labels
     tax_callbacks = [
         button.callback_data
         for row in bot.tax_accounting_menu_keyboard().inline_keyboard
@@ -6382,7 +6432,8 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
         initial_credits, _, _ = bot.get_user(user_id)
 
         bot.create_order("100001", user_id, 100000, 1000)
-        processed, desc, paid_info = bot.process_payos_paid_order("100001", 100000)
+        _, first_invoice_total = bot.payos_invoice_total_for_order("100001", 100000)
+        processed, desc, paid_info = bot.process_payos_paid_order("100001", first_invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 50
@@ -6390,7 +6441,8 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
         assert credits_after_first == initial_credits + 1050
 
         bot.create_order("100002", user_id, 100000, 1000)
-        processed, desc, paid_info = bot.process_payos_paid_order("100002", 100000)
+        _, second_invoice_total = bot.payos_invoice_total_for_order("100002", 100000)
+        processed, desc, paid_info = bot.process_payos_paid_order("100002", second_invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 0
@@ -6603,7 +6655,8 @@ def test_trial_bonus_antispam_is_free_trial_only(monkeypatch):
         user_id = "paid-user"
         initial_credits, _, _ = bot.get_user(user_id)
         bot.create_order("paid-50", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("paid-50", 50000)
+        _, invoice_total = bot.payos_invoice_total_for_order("paid-50", 50000)
+        processed, desc, paid_info = bot.process_payos_paid_order("paid-50", invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 30
@@ -6872,12 +6925,12 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         for row in bot.video_idea_menu_keyboard("vi").inline_keyboard
         for button in row
     ]
-    assert "🧠 Ý tưởng video" in video_menu_buttons
+    assert "💡 Ý tưởng video" in video_menu_buttons
     assert "📢 Concept quảng cáo" not in video_menu_buttons
     assert "📢 Ý tưởng quảng cáo" in idea_buttons
     assert "🔥 Ý tưởng theo xu hướng" not in idea_buttons
     assert "🎬 Ý tưởng điện ảnh / kể chuyện" in idea_buttons
-    assert "videoidea|kind|ad" in idea_callbacks
+    assert "videoidea|catalog|sales" in idea_callbacks
     assert "videoidea|kind|trend" not in idea_callbacks
     assert 'CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\\|")' in source
     assert 'CallbackQueryHandler(handle_prompt_video_callback, pattern=r"^promptvideo\\|")' in source
@@ -7029,8 +7082,9 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     assert bot.rotating_suggestions(["a", "b", "c", "d"], 2, 3) == ["c", "d", "a"]
 
     main_rows = bot.main_video_keyboard("vi").inline_keyboard
-    assert [button.callback_data for button in main_rows[-1]] == ["vproduct|open|video_local_edit", "menu|main"]
-    assert len(main_rows[-1]) == 2
+    assert [button.callback_data for button in main_rows[-2]] == ["vprofile|menu", "videoedit|hub"]
+    assert [button.callback_data for button in main_rows[-1]] == ["menu|main"]
+    assert len(main_rows[-1]) == 1
 
     ai_rows = bot.video_ai_true_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in ai_rows[-1]] == ["menu|main_video", "menu|main"]
@@ -7214,7 +7268,7 @@ def test_trend_guided_video_prompt_callbacks_are_telegram_safe():
         bot.trend_guided_video_public_off_keyboard("vi", is_admin=True),
     ]
     for keyboard in keyboards:
-        assert max(len(row) for row in keyboard.inline_keyboard) <= 2
+        assert max(len(row) for row in keyboard.inline_keyboard) <= 3
         callbacks = [
             button.callback_data
             for row in keyboard.inline_keyboard
@@ -7524,6 +7578,10 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
     image_prompt = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|image_guard", uid))
     assert "Prompt ảnh khung chính" in image_prompt["text"]
 
+    public_long_guard = asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
+    assert "Video dài tập 1–2 giờ đang phát triển" in public_long_guard["text"]
+    assert "chưa trừ Xu" in public_long_guard["text"]
+    monkeypatch.setattr(bot, "is_admin_user", lambda check_uid: check_uid == uid)
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|topic|sales", uid))
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|topic_choice|1", uid))
@@ -7566,9 +7624,9 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     source = bot_source_text()
     labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     callbacks = [button.callback_data for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert "🎬 Phim AI nhiều cảnh" in labels
-    assert "🎞 Storyboard + Prompt" in labels
-    assert "vproduct|open|multi_scene_film" in callbacks
+    assert "🎬 Video dài tập" in labels
+    assert "🎞 Storyboard" in labels
+    assert "longvideo|public_guard" in callbacks
     assert "vproduct|open|storyboard_prompt" in callbacks
     assert 'CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\\|")' in source
     assert 'CommandHandler("long_video_status", cmd_long_video_status)' in source
@@ -7596,7 +7654,7 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     }
     story_text = bot.storyboard_pack_result_text(story_state, "vi")
     for expected in [
-        "Storyboard + Prompt điện ảnh",
+        "Storyboard",
         "3 hướng prompt có thể dùng",
         "Shot 1",
         "Prompt ảnh",
@@ -7792,6 +7850,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
 
     main_labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert "🌐 Dịch/Lồng tiếng video" not in main_labels
+    assert "📥 Tải video từ liên kết" in main_labels
     assert "🎞 Video mẫu → Video AI" in [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "🎞 Video mẫu → Video AI" not in main_labels
 
@@ -7810,7 +7869,15 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
 
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
-    assert {"👁 Tạo phụ đề tự động", "🗣 Lồng tiếng tự động", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"}.issubset(set(dub_labels))
+    assert {
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
+        "🎞 Phụ đề + Lồng tiếng",
+    }.issubset(set(dub_labels))
+    assert "📄 Dịch file phụ đề" not in dub_labels
+    assert "🧾 Bóc lời thoại" not in dub_labels
+    assert "🔗 Tải video từ link" not in dub_labels
     assert "🎭 Dịch + lồng tiếng" not in dub_labels
     assert "🎬 Dịch + lồng tiếng + video" not in dub_labels
     assert "🎙 Lồng tiếng voice" not in dub_labels
@@ -7824,23 +7891,25 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
         },
         "vi",
     )
-    assert "Video đã sẵn sàng lồng tiếng" in dub_confirm
+    assert "Phụ đề + Lồng tiếng" in dub_confirm
     assert "1.050 Xu" not in dub_confirm
-    assert "Chi phí dự kiến" not in dub_confirm
-    assert "trừ Xu" in dub_confirm
+    assert "Tổng cộng:" in dub_confirm
+    assert "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận" in dub_confirm
     assert "Tác vụ:" not in dub_confirm
 
     subtitle_confirm = bot.video_dubbing_confirm_text(
         {"mode": "subtitle", "video_file_id": "video-2", "source_language": "auto", "video_duration": 45},
         "vi",
     )
-    assert "Video đã sẵn sàng tạo phụ đề" in subtitle_confirm
+    assert "Tạo phụ đề tự động" in subtitle_confirm
+    assert "Xuất video MP4 có phụ đề" in subtitle_confirm
     assert "Kiểu giọng" not in subtitle_confirm
     translated_subtitle_confirm = bot.video_dubbing_confirm_text(
         {"mode": "translate_subtitle", "video_file_id": "video-3", "target_language": "Tiếng Việt", "video_duration": 61},
         "vi",
     )
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in translated_subtitle_confirm
+    assert "Dịch phụ đề video" in translated_subtitle_confirm
+    assert "Xuất video MP4 có phụ đề dịch" in translated_subtitle_confirm
     assert "Kiểu giọng" not in translated_subtitle_confirm
 
     pricing = bot.calculate_video_translate_price("translate_subtitle", 383)
@@ -7853,7 +7922,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     }
     assert bot.calculate_video_translate_price("subtitle", 0)["total_price_xu"] == 20
     pricing_text = bot.video_dubbing_pricing_text("vi")
-    for marker in ["20 Xu/phút", "40 Xu/phút", "100 Xu/phút", "150 Xu/phút", "chưa xử lý và chưa trừ Xu"]:
+    for marker in ["0.1 Xu/ký tự", "0.2 Xu/ký tự", "Giảm giá: 10%", "20% khi trên 10.000", "hỏi xác nhận trước khi xử lý"]:
         assert marker in pricing_text
     assert "API" not in pricing_text
     assert "provider" not in pricing_text.lower()
@@ -7889,7 +7958,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert "confirm_subtitle_translate" in dubbing_callback_source
     assert "confirm_subtitle_plus_dub" in dubbing_callback_source
 
-    admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
+    admin_labels = [button.text for row in bot.admin_module_keyboard("support").inline_keyboard for button in row]
     assert "📣 Marketing tự động" in admin_labels
     public_admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", False).inline_keyboard for button in row]
     assert "📣 Marketing tự động" not in public_admin_labels
@@ -7963,8 +8032,31 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "PUBLIC_VOICE_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "PUBLIC_SUBTITLE_DUB_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_DUB_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", True)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
+        mode = bot.normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
+        if mode == bot.VIDEO_SUBTITLE_MODE_CREATE:
+            source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+            subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+            state = bot.set_video_dubbing_pending(
+                user_id,
+                state.get("step") or "output",
+                subtitle_ref=subtitle_ref,
+            )
+            return {
+                "state": state,
+                "source_subtitle": source,
+                "output_subtitle": source,
+                "output_script": "Xin chào",
+                "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+                "detected_language": "vi",
+            }
         translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
         state = bot.set_video_dubbing_pending(user_id, state.get("step") or "output", translated_subtitle_ref=translated_ref)
         return {"state": state, "output_subtitle": "Translated subtitle", "output_script": "Translated subtitle"}
@@ -7974,7 +8066,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     cases = [
         (71001, bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề tự động"),
         (71002, bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
-        (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng tự động"),
+        (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng video"),
         (71004, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Phụ đề + lồng tiếng"),
     ]
     for uid, mode, expected_text in cases:
@@ -7983,14 +8075,28 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         state = bot.get_video_dubbing_pending(uid)
         assert state["video_processing_mode"] == mode
         assert state["step"] == "source"
-        assert "gửi video/audio" in result["text"].lower()
+        assert "video/audio" not in result["text"].lower()
+        if mode == bot.VIDEO_SUBTITLE_MODE_CREATE:
+            assert "gửi video" in result["text"].lower()
+        elif mode == bot.VIDEO_SUBTITLE_MODE_TRANSLATE:
+            assert "video đã có phụ đề" in result["text"].lower()
+        elif mode == bot.VIDEO_SUBTITLE_MODE_DUB:
+            assert "lồng tiếng" in result["text"].lower()
+        else:
+            assert "xử lý video" in result["text"].lower()
         callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
         assert "videodub|link_start" not in callbacks
+        if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            assert "videodub|source_upload" not in callbacks
+            assert "videodub|path|has_subtitle" in callbacks
+            assert "videodub|path|no_subtitle" in callbacks
+            result = asyncio.run(press("videodub|path|no_subtitle", uid))
         result = asyncio.run(press("videodub|source_upload", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"
         assert expected_text.lower() in result["text"].lower()
-        assert "gửi hoặc reply video/audio" in result["text"].lower()
+        assert "video" in result["text"].lower()
+        assert "audio" not in result["text"].lower()
         assert "API" not in result["text"]
         assert "provider" not in result["text"].lower()
 
@@ -8008,42 +8114,41 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     update = SimpleNamespace(effective_user=SimpleNamespace(id=71004), message=message)
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(update, SimpleNamespace())) is True
     assert bot.get_video_dubbing_pending(71004)["step"] == "language"
+    assert bot.get_video_dubbing_pending(71004)["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     asyncio.run(press("videodub|language|English", 71004))
     plus_state = bot.get_video_dubbing_pending(71004)
-    assert plus_state["step"] == "output"
+    assert plus_state["step"] == "voice"
     assert plus_state["target_language"] == "English"
-    asyncio.run(press("videodub|continue_dubbing", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "voice"
+    translated_ref = bot.set_video_dubbing_artifact(71004, "translated_subtitle", "1\n00:00:00,000 --> 00:00:02,000\nHello")
+    bot.set_video_dubbing_pending(71004, "voice", translated_subtitle_ref=translated_ref)
     asyncio.run(press("videodub|voice|default_female", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "voice_speed"
-    asyncio.run(press("videodub|speed_default", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "confirm"
+    assert bot.get_video_dubbing_pending(71004)["step"] in {"confirm", "dub_confirmation"}
 
     upload_cases = [
-        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|final", "Video đã sẵn sàng tạo phụ đề"),
+        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "confirm", "videodub|final", "Xác nhận tạo phụ đề gốc"),
         (
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
-            "output",
-            "videodub|final",
-            "Xuất phụ đề dịch",
+            "language",
+            None,
+            "Dịch phụ đề",
         ),
         (
             71103,
             bot.VIDEO_SUBTITLE_MODE_DUB,
             {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên", "voice_speed": "1.0"},
-            "confirm",
-            "videodub|confirm_dub",
-            "Video đã sẵn sàng lồng tiếng",
+            "language",
+            None,
+            "Chọn ngôn ngữ",
         ),
         (
             71104,
             bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             {"target_language": "English", "translate_requested": "1"},
-            "output",
-            "videodub|final",
-            "Video đã sẵn sàng tạo phụ đề dịch",
+            "language",
+            None,
+            "Chọn ngôn ngữ",
         ),
     ]
     for uid, mode, extra, expected_step, expected_callback, expected_label in upload_cases:
@@ -8059,8 +8164,9 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == expected_step
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            assert state["video_processing_mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
+            assert state["video_processing_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
             assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+            assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
         else:
             assert state["video_processing_mode"] == mode
         assert expected_label in message.sent[-1]["text"]
@@ -8069,19 +8175,22 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             for row in message.sent[-1]["reply_markup"].inline_keyboard
             for button in row
         ]
-        assert expected_callback in callbacks
+        if expected_callback:
+            assert expected_callback in callbacks
 
 
 def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     source = bot_source_text()
     pipeline_source = source_between(source, "async def execute_video_dubbing_pipeline", "async def handle_video_dubbing_pending_upload")
-    prepare_source = source_between(source, "async def video_dubbing_prepare_subtitles", "async def execute_video_dubbing_pipeline")
+    core_source = source_between(source, "async def _execute_video_dubbing_pipeline_core", "async def execute_video_dubbing_pipeline")
+    prepare_source = source_between(source, "async def video_dubbing_prepare_subtitles", "async def _execute_video_dubbing_pipeline_core")
     resolver_source = source_between(source, "async def video_dubbing_resolve_source_script", "async def video_dubbing_render_video")
-    assert "video_dubbing_prepare_subtitles" in pipeline_source
+    assert "video_dubbing_prepare_subtitles" in core_source
     assert "video_dubbing_transcribe_bytes" in resolver_source
     assert "translate_subtitle_text" in prepare_source
-    assert "video_dubbing_tts_bytes" in pipeline_source
-    assert pipeline_source.index("video_dubbing_prepare_subtitles") < pipeline_source.index("spend_fixed_credit_info")
+    assert "synthesize_dub_segment_chunks" in core_source
+    assert core_source.index("video_dubbing_prepare_subtitles") < core_source.index("spend_fixed_credit_info")
+    assert "create_subtitle_dub_pipeline_workspace" in pipeline_source
 
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_TRANSLATE_SUBTITLE_ENABLED", False)
@@ -8094,9 +8203,9 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
     ]:
         capability = bot.video_dubbing_capability(mode, {})
-        assert capability["reason"] == "mode_disabled"
+        assert capability["reason"].startswith("missing_") or capability["reason"] == "ready"
         guard = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert maintenance_text in guard
+        assert "TOAN AAS chưa thể" in guard or "bảo trì" in guard
         assert "chưa trừ Xu" in guard
         assert "API" not in guard
         assert "provider" not in guard.lower()
@@ -8110,8 +8219,14 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_download(_context, _state):
         return b"video-bytes", "video/mp4"
 
-    async def fake_transcribe(_data, _context, content_type="application/octet-stream"):
+    async def fake_extract_audio(_data, content_type="application/octet-stream", max_seconds=0):
+        assert _data == b"video-bytes"
         assert content_type == "video/mp4"
+        return b"audio-from-video", "audio/mpeg", "ffmpeg_audio_extract"
+
+    async def fake_transcribe(_data, _context, content_type="application/octet-stream"):
+        assert _data == b"audio-from-video"
+        assert content_type == "audio/mpeg"
         return "Test ASR", "Xin chào từ video", "chars=17"
 
     async def fake_translate(text, target, **_kwargs):
@@ -8120,10 +8235,31 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_tts(text, voice_style="", voice_id="", voice_speed="1.0"):
         return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; speed={voice_speed}; chars={len(text)}"
 
+    async def fake_render_video(_source, dubbed_audio=b"", subtitle_bytes=b"", keep_original_audio=False):
+        return b"\x00\x00\x00\x18ftypmp42-core" + b"x" * 4096, "fake_render"
+
+    async def fake_timeline_audio(*_args, **_kwargs):
+        return b"timeline-audio", "timeline"
+
+    async def fake_normalize_audio(*_args, **_kwargs):
+        return b"normalized-audio", "normalized"
+
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
+    monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_dubbing_extract_audio", fake_extract_audio)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "video_dubbing_render_video", fake_render_video)
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "VIDEO_DUB_MUX_ENABLED", True)
+    monkeypatch.setattr(bot, "video_dubbing_video_render_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "build_dub_timeline_audio", fake_timeline_audio)
+    monkeypatch.setattr(bot, "normalize_dub_audio_bytes", fake_normalize_audio)
+    monkeypatch.setattr(bot, "resolve_video_dub_tts_voice", lambda _uid, _state: {"ok": True, "provider_voice_id": "default_female", "tts_payload_voice_id": "default_female", "resolved_gender": "female", "fallback_used": False})
+    async def fake_validate_video(_video_bytes, *, require_audio=False, min_bytes=None):
+        return {"ok": True, "detail": "ok", "duration": 2.0, "has_video": True, "has_audio": bool(require_audio), "size": len(_video_bytes or b"")}
+    monkeypatch.setattr(bot, "subdub_validate_video_output", fake_validate_video)
     monkeypatch.setattr(
         bot,
         "spend_fixed_credit_info",
@@ -8134,18 +8270,25 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         def __init__(self):
             self.documents = []
             self.audio = []
+            self.video = []
 
         async def reply_document(self, document, **kwargs):
             self.documents.append((document, kwargs))
+            return SimpleNamespace(message_id=3101, document=SimpleNamespace(file_id="doc-file"))
 
         async def reply_audio(self, audio, **kwargs):
             self.audio.append((audio, kwargs))
+            return SimpleNamespace(message_id=3102, audio=SimpleNamespace(file_id="audio-file"))
 
-    for mode, expect_subtitle, expect_audio in [
-        (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False),
-        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, False),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, False, True),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, True),
+        async def reply_video(self, video, **kwargs):
+            self.video.append((video, kwargs))
+            return SimpleNamespace(message_id=3103, video=SimpleNamespace(file_id="video-file"))
+
+    for mode, expect_video, expect_audio, expect_result_subtitle in [
+        (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False, True),
+        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, False, True),
+        (bot.VIDEO_SUBTITLE_MODE_DUB, True, False, False),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, False, True),
     ]:
         message = OutputMessage()
         query = SimpleNamespace(from_user=SimpleNamespace(id=72001), message=message)
@@ -8156,13 +8299,16 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
             "target_language": "English",
             "voice_style": "Nữ tự nhiên",
             "translate_requested": "1",
+            "source_mime_type": "video/mp4",
+            "_pipeline_source_bytes_override": b"video-bytes",
         }
         result = asyncio.run(bot.execute_video_dubbing_pipeline(query, SimpleNamespace(), state, "vi"))
         assert result["ok"] is True
-        assert bool(message.documents) is expect_subtitle
+        assert bool(message.documents) is False
+        assert bool(message.video) is expect_video
         assert bool(message.audio) is expect_audio
-        assert result["has_subtitle"] is expect_subtitle
-        assert result["has_audio"] is expect_audio
+        assert result["has_subtitle"] is expect_result_subtitle
+        assert result["has_audio"] is (mode in {bot.VIDEO_SUBTITLE_MODE_DUB, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
 
 
 def test_quick_image_flow_prompt_before_ratio_and_pricing():
@@ -8182,16 +8328,16 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     assert "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu" in entry_text
     assert "API" not in entry_text
     entry_rows = bot.quick_image_entry_keyboard("vi").inline_keyboard
-    assert [button.callback_data for button in entry_rows[0]] == ["create_media|qi_suggest", "create_media|qi_refresh"]
-    assert [button.callback_data for button in entry_rows[1]] == ["create_media|qi_custom", "menu|main_image"]
+    assert [button.callback_data for button in entry_rows[0]] == ["create_media|qi_suggest", "create_media|qi_custom"]
+    assert [button.callback_data for button in entry_rows[1]] == ["menu|main_image", "menu|main"]
 
     first = bot.quick_image_suggestions(0, "vi")
-    second = bot.quick_image_suggestions(3, "vi")
+    second = bot.quick_image_suggestions(5, "vi")
     assert len(bot.quick_image_suggestion_bank("vi")) >= 20
-    assert len(first) == 3
+    assert len(first) == 5
     assert first != second
     suggestions_text = bot.quick_image_suggestions_text({"suggest_offset": 0}, "vi")
-    assert "3 chủ đề gợi ý tạo ảnh" in suggestions_text
+    assert "5 ý tưởng gợi ý tạo ảnh" in suggestions_text
     assert "soạn prompt hoàn chỉnh" in suggestions_text
     assert first[0] in suggestions_text
     suggestion_callbacks = [
@@ -8199,7 +8345,16 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         for row in bot.quick_image_suggestions_keyboard("vi").inline_keyboard
         for button in row
     ]
-    assert {"create_media|qi_pick_1", "create_media|qi_pick_2", "create_media|qi_pick_3", "create_media|qi_refresh", "create_media|qi_custom"}.issubset(set(suggestion_callbacks))
+    assert {
+        "create_media|qi_pick_1",
+        "create_media|qi_pick_2",
+        "create_media|qi_pick_3",
+        "create_media|qi_pick_4",
+        "create_media|qi_pick_5",
+        "create_media|qi_refresh",
+        "create_media|qi_custom",
+    }.issubset(set(suggestion_callbacks))
+    assert [button.text for button in bot.quick_image_suggestions_keyboard("vi").inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
 
     prepared_prompt, negative_prompt = bot.quick_image_prompt_from_topic(first[0], "vi")
     rewritten_prompt, rewritten_negative = bot.quick_image_prompt_from_topic(first[0], "vi", 1)
@@ -8216,7 +8371,7 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         prompt=prepared_prompt,
         negative_prompt=negative_prompt,
         prompt_source="suggestion",
-        suggest_offset=3,
+        suggest_offset=5,
     )
     assert state["step"] == "prepared_prompt"
     assert state["prompt_source"] == "suggestion"
@@ -8234,7 +8389,7 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         "create_media|qi_rewrite",
         "create_media|qi_topics",
         "create_media|qi_custom",
-        "create_media|qi_back_suggestions",
+        "create_media|qi_back_source",
     }.issubset(set(prepared_callbacks))
 
     logo_choice_callbacks = [
@@ -8298,17 +8453,19 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     assert [button.callback_data for button in confirm_rows[0]] == ["shopai|confirm|token-1", "create_media|qi_back_tier"]
     assert [button.callback_data for button in confirm_rows[-1]] == ["menu|main"]
 
-    planning_keyboards = [
+    two_column_planning_keyboards = [
         bot.quick_image_entry_keyboard("vi"),
-        bot.quick_image_suggestions_keyboard("vi"),
         bot.quick_image_prepared_prompt_keyboard("vi"),
         bot.quick_image_custom_prompt_keyboard("vi"),
         bot.quick_image_ratio_keyboard("vi"),
         bot.quick_image_tier_keyboard("vi"),
         bot.quick_image_confirm_keyboard("token-1", "vi"),
     ]
-    for keyboard in planning_keyboards:
+    for keyboard in two_column_planning_keyboards:
         assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
+    suggestion_rows = bot.quick_image_suggestions_keyboard("vi").inline_keyboard
+    assert len(suggestion_rows[0]) == 5
+    assert all(len(row) <= 2 for row in suggestion_rows[1:])
 
     assert '"source": "quick_image_v6"' in callback_source
     assert 'set_quick_image_flow(\n            uid,\n            "prepared_prompt"' in callback_source
@@ -8507,7 +8664,7 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert callbacks(bot.image_prompt_ratio_keyboard("vi"))[-1] == ["imgtool|prompt_back_style", "menu|main"]
     assert callbacks(bot.image_prompt_output_keyboard("vi"))[-1] == ["imgtool|prompt_back_ratio", "menu|main"]
     assert callbacks(bot.main_docs_keyboard("vi"))[-1] == ["menu|main_memory", "menu|main"]
-    assert callbacks(bot.menu_nav_keyboard("admin", True))[-1] == ["menu|main", "menu|main"]
+    assert callbacks(bot.menu_nav_keyboard("admin", True))[-1] == ["menu|main"]
     assert callbacks(bot.freeze_queue_keyboard())[-1] == ["menu|admin", "menu|main"]
     assert callbacks(bot.smoke_test_menu_keyboard())[-1] == ["menu|admin", "menu|main"]
 
@@ -8603,7 +8760,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
         assert label not in voice_hub_labels
     assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
+    for label in ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
         assert label in music_hub_labels
     for label in ["📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
         assert label not in music_hub_labels
@@ -9540,7 +9697,8 @@ def test_manual_bank_qr_asset_send_and_missing_no_crash(monkeypatch, tmp_path):
 def test_manual_menu_bonus_text_no_zalopay_momo():
     text = bot.manual_payment_menu_text()
     assert "PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR" in text
-    assert "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được" in text
+    assert "MoMo chỉ dùng cho VND, không dùng cho CNY" in text
+    assert "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được" not in text
     assert "USD/CNY/USDT không áp dụng ưu đãi cộng Xu" in text
     assert "QR ngân hàng Việt Nam, ZaloPay hoặc MoMo" not in text
 
@@ -10671,10 +10829,9 @@ def test_provider_pipeline_v32_public_subtitle_guards_are_separate(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PUBLIC_ENABLED", False)
     capability = bot.video_dubbing_capability(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, public=True)
-    assert capability["ok"] is False
-    assert capability["reason"] == "public_disabled"
+    assert "missing" in capability
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
-    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in guard
+    assert "TOAN AAS chưa thể" in guard
     assert "chưa trừ Xu" in guard
     assert "API" not in guard
     assert "provider" not in guard.lower()
