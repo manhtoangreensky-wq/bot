@@ -77,6 +77,108 @@ def _scene_content(state: dict) -> list[dict]:
     return rows[:20]
 
 
+_PRESET_CONTENT_FIELDS = (
+    "preset_key",
+    "category_key",
+    "title",
+    "description",
+    "hook",
+    "objective",
+    "style",
+    "scene_arc",
+    "image_prompt_seed",
+    "video_prompt_seed",
+    "system_guidance",
+    "user_prompt_template",
+    "visual_plan",
+    "audio_plan",
+    "voice_plan",
+    "music_plan",
+    "recommended_profile_id",
+    "recommended_product_id",
+)
+
+
+def _preset_content(state: dict) -> dict:
+    """Return the curated preset payload without replacing it with generic copy."""
+
+    existing = deepcopy(dict((state or {}).get("idea_preset_content") or {}))
+    preset = deepcopy(dict((state or {}).get("idea_preset") or {}))
+    result = {
+        key: _clean(existing.get(key) or preset.get(key), 8000)
+        for key in _PRESET_CONTENT_FIELDS
+        if existing.get(key) or preset.get(key)
+    }
+    for key in ("platform_fit", "variation_axes"):
+        values = existing.get(key) or preset.get(key) or []
+        result[key] = [
+            _clean(value, 500)
+            for value in values
+            if _clean(value, 500)
+        ][:20]
+    return result
+
+
+def _scene_arc_steps(value: str) -> list[str]:
+    normalized = str(value or "").replace("→", "->")
+    return [
+        _clean(part, 500)
+        for part in normalized.split("->")
+        if _clean(part, 500)
+    ]
+
+
+def _preset_scene_content(state: dict, preset_content: dict) -> list[dict]:
+    """Distribute only the selected preset's real content across the chosen scenes."""
+
+    scene_count = _bounded_int((state or {}).get("scene_count"), 1, 1, 20)
+    title = _clean(preset_content.get("title") or (state or {}).get("subject") or "Ý tưởng video", 500)
+    description = _clean(preset_content.get("description"), 1600)
+    hook = _clean(preset_content.get("hook"), 1200)
+    objective = _clean(preset_content.get("objective"), 1200)
+    motion = _clean(preset_content.get("video_prompt_seed"), 1600)
+    stages = _scene_arc_steps(preset_content.get("scene_arc"))
+    axes = [
+        _clean(value, 500)
+        for value in preset_content.get("variation_axes") or []
+        if _clean(value, 500)
+    ]
+    if not stages:
+        stages = [value for value in (hook, description, objective, title) if value]
+    if not stages:
+        stages = [title]
+
+    rows: list[dict] = []
+    for index in range(scene_count):
+        if scene_count == 1:
+            stage_index = 0
+        else:
+            stage_index = round(index * (len(stages) - 1) / (scene_count - 1))
+        parts: list[str] = []
+        if index == 0 and hook:
+            parts.append(hook)
+        parts.append(stages[stage_index])
+        if index == 0 and description:
+            parts.append(description)
+        if axes:
+            parts.append(axes[index % len(axes)])
+        if motion:
+            parts.append(motion)
+        if index == scene_count - 1 and objective:
+            parts.append(objective)
+        unique_parts: list[str] = []
+        for part in parts:
+            if part and part not in unique_parts:
+                unique_parts.append(part)
+        rows.append({
+            "scene_index": index + 1,
+            "content": " · ".join(unique_parts),
+            "preset_title": title,
+            "preset_stage": stages[stage_index],
+        })
+    return rows
+
+
 def hydrate_parent_state(state: dict, handoff: dict) -> dict:
     """Persist the complete return contract without sharing sessions across products."""
 
@@ -152,7 +254,10 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
         or parent.get("storyboard_session_id"),
         160,
     )
-    scene_content = _scene_content(updated)
+    preset_content = _preset_content(updated)
+    scene_content = _scene_content(updated) or _preset_scene_content(updated, preset_content)
+    if not updated.get("scene_drafts"):
+        updated["scene_drafts"] = deepcopy(scene_content)
 
     updated.update({
         "idea_parent_product": product,
@@ -161,6 +266,7 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
         "idea_parent_revision": revision,
         "idea_return_step": return_step,
         "idea_preset_id": _bounded_int(updated.get("idea_preset_id"), 0, 0, 2_147_483_647),
+        "idea_preset_content": preset_content,
         "idea_content": _clean(
             updated.get("idea_content")
             or (updated.get("idea_preset") or {}).get("description")
@@ -209,13 +315,28 @@ def build_prompt_candidates(state: dict, *, offset: int = 0) -> list[dict]:
     product = _clean(source.get("idea_parent_product"), 80)
     if product not in SUPPORTED_PARENT_PRODUCTS:
         raise ValueError("unsupported_idea_parent_product")
-    scenes = list(source.get("idea_scene_content") or _scene_content(source))
+    preset_content = _preset_content(source)
+    scenes = list(
+        source.get("idea_scene_content")
+        or _scene_content(source)
+        or _preset_scene_content(source, preset_content)
+    )
     scene_count = _bounded_int(source.get("scene_count"), len(scenes) or 1, 1, 20)
     ratio = _clean(source.get("ratio") or source.get("recommended_aspect_ratio") or "9:16", 20)
     preset = dict(source.get("idea_preset") or {})
-    subject = _clean(source.get("subject") or preset.get("title") or source.get("idea_content") or "Ý tưởng video", 500)
+    subject = _clean(
+        preset_content.get("title")
+        or source.get("subject")
+        or preset.get("title")
+        or source.get("idea_content")
+        or "Ý tưởng video",
+        500,
+    )
     profile = _clean(
-        preset.get("recommended_profile_id")
+        preset_content.get("recommended_profile_id")
+        or preset_content.get("style")
+        or preset_content.get("visual_plan")
+        or preset.get("recommended_profile_id")
         or preset.get("profile")
         or preset.get("visual_plan")
         or source.get("primary_profile")
@@ -237,7 +358,13 @@ def build_prompt_candidates(state: dict, *, offset: int = 0) -> list[dict]:
         scene_prompts = []
         for scene_index in range(1, scene_count + 1):
             row = scenes[scene_index - 1] if scene_index <= len(scenes) else {}
-            content = _clean(row.get("content") or f"Nhịp nội dung {scene_index} của {subject}", 1600)
+            content = _clean(
+                row.get("content")
+                or preset_content.get("description")
+                or preset_content.get("hook")
+                or subject,
+                1600,
+            )
             previous_state = "Mở từ trạng thái đầu rõ ràng" if scene_index == 1 else "Tiếp nhận đúng trạng thái kết cảnh trước"
             next_state = "Khép toàn bộ video" if scene_index == scene_count else "Kết hành động tự nhiên và để lại trạng thái nối cảnh sau"
             scene_prompts.append(
@@ -251,6 +378,12 @@ def build_prompt_candidates(state: dict, *, offset: int = 0) -> list[dict]:
             f"Số cảnh: {scene_count}",
             f"Tỉ lệ: {ratio}",
         ]
+        if preset_content.get("description"):
+            context_parts.append(f"Nội dung cốt lõi: {preset_content['description']}")
+        if preset_content.get("objective"):
+            context_parts.append(f"Mục tiêu: {preset_content['objective']}")
+        if preset_content.get("scene_arc"):
+            context_parts.append(f"Mạch preset: {preset_content['scene_arc']}")
         if trend:
             context_parts.append(f"Ngữ cảnh trend phải giữ: {trend}")
         if source.get("source_video_id"):
@@ -347,6 +480,7 @@ def validate_return_state(state: dict) -> dict:
         "idea_parent_session_id": _clean(source.get("idea_parent_session_id"), 160),
         "idea_return_step": _clean(source.get("idea_return_step"), 160),
         "idea_preset_id": _bounded_int(source.get("idea_preset_id"), 0, 0, 2_147_483_647),
+        "idea_preset_content": dict(source.get("idea_preset_content") or {}),
         "idea_content": _clean(source.get("idea_content"), 8000),
         "idea_scene_content": list(source.get("idea_scene_content") or []),
         "idea_selected_prompt": str(source.get("idea_selected_prompt") or "").strip(),
