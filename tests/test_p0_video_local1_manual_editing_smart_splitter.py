@@ -128,11 +128,14 @@ def test_local1_exact_back_from_confirmation() -> None:
 
 def test_local1_no_processing_before_confirm() -> None:
     callback = _between(BOT_SOURCE, "async def handle_video_editor_callback", "async def handle_video_upload_callback")
-    assert callback.count("submit_local_video_editor_job(") == 1
-    assert callback.index('if action == "start"') < callback.index("submit_local_video_editor_job(")
+    tail_callback = _between(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_editor_callback")
+    assert callback.count("submit_local_video_editor_job(") == 0
+    assert tail_callback.count("await submit_local_video_editor_job(") == 1
+    assert callback.index('if action == "start"') < callback.index('return await video_tail9_render(query, uid, context, "review")', callback.index('if action == "start"'))
     assert "subprocess.run" not in callback
     submit = _between(BOT_SOURCE, "async def submit_local_video_editor_job", "async def handle_video_editor_pending_upload")
-    assert submit.count("create_local_worker_job(") == 1
+    assert submit.count("video_editengine1.create_job(") == 1
+    assert "create_local_worker_job(" not in submit
 
 
 def test_local1_no_provider_submit() -> None:
@@ -493,7 +496,8 @@ def test_local1_split_progress_part_count() -> None:
 
 def test_local1_no_success_before_delivery() -> None:
     worker = _between(WORKER_SOURCE, "def run_video_local_edit", "def _aiedit_progress")
-    assert worker.index("telegram_send_video(") < worker.index('terminal_status = "succeeded"')
+    assert worker.index("telegram_send_video_receipt(") < worker.index('terminal_status = "succeeded"')
+    assert worker.index('if not delivery.get("sent")') < worker.index('terminal_status = "succeeded"')
 
 
 def test_local1_single_terminal_outcome() -> None:
@@ -620,7 +624,8 @@ def test_local1_no_new_pricing_created() -> None:
 def test_local1_no_charge_before_delivery() -> None:
     submit = _between(BOT_SOURCE, "async def submit_local_video_editor_job", "async def handle_video_editor_pending_upload")
     assert '"xu_cost": 0' not in submit
-    assert "xu_cost=0" in submit
+    assert '"charge_policy": "after_valid_mp4_delivery"' in submit
+    assert "video_editengine1.create_job(" in submit
     for forbidden in ("spend_fixed_credit_info", "deduct_dynamic_credit", "charge_user"):
         assert forbidden not in submit
 

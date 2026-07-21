@@ -468,7 +468,7 @@ def test_route5_every_public_prefix_has_one_registered_owner_and_no_overlap():
         if prefix.startswith("vproduct|"):
             continue
         pattern = "^" + prefix.replace("|", "\\|")
-        registration = f'CallbackQueryHandler({owner}, pattern=r"{pattern}")'
+        registration = f'CallbackQueryHandler({owner}, pattern=r"{pattern}"'
         assert BOT_SOURCE.count(registration) == 1, (prefix, owner, registration)
 
 
