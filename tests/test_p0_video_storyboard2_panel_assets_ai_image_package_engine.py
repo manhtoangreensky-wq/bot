@@ -397,27 +397,32 @@ def test_all_public_storyboard_callbacks_have_one_canonical_owner() -> None:
     assert BOT_SOURCE.count('CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\\|")') == 1
 
 
-def test_storyboard_package_filter_hides_contract_invalid_tiers_without_provider_calls() -> None:
+def test_storyboard_package_filter_uses_public_catalog_without_runtime_provider_calls() -> None:
     source = _function_source("storyboard2_package_resolutions")
-    calls = []
+    catalog_calls = []
 
     class _Scene3:
         @staticmethod
         def normalize_state(state):
             return dict(state)
 
-    class _Catalog:
+    class _UiFreezeCatalog:
         @staticmethod
-        def resolve_product_video_model(**kwargs):
-            calls.append(dict(kwargs))
-            return {"ok": int(kwargs["tier"]) in {300, 600}}
+        def catalog_report(product_type, **kwargs):
+            catalog_calls.append({"product_type": product_type, **kwargs})
+            return {
+                "ok": True,
+                "offers": [
+                    {"tier_id": 300, "name": "Cơ bản"},
+                    {"tier_id": 600, "name": "Nâng cao"},
+                ],
+            }
 
     namespace = {
         "video_scene3_flow": _Scene3,
         "video_flow6_required_capability": lambda _kind, state: state["required_capability"],
         "safe_int": lambda value, default=0: int(value or default),
-        "VIDEO_B14_2_QUALITY_OPTIONS": (200, 300, 400, 500, 600),
-        "video_provider_catalog": _Catalog,
+        "video_uifreeze1": _UiFreezeCatalog,
     }
     exec(source, namespace)
     result = namespace["storyboard2_package_resolutions"]({
@@ -425,9 +430,13 @@ def test_storyboard_package_filter_hides_contract_invalid_tiers_without_provider
         "required_capability": "image_to_video",
     })
     assert [item["price"] for item in result] == [300, 600]
-    assert len(calls) == 5
-    assert all(call["required_capability"] == "image_to_video" for call in calls)
-    assert all(call["requires_concat"] is True for call in calls)
+    assert catalog_calls == [{
+        "product_type": "storyboard_prompt",
+        "scene_count": 2,
+        "ratio": "9:16",
+        "required_capability": "image_to_video",
+    }]
+    assert all(item["resolution"]["catalog_only"] is True for item in result)
 
 
 def test_storyboard_quality_back_and_two_frame_fallback_are_exact() -> None:
