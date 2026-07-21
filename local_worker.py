@@ -16,10 +16,12 @@ import socket
 import shutil
 import tempfile
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 from services.multiscene_video_pipeline import (
@@ -123,6 +125,12 @@ LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED"
 RENDER_MODE_REAL = "real"
 RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
+VIDEO_EDIT_WORKER_OWNER = "local_video_edit"
+VIDEO_EDIT_ENGINE_ROUTE = "local_worker_ffmpeg"
+VIDEO_EDIT_CAPABILITIES = ("video_edit",)
+LOCAL_WORKER_STARTED_AT_UTC = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+LOCAL_WORKER_INSTANCE_ID = f"{LOCAL_WORKER_ID}:{socket.gethostname()}:{os.getpid()}"
+LOCAL_WORKER_LAST_ERROR = ""
 
 
 def endpoint(path: str) -> str:
@@ -148,14 +156,49 @@ def http_json(method: str, path: str, payload: dict | None = None, timeout: int 
         return json.loads(body or "{}")
 
 
-def send_heartbeat() -> None:
-    payload = {
+def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0) -> dict:
+    return {
+        "heartbeat_contract_version": 1,
         "worker_id": LOCAL_WORKER_ID,
+        "worker_owner": VIDEO_EDIT_WORKER_OWNER,
+        "engine_route": VIDEO_EDIT_ENGINE_ROUTE,
+        "capabilities": list(VIDEO_EDIT_CAPABILITIES),
+        "instance_id": LOCAL_WORKER_INSTANCE_ID,
+        "process_id": int(os.getpid()),
+        "started_at_utc": LOCAL_WORKER_STARTED_AT_UTC,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "queue_depth": max(0, int(queue_depth or 0)),
+        "last_error": str(last_error or "")[:500],
         "ffmpeg_path": LOCAL_FFMPEG_PATH,
         "ffprobe_path": find_ffprobe(ffmpeg_path=LOCAL_FFMPEG_PATH),
         "comfy_enabled": LOCAL_COMFY_ENABLED,
     }
+
+
+def send_heartbeat() -> None:
+    payload = local_worker_heartbeat_payload(last_error=LOCAL_WORKER_LAST_ERROR)
     http_json("POST", "/internal/worker/heartbeat", payload, timeout=15)
+
+
+def run_heartbeat_loop(stop_event: threading.Event, interval_seconds: int = 30) -> None:
+    """Publish immediately and keep readiness fresh while FFmpeg is busy."""
+
+    global LOCAL_WORKER_LAST_ERROR
+    interval = max(1, int(interval_seconds or 30))
+    while not stop_event.is_set():
+        try:
+            send_heartbeat()
+            LOCAL_WORKER_LAST_ERROR = ""
+        except urllib.error.HTTPError as exc:
+            LOCAL_WORKER_LAST_ERROR = f"heartbeat_http_{exc.code}"
+            print(f"[local_worker] heartbeat HTTP {exc.code}")
+        except urllib.error.URLError as exc:
+            LOCAL_WORKER_LAST_ERROR = f"heartbeat_connection:{type(exc.reason).__name__}"
+            print(f"[local_worker] heartbeat connection error: {type(exc.reason).__name__}")
+        except Exception as exc:
+            LOCAL_WORKER_LAST_ERROR = f"heartbeat_{type(exc).__name__}"
+            print(f"[local_worker] heartbeat error: {type(exc).__name__}")
+        stop_event.wait(interval)
 
 
 def poll_job() -> dict | None:
@@ -1609,6 +1652,7 @@ def process_job(job: dict) -> None:
 
 
 def main() -> None:
+    global LOCAL_WORKER_LAST_ERROR
     print("[local_worker] TOAN AAS Local Worker Phase 1 starting")
     print(f"[local_worker] base_url={BOT_BASE_URL}")
     print(f"[local_worker] worker_id={LOCAL_WORKER_ID}")
@@ -1616,38 +1660,48 @@ def main() -> None:
     print(f"[local_worker] telegram_token_configured={'yes' if bool(TELEGRAM_BOT_TOKEN) else 'no'}")
     print(f"[local_worker] ffmpeg_path={LOCAL_FFMPEG_PATH}")
     print("[local_worker] ComfyUI render is planned/not_ready in Phase 1")
-    last_heartbeat = 0.0
-    while True:
-        try:
-            now = time.time()
-            if now - last_heartbeat >= 30:
-                send_heartbeat()
-                last_heartbeat = now
-            job = poll_job()
-            if job:
-                print(f"[local_worker] job #{job.get('id')} {job.get('job_type')}")
-                process_job(job)
-            elif VIDEO_PROJECT_QUEUE_ENABLED:
-                video_job = poll_video_render_job()
-                if video_job:
-                    print(f"[local_worker] video_job #{video_job.get('id')} {video_job.get('job_type')}")
-                    run_video_render_job(video_job)
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=run_heartbeat_loop,
+        args=(heartbeat_stop,),
+        name="toan-aas-local-worker-heartbeat",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        while True:
+            try:
+                job = poll_job()
+                if job:
+                    print(f"[local_worker] job #{job.get('id')} {job.get('job_type')}")
+                    process_job(job)
+                elif VIDEO_PROJECT_QUEUE_ENABLED:
+                    video_job = poll_video_render_job()
+                    if video_job:
+                        print(f"[local_worker] video_job #{video_job.get('id')} {video_job.get('job_type')}")
+                        run_video_render_job(video_job)
+                    else:
+                        time.sleep(5)
                 else:
                     time.sleep(5)
-            else:
-                time.sleep(5)
-        except KeyboardInterrupt:
-            print("[local_worker] stopped")
-            return
-        except urllib.error.HTTPError as exc:
-            print(f"[local_worker] HTTP {exc.code}; check LOCAL_WORKER_ENABLED/TOKEN/base URL")
-            time.sleep(10)
-        except urllib.error.URLError as exc:
-            print(f"[local_worker] connection error: {type(exc.reason).__name__}")
-            time.sleep(10)
-        except Exception as exc:
-            print(f"[local_worker] loop error: {type(exc).__name__}")
-            time.sleep(10)
+            except KeyboardInterrupt:
+                print("[local_worker] stopped")
+                return
+            except urllib.error.HTTPError as exc:
+                LOCAL_WORKER_LAST_ERROR = f"HTTP {exc.code}"
+                print(f"[local_worker] HTTP {exc.code}; check LOCAL_WORKER_ENABLED/TOKEN/base URL")
+                time.sleep(10)
+            except urllib.error.URLError as exc:
+                LOCAL_WORKER_LAST_ERROR = f"connection:{type(exc.reason).__name__}"
+                print(f"[local_worker] connection error: {type(exc.reason).__name__}")
+                time.sleep(10)
+            except Exception as exc:
+                LOCAL_WORKER_LAST_ERROR = type(exc).__name__
+                print(f"[local_worker] loop error: {type(exc).__name__}")
+                time.sleep(10)
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
 
 
 if __name__ == "__main__":
