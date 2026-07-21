@@ -55,6 +55,7 @@ PARENT_STATE_KEYS = frozenset({
     "selected_effects",
     "audio_plan",
     "trend_id",
+    "idea_preset_content",
     "idea_scene_content",
     "idea_prompt_candidates",
     "idea_selected_prompt",
@@ -113,6 +114,7 @@ def build_parent_handoff(
         "idea_return_step": return_step,
         "return_callback": str(return_callback or "videoidea|start").strip(),
         "idea_preset_id": _bounded_int(source.get("idea_preset_id"), 0, 0, 2_147_483_647),
+        "idea_preset_content": deepcopy(dict(source.get("idea_preset_content") or {})),
         "idea_content": str(source.get("idea_content") or source.get("subject") or ""),
         "idea_prompt": str(
             source.get("idea_prompt")
@@ -161,6 +163,7 @@ def normalize_parent_handoff(value: dict | None) -> dict:
     source["idea_parent_flow"] = str(source.get("idea_parent_flow") or source["idea_source_flow"])
     source["idea_return_step"] = str(source.get("idea_return_step") or NEXT_STEPS[product])
     source["idea_preset_id"] = _bounded_int(source.get("idea_preset_id"), 0, 0, 2_147_483_647)
+    source["idea_preset_content"] = deepcopy(dict(source.get("idea_preset_content") or {}))
     source["idea_content"] = str(source.get("idea_content") or "")
     source["idea_prompt"] = str(source.get("idea_prompt") or "")
     source["scene_count"] = _bounded_int(source.get("scene_count"), 1, 1, 20)
@@ -223,6 +226,11 @@ def apply_parent_handoff(scene_state: dict, handoff: dict) -> dict:
             0,
             0,
             2_147_483_647,
+        ),
+        "idea_preset_content": deepcopy(
+            updated.get("idea_preset_content")
+            or restored.get("idea_preset_content")
+            or {}
         ),
         "idea_content": str(updated.get("idea_content") or restored.get("idea_content") or ""),
         "idea_prompt": str(updated.get("idea_prompt") or restored.get("idea_prompt") or ""),

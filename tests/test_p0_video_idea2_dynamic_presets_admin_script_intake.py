@@ -294,7 +294,13 @@ def test_manual_editor_supports_add_edit_delete_merge_split_reorder_and_restore_
 
 def test_public_callbacks_are_short_dynamic_and_handoff_only_to_scene3():
     menu = _between("def video_idea_menu_keyboard", "\n\ndef _video_idea_dynamic_db")
-    assert '"videa|page|1"' in menu
+    for callback in (
+        '"videoidea|explore"',
+        '"vpromptlib|start"',
+        '"videoidea|source_start"',
+    ):
+        assert callback in menu
+    assert '"videa|page|1"' not in menu
     dynamic = _between("def _video_idea_dynamic_db", "\n\ndef video_idea_catalog_categories_text")
     for callback in ("videa|cat|", "videa|preset|", "videa|page|", "videa|sc|"):
         assert callback in dynamic

@@ -250,7 +250,7 @@ def test_exact_parent_render_map_uses_existing_product_owners_and_long_prompt_sh
     assert "video_selfshot2_render" in renderer
     assert "video_selfshot3_render" in renderer
     assert 'product_id == "multi_scene_film"' in renderer
-    assert '"step": "video_prompts"' in renderer
+    assert 'handoff["step"] = "full_review"' in renderer
     assert "save_video_profile_studio_state" in renderer
     assert "video_profile_scene1_render" in renderer
 
