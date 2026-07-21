@@ -1,58 +1,80 @@
+import asyncio
 import inspect
 
 import bot
 
 
-def test_new_dub_jobs_use_canonical_sequential_checkpoint_synthesizer():
+def test_new_dub_jobs_use_restored_pr400_shared_pipeline():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
-    assert "prepare_subdub_combo_tts_segments(" in source
-    assert source.count("synthesize_canonical_dub_segment_chunks(") == 1
-    assert "result = await synthesize_dub_segment_chunks" not in source
-    assert "mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}" in source
-    assert "return await build_canonical_dub_timeline_audio(chunks, total_duration)" in source
-    assert "checkpoint_dir=checkpoint_dir" in source
-    assert "checkpoint_entries=existing_checkpoints" in source
-    assert "checkpoint_callback=_persist_active_checkpoint" in source
-    assert "tts_resume_context=resume_context" in source
-    assert "canonical_sequential_tts_with_checkpoint" in source
+    assert "subdub_blackboxes.run_subdub_lane_blackbox(" in source
+    assert "runner=subtitle_dub_product_pipeline.run_subdub_pipeline" in source
+    assert "prepare_subtitles=_prepare_subtitles_for_blackbox" in source
+    assert "synthesize_segments=_synthesize_dub_segments_for_blackbox" in source
+    assert "render_video=_render_video_for_blackbox" in source
+    assert "synthesize_canonical_dub_segment_chunks(" not in source
 
 
-def test_combo_direct_synth_uses_translated_text_and_preserves_cue_windows():
-    canonical, tts_segments = bot.prepare_subdub_combo_tts_segments(
-        [
-            {
-                "index": 1,
-                "start": 1.25,
-                "end": 2.75,
-                "source_text": "Original one",
-                "translated_text": "Cau dich mot",
-            },
-            {
-                "index": 2,
-                "start": 3.0,
-                "end": 4.5,
-                "source_text": "Original two",
-                "translated_text": "Cau dich hai",
-            },
+def test_combo_audio_policy_uses_translated_text_and_preserves_cue_windows():
+    prepared = {
+        "source_segments": [
+            {"index": 1, "start": 1.25, "end": 2.75, "text": "Original one"},
+            {"index": 2, "start": 3.0, "end": 4.5, "text": "Original two"},
         ],
-        source_language="en",
-        target_language="vi",
+        "output_segments": [
+            {"index": 1, "start": 1.25, "end": 2.75, "text": "Cau dich mot"},
+            {"index": 2, "start": 3.0, "end": 4.5, "text": "Cau dich hai"},
+        ],
+    }
+    policy = bot.subtitle_dub_product_pipeline.resolve_subdub_dub_audio_policy(
+        {"target_language": "vi", "translate_requested": True},
+        prepared,
     )
 
-    assert [item["text"] for item in tts_segments] == ["Cau dich mot", "Cau dich hai"]
-    assert [(item["start"], item["end"]) for item in tts_segments] == [(1.25, 2.75), (3.0, 4.5)]
-    assert [item["source_start_ms"] for item in canonical] == [1250, 3000]
-    assert [item["source_end_ms"] for item in canonical] == [2750, 4500]
-    assert [item["translated_text"] for item in canonical] == ["Cau dich mot", "Cau dich hai"]
+    assert policy["dub_text_source"] == "translated"
+    assert policy["tts_tracks_count"] == 1
+    assert policy["source_tts_rendered"] is False
+    assert policy["target_tts_rendered"] is True
+    assert [item["text"] for item in policy["tts_segments"]] == ["Cau dich mot", "Cau dich hai"]
+    assert [(item["start"], item["end"]) for item in policy["tts_segments"]] == [
+        (1.25, 2.75),
+        (3.0, 4.5),
+    ]
 
 
-def test_restart_recovery_keeps_checkpoint_resume_path():
-    source = inspect.getsource(bot.subdub_resume_generating_voice_from_checkpoint)
+def test_restart_recovery_terminalizes_when_pr400_has_no_resume_executor(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "subdub_hydrate_registry_from_persisted",
+        lambda job: dict(job or {}),
+    )
+    monkeypatch.setattr(
+        bot,
+        "subdub_recovery_tts_checkpoint",
+        lambda _job: {"available": True, "valid": [{"artifact_path": "cue-1.wav"}], "total": 2, "completed": 1},
+    )
+    monkeypatch.setattr(
+        bot,
+        "subdub_atomic_mutate_persisted_job",
+        lambda job, *, reason, mutate: mutate(dict(job or {})),
+    )
 
-    assert "synthesize_canonical_dub_segment_chunks(" in source
-    assert "checkpoint_dir=" in source
-    assert "checkpoint_entries=" in source
+    recovered = asyncio.run(
+        bot.subdub_recover_persisted_job(
+            {
+                "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+                "current_stage": "generating_voice",
+                "status_registry_missing_after_restart": True,
+                "terminal_state": "running",
+            },
+            object(),
+        )
+    )
+
+    assert recovered["terminal_state"] == "failed_no_charge"
+    assert recovered["charged_xu"] == 0
+    assert recovered["recovery_result"] == "tts_resume_not_available_in_restored_runtime"
+    assert recovered["blocker"] == "recovery_resume_not_supported_on_pr400_runtime:generating_voice"
 
 
 def test_changing_translation_language_clears_only_derived_outputs(monkeypatch):

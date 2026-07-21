@@ -19,9 +19,6 @@ class CanonicalCue(TypedDict, total=False):
     source_end_ms: int
     source_text: str
     translated_text: str
-    translated_text_full: str
-    render_text: str
-    tts_text: str
     cue_source: str
     extraction_source: str
     source_language: str
@@ -110,12 +107,7 @@ def canonicalize_segments(
         end_ms = _milliseconds(item.get("source_end_ms"), item.get("end"))
         if end_ms <= start_ms:
             end_ms = start_ms + 1000
-        translated_text_full = normalize_cue_text(
-            item.get("translated_text_full")
-            or item.get("tts_text")
-            or item.get("translated_text")
-        )
-        render_text = normalize_cue_text(item.get("render_text") or item.get("translated_text"))
+        translated_text = normalize_cue_text(item.get("translated_text"))
         cue_id = str(item.get("cue_id") or _cue_id(source_index, start_ms, end_ms, source_text))
         canonical.append({
             **item,
@@ -137,12 +129,9 @@ def canonicalize_segments(
                 or extraction_source
                 or "unknown"
             ),
-            "translated_text": render_text,
-            "translated_text_full": translated_text_full,
-            "render_text": render_text,
-            "tts_text": translated_text_full,
+            "translated_text": translated_text,
             "target_language": str(item.get("target_language") or target_language or ""),
-            "text": render_text or source_text,
+            "text": translated_text or source_text,
             "confidence": float(item.get("confidence") or 0.0),
             "confidence_available": confidence_available,
             "frame_first_seen": item.get("frame_first_seen"),
@@ -411,94 +400,6 @@ def wrap_cue_text(text: str, *, max_chars: int = 42, max_lines: int = 2) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
-def cue_tts_text(cue: dict, *, translated: bool = True) -> str:
-    """Return semantic text for TTS without using the truncated render copy."""
-    item = dict(cue or {})
-    if translated:
-        value = (
-            item.get("translated_text_full")
-            or item.get("tts_text")
-            or item.get("translated_text")
-            or item.get("text")
-        )
-    else:
-        value = item.get("source_text") or item.get("text")
-    return normalize_cue_text(value).replace("\n", " ")
-
-
-def encode_srt_utf8_bom(value: Any) -> bytes:
-    """Encode SRT for FFmpeg/libass and external editors with an explicit UTF-8 BOM."""
-    return str(value or "").encode("utf-8-sig")
-
-
-def _target_language_key(value: Any) -> str:
-    clean = normalize_cue_text(value).casefold()
-    aliases = {
-        "vi": ("vi", "vietnamese", "tiếng việt", "tieng viet"),
-        "en": ("en", "english", "tiếng anh", "tieng anh"),
-        "zh": ("zh", "chinese", "中文", "tiếng trung", "tieng trung"),
-        "ja": ("ja", "japanese", "日本語", "tiếng nhật", "tieng nhat"),
-        "ko": ("ko", "korean", "한국어", "tiếng hàn", "tieng han"),
-        "th": ("th", "thai", "ภาษาไทย", "tiếng thái", "tieng thai"),
-        "ar": ("ar", "arabic", "العربية", "tiếng ả rập", "tieng a rap"),
-        "hi": ("hi", "hindi", "हिन्दी", "tiếng hindi", "tieng hindi"),
-        "ru": ("ru", "russian", "русский", "tiếng nga", "tieng nga"),
-    }
-    for key, names in aliases.items():
-        if clean in names or clean.startswith(f"{key}-"):
-            return key
-    return clean.split("-", 1)[0]
-
-
-def evaluate_translation_quality(value: Any, *, target_language: Any = "") -> dict:
-    """Reject obvious OCR/translation corruption without rewriting valid wording."""
-    raw = str(value or "")
-    text = normalize_cue_text(raw)
-    visible = [char for char in text if not char.isspace()]
-    letters = [char for char in visible if char.isalpha()]
-    digits = [char for char in visible if char.isdigit()]
-    script = detect_text_script(text)
-    language = _target_language_key(target_language)
-    expected_scripts = {
-        "zh": {"cjk"},
-        "ja": {"japanese", "cjk"},
-        "ko": {"korean"},
-        "th": {"thai"},
-        "ar": {"arabic"},
-        "hi": {"devanagari"},
-        "ru": {"cyrillic"},
-    }
-    reason = ""
-    if not text:
-        reason = "translation_empty"
-    elif "\ufffd" in raw or "\x00" in raw:
-        reason = "translation_invalid_unicode"
-    elif len(visible) >= 6 and len(digits) / max(1, len(visible)) > 0.35:
-        reason = "translation_numeric_noise"
-    elif (
-        language in expected_scripts
-        and script not in expected_scripts[language]
-        and not text.casefold().startswith(f"{normalize_cue_text(target_language).casefold()}:")
-    ):
-        reason = "translation_wrong_script"
-    elif script == "latin":
-        tokens = re.findall(r"[A-Za-z\u00c0-\u024f]+", text)
-        isolated_ratio = sum(1 for token in tokens if len(token) == 1) / max(1, len(tokens))
-        uppercase = [token for token in tokens if len(token) > 1 and token.isupper()]
-        latin_letters = "".join(tokens).casefold()
-        vowel_ratio = sum(1 for char in latin_letters if char in "aeiouyăâêôơư") / max(1, len(latin_letters))
-        if len(tokens) >= 6 and isolated_ratio > 0.40:
-            reason = "translation_fragmented_latin"
-        elif len(tokens) >= 5 and len(uppercase) / len(tokens) > 0.55 and vowel_ratio < 0.24:
-            reason = "translation_latin_gibberish"
-    return {
-        "accepted": not bool(reason),
-        "reason": reason or "accepted",
-        "detected_script": script,
-        "target_language": language,
-    }
-
-
 def apply_translations(
     source_cues: Iterable[dict],
     translations: Iterable[dict],
@@ -525,21 +426,18 @@ def apply_translations(
     output: list[dict] = []
     for cue in source:
         translated = by_cue_id.get(str(cue["cue_id"])) or by_index.get(int(cue["source_index"]))
-        translated_text_full = normalize_cue_text(
+        translated_text = normalize_cue_text(
             (translated or {}).get("translated_text") or (translated or {}).get("text")
         )
-        missing = not bool(translated_text_full)
+        missing = not bool(translated_text)
         if missing:
-            translated_text_full = str(cue["source_text"])
-        render_text = wrap_cue_text(translated_text_full, max_chars=max_chars, max_lines=max_lines)
+            translated_text = str(cue["source_text"])
+        translated_text = wrap_cue_text(translated_text, max_chars=max_chars, max_lines=max_lines)
         output.append({
             **cue,
-            "translated_text": render_text,
-            "translated_text_full": translated_text_full,
-            "render_text": render_text,
-            "tts_text": translated_text_full,
+            "translated_text": translated_text,
             "target_language": str(target_language or ""),
-            "text": render_text,
+            "text": translated_text,
             "translate_missing": missing,
             "start": round(int(cue["source_start_ms"]) / 1000.0, 3),
             "end": round(int(cue["source_end_ms"]) / 1000.0, 3),

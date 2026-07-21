@@ -93,7 +93,6 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import subdub_canonical_cues
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import voice_clone_pipeline
@@ -1046,15 +1045,6 @@ ADMIN_TEST_MUSIC_AI = env_flag("ADMIN_TEST_MUSIC_AI", "0")
 DEEPGRAM_API_KEY    = env_any("DEEPGRAM_API_KEY", "Deepgram_API_KEY", "DEEPGRAM_KEY", "DEEPGRAM_TOKEN")
 DEEPL_API_KEY       = env_any("DEEPL_API_KEY", "DeepL_API_KEY", "DEEPL_KEY", "DEEPL_AUTH_KEY")
 DEEPL_API_URL       = env_any("DEEPL_API_URL", default="https://api-free.deepl.com/v2/translate")
-PUBLIC_TRANSLATION_FALLBACK_ENABLED = env_flag("PUBLIC_TRANSLATION_FALLBACK_ENABLED", "1")
-PUBLIC_TRANSLATION_FALLBACK_URL = env_any(
-    "PUBLIC_TRANSLATION_FALLBACK_URL",
-    default="https://translate.googleapis.com/translate_a/single",
-)
-PUBLIC_TRANSLATION_FALLBACK_TIMEOUT_SECONDS = max(
-    5.0,
-    env_float("PUBLIC_TRANSLATION_FALLBACK_TIMEOUT_SECONDS", 20.0),
-)
 FISH_AUDIO_KEY      = _env("FISH_AUDIO_KEY")
 ELEVENLABS_API_KEY  = _env("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
@@ -1922,12 +1912,6 @@ PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SEC
 SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
 SUBDUB_PREVIEW_DURATION_SECONDS = max(1, env_int("SUBDUB_PREVIEW_DURATION_SECONDS", 30))
 SUBDUB_LONG_CHUNK_SECONDS = max(10, min(30, env_int("SUBDUB_LONG_CHUNK_SECONDS", 30)))
-SUBDUB_MAX_INPUT_MB = max(1, min(50, env_int("SUBDUB_MAX_INPUT_MB", 50)))
-SUBDUB_LONG_PROJECT_MAX_PARTS = max(1, min(48, env_int("SUBDUB_LONG_PROJECT_MAX_PARTS", 12)))
-SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS = max(
-    SUBDUB_MAX_DURATION_SECONDS,
-    env_int("SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS", 3600),
-)
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
 TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
 TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_MAX_TELEGRAM_OUTPUT_MB))
@@ -1968,25 +1952,6 @@ SUBDUB_CANONICAL_OCR_ENABLED = env_flag("SUBDUB_CANONICAL_OCR_ENABLED", "true")
 SUBDUB_CANONICAL_OCR_FPS = max(0.5, min(3.0, env_float("SUBDUB_CANONICAL_OCR_FPS", 2.0)))
 SUBDUB_CANONICAL_OCR_MAX_FRAMES = max(30, min(720, env_int("SUBDUB_CANONICAL_OCR_MAX_FRAMES", 360)))
 SUBDUB_CANONICAL_OCR_BOTTOM_RATIO = max(0.20, min(0.50, env_float("SUBDUB_CANONICAL_OCR_BOTTOM_RATIO", 0.30)))
-SUBDUB_VISUAL_OCR_ENABLED = env_flag("SUBDUB_VISUAL_OCR_ENABLED", "false")
-SUBDUB_VISUAL_OCR_PUBLIC_ENABLED = env_flag("SUBDUB_VISUAL_OCR_PUBLIC_ENABLED", "false")
-SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS = max(
-    1,
-    min(120, env_int("SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS", 15)),
-)
-SUBDUB_VISUAL_OCR_FPS = max(0.5, min(4.0, env_float("SUBDUB_VISUAL_OCR_FPS", 2.0)))
-SUBDUB_VISUAL_OCR_BOTTOM_RATIO = max(
-    0.20,
-    min(0.60, env_float("SUBDUB_VISUAL_OCR_BOTTOM_RATIO", 0.35)),
-)
-SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO = max(
-    0.0,
-    min(0.15, env_float("SUBDUB_VISUAL_OCR_SIDE_MARGIN_RATIO", 0.04)),
-)
-SUBDUB_VISUAL_OCR_MAX_FRAMES = max(
-    20,
-    min(1200, env_int("SUBDUB_VISUAL_OCR_MAX_FRAMES", 1200)),
-)
 ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
 SUBDUB_VOLUME_MIX_UI_ENABLED = env_flag("SUBDUB_VOLUME_MIX_UI_ENABLED", "true")
 SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT = max(0, min(100, env_int("SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT", 30)))
@@ -38856,7 +38821,6 @@ LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
 ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 120
 PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
 SUBTITLE_DUB_PIPELINE_JOBS: dict[str, dict] = {}
-SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
 ADMIN_CAPTION_TOOL_TEST_COMMANDS = {
     "tool_test_asr": "asr",
     "tool_test_auto_subtitle": "auto_subtitle",
@@ -104660,27 +104624,6 @@ async def safe_edit_query_message(query, text: str, reply_markup=None, parse_mod
                     return None
         raise
 
-def is_expired_callback_query_error(error: Exception) -> bool:
-    text = str(error or "").lower()
-    return any(fragment in text for fragment in (
-        "query is too old",
-        "response timeout expired",
-        "query id is invalid",
-    ))
-
-async def safe_answer_callback_query(query, *args, **kwargs) -> bool:
-    """A stale Telegram acknowledgement must not block the selected route."""
-    if not query or not hasattr(query, "answer"):
-        return False
-    try:
-        await query.answer(*args, **kwargs)
-        return True
-    except Exception as exc:
-        if not is_expired_callback_query_error(exc):
-            raise
-        logger.warning("callback acknowledgement expired; route continues | %s", sanitize_log_text(str(exc))[:240])
-        return False
-
 def html_message_to_plain_text(text: str) -> str:
     plain = re.sub(r"<a\s+href=\"([^\"]+)\"[^>]*>(.*?)</a>", r"\2: \1", str(text or ""), flags=re.I | re.S)
     plain = re.sub(r"<br\s*/?>", "\n", plain, flags=re.I)
@@ -106284,7 +106227,7 @@ async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAU
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await safe_answer_callback_query(query)
+    await query.answer()
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
     if user_is_admin:
@@ -112367,9 +112310,7 @@ def subdub_classify_bad_request(reason: str = "", *, stage: str = "", job: dict 
 
 def subdub_merge_debug_job(job: dict | None = None, *, lookup_store_hit: str = "") -> dict:
     current = dict(job or {})
-    # Persisted top-level fields are authoritative. The nested debug snapshot may
-    # be older than the DB row after a restart and must never roll progress back.
-    merged = {**dict(current.get("debug_job") or {}), **current}
+    merged = {**current, **dict(current.get("debug_job") or {})}
     merged = subdub_enrich_job_identity(merged, job_key=str(current.get("job_key") or ""))
     if lookup_store_hit and not merged.get("lookup_store_hit"):
         merged["lookup_store_hit"] = lookup_store_hit
@@ -122348,90 +122289,6 @@ async def translate_with_openai(text: str, target_lang: str = "vi") -> str:
         raise RuntimeError("OpenAI empty_response")
     return translated
 
-PUBLIC_TRANSLATION_TARGET_CODES = {
-    "vi": "vi",
-    "en": "en",
-    "zh": "zh-CN",
-    "zh_cn": "zh-CN",
-    "zh_tw": "zh-TW",
-    "ja": "ja",
-    "ko": "ko",
-    "th": "th",
-    "fr": "fr",
-    "de": "de",
-    "es": "es",
-    "id": "id",
-    "ms": "ms",
-    "pt": "pt",
-    "ru": "ru",
-    "ar": "ar",
-    "hi": "hi",
-    "lo": "lo",
-    "km": "km",
-    "my": "my",
-    "fil": "tl",
-}
-
-def public_translation_target_code(target_lang: str) -> str:
-    target = normalize_translate_target(target_lang)
-    code = PUBLIC_TRANSLATION_TARGET_CODES.get(target, "")
-    if not code:
-        raise RuntimeError(f"public_translation_unsupported_target:{target or target_lang}")
-    return code
-
-def public_translation_chunks(text: str, limit: int = 3500) -> list[str]:
-    value = str(text or "")
-    if not value:
-        return []
-    chunks: list[str] = []
-    remaining = value
-    while len(remaining) > limit:
-        split_at = max(remaining.rfind("\n", 0, limit + 1), remaining.rfind(" ", 0, limit + 1))
-        if split_at < max(1, limit // 2):
-            split_at = limit
-        chunks.append(remaining[:split_at])
-        remaining = remaining[split_at:]
-        if remaining.startswith("\n"):
-            remaining = remaining[1:]
-    if remaining:
-        chunks.append(remaining)
-    return chunks
-
-def parse_public_translation_response(payload) -> str:
-    rows = payload[0] if isinstance(payload, list) and payload and isinstance(payload[0], list) else []
-    translated = "".join(
-        str(row[0] or "")
-        for row in rows
-        if isinstance(row, list) and row
-    ).strip()
-    if not translated:
-        raise RuntimeError("public_translation_empty_response")
-    return translated
-
-async def translate_with_public_fallback(text: str, target_lang: str = "vi") -> str:
-    if not PUBLIC_TRANSLATION_FALLBACK_ENABLED or not PUBLIC_TRANSLATION_FALLBACK_URL:
-        raise RuntimeError("public_translation_fallback_disabled")
-    target_code = public_translation_target_code(target_lang)
-    chunks = public_translation_chunks(text)
-    if not chunks:
-        raise RuntimeError("public_translation_empty_input")
-    translated_chunks = []
-    async with httpx.AsyncClient(
-        timeout=PUBLIC_TRANSLATION_FALLBACK_TIMEOUT_SECONDS,
-        follow_redirects=True,
-    ) as client:
-        for chunk in chunks:
-            response = await client.post(
-                PUBLIC_TRANSLATION_FALLBACK_URL,
-                data={"client": "gtx", "sl": "auto", "tl": target_code, "dt": "t", "q": chunk},
-            )
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"public_translation_http_{response.status_code}:{sanitize_log_text(response.text)[:240]}"
-                )
-            translated_chunks.append(parse_public_translation_response(response.json()))
-    return "\n".join(translated_chunks).strip()
-
 def key4u_translation_provider_available() -> bool:
     return bool(
         KEY4U_ENABLED
@@ -122479,7 +122336,7 @@ async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admi
     except TranslationProviderError as exc:
         statuses = dict(getattr(exc, "statuses", {}) or {})
         provider_errors = dict(getattr(exc, "errors", {}) or {})
-        for name in ("deepl", "key4u", "public", "gemini", "openai"):
+        for name in ("deepl", "key4u", "gemini", "openai"):
             status = str(statuses.get(name) or "MISSING")
             if status != "MISSING" or provider_errors.get(name):
                 errors.append(f"{name}={status}")
@@ -122488,7 +122345,7 @@ async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admi
             {
                 "called": bool(errors),
                 "provider": "translate_to_language",
-                "route": "deepl/key4u/public/gemini/openai",
+                "route": "deepl/key4u/gemini/openai",
                 "status": "FAIL" if errors else "BLOCKED",
                 "error": " | ".join(errors or [provider_error_summary(exc)])[:500],
             },
@@ -122555,7 +122412,7 @@ async def translate_with_key4u(text: str, target_lang: str = "vi") -> str:
 
 async def translate_to_language(text: str, target_lang: str = "vi") -> dict:
     target = normalize_translate_target(target_lang) or "vi"
-    statuses = {"deepl": "MISSING", "key4u": "MISSING", "public": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
+    statuses = {"deepl": "MISSING", "key4u": "MISSING", "gemini": "MISSING", "openai": "MISSING"}
     errors = {}
     if DEEPL_API_KEY:
         try:
@@ -122569,18 +122426,6 @@ async def translate_to_language(text: str, target_lang: str = "vi") -> dict:
         except Exception as e:
             statuses["key4u"] = "FAIL"
             errors["key4u"] = provider_error_summary(e)
-    if PUBLIC_TRANSLATION_FALLBACK_ENABLED and PUBLIC_TRANSLATION_FALLBACK_URL:
-        try:
-            return {
-                "provider": "public",
-                "text": await translate_with_public_fallback(text, target),
-                "target": target,
-                "statuses": {**statuses, "public": "PASS"},
-                "errors": errors,
-            }
-        except Exception as e:
-            statuses["public"] = "FAIL"
-            errors["public"] = provider_error_summary(e)
     if gemini_client:
         try:
             return {"provider": "gemini", "text": await translate_with_gemini(text, target), "target": target, "statuses": {**statuses, "gemini": "PASS"}, "errors": errors}
@@ -141888,9 +141733,6 @@ async def run_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> tuple[bo
         return False, "ffmpeg_timeout"
     except Exception as e:
         return False, type(e).__name__
-
-
-_SUBDUB_BASE_RUN_FFMPEG_COMMAND = run_ffmpeg_command
 
 def media_temp_suffix(info: dict, default_suffix: str) -> str:
     name = str(info.get("file_name") or "")
@@ -196489,43 +196331,6 @@ def get_video_dubbing_artifact(user_id, ref_or_kind: str) -> str:
         return ""
     return str(payload.get("value") or "")
 
-
-def subdub_translation_cache_language_key(value: str = "") -> str:
-    normalized = normalize_translate_target(value)
-    if normalized:
-        return normalized
-    return re.sub(
-        r"\s+",
-        " ",
-        unicodedata.normalize("NFKC", str(value or "")).strip(),
-    ).casefold()[:80]
-
-
-def subdub_translation_cache_source_hash(subtitle_text: str = "") -> str:
-    body = unicodedata.normalize("NFC", str(subtitle_text or "")).strip()
-    if not body:
-        return ""
-    return hashlib.sha256(body.encode("utf-8", errors="strict")).hexdigest()[:24]
-
-
-def subdub_translation_cache_matches(
-    state: dict | None,
-    source_subtitle: str,
-    target_language: str,
-) -> bool:
-    current = dict(state or {})
-    translated_ref = str(current.get("translated_subtitle_ref") or "").strip()
-    cached_language = str(current.get("translated_subtitle_target_language") or "").strip()
-    cached_source_hash = str(current.get("translated_subtitle_source_hash") or "").strip()
-    if translated_ref and not cached_language and not cached_source_hash:
-        return True
-    return bool(
-        translated_ref
-        and cached_language == subdub_translation_cache_language_key(target_language)
-        and cached_source_hash == subdub_translation_cache_source_hash(source_subtitle)
-    )
-
-
 def normalize_video_translate_mode(value: str) -> str:
     raw_value = str(value or "").strip()
     raw_lower = raw_value.lower()
@@ -196554,16 +196359,6 @@ def normalize_video_translate_mode(value: str) -> str:
     }
     mode = aliases.get(raw_value, aliases.get(raw_lower, raw_value))
     return mode if mode in VIDEO_TRANSLATE_MODES else ""
-
-
-def subdub_mode_uses_canonical_cues(mode: str = "") -> bool:
-    """Report the shared cue contract without changing lane routing."""
-    return normalize_video_translate_mode(mode) in {
-        VIDEO_SUBTITLE_MODE_CREATE,
-        VIDEO_SUBTITLE_MODE_TRANSLATE,
-        VIDEO_SUBTITLE_MODE_DUB,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    }
 
 def video_dubbing_is_video_only_mode(mode: str) -> bool:
     return normalize_video_translate_mode(mode) in VIDEO_ONLY_TRANSLATE_MODES
@@ -200161,16 +199956,6 @@ def video_translation_provider_configured() -> bool:
         or shopaikey_public_chat_fallback_enabled()
     )
 
-def video_translation_route_configured() -> bool:
-    """Return whether SubDub has any configured translation route."""
-    return bool(
-        video_translation_provider_configured()
-        or (
-            PUBLIC_TRANSLATION_FALLBACK_ENABLED
-            and str(PUBLIC_TRANSLATION_FALLBACK_URL or "").strip()
-        )
-    )
-
 def active_translation_provider_label() -> str:
     if DEEPL_API_KEY:
         return "deepl"
@@ -200182,8 +199967,6 @@ def active_translation_provider_label() -> str:
         return "openai"
     if shopaikey_subtitle_translation_public_ready():
         return "shopaikey_chat"
-    if PUBLIC_TRANSLATION_FALLBACK_ENABLED and str(PUBLIC_TRANSLATION_FALLBACK_URL or "").strip():
-        return "public_fallback"
     return "missing"
 
 def video_tts_provider_available_for(public: bool = True) -> bool:
@@ -200282,7 +200065,7 @@ def video_dubbing_configured_readiness(mode: str, state: dict | None = None, pub
         missing.append("maintenance")
     if mode and video_dubbing_mode_needs_asr_provider(mode, state) and not get_asr_adapter_readiness(public=False).get("configured"):
         missing.append("asr")
-    if mode and video_dubbing_needs_translation_provider(mode, state) and not video_translation_route_configured():
+    if mode and video_dubbing_needs_translation_provider(mode, state) and not video_translation_provider_configured():
         missing.append("translation")
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not video_tts_provider_configured_for_dub():
         missing.append("tts")
@@ -200306,7 +200089,7 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
         "reason": "ready" if not missing else f"missing_{missing[0]}",
         "missing": missing,
         "asr": str(get_asr_adapter_readiness(public=False).get("adapter") or ""),
-        "translation": active_translation_provider_label() if video_translation_route_configured() else "",
+        "translation": TRANSLATE_PROVIDER if video_translation_provider_configured() else "",
         "tts": ("minimax" if minimax_tts_configured() else TTS_PROVIDER) if video_tts_provider_configured_for_dub() else "",
         "mux": "enabled" if video_dubbing_mux_ready() else "not_enabled_audio_output_only",
     }
@@ -200319,7 +200102,7 @@ def video_translation_admin_blockers(mode: str, state: dict | None = None, publi
         blockers.append("TRANSLATION_DUB_MAINTENANCE")
     if video_dubbing_mode_needs_asr_provider(mode, state) and not get_asr_adapter_readiness(public=False).get("configured"):
         blockers.append("ASR provider missing")
-    if video_dubbing_needs_translation_provider(mode, state) and not video_translation_route_configured():
+    if video_dubbing_needs_translation_provider(mode, state) and not video_translation_provider_configured():
         blockers.append("Subtitle translation provider missing")
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         if not video_tts_provider_configured_for_dub():
@@ -200746,46 +200529,6 @@ SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS = {
     "missing_video_file_id",
 }
 
-SUBDUB_STAGE_BLOCKER_FIELDS = (
-    "input_save_blocker",
-    "source_acquisition_blocker",
-    "source_blocker",
-    "asr_blocker",
-    "translation_blocker",
-    "tts_blocker",
-    "mux_blocker",
-    "delivery_blocker",
-)
-
-SUBDUB_EXECUTION_TRACE_FIELDS = (
-    "source_acquisition_started",
-    "source_acquisition_completed",
-    "source_acquisition_method",
-    "subtitle_stream_detected",
-    "ocr_started",
-    "ocr_completed",
-    "ocr_accepted",
-    "ocr_rejected",
-    "ocr_rejection_reason",
-    "asr_started",
-    "asr_completed",
-    "asr_fallback_used",
-    "translation_started",
-    "translation_completed",
-    "translation_provider",
-    "source_language",
-    "canonical_cue_count",
-    "canonical_cue_hash",
-    "input_save_blocker",
-    "source_acquisition_blocker",
-    "source_blocker",
-    "asr_blocker",
-    "translation_blocker",
-    "tts_blocker",
-    "mux_blocker",
-    "delivery_blocker",
-)
-
 
 def subdub_canonical_lifecycle_state(value: str = "") -> str:
     token = str(value or "").strip().lower().replace("-", "_")
@@ -200842,131 +200585,6 @@ def subdub_input_save_failure_detected(job: dict | None = None) -> bool:
     if blockers & SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS:
         return True
     return any("telegram_download_failed" in item or "file is too big" in item for item in blockers if item)
-
-
-def subdub_canonical_cue_hash(segments: list | None = None) -> str:
-    canonical = []
-    for index, item in enumerate(list(segments or []), start=1):
-        segment = dict(item or {})
-        canonical.append(
-            {
-                "cue_id": str(segment.get("cue_id") or segment.get("id") or index),
-                "start": round(float(segment.get("start") or 0.0), 3),
-                "end": round(float(segment.get("end") or 0.0), 3),
-                "text": str(segment.get("text") or segment.get("translated_text") or "").strip(),
-            }
-        )
-    if not canonical:
-        return ""
-    payload = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def subdub_update_execution_trace(
-    trace: dict | None,
-    *,
-    job_key: str = "",
-    **fields,
-) -> dict:
-    current = trace if isinstance(trace, dict) else {}
-    current.update({key: value for key, value in fields.items() if key in SUBDUB_EXECUTION_TRACE_FIELDS})
-    key = str(job_key or "").strip()
-    if key:
-        persisted = {name: current.get(name) for name in SUBDUB_EXECUTION_TRACE_FIELDS if name in current}
-        persisted["last_heartbeat_at"] = time.time()
-        update_subtitle_dub_pipeline_job(key, **persisted)
-    return current
-
-
-def subdub_failure_stage_fields(
-    reason: str = "",
-    *,
-    job: dict | None = None,
-    route_attempts: dict | None = None,
-) -> dict:
-    """Classify a SubDub failure without inventing an earlier-stage blocker."""
-    job_data = dict(job or {})
-    current = {
-        **dict(job_data.get("route_attempts") or {}),
-        **job_data,
-        **dict(route_attempts or {}),
-    }
-    safe_reason = sanitize_log_text(str(reason or "subdub_failed"))[:180] or "subdub_failed"
-    normalized = safe_reason.strip().lower().replace("-", "_")
-    canonical_count = _safe_int(current.get("canonical_cue_count"), 0)
-    translation_started = truthy_value(
-        current.get("translation_started", current.get("translation")),
-        False,
-    )
-    result = {name: "" for name in SUBDUB_STAGE_BLOCKER_FIELDS}
-
-    input_tokens = tuple(SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS) + ("input_save_failed", "file is too big")
-    if any(token in normalized for token in input_tokens):
-        stage = "input_save"
-        blocker = next((token for token in SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS if token in normalized), safe_reason)
-        result["input_save_blocker"] = blocker
-    elif any(token in normalized for token in ("delivery", "telegram_send", "send_video", "send_document")):
-        stage = "delivery"
-        blocker = safe_reason
-        result["delivery_blocker"] = blocker
-    elif any(token in normalized for token in ("mux", "render", "ffmpeg", "final_video", "output_duration")):
-        stage = "mux"
-        blocker = safe_reason
-        result["mux_blocker"] = blocker
-    elif any(token in normalized for token in ("tts", "voice", "speech_synth", "dub_audio")):
-        stage = "tts"
-        blocker = safe_reason
-        result["tts_blocker"] = blocker
-    elif "translation" in normalized or "translate" in normalized:
-        if canonical_count <= 0:
-            stage = "source_acquisition"
-            blocker = "no_usable_subtitle_or_audio_source"
-            result["source_acquisition_blocker"] = blocker
-            result["source_blocker"] = blocker
-        elif not translation_started:
-            stage = "translation"
-            blocker = "translation_not_attempted"
-            result["translation_blocker"] = blocker
-        else:
-            stage = "translation"
-            blocker = (
-                "translation_missing"
-                if any(token in normalized for token in ("missing", "empty", "incomplete"))
-                else safe_reason
-            )
-            result["translation_blocker"] = blocker
-    elif any(token in normalized for token in ("asr", "transcri", "speech_recognition", "audio_extract")):
-        stage = "asr"
-        blocker = safe_reason or "asr_failed"
-        result["asr_blocker"] = blocker
-    elif any(
-        token in normalized
-        for token in (
-            "source_acquisition",
-            "no_usable_subtitle",
-            "subtitle_segments_empty",
-            "subtitle_generation_failed",
-            "subtitle_script_empty",
-            "dialogue_unavailable",
-        )
-    ):
-        stage = "source_acquisition"
-        blocker = "no_usable_subtitle_or_audio_source"
-        result["source_acquisition_blocker"] = blocker
-        result["source_blocker"] = blocker
-    else:
-        stage = str(current.get("last_error_stage") or "orchestration")
-        blocker = safe_reason
-
-    result.update(
-        {
-            "last_error_stage": stage,
-            "last_error_safe": safe_reason,
-            "pipeline_blocker": blocker,
-            "no_charge_reason": blocker,
-        }
-    )
-    return result
 
 SUBDUB_DUB_GENERIC_PUBLIC_FAIL_SUPPRESS_REASONS = {
     "video_render_failed",
@@ -201540,100 +201158,6 @@ def subdub_restore_delivered_combo_result(
         "state": restored_state,
     }
 
-
-def subdub_video_delivery_message_id(
-    result: dict | None = None,
-    job: dict | None = None,
-) -> str:
-    """Return only a Telegram message id that belongs to the final video."""
-    evidence = subdub_terminal_delivery_evidence(result, job)
-    if not evidence.get("is_video"):
-        return ""
-    return str(evidence.get("message_id") or "").strip()
-
-
-def subdub_restore_delivered_video_result(
-    mode: str,
-    result: dict | None = None,
-    job: dict | None = None,
-    state: dict | None = None,
-) -> dict:
-    """Restore a delivered result for any SubDub lane from strict video proof."""
-    current_result = dict(result or {})
-    current_job = dict(job or {})
-    normalized_mode = normalize_video_translate_mode(mode)
-    if normalized_mode not in {
-        VIDEO_SUBTITLE_MODE_CREATE,
-        VIDEO_SUBTITLE_MODE_TRANSLATE,
-        VIDEO_SUBTITLE_MODE_DUB,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    }:
-        return current_result
-    if current_result.get("ok"):
-        return current_result
-    message_id = subdub_video_delivery_message_id(current_result, current_job)
-    if not message_id:
-        return current_result
-    merged = {**current_job, **current_result}
-    if not subdub_duration_validation_allows_success(merged):
-        return current_result
-    restored_state = {
-        **dict(state or {}),
-        **dict(current_result.get("state") or {}),
-        "terminal_state": "delivered",
-        "status_panel_terminalized": True,
-        "panel_finalized": True,
-        "panel_final_percent": 100,
-    }
-    return {
-        **current_job,
-        **current_result,
-        "ok": True,
-        "status": "completed",
-        "has_video": True,
-        "video_delivered": True,
-        "final_mp4_delivered": True,
-        "delivery_success": True,
-        "delivery_succeeded": True,
-        "terminal_state": "delivered",
-        "terminal_public_outcome_type": "success",
-        "terminal_public_outcome_sent": True,
-        "telegram_message_id": message_id,
-        "telegram_artifact_message_id": message_id,
-        "terminal_artifact_type": "video",
-        "video_delivery_message_id": message_id,
-        "public_error_sent": False,
-        "public_failure_sent": False,
-        "late_fail_suppressed": True,
-        "state": restored_state,
-    }
-
-
-def subdub_reconcile_delivered_video_result(
-    mode: str,
-    result: dict | None = None,
-    job: dict | None = None,
-    state: dict | None = None,
-) -> dict:
-    """Apply one delivered contract after a real Telegram video send."""
-    current_result = dict(result or {})
-    current_job = dict(job or {})
-    message_id = subdub_video_delivery_message_id(current_result, current_job)
-    if not message_id:
-        return current_result
-    merged = {**current_job, **current_result, **dict(state or {})}
-    if not subdub_duration_validation_allows_success(merged):
-        return current_result
-    reconciled = subdub_restore_delivered_video_result(
-        mode,
-        {**current_result, "ok": False},
-        current_job,
-        state,
-    )
-    if not reconciled.get("ok"):
-        return current_result
-    return reconciled
-
 def subdub_job_in_final_video_delivery_path(job: dict | None = None) -> bool:
     current = dict(job or {})
     terminal = str(current.get("terminal_state") or "").strip().lower()
@@ -201881,9 +201405,7 @@ def subdub_begin_delivery_once(job_key: str) -> bool:
 
 async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason: str = "", lang: str = "vi", reply_markup=None) -> dict:
     key = str(job_key or "")
-    persisted_job = subdub_progress_job_for_user(key, 0) if key else {}
-    job = dict(persisted_job or SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
-    key = str(job.get("job_key") or key)
+    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
     safe_mode = normalize_video_translate_mode(mode)
     if safe_mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         user_from_key = key.split("|", 1)[0] if key else ""
@@ -201995,8 +201517,14 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
         sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
         message_id = str(getattr(sent_msg, "message_id", "") or "")
     if key:
-        failure_fields = subdub_failure_stage_fields(reason, job=job)
-        input_save_fail = subdub_input_save_failure_detected({**job, **failure_fields})
+        input_save_fail = subdub_input_save_failure_detected(
+            {
+                **job,
+                "pipeline_blocker": str(reason or ""),
+                "input_save_blocker": str(reason or ""),
+                "last_error_stage": "input_save" if str(reason or "").strip() in SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS else job.get("last_error_stage"),
+            }
+        )
         fail_stage = "input_save_failed" if input_save_fail else "failed_no_charge"
         fail_percent = subdub_progress_percent_for_lifecycle(fail_stage, "failed_no_charge")
         update_subtitle_dub_pipeline_job(
@@ -202020,12 +201548,13 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
             late_fail_suppressed=False,
             error_sent_after_delivery=False,
             subdub_fail_message_id=message_id,
-            **failure_fields,
+            pipeline_blocker=str(reason or "subdub_failed")[:180],
             charge_status="not_charged",
+            no_charge_reason=str(reason or "subdub_failed")[:180],
             status_panel_terminalized=True,
             refresh_stopped_after_terminal=True,
             panel_finalized=True,
-            panel_final_percent=fail_percent,
+            panel_final_percent=95,
             panel_final_message_id=str(job.get("status_panel_message_id") or ""),
             validation_started=bool(subdub_canonical_lifecycle_state(job.get("progress_stage") or "") == "validating_output"),
             validation_passed=False,
@@ -202040,9 +201569,6 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
 
 def subtitle_dub_find_pipeline_job_for_user(user_id, job_id: str = "") -> dict:
     wanted = str(job_id or "").strip()
-    persisted = subdub_progress_job_for_user(wanted or "latest", user_id)
-    if persisted:
-        return dict(persisted)
     candidates = []
     for job in SUBTITLE_DUB_PIPELINE_JOBS.values():
         item = dict(job or {})
@@ -202152,9 +201678,7 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
     if status.startswith("failed") or terminal.startswith("failed"):
-        safe = sanitize_log_text(
-            str(job.get("last_error_safe") or job.get("public_safe_error") or "")
-        ).strip()[:500]
+        safe = sanitize_public_copy(str(job.get("last_error_safe") or job.get("public_safe_error") or ""), "")
         if safe:
             return safe
         return subdub_clean_failure_text(lang)
@@ -202501,12 +202025,6 @@ def video_dubbing_job_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pipeline_input_limit_mb(is_admin: bool = False) -> int:
     return PIPELINE_MAX_INPUT_MB_ADMIN if is_admin else PIPELINE_MAX_INPUT_MB_PUBLIC
 
-
-def subdub_input_limit_mb(is_admin: bool = False) -> int:
-    del is_admin
-    return int(SUBDUB_MAX_INPUT_MB)
-
-
 def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
 
@@ -202550,70 +202068,6 @@ def subdub_duration_over_limit_text(lang: str = "vi") -> str:
             "Please send a shorter video or try again later."
         )
     return "Video này dài hơn giới hạn xử lý hiện tại. TOAN AAS chưa trừ Xu. Anh/chị có thể gửi video ngắn hơn hoặc thử lại sau."
-
-
-def subdub_duration_invalid_output_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return (
-            "TOAN AAS could not create the complete video.\n"
-            "The result does not cover the full source duration, so it was not marked complete.\n"
-            "No Xu was charged."
-        )
-    return (
-        "TOAN AAS chưa tạo được video hoàn chỉnh.\n"
-        "Video kết quả chưa đủ thời lượng nên hệ thống chưa xác nhận hoàn tất.\n"
-        "Hệ thống chưa trừ Xu."
-    )
-
-
-def subdub_duration_validation_allows_success(payload: dict | None = None) -> bool:
-    current = dict(payload or {})
-    validation = dict(current.get("output_validation") or current.get("_subdub_output_validation") or {})
-    blocker = str(
-        current.get("success_blocked_reason")
-        or current.get("artifact_validation_result")
-        or validation.get("detail")
-        or ""
-    ).strip()
-    if blocker == "video_duration_coverage_failed":
-        return False
-    has_duration_contract = bool(
-        "duration_coverage_ok" in current
-        or "duration_coverage_ok" in validation
-        or float(current.get("expected_duration") or validation.get("expected_duration") or 0.0) > 0
-    )
-    if not has_duration_contract:
-        return True
-    if "duration_coverage_ok" in current and not truthy_value(current.get("duration_coverage_ok"), False):
-        return False
-    if "duration_coverage_ok" in validation and not truthy_value(validation.get("duration_coverage_ok"), False):
-        return False
-    if validation and "ok" in validation and not truthy_value(validation.get("ok"), False):
-        return False
-    expected = max(
-        0.0,
-        float(
-            current.get("expected_duration")
-            or current.get("source_duration")
-            or validation.get("expected_duration")
-            or validation.get("source_duration")
-            or 0.0
-        ),
-    )
-    actual = max(
-        0.0,
-        float(
-            current.get("canonical_final_artifact_duration")
-            or current.get("final_mp4_duration")
-            or validation.get("actual_duration")
-            or validation.get("duration")
-            or 0.0
-        ),
-    )
-    if expected > 0 and (actual <= 0 or actual < expected * 0.97):
-        return False
-    return True
-
 
 def subdub_duration_gate_payload(
     input_save: dict | None = None,
@@ -203184,53 +202638,6 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
     persist_subtitle_dub_pipeline_job_snapshot(str(job_key or ""), job, reason="pipeline_job_update")
     return dict(job)
-
-
-def subdub_mark_delivered_terminal(job_key: str, result: dict | None = None) -> dict:
-    """Terminalize a SubDub job only after strict Telegram video delivery proof."""
-    key = str(job_key or "").strip()
-    stored = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
-    current = dict(result or {})
-    message_id = subdub_video_delivery_message_id(current, stored)
-    if not key or not message_id:
-        return stored
-    if not subdub_duration_validation_allows_success({**stored, **current}):
-        return stored
-    return update_subtitle_dub_pipeline_job(
-        key,
-        status="completed",
-        terminal_state="delivered",
-        lifecycle_state="delivered",
-        current_stage="delivered",
-        progress_stage="delivered",
-        progress_percent=100,
-        completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
-        panel_finalized=True,
-        panel_final_percent=100,
-        status_panel_terminalized=True,
-        refresh_stopped_after_terminal=True,
-        terminal_public_outcome_type="success",
-        terminal_public_outcome_sent=True,
-        terminal_public_outcome_message_id=message_id,
-        public_error_sent=False,
-        public_failure_sent=False,
-        public_error_sent_count=0,
-        delivery_success=True,
-        delivery_succeeded=True,
-        delivery_confirmed_before_success=True,
-        final_mp4_delivered=True,
-        output_sent=True,
-        public_success_sent=True,
-        telegram_artifact_message_id=message_id,
-        terminal_artifact_type="video",
-        video_delivery_message_id=message_id,
-        final_video_message_id=message_id,
-        subdub_final_video_message_id=message_id,
-        delivery_message_id=message_id,
-        late_fail_suppressed=True,
-        error_sent_after_delivery=False,
-    )
-
 
 def persist_subtitle_dub_pipeline_job_snapshot(job_key: str, job: dict | None = None, *, reason: str = "") -> bool:
     current = subdub_normalize_input_save_failed_terminal(
@@ -203885,7 +203292,7 @@ def video_dubbing_product_gate_matrix(
     )
     translation_enabled = bool(
         not video_dubbing_needs_translation_provider(mode, state)
-        or video_translation_route_configured()
+        or video_translation_provider_configured()
     )
     tts_enabled = bool(
         mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -203992,11 +203399,9 @@ def video_dubbing_pipeline_blocker(
     gate_matrix: dict | None = None,
     detail: str = "",
     pipeline_attempted: bool = False,
-    route_attempts: dict | None = None,
 ) -> str:
     input_save = dict(input_save or {})
     matrix = dict(gate_matrix or {})
-    attempts = dict(route_attempts or {})
     normalized = str(detail or "").strip().lower()
     if (
         str(input_save.get("input_save_blocker") or "") == "large_telegram_download_unsupported"
@@ -204015,24 +203420,27 @@ def video_dubbing_pipeline_blocker(
         return "file_not_saved"
     if not matrix.get("product_route_allowed"):
         return "product_route_not_allowed"
+    keyword_blockers = (
+        ("duplicate", "duplicate_lock"),
+        ("unsupported", "unsupported_input"),
+        ("ffmpeg", "ffmpeg_missing"),
+        ("audio_extract", "ffmpeg_missing"),
+        ("asr", "asr_missing"),
+        ("transcri", "asr_missing"),
+        ("translation", "translation_missing"),
+        ("tts", "tts_missing"),
+        ("voice", "tts_missing"),
+        ("provider", "provider_key_missing"),
+        ("api_key", "provider_key_missing"),
+    )
+    for keyword, blocker in keyword_blockers:
+        if keyword in normalized:
+            return blocker
     blockers = list(matrix.get("gate_blockers") or [])
     if blockers:
         return str(blockers[0])
-    if normalized:
-        return str(
-            subdub_failure_stage_fields(
-                detail,
-                job={**input_save, **matrix},
-                route_attempts=attempts,
-            ).get("pipeline_blocker")
-            or "subdub_failed"
-        )
     if not pipeline_attempted:
-        return "pipeline_not_attempted"
-    for field in SUBDUB_STAGE_BLOCKER_FIELDS:
-        blocker = str(attempts.get(field) or matrix.get(field) or input_save.get(field) or "").strip()
-        if blocker:
-            return blocker
+        return "product_route_not_allowed"
     return ""
 
 def video_dubbing_product_public_failure_text(mode: str, state: dict | None = None, gate_matrix: dict | None = None, lang: str = "vi") -> str:
@@ -204071,18 +203479,6 @@ def subtitle_dub_debug_job_payload(
     final_path = str(artifacts.get("final_mp4") or "")
     route = dict(provider_route or {})
     attempts = dict(route_attempts or {})
-    execution_trace = {
-        name: state.get(name)
-        for name in SUBDUB_EXECUTION_TRACE_FIELDS
-        if name in state
-    }
-    execution_trace.update(
-        {
-            name: attempts.get(name)
-            for name in SUBDUB_EXECUTION_TRACE_FIELDS
-            if name in attempts
-        }
-    )
     style = subdub_normalize_style(subdub_output_style_state(state, mode))
     render_debug = dict(state.get("_subdub_render_debug") or {})
     voice_resolution = dict(state.get("_subdub_voice_resolution") or {})
@@ -204095,12 +203491,6 @@ def subtitle_dub_debug_job_payload(
         gate_matrix=gate_matrix,
         detail=detail,
         pipeline_attempted=pipeline_attempted,
-        route_attempts=execution_trace,
-    )
-    failure_fields = (
-        subdub_failure_stage_fields(detail, job=state, route_attempts=execution_trace)
-        if str(detail or "").strip()
-        else {}
     )
     return {
         "feature": "subtitle_dub",
@@ -204141,7 +203531,7 @@ def subtitle_dub_debug_job_payload(
         "registry_job_id": str(state.get("registry_job_id") or state.get("_pipeline_job_id") or ""),
         "registry_chat_id_present": bool(state.get("registry_chat_id_present") or chat_id),
         "status_panel_message_id": str(state.get("status_panel_message_id") or ""),
-        "last_error_stage": str(state.get("last_error_stage") or failure_fields.get("last_error_stage") or stage or ""),
+        "last_error_stage": str(state.get("last_error_stage") or stage or ""),
         "last_error_safe": public_safe_error,
         "charge_status": str(state.get("charge_status") or ("charged" if int(charged or 0) > 0 else "not_charged")),
         "chunking_enabled": bool(state.get("chunking_enabled")),
@@ -204159,8 +203549,7 @@ def subtitle_dub_debug_job_payload(
         "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "extracted_audio_path": str(artifacts.get("audio") or ""),
         "extracted_audio_exists": bool(artifacts.get("audio") and os.path.exists(str(artifacts.get("audio")))),
-        "asr_route_called": bool(execution_trace.get("asr_started")),
-        "translation_route_called": bool(execution_trace.get("translation_started")),
+        "asr_route_called": bool(attempts.get("asr") or route.get("asr")),
         "transcript_length": int(attempts.get("transcript_length") or 0),
         "original_srt_path": str((artifacts.get("subtitles") or [""])[0] if isinstance(artifacts.get("subtitles"), list) and artifacts.get("subtitles") else ""),
         "translated_srt_path": str((artifacts.get("translated_subtitles") or [""])[0] if isinstance(artifacts.get("translated_subtitles"), list) and artifacts.get("translated_subtitles") else ""),
@@ -204191,14 +203580,13 @@ def subtitle_dub_debug_job_payload(
         "final_mp4_delivered": bool(state.get("final_mp4_delivered") or state.get("video_delivery_message_id")),
         "final_mp4_duration": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "cue_source": str(state.get("cue_source") or state.get("subtitle_timing_source") or ""),
-        "source_language": str(execution_trace.get("source_language") or state.get("detected_language") or ""),
+        "source_language": str(state.get("source_language") or state.get("detected_language") or ""),
         "detected_script": str(state.get("detected_script") or "unknown"),
-        "ocr_accepted": bool(execution_trace.get("ocr_accepted")),
-        "ocr_rejected": bool(execution_trace.get("ocr_rejected")),
-        "ocr_rejection_reason": str(execution_trace.get("ocr_rejection_reason") or ""),
-        "asr_fallback_used": bool(execution_trace.get("asr_fallback_used")),
-        "canonical_cue_count": int(execution_trace.get("canonical_cue_count") or 0),
-        "canonical_cue_hash": str(execution_trace.get("canonical_cue_hash") or ""),
+        "ocr_accepted": bool(state.get("ocr_accepted")),
+        "ocr_rejected": bool(state.get("ocr_rejected")),
+        "ocr_rejection_reason": str(state.get("ocr_rejection_reason") or ""),
+        "asr_fallback_used": bool(state.get("asr_fallback_used")),
+        "canonical_cue_count": int(state.get("canonical_cue_count") or 0),
         "canonical_timeline_signature": list(state.get("canonical_timeline_signature") or []),
         "source_duration": subdub_float_value(state.get("source_duration"), 0.0),
         "output_duration": subdub_float_value(state.get("output_duration"), 0.0),
@@ -204271,19 +203659,6 @@ def subtitle_dub_debug_job_payload(
         "cost_line_reason": str(state.get("cost_line_reason") or ""),
         "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
         "public_safe_error": public_safe_error,
-        **{
-            name: execution_trace.get(name)
-            for name in SUBDUB_EXECUTION_TRACE_FIELDS
-            if name not in {
-                "source_language",
-                "canonical_cue_count",
-                "canonical_cue_hash",
-                "ocr_accepted",
-                "ocr_rejected",
-                "ocr_rejection_reason",
-                "asr_fallback_used",
-            }
-        },
         "pipeline_blocker": blocker,
         "provider_route": route,
         "gate_matrix": dict(gate_matrix or {}),
@@ -204592,456 +203967,6 @@ def subdub_terminalize_recovery_failed_no_charge(
         reason=f"subdub recovery terminalized: {safe_blocker}",
         mutate=_terminalize,
     )
-
-
-async def synthesize_canonical_dub_segment_chunks(
-    segments: list[dict],
-    *,
-    voice_style: str = "",
-    voice_id: str = "",
-    base_speed: float = 1.0,
-    allow_admin: bool = False,
-    checkpoint_dir: str = "",
-    checkpoint_entries: list[dict] | None = None,
-    checkpoint_callback=None,
-    cue_timeout_seconds: int | None = None,
-    max_attempts: int | None = None,
-) -> dict:
-    """Synthesize canonical cues sequentially and persist each completed cue."""
-    canonical = subdub_canonical_cues.canonicalize_segments(
-        segments,
-        extraction_source="canonical_product_contract",
-    )
-    if not canonical:
-        raise RuntimeError("canonical_tts_segments_empty")
-    speed = max(0.7, min(1.0, float(base_speed or 1.0)))
-    timeout_seconds = max(15, int(cue_timeout_seconds or SUBDUB_TTS_CUE_TIMEOUT_SECONDS))
-    attempt_limit = max(1, min(3, int(max_attempts or SUBDUB_TTS_CUE_MAX_ATTEMPTS)))
-    checkpoint_map: dict[str, dict] = {}
-    for raw_checkpoint in list(checkpoint_entries or []):
-        checkpoint = dict(raw_checkpoint or {})
-        checkpoint_key = str(
-            checkpoint.get("cue_id")
-            or checkpoint.get("source_index")
-            or checkpoint.get("index")
-            or ""
-        ).strip()
-        if checkpoint_key:
-            checkpoint_map[checkpoint_key] = checkpoint
-    if checkpoint_dir:
-        os.makedirs(checkpoint_dir, exist_ok=True)
-    chunks = []
-    providers = []
-    for cue in canonical:
-        source_index = int(cue.get("source_index") or cue.get("index") or 0)
-        cue_id = str(cue.get("cue_id") or source_index)
-        text = str(cue.get("translated_text") or cue.get("source_text") or "").strip()
-        if not text:
-            raise RuntimeError(f"canonical_tts_text_empty:{source_index}")
-        checkpoint = checkpoint_map.get(cue_id) or checkpoint_map.get(str(source_index)) or {}
-        checkpoint_path = str(
-            checkpoint.get("artifact_path")
-            or checkpoint.get("path")
-            or checkpoint.get("audio_path")
-            or ""
-        ).strip()
-        if checkpoint_path and checkpoint_dir:
-            checkpoint_root = os.path.realpath(checkpoint_dir)
-            checkpoint_candidate = os.path.realpath(checkpoint_path)
-            try:
-                if os.path.commonpath([checkpoint_root, checkpoint_candidate]) != checkpoint_root:
-                    checkpoint_path = ""
-            except ValueError:
-                checkpoint_path = ""
-        audio_bytes = b""
-        provider = ""
-        detail = ""
-        audio_duration = 0.0
-        reused_checkpoint = False
-        if checkpoint_path and os.path.isfile(checkpoint_path) and os.path.getsize(checkpoint_path) > 0:
-            with open(checkpoint_path, "rb") as handle:
-                candidate_audio = handle.read()
-            expected_hash = str(checkpoint.get("artifact_hash") or checkpoint.get("sha256") or "").strip()
-            actual_hash = hashlib.sha256(candidate_audio).hexdigest() if candidate_audio else ""
-            if candidate_audio and (not expected_hash or hmac.compare_digest(expected_hash, actual_hash)):
-                candidate_duration = float(checkpoint.get("audio_duration") or checkpoint.get("duration") or 0.0)
-                if candidate_duration <= 0:
-                    try:
-                        candidate_duration = float(
-                            await asyncio.wait_for(
-                                video_dubbing_audio_duration_seconds(candidate_audio),
-                                timeout=timeout_seconds,
-                            )
-                            or 0.0
-                        )
-                    except Exception:
-                        candidate_duration = 0.0
-                if candidate_duration > 0:
-                    audio_bytes = candidate_audio
-                    audio_duration = candidate_duration
-                    provider = str(checkpoint.get("provider") or "checkpoint")
-                    detail = "tts_checkpoint_reused"
-                    reused_checkpoint = True
-        attempt = int(checkpoint.get("attempt_count") or 0)
-        last_error = ""
-        while not audio_bytes and attempt < attempt_limit:
-            attempt += 1
-
-            async def _request_tts():
-                try:
-                    return await video_dubbing_tts_bytes(
-                        text,
-                        voice_style,
-                        voice_id,
-                        f"{speed:.3f}",
-                        allow_admin=allow_admin,
-                    )
-                except TypeError:
-                    return await video_dubbing_tts_bytes(text, voice_style, voice_id, f"{speed:.3f}")
-
-            try:
-                provider, audio_bytes, detail = await asyncio.wait_for(
-                    _request_tts(),
-                    timeout=timeout_seconds,
-                )
-            except asyncio.TimeoutError as exc:
-                last_error = f"canonical_tts_cue_timeout:{cue_id}:attempt={attempt}"
-                if attempt >= attempt_limit:
-                    raise RuntimeError(last_error) from exc
-                continue
-            except Exception as exc:
-                last_error = f"canonical_tts_cue_failed:{cue_id}:{type(exc).__name__}:attempt={attempt}"
-                if attempt >= attempt_limit:
-                    raise RuntimeError(last_error) from exc
-                continue
-            if not audio_bytes:
-                last_error = f"canonical_tts_audio_empty:{cue_id}:attempt={attempt}"
-                if attempt >= attempt_limit:
-                    raise RuntimeError(last_error)
-                continue
-            try:
-                audio_duration = float(
-                    await asyncio.wait_for(
-                        video_dubbing_audio_duration_seconds(audio_bytes),
-                        timeout=timeout_seconds,
-                    )
-                    or 0.0
-                )
-            except asyncio.TimeoutError as exc:
-                audio_bytes = b""
-                last_error = f"canonical_tts_duration_timeout:{cue_id}:attempt={attempt}"
-                if attempt >= attempt_limit:
-                    raise RuntimeError(last_error) from exc
-                continue
-            if audio_duration <= 0:
-                audio_bytes = b""
-                last_error = f"canonical_tts_duration_unavailable:{cue_id}:attempt={attempt}"
-                if attempt >= attempt_limit:
-                    raise RuntimeError(last_error)
-        if not audio_bytes:
-            raise RuntimeError(last_error or f"canonical_tts_audio_empty:{cue_id}")
-        if checkpoint_dir and not reused_checkpoint:
-            safe_cue_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", cue_id).strip("._") or str(source_index)
-            checkpoint_path = os.path.join(checkpoint_dir, f"cue_{source_index:04d}_{safe_cue_id}.mp3")
-            with open(checkpoint_path, "wb") as handle:
-                handle.write(bytes(audio_bytes))
-        checkpoint_entry = {
-            "index": source_index,
-            "source_index": source_index,
-            "cue_id": cue_id,
-            "artifact_path": checkpoint_path,
-            "artifact_hash": hashlib.sha256(bytes(audio_bytes)).hexdigest(),
-            "audio_duration": float(audio_duration or 0),
-            "attempt_count": max(1, attempt),
-            "provider": str(provider or ""),
-            "completed": True,
-            "completed_at": time.time(),
-        }
-        checkpoint_map[cue_id] = checkpoint_entry
-        checkpoint_map[str(source_index)] = checkpoint_entry
-        if checkpoint_callback:
-            unique_checkpoints = list(
-                {
-                    str(item.get("cue_id") or item.get("source_index") or ""): item
-                    for item in checkpoint_map.values()
-                }.values()
-            )
-            callback_result = checkpoint_callback(
-                checkpoint_entry,
-                unique_checkpoints,
-                len(chunks) + 1,
-                len(canonical),
-            )
-            if inspect.isawaitable(callback_result):
-                await callback_result
-        providers.append(str(provider or ""))
-        chunks.append({
-            "index": source_index,
-            "cue_id": cue_id,
-            "source_start_ms": int(cue.get("source_start_ms") or 0),
-            "source_end_ms": int(cue.get("source_end_ms") or 0),
-            "start": float(cue.get("start") or 0),
-            "end": float(cue.get("end") or 0),
-            "text": text,
-            "audio_bytes": bytes(audio_bytes),
-            "audio_duration": float(audio_duration or 0),
-            "cue_window_duration": max(
-                0.0,
-                (int(cue.get("source_end_ms") or 0) - int(cue.get("source_start_ms") or 0)) / 1000.0,
-            ),
-            "speed": round(speed, 3),
-            "provider": str(provider or ""),
-            "detail": sanitize_log_text(str(detail or ""))[:180],
-            "checkpoint_path": checkpoint_path,
-            "checkpoint_reused": reused_checkpoint,
-        })
-    return {
-        "chunks": chunks,
-        "provider": next((item for item in providers if item), ""),
-        "canonical_cue_count": len(canonical),
-        "canonical_timeline_signature": subdub_canonical_cues.timeline_signature(canonical),
-        "tts_tracks_count": 1,
-        "tts_overlap_count": 0,
-        "tts_cue_checkpoints": list(
-            {
-                str(item.get("cue_id") or item.get("source_index") or ""): item
-                for item in checkpoint_map.values()
-            }.values()
-        ),
-        "completed_tts_cues": len(chunks),
-        "total_tts_cues": len(canonical),
-    }
-
-
-async def subdub_resume_generating_voice_from_checkpoint(job: dict | None = None) -> dict:
-    current = subdub_hydrate_registry_from_persisted(job)
-    claimed = subdub_claim_recovery_lease(current, "tts_resume")
-    if not claimed:
-        return subdub_hydrate_registry_from_persisted(current)
-    claimed = subdub_persist_recovery_fields(
-        claimed,
-        "subdub TTS resume lease extended",
-        lease_expires_at=time.time() + SUBDUB_TTS_CUE_LEASE_SECONDS,
-        last_heartbeat_at=time.time(),
-    ) or claimed
-    resume_context = dict(claimed.get("tts_resume_context") or {})
-    mode = normalize_video_translate_mode(
-        resume_context.get("mode") or claimed.get("mode") or claimed.get("video_processing_mode")
-    )
-    if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-        return subdub_terminalize_recovery_failed_no_charge(
-            claimed,
-            "tts_resume_mode_invalid",
-            recovery_result="tts_resume_context_invalid",
-        )
-    source_path = str(resume_context.get("source_path") or claimed.get("source") or "").strip()
-    workspace = str(resume_context.get("workspace") or claimed.get("workspace") or "").strip()
-    voice_id = str(resume_context.get("voice_id") or "").strip()
-    canonical_cues = subdub_canonical_cues.canonicalize_segments(
-        list(resume_context.get("canonical_cues") or []),
-        extraction_source="canonical_product_contract",
-        source_language=str(resume_context.get("source_language") or "auto"),
-        target_language=str(resume_context.get("target_language") or ""),
-    )
-    if not source_path or not os.path.isfile(source_path) or os.path.getsize(source_path) <= 0:
-        return subdub_terminalize_recovery_failed_no_charge(
-            claimed,
-            "tts_resume_source_artifact_missing",
-            recovery_result="tts_resume_source_missing",
-        )
-    if not workspace or not canonical_cues or not voice_id:
-        blocker = "tts_resume_context_missing"
-        if not canonical_cues:
-            blocker = "tts_resume_canonical_cues_missing"
-        elif not voice_id:
-            blocker = "tts_resume_voice_id_missing"
-        return subdub_terminalize_recovery_failed_no_charge(
-            claimed,
-            blocker,
-            recovery_result="tts_resume_context_invalid",
-        )
-    checkpoint_dir = os.path.join(workspace, "tts_checkpoints")
-    existing_checkpoints = list(claimed.get("tts_cue_checkpoints") or [])
-    active_job = claimed
-
-    async def _persist_checkpoint(entry: dict, checkpoints: list[dict], completed: int, total: int) -> None:
-        nonlocal active_job
-        next_cue_id = ""
-        if completed < len(canonical_cues):
-            next_cue = canonical_cues[completed]
-            next_cue_id = str(next_cue.get("cue_id") or next_cue.get("source_index") or "")
-        active_job = subdub_persist_recovery_fields(
-            active_job,
-            "subdub TTS checkpoint resumed",
-            current_stage="generating_voice",
-            progress_stage="generating_voice",
-            last_heartbeat_at=time.time(),
-            lease_expires_at=time.time() + SUBDUB_TTS_CUE_LEASE_SECONDS,
-            current_cue_id=next_cue_id or str(entry.get("cue_id") or ""),
-            current_cue_started_at=time.time() if next_cue_id else 0,
-            current_tts_cue_attempt_count=int(entry.get("attempt_count") or 0),
-            total_tts_cues=total,
-            completed_tts_cues=completed,
-            tts_cue_checkpoints=checkpoints,
-            recovery_result="tts_resume_in_progress",
-            pipeline_blocker="",
-            blocker="",
-            error_code="",
-        ) or active_job
-
-    try:
-        synthesized = await synthesize_canonical_dub_segment_chunks(
-            canonical_cues,
-            voice_style=str(resume_context.get("voice_style") or ""),
-            voice_id=voice_id,
-            base_speed=float(resume_context.get("base_speed") or 1.0),
-            allow_admin=bool(claimed.get("is_admin") or claimed.get("_pipeline_is_admin")),
-            checkpoint_dir=checkpoint_dir,
-            checkpoint_entries=existing_checkpoints,
-            checkpoint_callback=_persist_checkpoint,
-            cue_timeout_seconds=SUBDUB_TTS_CUE_TIMEOUT_SECONDS,
-            max_attempts=SUBDUB_TTS_CUE_MAX_ATTEMPTS,
-        )
-        chunks = list(synthesized.get("chunks") or [])
-        if len(chunks) != len(canonical_cues):
-            raise RuntimeError("tts_resume_chunk_count_mismatch")
-        active_job = subdub_persist_recovery_fields(
-            active_job,
-            "subdub TTS resume complete; mux pending",
-            current_stage="muxing",
-            progress_stage="muxing",
-            stage_started_at=time.time(),
-            last_heartbeat_at=time.time(),
-            current_cue_id="",
-            current_cue_started_at=0,
-            current_tts_cue_attempt_count=0,
-            total_tts_cues=len(canonical_cues),
-            completed_tts_cues=len(canonical_cues),
-            tts_cue_checkpoints=list(synthesized.get("tts_cue_checkpoints") or []),
-            tts_checkpoint_complete=True,
-            recovery_result="tts_resume_complete_mux_pending",
-        ) or active_job
-        source_duration = max(
-            float(resume_context.get("source_duration") or claimed.get("input_duration") or 0.0),
-            max((float(cue.get("end") or 0.0) for cue in canonical_cues), default=0.0),
-        )
-        raw_audio, timeline_detail = await build_canonical_dub_timeline_audio(chunks, source_duration)
-        if not raw_audio:
-            raise RuntimeError(f"tts_resume_timeline_failed:{timeline_detail or 'empty'}")
-        dubbed_audio, normalization_detail = await normalize_dub_audio_bytes(raw_audio)
-        if not dubbed_audio:
-            raise RuntimeError(f"tts_resume_audio_normalize_failed:{normalization_detail or 'empty'}")
-        with open(source_path, "rb") as handle:
-            source_bytes = handle.read()
-        subtitle_bytes = b""
-        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            subtitle_text = str(
-                resume_context.get("subtitle_srt") or video_dubbing_srt_from_segments(canonical_cues)
-            ).strip()
-            if not subtitle_text:
-                raise RuntimeError("tts_resume_combo_subtitle_missing")
-            subtitle_bytes = subtitle_text.encode("utf-8")
-        active_job = subdub_persist_recovery_fields(
-            active_job,
-            "subdub resumed mux started",
-            current_stage="muxing",
-            progress_stage="muxing",
-            stage_started_at=time.time(),
-            last_heartbeat_at=time.time(),
-            mux_started=True,
-            recovery_result="tts_resume_mux_in_progress",
-        ) or active_job
-        render_kwargs = {
-            "dubbed_audio": dubbed_audio,
-            "subtitle_bytes": subtitle_bytes,
-            "keep_original_audio": bool(resume_context.get("keep_original_audio")),
-            "subtitle_style": (
-                dict(resume_context.get("subtitle_style") or {}) if subtitle_bytes else None
-            ),
-            "original_audio_mode": str(resume_context.get("original_audio_mode") or "mute"),
-            "original_audio_volume_percent": int(
-                resume_context.get("original_audio_volume_percent") or 0
-            ),
-            "dubbed_voice_volume_percent": int(
-                resume_context.get("dubbed_voice_volume_percent")
-                or SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT
-            ),
-            "require_audio": True,
-            "preserve_source_duration": True,
-        }
-        try:
-            render_signature = inspect.signature(video_dubbing_render_video)
-            accepts_render_kwargs = any(
-                parameter.kind == inspect.Parameter.VAR_KEYWORD
-                for parameter in render_signature.parameters.values()
-            )
-            if not accepts_render_kwargs:
-                supported_render_params = set(render_signature.parameters)
-                render_kwargs = {
-                    key: value
-                    for key, value in render_kwargs.items()
-                    if key in supported_render_params
-                }
-        except Exception:
-            render_kwargs.pop("preserve_source_duration", None)
-        final_video, render_detail = await video_dubbing_render_video(
-            source_bytes,
-            **render_kwargs,
-        )
-        if not final_video:
-            raise RuntimeError(f"tts_resume_mux_failed:{render_detail or 'empty'}")
-        validation = await subdub_validate_video_output(final_video, require_audio=True)
-        if not validation.get("ok"):
-            raise RuntimeError(
-                f"tts_resume_output_invalid:{validation.get('detail') or 'validation_failed'}"
-            )
-        os.makedirs(workspace, exist_ok=True)
-        artifact_path = write_subtitle_dub_pipeline_artifact(workspace, "final_recovered.mp4", final_video)
-        if not artifact_path or not os.path.isfile(artifact_path):
-            raise RuntimeError("tts_resume_final_artifact_write_failed")
-        active_job = subdub_persist_recovery_fields(
-            active_job,
-            "subdub resumed final MP4 ready for delivery",
-            status="recovering_delivery",
-            terminal_state="",
-            lifecycle_state="delivering",
-            current_stage="delivering",
-            progress_stage="delivering",
-            progress_percent=95,
-            completed_steps=subdub_completed_steps_for_lifecycle("delivering", "delivering"),
-            artifact_path=artifact_path,
-            artifact_hash=subdub_recovery_file_sha256(artifact_path),
-            artifact_duration=float(validation.get("duration") or 0.0),
-            final_mp4=artifact_path,
-            final_mp4_path=artifact_path,
-            final_video_path=artifact_path,
-            final_mp4_exists=True,
-            final_mp4_valid=True,
-            output_validated=True,
-            validation_passed=True,
-            mux_started=True,
-            mux_completed=True,
-            render_detail=str(render_detail or "")[:1200],
-            delivery_attempted=False,
-            recovery_result="tts_resumed_final_mp4_ready",
-            recovered_from_persisted_subdub_job=True,
-            execution_owner="",
-            lease_expires_at=0,
-            last_heartbeat_at=time.time(),
-            pipeline_blocker="",
-            blocker="",
-            error_code="",
-            charge_status="not_charged",
-            charged_xu=0,
-        ) or active_job
-        return active_job
-    except Exception as exc:
-        blocker = sanitize_log_text(str(exc) or type(exc).__name__)[:240]
-        return subdub_terminalize_recovery_failed_no_charge(
-            active_job,
-            blocker or "tts_resume_failed",
-            recovery_result="tts_resume_failed_no_charge",
-        )
 
 def subdub_prepare_artifact_delivery_recovery(job: dict | None, artifact_path: str, validation: dict) -> dict:
     artifact_hash = subdub_recovery_file_sha256(artifact_path)
@@ -205356,16 +204281,11 @@ async def subdub_recover_persisted_job(
                 checkpoint_blocker,
                 recovery_result="tts_resume_not_possible_no_checkpoint",
             )
-        resumed = await subdub_resume_generating_voice_from_checkpoint(current)
-        if subdub_recovery_final_mp4_path(resumed):
-            return await subdub_recover_persisted_job(
-                resumed,
-                bot_client,
-                query=query,
-                lang=lang,
-                source="tts_checkpoint_resume",
-            )
-        return resumed
+        return subdub_terminalize_recovery_failed_no_charge(
+            current,
+            f"recovery_resume_not_supported_on_pr400_runtime:{stage or 'unknown_stage'}",
+            recovery_result="tts_resume_not_available_in_restored_runtime",
+        )
     active_states = {
         "queued", "running", "processing", "received_file", "saved_input",
         "extracting_audio", "recognizing_dialogue", "transcribing", "translating",
@@ -205585,46 +204505,6 @@ SUBDUB_SUBTITLE_FONT_CANDIDATES = (
         "cjk": False,
     },
 )
-
-SUBDUB_SUBTITLE_FONT_FALLBACKS = {
-    "latin": (
-        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",), "vietnamese": True, "cjk": False},
-        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
-    ),
-    "chinese": (
-        {"family": "Noto Sans CJK SC", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf"), "vietnamese": True, "cjk": True},
-    ),
-    "japanese": (
-        {"family": "Noto Sans CJK JP", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf"), "vietnamese": False, "cjk": True},
-    ),
-    "korean": (
-        {"family": "Noto Sans CJK KR", "paths": ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf"), "vietnamese": False, "cjk": True},
-    ),
-    "thai": (
-        {"family": "Noto Sans Thai", "paths": ("/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",), "vietnamese": False, "cjk": False},
-    ),
-    "arabic": (
-        {"family": "Noto Sans Arabic", "paths": ("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",), "vietnamese": False, "cjk": False},
-    ),
-    "devanagari": (
-        {"family": "Noto Sans Devanagari", "paths": ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",), "vietnamese": False, "cjk": False},
-    ),
-    "cyrillic": (
-        {"family": "Noto Sans", "paths": ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",), "vietnamese": True, "cjk": False},
-        {"family": "DejaVu Sans", "paths": ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:\\Windows\\Fonts\\DejaVuSans.ttf"), "vietnamese": True, "cjk": False},
-    ),
-}
-
-SUBDUB_SUBTITLE_SCRIPT_CHARSET = {
-    "japanese": "3042",
-    "chinese": "4e2d",
-    "korean": "ac00",
-    "thai": "0e01",
-    "arabic": "0627",
-    "devanagari": "0915",
-    "cyrillic": "0416",
-    "latin": "1ea1",
-}
 
 SUBDUB_BROKEN_GLYPH_CHARS = {
     "\ufffd", "□", "▯", "■", "�", "▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩",
@@ -206198,35 +205078,6 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         side_margin = max(24, min(int(style["play_res_x"] * 0.10), side_margin))
         style["subtitle_margin_l_after"] = side_margin
         style["subtitle_margin_r_after"] = side_margin
-    if state.get("subdub_canonical_product_contract"):
-        canonical_size = subdub_clamp_int(int(style.get("render_size") or style.get("size") or 40) + 2, 42, 30, 72)
-        style["render_size"] = canonical_size
-        style["size"] = canonical_size
-        style["subtitle_font_size_after"] = canonical_size
-        style["translated_font_size_final"] = canonical_size
-        style["subtitle_alignment"] = "bottom_center"
-        style["position"] = "bottom"
-        style["align"] = "center"
-        style["max_lines"] = 2
-        style["subtitle_max_lines"] = 2
-        style["subtitle_wrap_lines_max"] = 2
-        style["text_color"] = "#FFFFFF"
-        style["outline_color"] = "#000000"
-        style["outline"] = max(4, int(style.get("outline") or 0))
-        style["shadow"] = max(1, int(style.get("shadow") or 0))
-        style["background"] = "box"
-        style["boxed_background"] = True
-        style["uppercase_text"] = True
-        style["bold_text"] = True
-        style["cover_original"] = False
-        style["hardsub_cover_enabled"] = False
-        raise_px = max(2, int(round(8.0 * float(style["play_res_y"]) / 1080.0)))
-        style["subtitle_margin_v_after"] = max(2, int(style.get("subtitle_margin_v_after") or 0) + raise_px)
-        side_margin = max(6, min(14, int(round(float(style["play_res_x"]) * 0.006))))
-        style["subtitle_margin_l_after"] = side_margin
-        style["subtitle_margin_r_after"] = side_margin
-        style["canonical_bottom_raise_px"] = raise_px
-        style["subdub_canonical_product_contract"] = True
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -207903,7 +206754,6 @@ def video_dubbing_qc_segments(segments: list[dict], *, preserve_timestamps: bool
         duration = max(0.1, end - start)
         if preserve_timestamps:
             qc_segments.append({
-                **dict(source or {}),
                 "index": int((source or {}).get("index") or len(qc_segments) + 1),
                 "start": round(start, 3),
                 "end": round(end, 3),
@@ -208066,25 +206916,16 @@ async def translate_subtitle_segments(
         except Exception:
             translated = {}
         translated_text = str(translated.get("text") or "").strip()
-        translation_quality = subdub_canonical_cues.evaluate_translation_quality(
-            translated_text,
-            target_language=target_language,
-        )
-        if translated_text and not translation_quality.get("accepted"):
-            translated_text = ""
         translate_missing = not bool(translated_text)
         if not translated_text:
             translated_text = text
             missing_count += 1
         providers.append(str(translated.get("provider") or ""))
         translated_segments.append({
-            **dict(item or {}),
             "index": int((item or {}).get("index") or index),
             "start": float((item or {}).get("start") or 0),
             "end": float((item or {}).get("end") or 0),
             "text": translated_text,
-            "translated_text_full": translated_text,
-            "translation_quality": translation_quality,
             "translate_missing": translate_missing,
         })
     if not translated_segments:
@@ -208388,238 +207229,6 @@ async def transcribe_media_to_segments(
         "global_timing_preserved": global_timing_preserved,
     }
 
-async def _video_dubbing_resolve_source_script_with_trace(
-    source_bytes: bytes,
-    content_type: str,
-    context: ContextTypes.DEFAULT_TYPE,
-    duration_seconds: int = 0,
-    max_seconds: int = 0,
-    allow_admin: bool = False,
-    updated_by="",
-    file_name: str = "",
-    media_kind: str = "",
-    source_language: str = "auto",
-    prefer_visual_subtitles: bool = False,
-    execution_trace: dict | None = None,
-    job_key: str = "",
-) -> dict:
-    trace = execution_trace if isinstance(execution_trace, dict) else {}
-    subdub_update_execution_trace(
-        trace,
-        job_key=job_key,
-        source_acquisition_started=True,
-        source_acquisition_completed=False,
-        source_acquisition_method="",
-        source_acquisition_blocker="",
-        source_blocker="",
-    )
-    embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
-    embedded_segments = video_dubbing_segments_from_subtitle(embedded_subtitle) if embedded_subtitle else []
-    subdub_update_execution_trace(
-        trace,
-        job_key=job_key,
-        subtitle_stream_detected=bool(embedded_subtitle),
-    )
-    if embedded_subtitle and embedded_segments:
-        detected_language = subdub_detect_language_from_text(embedded_subtitle, "auto")
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            source_acquisition_completed=True,
-            source_acquisition_method="embedded_subtitle",
-            subtitle_stream_detected=True,
-            source_language=detected_language,
-            canonical_cue_count=len(embedded_segments),
-            canonical_cue_hash=subdub_canonical_cue_hash(embedded_segments),
-        )
-        return {
-            "source_kind": "embedded_subtitle",
-            "subtitle": embedded_subtitle,
-            "script": video_dubbing_plain_script(embedded_subtitle),
-            "asr_provider": "embedded_subtitle",
-            "detail": subtitle_detail,
-            "segments": embedded_segments,
-            "detected_language": detected_language,
-            "global_timing_preserved": True,
-            "subtitle_timing_source": "embedded_subtitle",
-        }
-    if prefer_visual_subtitles:
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            ocr_started=True,
-            ocr_completed=False,
-            ocr_accepted=False,
-            ocr_rejected=False,
-            ocr_rejection_reason="",
-        )
-        try:
-            visual_result = await asyncio.wait_for(
-                video_dubbing_extract_visual_subtitle(
-                    source_bytes,
-                    content_type,
-                    duration_seconds=duration_seconds,
-                    source_language=source_language,
-                    max_seconds=max_seconds,
-                ),
-                timeout=float(SUBDUB_VISUAL_OCR_TOTAL_TIMEOUT_SECONDS),
-            )
-        except asyncio.TimeoutError:
-            visual_result = {"ok": False, "status": "visual_ocr_timeout", "segments": []}
-        except Exception as exc:
-            visual_result = {
-                "ok": False,
-                "status": "visual_ocr_unavailable",
-                "detail": type(exc).__name__,
-                "segments": [],
-            }
-        visual_segments = list(visual_result.get("segments") or [])
-        visual_ok = bool(
-            visual_result.get("ok")
-            and visual_result.get("subtitle")
-            and visual_segments
-        )
-        visual_rejection = str(
-            visual_result.get("rejection_reason")
-            or visual_result.get("status")
-            or visual_result.get("detail")
-            or ("" if visual_ok else "visual_ocr_no_usable_cues")
-        )[:180]
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            ocr_completed=True,
-            ocr_accepted=visual_ok,
-            ocr_rejected=not visual_ok,
-            ocr_rejection_reason="" if visual_ok else visual_rejection,
-        )
-        if visual_ok:
-            detected_language = subdub_detect_language_from_text(
-                str(visual_result.get("script") or ""),
-                source_language,
-            )
-            subdub_update_execution_trace(
-                trace,
-                job_key=job_key,
-                source_acquisition_completed=True,
-                source_acquisition_method="visual_hardsub_ocr",
-                source_language=detected_language,
-                canonical_cue_count=len(visual_segments),
-                canonical_cue_hash=subdub_canonical_cue_hash(visual_segments),
-            )
-            return {
-                "source_kind": "visual_hardsub_ocr",
-                "subtitle": str(visual_result.get("subtitle") or ""),
-                "script": str(visual_result.get("script") or ""),
-                "asr_provider": "visual_hardsub_ocr",
-                "detail": str(visual_result.get("detail") or ""),
-                "segments": visual_segments,
-                "detected_language": detected_language,
-                "duration_seconds": int(duration_seconds or 0),
-                "chunk_count": 1,
-                "chunk_strategy": "visual_frame_ocr",
-                "global_timing_preserved": True,
-                "subtitle_timing_source": "visual_hardsub_ocr",
-                "visual_ocr_frame_count": int(visual_result.get("frame_count") or 0),
-                "visual_ocr_cue_count": int(visual_result.get("cue_count") or 0),
-            }
-    # Media routing stays here; transcribe_media_to_segments calls video_dubbing_transcribe_bytes only after audio is valid.
-    subdub_update_execution_trace(
-        trace,
-        job_key=job_key,
-        asr_started=True,
-        asr_completed=False,
-        asr_fallback_used=bool(prefer_visual_subtitles),
-        asr_blocker="",
-    )
-    try:
-        result = await transcribe_media_to_segments(
-            {
-                "bytes": source_bytes,
-                "content_type": content_type,
-                "file_name": file_name,
-                "source_file_name": file_name,
-                "media_kind": media_kind,
-                "source_media_kind": media_kind,
-                "duration_seconds": duration_seconds,
-            },
-            context=context,
-            duration_seconds=duration_seconds,
-            max_seconds=max_seconds,
-            source_language=source_language,
-            allow_admin=allow_admin,
-            updated_by=updated_by,
-        )
-    except Exception as exc:
-        blocker = sanitize_log_text(str(exc or type(exc).__name__))[:180] or "asr_failed"
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            asr_completed=False,
-            asr_blocker=blocker,
-            source_acquisition_blocker=blocker,
-            source_blocker=blocker,
-        )
-        raise
-    if not result.get("output_valid"):
-        raw_blocker = str(result.get("status") or "asr_failed")
-        blocker = (
-            "no_usable_subtitle_or_audio_source"
-            if raw_blocker in {"empty_transcript", "segment_generation_failed", "no_speech"}
-            else raw_blocker
-        )
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            asr_completed=False,
-            asr_blocker=blocker,
-            source_acquisition_blocker=blocker,
-            source_blocker=blocker,
-        )
-        raise RuntimeError(blocker)
-    transcript = str(result.get("transcript_text") or "").strip()
-    subtitle_text = video_dubbing_srt_from_segments(list(result.get("segments") or []))
-    if not subtitle_text:
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            asr_completed=True,
-            asr_blocker="subtitle_generation_failed",
-            source_acquisition_blocker="subtitle_generation_failed",
-            source_blocker="subtitle_generation_failed",
-        )
-        raise RuntimeError("subtitle_generation_failed")
-    asr_segments = list(result.get("segments") or [])
-    detected_language = str(result.get("detected_language") or "")
-    subdub_update_execution_trace(
-        trace,
-        job_key=job_key,
-        source_acquisition_completed=True,
-        source_acquisition_method="asr",
-        asr_completed=True,
-        asr_blocker="",
-        source_acquisition_blocker="",
-        source_blocker="",
-        source_language=detected_language,
-        canonical_cue_count=len(asr_segments),
-        canonical_cue_hash=subdub_canonical_cue_hash(asr_segments),
-    )
-    return {
-        "source_kind": "asr",
-        "subtitle": subtitle_text,
-        "script": transcript,
-        "asr_provider": str(result.get("provider") or ""),
-        "detail": str(result.get("detail") or ""),
-        "segments": asr_segments,
-        "detected_language": detected_language,
-        "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
-        "chunk_count": int(result.get("chunk_count") or (1 if duration_seconds else 0)),
-        "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
-        "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
-        "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
-    }
-
-
 async def video_dubbing_resolve_source_script(
     source_bytes: bytes,
     content_type: str,
@@ -208721,128 +207330,6 @@ async def video_dubbing_resolve_source_script(
         "chunk_strategy": str(result.get("chunk_strategy") or "single_pass"),
         "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
         "subtitle_timing_source": str(result.get("subtitle_timing_source") or ""),
-    }
-
-
-async def video_dubbing_resolve_auto_subtitle_script(
-    source_bytes: bytes,
-    content_type: str,
-    context: ContextTypes.DEFAULT_TYPE,
-    duration_seconds: int = 0,
-    max_seconds: int = 0,
-    allow_admin: bool = False,
-    updated_by="",
-    file_name: str = "",
-    media_kind: str = "",
-    source_language: str = "auto",
-    execution_trace: dict | None = None,
-    job_key: str = "",
-) -> dict:
-    """Resolve original-language subtitles from audio only for the create lane."""
-    trace = execution_trace if isinstance(execution_trace, dict) else {}
-    subdub_update_execution_trace(
-        trace,
-        job_key=job_key,
-        source_acquisition_started=True,
-        source_acquisition_completed=False,
-        source_acquisition_method="audio_asr",
-        source_acquisition_blocker="",
-        source_blocker="",
-        asr_started=True,
-        asr_completed=False,
-        asr_blocker="",
-        translation_started=False,
-        translation_completed=False,
-        translation_provider="",
-        translation_blocker="",
-    )
-    try:
-        result = await transcribe_media_to_segments(
-            {
-                "bytes": source_bytes,
-                "content_type": content_type,
-                "file_name": file_name,
-                "source_file_name": file_name,
-                "media_kind": media_kind,
-                "source_media_kind": media_kind,
-                "duration_seconds": duration_seconds,
-            },
-            context=context,
-            source_language=source_language,
-            duration_seconds=duration_seconds,
-            max_seconds=max_seconds,
-            allow_admin=allow_admin,
-            updated_by=updated_by,
-        )
-    except Exception as exc:
-        blocker = sanitize_log_text(str(exc or type(exc).__name__))[:180] or "asr_failed"
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            asr_completed=False,
-            asr_blocker=blocker,
-            source_acquisition_blocker=blocker,
-            source_blocker=blocker,
-        )
-        raise
-    if not result.get("output_valid"):
-        raw_blocker = str(result.get("status") or "asr_failed")
-        blocker = (
-            "no_usable_subtitle_or_audio_source"
-            if raw_blocker in {"empty_transcript", "segment_generation_failed", "no_speech"}
-            else raw_blocker
-        )
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            asr_completed=False,
-            asr_blocker=blocker,
-            source_acquisition_blocker=blocker,
-            source_blocker=blocker,
-        )
-        raise RuntimeError(blocker)
-    segments = list(result.get("segments") or [])
-    subtitle_text = video_dubbing_srt_from_segments(segments)
-    if not subtitle_text:
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            asr_completed=True,
-            asr_blocker="subtitle_generation_failed",
-            source_acquisition_blocker="subtitle_generation_failed",
-            source_blocker="subtitle_generation_failed",
-        )
-        raise RuntimeError("subtitle_generation_failed")
-    transcript = str(result.get("transcript_text") or "").strip()
-    detected_language = str(result.get("detected_language") or source_language or "auto")
-    subdub_update_execution_trace(
-        trace,
-        job_key=job_key,
-        source_acquisition_completed=True,
-        source_acquisition_method="audio_asr",
-        source_acquisition_blocker="",
-        source_blocker="",
-        asr_completed=True,
-        asr_blocker="",
-        source_language=detected_language,
-        canonical_cue_count=len(segments),
-        canonical_cue_hash=subdub_canonical_cue_hash(segments),
-    )
-    return {
-        "source_kind": "asr",
-        "extraction_source": "audio_asr",
-        "source_priority": "audio_asr",
-        "subtitle": subtitle_text,
-        "script": transcript,
-        "asr_provider": str(result.get("provider") or ""),
-        "detail": str(result.get("detail") or ""),
-        "segments": segments,
-        "detected_language": detected_language,
-        "duration_seconds": int(result.get("duration_seconds") or duration_seconds or 0),
-        "chunk_count": int(result.get("chunk_count") or (1 if segments else 0)),
-        "chunk_strategy": str(result.get("chunk_strategy") or "single_audio_asr"),
-        "global_timing_preserved": bool(result.get("global_timing_preserved", True)),
-        "subtitle_timing_source": str(result.get("subtitle_timing_source") or "audio_asr"),
     }
 
 async def video_dubbing_render_video(
@@ -209353,35 +207840,6 @@ async def video_dubbing_audio_duration_seconds(audio_bytes: bytes, suffix: str =
         except Exception:
             return 0.0
 
-def prepare_subdub_combo_tts_segments(
-    segments: list[dict],
-    *,
-    source_language: str = "auto",
-    target_language: str = "",
-) -> tuple[list[dict], list[dict]]:
-    canonical_segments = subdub_canonical_cues.canonicalize_segments(
-        segments,
-        extraction_source="combo_canonical_timeline",
-        source_language=source_language,
-        target_language=target_language,
-    )
-    if not canonical_segments:
-        raise RuntimeError("combo_canonical_tts_segments_empty")
-    tts_segments = []
-    for cue in canonical_segments:
-        source_index = int(cue.get("source_index") or cue.get("index") or 0)
-        translated_text = str(cue.get("translated_text") or cue.get("text") or "").strip()
-        if not translated_text:
-            raise RuntimeError(f"combo_translated_text_empty:{source_index}")
-        tts_segments.append({
-            "index": source_index,
-            "start": float(cue.get("start") or 0),
-            "end": float(cue.get("end") or 0),
-            "text": translated_text,
-        })
-    return canonical_segments, tts_segments
-
-
 async def synthesize_dub_segment_chunks(
     segments: list[dict],
     *,
@@ -209565,182 +208023,6 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
         with open(output_path, "rb") as handle:
             return handle.read(), "ffmpeg_timeline_audio"
 
-def subdub_atempo_filters(ratio: float) -> list[str]:
-    remaining = max(1.0, float(ratio or 1.0))
-    filters = []
-    while remaining > 2.0:
-        filters.append("atempo=2.0")
-        remaining /= 2.0
-    if remaining > 1.001:
-        filters.append(f"atempo={remaining:.6f}")
-    return filters
-
-
-def subdub_plan_canonical_tts_timeline(
-    chunks: list[dict],
-    total_duration: float,
-    *,
-    max_tempo_ratio: float = 1.15,
-) -> dict:
-    """Schedule one TTS track sequentially without overlapping adjacent cues."""
-    if not chunks:
-        return {"ok": False, "blocker": "canonical_tts_segments_empty", "scheduled": []}
-    timeline_end = max(
-        float(total_duration or 0),
-        max(float((item or {}).get("end") or 0) for item in chunks),
-    )
-    if timeline_end <= 0:
-        return {"ok": False, "blocker": "canonical_timeline_duration_invalid", "scheduled": []}
-    normalized = []
-    for position, item in enumerate(chunks, start=1):
-        item = dict(item or {})
-        cue_id = str(item.get("cue_id") or item.get("index") or position)
-        start = max(0.0, float(item.get("start") or 0))
-        end = max(start, float(item.get("end") or 0))
-        audio_duration = max(0.0, float(item.get("audio_duration") or 0))
-        if end <= start:
-            return {"ok": False, "blocker": f"canonical_cue_window_invalid:{cue_id}", "scheduled": []}
-        if audio_duration <= 0:
-            return {
-                "ok": False,
-                "blocker": f"canonical_tts_duration_unavailable:{cue_id}",
-                "scheduled": [],
-            }
-        normalized.append({
-            **item,
-            "cue_id": cue_id,
-            "start": start,
-            "end": end,
-            "audio_duration": audio_duration,
-        })
-
-    def _schedule(tempo_ratio: float) -> tuple[list[dict], float, int]:
-        cursor = 0.0
-        shifted = 0
-        scheduled = []
-        for item in normalized:
-            planned_start = max(float(item["start"]), cursor)
-            if planned_start > float(item["start"]) + 0.001:
-                shifted += 1
-            planned_duration = float(item["audio_duration"]) / tempo_ratio
-            planned_end = planned_start + planned_duration
-            scheduled.append({
-                **item,
-                "scheduled_start": planned_start,
-                "scheduled_end": planned_end,
-                "scheduled_duration": planned_duration,
-                "tempo_ratio": tempo_ratio,
-            })
-            cursor = planned_end
-        return scheduled, cursor, shifted
-
-    max_tempo_ratio = max(1.0, min(2.0, float(max_tempo_ratio or 1.15)))
-    scheduled, final_end, shifted_count = _schedule(1.0)
-    tempo_ratio = 1.0
-    if final_end > timeline_end + 0.01:
-        _, fastest_end, _ = _schedule(max_tempo_ratio)
-        if fastest_end > timeline_end + 0.01:
-            return {
-                "ok": False,
-                "blocker": (
-                    "canonical_tts_timeline_exceeds_source:"
-                    f"required_end={fastest_end:.3f};source_duration={timeline_end:.3f};"
-                    f"max_tempo={max_tempo_ratio:.3f}"
-                ),
-                "scheduled": [],
-            }
-        low, high = 1.0, max_tempo_ratio
-        for _ in range(40):
-            candidate = (low + high) / 2.0
-            _, candidate_end, _ = _schedule(candidate)
-            if candidate_end > timeline_end:
-                low = candidate
-            else:
-                high = candidate
-        tempo_ratio = high
-        scheduled, final_end, shifted_count = _schedule(tempo_ratio)
-    return {
-        "ok": True,
-        "blocker": "",
-        "scheduled": scheduled,
-        "timeline_duration": timeline_end,
-        "final_audio_end": final_end,
-        "tempo_ratio": tempo_ratio,
-        "shifted_cue_count": shifted_count,
-        "overlap_count": 0,
-    }
-
-
-async def build_canonical_dub_timeline_audio(
-    chunks: list[dict],
-    total_duration: float = 0,
-) -> tuple[bytes, str]:
-    ffmpeg = frame_video_ffmpeg_path()
-    if not chunks:
-        return b"", "canonical_tts_segments_empty"
-    if not ffmpeg:
-        return b"", "canonical_timeline_ffmpeg_unavailable"
-    timeline_end = max(
-        float(total_duration or 0),
-        max(float(item.get("end") or 0) for item in chunks),
-    )
-    if timeline_end <= 0:
-        return b"", "canonical_timeline_duration_invalid"
-    plan = subdub_plan_canonical_tts_timeline(chunks, timeline_end, max_tempo_ratio=1.15)
-    if not plan.get("ok"):
-        return b"", str(plan.get("blocker") or "canonical_timeline_plan_failed")
-    scheduled_chunks = list(plan.get("scheduled") or [])
-    with tempfile.TemporaryDirectory(prefix="toanaas_canonical_dub_timeline_") as tmpdir:
-        command = [ffmpeg, "-y"]
-        for index, item in enumerate(scheduled_chunks):
-            chunk_path = os.path.join(tmpdir, f"chunk_{index:03d}.mp3")
-            audio_bytes = bytes(item.get("audio_bytes") or b"")
-            if not audio_bytes:
-                return b"", f"canonical_tts_audio_empty:{item.get('cue_id') or item.get('index') or index + 1}"
-            with open(chunk_path, "wb") as handle:
-                handle.write(audio_bytes)
-            command.extend(["-i", chunk_path])
-        filters = []
-        delayed_labels = []
-        for index, item in enumerate(scheduled_chunks):
-            scheduled_duration = max(0.1, float(item.get("scheduled_duration") or 0))
-            tempo_ratio = max(1.0, float(item.get("tempo_ratio") or 1.0))
-            chain = [*subdub_atempo_filters(tempo_ratio), f"atrim=duration={scheduled_duration:.3f}"]
-            delay_ms = max(0, int(round(float(item.get("scheduled_start") or 0) * 1000)))
-            chain.append(f"adelay={delay_ms}|{delay_ms}")
-            label = f"canonical_{index}"
-            filters.append(f"[{index}:a]{','.join(chain)}[{label}]")
-            delayed_labels.append(f"[{label}]")
-        filters.append(
-            f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:duration=longest:dropout_transition=0,"
-            f"apad,atrim=duration={timeline_end:.3f}[mix]"
-        )
-        output_path = os.path.join(tmpdir, "canonical_dub_timeline.mp3")
-        command.extend([
-            "-filter_complex",
-            ";".join(filters),
-            "-map",
-            "[mix]",
-            "-t",
-            f"{timeline_end:.3f}",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "160k",
-            output_path,
-        ])
-        ok, detail = await run_ffmpeg_command(command, timeout=max(180, len(chunks) * 30))
-        if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
-            return b"", str(detail or "canonical_timeline_audio_failed")
-        with open(output_path, "rb") as handle:
-            return handle.read(), (
-                f"ffmpeg_canonical_timeline_audio:cues={len(scheduled_chunks)};duration={timeline_end:.3f};"
-                f"tempo={float(plan.get('tempo_ratio') or 1.0):.6f};"
-                f"shifted_cues={int(plan.get('shifted_cue_count') or 0)};"
-                "tts_tracks=1;overlap_count=0;absolute_timestamps=yes;sequential=yes"
-            )
-
-
 def subdub_dub_audio_filter_chain(*, fallback: bool = False) -> str:
     gain = max(1.0, min(4.0, float(SUBDUB_DUB_VOICE_GAIN or 2.0)))
     peak = max(-6.0, min(-0.1, float(SUBDUB_DUB_MAX_PEAK_DB or -1.0)))
@@ -209833,20 +208115,10 @@ def subdub_mode_requests_translation(mode: str, state: dict | None = None) -> bo
     return bool(target)
 
 
-async def video_dubbing_prepare_subtitles(
-    context: ContextTypes.DEFAULT_TYPE,
-    state: dict,
-    user_id,
-    allow_admin: bool = False,
-    execution_trace: dict | None = None,
-) -> dict:
-    trace = execution_trace if isinstance(execution_trace, dict) else {}
-    job_key = str(state.get("_pipeline_job_key") or "")
+async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, state: dict, user_id, allow_admin: bool = False) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
-    auto_subtitle_only = mode == VIDEO_SUBTITLE_MODE_CREATE
-    canonical_cue_mode = subdub_mode_uses_canonical_cues(mode)
     source_bytes_override = state.get("_pipeline_source_bytes_override")
     if isinstance(source_bytes_override, bytearray):
         source_bytes_override = bytes(source_bytes_override)
@@ -209859,11 +208131,7 @@ async def video_dubbing_prepare_subtitles(
         or state.get("source_duration"),
         0,
     )
-    explicit_subtitle_ref = (
-        ""
-        if auto_subtitle_only
-        else str(state.get("subtitle_ref") or state.get("source_subtitle_ref") or "").strip()
-    )
+    explicit_subtitle_ref = str(state.get("subtitle_ref") or state.get("source_subtitle_ref") or "").strip()
     source_subtitle = get_video_dubbing_artifact(user_id, explicit_subtitle_ref) if explicit_subtitle_ref else ""
     if source_subtitle:
         should_keep_media_source = bool(
@@ -209910,32 +208178,21 @@ async def video_dubbing_prepare_subtitles(
                 "detected_language": subdub_detect_language_from_text(source_subtitle, state.get("source_language") or "auto"),
             }
         else:
-            resolver = (
-                video_dubbing_resolve_auto_subtitle_script
-                if auto_subtitle_only
-                else _video_dubbing_resolve_source_script_with_trace
-            )
-            resolver_kwargs = {
-                "duration_seconds": duration_hint,
-                "allow_admin": allow_admin,
-                "updated_by": user_id,
-                "file_name": str(state.get("source_file_name") or ""),
-                "media_kind": str(state.get("source_media_type") or state.get("media_kind") or ""),
-                "source_language": str(state.get("source_language") or "auto"),
-                "execution_trace": trace,
-                "job_key": job_key,
-            }
-            if not auto_subtitle_only:
-                resolver_kwargs["prefer_visual_subtitles"] = bool(
-                    SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
-                    and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-                    and video_dubbing_has_existing_subtitle_metadata(state) is not False
-                )
-            source_info = await resolver(
+            source_info = await video_dubbing_resolve_source_script(
                 source_bytes,
                 content_type,
                 context,
-                **resolver_kwargs,
+                duration_seconds=duration_hint,
+                allow_admin=allow_admin,
+                updated_by=user_id,
+                file_name=str(state.get("source_file_name") or ""),
+                media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
+                source_language=str(state.get("source_language") or "auto"),
+                prefer_visual_subtitles=bool(
+                    SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
+                    and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+                    and video_dubbing_has_existing_subtitle_metadata(state) is not False
+                ),
             )
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
@@ -209952,50 +208209,8 @@ async def video_dubbing_prepare_subtitles(
     if not source_segments and source_script:
         source_segments = video_dubbing_segments_from_text(source_script, duration_hint)
     if not source_segments:
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            source_acquisition_started=True,
-            source_acquisition_completed=False,
-            source_acquisition_blocker="no_usable_subtitle_or_audio_source",
-            source_blocker="no_usable_subtitle_or_audio_source",
-            canonical_cue_count=0,
-            canonical_cue_hash="",
-        )
         raise RuntimeError("subtitle_segments_empty")
-    detected_source_language = str(
-        source_info.get("detected_language")
-        or subdub_detect_language_from_text(source_script, state.get("source_language") or "auto")
-    )
-    if canonical_cue_mode:
-        source_segments = subdub_canonical_cues.canonicalize_segments(
-            source_segments,
-            extraction_source=str(
-                source_info.get("extraction_source")
-                or source_info.get("source_kind")
-                or ("audio_asr" if auto_subtitle_only else "cached_subtitle")
-            ),
-            source_language=detected_source_language,
-        )
-        if not source_segments:
-            raise RuntimeError("canonical_cues_empty")
-        source_subtitle = video_dubbing_srt_from_segments(source_segments)
-        source_script = video_dubbing_plain_script(source_subtitle)
-    if not trace.get("source_acquisition_completed"):
-        subdub_update_execution_trace(
-            trace,
-            job_key=job_key,
-            source_acquisition_started=True,
-            source_acquisition_completed=True,
-            source_acquisition_method=str(source_info.get("source_kind") or "cached_subtitle"),
-            subtitle_stream_detected=bool(source_info.get("source_kind") == "embedded_subtitle"),
-            source_language=detected_source_language,
-            canonical_cue_count=len(source_segments),
-            canonical_cue_hash=subdub_canonical_cue_hash(source_segments),
-            source_acquisition_blocker="",
-            source_blocker="",
-        )
-    needs_translation = bool(not auto_subtitle_only and subdub_mode_requests_translation(mode, state))
+    needs_translation = subdub_mode_requests_translation(mode, state)
     output_subtitle = source_subtitle
     output_segments = list(source_segments)
     translation_provider = ""
@@ -210031,58 +208246,19 @@ async def video_dubbing_prepare_subtitles(
             )
         if not output_subtitle:
             # translate_subtitle_segments calls translate_subtitle_text per segment so timestamps stay intact.
-            subdub_update_execution_trace(
-                trace,
-                job_key=job_key,
-                translation_started=True,
-                translation_completed=False,
-                translation_provider="",
-                translation_blocker="",
+            translated = await translate_subtitle_segments(
+                source_segments,
+                target_language,
+                allow_admin=allow_admin,
+                updated_by=user_id,
             )
-            try:
-                translated = await translate_subtitle_segments(
-                    source_segments,
-                    target_language,
-                    allow_admin=allow_admin,
-                    updated_by=user_id,
-                )
-            except Exception as exc:
-                blocker = sanitize_log_text(str(exc or type(exc).__name__))[:180] or "translation_failed"
-                subdub_update_execution_trace(
-                    trace,
-                    job_key=job_key,
-                    translation_completed=False,
-                    translation_blocker=blocker,
-                )
-                raise
             output_segments = list(translated.get("segments") or [])
             translation_provider = str(translated.get("provider") or "")
             if int(translated.get("translation_missing_count") or 0) > 0:
-                subdub_update_execution_trace(
-                    trace,
-                    job_key=job_key,
-                    translation_completed=False,
-                    translation_provider=translation_provider,
-                    translation_blocker="translation_missing",
-                )
                 raise RuntimeError("translation_incomplete")
             output_subtitle = str(translated.get("srt") or "").strip()
             if not output_subtitle:
-                subdub_update_execution_trace(
-                    trace,
-                    job_key=job_key,
-                    translation_completed=False,
-                    translation_provider=translation_provider,
-                    translation_blocker="translation_missing",
-                )
                 raise RuntimeError("translation_empty")
-            subdub_update_execution_trace(
-                trace,
-                job_key=job_key,
-                translation_completed=True,
-                translation_provider=translation_provider,
-                translation_blocker="",
-            )
             translated_ref = set_video_dubbing_artifact(user_id, "translated_subtitle", output_subtitle)
             sync_fields = video_dubbing_sync_state_fields(
                 state,
@@ -210101,13 +208277,6 @@ async def video_dubbing_prepare_subtitles(
                 translated_subtitle_source_hash=source_subtitle_hash,
             )
         else:
-            subdub_update_execution_trace(
-                trace,
-                job_key=job_key,
-                translation_completed=True,
-                translation_provider="cache",
-                translation_blocker="",
-            )
             output_segments = video_dubbing_segments_from_subtitle(output_subtitle) or output_segments
             retimed_segments = subdub_retime_translated_segments_to_source(source_segments, output_segments)
             if retimed_segments:
@@ -210134,33 +208303,8 @@ async def video_dubbing_prepare_subtitles(
         "output_script": output_script,
         "translation_provider": translation_provider,
         "asr_provider": str(source_info.get("asr_provider") or ("cached_subtitle" if source_subtitle else "")),
-        "detected_language": detected_source_language,
+        "detected_language": str(source_info.get("detected_language") or subdub_detect_language_from_text(source_script, state.get("source_language") or "auto")),
         "target_language": str(state.get("target_language") or ""),
-        "canonical_cue_mode": bool(canonical_cue_mode),
-        "canonical_cues": list(output_segments if canonical_cue_mode else []),
-        "canonical_source_cues": list(source_segments if canonical_cue_mode else []),
-        "canonical_timeline_signature": (
-            subdub_canonical_cues.timeline_signature(source_segments)
-            if canonical_cue_mode
-            else []
-        ),
-        "extraction_source": str(
-            source_info.get("extraction_source")
-            or source_info.get("source_kind")
-            or ("cached_subtitle" if source_subtitle else "")
-        ),
-        "source_priority": str(
-            source_info.get("source_priority")
-            or source_info.get("source_kind")
-            or ("cached_subtitle" if source_subtitle else "")
-        ),
-        "cue_source": str(
-            source_info.get("cue_source")
-            or source_info.get("source_priority")
-            or source_info.get("extraction_source")
-            or source_info.get("source_kind")
-            or ""
-        ),
         "source_segment_count": len(source_segments),
         "translated_segment_count": len(output_segments) if needs_translation else 0,
         "duration_seconds": int(source_info.get("duration_seconds") or duration_hint or 0),
@@ -210175,12 +208319,6 @@ async def video_dubbing_prepare_subtitles(
         "translation_cache_hit": bool(translation_cache_hit),
         "translation_cache_target_language": subdub_translation_cache_language_key(state.get("target_language") or "") if needs_translation else "",
         "translation_cache_source_hash": subdub_translation_cache_source_hash(source_subtitle) if needs_translation else "",
-        "auto_subtitle_only": bool(auto_subtitle_only),
-        "auto_subtitle_source": "audio_asr" if auto_subtitle_only else "",
-        "auto_subtitle_translation_requested": False if auto_subtitle_only else bool(needs_translation),
-        "auto_subtitle_tts_requested": False,
-        "auto_subtitle_dub_requested": False,
-        "execution_trace": dict(trace),
         **timing_validation,
     }
 
@@ -210197,12 +208335,7 @@ async def _execute_video_dubbing_pipeline_core(
     mode = subdub_resolved_route_mode("", state) or normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
-    canonical_cue_mode = subdub_mode_uses_canonical_cues(mode)
-    state = {
-        **dict(state or {}),
-        "_pipeline_is_admin": bool(is_admin_user(uid)),
-        "canonical_cue_mode": bool(canonical_cue_mode),
-    }
+    state = {**dict(state or {}), "_pipeline_is_admin": bool(is_admin_user(uid))}
     workspace = str(state.get("_pipeline_workspace") or "")
     if not workspace:
         workspace = create_subtitle_dub_pipeline_workspace(f"direct_{uid}_{time.time_ns()}")
@@ -210500,28 +208633,6 @@ async def _execute_video_dubbing_pipeline_core(
         "tts": False,
         "mux": False,
         "transcript_length": 0,
-        "source_acquisition_started": False,
-        "source_acquisition_completed": False,
-        "source_acquisition_method": "",
-        "source_acquisition_blocker": "",
-        "subtitle_stream_detected": False,
-        "ocr_started": False,
-        "ocr_completed": False,
-        "ocr_accepted": False,
-        "ocr_rejected": False,
-        "ocr_rejection_reason": "",
-        "asr_started": False,
-        "asr_completed": False,
-        "asr_fallback_used": False,
-        "asr_blocker": "",
-        "translation_started": False,
-        "translation_completed": False,
-        "translation_provider": "",
-        "translation_blocker": "",
-        "source_language": "",
-        "canonical_cue_count": 0,
-        "canonical_cue_hash": "",
-        "source_blocker": "",
     }
     render_debug = {
         "m4restore_shared_pipeline_active": True,
@@ -210547,36 +208658,13 @@ async def _execute_video_dubbing_pipeline_core(
             await _progress("reading_source_captions")
         else:
             await _progress("transcribing")
-        prepare_stage = "translating" if mode in {
-            VIDEO_SUBTITLE_MODE_TRANSLATE,
-            VIDEO_SUBTITLE_MODE_DUB,
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-        } else "transcribing"
-        prepare_timeout = subdub_recovery_stage_timeout_seconds({"current_stage": prepare_stage})
-        try:
-            prepared = await asyncio.wait_for(
-                video_dubbing_prepare_subtitles(
-                    context,
-                    service_state,
-                    uid,
-                    allow_admin=is_admin_user(uid),
-                    execution_trace=route_attempts,
-                ),
-                timeout=prepare_timeout,
-            )
-        except asyncio.TimeoutError as exc:
-            raise RuntimeError(
-                f"subdub_prepare_timeout:{mode}:{int(prepare_timeout)}s"
-            ) from exc
-        prepared_dict = dict(prepared or {})
-        prepared_trace = dict(prepared_dict.get("execution_trace") or {})
-        route_attempts.update(
-            {
-                name: prepared_trace.get(name)
-                for name in SUBDUB_EXECUTION_TRACE_FIELDS
-                if name in prepared_trace
-            }
+        prepared = await video_dubbing_prepare_subtitles(
+            context,
+            service_state,
+            uid,
+            allow_admin=is_admin_user(uid),
         )
+        prepared_dict = dict(prepared or {})
         prepared_state = dict(prepared_dict.get("state") or service_state or {})
         prepared_state.update({
             "chunk_count": int(prepared_dict.get("chunk_count") or prepared_state.get("chunk_count") or 0),
@@ -210584,10 +208672,10 @@ async def _execute_video_dubbing_pipeline_core(
             "global_timing_preserved": bool(prepared_dict.get("global_timing_preserved", prepared_state.get("global_timing_preserved", True))),
         })
         prepared_dict["state"] = prepared_state
-        route_attempts["asr"] = bool(route_attempts.get("asr_started"))
-        route_attempts["translation"] = bool(route_attempts.get("translation_started"))
+        route_attempts["asr"] = bool(prepared_dict.get("asr_provider"))
+        route_attempts["translation"] = bool(prepared_dict.get("translation_provider"))
         route_attempts["transcript_length"] = len(str(prepared_dict.get("output_script") or prepared_dict.get("output_text") or ""))
-        if route_attempts.get("translation_completed"):
+        if route_attempts["translation"]:
             await _progress("translating_subtitle" if mode == VIDEO_SUBTITLE_MODE_TRANSLATE else "translating")
         elif mode == VIDEO_SUBTITLE_MODE_CREATE:
             await _progress("auto_subtitle_ready")
@@ -210600,150 +208688,15 @@ async def _execute_video_dubbing_pipeline_core(
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not str(kwargs.get("voice_id") or "").strip():
             return {"provider": "", "chunks": []}
         speech_config = subdub_dub_speech_config(state, kwargs.get("base_speed") or state.get("voice_speed") or "1.0")
-        base_speed = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
-        input_segments = list(args[0] if args else kwargs.get("segments") or [])
-        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            canonical_segments, _combo_tts_segments = prepare_subdub_combo_tts_segments(
-                input_segments,
-                source_language=str(state.get("source_language") or "auto"),
-                target_language=str(state.get("target_language") or ""),
-            )
-        else:
-            canonical_segments = subdub_canonical_cues.canonicalize_segments(
-                input_segments,
-                extraction_source="dub_canonical_timeline",
-                source_language=str(state.get("source_language") or "auto"),
-                target_language=str(state.get("target_language") or ""),
-            )
-        if not canonical_segments:
-            raise RuntimeError("canonical_tts_segments_empty")
-
-        contract = subdub_blackbox_contracts.resolve_subdub_contract(
-            mode,
-            subdub_normalize_language_code(state.get("target_language") or "auto"),
-        )
-        job_key = str(state.get("_pipeline_job_key") or "")
-        active_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}) if job_key else {}
-        checkpoint_dir = os.path.join(workspace, "tts_checkpoints")
-        existing_checkpoints = list(active_job.get("tts_cue_checkpoints") or [])
-        voice_id = str(kwargs.get("voice_id") or "").strip()
-        voice_style = str(kwargs.get("voice_style") or "")
-        source_duration = max(
-            float(input_save.get("duration") or state.get("input_duration") or 0.0),
-            max((float(cue.get("end") or 0.0) for cue in canonical_segments), default=0.0),
-        )
-        resume_context = {
-            "mode": mode,
-            "source_path": str(input_save.get("path") or state.get("_pipeline_saved_source_path") or ""),
-            "workspace": workspace,
-            "voice_id": voice_id,
-            "voice_style": voice_style,
-            "base_speed": base_speed,
-            "canonical_cues": canonical_segments,
-            "source_language": str(state.get("source_language") or "auto"),
-            "target_language": str(state.get("target_language") or ""),
-            "source_duration": source_duration,
-            "subtitle_srt": video_dubbing_srt_from_segments(canonical_segments) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else "",
-            "keep_original_audio": bool(subdub_keep_original_audio_enabled(state)),
-            "original_audio_mode": str(state.get("original_audio_mode") or "mute"),
-            "original_audio_volume_percent": int(state.get("original_audio_volume_percent") or 0),
-            "dubbed_voice_volume_percent": int(state.get("dubbed_voice_volume_percent") or SUBDUB_DUBBED_VOICE_DEFAULT_VOLUME_PERCENT),
-            "subtitle_style": subdub_output_style_state(state, mode) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else {},
-            **contract.debug_fields(),
-        }
-        if job_key:
-            now = time.time()
-            update_subtitle_dub_pipeline_job(
-                job_key,
-                current_stage="generating_voice",
-                progress_stage="generating_voice",
-                stage_started_at=float(active_job.get("stage_started_at") or now),
-                last_heartbeat_at=now,
-                execution_owner=SUBDUB_RECOVERY_OWNER,
-                lease_expires_at=now + SUBDUB_TTS_CUE_LEASE_SECONDS,
-                tts_started=True,
-                tts_started_at=float(active_job.get("tts_started_at") or now),
-                current_cue_id=str(canonical_segments[0].get("cue_id") or canonical_segments[0].get("source_index") or ""),
-                total_tts_cues=len(canonical_segments),
-                completed_tts_cues=len(existing_checkpoints),
-                tts_cue_checkpoints=existing_checkpoints,
-                tts_resume_context=resume_context,
-                pipeline_blocker="",
-                blocker="",
-                error_code="",
-                **contract.debug_fields(),
-            )
-
-        async def _persist_active_checkpoint(entry: dict, checkpoints: list[dict], completed: int, total: int) -> None:
-            if not job_key:
-                return
-            next_cue_id = ""
-            if completed < len(canonical_segments):
-                next_cue = canonical_segments[completed]
-                next_cue_id = str(next_cue.get("cue_id") or next_cue.get("source_index") or "")
-            now = time.time()
-            update_subtitle_dub_pipeline_job(
-                job_key,
-                current_stage="generating_voice",
-                progress_stage="generating_voice",
-                last_heartbeat_at=now,
-                lease_expires_at=now + SUBDUB_TTS_CUE_LEASE_SECONDS,
-                current_cue_id=next_cue_id or str(entry.get("cue_id") or ""),
-                current_cue_started_at=now if next_cue_id else 0,
-                current_tts_cue_attempt_count=int(entry.get("attempt_count") or 0),
-                total_tts_cues=total,
-                completed_tts_cues=completed,
-                tts_cue_checkpoints=checkpoints,
-                recovery_result="tts_checkpoint_in_progress",
-                pipeline_blocker="",
-                blocker="",
-                error_code="",
-            )
-
-        result = await synthesize_canonical_dub_segment_chunks(
-            canonical_segments,
-            voice_style=voice_style,
-            voice_id=voice_id,
-            base_speed=base_speed,
-            allow_admin=is_admin_user(uid),
-            checkpoint_dir=checkpoint_dir,
-            checkpoint_entries=existing_checkpoints,
-            checkpoint_callback=_persist_active_checkpoint,
-            cue_timeout_seconds=SUBDUB_TTS_CUE_TIMEOUT_SECONDS,
-            max_attempts=SUBDUB_TTS_CUE_MAX_ATTEMPTS,
-        )
+        kwargs["base_speed"] = float(speech_config.get("dub_speech_rate") or SUBDUB_DUB_DEFAULT_SPEECH_RATE)
+        kwargs["max_speed"] = float(speech_config.get("dub_max_speech_rate") or SUBDUB_DUB_MAX_SPEECH_RATE)
+        result = await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
         if isinstance(result, dict):
             result.update({
                 **speech_config,
                 "male_fallback_used": False,
-                "canonical_timeline_signature": subdub_canonical_cues.timeline_signature(canonical_segments),
-                "canonical_cue_count": len(canonical_segments),
-                "tts_tracks_count": 1,
-                "tts_overlap_count": 0,
-                "dub_synthesis_path": "canonical_sequential_tts_with_checkpoint",
-                "combo_synthesis_path": "canonical_sequential_tts_with_checkpoint" if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else "",
-                **contract.debug_fields(),
             })
-            if job_key:
-                update_subtitle_dub_pipeline_job(
-                    job_key,
-                    current_cue_id="",
-                    current_cue_started_at=0,
-                    current_tts_cue_attempt_count=0,
-                    total_tts_cues=len(canonical_segments),
-                    completed_tts_cues=len(canonical_segments),
-                    tts_cue_checkpoints=list(result.get("tts_cue_checkpoints") or []),
-                    tts_checkpoint_complete=True,
-                    last_heartbeat_at=time.time(),
-                    recovery_result="tts_checkpoint_complete_mux_pending",
-                    **contract.debug_fields(),
-                )
         return result
-
-    async def _build_timeline_audio_for_blackbox(chunks: list[dict], total_duration: float = 0):
-        if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            return await build_canonical_dub_timeline_audio(chunks, total_duration)
-        return await build_dub_timeline_audio(chunks, total_duration)
 
     render_supports_validation = True
 
@@ -210885,7 +208838,7 @@ async def _execute_video_dubbing_pipeline_core(
         resolve_voice_id=_resolve_voice_id_for_blackbox,
         parse_voice_speed=parse_video_dubbing_voice_speed,
         synthesize_segments=_synthesize_dub_segments_for_blackbox,
-        build_timeline_audio=_build_timeline_audio_for_blackbox,
+        build_timeline_audio=build_dub_timeline_audio,
         normalize_audio=normalize_dub_audio_bytes,
         render_video=_render_video_for_blackbox,
         video_render_ready=lambda output_type: video_dubbing_video_render_ready(output_type, subtitle=True),
@@ -210896,11 +208849,6 @@ async def _execute_video_dubbing_pipeline_core(
     def _failed_product_result(status: str, text: str, detail: str, *, stage: str = "pipeline") -> dict:
         product_route_attempts = dict(product_result.get("route_attempts") or {})
         debug_route_attempts = {**route_attempts, **product_route_attempts} if product_route_attempts else dict(route_attempts)
-        prepared_state = {
-            **state,
-            **dict(product_result.get("state") or {}),
-            **dict(product_result.get("prepared") or {}),
-        }
         provider_route = {
             "asr": str((product_result.get("prepared") or {}).get("asr_provider") or product_result.get("asr_provider") or ""),
             "translation": str((product_result.get("prepared") or {}).get("translation_provider") or product_result.get("translation_provider") or ""),
@@ -210908,11 +208856,6 @@ async def _execute_video_dubbing_pipeline_core(
             "mux": str(product_result.get("partial_reason") or product_result.get("error_code") or ""),
         }
         failure_reason = sanitize_log_text(str(detail or status or stage or "subtitle_only_failed"))[:180]
-        failure_fields = subdub_failure_stage_fields(
-            failure_reason,
-            job=prepared_state,
-            route_attempts=debug_route_attempts,
-        )
         subtitle_debug_fields = {}
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             subtitle_debug_fields = {
@@ -210928,9 +208871,10 @@ async def _execute_video_dubbing_pipeline_core(
         debug_state = {
             **state,
             **subtitle_debug_fields,
-            **failure_fields,
             "_subdub_render_debug": dict(render_debug),
             "_subdub_terminal_state": "failed_no_charge",
+            "last_error_stage": stage,
+            "last_error_safe": text,
             "charge_status": "not_charged",
             "terminal_public_outcome_type": "failure",
             "success_blocked_reason": "missing_valid_delivered_mp4" if subdub_video_requires_final_mp4(mode, subdub_product_type_from_mode(mode, state)) and stage in {"video", "delivery"} else str(state.get("success_blocked_reason") or ""),
@@ -210971,8 +208915,6 @@ async def _execute_video_dubbing_pipeline_core(
             "debug_job": debug_job,
             "pipeline_attempted": True,
             "provider_route": provider_route,
-            "route_attempts": debug_route_attempts,
-            **failure_fields,
             **subtitle_debug_fields,
         }
 
@@ -211481,8 +209423,7 @@ async def _execute_video_dubbing_pipeline_core(
             missing_detail,
             stage="delivery",
         )
-    # Artifact delivery is only evidence. The shared terminal function owns the
-    # delivered/100% panel transition and the exactly-once receipt.
+    await _progress("delivered")
     delivered_video = int(delivery.get("video") or 0) + int(delivery.get("video_document") or 0) > 0
     partial_audio_delivered = bool(delivery.get("partial_audio_delivered"))
     delivery_partial_result = False
@@ -213924,11 +211865,6 @@ async def _terminalize_subdub_background_failure(
         set_video_dubbing_pending(uid, "completed", processing="0", terminal_state="delivered")
         return
     safe_reason = sanitize_log_text(str(reason or "background_processing_failed"))[:180]
-    failure_fields = subdub_failure_stage_fields(
-        safe_reason,
-        job={**state, **job},
-        route_attempts=job,
-    )
     update_subtitle_dub_pipeline_job(
         task_key,
         status="failed_no_charge",
@@ -213936,7 +211872,10 @@ async def _terminalize_subdub_background_failure(
         lifecycle_state="failed_no_charge",
         current_stage="failed_no_charge",
         progress_stage="failed_no_charge",
-        **failure_fields,
+        last_error_stage="orchestration",
+        last_error_safe=safe_reason,
+        pipeline_blocker=safe_reason,
+        no_charge_reason=safe_reason,
         charge_status="not_charged",
         charged_xu=0,
         continue_polling=False,
@@ -213987,10 +211926,7 @@ async def _run_subdub_public_final_background(
         await _terminalize_subdub_background_failure(
             update,
             task_key=task_key,
-            reason=(
-                f"background_processing_failed:{type(exc).__name__}:"
-                f"{sanitize_log_text(str(exc))[:120]}"
-            ),
+            reason=f"background_processing_failed:{type(exc).__name__}",
             send_public=True,
         )
     finally:
@@ -214007,7 +211943,7 @@ async def handle_video_dubbing_callback(
 ):
     query = update.callback_query
     if not _subdub_background:
-        await safe_answer_callback_query(query)
+        await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
@@ -215481,12 +213417,7 @@ async def handle_video_dubbing_callback(
             if not engine_result.get("ok") and not result:
                 result = {"ok": False, "guard": True, "text": engine_result.get("message") or video_dubbing_guard_text(mode, state, lang, admin=False)}
         except Exception as exc:
-            logger.exception(
-                "video subtitle/dub pipeline failed | mode=%s | error=%s | detail=%s",
-                mode,
-                type(exc).__name__,
-                sanitize_log_text(str(exc))[:240],
-            )
+            logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
             if _subdub_background:
                 await _terminalize_subdub_background_failure(
                     update,

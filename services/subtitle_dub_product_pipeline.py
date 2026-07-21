@@ -7,7 +7,6 @@ from services.subdub_tts_language_routing import (
     resolve_subdub_tts_language_route,
     subdub_tts_language_state_fields,
 )
-from services import subdub_canonical_cues
 
 
 VIDEO_SUBTITLE_MODE_CREATE = "subtitle_create"
@@ -126,12 +125,9 @@ def resolve_subdub_dub_audio_policy(state: dict, prepared: dict) -> dict[str, An
     else:
         dub_text_source = "translated"
         tts_segments = [
-            {
-                **dict(item or {}),
-                "text": subdub_canonical_cues.cue_tts_text(dict(item or {}), translated=True),
-            }
+            dict(item or {})
             for item in output_segments
-            if subdub_canonical_cues.cue_tts_text(dict(item or {}), translated=True)
+            if str((item or {}).get("text") or "").strip()
             and not _truthy((item or {}).get("translate_missing"))
         ]
 
@@ -246,7 +242,7 @@ async def process_subtitle_dub_job(
             output_text,
             _safe_int(pipeline_state.get("video_duration") or pipeline_state.get("source_duration"), 0),
         )
-        srt_bytes = subdub_canonical_cues.encode_srt_utf8_bom(srt_text)
+        srt_bytes = str(srt_text or "").encode("utf-8")
         if not srt_text.strip() or "-->" not in srt_text:
             return {
                 "ok": False,
