@@ -110,7 +110,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog
+from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
@@ -66263,26 +66263,36 @@ STORYBOARD2_CALLBACK_ACTIONS = frozenset({
 
 
 def storyboard2_package_resolutions(state: dict) -> list[dict]:
-    """Return only contract-valid package routes for the current asset mode.
+    """Return catalog-compatible packages for the current asset mode.
 
-    This is a catalog/contract lookup only. It does not submit to a provider,
-    create a job, or mutate the Storyboard session.
+    Runtime route readiness is checked later by preflight. Keeping that check
+    separate prevents a temporarily unavailable provider from erasing valid
+    public packages while still blocking invoice creation when no engine can
+    execute the selected plan.
     """
 
     current = video_scene3_flow.normalize_state(state)
     capability = video_flow6_required_capability("storyboard", current)
     scene_count = max(1, safe_int(current.get("scene_count"), 1))
-    rows = []
-    for price in VIDEO_B14_2_QUALITY_OPTIONS:
-        resolution = video_provider_catalog.resolve_product_video_model(
-            tier=price,
-            scene_count=scene_count,
-            required_capability=capability,
-            requires_concat=True,
-        )
-        if resolution.get("ok"):
-            rows.append({"price": price, "resolution": dict(resolution)})
-    return rows
+    catalog = video_uifreeze1.catalog_report(
+        "storyboard_prompt",
+        scene_count=scene_count,
+        ratio=str(current.get("ratio") or "9:16"),
+        required_capability=capability,
+    )
+    return [
+        {
+            "price": safe_int(offer.get("tier_id"), 0),
+            "resolution": {
+                "ok": True,
+                "catalog_only": True,
+                "required_capability": capability,
+                "supports_concat": scene_count > 1,
+            },
+            "tier": dict(offer),
+        }
+        for offer in catalog.get("offers") or []
+    ]
 
 
 def storyboard2_quality_text(state: dict, lang: str = "vi") -> str:
@@ -66306,11 +66316,14 @@ def storyboard2_quality_text(state: dict, lang: str = "vi") -> str:
         if capability == "first_last_frame_video":
             lines.append("Có thể chuyển về một ảnh đầu mỗi cảnh hoặc quay lại quản lý ảnh.")
         return "\n".join(lines)
-    lines.append("Chỉ các gói có model, payload và khả năng ghép nhiều cảnh phù hợp mới được hiển thị:")
+    lines.append("Các gói phù hợp với ảnh đầu/ảnh cuối, tỉ lệ và số cảnh đã chọn:")
     for item in packages:
         price = safe_int(item.get("price"), 0)
-        icon, name, _descriptions = video_b14_package_tier(price)
-        level, detail = video_scene3_public_quality_spec(price, scene_count=count)
+        tier = dict(item.get("tier") or video_uifreeze1.tier_spec(price))
+        icon = str(tier.get("icon") or "⭐")
+        name = str(tier.get("name") or "Chất lượng")
+        level = str(tier.get("public_level") or "Chất lượng phù hợp")
+        detail = str(tier.get("public_detail") or "Tạo và ghép cảnh theo kế hoạch đã duyệt.")
         lines.append(
             f"{icon} <b>{price} Xu — {html.escape(name)}</b>: "
             f"{html.escape(level)} · {html.escape(detail)}"
@@ -71608,14 +71621,7 @@ VIDEO_IDEA_PRODUCT_LANE_PRODUCTS = frozenset({
 })
 
 
-VIDEO_PUBLIC_MENU_ROWS = (
-    ("video_trend", "video_ai_real"),
-    ("script_image_video", "frame_video_local"),
-    ("self_shot_scene_change", "multi_scene_film"),
-    ("storyboard_prompt", "video_idea"),
-    ("video_local_edit", "video_downloader"),
-    ("main_menu", "video_guide"),
-)
+VIDEO_PUBLIC_MENU_ROWS = video_uifreeze1.PUBLIC_MENU_ROWS
 
 
 VIDEO_PUBLIC_ROUTE_MATRIX = {
@@ -75153,7 +75159,7 @@ VIDEO_B14_2_ASSET_SKIP_WARNING_VI = (
 VIDEO_B14_2_WORKER_NOT_READY_VI = "Hệ thống dựng video nền chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Video dài tập 1–2 giờ đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 cảnh / 8 giây. Tư liệu miễn phí đã gửi như logo, ảnh, voice hoặc nhạc được giữ; add-on có phí không áp dụng."
-VIDEO_B14_2_QUALITY_OPTIONS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
+VIDEO_B14_2_QUALITY_OPTIONS = video_uifreeze1.QUALITY_TIER_ORDER
 VIDEO_B14_2_SCENE_OPTIONS = (1, 3, 5, 10, 20)
 PRODUCT_VIDEO_TRIAL_QUALITY_XU = 200
 PRODUCT_VIDEO_TRIAL_FIXED_SCENE_COUNT = 1
@@ -75198,30 +75204,22 @@ VIDEO_B14_3_PROFILE_BUTTONS = (
     ("🎞 Phim ngắn / trailer", "cinematic_trailer"),
 )
 VIDEO_B14_3_PACKAGE_TIERS = {
-    200: ("🧪", "Trải nghiệm", ("Video gốc, không add-ons", "Phù hợp test nhanh")),
-    300: ("⭐", "Cơ bản", ("Video ngắn tiêu chuẩn", "Có thể dùng add-ons đơn giản")),
-    400: ("🔥", "Tốt", ("Prompt tốt hơn", "Phù hợp reels/shorts")),
-    500: ("💎", "Đẹp", ("Chất lượng cân bằng", "Khuyên dùng")),
-    600: ("🚀", "Nâng cao", ("Cảnh chi tiết hơn", "Phù hợp bán hàng/content")),
-    800: ("🏆", "Premium", ("Ưu tiên chất lượng", "Hậu kỳ tốt hơn")),
-    1000: ("🎬", "Pro", ("Phim/ads chất lượng cao",)),
-    1200: ("🎞", "Studio", ("Cảnh phức tạp hơn",)),
-    1500: ("👑", "Max", ("Mức cao nhất hiện tại",)),
+    tier_id: (
+        str(video_uifreeze1.tier_spec(tier_id)["icon"]),
+        str(video_uifreeze1.tier_spec(tier_id)["name"]),
+        tuple(video_uifreeze1.tier_spec(tier_id)["descriptions"]),
+    )
+    for tier_id in video_uifreeze1.QUALITY_TIER_ORDER
 }
 
-# Public descriptions are derived from the checked-in provider/model catalog,
-# but intentionally hide provider and model names. Do not promise a resolution
-# or capability that the final selected route may not deliver.
+# Frozen public descriptions come from the canonical UI catalog. Runtime
+# capability is checked separately before invoice and confirmation.
 VIDEO_SCENE3_QUALITY_PUBLIC_SPECS = {
-    200: ("Thử ý tưởng nhanh", "Chuyển động cơ bản, phù hợp thử mạch nội dung đơn giản."),
-    300: ("Cân bằng và ổn định", "Phù hợp video phổ thông, giới thiệu ngắn và nội dung mạng xã hội."),
-    400: ("Giữ chi tiết tốt hơn", "Ưu tiên sự nhất quán của chủ thể, sản phẩm và bố cục giữa các cảnh."),
-    500: ("Hoàn thiện rõ nét", "Cân bằng hình ảnh, chuyển động và khả năng giữ nội dung cần thiết."),
-    600: ("Chất lượng nâng cao", "Phù hợp ánh sáng, vật liệu và chuyển động có nhiều chi tiết."),
-    800: ("Ưu tiên chất lượng", "Dành cho nội dung cần hình ảnh tinh tế và mạch cảnh được kiểm soát kỹ."),
-    1000: ("Kiểm soát thành phần", "Phù hợp quảng cáo, phim ngắn và cảnh có nhiều yếu tố cần giữ nguyên."),
-    1200: ("Đường dựng chất lượng cao", "Ưu tiên độ ổn định và chi tiết khi công nghệ phù hợp đang sẵn sàng."),
-    1500: ("Mức cao nhất hiện tại", "Ưu tiên đường dựng cao nhất và phương án dự phòng phù hợp khi hệ thống sẵn sàng."),
+    tier_id: (
+        str(video_uifreeze1.tier_spec(tier_id)["public_level"]),
+        str(video_uifreeze1.tier_spec(tier_id)["public_detail"]),
+    )
+    for tier_id in video_uifreeze1.QUALITY_TIER_ORDER
 }
 
 VIDEO_SCENE3_PUBLIC_ROUTE_QUALITY_LABELS = {
@@ -75237,41 +75235,19 @@ VIDEO_SCENE3_PUBLIC_ROUTE_QUALITY_LABELS = {
 
 
 def video_scene3_public_quality_spec(price_xu: int, *, scene_count: int = 1) -> tuple[str, str]:
-    """Describe one public package from the checked-in route catalog only."""
+    """Return the frozen public description for one canonical tier.
 
-    price = int(price_xu or 0)
-    fallback_level, fallback_detail = VIDEO_SCENE3_QUALITY_PUBLIC_SPECS.get(
-        price,
-        ("Chất lượng phù hợp", "Tạo và ghép cảnh theo kế hoạch đã duyệt."),
+    Engine capability and runtime readiness are intentionally checked by the
+    product preflight. They must not rename or rewrite a public tier while a
+    user moves between Product Video screens.
+    """
+
+    _ = scene_count
+    tier = video_uifreeze1.tier_spec(int(price_xu or 0))
+    return (
+        str(tier.get("public_level") or "Chất lượng phù hợp"),
+        str(tier.get("public_detail") or "Tạo và ghép cảnh theo kế hoạch đã duyệt."),
     )
-    try:
-        route = video_provider_catalog.resolve_product_video_model(
-            tier=price,
-            scene_count=max(1, int(scene_count or 1)),
-            required_capability="text_to_video_or_scene_video",
-            requires_concat=True,
-        )
-    except Exception:
-        return fallback_level, f"{fallback_detail} Khả năng thực thi được kiểm tra lại trước xác nhận cuối."
-
-    if not route.get("ok"):
-        return fallback_level, f"{fallback_detail} Đường dựng được kiểm tra lại trước xác nhận cuối."
-
-    quality_key = str(route.get("selected_quality") or "").strip().lower()
-    level = VIDEO_SCENE3_PUBLIC_ROUTE_QUALITY_LABELS.get(quality_key, fallback_level)
-    clip_seconds = max(1, int(route.get("selected_clip_seconds") or 8))
-    capabilities = {str(item or "").strip().lower() for item in route.get("selected_capabilities") or []}
-    inputs = ["câu lệnh"]
-    if "image_to_video" in capabilities:
-        inputs.append("ảnh tham chiếu")
-    if "video_to_video" in capabilities:
-        inputs.append("video tham chiếu")
-    concat_note = "ghép đủ các cảnh đã duyệt" if route.get("supports_concat") else "chỉ dùng cho một cảnh"
-    detail = (
-        f"Mỗi cảnh khoảng {clip_seconds} giây; nhận {' và '.join(inputs)}; {concat_note}. "
-        f"Điểm phù hợp: {fallback_detail}"
-    )
-    return level, detail
 VIDEO_B14_3_CREATIVE_CHOICES = {
     "topic_mode": (
         ("🔥 Trend", "trend"),
@@ -84878,7 +84854,24 @@ def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
     return video_scene3_keyboard(rows)
 
 
-def video_tail9_quality_text(tail: dict, capability: dict) -> str:
+def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> dict:
+    product = str(tail.get("video_product_type") or "video_ai_real")
+    required_capability = str((capability or {}).get("required_capability") or "")
+    if product == "storyboard_prompt" and required_capability not in {
+        "image_to_video",
+        "first_last_frame_video",
+    }:
+        required_capability = "image_to_video"
+    return video_uifreeze1.catalog_report(
+        product,
+        scene_count=safe_int(tail.get("scene_count"), 1),
+        ratio=str(tail.get("ratio") or "9:16"),
+        required_capability=required_capability,
+    )
+
+
+def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None = None) -> str:
+    catalog = dict(catalog or video_tail9_catalog_report(tail, capability))
     lines = [
         "⭐ <b>Hoàn thiện video</b>", "",
         f"• Engine riêng: <b>{html.escape(str(tail.get('engine_route') or 'chưa xác định'))}</b>",
@@ -84886,22 +84879,37 @@ def video_tail9_quality_text(tail: dict, capability: dict) -> str:
     ]
     if not capability.get("ok"):
         lines.append(f"• Lý do: <code>{html.escape(str(capability.get('reason') or 'engine_route_unavailable'))}</code>")
-    lines.extend(["", "Mỗi gói dùng catalog giá chung nhưng vẫn giữ đúng engine của sản phẩm:"])
-    for price in VIDEO_B14_2_QUALITY_OPTIONS:
+    if not catalog.get("ok"):
+        lines.extend([
+            "",
+            "Hiện không có gói nào tương thích với loại đầu vào, số cảnh và tỉ lệ đã chọn.",
+            f"• Mã chặn: <code>{html.escape(str(catalog.get('reason') or 'no_compatible_quality_package'))}</code>",
+            "Hãy bấm Kiểm tra lại sau khi chỉnh kế hoạch. Chưa tạo job và chưa trừ Xu.",
+        ])
+        return "\n".join(lines)[:4050]
+    lines.extend(["", "Các gói tương thích từ catalog giá chung; engine của sản phẩm không bị thay đổi:"])
+    for offer in catalog.get("offers") or []:
+        price = safe_int(offer.get("tier_id"), 0)
         level, detail = video_scene3_public_quality_spec(price, scene_count=safe_int(tail.get("scene_count"), 1))
         lines.append(f"• <b>{price} Xu/cảnh</b> · {html.escape(level)}: {html.escape(detail)}")
-    lines.extend(["", "Chỉ tạo hóa đơn khi engine route hiện tại sẵn sàng. Chưa tạo job và chưa trừ Xu."])
+    lines.extend(["", "Catalog gói và trạng thái engine được kiểm tra riêng. Chỉ tạo hóa đơn khi engine hiện tại sẵn sàng; chưa tạo job và chưa trừ Xu."])
     return "\n".join(lines)[:4050]
 
 
-def video_tail9_quality_keyboard() -> InlineKeyboardMarkup:
-    buttons = [(video_b14_package_button_label(price), f"video_tail|quality|select|{price}") for price in VIDEO_B14_2_QUALITY_OPTIONS]
+def video_tail9_quality_keyboard(tail: dict, catalog: dict | None = None) -> InlineKeyboardMarkup:
+    catalog = dict(catalog or video_tail9_catalog_report(tail))
+    buttons = [
+        (video_b14_package_button_label(safe_int(offer.get("tier_id"), 0)), f"video_tail|quality|select|{safe_int(offer.get('tier_id'), 0)}")
+        for offer in catalog.get("offers") or []
+    ]
     rows = []
     for index in range(0, len(buttons), 2):
         row = buttons[index:index + 2]
         if len(row) == 1:
             row.append(("🔄 Kiểm tra lại", "video_tail|quality|open"))
         rows.append(row)
+    if not rows:
+        rows.append([("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📋 Xem lại kế hoạch", "video_tail|review|open")])
     rows.append([("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
@@ -84925,10 +84933,11 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         return await safe_edit_or_send(query, video_tail9_logo_text(tail), parse_mode="HTML", reply_markup=video_tail9_logo_keyboard())
     if screen == "quality":
         capability = video_tail9_preflight(user_id, context, tail, owner, host)
+        catalog = video_tail9_catalog_report(tail, capability)
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
         save_video_tail9_state(user_id, context, tail, owner, host)
-        return await safe_edit_or_send(query, video_tail9_quality_text(tail, capability), parse_mode="HTML", reply_markup=video_tail9_quality_keyboard())
+        return await safe_edit_or_send(query, video_tail9_quality_text(tail, capability, catalog), parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, catalog))
     tail["status_stage"] = "review"
     save_video_tail9_state(user_id, context, tail, owner, host)
     return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard())
@@ -85083,10 +85092,18 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "select":
             quality = max(200, min(1500, safe_int(argument, 300)))
             capability = video_tail9_preflight(uid, context, tail, owner, host, quality)
+            catalog = video_tail9_catalog_report(tail, capability)
+            if quality not in set(catalog.get("tier_ids") or []):
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_quality_text(tail, capability, catalog),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_quality_keyboard(tail, catalog),
+                )
             if not capability.get("ok"):
                 tail = video_tail9.set_capability(tail, capability)
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await safe_edit_or_send(query, video_tail9_quality_text(tail, capability), parse_mode="HTML", reply_markup=video_tail9_quality_keyboard())
+                return await safe_edit_or_send(query, video_tail9_quality_text(tail, capability, catalog), parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, catalog))
             tail["quality_tier_id"] = str(quality)
             tail["package_id"] = f"product_video_{quality}"
             session = video_tail9_apply_to_session(uid, context, tail, owner, host)
@@ -85105,7 +85122,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         allowed, reason = video_tail9.invoice_allowed(tail)
         if not allowed:
             await query.answer()
-            return await safe_edit_or_send(query, f"⚠️ Chưa thể xác nhận: {html.escape(str(reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.", parse_mode="HTML", reply_markup=video_tail9_quality_keyboard())
+            catalog = video_tail9_catalog_report(tail, dict(tail.get("capability_snapshot") or {}))
+            return await safe_edit_or_send(query, f"⚠️ Chưa thể xác nhận: {html.escape(str(reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.", parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, catalog))
         if tail.get("final_confirmed"):
             await query.answer("Yêu cầu này đã được xác nhận.")
             session = get_video_session(uid)
