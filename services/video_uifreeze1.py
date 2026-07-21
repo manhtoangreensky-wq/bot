@@ -27,6 +27,7 @@ CANONICAL_PRICING_PRODUCTS = frozenset({
     "script_image_video",
     "storyboard_prompt",
     "video_trend",
+    "video_edit",
     "video_local_edit",
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
@@ -165,7 +166,7 @@ def compatible_quality_tiers(
         capabilities = set(spec.get("capabilities") or ())
         if count > int(spec.get("max_scenes") or 1):
             continue
-        if aspect and f"ratio_{aspect}" not in capabilities and tier_id != 200:
+        if aspect and aspect != "keep" and f"ratio_{aspect}" not in capabilities and tier_id != 200:
             continue
         if capability and capability not in capabilities:
             continue

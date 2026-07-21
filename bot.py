@@ -42183,6 +42183,19 @@ def parse_now_text(value: str):
     except Exception:
         return None
 
+
+def parse_utc_text(value: str):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
 def local_worker_last_heartbeat() -> dict:
     heartbeat_at = get_system_setting("local_worker:last_heartbeat", "")
     worker_id = get_system_setting("local_worker:worker_id", "")
@@ -42582,6 +42595,58 @@ def local_worker_status_payload() -> dict:
         "comfy_status": "installed_but_not_ready/planned" if not LOCAL_COMFY_ENABLED else "admin_only/not_tested",
         "comfy_render": "admin-only/planned",
         "render_queue": "admin-only",
+    }
+
+
+def video_edit_worker_status_payload() -> dict:
+    """Return only the fresh heartbeat owned by the local Video Edit adapter."""
+
+    generic = dict(local_worker_status_payload())
+    received_at = get_system_setting("local_worker:video_edit_received_at_utc", "")
+    received_dt = parse_utc_text(received_at)
+    age_seconds = None
+    if received_dt:
+        age_seconds = max(
+            0,
+            int((datetime.now(timezone.utc) - received_dt).total_seconds()),
+        )
+    capabilities_raw = get_system_setting("local_worker:capabilities_json", "[]")
+    try:
+        capabilities = json.loads(capabilities_raw or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        capabilities = []
+    if not isinstance(capabilities, list):
+        capabilities = []
+    contract_version = safe_int(
+        get_system_setting("local_worker:heartbeat_contract_version", "0"),
+        0,
+    )
+    fresh = bool(
+        contract_version >= 1
+        and age_seconds is not None
+        and age_seconds <= video_editengine1.HEARTBEAT_TTL_SECONDS
+    )
+    worker_status = "healthy" if fresh else "stale"
+    return {
+        **generic,
+        "connected": fresh,
+        "heartbeat_contract_version": contract_version,
+        "worker_id": get_system_setting("local_worker:worker_id", ""),
+        "worker_owner": get_system_setting("local_worker:worker_owner", ""),
+        "engine_route": get_system_setting("local_worker:engine_route", ""),
+        "capabilities": [str(item) for item in capabilities if str(item).strip()],
+        "instance_id": get_system_setting("local_worker:instance_id", ""),
+        "worker_instance_id": get_system_setting("local_worker:instance_id", ""),
+        "process_id": safe_int(get_system_setting("local_worker:process_id", "0"), 0),
+        "started_at_utc": get_system_setting("local_worker:started_at_utc", ""),
+        "timestamp_utc": get_system_setting("local_worker:video_edit_timestamp_utc", ""),
+        "heartbeat_timestamp": get_system_setting("local_worker:video_edit_timestamp_utc", ""),
+        "received_at_utc": received_at,
+        "heartbeat_age_seconds": age_seconds,
+        "heartbeat_ttl_seconds": video_editengine1.HEARTBEAT_TTL_SECONDS,
+        "worker_status": worker_status,
+        "queue_depth": safe_int(get_system_setting("local_worker:queue_depth", "0"), 0),
+        "last_error": get_system_setting("local_worker:last_error", ""),
     }
 
 PROVIDER_ORCHESTRATOR_CAPABILITIES = {
@@ -65500,6 +65565,10 @@ VIDEO_EDITOR_STRUCTURED_FIELDS = {
     "provider_admission",
     "upgrade_suggestions",
     "video_tail9",
+    "edit_operations",
+    "addon_config",
+    "logo_config",
+    "pricing_snapshot",
 }
 VIDEO_EDITOR_TEXT_FIELDS = {
     "source_file_id", "source_file_name", "source_mime_type", "requested_action",
@@ -65510,7 +65579,11 @@ VIDEO_EDITOR_TEXT_FIELDS = {
     "provider_name", "model", "interface", "submit_source", "prompt_hash",
     "last_section", "entry_context", "selected_effect", "selected_capability",
     "aspect_method", "safe_zone", "return_action", "audio_component", "effect_timing",
-    "edit_mode", "current_screen", "return_to", "edit_session_id",
+    "edit_mode", "current_screen", "return_to", "edit_session_id", "session_id",
+    "product_type", "flow_owner", "engine_route", "worker_owner",
+    "source_video_id", "source_video_hash", "audio_policy", "status",
+    "delivery_message_id", "receipt_state", "charge_state",
+    "quality_tier_id", "package_id",
 }
 VIDEO_EDITOR_NUMBER_FIELDS = {
     "source_file_size", "source_duration", "source_duration_ms", "job_id",
@@ -65518,6 +65591,7 @@ VIDEO_EDITOR_NUMBER_FIELDS = {
     "target_duration_seconds", "price_xu",
     "audio_volume_percent", "brightness_percent",
     "last_media_message_id", "probe_count",
+    "state_revision", "revision", "edit_job_id", "outbox_id",
 }
 
 
@@ -65544,7 +65618,7 @@ def set_video_editor_pending(user_id, step: str, **fields) -> dict:
         elif key in {
             "allow_gaps", "coverage_required", "inspection_complete",
             "public_user_confirmed", "preserve_source_audio",
-            "awaiting_media", "intake_in_progress",
+            "awaiting_media", "intake_in_progress", "source_has_audio",
         }:
             payload[key] = bool(value)
         elif key in VIDEO_EDITOR_STRUCTURED_FIELDS:
@@ -65581,6 +65655,7 @@ def clear_video_editor_pending(user_id) -> bool:
 
 def start_video_edit_lane_state(user_id, edit_mode: str, **carry) -> dict:
     canonical = video_edit_state_machine.start_lane(edit_mode)
+    session_id = str(carry.get("edit_session_id") or carry.get("session_id") or uuid.uuid4().hex)
     mode_defaults = {
         "manual_edit": {"selected_tool": "manual", "entry_context": "manual", "last_section": "manual"},
         "ai_edit": {"selected_tool": "ai_edit", "entry_context": "ai", "last_section": "ai"},
@@ -65589,7 +65664,26 @@ def start_video_edit_lane_state(user_id, edit_mode: str, **carry) -> dict:
     fields = {
         **mode_defaults[canonical["edit_mode"]],
         **canonical,
-        "edit_session_id": str(carry.get("edit_session_id") or uuid.uuid4().hex),
+        "product_type": video_editengine1.PRODUCT_TYPE,
+        "flow_owner": "video_edit",
+        "engine_route": video_editengine1.ENGINE_ROUTE,
+        "worker_owner": video_editengine1.OUTBOX_OWNER,
+        "state_revision": 1,
+        "revision": 1,
+        "ratio": "keep",
+        "audio_policy": "preserve_if_present",
+        "status": "awaiting_source",
+        "source_has_audio": False,
+        "source_video_id": "",
+        "source_video_hash": "",
+        "edit_operations": [],
+        "addon_config": {},
+        "logo_config": {},
+        "pricing_snapshot": {},
+        "receipt_state": "not_created",
+        "charge_state": "not_charged",
+        "edit_session_id": session_id,
+        "session_id": session_id,
         **carry,
     }
     step = str(fields.pop("step"))
@@ -71270,6 +71364,7 @@ def video_local_brightness_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("↩️ Giữ nguyên 100%" if is_vi else "↩️ Original 100%", "videoedit|brightness_set|100"),
             ("✍️ Tự nhập" if is_vi else "✍️ Custom", "videoedit|brightness_custom"),
         ],
+        [("✅ Xem lại" if is_vi else "✅ Review", "videoedit|review")],
         [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
@@ -71592,6 +71687,41 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
         f"• Trạng thái: <b>{html.escape(public_status)}</b>",
         f"• Giá đã xác nhận: <b>{safe_int(canonical.get('price_xu') or (job or {}).get('xu_cost'), 0)} Xu</b>",
     ]
+    failed = bool(
+        canonical_status == "failed_no_charge"
+        or status in {"failed", "cancelled"}
+        or stage == "failed_no_charge"
+    )
+    completed_count = {
+        "received": 1,
+        "inspecting_input": 1,
+        "preparing_plan": 2,
+        "processing_video": 3,
+        "validating_output": 4,
+        "delivering": 5,
+        "delivered": 6,
+    }.get(stage, 1 if status in {"queued", "running"} else 0)
+    if delivered_truth:
+        completed_count = 6
+    canonical_stages = (
+        "Nhận video",
+        "Kiểm tra cấu hình",
+        "Chuẩn bị file",
+        "Chỉnh sửa video",
+        "Kiểm tra MP4",
+        "Gửi kết quả",
+    )
+    lines.extend(["", "<b>Tiến trình</b>"])
+    for index, label in enumerate(canonical_stages):
+        if index < completed_count:
+            icon = "✅"
+        elif failed and index == completed_count:
+            icon = "⚠️"
+        elif not failed and index == completed_count:
+            icon = "⏳"
+        else:
+            icon = "⬜"
+        lines.append(f"{icon} {label}")
     if total > 1 and stage in {"processing_video", "validating_output", "delivering", "delivered"}:
         if stage == "delivering":
             lines.append(f"• Đã gửi: <b>{min(delivered, total)}/{total}</b> phần")
@@ -71609,7 +71739,7 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
             lines.append("• Giao file thành công; hệ thống chưa ghi được phí và không tự trừ lặp lại.")
         else:
             lines.append("• Phí đang được ghi nhận sau biên nhận giao file; không cần bấm lại.")
-    elif canonical_status == "failed_no_charge" or status in {"failed", "cancelled"} or stage == "failed_no_charge":
+    elif failed:
         lines.append("• Kết quả: xử lý chưa thành công. Hệ thống không trừ Xu.")
     else:
         lines.append("• Hệ thống sẽ tự gửi kết quả sau khi file được kiểm tra hợp lệ. Không cần bấm lại.")
@@ -84554,15 +84684,20 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
         host = edit_host
         product_type = video_editengine1.PRODUCT_TYPE
         session_id = str(host.get("edit_session_id") or f"{uid}:{product_type}")
-        revision = 1
+        revision = max(1, safe_int(host.get("state_revision"), 1))
         scene_count = 1
         metadata = dict(host.get("source_metadata") or {})
-        width = max(0, safe_int(metadata.get("width"), 0))
-        height = max(0, safe_int(metadata.get("height"), 0))
-        ratio = "9:16" if height > width else "16:9" if width > height else "1:1"
-        crop = dict((host.get("manual_edit_plan") or {}).get("crop_or_fit") or {})
-        ratio = str(crop.get("aspect_ratio") or ratio)
-        estimated_duration = max(1, safe_int(host.get("source_duration") or metadata.get("duration"), 1))
+        ratio = "keep"
+        duration_ms = safe_int(host.get("source_duration_ms") or metadata.get("duration_ms"), 0)
+        estimated_duration = max(
+            1,
+            safe_int(
+                host.get("source_duration")
+                or metadata.get("duration")
+                or (duration_ms / 1000 if duration_ms else 0),
+                1,
+            ),
+        )
         source_asset_ids = [str(host.get("source_file_id") or "")]
         source_audio_available = bool(metadata.get("has_audio") or safe_int(metadata.get("audio_streams"), 0) > 0)
     elif session_product in selfshot_products:
@@ -84704,6 +84839,25 @@ def save_video_tail9_state(user_id: int, context, tail: dict, owner: str, host: 
                 else 0.0
             )
         current["manual_edit_plan"] = plan
+        current.update({
+            "product_type": video_editengine1.PRODUCT_TYPE,
+            "flow_owner": "video_edit",
+            "engine_route": video_editengine1.ENGINE_ROUTE,
+            "worker_owner": video_editengine1.OUTBOX_OWNER,
+            "session_id": str(current.get("session_id") or current.get("edit_session_id") or ""),
+            "revision": max(1, safe_int(current.get("revision") or current.get("state_revision"), 1)),
+            "ratio": "keep",
+            "audio_policy": str(current.get("audio_policy") or "preserve_if_present"),
+            "source_has_audio": bool(audio.get("source_audio_available")),
+            "addon_config": audio,
+            "logo_config": {
+                "logo": dict(clean.get("logo_config") or {}),
+                "watermark": dict(clean.get("watermark_config") or {}),
+            },
+            "quality_tier_id": str(clean.get("quality_tier_id") or ""),
+            "package_id": str(clean.get("package_id") or ""),
+            "pricing_snapshot": dict(clean.get("pricing_snapshot") or {}),
+        })
         save_video_edit_canonical_state(uid, current)
     elif owner == "scene3":
         save_video_profile_studio_state(context, current)
@@ -84769,7 +84923,7 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             VIDEO_TAIL9_STATE_KEY: clean,
             "b14_scene_count": 1,
             "b14_scene_count_selected": True,
-            "b14_aspect_ratio": str(clean.get("ratio") or "9:16"),
+            "b14_aspect_ratio": "keep",
             "b14_quality_xu": safe_int(clean.get("quality_tier_id"), 0),
             "b14_profile_id": "storytelling",
             "b14_addon_plan": addon_plan,
@@ -84784,7 +84938,7 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             "draft": draft,
             "product_id": video_editengine1.PRODUCT_TYPE,
             "topic": "Chỉnh sửa / Nâng cấp video",
-            "aspect_ratio": str(clean.get("ratio") or "9:16"),
+            "aspect_ratio": "keep",
             "scene_count": 1,
         }
     if owner == "scene3":
@@ -84857,7 +85011,7 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
 def video_tail9_preflight(user_id: int, context, tail: dict, owner: str, host: dict, quality: int = 300) -> dict:
     product = str(tail.get("video_product_type") or "")
     if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
-        runtime = dict(local_worker_status_payload())
+        runtime = dict(video_edit_worker_status_payload())
         report = dict(video_editengine1.preflight({**dict(host or {}), VIDEO_TAIL9_STATE_KEY: dict(tail or {})}, runtime))
     elif product == video_selfshot2.PRODUCT_ID:
         report = dict(video_selfshot2_preflight(host))
@@ -84889,6 +85043,72 @@ def video_tail9_review_keyboard() -> InlineKeyboardMarkup:
         [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|review|summary")],
         [("⭐ Hoàn thiện video", "video_tail|quality|open"), ("🔄 Làm lại kế hoạch", "video_tail|review|redo")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_tail9_video_edit_review_text(tail: dict, host: dict) -> str:
+    plan = dict((host or {}).get("manual_edit_plan") or {})
+    brightness = max(20, min(200, safe_int(plan.get("brightness_percent") or (host or {}).get("brightness_percent"), 100)))
+    metadata = dict((host or {}).get("source_metadata") or {})
+    duration = max(
+        1,
+        safe_int(
+            (host or {}).get("source_duration")
+            or metadata.get("duration")
+            or tail.get("estimated_duration"),
+            1,
+        ),
+    )
+    source_audio = bool(
+        metadata.get("has_audio")
+        or safe_int(metadata.get("audio_streams"), 0) > 0
+    )
+    return (
+        "🎬 <b>Review chỉnh sửa video</b>\n\n"
+        "• Thao tác: <b>Điều chỉnh độ sáng</b>\n"
+        f"• Mức sáng: <b>{brightness}%</b>\n"
+        f"• Thời lượng nguồn: <b>{duration} giây</b>\n"
+        "• Tỉ lệ: <b>Giữ nguyên</b>\n"
+        f"• Âm thanh: <b>{'Giữ nguyên nếu nguồn có' if source_audio else 'Nguồn không có âm thanh'}</b>\n"
+        f"• Engine: <code>{video_editengine1.ENGINE_ROUTE}</code>\n\n"
+        "Video này chỉ được chỉnh sửa từ file đã gửi. Không tạo cảnh, không viết prompt và không chuyển sang flow tạo video mới. "
+        "Chưa tạo tác vụ, chưa tạo file và chưa trừ Xu."
+    )
+
+
+def video_tail9_video_edit_review_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("🎛 Xem thao tác", "video_tail|review|operations"), ("✍️ Sửa thao tác", "video_tail|review|edit_operation")],
+        [("🎚️ Âm thanh & Add-on", "video_tail|audio|open"), ("🖼️ Logo/Watermark", "video_tail|logo|open")],
+        [("📄 Xem tổng hợp", "video_tail|review|summary"), ("⭐ Hoàn thiện video", "video_tail|quality|open")],
+        [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_tail9_video_edit_operations_text(host: dict) -> str:
+    plan = dict((host or {}).get("manual_edit_plan") or {})
+    operations = video_local_editing.public_plan_summary(plan)
+    lines = ["🎛 <b>Thao tác chỉnh sửa</b>", ""]
+    lines.extend(f"• {html.escape(str(item))}" for item in operations)
+    if not operations:
+        lines.append("• Giữ nguyên nội dung video")
+    lines.extend([
+        "",
+        "Các thao tác chỉ áp dụng lên video nguồn đã gửi. Chưa render file và chưa trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+
+def video_tail9_video_edit_operations_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("✍️ Sửa thao tác", "video_tail|review|edit_operation"), ("🎞 Thông tin video", "video_tail|review|source")],
+        [("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_tail9_video_edit_source_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("⬅️ Quay lại", "video_tail|review|operations"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -84978,6 +85198,8 @@ def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
 def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> dict:
     product = str(tail.get("video_product_type") or "video_ai_real")
     required_capability = str((capability or {}).get("required_capability") or "")
+    if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
+        required_capability = "video_to_video"
     if product == "storyboard_prompt" and required_capability not in {
         "image_to_video",
         "first_last_frame_video",
@@ -85017,12 +85239,17 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
     return "\n".join(lines)[:4050]
 
 
-def video_tail9_quality_keyboard(tail: dict, catalog: dict | None = None) -> InlineKeyboardMarkup:
+def video_tail9_quality_keyboard(
+    tail: dict,
+    catalog: dict | None = None,
+    *,
+    selectable: bool = True,
+) -> InlineKeyboardMarkup:
     catalog = dict(catalog or video_tail9_catalog_report(tail))
     buttons = [
         (video_b14_package_button_label(safe_int(offer.get("tier_id"), 0)), f"video_tail|quality|select|{safe_int(offer.get('tier_id'), 0)}")
         for offer in catalog.get("offers") or []
-    ]
+    ] if selectable else []
     rows = []
     for index in range(0, len(buttons), 2):
         row = buttons[index:index + 2]
@@ -85058,9 +85285,21 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
         save_video_tail9_state(user_id, context, tail, owner, host)
-        return await safe_edit_or_send(query, video_tail9_quality_text(tail, capability, catalog), parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, catalog))
+        return await safe_edit_or_send(
+            query,
+            video_tail9_quality_text(tail, capability, catalog),
+            parse_mode="HTML",
+            reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=bool(capability.get("ok"))),
+        )
     tail["status_stage"] = "review"
     save_video_tail9_state(user_id, context, tail, owner, host)
+    if owner == "video_edit":
+        return await safe_edit_or_send(
+            query,
+            video_tail9_video_edit_review_text(tail, host),
+            parse_mode="HTML",
+            reply_markup=video_tail9_video_edit_review_keyboard(),
+        )
     return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard())
 
 
@@ -85082,11 +85321,34 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if section != "confirm":
         await query.answer()
     if section == "review":
-        if action in {"open", "summary", "scenes"}:
-            return await video_tail9_render(query, uid, context, "review")
-        if action in {"edit", "redo", "prompts", "back"}:
-            if owner == "video_edit":
+        if owner == "video_edit":
+            if action in {"open", "summary", "scenes", "prompts", "redo"}:
+                return await video_tail9_render(query, uid, context, "review")
+            if action == "operations":
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_video_edit_operations_text(host),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_video_edit_operations_keyboard(),
+                )
+            if action == "source":
+                return await safe_edit_or_send(
+                    query,
+                    video_local_source_summary_text(host, get_user_language(uid) or "vi"),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_video_edit_source_keyboard(),
+                )
+            if action in {"edit_operation", "edit", "back"}:
                 current = dict(get_video_editor_pending(uid) or host)
+                plan = dict(current.get("manual_edit_plan") or {})
+                if "brightness_percent" in plan:
+                    update_video_editor_pending(uid, "brightness", selected_tool="manual", last_section="manual")
+                    return await safe_edit_or_send(
+                        query,
+                        video_local_brightness_text(current, get_user_language(uid) or "vi"),
+                        parse_mode="HTML",
+                        reply_markup=video_local_brightness_keyboard(get_user_language(uid) or "vi"),
+                    )
                 tool = str(current.get("selected_tool") or "manual")
                 if tool == "split":
                     return await safe_edit_or_send(
@@ -85101,6 +85363,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     parse_mode="HTML",
                     reply_markup=video_local_manual_options_keyboard(get_user_language(uid) or "vi"),
                 )
+        if action in {"open", "summary", "scenes"}:
+            return await video_tail9_render(query, uid, context, "review")
+        if action in {"edit", "redo", "prompts", "back"}:
             if owner == "scene3":
                 target = "video_prompts" if action == "prompts" else ("scene_plan" if action in {"edit", "redo"} else "full_review")
                 state = video_profile_studio_step(context, host, target, push=action != "back")
@@ -85258,12 +85523,17 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     query,
                     video_tail9_quality_text(tail, capability, catalog),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_quality_keyboard(tail, catalog),
+                    reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=bool(capability.get("ok"))),
                 )
             if not capability.get("ok"):
                 tail = video_tail9.set_capability(tail, capability)
                 save_video_tail9_state(uid, context, tail, owner, host)
-                return await safe_edit_or_send(query, video_tail9_quality_text(tail, capability, catalog), parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, catalog))
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_quality_text(tail, capability, catalog),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=False),
+                )
             tail["quality_tier_id"] = str(quality)
             tail["package_id"] = f"product_video_{quality}"
             session = video_tail9_apply_to_session(uid, context, tail, owner, host)
@@ -85283,7 +85553,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if not allowed:
             await query.answer()
             catalog = video_tail9_catalog_report(tail, dict(tail.get("capability_snapshot") or {}))
-            return await safe_edit_or_send(query, f"⚠️ Chưa thể xác nhận: {html.escape(str(reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.", parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, catalog))
+            return await safe_edit_or_send(
+                query,
+                f"⚠️ Chưa thể xác nhận: {html.escape(str(reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=False),
+            )
         if tail.get("final_confirmed"):
             await query.answer("Yêu cầu này đã được xác nhận.")
             if owner == "video_edit":
@@ -103569,11 +103844,27 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
                 save_video_edit_canonical_state(update.effective_user.id, waiting)
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=video_edit_runtime_recovery_text(has_source),
-                reply_markup=video_edit_runtime_recovery_keyboard(
-                    video_edit_intake_error_mode,
-                    has_source=has_source,
-                    lang=get_user_language(update.effective_user.id) or "vi",
+                text=(
+                    "⚠️ Video đã được nhận và Phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên, "
+                    "nhưng Telegram chưa mở được bảng thao tác. Anh/chị bấm Mở lại để tiếp tục đúng công cụ đã chọn.\n\n"
+                    "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
+                    if has_source
+                    else
+                    "⚠️ Hệ thống chưa đọc được video này. Phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên; "
+                    "anh/chị hãy gửi lại file MP4, MOV, MKV hoặc WebM.\n\n"
+                    "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
+                ),
+                reply_markup=(
+                    video_edit_runtime_recovery_keyboard(
+                        video_edit_intake_error_mode,
+                        has_source=True,
+                        lang=get_user_language(update.effective_user.id) or "vi",
+                    )
+                    if has_source
+                    else video_edit_lane_upload_keyboard(
+                        video_edit_intake_error_mode,
+                        get_user_language(update.effective_user.id) or "vi",
+                    )
                 ),
             )
         except Exception:
@@ -214384,8 +214675,12 @@ def video_editor_source_from_update(update: Update) -> dict:
     file_name = str(getattr(media, "file_name", "") or "video.mp4")
     if getattr(message, "document", None) and not (mime_type.startswith("video/") or file_name.lower().endswith((".mp4", ".mov", ".mkv", ".webm"))):
         return {}
+    source_file_id = str(getattr(media, "file_id", "") or "")[:240]
+    source_file_hash = str(getattr(media, "file_unique_id", "") or source_file_id)[:240]
     return {
-        "source_file_id": str(getattr(media, "file_id", "") or "")[:240],
+        "source_file_id": source_file_id,
+        "source_video_id": source_file_id,
+        "source_video_hash": source_file_hash,
         "source_file_name": file_name[:180],
         "source_mime_type": mime_type[:120],
         "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
@@ -214800,11 +215095,11 @@ async def submit_local_video_editor_job(
     if not allowed:
         text = f"⚠️ Chưa thể xác nhận: {html.escape(str(invoice_reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu."
         if query:
-            await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail))
+            await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, selectable=False))
         else:
-            await message.reply_text(text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail))
+            await message.reply_text(text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, selectable=False))
         return True
-    runtime = local_worker_status_payload()
+    runtime = video_edit_worker_status_payload()
     preflight_state = {**state, VIDEO_TAIL9_STATE_KEY: tail}
     admission = video_editengine1.preflight(preflight_state, runtime)
     if not admission.get("ok"):
@@ -214814,9 +215109,9 @@ async def submit_local_video_editor_job(
             "TOAN AAS chưa tạo tác vụ và chưa trừ Xu."
         )
         if query:
-            await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail))
+            await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, selectable=False))
         else:
-            await message.reply_text(text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail))
+            await message.reply_text(text, parse_mode="HTML", reply_markup=video_tail9_quality_keyboard(tail, selectable=False))
         return True
     pricing = dict(tail.get("pricing_snapshot") or {})
     price_xu = max(0, safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0))
@@ -214867,12 +215162,22 @@ async def submit_local_video_editor_job(
     payload = {
         "local1_contract": 1,
         "local1_mode": tool,
+        "product_type": video_editengine1.PRODUCT_TYPE,
+        "flow_owner": "video_edit",
+        "engine_route": video_editengine1.ENGINE_ROUTE,
+        "worker_owner": video_editengine1.OUTBOX_OWNER,
+        "worker_capability": video_editengine1.WORKER_CAPABILITY,
         "user_id": str(uid),
         "chat_id": str(message.chat_id),
         "source_file_id": source_file_id,
+        "source_video_id": str(state.get("source_video_id") or source_file_id),
+        "source_video_hash": str(state.get("source_video_hash") or ""),
         "source_file_name": str(state.get("source_file_name") or "video.mp4")[:180],
         "source_file_size": safe_int(state.get("source_file_size"), 0),
         "source_metadata": dict(state.get("source_metadata") or {}),
+        "state_revision": max(1, safe_int(state.get("state_revision"), 1)),
+        "ratio": "keep",
+        "audio_policy": str(state.get("audio_policy") or "preserve_if_present"),
         "manual_edit_plan": plan,
         "concat_sources": list(state.get("concat_sources") or []),
         "logo_source": logo_source,
@@ -214948,9 +215253,12 @@ async def submit_local_video_editor_job(
         uid,
         "job_status",
         job_id=job_id,
+        edit_job_id=safe_int(created.get("edit_job_id"), 0),
+        outbox_id=safe_int(created.get("outbox_id"), 0),
         price_xu=price_xu,
         video_tail9=tail,
         awaiting_media=False,
+        status=str(created.get("status") or "queued"),
     )
     text = (
         "✅ <b>Đã nhận yêu cầu xử lý video</b>\n\n"
@@ -215172,7 +215480,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         preset_intent = str(state.get("user_intent") or "")
         entry_context = str(state.get("entry_context") or "ai")
         selected_effect = str(state.get("selected_effect") or "")
-        current = set_video_editor_pending(
+        current = update_video_editor_pending(
             uid,
             "ai_source_summary",
             **source,
@@ -215192,6 +215500,14 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
             selected_effect=selected_effect,
             last_section="effects" if entry_context == "effects" else "restore" if entry_context == "restore" else "ai",
             inspection_complete=True,
+            awaiting_media=False,
+            intake_in_progress=False,
+            source_has_audio=bool(metadata.get("has_audio") or safe_int(metadata.get("audio_streams"), 0) > 0),
+            source_video_id=str(source.get("source_file_id") or ""),
+            source_video_hash=str(state.get("source_video_hash") or ""),
+            status="source_ready",
+            state_revision=max(1, safe_int(state.get("state_revision"), 1)) + 1,
+            revision=max(1, safe_int(state.get("revision"), 1)) + 1,
         )
         if preset_intent:
             route = video_ai_edit_router.route_ai_edit_intent(
@@ -215244,7 +215560,7 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     requested_action = str(state.get("requested_action") or "")
     plan = video_local_editing.default_manual_edit_plan("")
     plan["trim"] = {"start_ms": 0, "end_ms": int(metadata.get("duration_ms") or 0)}
-    current = set_video_editor_pending(
+    current = update_video_editor_pending(
         uid,
         "source_summary",
         **source,
@@ -215258,6 +215574,14 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         last_section=str(state.get("last_section") or "manual"),
         coverage_required=True,
         inspection_complete=True,
+        awaiting_media=False,
+        intake_in_progress=False,
+        source_has_audio=bool(metadata.get("has_audio") or safe_int(metadata.get("audio_streams"), 0) > 0),
+        source_video_id=str(source.get("source_file_id") or ""),
+        source_video_hash=str(state.get("source_video_hash") or ""),
+        status="source_ready",
+        state_revision=max(1, safe_int(state.get("state_revision"), 1)) + 1,
+        revision=max(1, safe_int(state.get("revision"), 1)) + 1,
     )
     if requested_action == "concat":
         current = update_video_editor_pending(uid, "await_concat", requested_action="")
@@ -215328,20 +215652,6 @@ async def handle_video_editor_invalid_intake_text(update: Update, context: Conte
     return True
 
 
-def video_edit_runtime_recovery_text(has_source: bool = False) -> str:
-    if has_source:
-        return (
-            "⚠️ Video đã được nhận và phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên, "
-            "nhưng Telegram chưa mở được bảng thao tác. Anh/chị bấm Mở lại để tiếp tục đúng công cụ đã chọn.\n\n"
-            "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
-        )
-    return (
-        "⚠️ Hệ thống chưa đọc được video này. Phiên Chỉnh sửa / Nâng cấp vẫn được giữ nguyên; "
-        "anh/chị hãy gửi lại file MP4, MOV, MKV hoặc WebM.\n\n"
-        "Chưa tạo tác vụ, chưa tạo file kết quả và chưa trừ Xu."
-    )
-
-
 def video_edit_runtime_recovery_keyboard(
     edit_mode: str,
     *,
@@ -215401,18 +215711,25 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             return True
         plan = dict(state.get("manual_edit_plan") or {})
         plan["brightness_percent"] = percent
-        current = update_video_editor_pending(
+        operations = [{
+            "operation": "brightness",
+            "label": "Điều chỉnh độ sáng",
+            "brightness_percent": percent,
+        }]
+        update_video_editor_pending(
             uid,
-            "brightness",
+            "confirmation",
             manual_edit_plan=plan,
+            edit_operations=operations,
             brightness_percent=percent,
             last_section="manual",
+            current_screen="review",
+            return_to="brightness",
+            status="review_ready",
+            state_revision=max(1, safe_int(state.get("state_revision"), 1)) + 1,
+            revision=max(1, safe_int(state.get("revision"), 1)) + 1,
         )
-        await update.message.reply_text(
-            video_local_brightness_text(current, lang),
-            parse_mode="HTML",
-            reply_markup=video_local_brightness_keyboard(lang),
-        )
+        await video_tail9_render(update.message, uid, context, "review")
         return True
     if step == "await_audio_volume":
         audio_back = "videoedit|manual_audio" if str(state.get("last_section") or "") == "manual" else "videoedit|audio"
@@ -218917,6 +219234,22 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=video_local_upload_keyboard(tool, lang, back_callback="videoedit|timeline" if entry_context == "timeline" else ""),
         )
+    if action == "review":
+        if not state.get("source_file_id") or not state.get("inspection_complete"):
+            return await safe_edit_or_send(
+                query,
+                video_edit_lane_upload_text("manual_edit", lang),
+                parse_mode="HTML",
+                reply_markup=video_edit_lane_upload_keyboard("manual_edit", lang),
+            )
+        update_video_editor_pending(
+            uid,
+            "confirmation",
+            current_screen="review",
+            return_to="brightness",
+            status="review_ready",
+        )
+        return await video_tail9_render(query, uid, context, "review")
     if not state.get("source_file_id") or not state.get("inspection_complete"):
         set_video_editor_pending(uid, "await_video", selected_tool=tool)
         return await safe_edit_or_send(
@@ -218959,20 +219292,26 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             return await query.answer("Độ sáng cần từ 20 đến 200%.", show_alert=True)
         plan = dict(state.get("manual_edit_plan") or {})
         plan["brightness_percent"] = percent
-        current = update_video_editor_pending(
+        operations = [{
+            "operation": "brightness",
+            "label": "Điều chỉnh độ sáng",
+            "brightness_percent": percent,
+        }]
+        update_video_editor_pending(
             uid,
-            "brightness",
+            "confirmation",
             manual_edit_plan=plan,
+            edit_operations=operations,
             brightness_percent=percent,
             selected_tool="manual",
             last_section="manual",
+            current_screen="review",
+            return_to="brightness",
+            status="review_ready",
+            state_revision=max(1, safe_int(state.get("state_revision"), 1)) + 1,
+            revision=max(1, safe_int(state.get("revision"), 1)) + 1,
         )
-        return await safe_edit_or_send(
-            query,
-            video_local_brightness_text(current, lang),
-            parse_mode="HTML",
-            reply_markup=video_local_brightness_keyboard(lang),
-        )
+        return await video_tail9_render(query, uid, context, "review")
     if action == "brightness_custom":
         update_video_editor_pending(uid, "await_brightness", selected_tool="manual", last_section="manual")
         return await safe_edit_or_send(
@@ -222144,7 +222483,36 @@ async def internal_worker_heartbeat(request: Request):
         "worker reported ffprobe availability",
         worker_id,
     )
-    return {"ok": True, "time": now_text(), "worker_id": worker_id}
+    contract_version = max(0, safe_int(payload.get("heartbeat_contract_version"), 0))
+    if contract_version >= 1:
+        received_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        capabilities = payload.get("capabilities") or []
+        if not isinstance(capabilities, list):
+            capabilities = []
+        adapter_settings = {
+            "local_worker:video_edit_received_at_utc": received_at_utc,
+            "local_worker:video_edit_timestamp_utc": str(payload.get("timestamp_utc") or "")[:80],
+            "local_worker:worker_owner": str(payload.get("worker_owner") or "")[:120],
+            "local_worker:engine_route": str(payload.get("engine_route") or "")[:120],
+            "local_worker:capabilities_json": json.dumps(
+                [str(item)[:120] for item in capabilities if str(item).strip()],
+                ensure_ascii=False,
+            ),
+            "local_worker:instance_id": str(payload.get("instance_id") or "")[:180],
+            "local_worker:process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
+            "local_worker:queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
+            "local_worker:last_error": str(payload.get("last_error") or "")[:500],
+            "local_worker:heartbeat_contract_version": str(contract_version),
+            "local_worker:started_at_utc": str(payload.get("started_at_utc") or "")[:80],
+        }
+        for key, value in adapter_settings.items():
+            set_system_setting(key, value, "video edit worker heartbeat contract", worker_id)
+    return {
+        "ok": True,
+        "time": now_text(),
+        "worker_id": worker_id,
+        "heartbeat_contract_version": contract_version,
+    }
 
 @fastapi_app.get("/internal/worker/poll")
 async def internal_worker_poll(request: Request):

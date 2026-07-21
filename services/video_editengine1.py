@@ -18,6 +18,8 @@ PRODUCT_TYPE = "video_edit"
 WORKER_JOB_TYPE = "video_local_edit"
 ENGINE_ROUTE = "local_worker_ffmpeg"
 OUTBOX_OWNER = "local_video_edit"
+WORKER_CAPABILITY = "video_edit"
+HEARTBEAT_TTL_SECONDS = 90
 TERMINAL_JOB_STATES = frozenset({"delivered", "charged", "failed_no_charge"})
 
 
@@ -130,6 +132,19 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
         brightness_valid = 20 <= int(brightness) <= 200
     except (TypeError, ValueError):
         brightness_valid = False
+    try:
+        contract_enabled = int(worker.get("heartbeat_contract_version") or 0) >= 1
+    except (TypeError, ValueError):
+        contract_enabled = False
+    capabilities = worker.get("capabilities")
+    if isinstance(capabilities, str):
+        capabilities = [item.strip() for item in capabilities.split(",") if item.strip()]
+    capabilities = {str(item).strip() for item in capabilities or [] if str(item).strip()}
+    heartbeat_age = worker.get("heartbeat_age_seconds", worker.get("age_seconds"))
+    try:
+        heartbeat_fresh = heartbeat_age is not None and 0 <= int(heartbeat_age) <= HEARTBEAT_TTL_SECONDS
+    except (TypeError, ValueError):
+        heartbeat_fresh = False
     checks = {
         "source_file": bool(str(current.get("source_file_id") or "").strip()),
         "source_probe": bool(current.get("inspection_complete") and metadata.get("ok")),
@@ -146,7 +161,15 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
         "ffprobe": bool(worker.get("ffprobe_path_configured")),
         "delivery": bool(worker.get("delivery_configured", True)),
     }
-    reason_order = (
+    contract_checks = {
+        "worker_owner": str(worker.get("worker_owner") or "") == OUTBOX_OWNER,
+        "engine_route": str(worker.get("engine_route") or "") == ENGINE_ROUTE,
+        "capability": WORKER_CAPABILITY in capabilities,
+        "heartbeat_ttl": heartbeat_fresh,
+    }
+    if contract_enabled:
+        checks.update(contract_checks)
+    reason_order = [
         ("source_file", "source_file_missing"),
         ("source_probe", "source_probe_missing"),
         ("operation", "edit_operation_missing"),
@@ -158,7 +181,15 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
         ("ffmpeg", "ffmpeg_missing"),
         ("ffprobe", "ffprobe_missing"),
         ("delivery", "telegram_delivery_unavailable"),
-    )
+    ]
+    if contract_enabled:
+        heartbeat_index = reason_order.index(("heartbeat", "local_worker_heartbeat_stale")) + 1
+        reason_order[heartbeat_index:heartbeat_index] = [
+            ("worker_owner", "local_worker_owner_mismatch"),
+            ("engine_route", "local_worker_route_mismatch"),
+            ("capability", "local_worker_capability_missing"),
+            ("heartbeat_ttl", "local_worker_heartbeat_stale"),
+        ]
     reason = next((code for key, code in reason_order if not checks[key]), "ok")
     audio = dict((current.get("video_tail9") or {}).get("audio_config") or {})
     unsupported = [key for key in ("dubbing", "music", "sfx", "subtitles") if audio.get(key)]
@@ -177,7 +208,7 @@ def preflight(state: dict, runtime: dict) -> dict[str, Any]:
         "owner": OUTBOX_OWNER,
         "queue": "local_worker_jobs",
         "worker_id": str(worker.get("worker_id") or ""),
-        "heartbeat_age_seconds": worker.get("heartbeat_age_seconds", worker.get("age_seconds")),
+        "heartbeat_age_seconds": heartbeat_age,
     }
 
 
