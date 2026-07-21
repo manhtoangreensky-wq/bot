@@ -173,17 +173,66 @@ def test_scope_and_menu_routing_static_gates():
 
     source = BOT_SOURCE.read_text(encoding="utf-8")
     assert source.count('callback_data="menu|admin_broadcast_lite"') == 1
-    assert 'rows.append([InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")])' in source
+    assert 'InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite"),' in source
+    assert 'InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),' in source
     assert 'InlineKeyboardButton("👥 Chọn người nhận", callback_data="broadcast_lite|audience")' in source
-    assert 'InlineKeyboardButton(("✅ " if all_selected else "") + "🌐 Toàn bộ khách đã dùng bot", callback_data=f"broadcast_lite|aud_all|{draft_id}")' in source
+    assert 'InlineKeyboardButton(("✅ " if all_selected else "") + "🌐 Toàn bộ bot", callback_data=f"broadcast_lite|aud_all|{draft_id}")' in source
+    assert 'InlineKeyboardButton("🏷 Hạng thành viên", callback_data=f"broadcast_lite|aud_tiers|{draft_id}")' in source
     assert 'set_broadcast_lite_audience(DB_FILE, parts[2], uid, "all")' in source
     assert "Dự kiến gửi:" in source
     assert '"Tất cả hạng", callback_data=f"broadcast_lite|tier|{draft_id}|all"' in source
+    assert 'if action in {"compose", "compose_text", "compose_photo"}:' in source
+    assert "Gửi văn bản hoặc ảnh kèm nội dung ngay tin nhắn tiếp theo." in source
+    assert 'InlineKeyboardButton("✅ Gửi thông báo", callback_data=f"broadcast_lite|confirm|{draft_id}")' in source
+    assert "broadcast_lite_preview_keyboard(preview)" in source
+    assert "broadcast_lite_navigation_keyboard" in source
+    assert '"⚠️ " + str(error)[:300] + "\\n\\n" + broadcast_lite_draft_text(draft)' in source
     assert 'CallbackQueryHandler(handle_broadcast_lite_callback, pattern=r"^broadcast_lite\\|")' in source
     assert "broadcast_lite_send_delivery(delivery, bot_client)" in source
     handler = source.split("async def handle_broadcast_lite_callback", 1)[1].split("async def handle_broadcast_lite_pending_text", 1)[0]
     assert "broadcast_lite_send_delivery" not in handler
     assert "tg_app.bot" not in handler
+
+
+def test_broadcast_menu_rows_are_exactly_two_buttons():
+    source = BOT_SOURCE.read_text(encoding="utf-8")
+    start = source.index("def broadcast_lite_admin_menu_keyboard")
+    end = source.index("async def cmd_broadcast_lite", start)
+
+    class Button:
+        def __init__(self, text, callback_data):
+            self.text = text
+            self.callback_data = callback_data
+
+    class Markup:
+        def __init__(self, rows):
+            self.inline_keyboard = rows
+
+    namespace = {
+        "InlineKeyboardButton": Button,
+        "InlineKeyboardMarkup": Markup,
+        "BROADCAST_LITE_TEMPLATES": broadcast.TEMPLATES,
+        "BROADCAST_LITE_CTA_REGISTRY": broadcast.CTA_REGISTRY,
+        "BROADCAST_LITE_TIER_ORDER": broadcast.MEMBER_TIER_ORDER,
+        "BROADCAST_LITE_TIER_REGISTRY": broadcast.MEMBER_TIER_REGISTRY,
+    }
+    exec(source[start:end], namespace)
+
+    empty = {"draft_id": "draft-1", "audience_kind": "", "ctas": [], "tiers": []}
+    ready = {"draft_id": "draft-1", "audience_kind": "all", "ctas": ["topup"], "tiers": []}
+    keyboards = [
+        namespace["broadcast_lite_admin_menu_keyboard"](),
+        namespace["broadcast_lite_navigation_keyboard"]("⬅️ Quay lại", "broadcast_lite|back"),
+        namespace["broadcast_lite_template_keyboard"](),
+        namespace["broadcast_lite_draft_keyboard"](empty),
+        namespace["broadcast_lite_draft_keyboard"](ready),
+        namespace["broadcast_lite_preview_keyboard"](ready),
+        namespace["broadcast_lite_cta_keyboard"](ready),
+        namespace["broadcast_lite_audience_keyboard"](ready),
+        namespace["broadcast_lite_tier_keyboard"](empty),
+        namespace["broadcast_lite_campaign_keyboard"](1),
+    ]
+    assert all(len(row) == 2 for keyboard in keyboards for row in keyboard.inline_keyboard)
 
 
 @pytest.mark.parametrize("route", ["menu|main_topup", "menu|main_video", "menu|main_image", "menu|support"])
