@@ -143,6 +143,26 @@ def test_video_brightness_is_visible_and_reaches_ffmpeg() -> None:
     assert "Độ sáng 130%" in video_local_editing.public_plan_summary(plan)
 
 
+def test_video_edit_callback_answer_failure_cannot_surface_generic_x() -> None:
+    callback = _function_source("handle_video_editor_callback")
+    prologue = callback[: callback.index("    uid = query.from_user.id")]
+    assert "try:" in prologue
+    assert "await query.answer()" in prologue
+    assert "except Exception as exc:" in prologue
+    assert "videoedit callback answer skipped" in prologue
+    assert "Có lỗi khi xử lý lệnh" not in callback
+
+
+def test_video_edit_callback_has_one_public_owner_and_global_dedupe() -> None:
+    registration = 'CallbackQueryHandler(handle_video_editor_callback, pattern=r"^videoedit\\|")'
+    assert BOT_SOURCE.count(registration) == 1
+    prefixes = BOT_SOURCE[
+        BOT_SOURCE.index("VIDEO_PUBLIC_CALLBACK_PREFIXES = (") :
+        BOT_SOURCE.index("_VIDEO_PUBLIC_CALLBACK_CLAIMS:")
+    ]
+    assert '"videoedit|"' in prefixes
+
+
 def test_video_edit_upload_failure_keeps_exact_lane_without_generic_x() -> None:
     error_handler = _function_source("on_telegram_error")
     recovery = error_handler.index("if video_edit_intake_error_mode")

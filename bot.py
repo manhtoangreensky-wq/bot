@@ -220092,7 +220092,15 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
 
 async def handle_video_editor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception as exc:
+        # Telegram callback acknowledgement is best-effort. A repeated or
+        # slightly old button must still follow the canonical editor route.
+        logger.warning(
+            "videoedit callback answer skipped | %s",
+            sanitize_log_text(str(exc))[:180],
+        )
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
