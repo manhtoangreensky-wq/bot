@@ -187,6 +187,7 @@ from admin_broadcast import (
     MEMBER_TIER_REGISTRY as BROADCAST_LITE_TIER_REGISTRY,
     TEMPLATES as BROADCAST_LITE_TEMPLATES,
     campaign_stats as broadcast_lite_campaign_stats,
+    clear_pending_drafts as clear_broadcast_lite_pending_drafts,
     confirm_draft as confirm_broadcast_lite_draft,
     create_empty_draft as create_broadcast_lite_draft,
     create_template_draft as create_broadcast_lite_template_draft,
@@ -40877,15 +40878,14 @@ def owner_and_admin_ids() -> list[str]:
 def broadcast_lite_admin_menu_text() -> str:
     return (
         "📣 Thông báo khách hàng\n\n"
-        "Soạn nội dung → chọn người nhận → bấm Gửi thông báo.\n\n"
+        "Soạn thông báo → chọn mẫu hoặc Bỏ qua → chọn người nhận → xác nhận gửi.\n\n"
         "Tin chỉ được đưa vào hàng đợi sau khi Admin xác nhận."
     )
 
 def broadcast_lite_admin_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Soạn thông báo", callback_data="broadcast_lite|compose"), InlineKeyboardButton("🎁 Chọn mẫu", callback_data="broadcast_lite|templates")],
-        [InlineKeyboardButton("👥 Chọn người nhận", callback_data="broadcast_lite|audience"), InlineKeyboardButton("📊 Lịch sử gửi", callback_data="broadcast_lite|history")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📝 Soạn thông báo", callback_data="broadcast_lite|compose"), InlineKeyboardButton("📊 Lịch sử gửi", callback_data="broadcast_lite|history")],
+        [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def broadcast_lite_navigation_keyboard(back_label: str, back_callback: str) -> InlineKeyboardMarkup:
@@ -40903,10 +40903,24 @@ def broadcast_lite_template_keyboard() -> InlineKeyboardMarkup:
     ]
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([
+        InlineKeyboardButton("⏭ Bỏ qua mẫu", callback_data="broadcast_lite|skip"),
         InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"),
-        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
+
+
+def broadcast_lite_input_keyboard(draft_id: str, *, back_to: str = "templates") -> InlineKeyboardMarkup:
+    draft_id = str(draft_id or "")
+    if back_to == "content":
+        back_label = "⬅️ Nội dung"
+        back_callback = f"broadcast_lite|content|{draft_id}"
+    else:
+        back_label = "⬅️ Chọn mẫu"
+        back_callback = f"broadcast_lite|cancel|{draft_id}"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(back_label, callback_data=back_callback),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ]])
 
 def _broadcast_lite_cta_buttons(draft: dict) -> list[list[InlineKeyboardButton]]:
     selected = set(draft.get("ctas") or [])
@@ -40918,48 +40932,43 @@ def _broadcast_lite_cta_buttons(draft: dict) -> list[list[InlineKeyboardButton]]
 
 def broadcast_lite_draft_keyboard(draft: dict) -> InlineKeyboardMarkup:
     draft_id = str(draft.get("draft_id") or "")
-    audience_selected = bool(str(draft.get("audience_kind") or "").strip())
-    if audience_selected:
-        rows = [
-            [
-                InlineKeyboardButton("👀 Xem trước", callback_data=f"broadcast_lite|preview|{draft_id}"),
-                InlineKeyboardButton("✅ Gửi thông báo", callback_data=f"broadcast_lite|confirm|{draft_id}"),
-            ],
-            [
-                InlineKeyboardButton("🔘 Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
-                InlineKeyboardButton("👥 Đổi người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
-            ],
-        ]
-    else:
-        rows = [[
-            InlineKeyboardButton("👥 Chọn người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
+    audience_label = "👥 Đổi người nhận" if draft.get("audience_kind") else "👥 Chọn người nhận"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(audience_label, callback_data=f"broadcast_lite|audience|{draft_id}"),
             InlineKeyboardButton("🔘 Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
-        ]]
-    rows.append([
-        InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"),
-        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+        [
+            InlineKeyboardButton("📝 Soạn lại", callback_data=f"broadcast_lite|edit|{draft_id}"),
+            InlineKeyboardButton("⬅️ Chọn mẫu", callback_data=f"broadcast_lite|cancel|{draft_id}"),
+        ],
     ])
-    return InlineKeyboardMarkup(rows)
 
 
 def broadcast_lite_preview_keyboard(draft: dict) -> InlineKeyboardMarkup:
     draft_id = str(draft.get("draft_id") or "")
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Gửi thông báo", callback_data=f"broadcast_lite|confirm|{draft_id}"),
-            InlineKeyboardButton("⬅️ Quay lại soạn", callback_data=f"broadcast_lite|draft|{draft_id}"),
+            InlineKeyboardButton("✅ Xác nhận gửi", callback_data=f"broadcast_lite|confirm|{draft_id}"),
+            InlineKeyboardButton("⬅️ Người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
         ],
         [
-            InlineKeyboardButton("👥 Đổi người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            InlineKeyboardButton("🔘 Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
+            InlineKeyboardButton("📝 Soạn lại", callback_data=f"broadcast_lite|edit|{draft_id}"),
         ],
     ])
 
 
 def broadcast_lite_cta_keyboard(draft: dict) -> InlineKeyboardMarkup:
+    if draft.get("audience_kind"):
+        back_label = "⬅️ Xem trước"
+        back_callback = f"broadcast_lite|preview|{draft['draft_id']}"
+    else:
+        back_label = "⬅️ Nội dung"
+        back_callback = f"broadcast_lite|content|{draft['draft_id']}"
     return InlineKeyboardMarkup(_broadcast_lite_cta_buttons(draft) + [[
         InlineKeyboardButton("✅ Xong", callback_data=f"broadcast_lite|ctas_done|{draft['draft_id']}"),
-        InlineKeyboardButton("⬅️ Quay lại soạn", callback_data=f"broadcast_lite|draft|{draft['draft_id']}"),
+        InlineKeyboardButton(back_label, callback_data=back_callback),
     ]])
 
 def broadcast_lite_audience_label(draft: dict) -> str:
@@ -41012,6 +41021,37 @@ def broadcast_lite_draft_text(draft: dict) -> str:
     )
 
 
+def broadcast_lite_audience_text(draft: dict) -> str:
+    return (
+        "👥 Chọn người nhận\n\n"
+        "• Toàn bộ bot: mọi chat ID hợp lệ đã từng dùng bot.\n"
+        "• Hạng thành viên: chọn một hoặc nhiều hạng.\n\n"
+        "Khách đã chặn bot sẽ được bỏ qua."
+    )
+
+
+def broadcast_lite_review_text(draft: dict) -> str:
+    message = str(draft.get("message_text") or "").strip()
+    if len(message) > 3000:
+        message = message[:3000].rstrip() + "…"
+    media_hint = "🖼️ Có ảnh đính kèm\n\n" if draft.get("media_file_id") else ""
+    cta_labels = ", ".join(
+        str(BROADCAST_LITE_CTA_REGISTRY[key]["label"])
+        for key in draft.get("ctas") or []
+        if key in BROADCAST_LITE_CTA_REGISTRY
+    ) or "Không có"
+    return (
+        "👀 Xem trước và xác nhận\n\n"
+        + media_hint
+        + (message or "(không có nội dung chữ)")
+        + "\n\n"
+        + f"🔘 Nút: {cta_labels}\n"
+        + f"👥 Người nhận: {broadcast_lite_audience_label(draft)}"
+        + broadcast_lite_audience_estimate(draft)
+        + "\n\nChỉ bắt đầu gửi sau khi bấm Xác nhận gửi."
+    )
+
+
 def broadcast_lite_audience_keyboard(draft: dict) -> InlineKeyboardMarkup:
     draft_id = str(draft.get("draft_id") or "")
     all_selected = str(draft.get("audience_kind") or "") == "all"
@@ -41020,9 +41060,8 @@ def broadcast_lite_audience_keyboard(draft: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton(("✅ " if all_selected else "") + "🌐 Toàn bộ bot", callback_data=f"broadcast_lite|aud_all|{draft_id}"),
             InlineKeyboardButton("🏷 Hạng thành viên", callback_data=f"broadcast_lite|aud_tiers|{draft_id}"),
         ],
-        [InlineKeyboardButton("👤 Nhập user ID", callback_data=f"broadcast_lite|aud_mode|{draft_id}|user"), InlineKeyboardButton("🧪 User test", callback_data=f"broadcast_lite|aud_mode|{draft_id}|test_list")],
         [
-            InlineKeyboardButton("⬅️ Quay lại soạn", callback_data=f"broadcast_lite|draft|{draft_id}"),
+            InlineKeyboardButton("⬅️ Nội dung", callback_data=f"broadcast_lite|content|{draft_id}"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ],
     ]
@@ -41069,6 +41108,13 @@ def broadcast_lite_campaign_keyboard(campaign_id: int) -> InlineKeyboardMarkup:
         ],
     ])
 
+
+def broadcast_lite_history_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ]])
+
 async def cmd_broadcast_lite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return await update.effective_message.reply_text("Khu vực này chỉ dành cho Admin.")
@@ -41077,36 +41123,80 @@ async def cmd_broadcast_lite(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _broadcast_lite_edit(query, text: str, reply_markup=None):
     return await safe_edit_query_message(query, text, reply_markup=reply_markup, parse_mode=None)
 
+
+def clear_broadcast_lite_pending(admin_id: int | str) -> None:
+    try:
+        clear_broadcast_lite_pending_drafts(DB_FILE, admin_id)
+    except Exception as error:
+        logger.warning("broadcast lite pending clear failed | error=%s", type(error).__name__)
+
+
+async def _broadcast_lite_show_review(query, draft: dict, admin_id: int | str):
+    preview = preview_broadcast_lite_draft(DB_FILE, draft["draft_id"], admin_id)
+    set_broadcast_lite_state(DB_FILE, draft["draft_id"], admin_id, "previewed")
+    return await _broadcast_lite_edit(
+        query,
+        broadcast_lite_review_text(preview),
+        broadcast_lite_preview_keyboard(preview),
+    )
+
 async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not update.effective_user or not is_admin_user(update.effective_user.id):
         if query:
             return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
         return
-    await query.answer()
+    await safe_answer_callback_query(query)
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "back"
     uid = update.effective_user.id
     try:
         if action in {"back", "menu"}:
             return await _broadcast_lite_edit(query, broadcast_lite_admin_menu_text(), broadcast_lite_admin_menu_keyboard())
-        if action in {"compose", "compose_text", "compose_photo"}:
+        if action in {"compose", "templates"}:
+            clear_broadcast_lite_pending(uid)
+            return await _broadcast_lite_edit(
+                query,
+                "🎁 Chọn mẫu tin nhắn\n\nChọn một mẫu có sẵn hoặc bấm Bỏ qua mẫu để tự nhập nội dung.",
+                broadcast_lite_template_keyboard(),
+            )
+        if action in {"skip", "compose_text", "compose_photo"}:
+            clear_broadcast_lite_pending(uid)
             draft = create_broadcast_lite_draft(DB_FILE, uid, state="awaiting_message")
             return await _broadcast_lite_edit(
                 query,
                 "📝 Soạn thông báo\n\nGửi văn bản hoặc ảnh kèm nội dung ngay tin nhắn tiếp theo.",
-                broadcast_lite_navigation_keyboard("⬅️ Thông báo", "broadcast_lite|back"),
+                broadcast_lite_input_keyboard(draft["draft_id"]),
             )
-        if action == "templates":
-            return await _broadcast_lite_edit(query, "🎁 Chọn mẫu tin nhắn", broadcast_lite_template_keyboard())
+        if action == "cancel" and len(parts) >= 3:
+            clear_broadcast_lite_pending(uid)
+            return await _broadcast_lite_edit(
+                query,
+                "🎁 Chọn mẫu tin nhắn\n\nChọn một mẫu có sẵn hoặc bấm Bỏ qua mẫu để tự nhập nội dung.",
+                broadcast_lite_template_keyboard(),
+            )
         if action == "template" and len(parts) >= 3:
+            clear_broadcast_lite_pending(uid)
             draft = create_broadcast_lite_template_draft(DB_FILE, uid, parts[2])
-            return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
-        if action == "draft" and len(parts) >= 3:
+            return await _broadcast_lite_edit(query, broadcast_lite_audience_text(draft), broadcast_lite_audience_keyboard(draft))
+        if action in {"draft", "content"} and len(parts) >= 3:
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid)
             if not draft:
                 return await _broadcast_lite_edit(query, "Không tìm thấy bản nháp.", broadcast_lite_admin_menu_keyboard())
+            if str(draft.get("state") or "").startswith("awaiting_"):
+                draft = set_broadcast_lite_state(DB_FILE, draft["draft_id"], uid, "draft")
             return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
+        if action == "edit" and len(parts) >= 3:
+            draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid)
+            if not draft:
+                return await _broadcast_lite_edit(query, "Không tìm thấy bản nháp.", broadcast_lite_admin_menu_keyboard())
+            clear_broadcast_lite_pending(uid)
+            draft = set_broadcast_lite_state(DB_FILE, draft["draft_id"], uid, "awaiting_message")
+            return await _broadcast_lite_edit(
+                query,
+                "📝 Soạn lại nội dung\n\nGửi văn bản hoặc ảnh kèm nội dung ngay tin nhắn tiếp theo.",
+                broadcast_lite_input_keyboard(draft["draft_id"], back_to="content"),
+            )
         if action == "ctas" and len(parts) >= 3:
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid) or get_latest_broadcast_lite_draft(DB_FILE, uid)
             if not draft:
@@ -41120,31 +41210,26 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             return await _broadcast_lite_edit(query, "🔘 Chọn tối đa 4 nút hành động\n\nChạm để bật/tắt:", broadcast_lite_cta_keyboard(draft))
         if action == "ctas_done" and len(parts) >= 3:
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid) or {}
+            if draft.get("audience_kind"):
+                return await _broadcast_lite_show_review(query, draft, uid)
             return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
         if action == "audience":
             draft_id = parts[2] if len(parts) >= 3 else ""
             draft = get_broadcast_lite_draft(DB_FILE, draft_id, uid) if draft_id else get_latest_broadcast_lite_draft(DB_FILE, uid)
             if not draft:
-                create_broadcast_lite_draft(DB_FILE, uid, state="awaiting_message")
                 return await _broadcast_lite_edit(
                     query,
-                    "📝 Hãy soạn nội dung trước. Gửi văn bản hoặc ảnh kèm nội dung ngay tin nhắn tiếp theo.",
-                    broadcast_lite_navigation_keyboard("⬅️ Thông báo", "broadcast_lite|back"),
+                    "📝 Hãy soạn thông báo trước. Chọn một mẫu hoặc bấm Bỏ qua mẫu.",
+                    broadcast_lite_template_keyboard(),
                 )
             return await _broadcast_lite_edit(
                 query,
-                "👥 Chọn người nhận\n\n"
-                "Chọn Toàn bộ khách đã dùng bot để gửi cho mọi chat ID hợp lệ đã từng nhấn Start. "
-                "Khách đã chặn bot sẽ tự được bỏ qua.",
+                broadcast_lite_audience_text(draft),
                 broadcast_lite_audience_keyboard(draft),
             )
         if action == "aud_all" and len(parts) >= 3:
             draft = set_broadcast_lite_audience(DB_FILE, parts[2], uid, "all")
-            return await _broadcast_lite_edit(
-                query,
-                "✅ Đã chọn toàn bộ khách đã dùng bot. Bây giờ có thể bấm Gửi thông báo.\n\n" + broadcast_lite_draft_text(draft),
-                broadcast_lite_draft_keyboard(draft),
-            )
+            return await _broadcast_lite_show_review(query, draft, uid)
         if action == "aud_tiers" and len(parts) >= 3:
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid)
             if not draft:
@@ -41161,7 +41246,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid) or {}
             if not draft.get("audience_kind"):
                 return await _broadcast_lite_edit(query, "Cần chọn ít nhất một hạng thành viên.", broadcast_lite_tier_keyboard(draft))
-            return await _broadcast_lite_edit(query, broadcast_lite_draft_text(draft), broadcast_lite_draft_keyboard(draft))
+            return await _broadcast_lite_show_review(query, draft, uid)
         if action == "aud_mode" and len(parts) >= 4:
             draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid)
             if not draft:
@@ -41175,11 +41260,8 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
                 broadcast_lite_navigation_keyboard("⬅️ Chọn người nhận", f"broadcast_lite|audience|{draft['draft_id']}"),
             )
         if action == "preview" and len(parts) >= 3:
-            preview = preview_broadcast_lite_draft(DB_FILE, parts[2], uid)
-            set_broadcast_lite_state(DB_FILE, parts[2], uid, "previewed")
-            stats = preview.get("audience") or {}
-            text = render_broadcast_lite_preview(preview) + f"\n\n📊 Đủ điều kiện gửi: {stats.get('eligible', 0)} | Bỏ qua: {stats.get('blocked', 0) + stats.get('invalid', 0)}"
-            return await _broadcast_lite_edit(query, text, broadcast_lite_preview_keyboard(preview))
+            draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid) or {}
+            return await _broadcast_lite_show_review(query, draft, uid)
         if action == "confirm" and len(parts) >= 3:
             campaign = confirm_broadcast_lite_draft(DB_FILE, parts[2], uid)
             stats = broadcast_lite_campaign_stats(DB_FILE, int(campaign["campaign_id"]))
@@ -41201,7 +41283,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
                     stats = campaign.get("stats") or {}
                     lines.append(f"\n#{campaign['campaign_id']} · {campaign.get('status')} · {stats.get('sent', 0)}/{stats.get('total', 0)} đã gửi")
                 text = "".join(lines)
-            return await _broadcast_lite_edit(query, text, broadcast_lite_admin_menu_keyboard())
+            return await _broadcast_lite_edit(query, text, broadcast_lite_history_keyboard())
         return await _broadcast_lite_edit(query, "Thao tác thông báo không hợp lệ.", broadcast_lite_admin_menu_keyboard())
     except ValueError as error:
         draft_id = parts[2] if len(parts) >= 3 else ""
@@ -41214,7 +41296,35 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             )
         return await _broadcast_lite_edit(query, str(error)[:400], broadcast_lite_admin_menu_keyboard())
     except Exception as error:
-        logger.warning("broadcast lite callback failed | error=%s", type(error).__name__)
+        logger.warning(
+            "broadcast lite callback failed | action=%s | error=%s | detail=%s",
+            action,
+            type(error).__name__,
+            sanitize_log_text(str(error))[:180],
+        )
+        try:
+            draft_id = parts[2] if len(parts) >= 3 else ""
+            draft = get_broadcast_lite_draft(DB_FILE, draft_id, uid) if draft_id else None
+            if draft:
+                if action in {"audience", "aud_all", "aud_tiers"}:
+                    return await _broadcast_lite_edit(
+                        query,
+                        "⚠️ Chưa xử lý được thao tác. Hãy chọn lại người nhận.",
+                        broadcast_lite_audience_keyboard(draft),
+                    )
+                if action in {"tier", "tier_done"}:
+                    return await _broadcast_lite_edit(
+                        query,
+                        "⚠️ Chưa xử lý được thao tác. Hãy chọn lại hạng thành viên.",
+                        broadcast_lite_tier_keyboard(draft),
+                    )
+                return await _broadcast_lite_edit(
+                    query,
+                    "⚠️ Chưa xử lý được thao tác. Bản nháp vẫn được giữ.\n\n" + broadcast_lite_draft_text(draft),
+                    broadcast_lite_draft_keyboard(draft),
+                )
+        except Exception:
+            pass
         return await _broadcast_lite_edit(query, "Không xử lý được thao tác thông báo.", broadcast_lite_admin_menu_keyboard())
 
 async def handle_broadcast_lite_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -41227,13 +41337,16 @@ async def handle_broadcast_lite_pending_text(update: Update, context: ContextTyp
     try:
         if draft["state"] in {"awaiting_message", "awaiting_photo", "awaiting_caption"}:
             draft = set_broadcast_lite_message(DB_FILE, draft["draft_id"], update.effective_user.id, text)
-            await update.message.reply_text("✅ Đã lưu nội dung. Bước tiếp theo: chọn người nhận.", reply_markup=broadcast_lite_draft_keyboard(draft))
+            await update.message.reply_text(
+                "✅ Đã lưu nội dung.\n\n" + broadcast_lite_audience_text(draft),
+                reply_markup=broadcast_lite_audience_keyboard(draft),
+            )
         elif draft["state"] == "awaiting_audience_user":
             draft = set_broadcast_lite_audience(DB_FILE, draft["draft_id"], update.effective_user.id, "user", text)
-            await update.message.reply_text("✅ Đã chọn user nhận thông báo.", reply_markup=broadcast_lite_draft_keyboard(draft))
+            await update.message.reply_text(broadcast_lite_review_text(draft), reply_markup=broadcast_lite_preview_keyboard(draft))
         else:
             draft = set_broadcast_lite_audience(DB_FILE, draft["draft_id"], update.effective_user.id, "test_list", text)
-            await update.message.reply_text("✅ Đã lưu danh sách user test.", reply_markup=broadcast_lite_draft_keyboard(draft))
+            await update.message.reply_text(broadcast_lite_review_text(draft), reply_markup=broadcast_lite_preview_keyboard(draft))
     except ValueError as error:
         await update.message.reply_text(str(error))
     return True
@@ -41247,7 +41360,16 @@ async def handle_broadcast_lite_pending_photo(update: Update, context: ContextTy
     photo = update.message.photo[-1]
     try:
         draft = set_broadcast_lite_media(DB_FILE, draft["draft_id"], update.effective_user.id, photo.file_id, caption=update.message.caption or "")
-        await update.message.reply_text(broadcast_lite_draft_text(draft), reply_markup=broadcast_lite_draft_keyboard(draft))
+        if draft.get("state") == "awaiting_caption":
+            await update.message.reply_text(
+                "🖼️ Đã nhận ảnh. Hãy gửi nội dung kèm ảnh trong tin nhắn tiếp theo.",
+                reply_markup=broadcast_lite_input_keyboard(draft["draft_id"], back_to="content"),
+            )
+        else:
+            await update.message.reply_text(
+                "✅ Đã lưu ảnh và nội dung.\n\n" + broadcast_lite_audience_text(draft),
+                reply_markup=broadcast_lite_audience_keyboard(draft),
+            )
     except ValueError as error:
         await update.message.reply_text(str(error))
     return True
@@ -106012,6 +106134,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await safe_answer_callback_query(query)
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
+    if user_is_admin:
+        clear_broadcast_lite_pending(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
     if action not in {"translation_text", "translation_transcript"} and not action.startswith("translation_text_target_"):
         clear_translation_menu_pending(query.from_user.id)

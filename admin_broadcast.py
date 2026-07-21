@@ -331,8 +331,32 @@ def get_latest_draft(db: str | Path, admin_id: Any, *, states: Iterable[str] | N
         if wanted:
             query += " AND state IN (" + ",".join("?" for _ in wanted) + ")"
             params.extend(wanted)
-        query += " ORDER BY created_at DESC LIMIT 1"
+        query += " ORDER BY updated_at DESC, created_at DESC, rowid DESC LIMIT 1"
         return _draft_row(conn.execute(query, params).fetchone())
+    finally:
+        if owned:
+            conn.close()
+
+
+def clear_pending_drafts(db: str | Path, admin_id: Any) -> int:
+    pending_states = (
+        "awaiting_message",
+        "awaiting_photo",
+        "awaiting_caption",
+        "awaiting_audience_user",
+        "awaiting_audience_test_list",
+    )
+    conn, owned = _connect(db)
+    try:
+        ensure_schema(conn)
+        placeholders = ",".join("?" for _ in pending_states)
+        cursor = conn.execute(
+            f"UPDATE broadcast_lite_drafts SET state='draft',updated_at=? "
+            f"WHERE admin_id=? AND state IN ({placeholders})",
+            (now_text(), str(admin_id), *pending_states),
+        )
+        conn.commit()
+        return max(0, int(cursor.rowcount or 0))
     finally:
         if owned:
             conn.close()
