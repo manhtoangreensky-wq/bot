@@ -85,6 +85,8 @@ def normalize_standalone_video_lane_entry_state(
     for key, canonical_value in canonical_fields.items():
         existing = normalized.get(key)
         if existing is None or str(existing).strip() == "":
+            normalized[key] = canonical_value
+            changed = True
             continue
         if str(existing).strip().lower() == canonical_value.lower():
             continue
