@@ -208,18 +208,18 @@ def test_idea_parent_next_step_contract_is_product_specific():
     }
 
 
-def test_long_video_is_publicly_locked_and_internal_contract_is_five_minutes_per_scene():
+def test_long_video_is_publicly_locked_and_internal_contract_is_ten_minutes_per_scene():
     assert video_long_planning.PUBLIC_ENABLED is False
-    assert video_long_planning.SCENE_DURATION_SECONDS == 300
+    assert video_long_planning.SCENE_DURATION_SECONDS == 600
     assert video_long_planning.public_access_allowed(is_admin=False) is False
     assert video_long_planning.public_access_allowed(is_admin=True) is False
 
     plan = video_long_planning.normalize_internal_plan({"duration_minutes": 120})
     assert plan["canonical_planning_flow"] == "video_ai_real"
-    assert plan["scene_unit_minutes"] == 5
+    assert plan["scene_unit_minutes"] == 10
     assert plan["planning_steps"] == list(video_long_planning.INTERNAL_STEPS)
-    assert plan["scene_duration_seconds"] == 300
-    assert plan["scene_count"] == 24
+    assert plan["scene_duration_seconds"] == 600
+    assert plan["scene_count"] == 12
     assert plan["public_enabled"] is False
     assert plan["provider_called"] is False
     assert plan["job_created"] is False
