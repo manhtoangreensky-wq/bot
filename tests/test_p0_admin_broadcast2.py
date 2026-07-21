@@ -50,6 +50,26 @@ def test_compose_custom_text_photo_and_preview(tmp_path: Path):
     assert photo["message_text"] == "Caption ảnh"
 
 
+def test_all_used_bot_audience_returns_to_draft_with_expected_delivery_count(tmp_path: Path):
+    db = make_db(tmp_path)
+    draft = broadcast.create_empty_draft(db, 9001)
+    draft = broadcast.set_draft_message(db, draft["draft_id"], 9001, "Thông báo toàn bot")
+    draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "all")
+
+    preview = broadcast.preview_draft(db, draft["draft_id"], 9001)
+    assert preview["audience"] == {"total": 2, "eligible": 2, "invalid": 1, "blocked": 0}
+
+    campaign = broadcast.confirm_draft(db, draft["draft_id"], 9001)
+    assert campaign["total_targets"] == 2
+    conn = sqlite3.connect(db)
+    targets = [row[0] for row in conn.execute(
+        "SELECT telegram_chat_id FROM broadcast_lite_deliveries WHERE campaign_id=? ORDER BY telegram_chat_id",
+        (campaign["campaign_id"],),
+    )]
+    conn.close()
+    assert targets == ["100", "200"]
+
+
 def test_audience_all_user_test_list_and_blocked(tmp_path: Path):
     db = make_db(tmp_path)
     conn = sqlite3.connect(db)
@@ -154,9 +174,13 @@ def test_scope_and_menu_routing_static_gates():
     source = BOT_SOURCE.read_text(encoding="utf-8")
     assert source.count('callback_data="menu|admin_broadcast_lite"') == 1
     assert 'rows.append([InlineKeyboardButton("📣 Thông báo khách hàng", callback_data="menu|admin_broadcast_lite")])' in source
-    assert 'InlineKeyboardButton("🏷 Chọn hạng thành viên", callback_data="broadcast_lite|audience")' in source
+    assert 'InlineKeyboardButton("👥 Chọn người nhận", callback_data="broadcast_lite|audience")' in source
+    assert 'InlineKeyboardButton(("✅ " if all_selected else "") + "🌐 Toàn bộ khách đã dùng bot", callback_data=f"broadcast_lite|aud_all|{draft_id}")' in source
+    assert 'set_broadcast_lite_audience(DB_FILE, parts[2], uid, "all")' in source
+    assert "Dự kiến gửi:" in source
     assert '"Tất cả hạng", callback_data=f"broadcast_lite|tier|{draft_id}|all"' in source
     assert 'CallbackQueryHandler(handle_broadcast_lite_callback, pattern=r"^broadcast_lite\\|")' in source
+    assert "broadcast_lite_send_delivery(delivery, bot_client)" in source
     handler = source.split("async def handle_broadcast_lite_callback", 1)[1].split("async def handle_broadcast_lite_pending_text", 1)[0]
     assert "broadcast_lite_send_delivery" not in handler
     assert "tg_app.bot" not in handler
