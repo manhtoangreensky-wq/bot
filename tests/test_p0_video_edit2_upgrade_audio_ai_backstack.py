@@ -145,7 +145,10 @@ def test_edit2_back_stack_is_contextual() -> None:
     assert "video_ai_edit_entry_back(state" in source
     local = _between("def video_local_source_summary_keyboard", "def video_local_manual_options_text")
     assert 'entry_context == "timeline"' in local
-    assert 'f"videoedit|{parent}"' in local
+    assert 'back_target = "videoedit|manual_join"' in local
+    assert 'previous_step == "manual_cut"' in local
+    assert 'back_target = "videoedit|manual_cut"' in local
+    assert 'back_target = "videoedit|hub"' in local
     guide = _between("def video_edit_guide_keyboard", "def video_edit_legacy_redirect_text")
     assert "videoedit|hub" in guide
     assert "menu|guide" not in guide

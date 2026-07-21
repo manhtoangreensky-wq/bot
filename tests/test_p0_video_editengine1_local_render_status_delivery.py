@@ -1,0 +1,528 @@
+from __future__ import annotations
+
+import io
+import json
+import socket
+import sqlite3
+import subprocess
+import urllib.error
+from pathlib import Path
+
+import pytest
+
+import local_worker
+from services import video_editengine1
+from services import video_local_editing as editing
+from services import video_local_validation as validation
+from services import video_tail9
+
+
+ROOT = Path(__file__).resolve().parents[1]
+BOT_SOURCE = (ROOT / "bot.py").read_text(encoding="utf-8")
+WORKER_SOURCE = (ROOT / "local_worker.py").read_text(encoding="utf-8")
+
+
+def _conn(path: Path | None = None) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(path) if path else ":memory:")
+    conn.execute(
+        """CREATE TABLE local_worker_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            command TEXT,
+            job_type TEXT,
+            status TEXT,
+            provider TEXT,
+            input_file_id TEXT,
+            created_at TEXT,
+            xu_cost INTEGER,
+            admin_only INTEGER,
+            updated_at TEXT
+        )"""
+    )
+    return conn
+
+
+def _state(*, brightness: object = 100) -> dict:
+    return {
+        "source_file_id": "telegram-file",
+        "inspection_complete": True,
+        "source_metadata": {"ok": True, "duration_ms": 4_000, "has_audio": True},
+        "selected_tool": "manual",
+        "manual_edit_plan": {
+            "source": "source.mp4",
+            "trim": {"start_ms": 0, "end_ms": 4_000},
+            "brightness_percent": brightness,
+        },
+        "video_tail9": {"audio_config": {}},
+    }
+
+
+def _runtime(**overrides) -> dict:
+    value = {
+        "enabled": True,
+        "poll_enabled": True,
+        "token_configured": True,
+        "connected": True,
+        "ffmpeg_path_configured": True,
+        "ffprobe_path_configured": True,
+        "delivery_configured": True,
+        "worker_id": "worker-edit-1",
+        "heartbeat_age_seconds": 3,
+    }
+    value.update(overrides)
+    return value
+
+
+def _create(conn: sqlite3.Connection, *, session: str = "edit-session-1") -> dict:
+    state = _state(brightness=120)
+    return video_editengine1.create_job(
+        conn,
+        user_id=77,
+        chat_id=88,
+        edit_session_id=session,
+        source_file_id=state["source_file_id"],
+        source_metadata=state["source_metadata"],
+        plan=state["manual_edit_plan"],
+        tail={"quality_tier_id": "300", "pricing_snapshot": {"total_xu": 100}},
+        quality_tier_id="300",
+        price_xu=100,
+        worker_payload={
+            "source_file_id": state["source_file_id"],
+            "source_file_name": "input.mp4",
+            "manual_edit_plan": state["manual_edit_plan"],
+            "provider_call": False,
+        },
+    )
+
+
+def _receipt() -> dict:
+    return {
+        "delivery_message_id": "9001",
+        "delivery_file_id": "telegram-output-file",
+        "source_video_path": "source.mp4",
+        "source_sha256": "a" * 64,
+        "output_path": "toan_aas_video_edit_1.mp4",
+        "output_sha256": "b" * 64,
+        "output_size_bytes": 4096,
+        "ffprobe": {
+            "ok": True,
+            "has_video": True,
+            "has_audio": True,
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "duration_ms": 4_000,
+        },
+    }
+
+
+def _manual_command(tmp_path: Path, brightness: int, *, audio: bool = True) -> list[str]:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    plan = editing.default_manual_edit_plan(str(source))
+    plan["trim"] = {"start_ms": 0, "end_ms": 4_000}
+    plan["brightness_percent"] = brightness
+    return editing.build_manual_ffmpeg_command(
+        plan,
+        output_path=str(tmp_path / f"output-{brightness}.mp4"),
+        source_probe={
+            "ok": True,
+            "duration": 4.0,
+            "duration_ms": 4_000,
+            "width": 640,
+            "height": 360,
+            "fps": 24.0,
+            "has_video": True,
+            "has_audio": audio,
+        },
+        ffmpeg_path="ffmpeg",
+    )
+
+
+def test_editengine1_preflight_reports_exact_healthy_route() -> None:
+    result = video_editengine1.preflight(_state(), _runtime())
+    assert result == {
+        "ok": True,
+        "ready": True,
+        "reason": "ok",
+        "blocker": "",
+        "checks": {
+            "source_file": True,
+            "source_probe": True,
+            "operation": True,
+            "brightness": True,
+            "worker_enabled": True,
+            "poll_enabled": True,
+            "token_configured": True,
+            "heartbeat": True,
+            "ffmpeg": True,
+            "ffprobe": True,
+            "delivery": True,
+        },
+        "unsupported_addons": [],
+        "product_type": "video_edit",
+        "worker_job_type": "video_local_edit",
+        "engine_route": "local_worker_ffmpeg",
+        "owner": "local_video_edit",
+        "queue": "local_worker_jobs",
+        "worker_id": "worker-edit-1",
+        "heartbeat_age_seconds": 3,
+    }
+
+
+def test_editengine1_tail_aliases_share_one_local_ffmpeg_adapter() -> None:
+    persisted = video_tail9.new_state(product_type="video_edit", session_id="edit-persisted")
+    public = video_tail9.new_state(product_type="video_local_edit", session_id="edit-public")
+    for state in (persisted, public):
+        assert state["engine_route"] == "local_worker_ffmpeg"
+        assert state["video_flow_owner"] == "video_edit"
+        assert state["audio_config"]["source_audio_available"] is True
+        assert video_tail9.adapter_for(state["video_product_type"])["executor_product_type"] == "video_local_edit"
+    assert persisted["video_product_type"] == "video_edit"
+    assert public["video_product_type"] == "video_local_edit"
+
+
+def test_editengine1_bot_preflight_dispatches_both_current_and_legacy_edit_ids() -> None:
+    start = BOT_SOURCE.index("def video_tail9_preflight")
+    end = BOT_SOURCE.index("def video_tail9_review_text", start)
+    source = BOT_SOURCE[start:end]
+    assert "video_editengine1.PRODUCT_TYPE" in source
+    assert "video_editengine1.WORKER_JOB_TYPE" in source
+    assert source.index("video_editengine1.preflight(") < source.index("video_flow6_preflight_for_state(")
+
+
+@pytest.mark.parametrize(
+    ("state", "runtime", "reason"),
+    [
+        (_state(brightness=19), _runtime(), "brightness_invalid"),
+        (_state(brightness=201), _runtime(), "brightness_invalid"),
+        (_state(brightness="invalid"), _runtime(), "brightness_invalid"),
+        (_state(), _runtime(connected=False), "local_worker_heartbeat_stale"),
+        (_state(), _runtime(ffmpeg_path_configured=False), "ffmpeg_missing"),
+        (_state(), _runtime(ffprobe_path_configured=False), "ffprobe_missing"),
+        (_state(), _runtime(delivery_configured=False), "telegram_delivery_unavailable"),
+    ],
+)
+def test_editengine1_preflight_exact_blockers(state: dict, runtime: dict, reason: str) -> None:
+    result = video_editengine1.preflight(state, runtime)
+    assert result["ok"] is False
+    assert result["reason"] == reason
+    assert result["blocker"] == reason
+
+
+def test_editengine1_preflight_rejects_unimplemented_addons_without_provider_call() -> None:
+    state = _state()
+    state["video_tail9"] = {"audio_config": {"music": True}}
+    result = video_editengine1.preflight(state, _runtime())
+    assert result["reason"] == "local_edit_addon_runtime_unavailable"
+    assert result["unsupported_addons"] == ["music"]
+
+
+def test_editengine1_final_confirm_is_idempotent_and_persists_owner_truth() -> None:
+    conn = _conn()
+    first = _create(conn)
+    conn.commit()
+    second = _create(conn)
+    conn.commit()
+
+    assert first["created"] is True
+    assert second == {**first, "created": False}
+    assert conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_jobs").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM video_edit_outbox").fetchone()[0] == 1
+    job = video_editengine1.get_job_by_worker_id(conn, first["local_worker_job_id"])
+    assert job["product_type"] == "video_edit"
+    assert job["worker_job_type"] == "video_local_edit"
+    assert job["engine_route"] == "local_worker_ffmpeg"
+    assert job["worker_owner"] == "local_video_edit"
+    assert job["source_video_path"] == "input.mp4"
+
+
+def test_editengine1_second_connection_reuses_same_job_after_restart(tmp_path: Path) -> None:
+    database = tmp_path / "edit.db"
+    first_conn = _conn(database)
+    first = _create(first_conn)
+    first_conn.commit()
+    first_conn.close()
+
+    second_conn = sqlite3.connect(database)
+    second = _create(second_conn)
+    second_conn.commit()
+    assert second["created"] is False
+    assert second["local_worker_job_id"] == first["local_worker_job_id"]
+    assert second_conn.execute("SELECT COUNT(*) FROM local_worker_jobs").fetchone()[0] == 1
+
+
+def test_editengine1_success_requires_valid_delivery_receipt() -> None:
+    conn = _conn()
+    created = _create(conn)
+    conn.commit()
+    job = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt={},
+    )
+    conn.commit()
+    assert job["status"] == "failed_no_charge"
+    assert job["blocker"] == "delivery_receipt_invalid"
+    assert job["receipt_state"] == "not_created"
+    assert job["charge_state"] == "not_charged"
+    assert job["charged_xu"] == 0
+
+
+def test_editengine1_delivery_receipt_and_charge_are_once_only() -> None:
+    conn = _conn()
+    created = _create(conn)
+    conn.commit()
+    worker_job_id = created["local_worker_job_id"]
+    rendered = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="running",
+        detail={"stage": "processing_video"},
+        receipt={},
+    )
+    assert rendered["status"] == "rendering"
+    assert rendered["progress_percent"] == 55
+    delivered = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt=_receipt(),
+    )
+    conn.commit()
+    assert delivered["status"] == "delivered"
+    assert delivered["receipt_state"] == "created"
+    assert delivered["delivery_message_id"] == "9001"
+    assert delivered["output_size_bytes"] == 4096
+    assert delivered["output_sha256"] == "b" * 64
+    assert delivered["ffprobe"]["video_codec"] == "h264"
+    assert video_editengine1.claim_charge(conn, worker_job_id=worker_job_id) is True
+    assert video_editengine1.claim_charge(conn, worker_job_id=worker_job_id) is False
+    charged = video_editengine1.mark_charge_result(conn, worker_job_id=worker_job_id, ok=True, charged_xu=100)
+    conn.commit()
+    assert charged["status"] == "charged"
+    assert charged["charged_xu"] == 100
+    duplicate = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=worker_job_id,
+        worker_status="succeeded",
+        detail={"validation": "passed"},
+        receipt={**_receipt(), "delivery_message_id": "duplicate"},
+    )
+    assert duplicate["delivery_message_id"] == "9001"
+    assert duplicate["charged_xu"] == 100
+
+
+def test_editengine1_worker_failure_is_terminal_no_charge() -> None:
+    conn = _conn()
+    created = _create(conn)
+    conn.commit()
+    failed = video_editengine1.record_worker_update(
+        conn,
+        worker_job_id=created["local_worker_job_id"],
+        worker_status="failed",
+        detail={"reason": "ffmpeg_failed"},
+        receipt={},
+    )
+    conn.commit()
+    assert failed["status"] == "failed_no_charge"
+    assert failed["blocker"] == "ffmpeg_failed"
+    assert failed["receipt_state"] == "not_created"
+    assert failed["charged_xu"] == 0
+    assert conn.execute("SELECT status,terminal_reason FROM video_edit_outbox").fetchone() == (
+        "terminal_failed",
+        "ffmpeg_failed",
+    )
+
+
+@pytest.mark.parametrize(
+    ("percent", "expression"),
+    [(20, "eq=brightness=-0.400"), (80, "eq=brightness=-0.100"), (120, "eq=brightness=0.100"), (200, "eq=brightness=0.500")],
+)
+def test_editengine1_brightness_maps_to_real_ffmpeg_filter(tmp_path: Path, percent: int, expression: str) -> None:
+    command = _manual_command(tmp_path, percent)
+    joined = " ".join(command)
+    assert expression in joined
+    assert "libx264" in command
+    assert "aac" in command
+    assert "-shortest" not in command
+    assert command[command.index("-t") + 1] == "4.000"
+
+
+def test_editengine1_brightness_100_is_unchanged_and_no_audio_is_supported(tmp_path: Path) -> None:
+    command = _manual_command(tmp_path, 100, audio=False)
+    assert "eq=brightness=" not in " ".join(command)
+    assert "-an" in command
+    assert "-c:a" not in command
+    assert "libx264" in command
+
+
+def test_editengine1_real_ffmpeg_brightness_preserves_h264_aac_and_duration(tmp_path: Path) -> None:
+    ffmpeg = validation.find_ffmpeg()
+    ffprobe = validation.find_ffprobe(ffmpeg_path=ffmpeg)
+    if not ffmpeg or not ffprobe:
+        pytest.skip("FFmpeg/ffprobe unavailable")
+    source = tmp_path / "source.mp4"
+    fixture = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+    assert fixture.returncode == 0, fixture.stderr[-1200:]
+    plan = editing.default_manual_edit_plan(str(source))
+    plan["trim"] = {"start_ms": 0, "end_ms": 2_000}
+    plan["brightness_percent"] = 200
+    output = tmp_path / "brightness-200.mp4"
+    result = editing.execute_manual_edit(
+        plan,
+        output_path=str(output),
+        workspace=tmp_path,
+        ffmpeg_path=ffmpeg,
+        ffprobe_path=ffprobe,
+        timeout=45,
+    )
+    assert result["ok"] is True
+    assert result["validation"]["video_codec"] == "h264"
+    assert result["validation"]["has_audio"] is True
+    assert abs(int(result["validation"]["duration_ms"]) - 2_000) <= 750
+    audio_probe = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", str(output)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert audio_probe.returncode == 0
+    assert audio_probe.stdout.strip() == "aac"
+
+
+class _Response:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def test_editengine1_telegram_http_rejection_falls_back_once_to_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"mp4-data")
+    calls: list[str] = []
+
+    def urlopen(request, timeout=0):
+        url = str(request.full_url)
+        calls.append(url)
+        if url.endswith("/sendVideo"):
+            raise urllib.error.HTTPError(url, 400, "bad request", {}, io.BytesIO())
+        return _Response({"ok": True, "result": {"message_id": 99, "document": {"file_id": "doc-file"}}})
+
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(local_worker.urllib.request, "urlopen", urlopen)
+    result = local_worker.telegram_send_video_receipt(88, str(video), "done")
+    assert result == {"sent": True, "file_id": "doc-file", "message_id": "99", "delivery_method": "sendDocument"}
+    assert [url.rsplit("/", 1)[-1] for url in calls] == ["sendVideo", "sendDocument"]
+
+
+def test_editengine1_telegram_timeout_does_not_duplicate_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"mp4-data")
+    calls = 0
+
+    def timeout(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise socket.timeout("timeout")
+
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(local_worker.urllib.request, "urlopen", timeout)
+    with pytest.raises(RuntimeError, match="telegram_delivery_outcome_uncertain"):
+        local_worker.telegram_send_video_receipt(88, str(video), "done")
+    assert calls == 1
+
+
+def test_editengine1_telegram_server_error_does_not_duplicate_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"mp4-data")
+    calls = 0
+
+    def server_error(request, timeout=0):
+        nonlocal calls
+        calls += 1
+        url = str(request.full_url)
+        raise urllib.error.HTTPError(url, 500, "server error", {}, io.BytesIO())
+
+    monkeypatch.setattr(local_worker, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(local_worker.urllib.request, "urlopen", server_error)
+    with pytest.raises(RuntimeError, match="telegram_delivery_outcome_uncertain"):
+        local_worker.telegram_send_video_receipt(88, str(video), "done")
+    assert calls == 1
+
+
+def test_editengine1_bot_charges_only_after_persisted_delivery_truth() -> None:
+    start = BOT_SOURCE.index("def handle_video_local_edit_worker_job_update")
+    end = BOT_SOURCE.index("async def submit_video_ai_edit_job", start)
+    source = BOT_SOURCE[start:end]
+    assert source.index("video_editengine1.record_worker_update(") < source.index("video_editengine1.claim_charge(")
+    assert source.index("video_editengine1.claim_charge(") < source.index("spend_fixed_credit_info(")
+    assert source.index("spend_fixed_credit_info(") < source.index("video_editengine1.mark_charge_result(")
+    assert 'canonical.get("status") == "delivered"' in source
+
+
+def test_editengine1_worker_receipt_contains_real_delivery_and_validation_truth() -> None:
+    start = WORKER_SOURCE.index("def run_video_local_edit")
+    end = WORKER_SOURCE.index("def _aiedit_progress", start)
+    source = WORKER_SOURCE[start:end]
+    for required in (
+        "telegram_send_video_receipt(",
+        'delivery.get("message_id")',
+        'delivery.get("file_id")',
+        '"output_sha256"',
+        '"output_size_bytes"',
+        '"ffprobe"',
+        'terminal_status = "succeeded"',
+    ):
+        assert required in source
+    assert source.index("telegram_send_video_receipt(") < source.index('terminal_status = "succeeded"')
+
+
+def test_editengine1_scope_has_no_real_provider_calls_or_early_charge() -> None:
+    service = (ROOT / "services" / "video_editengine1.py").read_text(encoding="utf-8")
+    submit_start = BOT_SOURCE.index("async def submit_local_video_editor_job")
+    submit_end = BOT_SOURCE.index("async def handle_video_editor_pending_upload", submit_start)
+    submit = BOT_SOURCE[submit_start:submit_end]
+    for forbidden in ("ShopAIKey", "Key4U", "provider.submit", "requests.", "httpx"):
+        assert forbidden not in service
+        assert forbidden not in submit
+    for forbidden in ("spend_fixed_credit_info", "deduct_dynamic_credit", "charge_user"):
+        assert forbidden not in submit

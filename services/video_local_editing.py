@@ -482,12 +482,13 @@ def _normalize_concat_inputs(
         command = [ffmpeg_path, "-y", "-i", source]
         if not probe.get("has_audio"):
             command.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
+        duration = max(0.001, float(probe.get("duration") or 0.0))
         command.extend([
             "-map", "0:v:0", "-map", "0:a:0?" if probe.get("has_audio") else "1:a:0",
             "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
             "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
-            "-shortest", "-movflags", "+faststart", str(target),
+            "-t", f"{duration:.3f}", "-movflags", "+faststart", str(target),
         ])
         _run_checked(command, timeout=timeout)
         normalized.append(target)

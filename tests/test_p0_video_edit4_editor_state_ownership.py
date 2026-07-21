@@ -161,10 +161,11 @@ def test_edit4_entering_two_means_two_parts_not_two_scenes() -> None:
 
 def test_edit4_editor_output_stays_edit_job_not_product_video() -> None:
     submit = _async_function_source("submit_local_video_editor_job")
-    assert 'command="video_local1"' in submit
-    assert 'job_type="video_local_edit"' in submit
+    assert "video_editengine1.create_job(" in submit
+    assert "video_editengine1.stable_idempotency_key(" in submit
     assert '"provider_call": False' in submit
-    assert '"charge_policy": "free_local_tool"' in submit
-    assert '"price_xu": 0' in submit
+    assert '"charge_policy": "after_valid_mp4_delivery"' in submit
+    assert '"quoted_price_xu": price_xu' in submit
+    assert "create_local_worker_job(" not in submit
     assert "video_profile_scene1" not in submit
     assert "video_scene3_flow" not in submit

@@ -150,14 +150,26 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "public_enabled": False,
         "scene_duration_seconds": 600,
     },
+    "video_local_edit": {
+        "flow_owner": "video_edit",
+        "engine_route": "local_worker_ffmpeg",
+        "executor_product_type": "video_local_edit",
+        "source_audio_available": True,
+        "return_to": "videoedit|review",
+    },
+}
+
+PRODUCT_ADAPTER_ALIASES = {
+    "video_edit": "video_local_edit",
 }
 
 
 def adapter_for(product_type: str) -> dict[str, Any]:
     key = str(product_type or "video_ai_real").strip()
-    adapter = PRODUCT_ADAPTERS.get(key) or PRODUCT_ADAPTERS["video_ai_real"]
+    adapter_key = PRODUCT_ADAPTER_ALIASES.get(key, key)
+    adapter = PRODUCT_ADAPTERS.get(adapter_key) or PRODUCT_ADAPTERS["video_ai_real"]
     result = deepcopy(adapter)
-    result["video_product_type"] = key if key in PRODUCT_ADAPTERS else "video_ai_real"
+    result["video_product_type"] = key if adapter_key in PRODUCT_ADAPTERS else "video_ai_real"
     result.setdefault("public_enabled", True)
     result.setdefault("scene_duration_seconds", 8)
     return result

@@ -183,7 +183,7 @@ def update_job(
         "status": status,
         "worker_id": LOCAL_WORKER_ID,
         "error_short": str(error_short or "")[: max(500, min(4000, int(detail_limit or 500)))],
-        "output_url": str(output_url or "")[:1000],
+        "output_url": str(output_url or "")[:4000],
         "output_file_id": str(output_file_id or "")[:500],
     }
     http_json("POST", "/internal/worker/job_update", payload, timeout=20)
@@ -396,41 +396,62 @@ def telegram_send_video_receipt(
 ) -> dict:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
-    boundary = "----TOANAASLocalWorkerBoundary"
     with open(video_path, "rb") as handle:
         video_bytes = handle.read()
-    fields = {
-        "chat_id": str(chat_id or ""),
-        "caption": str(caption or "")[:1000],
-    }
-    if reply_markup:
-        fields["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
-    body = bytearray()
-    for key, value in fields.items():
-        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
     safe_filename = safe_display_filename(filename or os.path.basename(video_path), "toan_aas_video.mp4")
     if not safe_filename.lower().endswith(".mp4"):
         safe_filename = "toan_aas_video.mp4"
-    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"video\"; filename=\"{safe_filename}\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8"))
-    body.extend(video_bytes)
-    body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
-    request = urllib.request.Request(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo",
-        data=bytes(body),
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        data = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
-    if not data.get("ok"):
-        raise RuntimeError("telegram_send_video_failed")
-    result = data.get("result") or {}
-    videos = result.get("video") or {}
-    return {
-        "sent": True,
-        "file_id": str(videos.get("file_id") or ""),
-        "message_id": str(result.get("message_id") or ""),
-    }
+
+    def send(method: str, file_field: str) -> dict:
+        boundary = f"----TOANAASLocalWorkerBoundary{method}"
+        fields = {"chat_id": str(chat_id or ""), "caption": str(caption or "")[:1000]}
+        if reply_markup:
+            fields["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        body = bytearray()
+        for key, value in fields.items():
+            body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
+        body.extend(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+            f"filename=\"{safe_filename}\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8")
+        )
+        body.extend(video_bytes)
+        body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        request = urllib.request.Request(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}",
+            data=bytes(body),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
+        if not data.get("ok"):
+            raise RuntimeError(f"telegram_{method.lower()}_failed")
+        result = data.get("result") or {}
+        media = result.get(file_field) or {}
+        return {
+            "sent": True,
+            "file_id": str(media.get("file_id") or ""),
+            "message_id": str(result.get("message_id") or ""),
+            "delivery_method": method,
+        }
+
+    try:
+        return send("sendVideo", "video")
+    except urllib.error.HTTPError as exc:
+        status = int(getattr(exc, "code", 0) or 0)
+        if status in {400, 413, 422}:
+            # Telegram rejected the video representation before accepting it.
+            # A document fallback is therefore deterministic and non-duplicating.
+            return send("sendDocument", "document")
+        if 400 <= status < 500:
+            raise RuntimeError("telegram_delivery_rejected") from exc
+        # A server-side failure can occur after Telegram accepted the upload.
+        # Never issue a second send while delivery truth is uncertain.
+        raise RuntimeError("telegram_delivery_outcome_uncertain") from exc
+    except (TimeoutError, socket.timeout, urllib.error.URLError) as exc:
+        # Telegram may have accepted the upload before the connection timed out.
+        # Do not issue a second send when delivery truth is uncertain.
+        raise RuntimeError("telegram_delivery_outcome_uncertain") from exc
 
 
 def telegram_send_video(
@@ -576,6 +597,7 @@ def run_video_local_edit(job: dict) -> None:
     terminal_status = "failed"
     terminal_detail = "failed_no_charge"
     output_file_ids: list[str] = []
+    terminal_receipt: dict = {}
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
         source_file_id = str(payload.get("source_file_id") or "")
@@ -597,7 +619,10 @@ def run_video_local_edit(job: dict) -> None:
             ALLOWED_SOURCE_EXTENSIONS,
             "source",
         )
+        source_sha256 = video_ai_edit_validation.sha256_file(source_path)
+        source_video_path = os.path.basename(source_path)
         mode = str(payload.get("local1_mode") or "manual").strip().lower()
+        price_xu = max(0, int(payload.get("price_xu") or 0))
         timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(30, int(payload.get("max_render_seconds") or 600)))
         if mode == "split":
             raw_ranges = [item for item in payload.get("split_ranges") or [] if isinstance(item, dict)]
@@ -631,18 +656,42 @@ def run_video_local_edit(job: dict) -> None:
             )
             outputs = list(result.get("outputs") or [])
             total = len(outputs)
+            delivery_receipts: list[dict] = []
             for index, item in enumerate(outputs, start=1):
                 output_path = str(item.get("path") or "")
                 if not delivery_file_allowed(output_path, workspace=workspace):
                     raise LocalVideoEditError("forbidden_delivery_artifact")
                 _local1_progress(job_id, "delivering", processed=total, total=total, delivered=index - 1)
                 duration_seconds = max(0.0, float(item.get("duration_ms") or 0) / 1000)
-                output_file_ids.append(telegram_send_video(
+                delivery = telegram_send_video_receipt(
                     chat_id,
                     output_path,
-                    f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · 0 Xu",
+                    f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · chỉ ghi phí sau khi giao đủ kết quả",
                     filename=os.path.basename(output_path),
-                ))
+                )
+                if not delivery.get("sent") or not delivery.get("file_id") or not delivery.get("message_id"):
+                    raise LocalVideoEditError("delivery_receipt_missing")
+                output_file_ids.append(str(delivery.get("file_id") or ""))
+                delivery_receipts.append({
+                    "message_id": str(delivery.get("message_id") or ""),
+                    "file_id": str(delivery.get("file_id") or ""),
+                    "size": int(os.path.getsize(output_path)),
+                    "sha256": video_ai_edit_validation.sha256_file(output_path),
+                    "ffprobe": dict(item.get("validation") or {}),
+                })
+            joined_hashes = "|".join(item["sha256"] for item in delivery_receipts)
+            terminal_receipt = {
+                "delivery_message_id": ",".join(item["message_id"] for item in delivery_receipts),
+                "delivery_file_id": str(delivery_receipts[0]["file_id"] if delivery_receipts else ""),
+                "source_video_path": source_video_path,
+                "source_sha256": source_sha256,
+                "output_path": ",".join(os.path.basename(str(item.get("path") or "")) for item in outputs)[:500],
+                "output_size_bytes": sum(int(item["size"]) for item in delivery_receipts),
+                "output_sha256": hashlib.sha256(joined_hashes.encode("utf-8")).hexdigest(),
+                "ffprobe": dict(delivery_receipts[0].get("ffprobe") or {}) if delivery_receipts else {},
+                "output_count": len(delivery_receipts),
+                "charge_policy": "after_valid_mp4_delivery",
+            }
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "delivered",
@@ -651,7 +700,8 @@ def run_video_local_edit(job: dict) -> None:
                 "total": total,
                 "delivered": total,
                 "validation": "passed",
-                "charge": 0,
+                "price_xu": price_xu,
+                "charge_status": "pending_post_delivery",
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
         else:
@@ -715,12 +765,28 @@ def run_video_local_edit(job: dict) -> None:
             if not result.get("ok") or not delivery_file_allowed(output_path, workspace=workspace):
                 raise LocalVideoEditError("output_validation_failed")
             _local1_progress(job_id, "delivering", processed=1, total=1)
-            output_file_ids.append(telegram_send_video(
+            delivery = telegram_send_video_receipt(
                 chat_id,
                 str(output_path),
-                "✅ Video đã chỉnh sửa xong · 0 Xu",
+                "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi giao file MP4 hợp lệ.",
                 filename=output_path.name,
-            ))
+            )
+            if not delivery.get("sent") or not delivery.get("file_id") or not delivery.get("message_id"):
+                raise LocalVideoEditError("delivery_receipt_missing")
+            output_file_ids.append(str(delivery.get("file_id") or ""))
+            validation = dict(result.get("validation") or {})
+            terminal_receipt = {
+                "delivery_message_id": str(delivery.get("message_id") or ""),
+                "delivery_file_id": str(delivery.get("file_id") or ""),
+                "source_video_path": source_video_path,
+                "source_sha256": source_sha256,
+                "output_path": output_path.name,
+                "output_size_bytes": int(os.path.getsize(output_path)),
+                "output_sha256": video_ai_edit_validation.sha256_file(output_path),
+                "ffprobe": validation,
+                "output_count": 1,
+                "charge_policy": "after_valid_mp4_delivery",
+            }
             terminal_detail = json.dumps({
                 "local1": 1,
                 "stage": "delivered",
@@ -729,7 +795,8 @@ def run_video_local_edit(job: dict) -> None:
                 "total": 1,
                 "delivered": 1,
                 "validation": "passed",
-                "charge": 0,
+                "price_xu": price_xu,
+                "charge_status": "pending_post_delivery",
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
         terminal_status = "succeeded"
@@ -774,6 +841,8 @@ def run_video_local_edit(job: dict) -> None:
             terminal_status,
             terminal_detail,
             output_file_id=",".join(item for item in output_file_ids if item)[:500],
+            output_url=json.dumps(terminal_receipt, ensure_ascii=False, separators=(",", ":")) if terminal_receipt else "",
+            detail_limit=4000,
         )
 
 
