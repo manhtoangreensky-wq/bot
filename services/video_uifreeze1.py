@@ -9,6 +9,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from services import video_tail9
+
 
 PUBLIC_MENU_ROWS = (
     ("video_trend", "video_ai_real"),
@@ -32,10 +34,12 @@ CANONICAL_PRICING_PRODUCTS = frozenset({
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
     "video_idea",
+    "multi_scene_film",
+    "video_long",
 })
 
 FRAMEVIDEO_PRICING_PRODUCTS = frozenset({"frame_video_local", "image_to_video"})
-PUBLIC_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long"})
+PUBLIC_EXECUTION_LOCKED_PRODUCTS = frozenset({"multi_scene_film", "video_long"})
 
 QUALITY_TIER_ORDER = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
 
@@ -136,11 +140,23 @@ def tier_spec(tier_id: int) -> dict[str, Any]:
 
 
 def uses_canonical_pricing(product_type: str) -> bool:
-    return str(product_type or "").strip() in CANONICAL_PRICING_PRODUCTS
+    product = str(product_type or "").strip()
+    if product not in video_tail9.PRODUCT_ADAPTERS and product not in video_tail9.PRODUCT_ADAPTER_ALIASES:
+        return False
+    contract = video_tail9.commercial_contract(product)
+    return (
+        str(contract.get("pricing_mode") or "") == "canonical"
+        and str(contract.get("product_type") or "") in CANONICAL_PRICING_PRODUCTS
+    )
 
 
 def uses_framevideo_pricing(product_type: str) -> bool:
-    return str(product_type or "").strip() in FRAMEVIDEO_PRICING_PRODUCTS
+    product = str(product_type or "").strip()
+    if product in FRAMEVIDEO_PRICING_PRODUCTS:
+        return True
+    if product not in video_tail9.PRODUCT_ADAPTERS and product not in video_tail9.PRODUCT_ADAPTER_ALIASES:
+        return False
+    return str(video_tail9.commercial_contract(product).get("pricing_mode") or "") == "frame_video"
 
 
 def compatible_quality_tiers(
@@ -152,19 +168,36 @@ def compatible_quality_tiers(
 ) -> list[dict[str, Any]]:
     """Return catalog-compatible tiers without consulting runtime health."""
 
-    product = str(product_type or "").strip()
-    if product in FRAMEVIDEO_PRICING_PRODUCTS or product in PUBLIC_LOCKED_PRODUCTS:
+    requested_product = str(product_type or "").strip()
+    if requested_product not in video_tail9.PRODUCT_ADAPTERS and requested_product not in video_tail9.PRODUCT_ADAPTER_ALIASES:
+        return []
+    contract = video_tail9.commercial_contract(requested_product)
+    product = str(contract.get("product_type") or "")
+    if str(contract.get("pricing_mode") or "") == "frame_video":
         return []
     if product not in CANONICAL_PRICING_PRODUCTS:
         return []
     count = max(1, int(scene_count or 1))
     aspect = str(ratio or "9:16")
-    capability = str(required_capability or "").strip()
+    capability = str(required_capability or contract.get("required_capability") or "").strip()
+    if not (
+        int(contract.get("minimum_scene_count") or 1)
+        <= count
+        <= int(contract.get("maximum_scene_count") or 20)
+    ):
+        return []
+    if count == 1 and not bool(contract.get("supports_single_scene")):
+        return []
+    supported_tiers = {int(item) for item in contract.get("supported_quality_tiers") or ()}
     offers: list[dict[str, Any]] = []
     for tier_id in QUALITY_TIER_ORDER:
+        if tier_id not in supported_tiers:
+            continue
         spec = tier_spec(tier_id)
         capabilities = set(spec.get("capabilities") or ())
         if count > int(spec.get("max_scenes") or 1):
+            continue
+        if tier_id == 200 and (count != 1 or not bool(contract.get("supports_single_scene"))):
             continue
         if aspect and aspect != "keep" and f"ratio_{aspect}" not in capabilities and tier_id != 200:
             continue
@@ -186,6 +219,11 @@ def catalog_report(
     ratio: str = "9:16",
     required_capability: str = "",
 ) -> dict[str, Any]:
+    requested_product = str(product_type or "").strip()
+    known_product = (
+        requested_product in video_tail9.PRODUCT_ADAPTERS
+        or requested_product in video_tail9.PRODUCT_ADAPTER_ALIASES
+    )
     offers = compatible_quality_tiers(
         product_type,
         scene_count=scene_count,
@@ -194,7 +232,11 @@ def catalog_report(
     )
     return {
         "ok": bool(offers),
-        "product_type": str(product_type or ""),
+        "product_type": str(
+            video_tail9.commercial_contract(requested_product).get("product_type")
+            if known_product
+            else requested_product
+        ),
         "uses_canonical_pricing": uses_canonical_pricing(product_type),
         "framevideo_excluded": uses_framevideo_pricing(product_type),
         "required_capability": str(required_capability or ""),

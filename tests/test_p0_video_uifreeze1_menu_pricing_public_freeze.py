@@ -36,12 +36,12 @@ def test_public_video_menu_order_is_frozen_without_callback_changes() -> None:
     assert "callback_data=str(route.get(\"entry_callback\")" in menu_builder
 
 
-def test_long_video_stays_publicly_locked() -> None:
+def test_long_video_opens_catalog_but_keeps_execution_locked() -> None:
     assert video_long_planning.PUBLIC_ENABLED is False
-    assert "multi_scene_film" in video_uifreeze1.PUBLIC_LOCKED_PRODUCTS
+    assert "multi_scene_film" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
     report = video_uifreeze1.catalog_report("multi_scene_film", scene_count=1)
-    assert report["ok"] is False
-    assert report["reason"] == "no_compatible_quality_package"
+    assert report["ok"] is True
+    assert report["tier_ids"] == [300, 400, 500, 600, 800, 1000, 1200, 1500]
 
 
 def test_storyboard_catalog_keeps_compatible_image_video_packages_visible() -> None:
