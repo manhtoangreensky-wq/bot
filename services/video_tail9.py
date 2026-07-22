@@ -55,6 +55,9 @@ STATUS_STAGES = (
     "failed",
 )
 
+CANONICAL_QUALITY_TIERS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
+MULTI_SCENE_QUALITY_TIERS = tuple(item for item in CANONICAL_QUALITY_TIERS if item != 200)
+
 
 PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
     "video_ai_real": {
@@ -63,6 +66,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_ai_prompt",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "text_to_video",
+        "input_type": "text_prompt",
+        "worker_owner": "product_video",
     },
     "video_ai_prompt": {
         "flow_owner": "scene3",
@@ -70,6 +76,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_ai_prompt",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "text_to_video",
+        "input_type": "text_prompt",
+        "worker_owner": "product_video",
     },
     "video_ai_image": {
         "flow_owner": "scene3",
@@ -77,6 +86,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_ai_image",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "image_to_video",
+        "input_type": "scene_images",
+        "worker_owner": "product_video",
     },
     "video_ai_video_reference": {
         "flow_owner": "scene3",
@@ -84,6 +96,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_ai_video_reference",
         "source_audio_available": True,
         "return_to": "vprofile|full_review",
+        "required_capability": "video_to_video",
+        "input_type": "source_video",
+        "worker_owner": "product_video",
     },
     "script_image_video": {
         "flow_owner": "scene3",
@@ -91,6 +106,12 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "script_to_video",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "text_to_video",
+        "input_type": "long_script",
+        "worker_owner": "product_video",
+        "minimum_scene_count": 2,
+        "supports_single_scene": False,
+        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
     },
     "storyboard_prompt": {
         "flow_owner": "storyboard",
@@ -98,6 +119,12 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "storyboard_prompt",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "image_to_video",
+        "input_type": "storyboard_frames",
+        "worker_owner": "product_video",
+        "minimum_scene_count": 2,
+        "supports_single_scene": False,
+        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
     },
     "video_trend": {
         "flow_owner": "trend",
@@ -105,6 +132,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_trend",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "text_to_video",
+        "input_type": "trend_prompt",
+        "worker_owner": "product_video",
     },
     "frame_video_local": {
         "flow_owner": "frame_video",
@@ -112,6 +142,10 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "image_to_video",
         "source_audio_available": False,
         "return_to": "framevideo|review",
+        "pricing_mode": "frame_video",
+        "required_capability": "local_ffmpeg",
+        "input_type": "image_sequence",
+        "worker_owner": "frame_video",
     },
     "self_shot_scene_change": {
         "flow_owner": "selfshot2",
@@ -119,6 +153,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "self_shot_scene_change",
         "source_audio_available": True,
         "return_to": "vproduct|ss2|show|review",
+        "required_capability": "video_to_video",
+        "input_type": "source_video",
+        "worker_owner": "selfshot2",
     },
     "self_shot_cinematic_transform": {
         "flow_owner": "selfshot3",
@@ -126,6 +163,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "self_shot_cinematic_transform",
         "source_audio_available": True,
         "return_to": "vproduct|ss3|show|review",
+        "required_capability": "video_to_video",
+        "input_type": "source_video",
+        "worker_owner": "selfshot3",
     },
     "video_idea": {
         "flow_owner": "scene3",
@@ -133,6 +173,9 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_idea_to_product",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "text_to_video",
+        "input_type": "idea_preset",
+        "worker_owner": "product_video",
     },
     "multi_scene_film": {
         "flow_owner": "scene3",
@@ -140,6 +183,14 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "multi_scene_film",
         "source_audio_available": False,
         "return_to": "vprofile|full_review",
+        "required_capability": "text_to_video",
+        "input_type": "long_form_plan",
+        "worker_owner": "product_video",
+        "scene_duration_seconds": 600,
+        "maximum_scene_count": 12,
+        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "execution_enabled": False,
+        "execution_blocker": "long_video_under_upgrade",
     },
     "video_long": {
         "flow_owner": "video_long",
@@ -149,6 +200,13 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "return_to": "vproduct|open|video_long",
         "public_enabled": False,
         "scene_duration_seconds": 600,
+        "required_capability": "text_to_video",
+        "input_type": "long_form_plan",
+        "worker_owner": "product_video",
+        "maximum_scene_count": 12,
+        "supported_quality_tiers": MULTI_SCENE_QUALITY_TIERS,
+        "execution_enabled": False,
+        "execution_blocker": "long_video_under_upgrade",
     },
     "video_local_edit": {
         "flow_owner": "video_edit",
@@ -156,11 +214,21 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "executor_product_type": "video_local_edit",
         "source_audio_available": True,
         "return_to": "videoedit|review",
+        "required_capability": "video_to_video",
+        "input_type": "source_video",
+        "worker_owner": "video_edit",
     },
 }
 
 PRODUCT_ADAPTER_ALIASES = {
     "video_edit": "video_local_edit",
+    "video_ai_realistic": "video_ai_real",
+    "trend_video": "video_trend",
+    "script_to_video": "script_image_video",
+    "storyboard_to_video": "storyboard_prompt",
+    "frame_video": "frame_video_local",
+    "image_to_video": "frame_video_local",
+    "long_video": "multi_scene_film",
 }
 
 
@@ -170,9 +238,131 @@ def adapter_for(product_type: str) -> dict[str, Any]:
     adapter = PRODUCT_ADAPTERS.get(adapter_key) or PRODUCT_ADAPTERS["video_ai_real"]
     result = deepcopy(adapter)
     result["video_product_type"] = key if adapter_key in PRODUCT_ADAPTERS else "video_ai_real"
+    result["adapter_key"] = adapter_key if adapter_key in PRODUCT_ADAPTERS else "video_ai_real"
+    result["canonical_product_type"] = result["adapter_key"]
     result.setdefault("public_enabled", True)
+    result.setdefault("public_planning_enabled", True)
+    result.setdefault("execution_enabled", True)
+    result.setdefault("execution_blocker", "")
     result.setdefault("scene_duration_seconds", 8)
+    result.setdefault("minimum_scene_count", 1)
+    result.setdefault("maximum_scene_count", 20)
+    result.setdefault("supports_single_scene", True)
+    result.setdefault("supported_quality_tiers", CANONICAL_QUALITY_TIERS)
+    result.setdefault("pricing_mode", "canonical")
+    result.setdefault("required_capability", "text_to_video")
+    result.setdefault("input_type", "text_prompt")
+    result.setdefault("output_type", "mp4")
+    result.setdefault("worker_owner", "product_video")
     return result
+
+
+def commercial_contract(product_type: str) -> dict[str, Any]:
+    """Return the product contract used by catalog, invoice and confirmation.
+
+    The contract contains no provider or worker health. Runtime readiness is a
+    final-confirm concern and must never erase compatible public packages.
+    """
+
+    adapter = adapter_for(product_type)
+    return {
+        "product_type": str(adapter["canonical_product_type"]),
+        "flow_owner": str(adapter["flow_owner"]),
+        "engine_route": str(adapter["engine_route"]),
+        "executor_product_type": str(adapter["executor_product_type"]),
+        "pricing_mode": str(adapter["pricing_mode"]),
+        "required_capability": str(adapter["required_capability"]),
+        "input_type": str(adapter["input_type"]),
+        "output_type": str(adapter["output_type"]),
+        "worker_owner": str(adapter["worker_owner"]),
+        "minimum_scene_count": max(1, int(adapter["minimum_scene_count"])),
+        "maximum_scene_count": max(1, int(adapter["maximum_scene_count"])),
+        "supports_single_scene": bool(adapter["supports_single_scene"]),
+        "supported_quality_tiers": tuple(int(item) for item in adapter["supported_quality_tiers"]),
+        "supported_package_tiers": tuple(int(item) for item in adapter["supported_quality_tiers"]),
+        "scene_duration_seconds": max(1, int(adapter["scene_duration_seconds"])),
+        "public_planning_enabled": bool(adapter["public_planning_enabled"]),
+        "execution_enabled": bool(adapter["execution_enabled"]),
+        "execution_blocker": str(adapter["execution_blocker"]),
+    }
+
+
+def package_compatibility(
+    product_type: str,
+    *,
+    scene_count: int,
+    ratio: str,
+    quality_tier_id: int = 0,
+    asset_ready: bool = True,
+    input_valid: bool = True,
+) -> dict[str, Any]:
+    contract = commercial_contract(product_type)
+    count = max(1, int(scene_count or 1))
+    tier_id = int(quality_tier_id or 0)
+    blockers: list[str] = []
+    if not (contract["minimum_scene_count"] <= count <= contract["maximum_scene_count"]):
+        blockers.append("scene_count_not_supported")
+    if count == 1 and not contract["supports_single_scene"]:
+        blockers.append("single_scene_not_supported")
+    if tier_id and tier_id not in set(contract["supported_quality_tiers"]):
+        blockers.append("quality_tier_not_supported")
+    if not input_valid:
+        blockers.append("input_not_ready")
+    if not asset_ready:
+        blockers.append("assets_not_ready")
+    if str(ratio or "") not in {"9:16", "16:9", "1:1", "4:5", "keep"}:
+        blockers.append("ratio_not_supported")
+    return {
+        **contract,
+        "ok": not blockers,
+        "blockers": blockers,
+        "reason": blockers[0] if blockers else "",
+        "scene_count": count,
+        "ratio": str(ratio or "9:16"),
+        "quality_tier_id": tier_id,
+        "side_effects": {
+            "job": 0,
+            "outbox": 0,
+            "provider_calls": 0,
+            "generated_files": 0,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        },
+    }
+
+
+def status_contract(product_type: str) -> dict[str, Any]:
+    contract = commercial_contract(product_type)
+    product_stages = {
+        "video_ai_real": ("planning", "preparing_assets", "rendering_scenes", "composing"),
+        "video_trend": ("locking_trend", "rendering_scenes", "composing", "validating_mp4"),
+        "script_image_video": ("locking_script", "rendering_scenes", "composing", "validating_mp4"),
+        "storyboard_prompt": ("locking_storyboard", "preparing_images", "animating_scenes", "composing"),
+        "self_shot_scene_change": ("analyzing_source", "changing_scenes", "continuity", "composing"),
+        "self_shot_cinematic_transform": ("analyzing_source", "cinematic_transform", "continuity", "composing"),
+        "frame_video_local": ("preparing_images", "rendering_transitions", "mixing_audio", "validating_mp4"),
+        "multi_scene_film": ("locking_long_plan", "preparing_chapters", "rendering_chapters", "composing"),
+    }
+    return {
+        "product_type": contract["product_type"],
+        "engine_route": contract["engine_route"],
+        "stages": (
+            "received",
+            "preparing",
+            "rendering",
+            "postprocessing",
+            "validating_mp4",
+            "delivering",
+            "delivered",
+        ),
+        "product_stages": product_stages.get(
+            str(contract["product_type"]),
+            ("planning", "preparing_assets", "rendering", "postprocessing"),
+        ),
+        "delivery_requires_message_id": True,
+        "receipt_after_delivery": True,
+        "charge_after_receipt": True,
+    }
 
 
 def _volume(value: Any, default: int = 100) -> int:
@@ -379,6 +569,14 @@ def select_package(
     capability_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     current = normalize_state(state)
+    compatibility = package_compatibility(
+        str(current.get("video_product_type") or "video_ai_real"),
+        scene_count=int(current.get("scene_count") or 1),
+        ratio=str(current.get("ratio") or "9:16"),
+        quality_tier_id=int(quality_tier_id or 0),
+    )
+    if not compatibility.get("ok"):
+        raise ValueError(str(compatibility.get("reason") or "package_not_compatible"))
     capability = dict(capability_snapshot or {})
     if not capability.get("ok"):
         raise ValueError(str(capability.get("reason") or "engine_route_unavailable"))
@@ -389,6 +587,9 @@ def select_package(
     current["package_id"] = str(package_id or "")
     current["pricing_snapshot"] = pricing
     current["capability_snapshot"] = capability
+    current["invoice_id"] = str(
+        f"pv:{current['video_session_id']}:{current['plan_revision']}:{current['quality_tier_id']}"
+    )[:160]
     current["status_stage"] = "invoice"
     return current
 
@@ -411,6 +612,9 @@ def confirm_once(state: dict[str, Any], confirm_token: str) -> tuple[dict[str, A
     allowed, reason = invoice_allowed(current)
     if not allowed:
         raise ValueError(reason)
+    contract = commercial_contract(str(current.get("video_product_type") or "video_ai_real"))
+    if not contract.get("execution_enabled"):
+        raise ValueError(str(contract.get("execution_blocker") or "execution_disabled"))
     token = str(confirm_token or "").strip()
     if current.get("final_confirmed"):
         return current, False

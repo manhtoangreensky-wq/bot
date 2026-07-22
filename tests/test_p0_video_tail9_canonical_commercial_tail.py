@@ -225,12 +225,16 @@ def test_tail_confirmation_is_only_persisted_after_a_real_job_exists() -> None:
     assert 'tail["job_id"] = str(job_id)' in handler[persisted:]
 
 
-def test_long_video_remains_publicly_locked_at_ten_minutes_per_scene() -> None:
+def test_long_video_keeps_internal_engine_lock_but_opens_shared_commercial_preview() -> None:
     assert video_long_planning.PUBLIC_ENABLED is False
     assert video_long_planning.SCENE_DURATION_SECONDS == 600
-    adapter = video_tail9.adapter_for("video_long")
-    assert adapter["public_enabled"] is False
-    assert adapter["scene_duration_seconds"] == 600
+    contract = video_tail9.commercial_contract("long_video")
+    assert contract["public_planning_enabled"] is True
+    assert contract["execution_enabled"] is False
+    assert contract["execution_blocker"] == "long_video_under_upgrade"
+    assert contract["scene_duration_seconds"] == 600
+    handler = _between("async def handle_long_video_callback", "async def handle_storyboard_pack_callback")
+    assert 'query.data = "vproduct|open|multi_scene_film"' in handler
 
 
 def test_preconfirm_tail_contract_does_not_call_provider_or_mutate_wallet() -> None:

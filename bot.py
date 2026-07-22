@@ -66810,6 +66810,7 @@ VIDEO_SCENE2_PUBLIC_PRODUCTS = frozenset({
     "self_shot_scene_change",
     "video_idea",
     "storyboard_prompt",
+    "multi_scene_film",
 })
 
 # Public creation lanes share the FLOW6 intake.  Their required-media gates and
@@ -66823,6 +66824,7 @@ VIDEO_SCENE3_CANONICAL_PUBLIC_PRODUCTS = frozenset({
     "video_idea",
     "storyboard_prompt",
     "self_shot_scene_change",
+    "multi_scene_film",
 })
 
 VIDEO_SCENE2_LEGACY_PRICE_KEYS = frozenset({
@@ -73029,13 +73031,16 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎬 多场景 AI 影片",
         "entry_callback": "longvideo|public_guard",
         "handler": "handle_long_video_callback",
-        "expected_children": (),
+        "expected_children": (
+            "vproduct|scene3_start|multi_scene_film",
+            "vproduct|idea_library|multi_scene_film",
+        ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
-        "category": "long_video_developing",
-        "flow_type": "development_guard",
+        "category": "video_product",
+        "flow_type": "canonical_long_preview",
         "first_step": "intro",
-        "invoice_reachable": False,
+        "invoice_reachable": True,
         "job_reachable": False,
         "product_id": "multi_scene_film",
     },
@@ -73174,12 +73179,6 @@ def video_public_product_flow_access(product_id: str) -> dict:
             "product_id": product,
             "flow_access_allowed": False,
             "flow_block_reason": "unknown_video_product",
-        }
-    if product == "multi_scene_film":
-        return {
-            "product_id": product,
-            "flow_access_allowed": False,
-            "flow_block_reason": "long_form_video_in_development",
         }
     return {
         "product_id": product,
@@ -85735,6 +85734,22 @@ VIDEO_TAIL9_AUDIO_LABELS = {
     "environment": "Âm thanh môi trường",
 }
 
+VIDEO_TAIL9_PRODUCT_LABELS = {
+    "video_ai_real": "Video AI chân thật",
+    "video_ai_prompt": "Prompt → Video",
+    "video_ai_image": "Ảnh → Video AI",
+    "video_ai_video_reference": "Video mẫu → Video AI",
+    "script_image_video": "Kịch bản → Video",
+    "storyboard_prompt": "Storyboard",
+    "video_trend": "Video theo trend",
+    "frame_video_local": "Ghép ảnh thành video",
+    "self_shot_scene_change": "Tự quay & đổi cảnh AI",
+    "self_shot_cinematic_transform": "Tự quay & biến đổi điện ảnh",
+    "multi_scene_film": "Video dài tập",
+    "video_long": "Video dài tập",
+    "video_local_edit": "Chỉnh sửa / Nâng cấp video",
+}
+
 
 def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     """Return one scoped tail state and the canonical host that owns it."""
@@ -86096,6 +86111,86 @@ def video_tail9_preflight(user_id: int, context, tail: dict, owner: str, host: d
     return {**report, "ok": ok, "reason": reason, "engine_route": str(tail.get("engine_route") or "")}
 
 
+def video_tail9_runtime_only_blocker(value: str) -> bool:
+    blocker = str(value or "").strip().lower()
+    if blocker in {
+        "package_unavailable",
+        "execution_owner_unavailable",
+        "worker_runtime_unavailable",
+        "required_capability_unavailable",
+        "long_series_public_not_ready",
+        "long_form_video_in_development",
+        "long_video_under_upgrade",
+    }:
+        return True
+    return any(token in blocker for token in (
+        "provider_unavailable",
+        "provider_not_ready",
+        "provider_freeze",
+        "worker_unavailable",
+        "worker_not_ready",
+        "engine_unavailable",
+        "engine_not_ready",
+        "route_unavailable",
+        "owner_unavailable",
+        "owner_not_ready",
+        "executor_unavailable",
+        "capability_unavailable",
+        "capability_missing",
+    ))
+
+
+def video_tail9_commercial_preflight(
+    user_id: int,
+    context,
+    tail: dict,
+    owner: str,
+    host: dict,
+    quality: int = 300,
+) -> dict:
+    """Validate planning/package compatibility without binding UI to runtime health."""
+
+    runtime = video_tail9_preflight(user_id, context, tail, owner, host, quality)
+    compatibility = video_tail9.package_compatibility(
+        str(tail.get("video_product_type") or "video_ai_real"),
+        scene_count=safe_int(tail.get("scene_count"), 1),
+        ratio=str(tail.get("ratio") or "9:16"),
+        quality_tier_id=safe_int(quality, 0),
+    )
+    runtime_blockers = [str(item) for item in runtime.get("blockers") or [] if str(item)]
+    runtime_reason = str(runtime.get("reason") or runtime.get("blocker") or "")
+    if runtime_reason and not runtime.get("ok") and runtime_reason not in runtime_blockers:
+        runtime_blockers.append(runtime_reason)
+    structural_blockers = [
+        item for item in runtime_blockers if not video_tail9_runtime_only_blocker(item)
+    ]
+    if not compatibility.get("ok"):
+        structural_blockers.extend(str(item) for item in compatibility.get("blockers") or [])
+    structural_blockers = list(dict.fromkeys(item for item in structural_blockers if item))
+    return {
+        "ok": not structural_blockers,
+        "reason": structural_blockers[0] if structural_blockers else "",
+        "blocker": structural_blockers[0] if structural_blockers else "",
+        "blockers": structural_blockers,
+        "required_capability": str(compatibility.get("required_capability") or ""),
+        "engine_route": str(tail.get("engine_route") or compatibility.get("engine_route") or ""),
+        "runtime_ready": bool(runtime.get("ok")),
+        "runtime_reason": runtime_reason,
+        "runtime_blockers": runtime_blockers,
+        "execution_enabled": bool(compatibility.get("execution_enabled")),
+        "execution_blocker": str(compatibility.get("execution_blocker") or ""),
+        "commercial_contract": compatibility,
+        "side_effects": {
+            "job": 0,
+            "outbox": 0,
+            "provider_calls": 0,
+            "generated_files": 0,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        },
+    }
+
+
 def video_tail9_review_text(tail: dict) -> str:
     return (
         "🎬 <b>Review video</b>\n\n"
@@ -86269,14 +86364,8 @@ def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
 
 def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> dict:
     product = str(tail.get("video_product_type") or "video_ai_real")
-    required_capability = str((capability or {}).get("required_capability") or "")
-    if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
-        required_capability = "video_to_video"
-    if product == "storyboard_prompt" and required_capability not in {
-        "image_to_video",
-        "first_last_frame_video",
-    }:
-        required_capability = "image_to_video"
+    contract = video_tail9.commercial_contract(product)
+    required_capability = str(contract.get("required_capability") or "")
     return video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),
@@ -86289,8 +86378,9 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
     catalog = dict(catalog or video_tail9_catalog_report(tail, capability))
     lines = [
         "⭐ <b>Hoàn thiện video</b>", "",
-        f"• Engine riêng: <b>{html.escape(str(tail.get('engine_route') or 'chưa xác định'))}</b>",
-        f"• Trạng thái: <b>{'Sẵn sàng' if capability.get('ok') else 'Chưa sẵn sàng'}</b>",
+        f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(str(tail.get('video_product_type') or ''), str(tail.get('video_product_type') or 'Video AI')))}</b>",
+        f"• Đường dựng riêng: <b>{html.escape(str(tail.get('engine_route') or 'chưa xác định'))}</b>",
+        f"• Kế hoạch và gói: <b>{'Hợp lệ' if capability.get('ok') else 'Cần chỉnh lại'}</b>",
     ]
     if not capability.get("ok"):
         lines.append(f"• Lý do: <code>{html.escape(str(capability.get('reason') or 'engine_route_unavailable'))}</code>")
@@ -86302,12 +86392,12 @@ def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None 
             "Hãy bấm Kiểm tra lại sau khi chỉnh kế hoạch. Chưa tạo job và chưa trừ Xu.",
         ])
         return "\n".join(lines)[:4050]
-    lines.extend(["", "Các gói tương thích từ catalog giá chung; engine của sản phẩm không bị thay đổi:"])
+    lines.extend(["", "Các gói tương thích từ bảng giá chung; đường dựng riêng của sản phẩm không bị thay đổi:"])
     for offer in catalog.get("offers") or []:
         price = safe_int(offer.get("tier_id"), 0)
         level, detail = video_scene3_public_quality_spec(price, scene_count=safe_int(tail.get("scene_count"), 1))
         lines.append(f"• <b>{price} Xu/cảnh</b> · {html.escape(level)}: {html.escape(detail)}")
-    lines.extend(["", "Catalog gói và trạng thái engine được kiểm tra riêng. Chỉ tạo hóa đơn khi engine hiện tại sẵn sàng; chưa tạo job và chưa trừ Xu."])
+    lines.extend(["", "Gói và trạng thái hệ thống dựng được kiểm tra tách biệt. Hệ thống kiểm tra readiness lần cuối khi xác nhận; màn này chưa tạo job, chưa gọi provider và chưa trừ Xu."])
     return "\n".join(lines)[:4050]
 
 
@@ -86336,7 +86426,69 @@ def video_tail9_quality_keyboard(
 
 def video_tail9_invoice_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✅ Xác nhận tạo video", "video_tail|confirm"), ("📋 Xem lại kế hoạch", "video_tail|review|open")],
+        [("✅ Xác nhận tạo video", "video_tail|confirm")],
+        [("✍️ Sửa cấu hình", "video_tail|review|open"), ("⭐ Đổi gói", "video_tail|quality|open")],
+        [("⬅️ Quay lại", "video_tail|quality|open"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str = "vi") -> str:
+    pricing = dict(tail.get("pricing_snapshot") or {})
+    audio = dict(tail.get("audio_config") or {})
+    enabled_audio = [
+        VIDEO_TAIL9_AUDIO_LABELS[key]
+        for key in ("source_audio", "dubbing", "music", "sfx", "subtitles")
+        if audio.get(key)
+    ]
+    quality = safe_int(tail.get("quality_tier_id") or pricing.get("quality_xu"), 0)
+    package_label = str(pricing.get("package_label") or video_b14_package_full_label(quality))
+    total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
+    balance_line = ""
+    try:
+        credits, _, _ = get_user(user_id)
+        balance_line = f"• Số dư hiện tại: <b>{xu_number(int(credits or 0))} Xu</b>\n"
+    except Exception:
+        pass
+    logo = dict(tail.get("logo_config") or {})
+    watermark = dict(tail.get("watermark_config") or {})
+    branding = ", ".join(
+        label
+        for enabled, label in (
+            (logo.get("enabled"), "Logo"),
+            (watermark.get("enabled"), "Watermark"),
+        )
+        if enabled
+    ) or "Không thêm"
+    product = str(tail.get("video_product_type") or "video_ai_real")
+    return (
+        "🧾 <b>Hóa đơn tạo video</b>\n\n"
+        f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or 'chưa tạo'))}</code>\n"
+        f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(product, product))}</b>\n"
+        f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>\n"
+        f"• Thời lượng: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
+        f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
+        f"• Gói: <b>{html.escape(package_label)}</b>\n"
+        f"• Chất lượng: <b>{quality} Xu/cảnh</b>\n"
+        f"• Âm thanh/Add-on: <b>{html.escape(', '.join(enabled_audio) or 'Không thêm')}</b>\n"
+        f"• Logo/Watermark: <b>{html.escape(branding)}</b>\n"
+        f"• Tổng: <b>{xu_number(total)} Xu</b>\n"
+        f"{balance_line}\n"
+        "Bấm xác nhận để hệ thống kiểm tra readiness lần cuối. Chỉ trừ Xu sau khi MP4 hợp lệ đã được gửi qua Telegram, có message_id và biên nhận thành công."
+    )[:4050]
+
+
+def video_tail9_long_maintenance_text(tail: dict) -> str:
+    return (
+        "🛠️ <b>Video dài tập đang được nâng cấp</b>\n\n"
+        f"Kế hoạch <b>{safe_int(tail.get('scene_count'), 1)} cảnh</b>, khoảng "
+        f"<b>{safe_int(tail.get('estimated_duration'), 600) // 60} phút</b> và gói đã chọn vẫn được giữ nguyên.\n\n"
+        "TOAN AAS chưa tạo job, chưa tạo outbox, chưa gọi provider và chưa trừ Xu. Anh/chị có thể xem lại cấu hình hoặc kiểm tra lại sau."
+    )
+
+
+def video_tail9_long_maintenance_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("🔄 Kiểm tra lại", "video_tail|confirm"), ("📄 Xem cấu hình", "video_tail|review|open")],
         [("⬅️ Quay lại", "video_tail|quality|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -86352,7 +86504,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         save_video_tail9_state(user_id, context, tail, owner, host)
         return await safe_edit_or_send(query, video_tail9_logo_text(tail), parse_mode="HTML", reply_markup=video_tail9_logo_keyboard())
     if screen == "quality":
-        capability = video_tail9_preflight(user_id, context, tail, owner, host)
+        capability = video_tail9_commercial_preflight(user_id, context, tail, owner, host)
         catalog = video_tail9_catalog_report(tail, capability)
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
@@ -86588,7 +86740,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             return await video_tail9_render(query, uid, context, "quality")
         if action == "select":
             quality = max(200, min(1500, safe_int(argument, 300)))
-            capability = video_tail9_preflight(uid, context, tail, owner, host, quality)
+            capability = video_tail9_commercial_preflight(uid, context, tail, owner, host, quality)
             catalog = video_tail9_catalog_report(tail, capability)
             if quality not in set(catalog.get("tier_ids") or []):
                 return await safe_edit_or_send(
@@ -86610,6 +86762,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             tail["package_id"] = f"product_video_{quality}"
             session = video_tail9_apply_to_session(uid, context, tail, owner, host)
             pricing = video_b14_invoice_for_session(session, uid)
+            pricing.update({
+                "product_type": str(tail.get("video_product_type") or "video_ai_real"),
+                "scene_count": safe_int(tail.get("scene_count"), 1),
+                "duration_seconds": safe_int(tail.get("estimated_duration"), 8),
+                "ratio": str(tail.get("ratio") or "9:16"),
+            })
             tail = video_tail9.select_package(
                 tail,
                 quality_tier_id=str(quality),
@@ -86619,7 +86777,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             )
             save_video_tail9_state(uid, context, tail, owner, host)
             session = video_tail9_apply_to_session(uid, context, tail, owner, host)
-            return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, get_user_language(uid) or "vi"), parse_mode="HTML", reply_markup=video_tail9_invoice_keyboard())
+            return await safe_edit_or_send(
+                query,
+                video_tail9_invoice_text(tail, session, uid, get_user_language(uid) or "vi"),
+                parse_mode="HTML",
+                reply_markup=video_tail9_invoice_keyboard(),
+            )
     if section == "confirm":
         allowed, reason = video_tail9.invoice_allowed(tail)
         if not allowed:
@@ -86630,6 +86793,15 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 f"⚠️ Chưa thể xác nhận: {html.escape(str(reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
                 parse_mode="HTML",
                 reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=False),
+            )
+        contract = video_tail9.commercial_contract(str(tail.get("video_product_type") or ""))
+        if not contract.get("execution_enabled"):
+            await query.answer("Video dài tập đang được nâng cấp.")
+            return await safe_edit_or_send(
+                query,
+                video_tail9_long_maintenance_text(tail),
+                parse_mode="HTML",
+                reply_markup=video_tail9_long_maintenance_keyboard(),
             )
         if tail.get("final_confirmed"):
             await query.answer("Yêu cầu này đã được xác nhận.")
@@ -86873,7 +87045,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 duration=architecture_draft.get("duration") or 0,
                 input_collected=True,
             )
-        if value in {"video_ai_real", "video_reference", "motion_prompt", "script_image_video"}:
+        if value in {"video_ai_real", "video_reference", "motion_prompt", "script_image_video", "multi_scene_film"}:
             return await start_public_video_scene2_step(
                 query,
                 context,
@@ -99591,12 +99763,19 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
 
 async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
-    if action == "public_guard" or not video_long_planning.public_access_allowed(is_admin=is_admin_user(uid)):
+    if action == "public_guard":
+        original = str(query.data or "")
+        query.data = "vproduct|open|multi_scene_film"
+        try:
+            return await handle_video_product_callback(update, context)
+        finally:
+            query.data = original
+    await query.answer()
+    if not video_long_planning.public_access_allowed(is_admin=is_admin_user(uid)):
         return await safe_edit_query_message(
             query,
             MULTISCENE_LONG_VIDEO_GUARD_TEXT,
