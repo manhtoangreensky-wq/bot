@@ -184,7 +184,10 @@ def test_long_public_entry_and_final_confirm_have_exact_separate_owners() -> Non
     confirm = _between("async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
     assert '"entry_callback": "longvideo|public_guard"' in route
     assert '"invoice_reachable": True' in route[route.index('"multi_scene_film"'):]
-    assert 'query.data = "vproduct|open|multi_scene_film"' in handler
+    assert "start_public_video_scene2_step" in handler
+    assert '"multi_scene_film"' in handler
+    assert "handle_video_product_callback" not in handler
+    assert "query.data =" not in handler
     assert "video_tail9_long_maintenance_text" in confirm
     maintenance = confirm[confirm.index("if not contract.get(\"execution_enabled\")"):]
     assert "handle_product_video_public_confirm_callback" not in maintenance.split("if tail.get(\"final_confirmed\")", 1)[0]

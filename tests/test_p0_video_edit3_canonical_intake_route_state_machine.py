@@ -125,6 +125,7 @@ def _run_canonical_upload(mode: str, *, valid: bool = True):
                 "source_duration": 8,
             },
             "inspect_video_editor_source": inspect,
+            "video_editor_telegram_probe_fallback": lambda _source, _reason: {},
             "video_local_validation": SimpleNamespace(
                 LocalVideoValidationError=RuntimeError,
                 safe_display_filename=lambda value: value,

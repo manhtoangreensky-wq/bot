@@ -66663,7 +66663,7 @@ VIDEO_EDITOR_TEXT_FIELDS = {
     "product_type", "flow_owner", "engine_route", "worker_owner",
     "source_video_id", "source_video_hash", "audio_policy", "status",
     "delivery_message_id", "receipt_state", "charge_state",
-    "quality_tier_id", "package_id",
+    "quality_tier_id", "package_id", "source_origin",
 }
 VIDEO_EDITOR_NUMBER_FIELDS = {
     "source_file_size", "source_duration", "source_duration_ms", "job_id",
@@ -66672,6 +66672,7 @@ VIDEO_EDITOR_NUMBER_FIELDS = {
     "audio_volume_percent", "brightness_percent",
     "last_media_message_id", "probe_count",
     "state_revision", "revision", "edit_job_id", "outbox_id",
+    "source_width", "source_height",
 }
 
 
@@ -85280,11 +85281,11 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
         return await storyboard2_render(query, context, persist(board))
     if action == "finish":
         try:
-            state = storyboard2_scene3_handoff(context, board)
+            storyboard2_scene3_handoff(context, board)
         except ValueError as exc:
             return await query.answer(f"Chưa thể hoàn thiện: {str(exc)}", show_alert=True)
         await query.answer()
-        return await video_profile_scene1_render(query, state, get_user_language(uid) or "vi")
+        return await video_tail9_render(query, uid, context, "review")
     if action in deferred_answer_actions:
         return await query.answer("Nút Storyboard này đã hết phiên. Hãy mở lại màn hiện tại.", show_alert=True)
     return True
@@ -99778,12 +99779,16 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     if action == "public_guard":
-        original = str(query.data or "")
-        query.data = "vproduct|open|multi_scene_film"
-        try:
-            return await handle_video_product_callback(update, context)
-        finally:
-            query.data = original
+        await query.answer()
+        return await start_public_video_scene2_step(
+            query,
+            context,
+            uid,
+            "multi_scene_film",
+            lang=lang,
+            origin_step="menu_video",
+            start_at_scene_count=True,
+        )
     await query.answer()
     if not video_long_planning.public_access_allowed(is_admin=is_admin_user(uid)):
         return await safe_edit_query_message(
@@ -100157,7 +100162,8 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
     source = dict(state or {})
     preset = dict(source.get("idea_preset") or {})
     drafts = [dict(item) for item in source.get("scene_drafts") or [] if isinstance(item, dict)]
-    count = max(1, min(20, len(drafts) or safe_int(source.get("scene_count"), 1)))
+    requested_count = safe_int(source.get("scene_count"), 0)
+    count = max(1, min(20, requested_count or len(drafts) or 1))
     selected_prompt = str(source.get("idea_selected_prompt") or "").strip()
     custom_note = "\n\n".join(
         item
@@ -100167,6 +100173,21 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         )
         if item
     )
+    planning_ready = len(drafts) == count and all(
+        str(item.get("goal") or "").strip()
+        and str(item.get("start_state") or "").strip()
+        and str(item.get("end_state") or "").strip()
+        for item in drafts
+    )
+    if not planning_ready:
+        topic = str(source.get("subject") or preset.get("title") or "Ý tưởng video")
+        drafts = video_idea_script_intake.deterministic_scene_drafts(
+            preset,
+            scene_count=count,
+            topic=topic,
+            customer_brief=custom_note,
+            semantic_beats=video_idea_catalog.semantic_beats_for_idea(preset, count),
+        )
     plan = video_idea_catalog.build_plan(
         preset,
         scene_count=count,
@@ -213952,7 +213973,8 @@ def video_editor_source_from_update(update: Update) -> dict:
     message = update.message
     if not message:
         return {}
-    media = getattr(message, "video", None) or getattr(message, "document", None)
+    telegram_video = getattr(message, "video", None)
+    media = telegram_video or getattr(message, "document", None)
     if not media:
         return {}
     mime_type = str(getattr(media, "mime_type", "") or "video/mp4")
@@ -213969,6 +213991,9 @@ def video_editor_source_from_update(update: Update) -> dict:
         "source_mime_type": mime_type[:120],
         "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
         "source_duration": safe_int(getattr(media, "duration", 0), 0),
+        "source_origin": "telegram_video" if telegram_video else "telegram_document",
+        "source_width": safe_int(getattr(media, "width", 0), 0),
+        "source_height": safe_int(getattr(media, "height", 0), 0),
     }
 
 
@@ -214004,12 +214029,22 @@ def video_editor_aux_source_from_update(update: Update, kind: str) -> dict:
 
 
 def video_local_public_error(reason: str) -> str:
+    reason = str(reason or "")
+    if reason.startswith("ffprobe_exec_failed:"):
+        reason = "ffprobe_exec_failed"
     mapping = {
         "video_too_large": "Video vượt giới hạn 50 MB. Anh/chị vui lòng gửi file nhỏ hơn.",
         "duration_too_long": "Video dài hơn giới hạn xử lý 30 phút.",
         "unsupported_file_type": "Định dạng chưa hỗ trợ. Vui lòng dùng MP4, MOV, MKV hoặc WebM.",
         "ffprobe_missing": "Hệ thống kiểm tra video chưa sẵn sàng. Video chưa được xử lý và chưa trừ Xu.",
         "ffprobe_timeout": "Hệ thống chưa đọc xong thông tin video. Anh/chị vui lòng thử file khác.",
+        "ffprobe_failed": "Hệ thống chưa đọc được thông tin video. Video chưa được xử lý và chưa trừ Xu.",
+        "ffprobe_exec_failed": "Hệ thống kiểm tra video chưa chạy được. Video chưa được xử lý và chưa trừ Xu.",
+        "ffprobe_invalid_json": "Thông tin kỹ thuật của video chưa đọc được. Video chưa được xử lý và chưa trừ Xu.",
+        "invalid_video_metadata": "Video thiếu thông tin thời lượng hoặc kích thước hợp lệ. Anh/chị vui lòng gửi video khác.",
+        "invalid_video": "Video chưa có thông tin kỹ thuật hợp lệ. Anh/chị vui lòng gửi video khác.",
+        "input_missing": "Hệ thống chưa tải được video để kiểm tra. Anh/chị vui lòng gửi lại file.",
+        "input_zero_bytes": "Video tải về đang rỗng. Anh/chị vui lòng gửi lại file.",
         "segment_too_short": "Mỗi phần cần dài ít nhất 2 giây.",
         "too_many_parts": "Số phần vượt giới hạn 30. Anh/chị hãy chọn ít phần hơn.",
         "range_overlap": "Các khoảng thời gian đang chồng nhau. Vui lòng sửa lại.",
@@ -214024,7 +214059,49 @@ def video_local_public_error(reason: str) -> str:
         "active_job_exists": "Anh/chị đang có một video được xử lý. Vui lòng chờ kết quả trước khi tạo tác vụ mới.",
         "workspace_limit_exceeded": "Dung lượng tạm không đủ để xử lý video này.",
     }
-    return "⚠️ " + mapping.get(str(reason or ""), "Yêu cầu chưa hợp lệ. Hệ thống chưa xử lý và chưa trừ Xu.")
+    return "⚠️ " + mapping.get(reason, "Yêu cầu chưa hợp lệ. Hệ thống chưa xử lý và chưa trừ Xu.")
+
+
+def video_editor_telegram_probe_fallback(source: dict, reason: str) -> dict:
+    """Use Telegram's video envelope only when the local probe is unavailable."""
+    reason = str(reason or "")
+    allowed_reason = reason in {
+        "ffprobe_missing",
+        "ffprobe_failed",
+        "ffprobe_invalid_json",
+        "invalid_video_metadata",
+    } or reason.startswith("ffprobe_exec_failed:")
+    duration = safe_int(source.get("source_duration"), 0)
+    width = safe_int(source.get("source_width"), 0)
+    height = safe_int(source.get("source_height"), 0)
+    size = safe_int(source.get("source_file_size"), 0)
+    if (
+        str(source.get("source_origin") or "") != "telegram_video"
+        or not allowed_reason
+        or duration <= 0
+        or width <= 0
+        or height <= 0
+        or size <= 0
+    ):
+        return {}
+    metadata = {
+        "ok": True,
+        "reason": "",
+        "bytes": size,
+        "duration": float(duration),
+        "duration_ms": duration * 1000,
+        "width": width,
+        "height": height,
+        "fps": 0.0,
+        "has_video": True,
+        "has_audio": False,
+        "audio_stream_count": 0,
+        "format_name": "telegram_video",
+        "video_codec": "",
+        "probe_fallback": "telegram_video_metadata",
+        "probe_warning": reason,
+    }
+    return video_local_validation.validate_source_metadata(metadata, file_size=size)
 
 
 async def inspect_video_editor_source(context: ContextTypes.DEFAULT_TYPE, source: dict) -> dict:
@@ -214631,6 +214708,10 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
         except Exception as exc:
             logger.warning("canonical video edit inspection failed | %s", sanitize_log_text(str(exc))[:180])
             metadata = {"ok": False, "reason": "ffprobe_failed"}
+        if not metadata.get("ok"):
+            fallback = video_editor_telegram_probe_fallback(source, str(metadata.get("reason") or ""))
+            if fallback.get("ok"):
+                metadata = fallback
         if not metadata.get("ok"):
             reason = str(metadata.get("reason") or "invalid_video")
             waiting = video_edit_state_machine.keep_waiting_after_invalid(state, reason)
