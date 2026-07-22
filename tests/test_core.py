@@ -6927,10 +6927,12 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     ]
     assert "💡 Ý tưởng video" in video_menu_buttons
     assert "📢 Concept quảng cáo" not in video_menu_buttons
-    assert "📢 Ý tưởng quảng cáo" in idea_buttons
+    assert "🔎 Khám phá ý tưởng" in idea_buttons
+    assert "📢 Ý tưởng quảng cáo" not in idea_buttons
     assert "🔥 Ý tưởng theo xu hướng" not in idea_buttons
-    assert "🎬 Ý tưởng điện ảnh / kể chuyện" in idea_buttons
-    assert "videoidea|catalog|sales" in idea_callbacks
+    assert "🎬 Ý tưởng điện ảnh / kể chuyện" not in idea_buttons
+    assert idea_callbacks.count("videoidea|explore") == 1
+    assert "videoidea|catalog|sales" not in idea_callbacks
     assert "videoidea|kind|trend" not in idea_callbacks
     assert 'CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\\|")' in source
     assert 'CallbackQueryHandler(handle_prompt_video_callback, pattern=r"^promptvideo\\|")' in source
