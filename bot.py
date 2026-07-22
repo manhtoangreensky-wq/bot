@@ -41237,7 +41237,7 @@ def broadcast_lite_schedule_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📆 Hàng tháng", callback_data="broadcast_lite|scnew|m"), InlineKeyboardButton("🗓️ Hàng tuần", callback_data="broadcast_lite|scnew|w")],
         [InlineKeyboardButton("☀️ Hàng ngày", callback_data="broadcast_lite|scnew|d"), InlineKeyboardButton("⏰ Một lần", callback_data="broadcast_lite|scnew|o")],
-        [InlineKeyboardButton("📋 Lịch đã tạo", callback_data="broadcast_lite|sclist"), InlineKeyboardButton("⚙️ Giới hạn gửi", callback_data="broadcast_lite|limits")],
+        [InlineKeyboardButton("📋 Lịch đã tạo", callback_data="broadcast_lite|sclist"), InlineKeyboardButton("⚙️ Giới hạn gửi", callback_data="broadcast_lite|limits|sched")],
         [InlineKeyboardButton("⬅️ Thông báo", callback_data="broadcast_lite|back"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -41344,11 +41344,13 @@ def broadcast_lite_limits_text() -> str:
     )
 
 
-def broadcast_lite_limits_keyboard() -> InlineKeyboardMarkup:
+def broadcast_lite_limits_keyboard(back_to: str = "back") -> InlineKeyboardMarkup:
     limits = get_broadcast_lite_promo_limits(DB_FILE)
+    back_to = "sched" if back_to == "sched" else "back"
+    back_label = "⬅️ Lịch thông báo" if back_to == "sched" else "⬅️ Thông báo"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔁 Đổi Weekly → Daily", callback_data="broadcast_lite|limtoggle"), InlineKeyboardButton("♻️ Mặc định 1/24h · 3/7d", callback_data="broadcast_lite|limreset")],
-        [InlineKeyboardButton("⬅️ Lịch thông báo", callback_data="broadcast_lite|sched"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔁 Đổi Weekly → Daily", callback_data=f"broadcast_lite|limtoggle|{back_to}"), InlineKeyboardButton("♻️ Mặc định 1/24h · 3/7d", callback_data=f"broadcast_lite|limreset|{back_to}")],
+        [InlineKeyboardButton(back_label, callback_data=f"broadcast_lite|{back_to}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 async def cmd_broadcast_lite(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41713,9 +41715,11 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             return await _broadcast_lite_edit(query, broadcast_lite_schedule_list_text(schedules), broadcast_lite_schedule_list_keyboard(schedules))
 
         if action == "limits":
-            return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard())
+            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "back"
+            return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard(back_to))
 
         if action == "limtoggle":
+            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "back"
             limits = get_broadcast_lite_promo_limits(DB_FILE)
             set_broadcast_lite_promo_limits(
                 DB_FILE,
@@ -41724,11 +41728,12 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
                 weekly_then_daily=not bool(limits.get("weekly_then_daily")),
                 updated_by=uid,
             )
-            return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard())
+            return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard(back_to))
 
         if action == "limreset":
+            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "back"
             set_broadcast_lite_promo_limits(DB_FILE, max_24h=1, max_7d=3, weekly_then_daily=False, updated_by=uid)
-            return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard())
+            return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard(back_to))
 
         return await _broadcast_lite_edit(query, "Thao tác thông báo không hợp lệ.", broadcast_lite_admin_menu_keyboard())
     except BroadcastLiteFrequencyCapWarning as warning:
