@@ -96,7 +96,7 @@ def test_video_menu_current_buttons_unchanged():
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
         ("vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom")),
-        ("videoidea|start", "Ý tưởng video", ("videa|page|1",)),
+        ("videoidea|start", "Ý tưởng video", ("videoidea|explore",)),
         ("vproduct|open|storyboard_prompt", "Storyboard", ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt")),
         ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|ai_prompt_menu|video_ai_real", "vproduct|ai_image_menu|video_ai_real", "vproduct|ai_video_menu|video_ai_real")),
         ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_existing|script_image_video", "vproduct|script_ideas|script_image_video", "vproduct|script_manual|script_image_video")),
@@ -149,7 +149,7 @@ def test_video_idea_route():
         918802,
         "videoidea|start",
         "Ý tưởng video",
-        ("videa|page|1",),
+        ("videoidea|explore",),
     )
 
 
@@ -221,10 +221,10 @@ def test_legacy_video_idea_callback_redirects_to_canonical_hub_without_side_effe
     _press(user_id, "vproduct|open|video_idea")
     session = bot.get_video_session(user_id)
     assert session.get("video_tool") == "video_idea"
-    assert session.get("provider_called") is False
-    assert session.get("job_created") is False
-    assert session.get("outbox_created") is False
-    assert session.get("xu_charged") == 0
+    assert not session.get("provider_called")
+    assert not session.get("job_created")
+    assert not session.get("outbox_created")
+    assert int(session.get("xu_charged") or 0) == 0
 
 
 def test_video_invoice_back_to_addons_or_previous_step():

@@ -73032,11 +73032,6 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "handler": "handle_video_idea_callback",
         "expected_children": (
             "videoidea|explore",
-            "vpromptlib|start",
-            "videoidea|catalog|sales",
-            "videoidea|catalog|story",
-            "videoidea|source_start",
-            "videoidea|kind|custom",
         ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
@@ -74420,16 +74415,9 @@ def video_semantics_audit_payload() -> dict:
             "detail": "Kịch bản là chữ/thoại/phân cảnh; Storyboard là chuỗi hình/prompt nối tiếp.",
         },
         {
-            "name": "video_idea_unifies_catalog_templates_media_and_custom",
-            "ok": idea_callbacks == {
-                "videoidea|explore",
-                "vpromptlib|start",
-                "videoidea|catalog|sales",
-                "videoidea|catalog|story",
-                "videoidea|source_start",
-                "videoidea|kind|custom",
-            },
-            "detail": "Ý tưởng video là cửa vào duy nhất cho kho mẫu, khám phá, tư liệu có sẵn và tự nhập.",
+            "name": "video_idea_has_one_complete_explore_catalog_entry",
+            "ok": idea_callbacks == {"videoidea|explore"},
+            "detail": "Ý tưởng video chỉ mở một kho Khám phá hoàn chỉnh; các lối cũ không còn lặp trên hub công khai.",
         },
     ]
     return {"ok": all(item.get("ok") for item in checks), "checks": checks, "semantics": dict(VIDEO_PRODUCT_SEMANTICS)}
@@ -96420,11 +96408,6 @@ def video_idea_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_v6_keyboard(
         [
             ("🔎 Khám phá ý tưởng" if is_vi else "🔎 Explore ideas", "videoidea|explore"),
-            ("📚 Kho mẫu & câu lệnh" if is_vi else "📚 Templates & prompts", "vpromptlib|start"),
-            ("📢 Ý tưởng quảng cáo" if is_vi else "📢 Advertising idea", "videoidea|catalog|sales"),
-            ("🎬 Ý tưởng điện ảnh / kể chuyện" if is_vi else "🎬 Cinematic / story idea", "videoidea|catalog|story"),
-            ("🖼 Từ ảnh/video có sẵn" if is_vi else "🖼 From existing media", "videoidea|source_start"),
-            ("✍️ Tự nhập & chỉnh nhanh" if is_vi else "✍️ Custom and quick edit", "videoidea|kind|custom"),
         ],
         lang,
         back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
@@ -96445,6 +96428,20 @@ def video_idea_product_lane_origin(context=None, state: dict | None = None) -> s
                 or ""
             ).strip()
     return candidate if candidate in VIDEO_IDEA_PRODUCT_LANE_PRODUCTS else ""
+
+
+def clear_video_idea_parent_context(context) -> None:
+    user_data = getattr(context, "user_data", None)
+    if not isinstance(user_data, dict):
+        return
+    for key in (
+        "video_idea_flow7_intake",
+        "video_idea_parent_handoff",
+        "video_idea_origin_product",
+        "video_idea_source_media_refs",
+        "video_idea_return_callback",
+    ):
+        user_data.pop(key, None)
 
 
 def video_idea_catalog_back_callback(context=None, state: dict | None = None) -> str:
@@ -100571,9 +100568,19 @@ async def handle_video_idea_dynamic_callback(update: Update, context: ContextTyp
     action = parts[1] if len(parts) > 1 else "page"
     value = parts[2] if len(parts) > 2 else ""
 
+    # `videa` is the embedded preset namespace. Old standalone messages are
+    # read-only redirects to the complete reference catalog; they must never
+    # reopen the retired generic scene-preview/Continue branch.
+    previous_state = video_idea_dynamic_state(uid)
+    if not video_idea_product_lane_origin(context, previous_state):
+        return await safe_edit_or_send_long_html(
+            query,
+            video_idea_catalog_categories_text(lang),
+            reply_markup=video_idea_catalog_categories_keyboard(lang),
+        )
+
     if action == "page":
         page = max(1, safe_int(value, 1))
-        previous_state = video_idea_dynamic_state(uid)
         origin_product = video_idea_product_lane_origin(context, previous_state)
         if origin_product:
             context.user_data["video_idea_origin_product"] = origin_product
@@ -101589,45 +101596,35 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
         )
     if action == "start":
         clear_developing_video_pending(uid)
-        context.user_data.pop("video_idea_origin_product", None)
-        context.user_data.pop("video_idea_source_media_refs", None)
+        clear_video_idea_parent_context(context)
         set_video_route_session(uid, "video_idea", "tool_home", product_id="video_idea")
         return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
     if action == "explore":
         clear_developing_video_pending(uid)
-        context.user_data.pop("video_idea_origin_product", None)
-        context.user_data.pop("video_idea_source_media_refs", None)
+        clear_video_idea_parent_context(context)
         return await safe_edit_or_send_long_html(
             query,
-            video_idea_dynamic_page_text(1, lang),
-            reply_markup=video_idea_dynamic_page_keyboard(1, lang),
+            video_idea_catalog_categories_text(lang),
+            reply_markup=video_idea_catalog_categories_keyboard(lang),
         )
     if action == "catalog":
-        context.user_data.pop("video_idea_origin_product", None)
-        context.user_data.pop("video_idea_source_media_refs", None)
-        category_row = video_idea_dynamic_category_key(value) or video_idea_dynamic_category_key("sales")
-        category_id = safe_int(category_row.get("id"), 0)
-        presets = video_idea_dynamic_presets(category_id, offset=0, limit=5)
+        clear_video_idea_parent_context(context)
         state = {
-            "idea2": True,
-            "idea_category_id": category_id,
-            "idea_category": category_row,
-            "preset_offset": 0,
+            "catalog_category": value if value in video_idea_catalog.CATEGORY_LABELS else "sales",
+            "catalog_offset": 0,
             "provider_called": False,
             "image_provider_called": False,
-            "music_provider_calls": 0,
-            "voice_provider_calls": 0,
-            "files_generated": 0,
             "job_created": False,
             "outbox_created": False,
             "wallet_mutations": 0,
             "xu_charged": 0,
         }
-        restore_developing_video_pending(uid, "videoidea", state, "idea2_presets")
-        return await safe_edit_or_send_long_html(
+        restore_developing_video_pending(uid, "videoidea", state, "catalog_options")
+        return await safe_edit_or_send(
             query,
-            video_idea_dynamic_category_text(category_row, presets),
-            reply_markup=video_idea_dynamic_category_keyboard(category_id, presets, lang),
+            video_idea_catalog_options_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_idea_catalog_options_keyboard(lang),
         )
     if action == "catalog_refresh":
         state = dict(get_developing_video_pending(uid) or {})

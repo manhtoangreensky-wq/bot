@@ -184,19 +184,68 @@ def test_storyboard_is_mandatory_while_other_products_return_to_canonical_tail()
     assert '"chapter_duration_minutes": 5' in renderer
 
 
-def test_standalone_idea_hub_and_prompt_library_are_restored_without_catalog_replacement() -> None:
+def test_standalone_idea_hub_has_one_complete_explore_entry() -> None:
     idea_menu = _function_source("video_idea_menu_keyboard")
     prompt_library = _function_source("video_prompt_library_keyboard")
 
+    assert idea_menu.count("videoidea|explore") == 1
     for callback in (
-        "videoidea|explore",
         "vpromptlib|start",
         "videoidea|source_start",
+        "videoidea|catalog|sales",
+        "videoidea|catalog|story",
+        "videoidea|kind|custom",
     ):
-        assert callback in idea_menu
+        assert callback not in idea_menu
     assert "videa|page|1" not in idea_menu
+    # Legacy prompt-library routes remain owned by their original handler, but
+    # are no longer duplicated on the public Idea Video hub.
     assert "vpromptlib|idea" in prompt_library
     assert "vpromptlib|cinematic" in prompt_library
+
+
+def test_standalone_explore_uses_complete_catalog_without_scene_preview_continue() -> None:
+    handler = _function_source("handle_video_idea_callback")
+    explore_start = handler.index('if action == "explore":')
+    catalog_start = handler.index('if action == "catalog":', explore_start)
+    refresh_start = handler.index('if action == "catalog_refresh":', catalog_start)
+    explore_branch = handler[explore_start:catalog_start]
+    catalog_branch = handler[catalog_start:refresh_start]
+
+    assert "video_idea_catalog_categories_text" in explore_branch
+    assert "video_idea_catalog_categories_keyboard" in explore_branch
+    assert "video_idea_dynamic_page_text" not in explore_branch
+    assert "video_idea_catalog_options_text" in catalog_branch
+    assert "video_idea_catalog_options_keyboard" in catalog_branch
+    assert "video_idea_dynamic_preview_text" not in catalog_branch
+
+
+def test_stale_standalone_dynamic_callbacks_redirect_read_only_to_complete_catalog() -> None:
+    handler = _function_source("handle_video_idea_dynamic_callback")
+    guard_at = handler.index("if not video_idea_product_lane_origin")
+    page_at = handler.index('if action == "page":')
+    guard = handler[guard_at:page_at]
+
+    assert guard_at < page_at
+    assert "video_idea_catalog_categories_text" in guard
+    assert "video_idea_catalog_categories_keyboard" in guard
+    assert "restore_developing_video_pending" not in guard
+    assert "video_idea_dynamic_preview_text" not in guard
+
+
+def test_standalone_entry_clears_every_embedded_parent_owner_field() -> None:
+    helper = _function_source("clear_video_idea_parent_context")
+    handler = _function_source("handle_video_idea_callback")
+
+    for field in (
+        "video_idea_flow7_intake",
+        "video_idea_parent_handoff",
+        "video_idea_origin_product",
+        "video_idea_source_media_refs",
+        "video_idea_return_callback",
+    ):
+        assert field in helper
+    assert handler.count("clear_video_idea_parent_context(context)") >= 3
 
 
 def test_prompt_namespace_has_one_owner_and_framevideo_remains_out_of_scope() -> None:

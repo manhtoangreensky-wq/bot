@@ -41,7 +41,7 @@ def test_reference_catalog_has_six_ideas_per_group_and_covers_all_public_profile
 
 def test_public_root_removes_duplicate_ad_story_source_and_custom_routes():
     menu = _between("def video_idea_menu_keyboard", "\n\ndef _video_idea_dynamic_db")
-    assert menu.count('"videa|page|1"') == 1
+    assert menu.count('"videoidea|explore"') == 1
     for removed in (
         "Ý tưởng quảng cáo", "Ý tưởng điện ảnh", "Từ ảnh/video có sẵn",
         "Tự nhập & chỉnh nhanh", "vpromptlib|start", "videoidea|source_start",

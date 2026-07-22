@@ -43,17 +43,17 @@ def test_public_video_menu_hides_profile_studio_and_keeps_compact_two_button_row
     assert '"entry_callback": "videoidea|start"' in matrix
 
 
-def test_video_ideas_root_restores_original_standalone_inventory():
+def test_video_ideas_root_has_one_complete_reference_catalog_entry():
     menu = _between("def video_idea_menu_keyboard", "\n\ndef _video_idea_dynamic_db")
+    assert menu.count('"videoidea|explore"') == 1
     for callback in (
-        '"videoidea|explore"',
         '"vpromptlib|start"',
         '"videoidea|catalog|sales"',
         '"videoidea|catalog|story"',
         '"videoidea|source_start"',
         '"videoidea|kind|custom"',
     ):
-        assert callback in menu
+        assert callback not in menu
     assert '"videa|page|1"' not in menu
     prompt_menu = _between("def video_prompt_library_keyboard", "\n\ndef video_prompt_library_guard_text")
     assert '"vpromptlib|idea"' in prompt_menu
