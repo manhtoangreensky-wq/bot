@@ -65222,6 +65222,7 @@ VIDEO_PUBLIC_CALLBACK_PREFIXES = (
     "motion|", "adconcept|", "promptvideo|", "imagevideo|", "videoref|",
     "videodub|", "marketing|", "selfscene|", "storypack|", "videa|",
     "video_upload|", "storyboard|", "vfinal|", "videoaddon|", "archprofile|",
+    "video_tail|", "vtrend|", "vstory|", "vstoryimg|", "idea_video|",
     "video|status|",
 )
 _VIDEO_PUBLIC_CALLBACK_CLAIMS: dict[str, float] = {}
@@ -65274,6 +65275,45 @@ async def video_public_callback_dedupe_guard(update: Update, context: ContextTyp
     except Exception:
         pass
     raise ApplicationHandlerStop
+
+
+def video_public_callback_failure_guard(callback_handler):
+    """Contain an unexpected public Video callback failure inside its current screen.
+
+    The individual route keeps ownership of state and Back.  This wrapper only
+    prevents an exception from escaping into the global generic-X error handler.
+    """
+
+    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            return await callback_handler(update, context)
+        except ApplicationHandlerStop:
+            raise
+        except Exception:
+            query = getattr(update, "callback_query", None)
+            callback_data = str(getattr(query, "data", "") or "")
+            # Some shared handlers also serve non-Video features.  Preserve
+            # their existing error ownership unless this is an active public
+            # Product Video route.
+            if not _is_video_public_callback(callback_data, context):
+                raise
+            logger.exception(
+                "product_video_callback_failed callback=%s handler=%s",
+                callback_data,
+                getattr(callback_handler, "__name__", "unknown"),
+            )
+            if query:
+                try:
+                    await query.answer(
+                        "Không thể cập nhật lựa chọn này. Màn hiện tại và kế hoạch vẫn được giữ.",
+                        show_alert=True,
+                    )
+                except Exception:
+                    pass
+            return True
+
+    guarded.__name__ = getattr(callback_handler, "__name__", "video_public_callback")
+    return guarded
 
 
 async def video_public_media_dedupe_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83930,6 +83970,7 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
     return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
 
 
+@video_public_callback_failure_guard
 async def handle_video_prompt_library_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -84005,6 +84046,7 @@ async def handle_video_prompt_library_callback(update: Update, context: ContextT
     return await safe_edit_or_send(query, video_prompt_library_text(lang), parse_mode="HTML", reply_markup=video_prompt_library_keyboard(lang))
 
 
+@video_public_callback_failure_guard
 async def handle_product_video_public_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or str(query.data or "") != video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK:
@@ -84707,6 +84749,7 @@ async def _handle_video_trend2_callback_impl(update: Update, context: ContextTyp
     return await video_trend2_render(query, context, state, lang)
 
 
+@video_public_callback_failure_guard
 async def handle_video_trend2_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         return await _handle_video_trend2_callback_impl(update, context)
@@ -85291,6 +85334,7 @@ async def _handle_storyboard2_callback_impl(update: Update, context: ContextType
     return True
 
 
+@video_public_callback_failure_guard
 async def handle_storyboard2_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Single guarded owner for every canonical Storyboard callback.
 
@@ -85334,6 +85378,7 @@ async def handle_storyboard2_legacy_callback(update: Update, context: ContextTyp
     return await storyboard2_render(query, context, board)
 
 
+@video_public_callback_failure_guard
 async def handle_video_trend2_legacy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Redirect old Trend buttons without restoring or mutating their legacy state."""
 
@@ -85817,6 +85862,11 @@ def video_ai_realistic_restore_legacy_content_mode(state: dict | None) -> dict:
         or ""
     ).strip()
 
+    raw_plan = current.get("plan") or current.get("scene_plan") or {}
+    plan = dict(raw_plan) if isinstance(raw_plan, dict) else {}
+    planned_scenes = [item for item in plan.get("scenes") or [] if isinstance(item, dict)]
+    completed_profile_plan = bool(planned_scenes and profile)
+
     if source in {"manual", "custom", "manual_content"} and manual_content:
         current["content_mode"] = "manual"
         current["content_source"] = "manual"
@@ -85828,6 +85878,20 @@ def video_ai_realistic_restore_legacy_content_mode(state: dict | None) -> dict:
     elif idea_id:
         current["content_mode"] = "suggestions"
         current["content_source"] = source or "idea_catalog"
+    elif completed_profile_plan:
+        # A saved multi-scene plan plus its selected profile is sufficient proof
+        # that this older Video AI session already passed content selection.
+        # Do not use this branch for a bare topic or an incomplete plan.
+        first_scene = dict(planned_scenes[0] or {})
+        current["content_mode"] = "suggestions"
+        current["content_source"] = source or "profiles"
+        current["primary_profile_key"] = profile
+        if not selection:
+            current["content_choice"] = {
+                "id": str(current.get("selected_suggestion_id") or profile or "completed_profile_plan"),
+                "title": str(first_scene.get("title") or first_scene.get("goal") or current.get("subject") or profile),
+                "concept": str(first_scene.get("summary") or first_scene.get("goal") or current.get("subject") or ""),
+            }
     else:
         return current
 
@@ -86613,6 +86677,58 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
     return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard())
 
 
+def video_tail9_callback_guard(callback_handler):
+    """Keep pre-confirm tail callback failures inside their exact product route."""
+
+    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            return await callback_handler(update, context)
+        except ApplicationHandlerStop:
+            raise
+        except Exception:
+            query = getattr(update, "callback_query", None)
+            callback_data = str(getattr(query, "data", "") or "")
+            logger.exception("video_tail_callback_failed callback=%s", callback_data)
+            if not query:
+                return True
+
+            try:
+                await query.answer("Không thể cập nhật lựa chọn này. Kế hoạch vẫn được giữ.", show_alert=True)
+            except Exception:
+                pass
+
+            section = callback_data.split("|")[1] if callback_data.count("|") >= 1 else "review"
+            screen = {
+                "audio": "audio",
+                "logo": "logo",
+                "quality": "quality",
+                "confirm": "quality",
+            }.get(section, "review")
+            try:
+                return await video_tail9_render(query, int(query.from_user.id), context, screen)
+            except Exception:
+                logger.exception("video_tail_callback_recovery_failed callback=%s", callback_data)
+                back_callback = {
+                    "audio": "video_tail|audio|open",
+                    "logo": "video_tail|logo|open",
+                    "quality": "video_tail|quality|open",
+                    "confirm": "video_tail|quality|open",
+                }.get(section, "video_tail|review|open")
+                try:
+                    return await safe_edit_or_send(
+                        query,
+                        "⚠️ Không thể áp dụng lựa chọn này ở phiên hiện tại. Kế hoạch chưa bị thay đổi; hãy quay lại đúng bước trước để thử lại.",
+                        parse_mode="HTML",
+                        reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", back_callback), ("🏠 Menu chính", "menu|main")]]),
+                    )
+                except Exception:
+                    return True
+
+    guarded.__name__ = getattr(callback_handler, "__name__", "handle_video_tail_callback")
+    return guarded
+
+
+@video_tail9_callback_guard
 async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -86844,31 +86960,50 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     parse_mode="HTML",
                     reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=False),
                 )
-            tail["quality_tier_id"] = str(quality)
-            tail["package_id"] = f"product_video_{quality}"
-            session = video_tail9_apply_to_session(uid, context, tail, owner, host)
-            pricing = video_b14_invoice_for_session(session, uid)
-            pricing.update({
-                "product_type": str(tail.get("video_product_type") or "video_ai_real"),
-                "scene_count": safe_int(tail.get("scene_count"), 1),
-                "duration_seconds": safe_int(tail.get("estimated_duration"), 8),
-                "ratio": str(tail.get("ratio") or "9:16"),
-            })
-            tail = video_tail9.select_package(
-                tail,
-                quality_tier_id=str(quality),
-                package_id=f"product_video_{quality}",
-                pricing_snapshot=pricing,
-                capability_snapshot=capability,
-            )
-            save_video_tail9_state(uid, context, tail, owner, host)
-            session = video_tail9_apply_to_session(uid, context, tail, owner, host)
-            return await safe_edit_or_send(
-                query,
-                video_tail9_invoice_text(tail, session, uid, get_user_language(uid) or "vi"),
-                parse_mode="HTML",
-                reply_markup=video_tail9_invoice_keyboard(),
-            )
+            try:
+                tail["quality_tier_id"] = str(quality)
+                tail["package_id"] = f"product_video_{quality}"
+                session = video_tail9_apply_to_session(uid, context, tail, owner, host)
+                pricing = video_b14_invoice_for_session(session, uid)
+                pricing.update({
+                    "product_type": str(tail.get("video_product_type") or "video_ai_real"),
+                    "scene_count": safe_int(tail.get("scene_count"), 1),
+                    "duration_seconds": safe_int(tail.get("estimated_duration"), 8),
+                    "ratio": str(tail.get("ratio") or "9:16"),
+                })
+                tail = video_tail9.select_package(
+                    tail,
+                    quality_tier_id=str(quality),
+                    package_id=f"product_video_{quality}",
+                    pricing_snapshot=pricing,
+                    capability_snapshot=capability,
+                )
+                save_video_tail9_state(uid, context, tail, owner, host)
+                session = video_tail9_apply_to_session(uid, context, tail, owner, host)
+                return await safe_edit_or_send(
+                    query,
+                    video_tail9_invoice_text(tail, session, uid, get_user_language(uid) or "vi"),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_invoice_keyboard(),
+                )
+            except Exception:
+                logger.exception(
+                    "video_tail_quality_selection_failed product=%s quality=%s",
+                    tail.get("video_product_type"),
+                    quality,
+                )
+                tail = video_tail9.normalize_state(tail)
+                tail["quality_tier_id"] = ""
+                tail["package_id"] = ""
+                tail["pricing_snapshot"] = {}
+                tail = video_tail9.set_capability(tail, capability)
+                save_video_tail9_state(uid, context, tail, owner, host)
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Chưa thể lập hóa đơn từ kế hoạch hiện tại. Dữ liệu vẫn được giữ; hãy xem lại kế hoạch rồi chọn gói lại. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=bool(capability.get("ok"))),
+                )
     if section == "confirm":
         allowed, reason = video_tail9.invoice_allowed(tail)
         if not allowed:
@@ -86984,6 +87119,7 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
     return True
 
 
+@video_public_callback_failure_guard
 async def handle_video_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -98867,6 +99003,7 @@ async def handle_developing_video_pending_image(update: Update, context: Context
     await update.message.reply_text(image_video_style_text(lang, state), parse_mode="HTML", reply_markup=image_video_style_keyboard(lang))
     return True
 
+@video_public_callback_failure_guard
 async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99038,6 +99175,7 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         return await open_prompt_video_finalization_from_state(query, uid, state, lang, "promptvideo|back_motion")
     return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
 
+@video_public_callback_failure_guard
 async def handle_image_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99192,6 +99330,7 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         return await open_image_video_finalization_from_state(query, uid, state, lang, "imagevideo|back_motion")
     return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
 
+@video_public_callback_failure_guard
 async def handle_video_reference_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99511,6 +99650,7 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
         return await safe_edit_or_send_long_html(query, video_reference_plan_text(plan, lang), reply_markup=video_reference_result_keyboard(lang))
     return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
 
+@video_public_callback_failure_guard
 async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99841,6 +99981,7 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_query_message(query, self_scene_guard_text(action, lang, plan), reply_markup=self_scene_result_keyboard(lang))
     return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
 
+@video_public_callback_failure_guard
 async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -100036,6 +100177,7 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         return await safe_edit_or_send_long_html(query, long_video_followup_text(action, plan, lang), reply_markup=long_video_result_keyboard(lang))
     return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
 
+@video_public_callback_failure_guard
 async def handle_storyboard_pack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -100816,6 +100958,7 @@ async def video_idea_continue_to_exact_parent(
     return rendered
 
 
+@video_public_callback_failure_guard
 async def handle_video_idea_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -100953,6 +101096,7 @@ async def handle_video_idea_prompt_callback(update: Update, context: ContextType
     )
 
 
+@video_public_callback_failure_guard
 async def handle_video_idea_dynamic_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
@@ -101933,6 +102077,7 @@ async def handle_video_idea_admin_callback(update: Update, context: ContextTypes
     return await safe_edit_or_send(query, video_idea_admin_main_text(), parse_mode="HTML", reply_markup=video_idea_admin_main_keyboard())
 
 
+@video_public_callback_failure_guard
 async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -120090,6 +120235,7 @@ def shopaikey_video_job_check_keyboard(
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")])
     return InlineKeyboardMarkup(rows)
 
+@video_public_callback_failure_guard
 async def handle_public_video_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -154481,6 +154627,7 @@ def creative_motion_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         back=("🔙 Quay lại phong cách" if is_vi else "🔙 Back to style", "motion|back_style"),
     )
 
+@video_public_callback_failure_guard
 async def handle_creative_motion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -156180,6 +156327,7 @@ async def send_or_confirm_trend_video_flow_from_callback(query, uid: int, topic:
         await safe_edit_or_send(query, "🎬 Đang tạo Trend → Video Workflow từ concept hiện tại...")
     await execute_confirmed_trend_workflow_content(query.message, uid, topic, workflow)
 
+@video_public_callback_failure_guard
 async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -161553,6 +161701,7 @@ async def render_video_finalization_stack_target(query, user_id, state: dict, ta
         return True, await safe_edit_or_send(query, "✍️ Hãy nhập nội dung dùng chung cho phụ đề và lồng tiếng. TOAN AAS chưa xử lý video và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     return False, None
 
+@video_public_callback_failure_guard
 async def handle_video_finalization_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -163892,6 +164041,7 @@ async def render_video_addon_screen(query, user_id, state: dict, target_screen: 
         reply_markup=public_media_aspect_ratio_keyboard("video", lang),
     )
 
+@video_public_callback_failure_guard
 async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     parts = (query.data or "").split("|")
@@ -170083,6 +170233,7 @@ async def handle_img2vid_lock1_callback(query, context: ContextTypes.DEFAULT_TYP
         return {"continue_confirm": True, "state": state}
     return None
 
+@video_public_callback_failure_guard
 async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     try:
@@ -170794,6 +170945,7 @@ async def storyboard_generate_images_for_query(query, context: ContextTypes.DEFA
         reply_markup=storyboard_after_images_keyboard(project_id),
     )
 
+@video_public_callback_failure_guard
 async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # All historical ``storyboard|`` buttons are now read-only redirects.
     # Keep this public owner name for callback-registry compatibility while
@@ -172127,6 +172279,7 @@ async def _handle_create_media_callback_impl(
     await safe_edit_or_send(query, create_media_menu_text(lang), reply_markup=create_media_menu_keyboard(lang))
 
 
+@video_public_callback_failure_guard
 async def handle_create_media_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     callback_parts = str(query.data or "").split("|")
@@ -172172,6 +172325,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
     )
 
 
+@video_public_callback_failure_guard
 async def handle_storyboard_image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id if query and query.from_user else 0
@@ -198724,6 +198878,7 @@ async def send_video_downloader_file(query, result: dict, lang: str = "vi") -> d
                 sent = await query.message.reply_document(document=handle, filename=filename, caption=caption)
                 return {"method": "document", "message_id": int(getattr(sent, "message_id", 0) or 0)}
 
+@video_public_callback_failure_guard
 async def handle_video_downloader_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -216109,6 +216264,7 @@ async def handle_video_profile_studio_pending_text(update: Update, context: Cont
     return True
 
 
+@video_public_callback_failure_guard
 async def handle_video_profile_studio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -218035,6 +218191,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     return await video_profile_scene1_render(query, state, lang)
 
 
+@video_public_callback_failure_guard
 async def handle_video_editor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     try:
@@ -218958,6 +219115,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_edit_hub_text(lang), parse_mode="HTML", reply_markup=video_edit_hub_keyboard(lang))
 
 
+@video_public_callback_failure_guard
 async def handle_video_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
