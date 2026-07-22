@@ -221,6 +221,32 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
         or parent.get("return_step"),
         160,
     )
+    parent_return_step = _clean(
+        updated.get("idea_parent_return_step")
+        or parent.get("idea_parent_return_step")
+        or return_step,
+        160,
+    )
+    parent_continuation = _clean(
+        updated.get("idea_parent_continuation")
+        or parent.get("idea_parent_continuation"),
+        160,
+    )
+    parent_flow_owner = _clean(
+        updated.get("idea_parent_flow_owner")
+        or parent.get("idea_parent_flow_owner"),
+        160,
+    )
+    parent_engine_route = _clean(
+        updated.get("idea_parent_engine_route")
+        or parent.get("idea_parent_engine_route"),
+        160,
+    )
+    parent_public_product_type = _clean(
+        updated.get("idea_parent_public_product_type")
+        or parent.get("idea_parent_public_product_type"),
+        160,
+    )
     scene_count = _bounded_int(
         updated.get("scene_count") or parent.get("scene_count"),
         1,
@@ -254,6 +280,10 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
         or parent.get("storyboard_session_id"),
         160,
     )
+    parent_state = deepcopy(dict(parent.get("parent_state") or {}))
+    for key, value in parent_state.items():
+        if key not in updated or updated.get(key) in (None, "", [], {}):
+            updated[key] = deepcopy(value)
     preset_content = _preset_content(updated)
     scene_content = _scene_content(updated) or _preset_scene_content(updated, preset_content)
     if not updated.get("scene_drafts"):
@@ -265,7 +295,33 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
         "idea_parent_session_id": session_id,
         "idea_parent_revision": revision,
         "idea_return_step": return_step,
+        "idea_parent_return_step": parent_return_step,
+        "idea_parent_continuation": parent_continuation,
+        "idea_parent_flow_owner": parent_flow_owner,
+        "idea_parent_engine_route": parent_engine_route,
+        "idea_parent_public_product_type": parent_public_product_type,
+        "content_source": "idea_catalog",
+        "selected_profile": _clean(
+            updated.get("selected_profile")
+            or parent.get("selected_profile")
+            or preset_content.get("recommended_profile_id"),
+            500,
+        ),
         "idea_preset_id": _bounded_int(updated.get("idea_preset_id"), 0, 0, 2_147_483_647),
+        "idea_id": _clean(
+            updated.get("idea_id")
+            or parent.get("idea_id")
+            or preset_content.get("preset_key")
+            or updated.get("idea_preset_id"),
+            500,
+        ),
+        "idea_title": _clean(
+            updated.get("idea_title")
+            or parent.get("idea_title")
+            or preset_content.get("title")
+            or updated.get("subject"),
+            1000,
+        ),
         "idea_preset_content": preset_content,
         "idea_content": _clean(
             updated.get("idea_content")
@@ -274,13 +330,44 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
             8000,
         ),
         "idea_scene_content": scene_content,
+        "idea_scene_contents": deepcopy(scene_content),
         "scene_count": scene_count,
         "ratio": ratio,
         "recommended_aspect_ratio": ratio,
         "trend_source": trend_source,
         "trend_id": trend_id,
+        "trend_title": _clean(
+            updated.get("trend_title")
+            or parent.get("trend_title")
+            or trend_source.get("title"),
+            500,
+        ),
+        "trend_context": _clean(
+            updated.get("trend_context")
+            or parent.get("trend_context")
+            or trend_source.get("summary"),
+            2000,
+        ),
+        "script_session_id": _clean(
+            updated.get("script_session_id") or parent.get("script_session_id"),
+            160,
+        ),
+        "long_script_revision": _bounded_int(
+            updated.get("long_script_revision") or parent.get("long_script_revision"),
+            1,
+            1,
+            1_000_000,
+        ),
         "source_video_id": source_video_id,
         "storyboard_session_id": storyboard_session_id,
+        "selfshot_mode": _clean(
+            updated.get("selfshot_mode") or parent.get("selfshot_mode"),
+            160,
+        ),
+        "long_video_mode": _clean(
+            updated.get("long_video_mode") or parent.get("long_video_mode"),
+            160,
+        ),
         "idea_session_key": f"{product}:{session_id or 'missing'}:{revision}",
         "provider_called": False,
         "image_provider_called": False,
@@ -390,6 +477,14 @@ def build_prompt_candidates(state: dict, *, offset: int = 0) -> list[dict]:
             context_parts.append("Dùng đúng video nguồn đã gắn trong phiên; không thay bằng video khác")
         full_prompt = ". ".join(context_parts) + ". " + continuity + "\n\n" + "\n".join(scene_prompts)
         candidates.append({
+            "prompt_id": (
+                f"{_clean(source.get('idea_id') or source.get('idea_preset_id') or subject, 300)}:"
+                f"v{variation_index + 1}"
+            ),
+            "prompt_revision": _bounded_int(
+                source.get("idea_parent_revision"), 1, 1, 1_000_000
+            ),
+            "prompt_style": title,
             "button_index": button_index + 1,
             "variant_index": variation_index + 1,
             "title": title,
@@ -410,6 +505,10 @@ def prepare_prompt_selection(state: dict, handoff: dict) -> dict:
     updated["idea_prompt_candidates"] = build_prompt_candidates(updated, offset=0)
     updated["idea_selected_prompt"] = ""
     updated["idea_selected_prompt_record"] = {}
+    updated["selected_prompt_id"] = ""
+    updated["selected_prompt_text"] = ""
+    updated["selected_prompt_revision"] = 0
+    updated["prompt_style"] = ""
     updated["idea_prompt_skipped"] = False
     return updated
 
@@ -431,6 +530,12 @@ def select_prompt(state: dict, button_index: int) -> dict:
     selected = candidates[index - 1]
     updated["idea_selected_prompt"] = _clean(selected.get("prompt"), 20000)
     updated["idea_selected_prompt_record"] = selected
+    updated["selected_prompt_id"] = _clean(selected.get("prompt_id"), 500)
+    updated["selected_prompt_text"] = updated["idea_selected_prompt"]
+    updated["selected_prompt_revision"] = _bounded_int(
+        selected.get("prompt_revision"), 1, 1, 1_000_000
+    )
+    updated["prompt_style"] = _clean(selected.get("prompt_style") or selected.get("title"), 500)
     updated["idea_prompt_skipped"] = False
     return updated
 
@@ -442,6 +547,9 @@ def set_custom_prompt(state: dict, prompt: str) -> dict:
     updated = deepcopy(dict(state or {}))
     updated["idea_selected_prompt"] = value
     updated["idea_selected_prompt_record"] = {
+        "prompt_id": f"custom:{_bounded_int(updated.get('idea_parent_revision'), 1, 1, 1_000_000)}",
+        "prompt_revision": _bounded_int(updated.get("idea_parent_revision"), 1, 1, 1_000_000),
+        "prompt_style": "Prompt đã sửa",
         "button_index": 0,
         "variant_index": 0,
         "title": "Prompt đã sửa",
@@ -450,6 +558,10 @@ def set_custom_prompt(state: dict, prompt: str) -> dict:
         "scene_prompts": [],
         "negative_prompt": "",
     }
+    updated["selected_prompt_id"] = updated["idea_selected_prompt_record"]["prompt_id"]
+    updated["selected_prompt_text"] = value
+    updated["selected_prompt_revision"] = updated["idea_selected_prompt_record"]["prompt_revision"]
+    updated["prompt_style"] = "Prompt đã sửa"
     updated["idea_prompt_skipped"] = False
     return updated
 
@@ -468,6 +580,12 @@ def skip_prompt(state: dict) -> dict:
     selected = candidates[0]
     updated["idea_selected_prompt"] = _clean(selected.get("prompt"), 20000)
     updated["idea_selected_prompt_record"] = selected
+    updated["selected_prompt_id"] = _clean(selected.get("prompt_id"), 500)
+    updated["selected_prompt_text"] = updated["idea_selected_prompt"]
+    updated["selected_prompt_revision"] = _bounded_int(
+        selected.get("prompt_revision"), 1, 1, 1_000_000
+    )
+    updated["prompt_style"] = _clean(selected.get("prompt_style") or selected.get("title"), 500)
     updated["idea_prompt_skipped"] = True
     return updated
 
@@ -478,12 +596,25 @@ def validate_return_state(state: dict) -> dict:
         "idea_parent_product": _clean(source.get("idea_parent_product"), 80),
         "idea_parent_flow": _clean(source.get("idea_parent_flow"), 160),
         "idea_parent_session_id": _clean(source.get("idea_parent_session_id"), 160),
+        "idea_parent_revision": _bounded_int(source.get("idea_parent_revision"), 0, 0, 1_000_000),
+        "idea_parent_return_step": _clean(source.get("idea_parent_return_step"), 160),
+        "idea_parent_continuation": _clean(source.get("idea_parent_continuation"), 160),
+        "idea_parent_flow_owner": _clean(source.get("idea_parent_flow_owner"), 160),
+        "idea_parent_engine_route": _clean(source.get("idea_parent_engine_route"), 160),
+        "idea_parent_public_product_type": _clean(source.get("idea_parent_public_product_type"), 160),
         "idea_return_step": _clean(source.get("idea_return_step"), 160),
+        "content_source": _clean(source.get("content_source"), 80),
         "idea_preset_id": _bounded_int(source.get("idea_preset_id"), 0, 0, 2_147_483_647),
+        "idea_id": _clean(source.get("idea_id"), 500),
+        "idea_title": _clean(source.get("idea_title"), 1000),
         "idea_preset_content": dict(source.get("idea_preset_content") or {}),
         "idea_content": _clean(source.get("idea_content"), 8000),
         "idea_scene_content": list(source.get("idea_scene_content") or []),
         "idea_selected_prompt": str(source.get("idea_selected_prompt") or "").strip(),
+        "selected_prompt_id": _clean(source.get("selected_prompt_id"), 500),
+        "selected_prompt_text": str(source.get("selected_prompt_text") or "").strip(),
+        "selected_prompt_revision": _bounded_int(source.get("selected_prompt_revision"), 0, 0, 1_000_000),
+        "prompt_style": _clean(source.get("prompt_style"), 500),
         "scene_count": _bounded_int(source.get("scene_count"), 0, 0, 20),
         "ratio": _clean(source.get("ratio"), 20),
     }
