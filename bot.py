@@ -41360,6 +41360,20 @@ async def _broadcast_lite_edit(query, text: str, reply_markup=None):
     return await safe_edit_query_message(query, text, reply_markup=reply_markup, parse_mode=None)
 
 
+async def _broadcast_lite_answer_callback(query, text: str | None = None, **kwargs):
+    """Acknowledge a Broadcast callback without blocking the requested action."""
+    try:
+        if text is None:
+            return await query.answer(**kwargs)
+        return await query.answer(text, **kwargs)
+    except Exception as error:
+        logger.warning(
+            "broadcast lite callback answer failed | error=%s",
+            type(error).__name__,
+        )
+        return None
+
+
 def clear_broadcast_lite_pending(admin_id: int | str) -> None:
     try:
         clear_broadcast_lite_pending_drafts(DB_FILE, admin_id)
@@ -41421,9 +41435,9 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
     query = update.callback_query
     if not query or not update.effective_user or not is_admin_user(update.effective_user.id):
         if query:
-            return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+            return await _broadcast_lite_answer_callback(query, "Khu vực này chỉ dành cho Admin.", show_alert=True)
         return
-    await safe_answer_callback_query(query)
+    await _broadcast_lite_answer_callback(query)
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "back"
     uid = update.effective_user.id

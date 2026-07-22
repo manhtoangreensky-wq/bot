@@ -298,17 +298,16 @@ def test_callback_flow_compose_audience_confirm_creates_outbox_without_sending(t
             self.caption = caption
             self.photo = [SimpleNamespace(file_id="telegram-photo-file-id")]
 
-    async def safe_answer(query, *args, **kwargs):
-        await query.answer(*args, **kwargs)
-        return True
-
     async def safe_edit(query, text, reply_markup=None, **kwargs):
         query.text = text
         query.reply_markup = reply_markup
         return True
 
+    warning_calls = []
+
     class Logger:
         def warning(self, *args, **kwargs):
+            warning_calls.append((args, kwargs))
             return None
 
     namespace = {
@@ -317,7 +316,6 @@ def test_callback_flow_compose_audience_confirm_creates_outbox_without_sending(t
         "ContextTypes": ContextTypes,
         "DB_FILE": db,
         "is_admin_user": lambda user_id: int(user_id) == 9001,
-        "safe_answer_callback_query": safe_answer,
         "safe_edit_query_message": safe_edit,
         "sanitize_log_text": lambda value: str(value),
         "logger": Logger(),
@@ -359,6 +357,30 @@ def test_callback_flow_compose_audience_confirm_creates_outbox_without_sending(t
         )
         assert blocked.answers[-1][1] == {"show_alert": True}
         assert blocked.reply_markup is None
+
+        top_level_screens = (
+            ("broadcast_lite|back", "Thông báo khách hàng"),
+            ("broadcast_lite|history", "Lịch sử gửi"),
+            ("broadcast_lite|sched", "Lịch thông báo"),
+            ("broadcast_lite|limits", "Giới hạn gửi"),
+        )
+        for callback_data, expected_text in top_level_screens:
+            screen = Query(callback_data)
+            await namespace["handle_broadcast_lite_callback"](
+                SimpleNamespace(callback_query=screen, effective_user=user), None
+            )
+            assert screen.answers == [("", {})]
+            assert expected_text in screen.text, warning_calls[-1] if warning_calls else None
+
+        class ExpiredAnswerQuery(Query):
+            async def answer(self, text="", **kwargs):
+                raise RuntimeError("callback query expired")
+
+        expired = ExpiredAnswerQuery("broadcast_lite|history")
+        await namespace["handle_broadcast_lite_callback"](
+            SimpleNamespace(callback_query=expired, effective_user=user), None
+        )
+        assert "Lịch sử gửi" in expired.text
 
         compose = Query("broadcast_lite|compose")
         await namespace["handle_broadcast_lite_callback"](
@@ -514,7 +536,7 @@ def test_scope_and_menu_routing_static_gates():
 
 def _load_broadcast_ui():
     source = BOT_TEXT
-    start = source.index("def broadcast_lite_admin_menu_keyboard")
+    start = source.index("def broadcast_lite_admin_menu_text")
     end = source.index("async def cmd_broadcast_lite", start)
 
     class Button:
