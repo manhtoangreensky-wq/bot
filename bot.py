@@ -41344,13 +41344,14 @@ def broadcast_lite_limits_text() -> str:
     )
 
 
-def broadcast_lite_limits_keyboard(back_to: str = "back") -> InlineKeyboardMarkup:
+def broadcast_lite_limits_keyboard(back_to: str = "root") -> InlineKeyboardMarkup:
     limits = get_broadcast_lite_promo_limits(DB_FILE)
-    back_to = "sched" if back_to == "sched" else "back"
+    back_to = "sched" if back_to == "sched" else "root"
     back_label = "⬅️ Lịch thông báo" if back_to == "sched" else "⬅️ Thông báo"
+    back_callback = "broadcast_lite|sched" if back_to == "sched" else "broadcast_lite|back"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔁 Đổi Weekly → Daily", callback_data=f"broadcast_lite|limtoggle|{back_to}"), InlineKeyboardButton("♻️ Mặc định 1/24h · 3/7d", callback_data=f"broadcast_lite|limreset|{back_to}")],
-        [InlineKeyboardButton(back_label, callback_data=f"broadcast_lite|{back_to}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton(back_label, callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 async def cmd_broadcast_lite(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41715,11 +41716,11 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             return await _broadcast_lite_edit(query, broadcast_lite_schedule_list_text(schedules), broadcast_lite_schedule_list_keyboard(schedules))
 
         if action == "limits":
-            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "back"
+            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "root"
             return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard(back_to))
 
         if action == "limtoggle":
-            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "back"
+            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "root"
             limits = get_broadcast_lite_promo_limits(DB_FILE)
             set_broadcast_lite_promo_limits(
                 DB_FILE,
@@ -41731,7 +41732,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard(back_to))
 
         if action == "limreset":
-            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "back"
+            back_to = "sched" if len(parts) >= 3 and parts[2] == "sched" else "root"
             set_broadcast_lite_promo_limits(DB_FILE, max_24h=1, max_7d=3, weekly_then_daily=False, updated_by=uid)
             return await _broadcast_lite_edit(query, broadcast_lite_limits_text(), broadcast_lite_limits_keyboard(back_to))
 

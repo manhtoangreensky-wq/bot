@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import admin_broadcast as broadcast
+from services import ui_navigation
 
 
 BOT_SOURCE = Path(__file__).resolve().parents[1] / "bot.py"
@@ -650,12 +651,20 @@ def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     assert [button.callback_data for button in history.inline_keyboard[0]] == ["broadcast_lite|back", "menu|main"]
     assert [button.callback_data for button in schedule_menu.inline_keyboard[2]] == ["broadcast_lite|sclist", "broadcast_lite|limits|sched"]
     assert [[button.callback_data for button in row] for row in limits_from_root.inline_keyboard] == [
-        ["broadcast_lite|limtoggle|back", "broadcast_lite|limreset|back"],
+        ["broadcast_lite|limtoggle|root", "broadcast_lite|limreset|root"],
         ["broadcast_lite|back", "menu|main"],
     ]
     assert [[button.callback_data for button in row] for row in limits_from_schedule.inline_keyboard] == [
         ["broadcast_lite|limtoggle|sched", "broadcast_lite|limreset|sched"],
         ["broadcast_lite|sched", "menu|main"],
+    ]
+    normalized_root_limits = ui_navigation.canonicalize_bottom_navigation(
+        limits_from_root.inline_keyboard,
+        button_factory=namespace["InlineKeyboardButton"],
+    )
+    assert [[button.callback_data for button in row] for row in normalized_root_limits] == [
+        ["broadcast_lite|limtoggle|root", "broadcast_lite|limreset|root"],
+        ["broadcast_lite|back", "menu|main"],
     ]
 
     keyboards = [
