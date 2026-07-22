@@ -621,6 +621,8 @@ def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     features = namespace["broadcast_lite_feature_cta_keyboard"](ready)
     force = namespace["broadcast_lite_force_confirm_keyboard"](ready)
     schedule_menu = namespace["broadcast_lite_schedule_menu_keyboard"]()
+    limits_from_root = namespace["broadcast_lite_limits_keyboard"]()
+    limits_from_schedule = namespace["broadcast_lite_limits_keyboard"]("sched")
     schedule_list = namespace["broadcast_lite_schedule_list_keyboard"]([
         {"schedule_id": 1, "is_active": 1},
         {"schedule_id": 2, "is_active": 0},
@@ -646,10 +648,20 @@ def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     assert [button.callback_data for button in ctas_after_audience.inline_keyboard[-1]] == [f"broadcast_lite|ctas_done|{draft_id}", f"broadcast_lite|content|{draft_id}"]
     assert [button.callback_data for button in tiers.inline_keyboard[-1]] == [f"broadcast_lite|audience|{draft_id}", "menu|main"]
     assert [button.callback_data for button in history.inline_keyboard[0]] == ["broadcast_lite|back", "menu|main"]
+    assert [button.callback_data for button in schedule_menu.inline_keyboard[2]] == ["broadcast_lite|sclist", "broadcast_lite|limits|sched"]
+    assert [[button.callback_data for button in row] for row in limits_from_root.inline_keyboard] == [
+        ["broadcast_lite|limtoggle|back", "broadcast_lite|limreset|back"],
+        ["broadcast_lite|back", "menu|main"],
+    ]
+    assert [[button.callback_data for button in row] for row in limits_from_schedule.inline_keyboard] == [
+        ["broadcast_lite|limtoggle|sched", "broadcast_lite|limreset|sched"],
+        ["broadcast_lite|sched", "menu|main"],
+    ]
 
     keyboards = [
         root, compose, templates, template_review, custom_input, content, audience, review,
         ctas_before_audience, ctas_after_audience, features, tiers, force, history, schedule_menu, schedule_list,
+        limits_from_root, limits_from_schedule,
     ]
     callback_data = [button.callback_data for keyboard in keyboards for row in keyboard.inline_keyboard for button in row]
     assert callback_data
