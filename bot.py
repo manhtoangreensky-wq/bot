@@ -220603,11 +220603,6 @@ async def shopaikey_usage_monitor_loop(bot_client):
         await asyncio.sleep(interval_seconds)
 TELEGRAM_STARTUP_ERROR = ""
 
-
-def _resolve_optional_telegram_startup_hook(name: str):
-    hook = globals().get(str(name or "").strip())
-    return hook if callable(hook) else None
-
 async def run_polling_guarded():
     try:
         await tg_app.updater.start_polling(
@@ -221920,31 +221915,24 @@ async def lifespan(app: FastAPI):
         if tg_broadcast_lite_worker_task is None or tg_broadcast_lite_worker_task.done():
             tg_broadcast_lite_worker_task = asyncio.create_task(broadcast_lite_outbox_loop(tg_app.bot))
         if str(ownership.get("level") or "") in {"OWNED_BY_THIS_DEPLOY", "POLLING_MODE"}:
-            recovery_hook = _resolve_optional_telegram_startup_hook("subdub_recover_persisted_jobs")
-            if recovery_hook is None:
-                logger.warning("optional Telegram startup hook unavailable | hook=subdub_recover_persisted_jobs")
-            else:
-                try:
-                    recovery_summary = await recovery_hook(
-                        tg_app.bot,
-                        source="boot",
-                        limit=80,
-                    )
-                    logger.info(
-                        "subtitle/dub boot recovery | inspected=%s delivered=%s terminalized=%s errors=%s",
-                        recovery_summary.get("inspected", 0),
-                        recovery_summary.get("delivered", 0),
-                        recovery_summary.get("terminalized", 0),
-                        recovery_summary.get("errors", 0),
-                    )
-                except Exception as exc:
-                    logger.warning("subtitle/dub boot recovery skipped | %s", sanitize_log_text(str(exc))[:180])
-            recovery_watchdog_hook = _resolve_optional_telegram_startup_hook("subdub_recovery_watchdog_loop")
-            if recovery_watchdog_hook is None:
-                logger.warning("optional Telegram startup hook unavailable | hook=subdub_recovery_watchdog_loop")
-            elif tg_subdub_recovery_task is None or tg_subdub_recovery_task.done():
+            try:
+                recovery_summary = await subdub_recover_persisted_jobs(
+                    tg_app.bot,
+                    source="boot",
+                    limit=80,
+                )
+                logger.info(
+                    "subtitle/dub boot recovery | inspected=%s delivered=%s terminalized=%s errors=%s",
+                    recovery_summary.get("inspected", 0),
+                    recovery_summary.get("delivered", 0),
+                    recovery_summary.get("terminalized", 0),
+                    recovery_summary.get("errors", 0),
+                )
+            except Exception as exc:
+                logger.warning("subtitle/dub boot recovery skipped | %s", sanitize_log_text(str(exc))[:180])
+            if tg_subdub_recovery_task is None or tg_subdub_recovery_task.done():
                 tg_subdub_recovery_task = asyncio.create_task(
-                    recovery_watchdog_hook(tg_app.bot)
+                    subdub_recovery_watchdog_loop(tg_app.bot)
                 )
         if ADMIN_ID:
             try:

@@ -6,6 +6,14 @@ import bot
 import pytest
 
 
+def test_live24_boot_recovery_uses_direct_pr400_hooks():
+    source = Path(bot.__file__).read_text(encoding="utf-8")
+
+    assert "_resolve_optional_telegram_startup_hook" not in source
+    assert "recovery_summary = await subdub_recover_persisted_jobs(" in source
+    assert "subdub_recovery_watchdog_loop(tg_app.bot)" in source
+
+
 class CaptureBot:
     def __init__(self):
         self.video_sends = []
