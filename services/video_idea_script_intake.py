@@ -124,6 +124,7 @@ def deterministic_scene_drafts(
         completion = _clean(beat.get("completion")) or "Khép hành động tự nhiên và để lại trạng thái rõ cho cảnh sau."
         rows.append({
             "scene_index": index,
+            "role": _clean(beat.get("role")) or ("customer_conclusion" if index == count else f"customer_scene_{index:02d}"),
             "goal": main_idea,
             "content": action + (f" Yêu cầu riêng: {brief}." if brief else ""),
             "start_state": "Mở bằng trạng thái dễ hiểu, chủ thể và bối cảnh đã ổn định.",
@@ -258,10 +259,14 @@ def move_scene(rows: Iterable[Mapping[str, Any]], scene_index: int, target_index
 
 def semantic_beats_from_drafts(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     beats: list[dict[str, Any]] = []
-    for row in renumber_scene_drafts(rows):
+    numbered = renumber_scene_drafts(rows)
+    total = len(numbered)
+    for row in numbered:
         content = _clean(row.get("content") or row.get("goal"))
+        scene_index = int(row["scene_index"])
         beats.append({
-            "role": f"customer_scene_{int(row['scene_index']):02d}",
+            "role": _clean(row.get("role") or row.get("scene_role"))
+            or ("customer_conclusion" if scene_index == total else f"customer_scene_{scene_index:02d}"),
             "main_idea": content,
             "action": _clean(row.get("development")) or content,
             "development": _clean(row.get("development")) or content,

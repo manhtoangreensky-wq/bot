@@ -234,7 +234,10 @@ def test_long_video_keeps_internal_engine_lock_but_opens_shared_commercial_previ
     assert contract["execution_blocker"] == "long_video_under_upgrade"
     assert contract["scene_duration_seconds"] == 600
     handler = _between("async def handle_long_video_callback", "async def handle_storyboard_pack_callback")
-    assert 'query.data = "vproduct|open|multi_scene_film"' in handler
+    assert "start_public_video_scene2_step" in handler
+    assert '"multi_scene_film"' in handler
+    assert "handle_video_product_callback" not in handler
+    assert "query.data =" not in handler
 
 
 def test_preconfirm_tail_contract_does_not_call_provider_or_mutate_wallet() -> None:
