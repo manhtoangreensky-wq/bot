@@ -85768,6 +85768,72 @@ VIDEO_TAIL9_PRODUCT_LABELS = {
 }
 
 
+def video_ai_realistic_restore_legacy_content_mode(state: dict | None) -> dict:
+    """Materialize only the completed pre-FLOW6 Video AI trạng thái content mode.
+
+    FLOW6 made ``content_mode`` a required preflight field. Older Video AI chân
+    thật sessions had already persisted the selected profile/content but not that
+    new field, so the commercial tail rejected an otherwise complete plan. This
+    compatibility shim deliberately refuses to infer a choice from a bare topic:
+    it only repairs a state that contains proof of a completed content branch.
+    """
+
+    current = dict(state or {})
+    raw_product = str(current.get("source_product_id") or current.get("product_type") or "").strip()
+    if raw_product != "video_ai_real":
+        return current
+
+    flow_context = dict(current.get("video_flow_context") or {})
+    existing_mode = str(current.get("content_mode") or flow_context.get("content_mode") or "").strip()
+    if existing_mode in video_flow6.CONTENT_MODES:
+        return video_flow6.sync_scene_state(current)
+
+    source_fields = dict(current.get("source_fields") or flow_context.get("source_fields") or {})
+    source = str(
+        current.get("content_source")
+        or source_fields.get("content_source")
+        or flow_context.get("content_source")
+        or ""
+    ).strip()
+    selection = dict(
+        current.get("content_choice")
+        or current.get("selected_suggestion")
+        or flow_context.get("content_choice")
+        or {}
+    )
+    profile = str(
+        current.get("primary_profile_key")
+        or current.get("primary_profile")
+        or current.get("technical_profile")
+        or flow_context.get("primary_profile_key")
+        or ""
+    ).strip()
+    idea_id = str(current.get("idea_preset_id") or flow_context.get("idea_preset_id") or "").strip()
+    manual_content = str(
+        current.get("manual_content")
+        or current.get("manual_script_raw")
+        or current.get("script_text")
+        or source_fields.get("manual_content")
+        or ""
+    ).strip()
+
+    if source in {"manual", "custom", "manual_content"} and manual_content:
+        current["content_mode"] = "manual"
+        current["content_source"] = "manual"
+    elif source in {"profiles", "profile", "suggestions", "idea", "idea_catalog"} and (selection or idea_id):
+        current["content_mode"] = "suggestions"
+    elif selection and profile:
+        current["content_mode"] = "suggestions"
+        current["content_source"] = source or "profiles"
+    elif idea_id:
+        current["content_mode"] = "suggestions"
+        current["content_source"] = source or "idea_catalog"
+    else:
+        return current
+
+    return video_flow6.sync_scene_state(current)
+
+
 def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     """Return one scoped tail state and the canonical host that owns it."""
 
@@ -85838,6 +85904,9 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     else:
         owner = "scene3"
         host = video_profile_studio_state(context)
+        restored_host = video_ai_realistic_restore_legacy_content_mode(host)
+        if restored_host != host:
+            host = save_video_profile_studio_state(context, restored_host)
         requested = str(host.get("product_type") or host.get("source_product_id") or session_product or "video_ai_real")
         product_type = requested if requested in video_tail9.PRODUCT_ADAPTERS else "video_ai_real"
         session_id = str(host.get("video_session_id") or host.get("flow_session_id") or f"{uid}:{product_type}")
