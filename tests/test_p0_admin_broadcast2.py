@@ -240,6 +240,31 @@ def test_async_outbox_used_by_live_worker_has_bounded_retry(tmp_path: Path):
     assert broadcast.campaign_stats(db, campaign["campaign_id"])["sent"] == 2
 
 
+def test_live_worker_startup_survives_missing_optional_hook():
+    source = BOT_TEXT
+    helper_start = source.index("def _resolve_optional_telegram_startup_hook")
+    helper_end = source.index("async def run_polling_guarded", helper_start)
+    namespace = {}
+    exec(source[helper_start:helper_end], namespace)
+
+    assert namespace["_resolve_optional_telegram_startup_hook"]("missing_hook") is None
+
+    def available_hook():
+        return None
+
+    namespace["available_hook"] = available_hook
+    assert namespace["_resolve_optional_telegram_startup_hook"]("available_hook") is available_hook
+
+    lifespan_start = source.index("async def lifespan")
+    lifespan_end = source.index("fastapi_app = FastAPI", lifespan_start)
+    lifespan_source = source[lifespan_start:lifespan_end]
+    worker_start = "tg_broadcast_lite_worker_task = asyncio.create_task(broadcast_lite_outbox_loop(tg_app.bot))"
+    optional_watchdog = '_resolve_optional_telegram_startup_hook("subdub_recovery_watchdog_loop")'
+    assert lifespan_source.count(worker_start) == 1
+    assert lifespan_source.index(worker_start) < lifespan_source.index(optional_watchdog)
+    assert "subdub_recovery_watchdog_loop(tg_app.bot)" not in lifespan_source
+
+
 def test_outbox_resumes_stale_claim_and_records_heartbeat(tmp_path: Path):
     db = make_db(tmp_path)
     draft = broadcast.create_template_draft(db, 9001, "support")
