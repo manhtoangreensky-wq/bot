@@ -205630,6 +205630,666 @@ async def subdub_validate_video_output(
         return {**probe, **duration_fields, "ok": False, "detail": "video_duration_coverage_failed"}
     return {**probe, **duration_fields, "ok": True, "detail": "ok"}
 
+
+# Persisted SubDub recovery deliberately lives beside output validation.  The
+# normal pipeline owns rendering; this layer only restores a DB-backed job
+# after a process restart and never rerenders a validated artifact.
+SUBDUB_RECOVERY_OWNER = str(
+    os.getenv("SUBDUB_RECOVERY_OWNER") or f"subdub-recovery:{os.getpid()}"
+).strip()
+SUBDUB_RECOVERY_LEASE_SECONDS = max(
+    30, env_int("SUBDUB_RECOVERY_LEASE_SECONDS", 180)
+)
+SUBDUB_RECOVERY_STAGE_TIMEOUT_SECONDS = max(
+    60, env_int("SUBDUB_RECOVERY_STAGE_TIMEOUT_SECONDS", 900)
+)
+
+
+def subdub_registry_key_for_job(job: dict | None = None) -> str:
+    current = dict(job or {})
+    direct = str(current.get("job_key") or "").strip()
+    if direct:
+        return direct
+    variants = subdub_job_identifier_variants(current)
+    for key, candidate in SUBTITLE_DUB_PIPELINE_JOBS.items():
+        if variants and variants & subdub_job_identifier_variants(candidate):
+            return str(key or "")
+    return ""
+
+
+def subdub_hydrate_registry_from_persisted(job: dict | None = None) -> dict:
+    """Hydrate disposable RAM cache from the persisted SubDub source of truth."""
+    persisted = subdub_merge_debug_job(job, lookup_store_hit="engine_async_persisted_scan")
+    if not persisted:
+        return {}
+    internal_id = str(
+        persisted.get("internal_job_id")
+        or persisted.get("job_id")
+        or persisted.get("registry_job_id")
+        or ""
+    ).strip()
+    if internal_id:
+        ENGINE_ASYNC_MEMORY_JOBS[internal_id] = dict(persisted)
+    registry_key = subdub_registry_key_for_job(persisted)
+    registry_missing = not bool(registry_key and SUBTITLE_DUB_PIPELINE_JOBS.get(registry_key))
+    registry_key = registry_key or str(persisted.get("job_key") or internal_id or "").strip()
+    persisted["status_registry_missing_after_restart"] = bool(
+        persisted.get("status_registry_missing_after_restart") or registry_missing
+    )
+    if not registry_key:
+        return persisted
+    persisted["job_key"] = registry_key
+    cached = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(registry_key) or {})
+    hydrated = {**cached, **persisted}
+    SUBTITLE_DUB_PIPELINE_JOBS[registry_key] = hydrated
+    return dict(hydrated)
+
+
+def subdub_reload_persisted_job(job: dict | None = None) -> dict:
+    current = dict(job or {})
+    internal_id = str(
+        current.get("internal_job_id")
+        or current.get("job_id")
+        or current.get("registry_job_id")
+        or ""
+    ).strip()
+    persisted = get_engine_async_job(internal_id) if internal_id else {}
+    return subdub_hydrate_registry_from_persisted(persisted or current)
+
+
+def subdub_atomic_mutate_persisted_job(job: dict | None, *, reason: str, mutate) -> dict:
+    """Perform a compare-safe persisted mutation while holding SQLite's write lock."""
+    current = dict(job or {})
+    internal_id = str(
+        current.get("internal_job_id")
+        or current.get("job_id")
+        or current.get("registry_job_id")
+        or ""
+    ).strip()
+    if not internal_id:
+        return {}
+    conn = None
+    try:
+        conn = db_connect()
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        setting_key = _engine_async_job_key(internal_id)
+        cursor.execute("SELECT value FROM system_settings WHERE key=?", (setting_key,))
+        row = cursor.fetchone()
+        if not row:
+            conn.rollback()
+            return {}
+        try:
+            persisted = json.loads((row[0] if row else "") or "{}")
+        except Exception:
+            conn.rollback()
+            return {}
+        if not isinstance(persisted, dict):
+            conn.rollback()
+            return {}
+        updated = mutate(dict(persisted))
+        if not isinstance(updated, dict):
+            conn.rollback()
+            return {}
+        updated["updated_at"] = time.time()
+        cursor.execute(
+            """UPDATE system_settings
+               SET value=?, note=?, updated_at=?, updated_by=?
+               WHERE key=?""",
+            (
+                json.dumps(updated, ensure_ascii=False, separators=(",", ":")),
+                str(reason or "subdub recovery")[:1200],
+                now_text(),
+                str(updated.get("user_id") or ""),
+                setting_key,
+            ),
+        )
+        conn.commit()
+        return subdub_hydrate_registry_from_persisted(updated)
+    except Exception as exc:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "subtitle/dub persisted recovery update failed | %s",
+            sanitize_log_text(type(exc).__name__)[:180],
+        )
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+def subdub_persist_recovery_fields(job: dict | None, reason: str, **fields) -> dict:
+    return subdub_atomic_mutate_persisted_job(
+        job,
+        reason=reason,
+        mutate=lambda current: {**current, **fields},
+    )
+
+
+def subdub_claim_recovery_lease(job: dict | None, action: str) -> dict:
+    now_ts = time.time()
+
+    def _claim(current: dict) -> dict | None:
+        terminal = str(current.get("terminal_state") or "").strip().lower()
+        if terminal == "delivered" or subdub_recovery_delivery_message_id(current):
+            return None
+        lease_owner = str(current.get("execution_owner") or "").strip()
+        lease_expires = subdub_job_timestamp(current.get("lease_expires_at"))
+        if lease_owner and lease_expires > now_ts:
+            return None
+        if action == "delivery" and truthy_value(current.get("delivery_attempted"), False):
+            return None
+        current.update(
+            {
+                "execution_owner": SUBDUB_RECOVERY_OWNER,
+                "lease_expires_at": now_ts + SUBDUB_RECOVERY_LEASE_SECONDS,
+                "last_heartbeat_at": now_ts,
+                "attempt_count": _safe_int(current.get("attempt_count"), 0) + 1,
+                "recovery_attempted": True,
+                "recovery_action": str(action or ""),
+                "recovery_result": "claimed",
+            }
+        )
+        if action == "delivery":
+            current["delivery_attempted"] = True
+            current["delivery_attempted_at"] = now_ts
+        return current
+
+    return subdub_atomic_mutate_persisted_job(
+        job,
+        reason=f"subdub recovery lease {action}",
+        mutate=_claim,
+    )
+
+
+def subdub_recovery_stage_age_seconds(job: dict | None = None) -> float:
+    current = dict(job or {})
+    started = subdub_job_timestamp(
+        current.get("stage_started_at")
+        or current.get("last_heartbeat_at")
+        or current.get("updated_at")
+        or current.get("started_at")
+    )
+    return max(0.0, time.time() - started) if started > 0 else 0.0
+
+
+def subdub_recovery_delivery_message_id(job: dict | None = None) -> str:
+    current = dict(job or {})
+    for key in (
+        "video_delivery_message_id",
+        "final_video_message_id",
+        "telegram_artifact_message_id",
+        "delivery_message_id",
+        "telegram_message_id",
+    ):
+        value = str(current.get(key) or "").strip()
+        if value:
+            return value
+    return subdub_video_delivery_message_id(current)
+
+
+def subdub_recovery_final_mp4_path(job: dict | None = None) -> str:
+    current = dict(job or {})
+    candidates = (
+        current.get("artifact_path"),
+        current.get("final_mp4_path"),
+        current.get("final_video_path"),
+        current.get("canonical_video_path"),
+        current.get("output_path"),
+    )
+    for candidate in dict.fromkeys(str(item or "").strip() for item in candidates):
+        if not candidate:
+            continue
+        path = os.path.abspath(os.path.expanduser(candidate))
+        try:
+            if path.lower().endswith(".mp4") and os.path.isfile(path) and os.path.getsize(path) > 0:
+                return path
+        except OSError:
+            continue
+    return ""
+
+
+def subdub_recovery_file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except Exception:
+        return ""
+    return digest.hexdigest()
+
+
+def subdub_recovery_chat_id(job: dict | None = None):
+    current = dict(job or {})
+    for key in (
+        "status_panel_chat_id", "delivery_chat_id", "telegram_chat_id",
+        "registry_chat_id", "chat_id", "user_id",
+    ):
+        value = str(current.get(key) or "").strip()
+        if value:
+            return int(value) if value.lstrip("-").isdigit() else value
+    return ""
+
+
+def subdub_recovery_lang(job: dict | None = None, fallback: str = "vi") -> str:
+    current = dict(job or {})
+    return normalize_user_language(
+        str(current.get("ui_language") or current.get("ui_lang") or current.get("lang") or fallback)
+    )
+
+
+def subdub_recovery_has_tts_checkpoint(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    checkpoints = (
+        current.get("tts_cue_checkpoints")
+        or current.get("tts_checkpoints")
+        or current.get("tts_cue_artifacts")
+        or []
+    )
+    if not isinstance(checkpoints, list):
+        return False
+    for checkpoint in checkpoints:
+        item = dict(checkpoint or {}) if isinstance(checkpoint, dict) else {}
+        path = str(item.get("path") or item.get("audio_path") or item.get("artifact_path") or "").strip()
+        if path and os.path.isfile(os.path.abspath(os.path.expanduser(path))):
+            return True
+    return False
+
+
+def subdub_terminalize_recovery_failed_no_charge(
+    job: dict | None,
+    *,
+    blocker: str,
+    recovery_result: str,
+) -> dict:
+    stage = str(dict(job or {}).get("current_stage") or dict(job or {}).get("progress_stage") or "").strip()
+    return subdub_persist_recovery_fields(
+        job,
+        "subdub recovery terminal failure",
+        status="failed_no_charge",
+        terminal_state="failed_no_charge",
+        lifecycle_state="failed_no_charge",
+        current_stage="failed_no_charge",
+        progress_stage="failed_no_charge",
+        progress_percent=100,
+        completed_steps=subdub_completed_steps_for_lifecycle("failed_no_charge", "failed_no_charge"),
+        pipeline_blocker=str(blocker),
+        blocker=str(blocker),
+        error_code=str(blocker),
+        last_error_stage=stage,
+        last_error_safe=str(blocker),
+        no_charge_reason=str(blocker),
+        charge_status="not_charged",
+        charged_xu=0,
+        recovered_from_persisted_subdub_job=True,
+        recovery_attempted=True,
+        recovery_result=str(recovery_result),
+        recovery_blocker=str(blocker),
+        execution_owner="",
+        lease_expires_at=0,
+        terminal_public_outcome_type="failure",
+    )
+
+
+def subdub_prepare_artifact_delivery_recovery(
+    job: dict | None,
+    artifact_path: str,
+    validation: dict | None = None,
+) -> dict:
+    details = dict(validation or {})
+    return subdub_persist_recovery_fields(
+        job,
+        "subdub recovery artifact ready for delivery",
+        status="recovering_delivery",
+        terminal_state="",
+        lifecycle_state="delivering",
+        current_stage="delivering",
+        progress_stage="delivering",
+        progress_percent=max(95, min(99, _safe_int(dict(job or {}).get("progress_percent"), 95))),
+        completed_steps=subdub_completed_steps_for_lifecycle("delivering", ""),
+        artifact_path=str(artifact_path),
+        final_mp4_path=str(artifact_path),
+        artifact_hash=subdub_recovery_file_sha256(artifact_path),
+        artifact_duration=float(details.get("duration") or dict(job or {}).get("artifact_duration") or 0.0),
+        output_duration=float(details.get("duration") or dict(job or {}).get("output_duration") or 0.0),
+        final_mp4_exists=True,
+        final_mp4_valid=True,
+        final_mp4_validated=True,
+        delivery_attempted=False,
+        delivery_succeeded=False,
+        recovery_attempted=True,
+        recovery_result="artifact_valid_delivery_pending",
+        pipeline_blocker="",
+        blocker="",
+        error_code="",
+        last_error_safe="",
+        charge_status="not_charged",
+        charged_xu=0,
+    )
+
+
+class _SubdubRecoveryMessage:
+    def __init__(self, bot_client, chat_id):
+        self._bot = bot_client
+        self._chat_id = chat_id
+
+    async def reply_text(self, text, **kwargs):
+        return await self._bot.send_message(chat_id=self._chat_id, text=text, **kwargs)
+
+
+def subdub_claim_recovery_receipt(job: dict | None) -> dict:
+    now_ts = time.time()
+
+    def _claim(current: dict) -> dict | None:
+        existing = str(current.get("subdub_success_message_id") or current.get("receipt_message_id") or "").strip()
+        if existing or truthy_value(current.get("receipt_sent_once"), False) or truthy_value(current.get("receipt_send_attempted"), False):
+            return None
+        delivery_id = subdub_recovery_delivery_message_id(current)
+        panel_ready = bool(
+            truthy_value(current.get("status_panel_terminal_edit_succeeded"), False)
+            and _safe_int(current.get("panel_final_percent"), 0) == 100
+            and truthy_value(current.get("status_panel_terminalized"), False)
+        )
+        if str(current.get("terminal_state") or "").strip().lower() != "delivered" or not panel_ready or not delivery_id:
+            return None
+        current.update(
+            {
+                "receipt_send_attempted": True,
+                "receipt_send_attempted_at": now_ts,
+                "receipt_send_state": "claimed",
+                "receipt_execution_owner": SUBDUB_RECOVERY_OWNER,
+                "receipt_lease_expires_at": now_ts + SUBDUB_RECOVERY_LEASE_SECONDS,
+                "last_heartbeat_at": now_ts,
+            }
+        )
+        return current
+
+    return subdub_atomic_mutate_persisted_job(
+        job,
+        reason="subdub recovery receipt claim",
+        mutate=_claim,
+    )
+
+
+async def subdub_recovery_finalize_delivered_panel(job: dict | None, bot_client, *, lang: str = "vi") -> dict:
+    current = subdub_reload_persisted_job(job)
+    if not current:
+        return {}
+    chat_id = subdub_recovery_chat_id(current)
+    panel_id = str(current.get("status_panel_message_id") or "").strip()
+    if not bot_client or not chat_id or not panel_id:
+        return subdub_persist_recovery_fields(
+            current,
+            "subdub recovery waiting for status panel",
+            recovery_result="delivery_confirmed_panel_context_missing",
+            status_panel_terminal_edit_succeeded=False,
+            status_panel_terminal_edit_error="status_panel_context_missing",
+        )
+    job_id = str(current.get("public_code") or current.get("job_id") or current.get("internal_job_id") or "")
+    try:
+        await bot_client.edit_message_text(
+            chat_id=chat_id,
+            message_id=int(panel_id) if panel_id.isdigit() else panel_id,
+            text=subdub_progress_text("delivered", job_id, lang),
+            parse_mode="HTML",
+            reply_markup=subdub_progress_keyboard(job_id, lang),
+        )
+    except Exception as exc:
+        detail = sanitize_log_text(type(exc).__name__)
+        if "notmodified" not in detail.lower() and "not modified" not in str(exc).lower():
+            return subdub_persist_recovery_fields(
+                current,
+                "subdub recovery panel edit failed",
+                recovery_result="delivery_confirmed_panel_edit_pending",
+                status_panel_terminal_edit_succeeded=False,
+                status_panel_terminal_edit_error=detail[:160],
+            )
+    return subdub_persist_recovery_fields(
+        current,
+        "subdub recovery delivered terminal panel",
+        status="completed",
+        terminal_state="delivered",
+        lifecycle_state="delivered",
+        current_stage="delivered",
+        progress_stage="delivered",
+        progress_percent=100,
+        completed_steps=subdub_completed_steps_for_lifecycle("delivered", "delivered"),
+        output_sent=True,
+        final_mp4_delivered=True,
+        delivery_succeeded=True,
+        status_panel_terminal_edit_succeeded=True,
+        status_panel_terminal_edit_error="",
+        status_panel_terminalized=True,
+        panel_finalized=True,
+        panel_final_percent=100,
+        recovered_from_persisted_subdub_job=True,
+        recovery_attempted=True,
+        recovery_result="delivered_panel_finalized",
+        execution_owner="",
+        lease_expires_at=0,
+        terminal_public_outcome_type="success",
+    )
+
+
+async def subdub_recovery_send_receipt_once(job: dict | None, bot_client, *, lang: str = "vi") -> dict:
+    current = subdub_claim_recovery_receipt(job)
+    if not current:
+        return subdub_reload_persisted_job(job)
+    chat_id = subdub_recovery_chat_id(current)
+    job_key = str(current.get("job_key") or "").strip()
+    if not bot_client or not chat_id or not job_key:
+        return subdub_persist_recovery_fields(
+            current,
+            "subdub recovery receipt context missing",
+            receipt_send_state="pending",
+            receipt_send_attempted=False,
+            recovery_result="receipt_context_missing",
+        )
+    receipt = await subdub_send_success_receipt_once(
+        _SubdubRecoveryMessage(bot_client, chat_id),
+        job_key,
+        video_dubbing_receipt_text(current, current, lang),
+        reply_markup=video_dubbing_receipt_keyboard(lang, state=current),
+    )
+    updated = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or current)
+    receipt_id = str(getattr(receipt, "message_id", "") or updated.get("receipt_message_id") or "").strip()
+    if receipt_id:
+        return subdub_persist_recovery_fields(
+            updated,
+            "subdub recovery receipt sent",
+            receipt_message_id=receipt_id,
+            subdub_success_message_id=receipt_id,
+            receipt_sent_once=True,
+            receipt_send_state="sent",
+            receipt_send_failed=False,
+            receipt_send_uncertain=False,
+            terminal_receipt_count=1,
+            recovery_result="delivered_receipt_sent",
+        )
+    return subdub_reload_persisted_job(updated)
+
+
+async def subdub_recover_existing_delivery(job: dict | None, bot_client, *, lang: str = "vi") -> dict:
+    current = subdub_hydrate_registry_from_persisted(job)
+    delivery_id = subdub_recovery_delivery_message_id(current)
+    if not current or not delivery_id:
+        return current
+    current = subdub_persist_recovery_fields(
+        current,
+        "subdub recovery confirmed existing delivery",
+        delivery_message_id=delivery_id,
+        video_delivery_message_id=delivery_id,
+        telegram_artifact_message_id=delivery_id,
+        final_mp4_delivered=True,
+        delivery_succeeded=True,
+        output_sent=True,
+        recovery_attempted=True,
+        recovered_from_persisted_subdub_job=True,
+        recovery_result="existing_delivery_confirmed",
+    )
+    finalized = await subdub_recovery_finalize_delivered_panel(current, bot_client, lang=lang)
+    if str(finalized.get("terminal_state") or "").lower() == "delivered":
+        return await subdub_recovery_send_receipt_once(finalized, bot_client, lang=lang)
+    return finalized
+
+
+async def subdub_recover_persisted_job(
+    job: dict | None,
+    bot_client,
+    *,
+    lang: str = "vi",
+    source: str = "boot",
+    query=None,
+) -> dict:
+    del query
+    current = subdub_hydrate_registry_from_persisted(job)
+    if not current:
+        return {}
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    if terminal in SUBDUB_TERMINAL_STATES:
+        return current
+    resolved_lang = subdub_recovery_lang(current, lang)
+    delivery_id = subdub_recovery_delivery_message_id(current)
+    if delivery_id:
+        return await subdub_recover_existing_delivery(current, bot_client, lang=resolved_lang)
+    artifact_path = subdub_recovery_final_mp4_path(current)
+    if artifact_path:
+        if truthy_value(current.get("delivery_attempted"), False):
+            return subdub_terminalize_recovery_failed_no_charge(
+                current,
+                blocker="delivery_outcome_uncertain_after_restart",
+                recovery_result="delivery_not_retried_without_message_id",
+            )
+        try:
+            with open(artifact_path, "rb") as handle:
+                video_bytes = handle.read()
+        except OSError:
+            video_bytes = b""
+        mode = normalize_video_translate_mode(str(current.get("mode") or current.get("mapped_mode") or ""))
+        validation = await subdub_validate_video_output(
+            video_bytes,
+            require_audio=mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB},
+        )
+        if not validation.get("ok"):
+            return subdub_terminalize_recovery_failed_no_charge(
+                current,
+                blocker=f"persisted_artifact_invalid_after_restart:{str(validation.get('detail') or 'invalid')}",
+                recovery_result="artifact_validation_failed",
+            )
+        if not bot_client or not subdub_recovery_chat_id(current):
+            return subdub_persist_recovery_fields(
+                current,
+                "subdub recovery artifact awaiting delivery context",
+                recovery_attempted=True,
+                recovery_result="artifact_valid_delivery_context_pending",
+            )
+        claimed = subdub_claim_recovery_lease(current, "delivery")
+        if not claimed:
+            return subdub_reload_persisted_job(current)
+        prepared = subdub_prepare_artifact_delivery_recovery(claimed, artifact_path, validation)
+        # The claim is persisted before Telegram, so a restart can never resend an
+        # artifact whose delivery outcome is unknown.
+        prepared = subdub_persist_recovery_fields(
+            prepared,
+            "subdub recovery delivery claim persisted",
+            delivery_attempted=True,
+            delivery_attempted_at=time.time(),
+            execution_owner=SUBDUB_RECOVERY_OWNER,
+            lease_expires_at=time.time() + SUBDUB_RECOVERY_LEASE_SECONDS,
+        )
+        try:
+            delivery = await send_generated_video_path_for_delivery(
+                bot_client,
+                subdub_recovery_chat_id(prepared),
+                artifact_path,
+                filename=os.path.basename(artifact_path),
+                lang=resolved_lang,
+            )
+        except Exception as exc:
+            return subdub_terminalize_recovery_failed_no_charge(
+                prepared,
+                blocker=f"recovery_delivery_exception:{sanitize_log_text(type(exc).__name__).lower()}",
+                recovery_result="delivery_failed_before_message_id",
+            )
+        message_id = subdub_recovery_delivery_message_id(delivery)
+        if not message_id:
+            return subdub_terminalize_recovery_failed_no_charge(
+                prepared,
+                blocker="recovery_delivery_missing_message_id",
+                recovery_result="delivery_failed_before_message_id",
+            )
+        delivered = subdub_persist_recovery_fields(
+            prepared,
+            "subdub recovery Telegram artifact delivered",
+            delivery_message_id=message_id,
+            video_delivery_message_id=message_id,
+            telegram_artifact_message_id=message_id,
+            final_video_message_id=message_id,
+            final_mp4_delivered=True,
+            delivery_succeeded=True,
+            output_sent=True,
+        )
+        return await subdub_recover_existing_delivery(delivered, bot_client, lang=resolved_lang)
+    stage = str(current.get("current_stage") or current.get("progress_stage") or "received_file").strip().lower()
+    if stage == "generating_voice":
+        blocker = "tts_checkpoint_unavailable_after_restart"
+        result = "tts_resume_not_possible_no_checkpoint"
+        if subdub_recovery_has_tts_checkpoint(current):
+            blocker = "tts_checkpoint_resume_requires_live_worker"
+            result = "tts_checkpoint_present_no_worker_resume"
+    else:
+        blocker = f"recovery_checkpoint_unavailable_after_restart:{stage or 'received_file'}"
+        result = "recovery_checkpoint_unavailable"
+    return subdub_terminalize_recovery_failed_no_charge(
+        current,
+        blocker=blocker,
+        recovery_result=result,
+    )
+
+
+async def subdub_recover_persisted_jobs(bot_client, *, source: str = "boot", limit: int = 40) -> dict:
+    summary = {"inspected": 0, "delivered": 0, "terminalized": 0, "errors": 0}
+    for job in subdub_engine_async_persisted_scan(limit=max(1, int(limit or 40))):
+        current = subdub_hydrate_registry_from_persisted(job)
+        terminal = str(current.get("terminal_state") or "").strip().lower()
+        if terminal in SUBDUB_TERMINAL_STATES:
+            continue
+        key = str(current.get("job_key") or "")
+        registry_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {}) if key else {}
+        if registry_job and not truthy_value(current.get("status_registry_missing_after_restart"), False):
+            continue
+        summary["inspected"] += 1
+        try:
+            result = await subdub_recover_persisted_job(current, bot_client, lang=subdub_recovery_lang(current), source=source)
+        except Exception as exc:
+            summary["errors"] += 1
+            logger.warning("subtitle/dub recovery failed | %s", sanitize_log_text(type(exc).__name__)[:160])
+            continue
+        terminal = str(result.get("terminal_state") or "").strip().lower()
+        if terminal == "delivered":
+            summary["delivered"] += 1
+        elif terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+            summary["terminalized"] += 1
+    return summary
+
+
+async def subdub_recovery_watchdog_loop(bot_client) -> None:
+    interval = max(30, env_int("SUBDUB_RECOVERY_WATCHDOG_INTERVAL_SECONDS", 60))
+    await asyncio.sleep(min(15, interval))
+    while True:
+        try:
+            await subdub_recover_persisted_jobs(bot_client, source="watchdog")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("subtitle/dub recovery watchdog failed | %s", sanitize_log_text(type(exc).__name__)[:160])
+        await asyncio.sleep(interval)
+
 def subdub_mode_requires_final_video(mode: str = "", state: dict | None = None, content_type: str = "", output_type: str = "") -> bool:
     state = dict(state or {})
     mode = normalize_video_translate_mode(mode or state.get("video_processing_mode") or state.get("mode") or state.get("process_type"))

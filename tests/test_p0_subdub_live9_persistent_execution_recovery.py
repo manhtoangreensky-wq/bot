@@ -291,6 +291,7 @@ def test_live9_sqlite_lease_blocks_second_recovery_owner(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "mode",
     [
+        bot.VIDEO_SUBTITLE_MODE_CREATE,
         bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         bot.VIDEO_SUBTITLE_MODE_DUB,
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
@@ -359,6 +360,7 @@ def test_live9_restart_without_checkpoint_never_stays_running(
 @pytest.mark.parametrize(
     "mode",
     [
+        bot.VIDEO_SUBTITLE_MODE_CREATE,
         bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         bot.VIDEO_SUBTITLE_MODE_DUB,
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
@@ -390,7 +392,12 @@ def test_live9_restart_at_95_delivers_existing_artifact_once_per_lane(
     bot.ENGINE_ASYNC_MEMORY_JOBS.clear()
 
     async def validate(_payload, *, require_audio=False):
-        assert require_audio is (mode != bot.VIDEO_SUBTITLE_MODE_TRANSLATE)
+        assert require_audio is (
+            mode in {
+                bot.VIDEO_SUBTITLE_MODE_DUB,
+                bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            }
+        )
         return {"ok": True, "duration": 30.0}
 
     monkeypatch.setattr(bot, "subdub_validate_video_output", validate)
