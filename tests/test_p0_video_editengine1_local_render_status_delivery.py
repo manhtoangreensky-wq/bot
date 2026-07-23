@@ -421,6 +421,116 @@ def test_editengine1_real_ffmpeg_brightness_preserves_h264_aac_and_duration(tmp_
     assert audio_probe.stdout.strip() == "aac"
 
 
+def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ffmpeg = validation.find_ffmpeg()
+    ffprobe = validation.find_ffprobe(ffmpeg_path=ffmpeg)
+    if not ffmpeg or not ffprobe:
+        pytest.skip("FFmpeg/ffprobe unavailable")
+
+    source = tmp_path / "source.mp4"
+    fixture = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+    assert fixture.returncode == 0, fixture.stderr[-1200:]
+
+    workspaces = tmp_path / "workspaces"
+    updates: list[dict] = []
+    deliveries: list[dict] = []
+
+    def fake_download(_file_id: str, destination: str, max_bytes: int = 0) -> None:
+        Path(destination).write_bytes(source.read_bytes())
+
+    def fake_delivery(chat_id: str, output_path: str, caption: str = "", **_kwargs) -> dict:
+        deliveries.append({"chat_id": chat_id, "output_path": output_path, "caption": caption})
+        return {"sent": True, "message_id": "delivery-901", "file_id": "telegram-output-901"}
+
+    def capture_update(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "", **_kwargs) -> None:
+        updates.append({
+            "job_id": job_id,
+            "status": status,
+            "detail": error_short,
+            "output_url": output_url,
+            "output_file_id": output_file_id,
+        })
+
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: ffmpeg)
+    monkeypatch.setattr(local_worker, "find_ffprobe", lambda ffmpeg_path="": ffprobe)
+    monkeypatch.setattr(
+        local_worker,
+        "create_job_workspace",
+        lambda job_id: validation.create_job_workspace(job_id, root=workspaces),
+    )
+    monkeypatch.setattr(
+        local_worker,
+        "cleanup_job_workspace",
+        lambda workspace: validation.cleanup_job_workspace(workspace, root=workspaces),
+    )
+    monkeypatch.setattr(local_worker, "telegram_download_file", fake_download)
+    monkeypatch.setattr(local_worker, "telegram_send_video_receipt", fake_delivery)
+    monkeypatch.setattr(local_worker, "update_job", capture_update)
+
+    plan = editing.default_manual_edit_plan("")
+    plan["trim"] = {"start_ms": 0, "end_ms": 2_000}
+    plan["brightness_percent"] = 120
+    local_worker.run_video_local_edit({
+        "id": 901,
+        "job_type": video_editengine1.WORKER_JOB_TYPE,
+        "input_file_id": json.dumps({
+            "source_file_id": "source-telegram-file",
+            "source_file_name": "source.mp4",
+            "chat_id": "88",
+            "manual_edit_plan": plan,
+            "price_xu": 300,
+            "max_render_seconds": 45,
+        }),
+    })
+
+    assert len(deliveries) == 1
+    terminal = updates[-1]
+    assert terminal["status"] == "succeeded"
+    assert terminal["output_file_id"] == "telegram-output-901"
+    assert json.loads(terminal["detail"])["validation"] == "passed"
+    receipt = json.loads(terminal["output_url"])
+    assert receipt["delivery_message_id"] == "delivery-901"
+    assert receipt["delivery_file_id"] == "telegram-output-901"
+    assert receipt["ffprobe"]["ok"] is True
+    assert receipt["ffprobe"]["video_codec"] == "h264"
+    assert receipt["ffprobe"]["has_audio"] is True
+
+
+def test_editengine1_worker_dispatches_only_to_its_local_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: list[dict] = []
+    monkeypatch.setattr(local_worker, "run_video_local_edit", lambda job: received.append(job))
+
+    local_worker.process_job({"id": 902, "job_type": video_editengine1.WORKER_JOB_TYPE})
+
+    assert received == [{"id": 902, "job_type": video_editengine1.WORKER_JOB_TYPE}]
+
+
 class _Response:
     def __init__(self, payload: dict):
         self.payload = payload

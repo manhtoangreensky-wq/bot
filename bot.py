@@ -86514,8 +86514,12 @@ def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
 
 def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> dict:
     product = str(tail.get("video_product_type") or "video_ai_real")
-    contract = video_tail9.commercial_contract(product)
-    required_capability = str(contract.get("required_capability") or "")
+    if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
+        # The local editor renders a supplied video with FFmpeg; it is not a text-to-video package.
+        required_capability = "video_to_video"
+    else:
+        contract = video_tail9.commercial_contract(product)
+        required_capability = str(contract.get("required_capability") or "")
     return video_uifreeze1.catalog_report(
         product,
         scene_count=safe_int(tail.get("scene_count"), 1),
@@ -215605,7 +215609,11 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
                 reply_markup=video_edit_lane_upload_keyboard(edit_mode, lang),
             )
             return True
-        cache_recent_media_state(update)
+        # Recency caching is optional. A failure here must not discard a valid edit upload.
+        try:
+            cache_recent_media_state(update)
+        except Exception as exc:
+            logger.warning("canonical video edit media cache failed | %s", sanitize_log_text(str(exc))[:180])
         source["source_file_size"] = int(metadata.get("bytes") or source.get("source_file_size") or 0)
         source["source_duration"] = int(round(float(metadata.get("duration") or 0)))
         source["source_duration_ms"] = int(metadata.get("duration_ms") or 0)
