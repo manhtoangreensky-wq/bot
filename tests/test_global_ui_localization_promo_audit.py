@@ -108,19 +108,20 @@ def test_public_no_env_api_text():
 
 def test_vi_promo_table_keeps_domestic_deposit_promos():
     text = _text(bot.billing_promotions_lines("vi"))
-    assert "FIRST30" in text
-    assert "SECOND15" in text
-    assert "Launch Bonus" in text
+    assert "Nạp lần đầu từ <b>10.000đ</b>: tự động <b>+30% Xu</b>." in text
+    assert "Nạp lần hai từ <b>10.000đ</b>: tự động <b>+20% Xu</b>." in text
+    assert "Không cần nhập mã cho hai ưu đãi này." in text
+    assert "Không cộng chồng mã cũ FIRST30/SECOND15" in text
 
 
 def test_vi_promo_notes_payos_bank_only():
     text = _text(bot.billing_promotions_lines("vi"))
-    assert "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam." in text
+    assert "Tài khoản Việt Nam + thanh toán VND nội địa qua PayOS hoặc ACB/VietQR." in text
 
 
 def test_vi_promo_excludes_zalo_momo():
     text = _text(bot.billing_promotions_lines("vi"))
-    assert "Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế." in text
+    assert "ZaloPay/MoMo, ngoại tệ, USDT và thanh toán quốc tế không nhận bonus nội địa." in text
 
 
 def test_en_promo_table_removes_deposit_launch_bonus():
@@ -128,22 +129,22 @@ def test_en_promo_table_removes_deposit_launch_bonus():
     assert "FIRST30" not in text
     assert "SECOND15" not in text
     assert "Launch Bonus theo mệnh giá" not in text
-    assert "launch bonuses are not offered" in text
+    assert "Vietnam domestic top-up promotions" in text
 
 
 def test_international_promo_shows_tier_discount_only():
     text = _text(bot.billing_promotions_lines("en"))
     assert "member-tier service discounts" in text
-    assert "Vietnam domestic deposit bonuses" in text
+    assert "Vietnam domestic top-up promotions" in text
 
 
 def test_promo_policy_no_cross_market_confusion():
     vi = _text(bot.billing_promotions_lines("vi"))
     en = _text(bot.billing_promotions_lines("en"))
-    assert "FIRST30" in vi
+    assert "+30% Xu" in vi and "+20% Xu" in vi
     assert "FIRST30" not in en
     assert "International users receive" in en
-    assert "PayOS hoặc chuyển khoản ngân hàng Việt Nam" in vi
+    assert "PayOS hoặc ACB/VietQR" in vi
 
 
 def test_member_tier_copy_clear():

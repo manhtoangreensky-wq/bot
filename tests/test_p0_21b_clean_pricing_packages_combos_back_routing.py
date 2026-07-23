@@ -75,7 +75,8 @@ def test_public_voucher_entry_still_available():
     assert "🎁 Nhập mã ưu đãi" in labels
     assert "pricing|promo_apply" in callbacks
     promo_text = "\n".join(bot.billing_promo_apply_lines("vi"))
-    assert "/promo FIRST30" in promo_text
+    assert "Lần đầu +30% và lần hai +20% được tự động áp dụng, không cần mã." in promo_text
+    assert "/promo WEEKLY10" in promo_text
 
 
 def test_monthly_packages_rebuilt_current_products():
