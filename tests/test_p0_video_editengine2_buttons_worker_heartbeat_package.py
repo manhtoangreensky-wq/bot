@@ -76,11 +76,12 @@ def test_video_edit_review_has_only_exact_product_buttons() -> None:
         "video_tail|audio|open",
         "video_tail|logo|open",
         "video_tail|review|summary",
-        "video_tail|quality|open",
+        "video_tail|review|source",
         "video_tail|review|back",
         "menu|main",
     }
     assert all(callback in section for callback in expected)
+    assert "video_tail|quality|open" not in section
     assert "review|scenes" not in section
     assert "review|prompts" not in section
     assert "review|redo" not in section
@@ -137,8 +138,9 @@ def test_stale_worker_never_exposes_quality_selection_or_payable_invoice() -> No
     render = _section(BOT_SOURCE, "async def video_tail9_render", "async def handle_video_tail_callback")
     assert "selectable=bool(capability.get(\"ok\"))" in render
     handler = _section(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
-    assert "video_tail9_quality_keyboard(tail, catalog, selectable=False)" in handler
-    assert "TOAN AAS chưa tạo tác vụ và chưa trừ Xu" in handler
+    assert 'if not capability.get("ok"):' in handler
+    assert "video_tail9_public_blocker_text()" in handler
+    assert "video_tail9_public_blocker_keyboard()" in handler
 
 
 def test_fresh_canonical_heartbeat_admits_video_edit() -> None:

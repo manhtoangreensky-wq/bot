@@ -42,8 +42,15 @@ COLOR_PRESETS = {
     "high_contrast": "eq=contrast=1.25:saturation=1.05",
     "black_white": "hue=s=0,eq=contrast=1.08",
 }
-TEXT_POSITIONS = {"top", "center", "bottom"}
-LOGO_POSITIONS = {"top_left", "top_right", "bottom_left", "bottom_right"}
+OVERLAY_POSITIONS = {
+    "top_left", "top_center", "top_right",
+    "center_left", "center", "center_right",
+    "bottom_left", "bottom_center", "bottom_right",
+}
+# Earlier edit plans used three vertical-only text labels. Keep those plans
+# valid, then normalize them to the same 3x3 placement contract as logos.
+TEXT_POSITIONS = OVERLAY_POSITIONS | {"top", "bottom"}
+LOGO_POSITIONS = set(OVERLAY_POSITIONS)
 
 
 class LocalVideoEditError(RuntimeError):
@@ -68,6 +75,45 @@ def _integer(value: Any, default: int = 0) -> int:
 
 def _safe_text(value: Any, maximum: int = 500) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:maximum]
+
+
+def _canonical_overlay_position(value: Any, default: str) -> str:
+    token = str(value or default).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "top": "top_center",
+        "bottom": "bottom_center",
+        "middle": "center",
+        "middle_left": "center_left",
+        "middle_right": "center_right",
+    }
+    token = aliases.get(token, token)
+    return token if token in OVERLAY_POSITIONS else default
+
+
+def _overlay_xy(
+    position: Any,
+    *,
+    frame_width: str,
+    frame_height: str,
+    overlay_width: str,
+    overlay_height: str,
+    margin_x: str,
+    margin_y: str,
+    default: str,
+) -> tuple[str, str]:
+    """Return FFmpeg expressions for a canonical 3x3 overlay position."""
+    token = _canonical_overlay_position(position, default)
+    x = f"({frame_width}-{overlay_width})/2"
+    y = f"({frame_height}-{overlay_height})/2"
+    if token.endswith("_left"):
+        x = margin_x
+    elif token.endswith("_right"):
+        x = f"{frame_width}-{overlay_width}-{margin_x}"
+    if token.startswith("top_"):
+        y = margin_y
+    elif token.startswith("bottom_"):
+        y = f"{frame_height}-{overlay_height}-{margin_y}"
+    return x, y
 
 
 def default_manual_edit_plan(input_video: str = "") -> dict[str, Any]:
@@ -153,11 +199,12 @@ def normalize_manual_edit_plan(
     text = dict(raw.get("text_overlay") or {})
     if text:
         content = _safe_text(text.get("content"), 260)
-        position = str(text.get("position") or "bottom").strip().lower()
+        requested_position = str(text.get("position") or "bottom").strip().lower()
+        position = _canonical_overlay_position(requested_position, "bottom_center")
         start = max(0, _integer(text.get("start_ms"), 0))
         end = _integer(text.get("end_ms"), 0) or end_ms - start_ms
         font_size = max(16, min(120, _integer(text.get("font_size"), 42)))
-        if not content or position not in TEXT_POSITIONS or start >= end:
+        if not content or requested_position not in TEXT_POSITIONS or start >= end:
             raise LocalVideoEditError("text_overlay_invalid")
         text = {
             "content": content,
@@ -171,10 +218,11 @@ def normalize_manual_edit_plan(
     logo = dict(raw.get("logo_overlay") or {})
     if logo:
         logo_path = str(logo.get("path") or "").strip()
-        position = str(logo.get("position") or "top_right").strip().lower()
+        requested_position = str(logo.get("position") or "top_right").strip().lower()
+        position = _canonical_overlay_position(requested_position, "top_right")
         scale = _number(logo.get("scale"), 0.12)
         opacity = _number(logo.get("opacity"), 1.0)
-        if position not in LOGO_POSITIONS or not 0.02 <= scale <= 0.18 or not 0.1 <= opacity <= 1.0:
+        if requested_position not in LOGO_POSITIONS or not 0.02 <= scale <= 0.18 or not 0.1 <= opacity <= 1.0:
             raise LocalVideoEditError("logo_overlay_invalid")
         if workspace is not None:
             try:
@@ -275,8 +323,16 @@ def resolve_vietnamese_font_path(explicit: str = "") -> str:
 def _text_filter(config: dict[str, Any]) -> str:
     if not config:
         return ""
-    position = str(config.get("position") or "bottom")
-    y = {"top": "h*0.06", "center": "(h-text_h)/2", "bottom": "h-text_h-h*0.06"}[position]
+    x, y = _overlay_xy(
+        config.get("position"),
+        frame_width="w",
+        frame_height="h",
+        overlay_width="text_w",
+        overlay_height="text_h",
+        margin_x="w*0.04",
+        margin_y="h*0.06",
+        default="bottom_center",
+    )
     font_path = resolve_vietnamese_font_path(str(config.get("font_path") or ""))
     font = f"fontfile='{_escape_filter_path(font_path)}':" if font_path else ""
     start = int(config.get("start_ms") or 0) / 1000
@@ -285,7 +341,7 @@ def _text_filter(config: dict[str, Any]) -> str:
         f"drawtext={font}text='{_escape_filter_text(str(config.get('content') or ''))}':"
         f"fontcolor=white:fontsize={int(config.get('font_size') or 42)}:"
         f"borderw={int(config.get('outline') or 2)}:bordercolor=black@0.9:"
-        f"x=(w-text_w)/2:y={y}:enable='between(t,{start:.3f},{end:.3f})'"
+        f"x={x}:y={y}:enable='between(t,{start:.3f},{end:.3f})'"
     )
 
 
@@ -365,14 +421,21 @@ def build_manual_ffmpeg_command(
     filters.append("format=yuv420p")
     base_filter = ",".join(item for item in filters if item)
     if logo:
-        position = str(logo.get("position") or "top_right")
-        x_map = {"top_left": "main_w*0.04", "bottom_left": "main_w*0.04", "top_right": "main_w-overlay_w-main_w*0.04", "bottom_right": "main_w-overlay_w-main_w*0.04"}
-        y_map = {"top_left": "main_h*0.035", "top_right": "main_h*0.035", "bottom_left": "main_h-overlay_h-main_h*0.035", "bottom_right": "main_h-overlay_h-main_h*0.035"}
+        x, y = _overlay_xy(
+            logo.get("position"),
+            frame_width="main_w",
+            frame_height="main_h",
+            overlay_width="overlay_w",
+            overlay_height="overlay_h",
+            margin_x="main_w*0.04",
+            margin_y="main_h*0.035",
+            default="top_right",
+        )
         complex_filter = (
             f"[0:v]{base_filter}[base];"
             f"[1:v]format=rgba,colorchannelmixer=aa={float(logo.get('opacity') or 1.0):.3f}[logo0];"
             f"[logo0][base]scale2ref=w=main_w*{float(logo.get('scale') or 0.12):.3f}:h=ow/mdar[logo][base2];"
-            f"[base2][logo]overlay={x_map[position]}:{y_map[position]}[v]"
+            f"[base2][logo]overlay={x}:{y}[v]"
         )
         command.extend(["-filter_complex", complex_filter, "-map", "[v]"])
     else:

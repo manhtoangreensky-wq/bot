@@ -67394,7 +67394,7 @@ VIDEO_EDITOR_NUMBER_FIELDS = {
     "audio_volume_percent", "brightness_percent",
     "last_media_message_id", "probe_count",
     "state_revision", "revision", "edit_job_id", "outbox_id",
-    "source_width", "source_height",
+    "source_width", "source_height", "last_recovery_message_id",
 }
 
 
@@ -69866,13 +69866,13 @@ def video_scene3_field_editor_keyboard(
     entry = dict((state.get(group) or {}).get(key) or {})
     number_buttons = [(str(index), f"vprofile|{pick_action}|{index}") for index in range(1, 6)]
     rotate_callback = f"vprofile|{'req_rotate' if group == 'preservation_requirements' else 'creative_rotate'}"
-    rows = [number_buttons[:2], number_buttons[2:4], [number_buttons[4], ("🔄 Đổi gợi ý", rotate_callback)]]
+    rows = [
+        number_buttons,
+        [("🔄 Đổi 5 gợi ý", rotate_callback), ("✍️ Tự nhập", f"vprofile|{custom_action}")],
+    ]
     if list(entry.get("history") or []):
-        second_action = ("↩️ Khôi phục", f"vprofile|{restore_action}")
-    else:
         remove_action = "req_remove" if group == "preservation_requirements" else "creative_remove"
-        second_action = ("🚫 Bỏ chọn mục", f"vprofile|{remove_action}")
-    rows.append([("✍️ Tự nhập", f"vprofile|{custom_action}"), second_action])
+        rows.append([("↩️ Khôi phục", f"vprofile|{restore_action}"), ("🚫 Bỏ chọn mục", f"vprofile|{remove_action}")])
     rows.append([("⬅️ Quay lại", f"vprofile|{back_action}"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
@@ -70170,13 +70170,16 @@ def video_scene3_content_suggestions_text(state: dict) -> str:
 
 def video_scene3_content_suggestions_keyboard(state: dict) -> InlineKeyboardMarkup:
     number_buttons = [(str(index), f"vprofile|content_pick|{index}") for index in range(1, 6)]
-    return video_scene3_keyboard([
-        number_buttons[:2],
-        number_buttons[2:4],
-        [number_buttons[4], ("✍️ Tự nhập", "vprofile|content_custom")],
-        [("↩️ Khôi phục", "vprofile|content_restore"), ("⬅️ Về mục này", "vprofile|content_detail_done")],
-        *video_scene3_nav_rows(),
-    ])
+    key = str(state.get("active_content_addon") or "")
+    entry = dict((state.get("content_affecting_addons") or {}).get(key) or {})
+    rows = [number_buttons]
+    if list(entry.get("history") or []):
+        rows.append([("✍️ Tự nhập", "vprofile|content_custom"), ("↩️ Khôi phục", "vprofile|content_restore")])
+        rows.append([("🚫 Bỏ chọn mục", "vprofile|content_remove"), ("⬅️ Về mục này", "vprofile|content_detail_done")])
+    else:
+        rows.append([("✍️ Tự nhập", "vprofile|content_custom"), ("⏭️ Không dùng mục", "vprofile|content_remove")])
+    rows.append([("⬅️ Quay lại", "vprofile|content_detail_done"), ("🏠 Menu chính", "menu|main")])
+    return video_scene3_keyboard(rows)
 
 
 def video_scene3_content_position_text(state: dict) -> str:
@@ -70194,8 +70197,8 @@ def video_scene3_content_position_text(state: dict) -> str:
 def video_scene3_content_position_keyboard() -> InlineKeyboardMarkup:
     values = list(video_scene3_flow.LOGO_POSITIONS)
     rows = [
-        [(label, f"vprofile|content_position_set|{key}") for key, label in values[index:index + 2]]
-        for index in range(0, len(values), 2)
+        [(label, f"vprofile|content_position_set|{key}") for key, label in values[index:index + 3]]
+        for index in range(0, len(values), 3)
     ]
     rows.append([("⬅️ Về mục này", "vprofile|content_position_done"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
@@ -70918,8 +70921,8 @@ def video_scene3_post_position_text(state: dict) -> str:
 def video_scene3_post_position_keyboard() -> InlineKeyboardMarkup:
     values = list(video_scene3_flow.LOGO_POSITIONS)
     rows = [
-        [(label, f"vprofile|post_position_set|{key}") for key, label in values[index:index + 2]]
-        for index in range(0, len(values), 2)
+        [(label, f"vprofile|post_position_set|{key}") for key, label in values[index:index + 3]]
+        for index in range(0, len(values), 3)
     ]
     rows.append([("⬅️ Quay lại", "vprofile|post_position_done"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
@@ -70943,8 +70946,8 @@ def video_scene3_logo_position_text(state: dict) -> str:
 def video_scene3_logo_position_keyboard() -> InlineKeyboardMarkup:
     values = list(video_scene3_flow.LOGO_POSITIONS)
     rows = [
-        [(label, f"vprofile|logo_position_set|{key}") for key, label in values[index:index + 2]]
-        for index in range(0, len(values), 2)
+        [(label, f"vprofile|logo_position_set|{key}") for key, label in values[index:index + 3]]
+        for index in range(0, len(values), 3)
     ]
     rows.append([("⬅️ Quay lại", "vprofile|logo_position_done"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
@@ -71601,7 +71604,11 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
     })
     runtime_addons = video_b14_lock_product_video_addons(planned_runtime_addons)
     product_id = video_flow6_product_id(state)
-    flow_context = video_flow6.context_from_scene_state(state)
+    # Preserve the completed content branch before the legacy B14 session is
+    # built. The commercial tail must receive the exact selected profile,
+    # idea or manual content instead of trying to infer it from a topic later.
+    content_contract = video_tail12_compile_content_contract(state, product_type=product_id)
+    flow_context = video_flow6.context_from_scene_state(content_contract)
     execution_route = dict((state.get("flow6_preflight") or {}).get("route") or video_flow6.execution_route_for(flow_context))
     session.update({
         "product_id": product_id,
@@ -71613,6 +71620,20 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
     })
     session["draft"] = {
         "topic": str(state.get("subject") or ""),
+        "content_mode": str(content_contract.get("content_mode") or ""),
+        "canonical_content_mode": str(content_contract.get("canonical_content_mode") or ""),
+        "content_source": str(content_contract.get("content_source") or ""),
+        "content_choice": dict(content_contract.get("content_choice") or {}),
+        "selected_suggestion": dict(content_contract.get("content_choice") or {}),
+        "idea_preset_id": str(content_contract.get("idea_preset_id") or content_contract.get("idea_id") or ""),
+        "selected_prompt": str(content_contract.get("selected_prompt") or ""),
+        "selected_prompt_text": str(content_contract.get("selected_prompt") or ""),
+        "per_scene_content": [
+            dict(item) for item in content_contract.get("per_scene_content") or [] if isinstance(item, dict)
+        ],
+        "content_revision": max(1, safe_int(content_contract.get("content_revision"), 1)),
+        "flow_owner": str(content_contract.get("flow_owner") or "scene3"),
+        "parent_session_id": str(content_contract.get("parent_session_id") or ""),
         "b14_profile_id": profile_id,
         "b14_scene_count": count,
         "b14_scene_count_selected": True,
@@ -71637,6 +71658,16 @@ def video_profile_scene1_handoff(user_id: int, state: dict) -> dict:
                 video_profile_catalog.SCHEMA_VERSION,
             ),
             "content_type": str(state.get("content_type") or ""),
+            "content_mode": str(content_contract.get("content_mode") or ""),
+            "canonical_content_mode": str(content_contract.get("canonical_content_mode") or ""),
+            "content_source": str(content_contract.get("content_source") or ""),
+            "content_choice": dict(content_contract.get("content_choice") or {}),
+            "idea_preset_id": str(content_contract.get("idea_preset_id") or content_contract.get("idea_id") or ""),
+            "selected_prompt": str(content_contract.get("selected_prompt") or ""),
+            "per_scene_content": [
+                dict(item) for item in content_contract.get("per_scene_content") or [] if isinstance(item, dict)
+            ],
+            "content_revision": max(1, safe_int(content_contract.get("content_revision"), 1)),
             "technical_profile": str(state.get("technical_profile") or ""),
             "custom_technical_profile": str(state.get("custom_technical_profile") or ""),
             "character_config": dict(state.get("character_config") or {}),
@@ -77155,11 +77186,18 @@ PRODUCT_VIDEO_TRIAL_LIMIT_COPY_VI = "Gói Trải nghiệm chỉ hỗ trợ 1 c�
 PRODUCT_VIDEO_R9E_ADDONS_LOCKED = True
 PRODUCT_VIDEO_R9E_ADDONS_LOCK_COPY_VI = "Hậu kỳ đang khóa tạm thời cho Product Video. Hóa đơn này chỉ tính video chính."
 PRODUCT_VIDEO_R9E_PROVIDER_LOCK_COPY_VI = "Hệ thống dựng video đang tạm khóa để bảo vệ Xu. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
-PRODUCT_VIDEO_LOGO_POSITIONS = ("top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right")
+PRODUCT_VIDEO_LOGO_POSITIONS = (
+    "top_left", "top_center", "top_right",
+    "center_left", "center", "center_right",
+    "bottom_left", "bottom_center", "bottom_right",
+)
 PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI = {
     "top_left": "Trên trái",
     "top_center": "Trên giữa",
     "top_right": "Trên phải",
+    "center_left": "Giữa trái",
+    "center": "Chính giữa",
+    "center_right": "Giữa phải",
     "bottom_left": "Dưới trái",
     "bottom_center": "Dưới giữa",
     "bottom_right": "Dưới phải",
@@ -86759,6 +86797,62 @@ def video_tail12_compile_content_contract(state: dict | None, *, product_type: s
     return video_flow6.sync_scene_state(current)
 
 
+def video_tail9_hydrate_scene3_host(host: dict | None, session: dict | None) -> dict:
+    """Restore the completed content contract before the shared commercial tail.
+
+    Scene3 keeps its interactive screen state in ``context.user_data`` while
+    the B14 handoff persists the final content contract in ``session.draft``.
+    A tail re-render can therefore see an older screen state even though the
+    user already chose content and a prompt.  Copy only missing fields from
+    that persisted contract; a newer value on the current screen always wins.
+    """
+
+    current = dict(host or {})
+    draft = dict((session or {}).get("draft") or {})
+    contract = dict(draft.get("scene3_data_contract") or {})
+    sources = (contract, draft)
+    fields = (
+        "product_type",
+        "source_product_id",
+        "flow_owner",
+        "parent_session_id",
+        "content_mode",
+        "canonical_content_mode",
+        "content_source",
+        "content_choice",
+        "selected_suggestion",
+        "idea_preset_id",
+        "idea_id",
+        "idea_title",
+        "selected_prompt",
+        "selected_prompt_text",
+        "idea_selected_prompt",
+        "per_scene_content",
+        "scene_drafts",
+        "content_revision",
+        "scene_count",
+        "aspect_ratio",
+        "primary_profile",
+        "primary_profile_key",
+        "technical_profile",
+        "manual_content",
+        "manual_script_raw",
+        "script_text",
+        "source_video_id",
+        "storyboard_session_id",
+    )
+    for field in fields:
+        existing = current.get(field)
+        if existing not in (None, "", [], {}):
+            continue
+        for source in sources:
+            value = source.get(field)
+            if value not in (None, "", [], {}):
+                current[field] = value
+                break
+    return current
+
+
 def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     """Return one scoped tail state and the canonical host that owns it."""
 
@@ -86829,6 +86923,7 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     else:
         owner = "scene3"
         host = video_profile_studio_state(context)
+        host = video_tail9_hydrate_scene3_host(host, session)
         restored_host = video_ai_realistic_restore_legacy_content_mode(host)
         host = save_video_profile_studio_state(context, restored_host)
         requested = str(host.get("product_type") or host.get("source_product_id") or session_product or "video_ai_real")
@@ -87432,6 +87527,7 @@ def video_tail9_logo_text(tail: dict) -> str:
 def video_tail9_logo_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🖼️ Thêm logo", "video_tail|logo|upload"), ("✍️ Thêm watermark", "video_tail|logo|watermark")],
+        [("📍 Vị trí logo", "video_tail|logo|position|logo"), ("📍 Vị trí watermark", "video_tail|logo|position|watermark")],
         [("🗑️ Xóa logo", "video_tail|logo|clear|logo"), ("🗑️ Xóa watermark", "video_tail|logo|clear|watermark")],
         [("✅ Xong bổ sung", "video_tail|logo|done"), ("⏭️ Bỏ qua", "video_tail|logo|skip")],
         [("⬅️ Quay lại", "video_tail|audio|open"), ("🏠 Menu chính", "menu|main")],
@@ -87447,11 +87543,15 @@ def video_tail9_position_text(target: str) -> str:
 
 
 def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
-    labels = (("↖️ Trên trái", "top_left"), ("↗️ Trên phải", "top_right"), ("⏺ Giữa trên", "top_center"), ("↙️ Dưới trái", "bottom_left"), ("↘️ Dưới phải", "bottom_right"))
+    labels = (
+        ("↖️ Trên trái", "top_left"), ("⬆️ Trên giữa", "top_center"), ("↗️ Trên phải", "top_right"),
+        ("⬅️ Giữa trái", "center_left"), ("⏺ Chính giữa", "center"), ("➡️ Giữa phải", "center_right"),
+        ("↙️ Dưới trái", "bottom_left"), ("⬇️ Dưới giữa", "bottom_center"), ("↘️ Dưới phải", "bottom_right"),
+    )
     rows = [
-        [(labels[0][0], f"video_tail|logo|setpos|{target}|{labels[0][1]}"), (labels[1][0], f"video_tail|logo|setpos|{target}|{labels[1][1]}")],
-        [(labels[2][0], f"video_tail|logo|setpos|{target}|{labels[2][1]}")],
-        [(labels[3][0], f"video_tail|logo|setpos|{target}|{labels[3][1]}"), (labels[4][0], f"video_tail|logo|setpos|{target}|{labels[4][1]}")],
+        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[0:3]],
+        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[3:6]],
+        [(label, f"video_tail|logo|setpos|{target}|{position}") for label, position in labels[6:9]],
     ]
     rows.append([("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
@@ -87861,9 +87961,19 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "position":
             config = dict(tail.get("logo_config" if argument == "logo" else "watermark_config") or {})
             if argument == "logo" and not config.get("asset_file_id"):
-                return await video_tail9_render(query, uid, context, "logo")
+                return await safe_edit_or_send(
+                    query,
+                    "📎 <b>Thêm logo trước</b>\n\nGửi ảnh logo rồi chọn một trong 9 vị trí hiển thị.",
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_logo_keyboard(),
+                )
             if argument == "watermark" and not config.get("text"):
-                return await video_tail9_render(query, uid, context, "logo")
+                return await safe_edit_or_send(
+                    query,
+                    "✍️ <b>Nhập watermark trước</b>\n\nNhập chữ watermark rồi chọn một trong 9 vị trí hiển thị.",
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_logo_keyboard(),
+                )
             return await safe_edit_or_send(
                 query,
                 video_tail9_position_text(argument),
@@ -147205,6 +147315,161 @@ def frame_video_message_media(update: Update) -> tuple[str, object | None]:
     return "", None
 
 
+def video_edit_recovery_mode(state: dict) -> str:
+    """Infer a canonical lane only for a state already owned by Video Edit."""
+
+    mode = video_edit_state_machine.normalize_edit_mode(state.get("edit_mode"))
+    if mode:
+        return mode
+    step = str(state.get("step") or "")
+    selected_tool = str(state.get("selected_tool") or "")
+    entry_context = str(state.get("entry_context") or "")
+    last_section = str(state.get("last_section") or "")
+    if entry_context == "quality_enhance" or last_section == "restore":
+        return "quality_enhance"
+    if selected_tool == "ai_edit" or step in {"await_ai_video", "ai_source_summary", "ai_suggestions"}:
+        return "ai_edit"
+    if selected_tool in {"manual", "manual_edit"} or step in {
+        "await_video", "await_concat", "await_logo", "await_srt", "manual_edit", "options",
+    }:
+        return "manual_edit"
+    return ""
+
+
+async def recover_product_video_media_failure(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    handler_name: str,
+) -> bool:
+    """Contain a media intake failure inside the product that owns the session."""
+
+    message = getattr(update, "message", None)
+    user = getattr(update, "effective_user", None)
+    if not message or not user:
+        return False
+    uid = int(user.id)
+    lang = get_user_language(uid) or "vi"
+    message_id = safe_int(getattr(message, "message_id", 0), 0)
+
+    if handler_name == "handle_video_editor_pending_upload":
+        state = dict(get_video_editor_pending(uid) or {})
+        if not state:
+            return False
+        step = str(state.get("step") or "")
+        if step == "awaiting_video_tail9_logo":
+            if message_id and safe_int(state.get("last_recovery_message_id"), 0) == message_id:
+                return True
+            update_video_editor_pending(
+                uid,
+                "awaiting_video_tail9_logo",
+                last_recovery_message_id=message_id,
+                awaiting_media=True,
+            )
+            await message.reply_text(
+                "⚠️ Chưa lưu được logo vừa gửi. Kế hoạch vẫn được giữ; anh/chị hãy gửi lại logo PNG, JPG hoặc WEBP.",
+                reply_markup=video_scene3_keyboard([
+                    [("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")],
+                ]),
+            )
+            return True
+
+        mode = video_edit_recovery_mode(state)
+        if not mode:
+            return False
+        if message_id and safe_int(state.get("last_recovery_message_id"), 0) == message_id:
+            return True
+
+        if not state.get("source_file_id"):
+            waiting = video_edit_state_machine.keep_waiting_after_invalid(
+                state,
+                "video_edit_intake_runtime_error",
+            )
+            waiting["last_recovery_message_id"] = message_id
+            save_video_edit_canonical_state(uid, waiting)
+            await message.reply_text(
+                "⚠️ Chưa đọc được video này. Phiên chỉnh sửa vẫn được giữ; anh/chị hãy gửi lại file MP4, MOV, MKV hoặc WebM.",
+                reply_markup=video_edit_lane_upload_keyboard(mode, lang),
+            )
+            return True
+
+        recovered = dict(state)
+        recovered.update({
+            "step": video_edit_state_machine.ready_screen(mode),
+            "edit_mode": mode,
+            "current_screen": video_edit_state_machine.ready_screen(mode),
+            "return_to": "videoedit|hub",
+            "awaiting_media": False,
+            "intake_in_progress": False,
+            "last_recovery_message_id": message_id,
+        })
+        if mode == "manual_edit" and not recovered.get("manual_edit_plan"):
+            recovered["manual_edit_plan"] = video_local_editing.default_manual_edit_plan("")
+        current = save_video_edit_canonical_state(uid, recovered)
+        if mode == "manual_edit":
+            text = video_local_manual_options_text(current, lang)
+            markup = video_local_manual_options_keyboard(lang)
+        elif mode == "quality_enhance":
+            text = video_quality_enhance_source_text(current, lang)
+            markup = video_quality_enhance_source_keyboard(lang)
+        else:
+            text = video_ai_edit_source_summary_text(current, lang)
+            markup = video_ai_edit_source_summary_keyboard(lang, current)
+        await message.reply_text(text, parse_mode="HTML", reply_markup=markup)
+        return True
+
+    if handler_name == "handle_frame_video_pending_media":
+        raw_state = get_frame_video_state(uid)
+        if not raw_state:
+            return False
+        state = normalize_frame_video_state(raw_state)
+        step = str(state.get("step") or "")
+        pending = str(state.get("pending_input") or "")
+        relevant = {"collect", "replace_image", "logo_upload", "music_upload", "voice_upload"}
+        if step not in relevant and pending not in relevant:
+            return False
+        if message_id and safe_int(state.get("last_media_recovery_message_id"), 0) == message_id:
+            return True
+        state["last_media_recovery_message_id"] = message_id
+        set_frame_video_state(uid, state)
+        text, markup, parse_mode = frame_video3_current_screen(state, lang)
+        await message.reply_text(
+            "⚠️ Chưa mở được tệp vừa gửi. Ảnh và kế hoạch vẫn được giữ nguyên. Anh/chị có thể gửi lại tệp ở đúng màn này.\n\n" + text,
+            parse_mode=parse_mode,
+            reply_markup=markup,
+        )
+        return True
+
+    return False
+
+
+def product_video_media_failure_guard(media_handler):
+    """Prevent one Product Video media exception from escaping as generic X."""
+
+    async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            return await media_handler(update, context)
+        except ApplicationHandlerStop:
+            raise
+        except Exception:
+            logger.exception("product_video_media_intake_failed handler=%s", getattr(media_handler, "__name__", "unknown"))
+            try:
+                if await recover_product_video_media_failure(
+                    update,
+                    context,
+                    handler_name=getattr(media_handler, "__name__", ""),
+                ):
+                    return True
+            except Exception:
+                logger.exception("product_video_media_intake_recovery_failed handler=%s", getattr(media_handler, "__name__", "unknown"))
+                return True
+            raise
+
+    guarded.__name__ = getattr(media_handler, "__name__", "product_video_media_handler")
+    return guarded
+
+
+@product_video_media_failure_guard
 async def handle_frame_video_pending_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message:
         return False
@@ -215970,12 +216235,11 @@ async def submit_local_video_editor_job(
         plan["logo_overlay"] = logo_overlay
     watermark = dict(tail.get("watermark_config") or {})
     if watermark.get("enabled") and str(watermark.get("text") or "").strip():
-        position = str(watermark.get("position") or "bottom_right")
-        text_position = "top" if position.startswith("top") else "center" if position.startswith("center") else "bottom"
+        position = logo_watermark_normalize_position(str(watermark.get("position") or "bottom_right"))
         duration_ms = max(1, safe_int(state.get("source_duration_ms") or (state.get("source_metadata") or {}).get("duration_ms"), 1))
         plan["text_overlay"] = {
             "content": str(watermark.get("text") or "")[:260],
-            "position": text_position,
+            "position": position,
             "start_ms": 0,
             "end_ms": duration_ms,
             "font_size": 34,
@@ -216097,6 +216361,7 @@ async def submit_local_video_editor_job(
     return True
 
 
+@product_video_media_failure_guard
 async def handle_video_editor_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message:
         return False
