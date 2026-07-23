@@ -315,7 +315,9 @@ def test_p0_21d_public_discount_code_preserved():
     callbacks = _callbacks(bot.billing_promotions_keyboard("vi"))
     assert "🎁 Nhập mã ưu đãi" in labels
     assert "pricing|promo_apply" in callbacks
-    assert "/promo FIRST30" in "\n".join(bot.billing_promo_apply_lines("vi"))
+    promo_text = "\n".join(bot.billing_promo_apply_lines("vi"))
+    assert "Lần đầu +30% và lần hai +20% được tự động áp dụng, không cần mã." in promo_text
+    assert "/promo WEEKLY10" in promo_text
 
 
 def test_p0_21d_menu_not_one_huge_message():

@@ -17,8 +17,21 @@ BOT_TEXT = BOT_SOURCE.read_text(encoding="utf-8")
 def make_db(tmp_path: Path) -> Path:
     db = tmp_path / "broadcast-lite.sqlite3"
     conn = sqlite3.connect(db)
-    conn.execute("CREATE TABLE users (user_id TEXT PRIMARY KEY, username TEXT, join_date TEXT)")
-    conn.executemany("INSERT INTO users(user_id,username,join_date) VALUES (?,?,?)", [("100", "one", "today"), ("200", "two", "today"), ("bad-id", "bad", "today")])
+    conn.execute(
+        "CREATE TABLE users (user_id TEXT PRIMARY KEY, username TEXT, join_date TEXT, "
+        "user_market TEXT DEFAULT '', country_code TEXT DEFAULT '', "
+        "account_region TEXT DEFAULT '', international_account INTEGER DEFAULT 0, "
+        "user_language TEXT DEFAULT '', initial_user_language TEXT DEFAULT '')"
+    )
+    conn.executemany(
+        "INSERT INTO users(user_id,username,join_date,user_market,country_code,account_region,"
+        "international_account,user_language,initial_user_language) VALUES (?,?,?,?,?,?,?,?,?)",
+        [
+            ("100", "one", "today", "VN", "VN", "VIETNAM", 0, "vi", "vi"),
+            ("200", "two", "today", "INTL", "US", "INTERNATIONAL", 1, "en", "en"),
+            ("bad-id", "bad", "today", "VN", "VN", "VIETNAM", 0, "vi", "vi"),
+        ],
+    )
     broadcast.ensure_schema(conn)
     conn.commit()
     conn.close()
@@ -50,6 +63,7 @@ def test_compose_custom_text_photo_and_preview(tmp_path: Path):
     draft = broadcast.create_empty_draft(db, 9001)
     draft = broadcast.set_draft_message(db, draft["draft_id"], 9001, "Thông báo tùy ý <không parse>")
     draft = broadcast.set_draft_ctas(db, draft["draft_id"], 9001, ["video", "support", "image", "topup", "video"])
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "all")
     preview = broadcast.preview_draft(db, draft["draft_id"], 9001)
     assert "Thông báo tùy ý" in preview["preview_text"]
@@ -66,6 +80,7 @@ def test_template_is_optional_content_only_and_can_be_edited(tmp_path: Path):
     db = make_db(tmp_path)
     draft = broadcast.create_empty_draft(db, 9001, state="awaiting_content")
     draft = broadcast.set_draft_ctas(db, draft["draft_id"], 9001, ["video", "support"])
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "vn")
     draft = broadcast.apply_template_to_draft(db, draft["draft_id"], 9001, "first_topup")
     assert "30% Xu" in draft["message_text"]
     assert draft["ctas"] == ["video", "support"]
@@ -102,10 +117,17 @@ def test_all_used_bot_audience_returns_to_draft_with_expected_delivery_count(tmp
     db = make_db(tmp_path)
     draft = broadcast.create_empty_draft(db, 9001)
     draft = broadcast.set_draft_message(db, draft["draft_id"], 9001, "Thông báo toàn bot")
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "all")
 
     preview = broadcast.preview_draft(db, draft["draft_id"], 9001)
-    assert preview["audience"] == {"total": 2, "eligible": 2, "invalid": 1, "blocked": 0}
+    assert preview["audience"] == {
+        "total": 2,
+        "eligible": 2,
+        "invalid": 1,
+        "blocked": 0,
+        "wrong_market": 0,
+    }
 
     campaign = broadcast.confirm_draft(db, draft["draft_id"], 9001)
     assert campaign["total_targets"] == 2
@@ -125,13 +147,64 @@ def test_audience_all_user_test_list_and_blocked(tmp_path: Path):
     conn.commit()
     conn.close()
     all_stats = broadcast.preview_audience(db, "all")
-    assert all_stats == {"total": 2, "eligible": 1, "invalid": 1, "blocked": 1}
+    assert all_stats == {
+        "total": 2,
+        "eligible": 1,
+        "invalid": 1,
+        "blocked": 1,
+        "wrong_market": 0,
+    }
     assert broadcast.preview_audience(db, "user", "100")["eligible"] == 1
     assert broadcast.preview_audience(db, "user", "not-a-chat")["invalid"] == 1
     test_stats = broadcast.preview_audience(db, "test_list", "100, 200, 300, nope")
     assert test_stats["eligible"] == 2
     assert test_stats["blocked"] == 1
     assert test_stats["invalid"] == 1
+
+
+def test_market_scopes_filter_delivery_and_lock_domestic_templates(tmp_path: Path):
+    db = make_db(tmp_path)
+    vietnam = broadcast.preview_audience(db, "all", market_scope="vn")
+    international = broadcast.preview_audience(db, "all", market_scope="intl")
+    all_bot = broadcast.preview_audience(db, "all", market_scope="all")
+
+    assert vietnam == {
+        "total": 1,
+        "eligible": 1,
+        "invalid": 1,
+        "blocked": 0,
+        "wrong_market": 1,
+    }
+    assert international == {
+        "total": 1,
+        "eligible": 1,
+        "invalid": 1,
+        "blocked": 0,
+        "wrong_market": 1,
+    }
+    assert all_bot["eligible"] == 2
+    assert all_bot["wrong_market"] == 0
+
+    domestic = broadcast.create_template_draft(db, 9001, "first_topup")
+    with pytest.raises(ValueError, match="chỉ được gửi cho thị trường Việt Nam"):
+        broadcast.set_draft_market(db, domestic["draft_id"], 9001, "intl")
+    with pytest.raises(ValueError, match="chỉ được gửi cho thị trường Việt Nam"):
+        broadcast.set_draft_market(db, domestic["draft_id"], 9001, "all")
+    domestic = broadcast.set_draft_market(db, domestic["draft_id"], 9001, "vn")
+    domestic = broadcast.set_draft_audience(db, domestic["draft_id"], 9001, "all")
+    preview = broadcast.preview_draft(db, domestic["draft_id"], 9001)
+    assert preview["audience"]["eligible"] == 1
+    assert preview["audience"]["wrong_market"] == 1
+    campaign = broadcast.confirm_draft(db, domestic["draft_id"], 9001)
+
+    conn = sqlite3.connect(db)
+    delivery = conn.execute(
+        "SELECT telegram_chat_id,campaign_market_scope,user_market_snapshot,locale_snapshot,"
+        "country_snapshot FROM broadcast_lite_deliveries WHERE campaign_id=?",
+        (campaign["campaign_id"],),
+    ).fetchone()
+    conn.close()
+    assert delivery == ("100", "vn", "VN", "vi", "VN")
 
 
 def test_member_tier_audience_includes_no_tier_and_all_tiers(tmp_path: Path):
@@ -155,6 +228,7 @@ def test_member_tier_audience_includes_no_tier_and_all_tiers(tmp_path: Path):
     assert all_tiers["invalid"] == 1
 
     draft = broadcast.create_template_draft(db, 9001, "video")
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "tiers", '["newbie","silver"]')
     campaign = broadcast.confirm_draft(db, draft["draft_id"], 9001)
     conn = sqlite3.connect(db)
@@ -165,6 +239,7 @@ def test_member_tier_audience_includes_no_tier_and_all_tiers(tmp_path: Path):
 def test_confirm_is_idempotent_and_one_delivery_per_user(tmp_path: Path):
     db = make_db(tmp_path)
     draft = broadcast.create_template_draft(db, 9001, "video")
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "test_list", "100 100 200")
     first = broadcast.confirm_draft(db, draft["draft_id"], 9001)
     second = broadcast.confirm_draft(db, draft["draft_id"], 9001)
@@ -179,6 +254,7 @@ def test_confirm_is_idempotent_and_one_delivery_per_user(tmp_path: Path):
 def test_outbox_success_429_retry_blocked_and_no_duplicate(tmp_path: Path):
     db = make_db(tmp_path)
     draft = broadcast.create_template_draft(db, 9001, "image")
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "test_list", "100 200")
     campaign = broadcast.confirm_draft(db, draft["draft_id"], 9001)
 
@@ -215,6 +291,7 @@ def test_outbox_success_429_retry_blocked_and_no_duplicate(tmp_path: Path):
 def test_async_outbox_used_by_live_worker_has_bounded_retry(tmp_path: Path):
     db = make_db(tmp_path)
     draft = broadcast.create_template_draft(db, 9001, "video")
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "all")
     campaign = broadcast.confirm_draft(db, draft["draft_id"], 9001)
     calls = []
@@ -240,34 +317,22 @@ def test_async_outbox_used_by_live_worker_has_bounded_retry(tmp_path: Path):
     assert broadcast.campaign_stats(db, campaign["campaign_id"])["sent"] == 2
 
 
-def test_live_worker_startup_survives_missing_optional_hook():
+def test_live_worker_startup_registers_broadcast_worker_once():
     source = BOT_TEXT
-    helper_start = source.index("def _resolve_optional_telegram_startup_hook")
-    helper_end = source.index("async def run_polling_guarded", helper_start)
-    namespace = {}
-    exec(source[helper_start:helper_end], namespace)
-
-    assert namespace["_resolve_optional_telegram_startup_hook"]("missing_hook") is None
-
-    def available_hook():
-        return None
-
-    namespace["available_hook"] = available_hook
-    assert namespace["_resolve_optional_telegram_startup_hook"]("available_hook") is available_hook
-
     lifespan_start = source.index("async def lifespan")
     lifespan_end = source.index("fastapi_app = FastAPI", lifespan_start)
     lifespan_source = source[lifespan_start:lifespan_end]
     worker_start = "tg_broadcast_lite_worker_task = asyncio.create_task(broadcast_lite_outbox_loop(tg_app.bot))"
-    optional_watchdog = '_resolve_optional_telegram_startup_hook("subdub_recovery_watchdog_loop")'
     assert lifespan_source.count(worker_start) == 1
-    assert lifespan_source.index(worker_start) < lifespan_source.index(optional_watchdog)
-    assert "subdub_recovery_watchdog_loop(tg_app.bot)" not in lifespan_source
+    assert lifespan_source.index(worker_start) < lifespan_source.index(
+        "tg_subdub_recovery_task = asyncio.create_task("
+    )
 
 
 def test_outbox_resumes_stale_claim_and_records_heartbeat(tmp_path: Path):
     db = make_db(tmp_path)
     draft = broadcast.create_template_draft(db, 9001, "support")
+    draft = broadcast.set_draft_market(db, draft["draft_id"], 9001, "all")
     draft = broadcast.set_draft_audience(db, draft["draft_id"], 9001, "user", "100")
     campaign = broadcast.confirm_draft(db, draft["draft_id"], 9001)
     stale = (datetime.now(timezone.utc) - timedelta(minutes=11)).replace(microsecond=0).isoformat()
@@ -361,6 +426,7 @@ def test_callback_flow_compose_audience_confirm_creates_outbox_without_sending(t
         "preview_broadcast_lite_draft": broadcast.preview_draft,
         "set_broadcast_lite_audience": broadcast.set_draft_audience,
         "set_broadcast_lite_ctas": broadcast.set_draft_ctas,
+        "set_broadcast_lite_market": broadcast.set_draft_market,
         "set_broadcast_lite_media": broadcast.set_draft_media,
         "set_broadcast_lite_message": broadcast.set_draft_message,
         "set_broadcast_lite_promo_limits": broadcast.set_promo_limits,
@@ -443,7 +509,21 @@ def test_callback_flow_compose_audience_confirm_creates_outbox_without_sending(t
         await namespace["handle_broadcast_lite_callback"](
             SimpleNamespace(callback_query=ctas_done, effective_user=user), None
         )
-        audience_markup = ctas_done.reply_markup
+        market_markup = ctas_done.reply_markup
+        assert [button.callback_data for button in market_markup.inline_keyboard[0]] == [
+            f"broadcast_lite|market|{draft['draft_id']}|v",
+            f"broadcast_lite|market|{draft['draft_id']}|i",
+        ]
+        assert [button.callback_data for button in market_markup.inline_keyboard[1]] == [
+            f"broadcast_lite|market|{draft['draft_id']}|a",
+            f"broadcast_lite|ctas|{draft['draft_id']}",
+        ]
+
+        select_market = Query(f"broadcast_lite|market|{draft['draft_id']}|a")
+        await namespace["handle_broadcast_lite_callback"](
+            SimpleNamespace(callback_query=select_market, effective_user=user), None
+        )
+        audience_markup = select_market.reply_markup
         assert [button.callback_data for button in audience_markup.inline_keyboard[0]] == [
             f"broadcast_lite|aud_all|{draft['draft_id']}",
             f"broadcast_lite|aud_tiers|{draft['draft_id']}",
@@ -462,6 +542,9 @@ def test_callback_flow_compose_audience_confirm_creates_outbox_without_sending(t
         )
         assert "Đã chọn: Toàn bộ khách đã dùng bot" in back_audience.text
         assert back_audience.reply_markup.inline_keyboard[2][0].callback_data == f"broadcast_lite|preview|{draft['draft_id']}"
+        retained = broadcast.get_draft(db, draft["draft_id"], 9001)
+        assert retained["market_scope"] == "all"
+        assert retained["audience_kind"] == "all"
 
         first_confirm = Query(f"broadcast_lite|confirm|{draft['draft_id']}")
         duplicate_confirm = Query(f"broadcast_lite|confirm|{draft['draft_id']}")
@@ -586,6 +669,10 @@ def _load_broadcast_ui():
         "BROADCAST_LITE_CTA_REGISTRY": broadcast.CTA_REGISTRY,
         "BROADCAST_LITE_TIER_ORDER": broadcast.MEMBER_TIER_ORDER,
         "BROADCAST_LITE_TIER_REGISTRY": broadcast.MEMBER_TIER_REGISTRY,
+        "BROADCAST_LITE_MARKET_SCOPE_VN": broadcast.MARKET_SCOPE_VN,
+        "BROADCAST_LITE_MARKET_SCOPE_INTL": broadcast.MARKET_SCOPE_INTL,
+        "BROADCAST_LITE_MARKET_SCOPE_ALL": broadcast.MARKET_SCOPE_ALL,
+        "BROADCAST_LITE_MARKET_SCOPE_LABELS": broadcast.MARKET_SCOPE_LABELS,
         "get_broadcast_lite_promo_limits": lambda _db: {"max_24h": 1, "max_7d": 3, "weekly_then_daily": False},
         "preview_broadcast_lite_audience": lambda *_args, **_kwargs: {"total": 0, "eligible": 0, "invalid": 0, "blocked": 0},
     }
@@ -597,8 +684,8 @@ def test_broadcast_menu_rows_are_exactly_two_buttons():
     namespace = _load_broadcast_ui()
 
     draft_id = "f" * 32
-    empty = {"draft_id": draft_id, "audience_kind": "", "ctas": [], "tiers": []}
-    ready = {"draft_id": draft_id, "audience_kind": "all", "ctas": ["topup"], "tiers": []}
+    empty = {"draft_id": draft_id, "market_scope": "", "audience_kind": "", "ctas": [], "tiers": []}
+    ready = {"draft_id": draft_id, "market_scope": "all", "audience_kind": "all", "ctas": ["topup"], "tiers": []}
     keyboards = [
         namespace["broadcast_lite_admin_menu_keyboard"](),
         namespace["broadcast_lite_navigation_keyboard"]("⬅️ Quay lại", "broadcast_lite|back"),
@@ -614,6 +701,8 @@ def test_broadcast_menu_rows_are_exactly_two_buttons():
         namespace["broadcast_lite_cta_keyboard"](empty),
         namespace["broadcast_lite_cta_keyboard"](ready),
         namespace["broadcast_lite_feature_cta_keyboard"](ready),
+        namespace["broadcast_lite_market_keyboard"](empty),
+        namespace["broadcast_lite_market_keyboard"](ready),
         namespace["broadcast_lite_audience_keyboard"](ready),
         namespace["broadcast_lite_tier_keyboard"](empty),
         namespace["broadcast_lite_campaign_keyboard"](1),
@@ -630,8 +719,8 @@ def test_broadcast_menu_rows_are_exactly_two_buttons():
 def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     namespace = _load_broadcast_ui()
     draft_id = "f" * 32
-    empty = {"draft_id": draft_id, "audience_kind": "", "ctas": [], "tiers": []}
-    ready = {"draft_id": draft_id, "audience_kind": "all", "ctas": ["topup"], "tiers": []}
+    empty = {"draft_id": draft_id, "market_scope": "", "audience_kind": "", "ctas": [], "tiers": []}
+    ready = {"draft_id": draft_id, "market_scope": "all", "audience_kind": "all", "ctas": ["topup"], "tiers": []}
     root = namespace["broadcast_lite_admin_menu_keyboard"]()
     compose = namespace["broadcast_lite_compose_keyboard"](draft_id)
     templates = namespace["broadcast_lite_template_keyboard"](draft_id)
@@ -641,6 +730,7 @@ def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     review = namespace["broadcast_lite_preview_keyboard"](ready)
     ctas_before_audience = namespace["broadcast_lite_cta_keyboard"](empty)
     ctas_after_audience = namespace["broadcast_lite_cta_keyboard"](ready)
+    market = namespace["broadcast_lite_market_keyboard"](empty)
     tiers = namespace["broadcast_lite_tier_keyboard"](empty)
     history = namespace["broadcast_lite_history_keyboard"]()
     template_review = namespace["broadcast_lite_template_review_keyboard"](ready)
@@ -663,11 +753,16 @@ def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     assert [button.callback_data for button in templates.inline_keyboard[-1]] == [f"broadcast_lite|compose_back|{draft_id}", "menu|main"]
     assert [button.callback_data for button in custom_input.inline_keyboard[0]] == [f"broadcast_lite|cancel|{draft_id}", "menu|main"]
     assert [button.callback_data for button in content.inline_keyboard[0]] == [f"broadcast_lite|edit|{draft_id}", f"broadcast_lite|tpls|{draft_id}"]
+    assert [[button.callback_data for button in row] for row in market.inline_keyboard] == [
+        [f"broadcast_lite|market|{draft_id}|v", f"broadcast_lite|market|{draft_id}|i"],
+        [f"broadcast_lite|market|{draft_id}|a", f"broadcast_lite|ctas|{draft_id}"],
+        [f"broadcast_lite|cancel|{draft_id}", "menu|main"],
+    ]
     assert [[button.callback_data for button in row] for row in audience.inline_keyboard] == [
         [f"broadcast_lite|aud_all|{draft_id}", f"broadcast_lite|aud_tiers|{draft_id}"],
         [f"broadcast_lite|au|{draft_id}|u", f"broadcast_lite|au|{draft_id}|t"],
-        [f"broadcast_lite|preview|{draft_id}", f"broadcast_lite|ctas|{draft_id}"],
-        [f"broadcast_lite|cancel|{draft_id}", "menu|main"],
+        [f"broadcast_lite|preview|{draft_id}", f"broadcast_lite|market_screen|{draft_id}"],
+        [f"broadcast_lite|market_screen|{draft_id}", f"broadcast_lite|cancel|{draft_id}"],
     ]
     assert [button.callback_data for button in review.inline_keyboard[0]] == [f"broadcast_lite|confirm|{draft_id}", f"broadcast_lite|edit|{draft_id}"]
     assert [button.callback_data for button in ctas_before_audience.inline_keyboard[-1]] == [f"broadcast_lite|ctas_done|{draft_id}", f"broadcast_lite|content|{draft_id}"]
@@ -693,7 +788,7 @@ def test_broadcast_button_routes_are_ordered_and_within_telegram_limit():
     ]
 
     keyboards = [
-        root, compose, templates, template_review, custom_input, content, audience, review,
+        root, compose, templates, template_review, custom_input, content, market, audience, review,
         ctas_before_audience, ctas_after_audience, features, tiers, force, history, schedule_menu, schedule_list,
         limits_from_root, limits_from_schedule,
     ]
@@ -716,16 +811,33 @@ def make_payment_db(tmp_path: Path) -> Path:
     conn = sqlite3.connect(db)
     conn.execute(
         "CREATE TABLE users (user_id TEXT PRIMARY KEY, username TEXT, join_date TEXT, "
-        "has_deposited INTEGER NOT NULL DEFAULT 0)"
+        "has_deposited INTEGER NOT NULL DEFAULT 0, user_market TEXT DEFAULT '', "
+        "country_code TEXT DEFAULT '', account_region TEXT DEFAULT '', "
+        "international_account INTEGER DEFAULT 0, user_language TEXT DEFAULT '', "
+        "initial_user_language TEXT DEFAULT '')"
     )
     conn.executemany(
-        "INSERT INTO users(user_id,username,join_date,has_deposited) VALUES (?,?,?,?)",
-        [("100", "new", "today", 0), ("200", "paid", "today", 1), ("300", "pending", "today", 0), ("400", "fast", "today", 0)],
+        "INSERT INTO users(user_id,username,join_date,has_deposited,user_market,country_code,"
+        "account_region,international_account,user_language,initial_user_language) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("100", "new", "today", 0, "VN", "VN", "VIETNAM", 0, "vi", "vi"),
+            ("200", "paid", "today", 1, "VN", "VN", "VIETNAM", 0, "vi", "vi"),
+            ("300", "pending", "today", 0, "VN", "VN", "VIETNAM", 0, "vi", "vi"),
+            ("400", "fast", "today", 0, "VN", "VN", "VIETNAM", 0, "vi", "vi"),
+            ("500", "international", "today", 0, "INTL", "US", "INTERNATIONAL", 1, "en", "en"),
+            ("600", "non-vietnamese", "today", 0, "VN", "VN", "VIETNAM", 0, "en", "en"),
+        ],
     )
     conn.execute(
         "CREATE TABLE payos_orders (order_code TEXT PRIMARY KEY,user_id TEXT,status TEXT,order_type TEXT)"
     )
+    conn.execute(
+        "CREATE TABLE payos_processed_events ("
+        "order_code TEXT, transaction_id TEXT, credited INTEGER DEFAULT 0)"
+    )
     conn.execute("INSERT INTO payos_orders VALUES ('paid-200','200','SETTLED','topup')")
+    conn.execute("INSERT INTO payos_processed_events VALUES ('paid-200','tx-paid-200',1)")
     conn.executemany(
         "INSERT INTO payos_orders VALUES (?,?,?,?)",
         [
@@ -745,10 +857,16 @@ def test_automatic_first_start_once_and_real_send_is_injected(tmp_path: Path):
     first = broadcast.enqueue_first_start_notice(db, "100")
     duplicate = broadcast.enqueue_first_start_notice(db, "100")
     paid_user = broadcast.enqueue_first_start_notice(db, "200")
+    international = broadcast.enqueue_first_start_notice(db, "500")
+    non_vietnamese_initial = broadcast.enqueue_first_start_notice(db, "600")
 
     assert first["queued"] is True
     assert duplicate["queued"] is False and duplicate["reason"] == "duplicate"
     assert paid_user["queued"] is False and paid_user["reason"] == "not_eligible"
+    assert international["queued"] is False
+    assert international["reason"] == "initial_language_or_market_not_vietnamese"
+    assert non_vietnamese_initial["queued"] is False
+    assert non_vietnamese_initial["reason"] == "initial_language_or_market_not_vietnamese"
 
     calls = []
 
@@ -783,6 +901,7 @@ def test_after_first_topup_once_pending_failed_refund_do_not_count(tmp_path: Pat
 
     conn = sqlite3.connect(db)
     conn.execute("INSERT INTO payos_orders VALUES ('paid-200-2','200','PAID','topup')")
+    conn.execute("INSERT INTO payos_processed_events VALUES ('paid-200-2','tx-paid-200-2',1)")
     conn.commit()
     conn.close()
     other_db = tmp_path / "already-twice.sqlite3"
@@ -801,6 +920,7 @@ def test_after_first_topup_supersedes_only_pending_first_offer(tmp_path: Path):
     assert first["queued"] is True
     conn = sqlite3.connect(db)
     conn.execute("INSERT INTO payos_orders VALUES ('paid-400','400','SETTLED','topup')")
+    conn.execute("INSERT INTO payos_processed_events VALUES ('paid-400','tx-paid-400',1)")
     conn.execute("UPDATE users SET has_deposited=1 WHERE user_id='400'")
     conn.commit()
     conn.close()
@@ -861,6 +981,40 @@ def test_schedule_once_per_period_timezone_and_restart_recovery(tmp_path: Path, 
     assert active == (0 if cadence == "one_time" else 1)
 
 
+def test_vietnam_scheduled_notice_requires_initial_vietnamese(tmp_path: Path):
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO users(user_id,username,join_date,user_market,country_code,account_region,"
+        "international_account,user_language,initial_user_language) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("300", "vn-en", "today", "VN", "VN", "VIETNAM", 0, "en", "en"),
+    )
+    conn.commit()
+    conn.close()
+    base = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+    schedule = broadcast.create_schedule(
+        db,
+        name="Thông báo tuần nội địa",
+        message_text="Nội dung tuần",
+        ctas=["topup"],
+        audience_kind="all",
+        market_scope="vn",
+        cadence="one_time",
+        starts_at="2026-07-01 09:00",
+        created_by="9001",
+        now=base,
+    )
+    due = datetime.fromisoformat(schedule["next_run_at"])
+    result = broadcast.run_due_schedules(db, now=due)
+    assert result["queued"] == 1
+    conn = sqlite3.connect(db)
+    recipients = conn.execute(
+        "SELECT user_id FROM broadcast_lite_deliveries ORDER BY delivery_id"
+    ).fetchall()
+    conn.close()
+    assert recipients == [("100",)]
+
+
 def test_disabled_and_expired_schedule_never_enqueue(tmp_path: Path):
     db = make_db(tmp_path)
     base = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
@@ -895,11 +1049,13 @@ def test_manual_frequency_warning_and_explicit_override(tmp_path: Path):
     db = make_db(tmp_path)
     first = broadcast.create_empty_draft(db, 9001)
     first = broadcast.set_draft_message(db, first["draft_id"], 9001, "Tin thứ nhất")
+    first = broadcast.set_draft_market(db, first["draft_id"], 9001, "all")
     first = broadcast.set_draft_audience(db, first["draft_id"], 9001, "user", "100")
     broadcast.confirm_draft(db, first["draft_id"], 9001)
 
     second = broadcast.create_empty_draft(db, 9001)
     second = broadcast.set_draft_message(db, second["draft_id"], 9001, "Tin thứ hai")
+    second = broadcast.set_draft_market(db, second["draft_id"], 9001, "all")
     second = broadcast.set_draft_audience(db, second["draft_id"], 9001, "user", "100")
     with pytest.raises(broadcast.FrequencyCapWarning):
         broadcast.confirm_draft(db, second["draft_id"], 9001)

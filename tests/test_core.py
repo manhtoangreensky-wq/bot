@@ -2410,7 +2410,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     pricing_hub_text = "\n".join(bot.pricing_hub_lines("vi"))
     assert "Nạp Xu / Bảng giá TOAN AAS" in pricing_hub_text
     assert "xem bảng giá, nạp Xu, xem ưu đãi hay mua gói/combo" in pricing_hub_text
-    assert "Launch Bonus cho thanh toán nội địa Việt Nam" in pricing_hub_text
+    assert "lần đầu/lần hai tự động theo điều kiện nội địa" in pricing_hub_text
     price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
     assert price_keyboard_labels == [
         "📋 Bảng giá",
@@ -2437,14 +2437,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Deposit promotions are available only for Vietnam PayOS/bank-transfer campaigns" in "\n".join(bot.pricing_hub_lines("en"))
     promo_text = "\n".join(bot.billing_promotions_lines("vi"))
     assert "ƯU ĐÃI TOAN AAS" in promo_text
-    assert "FIRST30" in promo_text
-    assert "SECOND15" in promo_text
-    assert "MONTHLY20" in promo_text
-    assert "WEEKLY10" in promo_text
-    assert "DAILY5" in promo_text
-    assert "Launch Bonus theo mệnh giá" in promo_text
-    assert "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam" in promo_text
-    assert "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng" in promo_text
+    assert "Nạp lần đầu từ <b>10.000đ</b>: tự động <b>+30% Xu</b>." in promo_text
+    assert "Nạp lần hai từ <b>10.000đ</b>: tự động <b>+20% Xu</b>." in promo_text
+    assert "Không cần nhập mã cho hai ưu đãi này." in promo_text
+    assert "MONTHLY / WEEKLY / DAILY / Launch Bonus" in promo_text
+    assert "mã hợp lệ" in promo_text
+    assert "Không cộng chồng mã cũ FIRST30/SECOND15" in promo_text
+    assert "Tài khoản Việt Nam + thanh toán VND nội địa qua PayOS hoặc ACB/VietQR." in promo_text
+    assert "ZaloPay/MoMo, ngoại tệ, USDT và thanh toán quốc tế không nhận bonus nội địa." in promo_text
     promo_callbacks = [button.callback_data for row in bot.billing_promotions_keyboard("vi").inline_keyboard for button in row]
     assert promo_callbacks == ["pricing|promo_apply", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
     assert bot.hidden_active_features_audit("vi") == []
@@ -5776,7 +5776,7 @@ def test_customer_guide_sales_readiness_still_exposes_menu():
     assert "Guide menu: <code>{'ON' if commands.get('guide_menu') else 'OFF'}</code>" in bot_source_text()
 
 
-def test_launch_bonus_preview_once_per_user_package(monkeypatch):
+def test_topup_credit_preview_is_base_only_without_launch_bonus(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
@@ -5789,38 +5789,27 @@ def test_launch_bonus_preview_once_per_user_package(monkeypatch):
             payos_columns = {row[1] for row in conn.execute("PRAGMA table_info(payos_orders)").fetchall()}
             assert {"package_amount_vnd", "base_xu", "launch_bonus_xu"}.issubset(payos_columns)
 
-            fifty = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
-            assert fifty["base_xu"] == 500
-            assert fifty["launch_bonus_xu"] == 30
-            assert fifty["launch_bonus_eligible"] is True
-            assert fifty["launch_bonus_available"] == 30
-            bot.create_order("order-preview-50", "u1", 50000, fifty["total_xu"], base_xu=fifty["base_xu"], launch_bonus_xu=fifty["launch_bonus_xu"], package_amount_vnd=50000)
-            row = conn.execute("SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code='order-preview-50'").fetchone()
-            assert row == (530, 50000, 500, 30)
-            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-50", 50000) == 30
-            conn.commit()
-            fifty_repeat = bot.calculate_package_credit_for_user("u1", 50000, conn=conn)
-            assert fifty_repeat["launch_bonus_xu"] == 0
-            assert fifty_repeat["launch_bonus_eligible"] is False
-
-            first = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
-            assert first["base_xu"] == 1000
-            assert first["launch_bonus_xu"] == 50
-            assert first["launch_bonus_eligible"] is True
-            assert first["launch_bonus_available"] == 50
-            bot.create_order("order-preview", "u1", 100000, first["total_xu"], base_xu=first["base_xu"], launch_bonus_xu=first["launch_bonus_xu"], package_amount_vnd=100000)
-            row = conn.execute("SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code='order-preview'").fetchone()
-            assert row == (1050, 100000, 1000, 50)
-
-            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-1", 100000) == 50
-            conn.commit()
-            repeat = bot.calculate_package_credit_for_user("u1", 100000, conn=conn)
-            assert repeat["launch_bonus_xu"] == 0
-            assert repeat["launch_bonus_eligible"] is False
-            assert bot.redeem_launch_bonus_for_order(conn, "u1", "order-dup", 100000) == 0
-
-            other_package = bot.calculate_package_credit_for_user("u1", 200000, conn=conn)
-            assert other_package["launch_bonus_xu"] == 150
+            for amount_vnd, expected_base in ((50000, 500), (100000, 1000), (200000, 2000)):
+                credit = bot.calculate_package_credit_for_user("u1", amount_vnd, conn=conn)
+                assert credit["base_xu"] == expected_base
+                assert credit["launch_bonus_xu"] == 0
+                assert credit["launch_bonus_eligible"] is False
+                assert credit["total_xu"] == expected_base
+                order_code = f"order-preview-{amount_vnd}"
+                bot.create_order(
+                    order_code,
+                    "u1",
+                    amount_vnd,
+                    credit["total_xu"],
+                    base_xu=credit["base_xu"],
+                    launch_bonus_xu=credit["launch_bonus_xu"],
+                    package_amount_vnd=amount_vnd,
+                )
+                row = conn.execute(
+                    "SELECT xu, package_amount_vnd, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=?",
+                    (order_code,),
+                ).fetchone()
+                assert row == (expected_base, amount_vnd, expected_base, 0)
         finally:
             conn.close()
     finally:
@@ -5974,35 +5963,59 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
     monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    monkeypatch.setattr(bot, "enqueue_broadcast_after_first_topup_safe", lambda _user_id: {"queued": False, "reason": "test"})
     try:
         bot.init_db()
         bot.seed_promotion_policy()
         user_id = "promo-user"
+        bot.get_user(user_id)
+        bot.set_user_language(user_id, "vi")
         initial_credits, _, _ = bot.get_user(user_id)
 
-        ok, status, info = bot.activate_promo_for_user(user_id, "FIRST30")
-        assert ok is True
-        assert status == "activated"
-        assert info["promo_type"] == "percent_bonus"
-        assert info["value"] == 30
-
-        bot.create_order("123456789", user_id, 50000, 500)
-        _, invoice_total = bot.payos_invoice_total_for_order("123456789", 50000)
-        processed, desc, paid_info = bot.process_payos_paid_order("123456789", invoice_total)
+        bot.create_order("123456789", user_id, 10000, 100)
+        _, invoice_total = bot.payos_invoice_total_for_order("123456789", 10000)
+        processed, desc, paid_info = bot.process_payos_paid_order(
+            "123456789",
+            invoice_total,
+            transaction_id="core-first-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
         assert processed is True
         assert desc == "success"
-        assert paid_info["promo_bonus"] == 150
-        assert paid_info["promo_code"] == "FIRST30"
-        assert paid_info["launch_bonus"] == 30
+        assert paid_info["auto_bonus"] == 30
+        assert paid_info["auto_promotion_id"] == bot.AUTO_FIRST_TOPUP_PROMOTION_ID
+        assert paid_info["promo_bonus"] == 0
+        assert paid_info["promo_code"] == ""
 
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 680
+        assert credits_after_paid == initial_credits + 130
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", invoice_total)
+        bot.create_order("123456790", user_id, 10000, 100)
+        _, second_invoice_total = bot.payos_invoice_total_for_order("123456790", 10000)
+        processed, desc, second_info = bot.process_payos_paid_order(
+            "123456790",
+            second_invoice_total,
+            transaction_id="core-second-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
+        assert processed is True
+        assert desc == "success"
+        assert second_info["auto_bonus"] == 20
+        assert second_info["auto_promotion_id"] == bot.AUTO_SECOND_TOPUP_PROMOTION_ID
+
+        processed, desc, _paid_info = bot.process_payos_paid_order(
+            "123456789",
+            invoice_total,
+            transaction_id="core-first-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
         assert processed is False
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)
-        assert credits_after_replay == credits_after_paid
+        assert credits_after_replay == credits_after_paid + 120
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -6421,33 +6434,66 @@ def test_internal_archive_department_callbacks_keep_department_state(monkeypatch
     bot.clear_internal_archive_pending(user_id)
 
 
-def test_launch_bonus_once_per_user_package(monkeypatch):
+def test_automatic_topup_bonus_uses_settled_ordinal_once(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
     monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    monkeypatch.setattr(bot, "enqueue_broadcast_after_first_topup_safe", lambda _user_id: {"queued": False, "reason": "test"})
     try:
         bot.init_db()
         user_id = "launch-user"
+        bot.get_user(user_id)
+        bot.set_user_language(user_id, "vi")
         initial_credits, _, _ = bot.get_user(user_id)
 
-        bot.create_order("100001", user_id, 100000, 1000)
-        _, first_invoice_total = bot.payos_invoice_total_for_order("100001", 100000)
-        processed, desc, paid_info = bot.process_payos_paid_order("100001", first_invoice_total)
-        assert processed is True
-        assert desc == "success"
-        assert paid_info["launch_bonus"] == 50
-        credits_after_first, _, _ = bot.get_user(user_id)
-        assert credits_after_first == initial_credits + 1050
-
-        bot.create_order("100002", user_id, 100000, 1000)
-        _, second_invoice_total = bot.payos_invoice_total_for_order("100002", 100000)
-        processed, desc, paid_info = bot.process_payos_paid_order("100002", second_invoice_total)
+        bot.create_order("100001", user_id, 10000, 100)
+        _, first_invoice_total = bot.payos_invoice_total_for_order("100001", 10000)
+        processed, desc, paid_info = bot.process_payos_paid_order(
+            "100001",
+            first_invoice_total,
+            transaction_id="launch-first-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 0
+        assert paid_info["auto_bonus"] == 30
+        credits_after_first, _, _ = bot.get_user(user_id)
+        assert credits_after_first == initial_credits + 130
+
+        bot.create_order("100002", user_id, 10000, 100)
+        _, second_invoice_total = bot.payos_invoice_total_for_order("100002", 10000)
+        processed, desc, paid_info = bot.process_payos_paid_order(
+            "100002",
+            second_invoice_total,
+            transaction_id="launch-second-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
+        assert processed is True
+        assert desc == "success"
+        assert paid_info["launch_bonus"] == 0
+        assert paid_info["auto_bonus"] == 20
         credits_after_second, _, _ = bot.get_user(user_id)
-        assert credits_after_second == credits_after_first + 1000
+        assert credits_after_second == credits_after_first + 120
+
+        bot.create_order("100003", user_id, 10000, 100)
+        _, third_invoice_total = bot.payos_invoice_total_for_order("100003", 10000)
+        processed, desc, paid_info = bot.process_payos_paid_order(
+            "100003",
+            third_invoice_total,
+            transaction_id="launch-third-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
+        assert processed is True
+        assert desc == "success"
+        assert paid_info["launch_bonus"] == 0
+        assert paid_info["auto_bonus"] == 0
+        credits_after_third, _, _ = bot.get_user(user_id)
+        assert credits_after_third == credits_after_second + 100
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
@@ -6650,18 +6696,28 @@ def test_trial_bonus_antispam_is_free_trial_only(monkeypatch):
     os.close(fd)
     monkeypatch.setattr(bot, "DB_FILE", db_path)
     monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    monkeypatch.setattr(bot, "enqueue_broadcast_after_first_topup_safe", lambda _user_id: {"queued": False, "reason": "test"})
     try:
         bot.init_db()
         user_id = "paid-user"
+        bot.get_user(user_id)
+        bot.set_user_language(user_id, "vi")
         initial_credits, _, _ = bot.get_user(user_id)
         bot.create_order("paid-50", user_id, 50000, 500)
         _, invoice_total = bot.payos_invoice_total_for_order("paid-50", 50000)
-        processed, desc, paid_info = bot.process_payos_paid_order("paid-50", invoice_total)
+        processed, desc, paid_info = bot.process_payos_paid_order(
+            "paid-50",
+            invoice_total,
+            transaction_id="paid-first-tx",
+            webhook_status="PAID",
+            webhook_currency="VND",
+        )
         assert processed is True
         assert desc == "success"
-        assert paid_info["launch_bonus"] == 30
+        assert paid_info["launch_bonus"] == 0
+        assert paid_info["auto_bonus"] == 150
         credits_after_paid, _, _ = bot.get_user(user_id)
-        assert credits_after_paid == initial_credits + 530
+        assert credits_after_paid == initial_credits + 650
 
         conn = bot.db_connect()
         try:
@@ -9733,17 +9789,17 @@ def test_topup_promo_payment_eligibility_keeps_zalopay_momo_blocked():
     assert bot.is_vietnam_local_payment_method("momo") is False
     assert bot.is_vietnam_local_payment_method("usdt_trc20") is False
 
-    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 50000, "50k", 50000) is True
-    assert bot.should_apply_topup_promo("topup_xu", "manual_vietqr_vnd", "VND", 50000, "50k", 50000) is True
+    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 10000, "10k", 10000) is True
+    assert bot.should_apply_topup_promo("topup_xu", "manual_vietqr_vnd", "VND", 10000, "10k", 10000) is True
     assert bot.should_apply_topup_promo("topup_xu", "zalopay_personal", "VND", 50000, "50k", 50000) is False
     assert bot.should_apply_topup_promo("topup_xu", "momo_tuithantai", "VND", 50000, "50k", 50000) is False
-    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 10000, "10k", 50000) is False
-    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 20000, "20k", 50000) is False
+    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 9000, "9k", 10000) is False
+    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 10000, "10k", 10000) is True
     assert bot.should_apply_topup_promo("storage_addon", "payos", "VND", 50000, "50mb", 50000) is False
     assert bot.should_apply_topup_promo("combo_purchase", "payos", "VND", 99000, "tiktok_99k", 50000) is False
     assert bot.should_apply_topup_promo("monthly_package", "payos", "VND", 99000, "creator_monthly", 50000) is False
     assert bot.should_apply_topup_promo("topup_xu", "usdt_trc20", "USD", 250000, "", 50000, foreign_manual=True) is False
-    assert bot.launch_bonus_eligible_for_payment("topup_xu", "payos", "VND", 50000, "50k") is True
+    assert bot.launch_bonus_eligible_for_payment("topup_xu", "payos", "VND", 50000, "50k") is False
     assert bot.launch_bonus_eligible_for_payment("topup_xu", "usdt_trc20", "USD", 250000, "", True) is False
     assert bot.launch_bonus_eligible_for_payment("topup_xu", "zalopay_personal", "VND", 50000, "50k") is False
     assert bot.membership_rank_volume_eligible("topup_xu", "usdt_trc20", "USD") is True
@@ -9808,17 +9864,27 @@ def test_momo_asset_is_public_manual_method(monkeypatch):
 
 
 def test_manual_vnd_amount_then_method_and_blocked_bonus(monkeypatch):
-    monkeypatch.setattr(
-        bot,
-        "calculate_package_credit_for_user",
-        lambda _uid, amount: {"base_xu": amount // 100, "launch_bonus_xu": 100},
-    )
-    amount_labels = [button.text for row in bot.manual_domestic_amount_keyboard(123).inline_keyboard for button in row]
-    assert amount_labels[:6] == ["💳 10k", "💳 20k", "💳 50k", "💳 100k", "💳 200k", "💳 500k"]
-    bank = bot.manual_vnd_topup_preview(123, "50k", "bank_acb")
-    zalo = bot.manual_vnd_topup_preview(123, "50k", "zalopay_personal")
-    assert bank["bonus_allowed"] is True and bank["expected_xu"] == 600
-    assert zalo["bonus_allowed"] is False and zalo["bonus_xu"] == 0 and zalo["expected_xu"] == 500
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    try:
+        bot.init_db()
+        bot.get_user(123)
+        bot.set_user_language(123, "vi")
+        monkeypatch.setattr(
+            bot,
+            "calculate_package_credit_for_user",
+            lambda _uid, amount: {"base_xu": amount // 100, "launch_bonus_xu": 100},
+        )
+        amount_labels = [button.text for row in bot.manual_domestic_amount_keyboard(123).inline_keyboard for button in row]
+        assert amount_labels[:6] == ["💳 10k", "💳 20k", "💳 50k", "💳 100k", "💳 200k", "💳 500k"]
+        bank = bot.manual_vnd_topup_preview(123, "50k", "bank_acb")
+        zalo = bot.manual_vnd_topup_preview(123, "50k", "zalopay_personal")
+        assert bank["bonus_allowed"] is True and bank["expected_xu"] == 600
+        assert zalo["bonus_allowed"] is False and zalo["bonus_xu"] == 0 and zalo["expected_xu"] == 500
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
 
 
 def _create_manual_deposit_test_db(path):
@@ -10001,10 +10067,10 @@ def test_foreign_topup_i18n_hides_bonus_promises_and_vi_has_domestic_notice():
     assert "30%" not in en
     assert "不包含首次充值奖励" in zh
     assert "首充 30%" not in zh
-    assert "chỉ áp dụng cho khách nội địa Việt Nam" in vi
+    assert "Khách Việt Nam nạp VND nội địa từ 10.000đ" in vi
     assert "PayOS" in vi
     assert "QR ngân hàng Việt Nam/ACB/VietQR" in vi
-    assert "ZaloPay, MoMo, USD, CNY và USDT TRC20 không áp dụng" in vi
+    assert "ZaloPay, MoMo, USD, CNY, USDT TRC20 và thanh toán quốc tế không nhận +30%/+20% nội địa." in vi
 
 
 def test_manual_foreign_session_saves_bonus_flags_and_duplicate_tx(monkeypatch, tmp_path):

@@ -31,6 +31,15 @@ DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
 DEFAULT_PROMO_LIMIT_24H = 1
 DEFAULT_PROMO_LIMIT_7D = 3
 CHAT_ID_RE = re.compile(r"^-?\d{1,30}$")
+MARKET_SCOPE_VN = "vn"
+MARKET_SCOPE_INTL = "intl"
+MARKET_SCOPE_ALL = "all"
+MARKET_SCOPE_LABELS = {
+    MARKET_SCOPE_VN: "Việt Nam",
+    MARKET_SCOPE_INTL: "Quốc tế",
+    MARKET_SCOPE_ALL: "Toàn bộ bot",
+}
+DOMESTIC_PROMOTION_TEMPLATE_KEYS = frozenset({"first_topup", "second_topup"})
 
 CTA_REGISTRY: dict[str, dict[str, str]] = {
     "topup": {"label": "💳 Nạp ngay", "callback_data": "menu|main_topup"},
@@ -70,19 +79,27 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "label": "Mẫu 1 · Nạp Xu lần đầu",
         "message": (
             "🎁 ƯU ĐÃI NẠP XU LẦN ĐẦU\n\n"
-            "Nạp Xu lần đầu được tặng thêm 30% Xu.\n"
+            "Nạp Xu lần đầu từ 10.000đ được tự động tặng thêm 30% Xu.\n"
             "Không cần mã giảm giá."
         ),
         "ctas": [],
+        "allowed_market": "VN",
+        "allowed_currency": "VND",
+        "domestic_only": True,
+        "minimum_topup_vnd": 10_000,
     },
     "second_topup": {
         "label": "Mẫu 2 · Nạp Xu lần hai",
         "message": (
             "🎁 ƯU ĐÃI NẠP XU LẦN HAI\n\n"
-            "Nạp Xu lần thứ hai được tặng thêm 20% Xu.\n"
+            "Nạp Xu lần thứ hai từ 10.000đ được tự động tặng thêm 20% Xu.\n"
             "Không cần mã giảm giá."
         ),
         "ctas": [],
+        "allowed_market": "VN",
+        "allowed_currency": "VND",
+        "domestic_only": True,
+        "minimum_topup_vnd": 10_000,
     },
     "video": {
         "label": "Mẫu 3 · Tạo video AI",
@@ -122,7 +139,7 @@ AUTO_NOTICE_CONTENT: dict[str, dict[str, Any]] = {
         "title": "Ưu đãi nạp Xu lần đầu",
         "message": (
             "🎁 ƯU ĐÃI NẠP XU LẦN ĐẦU\n\n"
-            "Nạp Xu lần đầu được tặng thêm 30% Xu.\n"
+            "Nạp Xu lần đầu từ 10.000đ được tự động tặng thêm 30% Xu.\n"
             "Không cần mã giảm giá."
         ),
         "ctas": ["topup"],
@@ -133,7 +150,7 @@ AUTO_NOTICE_CONTENT: dict[str, dict[str, Any]] = {
         "title": "Ưu đãi nạp Xu lần hai",
         "message": (
             "🎁 ƯU ĐÃI NẠP XU LẦN HAI\n\n"
-            "Lần nạp Xu tiếp theo, anh/chị được tặng thêm 20% Xu.\n"
+            "Lần nạp Xu thứ hai từ 10.000đ, anh/chị được tự động tặng thêm 20% Xu.\n"
             "Không cần mã giảm giá."
         ),
         "ctas": ["topup"],
@@ -203,6 +220,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             media_file_id TEXT NOT NULL DEFAULT '',
             media_type TEXT NOT NULL DEFAULT '',
             keyboard_json TEXT NOT NULL DEFAULT '[]',
+            market_scope TEXT NOT NULL DEFAULT '',
             audience_kind TEXT NOT NULL DEFAULT '',
             audience_value TEXT NOT NULL DEFAULT '',
             state TEXT NOT NULL DEFAULT 'draft',
@@ -217,6 +235,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             media_file_id TEXT NOT NULL DEFAULT '',
             media_type TEXT NOT NULL DEFAULT '',
             keyboard_json TEXT NOT NULL DEFAULT '[]',
+            market_scope TEXT NOT NULL DEFAULT 'all',
             audience_kind TEXT NOT NULL,
             audience_value TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'queued',
@@ -240,6 +259,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             next_retry_at REAL NOT NULL DEFAULT 0,
             last_attempt_at TEXT,
             worker_heartbeat_at TEXT,
+            campaign_market_scope TEXT NOT NULL DEFAULT 'all',
+            user_market_snapshot TEXT NOT NULL DEFAULT '',
+            locale_snapshot TEXT NOT NULL DEFAULT '',
+            country_snapshot TEXT NOT NULL DEFAULT '',
             UNIQUE(campaign_id, telegram_chat_id),
             FOREIGN KEY(campaign_id) REFERENCES broadcast_lite_campaigns(campaign_id)
         );
@@ -278,6 +301,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             media_file_id TEXT NOT NULL DEFAULT '',
             media_type TEXT NOT NULL DEFAULT '',
             cta_json TEXT NOT NULL DEFAULT '[]',
+            market_scope TEXT NOT NULL DEFAULT 'all',
             audience_kind TEXT NOT NULL,
             audience_filter TEXT NOT NULL DEFAULT '',
             cadence TEXT NOT NULL,
@@ -326,6 +350,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     )
     for table, columns in {
         "broadcast_lite_drafts": {
+            "market_scope": "TEXT NOT NULL DEFAULT ''",
             "revision": "INTEGER NOT NULL DEFAULT 1",
             "draft_kind": "TEXT NOT NULL DEFAULT 'manual'",
             "schedule_cadence": "TEXT NOT NULL DEFAULT ''",
@@ -335,6 +360,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "cap_acknowledged": "INTEGER NOT NULL DEFAULT 0",
         },
         "broadcast_lite_campaigns": {
+            "market_scope": "TEXT NOT NULL DEFAULT 'all'",
+            "template_key": "TEXT NOT NULL DEFAULT ''",
             "source": "TEXT NOT NULL DEFAULT 'manual'",
             "schedule_id": "INTEGER",
             "trigger_type": "TEXT NOT NULL DEFAULT 'manual'",
@@ -345,11 +372,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "frequency_override": "INTEGER NOT NULL DEFAULT 0",
         },
         "broadcast_lite_deliveries": {
+            "campaign_market_scope": "TEXT NOT NULL DEFAULT 'all'",
+            "user_market_snapshot": "TEXT NOT NULL DEFAULT ''",
+            "locale_snapshot": "TEXT NOT NULL DEFAULT ''",
+            "country_snapshot": "TEXT NOT NULL DEFAULT ''",
             "schedule_id": "INTEGER",
             "trigger_type": "TEXT NOT NULL DEFAULT 'manual'",
             "user_id": "TEXT NOT NULL DEFAULT ''",
             "content_hash": "TEXT NOT NULL DEFAULT ''",
             "frequency_log_id": "INTEGER",
+        },
+        "broadcast_lite_schedules": {
+            "market_scope": "TEXT NOT NULL DEFAULT 'all'",
+            "template_key": "TEXT NOT NULL DEFAULT ''",
         },
     }.items():
         for name, definition in columns.items():
@@ -391,6 +426,56 @@ def normalize_ctas(ctas: Iterable[str] | None) -> list[str]:
         if len(result) == MAX_CTA_COUNT:
             break
     return result
+
+
+def normalize_market_scope(value: Any, *, allow_empty: bool = False) -> str:
+    raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "v": MARKET_SCOPE_VN,
+        "vi": MARKET_SCOPE_VN,
+        "vietnam": MARKET_SCOPE_VN,
+        "viet_nam": MARKET_SCOPE_VN,
+        "domestic": MARKET_SCOPE_VN,
+        "i": MARKET_SCOPE_INTL,
+        "international": MARKET_SCOPE_INTL,
+        "global": MARKET_SCOPE_INTL,
+        "foreign": MARKET_SCOPE_INTL,
+        "a": MARKET_SCOPE_ALL,
+        "bot": MARKET_SCOPE_ALL,
+        "everyone": MARKET_SCOPE_ALL,
+    }
+    normalized = aliases.get(raw, raw)
+    if allow_empty and not normalized:
+        return ""
+    if normalized not in MARKET_SCOPE_LABELS:
+        raise ValueError("Thị trường nhận thông báo không hợp lệ")
+    return normalized
+
+
+def template_market_allowed(template_key: Any, market_scope: Any) -> bool:
+    key = str(template_key or "").strip()
+    if not key:
+        return True
+    template = TEMPLATES.get(key)
+    if not template:
+        return False
+    scope = normalize_market_scope(market_scope, allow_empty=True)
+    if not scope:
+        return True
+    if bool(template.get("domestic_only")):
+        return scope == MARKET_SCOPE_VN
+    return True
+
+
+def validate_template_market(template_key: Any, market_scope: Any) -> None:
+    key = str(template_key or "").strip()
+    if key and key not in TEMPLATES:
+        raise ValueError("Mẫu thông báo không tồn tại")
+    if not template_market_allowed(key, market_scope):
+        raise ValueError(
+            "Mẫu ưu đãi nạp Xu nội địa chỉ được gửi cho thị trường Việt Nam. "
+            "Hãy chọn Việt Nam hoặc đổi sang nội dung chung."
+        )
 
 
 def normalize_member_tier(value: Any) -> str:
@@ -435,6 +520,7 @@ def _draft_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
         value["ctas"] = normalize_ctas(json.loads(value.get("keyboard_json") or "[]"))
     except (TypeError, ValueError, json.JSONDecodeError):
         value["ctas"] = []
+    value["market_scope"] = normalize_market_scope(value.get("market_scope"), allow_empty=True)
     value["tiers"] = normalize_member_tiers(value.get("audience_value")) if value.get("audience_kind") == "tiers" else []
     try:
         schedule_config = json.loads(value.get("schedule_config_json") or "{}")
@@ -450,9 +536,9 @@ def _new_draft(conn: sqlite3.Connection, admin_id: Any, **values: Any) -> str:
     conn.execute(
         """INSERT INTO broadcast_lite_drafts
         (draft_id, admin_id, title, message_text, media_file_id, media_type,
-         keyboard_json, audience_kind, audience_value, state, revision, draft_kind,
+         keyboard_json, market_scope, audience_kind, audience_value, state, revision, draft_kind,
          schedule_cadence, schedule_config_json, template_key, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             draft_id,
             str(admin_id),
@@ -461,6 +547,7 @@ def _new_draft(conn: sqlite3.Connection, admin_id: Any, **values: Any) -> str:
             str(values.get("media_file_id") or ""),
             str(values.get("media_type") or ""),
             _json_ctas(values.get("ctas") or []),
+            normalize_market_scope(values.get("market_scope"), allow_empty=True),
             str(values.get("audience_kind") or ""),
             str(values.get("audience_value") or ""),
             str(values.get("state") or "draft"),
@@ -548,6 +635,13 @@ def apply_template_to_draft(
     conn, owned = _connect(db)
     try:
         ensure_schema(conn)
+        draft = _draft_row(conn.execute(
+            "SELECT * FROM broadcast_lite_drafts WHERE draft_id=? AND admin_id=?",
+            (str(draft_id), str(admin_id)),
+        ).fetchone())
+        if not draft:
+            raise ValueError("Không tìm thấy bản nháp")
+        validate_template_market(template_key, draft.get("market_scope"))
         message = str(template.get("message") or "")
         if template_key == "saved_custom":
             row = conn.execute(
@@ -642,7 +736,7 @@ def _update_draft(db: str | Path, draft_id: str, admin_id: Any, **values: Any) -
                 key, value = "schedule_config_json", json.dumps(value or {}, ensure_ascii=False, separators=(",", ":"))
             if key not in {
                 "title", "message_text", "media_file_id", "media_type", "keyboard_json",
-                "audience_kind", "audience_value", "state", "campaign_id",
+                "market_scope", "audience_kind", "audience_value", "state", "campaign_id",
                 "draft_kind", "schedule_cadence", "schedule_config_json", "template_key",
                 "schedule_id", "cap_acknowledged",
             }:
@@ -705,6 +799,23 @@ def set_draft_media(
 
 def set_draft_ctas(db: str | Path, draft_id: str, admin_id: Any, ctas: Iterable[str]) -> dict[str, Any]:
     return _update_draft(db, draft_id, admin_id, ctas=normalize_ctas(ctas), state="draft")
+
+
+def set_draft_market(db: str | Path, draft_id: str, admin_id: Any, market_scope: Any) -> dict[str, Any]:
+    draft = get_draft(db, draft_id, admin_id)
+    if not draft:
+        raise ValueError("Không tìm thấy bản nháp")
+    scope = normalize_market_scope(market_scope)
+    validate_template_market(draft.get("template_key"), scope)
+    return _update_draft(
+        db,
+        draft_id,
+        admin_id,
+        market_scope=scope,
+        audience_kind="",
+        audience_value="",
+        state="draft",
+    )
 
 
 def set_draft_state(db: str | Path, draft_id: str, admin_id: Any, state: str) -> dict[str, Any]:
@@ -1067,6 +1178,85 @@ def _member_user_candidates(conn: sqlite3.Connection, selected_tiers: Iterable[s
     return candidates, invalid
 
 
+def _normalize_user_market(value: Any) -> str:
+    raw = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "VI": "VN",
+        "VNM": "VN",
+        "VIETNAM": "VN",
+        "VIET_NAM": "VN",
+        "DOMESTIC": "VN",
+        "INTERNATIONAL": "INTL",
+        "GLOBAL": "INTL",
+        "FOREIGN": "INTL",
+        "OVERSEAS": "INTL",
+    }
+    normalized = aliases.get(raw, raw)
+    return normalized if normalized in {"VN", "INTL"} else ""
+
+
+def _user_market_snapshot_conn(conn: sqlite3.Connection, user_id: Any) -> dict[str, Any]:
+    uid = str(user_id or "").strip()
+    columns = _table_columns(conn, "users") if _table_exists(conn, "users") else set()
+    wanted = [
+        name for name in (
+            "user_market", "country_code", "account_region", "international_account",
+            "user_language", "initial_user_language",
+        )
+        if name in columns
+    ]
+    values: dict[str, Any] = {}
+    if uid and wanted:
+        row = conn.execute(
+            f"SELECT {','.join(wanted)} FROM users WHERE CAST(user_id AS TEXT)=? LIMIT 1",
+            (uid,),
+        ).fetchone()
+        if row:
+            values = {name: row[name] for name in wanted}
+    country = str(values.get("country_code") or "").strip().upper()
+    region = str(values.get("account_region") or "").strip().upper()
+    initial_language = str(values.get("initial_user_language") or "").strip().lower()
+    current_language = str(values.get("user_language") or "").strip().lower()
+    explicit_market = _normalize_user_market(values.get("user_market"))
+    try:
+        international = bool(int(values.get("international_account") or 0))
+    except (TypeError, ValueError):
+        international = str(values.get("international_account") or "").strip().lower() in {"true", "yes", "on"}
+    if international:
+        market = "INTL"
+    elif explicit_market:
+        market = explicit_market
+    elif country in {"VN", "VNM"} or region in {"VN", "VIETNAM", "VIET_NAM"}:
+        market = "VN"
+    elif country or region:
+        market = "INTL"
+    elif initial_language:
+        market = "VN" if initial_language == "vi" else "INTL"
+    elif current_language:
+        market = "VN" if current_language == "vi" else "INTL"
+    else:
+        market = ""
+    return {
+        "user_id": uid,
+        "user_market": market,
+        "country_code": country,
+        "account_region": region,
+        "international_account": international,
+        "initial_user_language": initial_language,
+        "locale": current_language or initial_language,
+        "initial_vietnamese": initial_language == "vi",
+    }
+
+
+def _market_matches(snapshot: Mapping[str, Any], market_scope: str) -> bool:
+    scope = normalize_market_scope(market_scope)
+    if scope == MARKET_SCOPE_ALL:
+        return True
+    if scope == MARKET_SCOPE_VN:
+        return str(snapshot.get("user_market") or "") == "VN" and not bool(snapshot.get("international_account"))
+    return str(snapshot.get("user_market") or "") == "INTL" or bool(snapshot.get("international_account"))
+
+
 def _raw_audience_candidates(conn: sqlite3.Connection, kind: str, value: str) -> tuple[list[str], int]:
     invalid = 0
     if kind == "all":
@@ -1084,30 +1274,92 @@ def _raw_audience_candidates(conn: sqlite3.Connection, kind: str, value: str) ->
     return candidates, invalid
 
 
-def _audience_ids(conn: sqlite3.Connection, kind: str, value: str) -> tuple[list[str], int]:
+def _audience_selection_conn(
+    conn: sqlite3.Connection,
+    kind: str,
+    value: str,
+    market_scope: str = MARKET_SCOPE_ALL,
+    *,
+    require_initial_vietnamese: bool = False,
+) -> dict[str, Any]:
+    scope = normalize_market_scope(market_scope)
     blocked = _blocked_ids(conn)
-    candidates, invalid = _raw_audience_candidates(conn, kind, value)
-    if kind != "tiers":
-        invalid = 0
+    candidates, prefiltered_invalid = _raw_audience_candidates(conn, kind, value)
+    # Tier expansion filters malformed chat IDs before returning candidates;
+    # other audience modes keep them in the candidate list for the loop below.
+    invalid = int(prefiltered_invalid) if kind == "tiers" else 0
     result: list[str] = []
+    matched: list[str] = []
+    blocked_matches: list[str] = []
+    wrong_market: list[str] = []
+    snapshots: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
     for item in candidates:
         if not valid_chat_id(item):
             invalid += 1
-        elif item not in blocked and item not in result:
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        snapshot = _user_market_snapshot_conn(conn, item)
+        snapshots[item] = snapshot
+        market_ok = _market_matches(snapshot, scope)
+        language_ok = not require_initial_vietnamese or (
+            scope != MARKET_SCOPE_VN or bool(snapshot.get("initial_vietnamese"))
+        )
+        if not market_ok or not language_ok:
+            wrong_market.append(item)
+            continue
+        matched.append(item)
+        if item in blocked:
+            blocked_matches.append(item)
+        else:
             result.append(item)
-    return result, invalid
+    return {
+        "ids": result,
+        "matched_ids": matched,
+        "blocked_ids": blocked_matches,
+        "wrong_market_ids": wrong_market,
+        "snapshots": snapshots,
+        "invalid": invalid,
+        "market_scope": scope,
+    }
 
 
-def preview_audience(db: str | Path, kind: str, value: str = "") -> dict[str, int]:
+def _audience_ids(
+    conn: sqlite3.Connection,
+    kind: str,
+    value: str,
+    market_scope: str = MARKET_SCOPE_ALL,
+) -> tuple[list[str], int]:
+    selection = _audience_selection_conn(conn, kind, value, market_scope)
+    return list(selection["ids"]), int(selection["invalid"])
+
+
+def preview_audience(
+    db: str | Path,
+    kind: str,
+    value: str = "",
+    market_scope: str = MARKET_SCOPE_ALL,
+) -> dict[str, int]:
     conn, owned = _connect(db)
     try:
         ensure_schema(conn)
-        raw, invalid = _raw_audience_candidates(conn, str(kind), str(value or ""))
-        blocked_ids = _blocked_ids(conn)
-        valid = {item for item in raw if valid_chat_id(item)}
-        blocked = len(valid & blocked_ids)
-        eligible = len(valid - blocked_ids)
-        return {"total": eligible + blocked, "eligible": eligible, "invalid": invalid, "blocked": blocked}
+        selection = _audience_selection_conn(
+            conn,
+            str(kind),
+            str(value or ""),
+            normalize_market_scope(market_scope),
+        )
+        eligible = len(selection["ids"])
+        blocked = len(selection["blocked_ids"])
+        return {
+            "total": eligible + blocked,
+            "eligible": eligible,
+            "invalid": int(selection["invalid"]),
+            "blocked": blocked,
+            "wrong_market": len(selection["wrong_market_ids"]),
+        }
     finally:
         if owned:
             conn.close()
@@ -1129,7 +1381,9 @@ def render_preview_text(draft: Mapping[str, Any]) -> str:
         audience = ", ".join(member_tier_display(tier) for tier in normalize_member_tiers(draft.get("audience_value"))) or "chưa chọn"
     else:
         audience = str(draft.get("audience_kind") or "chưa chọn")
-    return f"👀 Xem trước\n\n{message}\n\n🔘 Nút: {buttons}\n👥 Người nhận: {audience}"
+    scope = normalize_market_scope(draft.get("market_scope"), allow_empty=True)
+    market = MARKET_SCOPE_LABELS.get(scope, "chưa chọn")
+    return f"👀 Xem trước\n\n{message}\n\n🔘 Nút: {buttons}\n🌍 Thị trường: {market}\n👥 Người nhận: {audience}"
 
 
 def preview_draft(db: str | Path, draft_id: str, admin_id: Any) -> dict[str, Any]:
@@ -1138,9 +1392,21 @@ def preview_draft(db: str | Path, draft_id: str, admin_id: Any) -> dict[str, Any
         raise ValueError("Không tìm thấy bản nháp")
     if not str(draft.get("message_text") or "").strip() and not draft.get("media_file_id"):
         raise ValueError("Cần nhập nội dung trước khi xem trước")
+    if not draft.get("market_scope"):
+        raise ValueError("Cần chọn thị trường trước khi xem trước")
     if not draft.get("audience_kind"):
         raise ValueError("Cần chọn người nhận trước khi xem trước")
-    return {**draft, "preview_text": render_preview_text(draft), "audience": preview_audience(db, draft["audience_kind"], draft["audience_value"])}
+    validate_template_market(draft.get("template_key"), draft.get("market_scope"))
+    return {
+        **draft,
+        "preview_text": render_preview_text(draft),
+        "audience": preview_audience(
+            db,
+            draft["audience_kind"],
+            draft["audience_value"],
+            draft["market_scope"],
+        ),
+    }
 
 
 def _campaign_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -1151,6 +1417,7 @@ def _campaign_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         value["ctas"] = normalize_ctas(json.loads(value.get("keyboard_json") or "[]"))
     except (TypeError, ValueError, json.JSONDecodeError):
         value["ctas"] = []
+    value["market_scope"] = normalize_market_scope(value.get("market_scope") or MARKET_SCOPE_ALL)
     return value
 
 
@@ -1169,6 +1436,8 @@ def _insert_campaign_conn(
     targets: Iterable[str],
     source: str,
     trigger_type: str,
+    market_scope: str = MARKET_SCOPE_ALL,
+    template_key: str = "",
     schedule_id: int | None = None,
     promotion_id: str = "",
     priority: int = 0,
@@ -1184,19 +1453,22 @@ def _insert_campaign_conn(
     if existing:
         return _campaign_dict(existing) or {}
     normalized_ctas = normalize_ctas(ctas)
+    scope = normalize_market_scope(market_scope)
+    validate_template_market(template_key, scope)
     unique_targets = list(dict.fromkeys(str(value) for value in targets if valid_chat_id(value)))
     stamp = _utc_now(reserved_at).isoformat()
     content_hash = notification_content_hash(message_text, media_file_id)
     cta_hash = notification_cta_hash(normalized_ctas)
     conn.execute(
         """INSERT INTO broadcast_lite_campaigns
-        (title,message_text,media_file_id,media_type,keyboard_json,audience_kind,audience_value,
+        (title,message_text,media_file_id,media_type,keyboard_json,market_scope,template_key,audience_kind,audience_value,
          status,created_by,idempotency_key,total_targets,created_at,updated_at,source,schedule_id,
          trigger_type,content_hash,cta_hash,promotion_id,priority,frequency_override)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             str(title or "Thông báo khách hàng"), str(message_text or ""), str(media_file_id or ""),
-            str(media_type or ""), _json_ctas(normalized_ctas), str(audience_kind), str(audience_value or ""),
+            str(media_type or ""), _json_ctas(normalized_ctas), scope, str(template_key or ""),
+            str(audience_kind), str(audience_value or ""),
             "queued", str(created_by), str(idempotency_key), len(unique_targets), stamp, stamp,
             str(source or "manual"), schedule_id, str(trigger_type or source or "manual"), content_hash,
             cta_hash, str(promotion_id or ""), int(priority), int(bool(frequency_override)),
@@ -1205,13 +1477,17 @@ def _insert_campaign_conn(
     campaign_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     retry_map = {str(key): float(value) for key, value in (next_retry_by_user or {}).items()}
     for user_id in unique_targets:
+        snapshot = _user_market_snapshot_conn(conn, user_id)
         conn.execute(
             """INSERT INTO broadcast_lite_deliveries
-            (campaign_id,telegram_chat_id,status,next_retry_at,schedule_id,trigger_type,user_id,content_hash)
-            VALUES (?,?,'pending',?,?,?,?,?)""",
+            (campaign_id,telegram_chat_id,status,next_retry_at,schedule_id,trigger_type,user_id,content_hash,
+             campaign_market_scope,user_market_snapshot,locale_snapshot,country_snapshot)
+            VALUES (?,?,'pending',?,?,?,?,?,?,?,?,?)""",
             (
                 campaign_id, user_id, retry_map.get(user_id, 0.0), schedule_id,
                 str(trigger_type or source or "manual"), user_id, content_hash,
+                scope, str(snapshot.get("user_market") or ""), str(snapshot.get("locale") or ""),
+                str(snapshot.get("country_code") or ""),
             ),
         )
         delivery_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
@@ -1266,9 +1542,18 @@ def confirm_draft(
             return _campaign_dict(row) or {}
         if not str(draft.get("message_text") or "").strip() and not draft.get("media_file_id"):
             raise ValueError("Cần nhập nội dung trước khi gửi")
+        if not draft.get("market_scope"):
+            raise ValueError("Cần chọn thị trường trước khi gửi")
         if draft.get("audience_kind") not in {"all", "tiers", "user", "test_list"}:
             raise ValueError("Cần chọn người nhận trước khi gửi")
-        targets, _invalid = _audience_ids(conn, draft["audience_kind"], draft.get("audience_value") or "")
+        validate_template_market(draft.get("template_key"), draft.get("market_scope"))
+        selection = _audience_selection_conn(
+            conn,
+            draft["audience_kind"],
+            draft.get("audience_value") or "",
+            draft["market_scope"],
+        )
+        targets = list(selection["ids"])
         cap = frequency_cap_summary(
             conn,
             targets,
@@ -1295,6 +1580,8 @@ def confirm_draft(
             targets=targets,
             source="manual",
             trigger_type="manual",
+            market_scope=str(draft["market_scope"]),
+            template_key=str(draft.get("template_key") or ""),
             priority=CAMPAIGN_PRIORITY["manual"],
             frequency_override=bool(override_frequency_cap),
         )
@@ -1317,7 +1604,13 @@ def confirm_draft(
 
 
 def settled_topup_count_conn(conn: sqlite3.Connection, user_id: Any) -> int:
-    """Read-only compatibility query for successful top-ups; never mutates billing."""
+    """Count only durable, credited top-ups for automatic notice eligibility.
+
+    ``users.has_deposited`` is intentionally not used as a fallback.  That flag
+    is a legacy summary and cannot prove settlement, a transaction id, or a
+    wallet credit.  A legacy database without the transaction tables therefore
+    returns zero instead of risking a false promotion notice.
+    """
     candidate = str(user_id or "").strip()
     if not candidate:
         return 0
@@ -1325,31 +1618,63 @@ def settled_topup_count_conn(conn: sqlite3.Connection, user_id: Any) -> int:
     if _table_exists(conn, "payos_orders"):
         columns = _table_columns(conn, "payos_orders")
         if {"user_id", "status"}.issubset(columns):
-            order_type_filter = ""
+            filters = [
+                "UPPER(COALESCE(o.status,'')) IN ('PAID','SETTLED','SUCCESS','SUCCEEDED')",
+            ]
             if "order_type" in columns:
-                order_type_filter = (
-                    " AND LOWER(COALESCE(order_type,'topup')) NOT IN "
-                    "('package_purchase','plan_purchase','storage_addon')"
+                filters.append(
+                    "LOWER(COALESCE(o.order_type,'topup')) IN ('topup','topup_xu')"
                 )
-            row = conn.execute(
-                "SELECT COUNT(*) FROM payos_orders WHERE CAST(user_id AS TEXT)=? "
-                "AND UPPER(COALESCE(status,'')) IN ('PAID','SETTLED','SUCCESS','SUCCEEDED')"
-                + order_type_filter,
-                (candidate,),
-            ).fetchone()
-            count = int(row[0] or 0) if row else 0
-    if count:
-        return count
-    if _table_exists(conn, "users"):
-        columns = _table_columns(conn, "users")
-        if {"user_id", "has_deposited"}.issubset(columns):
-            row = conn.execute(
-                "SELECT COALESCE(has_deposited,0) FROM users WHERE CAST(user_id AS TEXT)=?",
-                (candidate,),
-            ).fetchone()
-            if row and int(row[0] or 0) > 0:
-                return 1
-    return 0
+            if "payment_type" in columns:
+                filters.append(
+                    "LOWER(COALESCE(o.payment_type,'topup_xu')) IN ('topup_xu','manual_topup')"
+                )
+            if _table_exists(conn, "payos_processed_events") and {
+                "order_code", "transaction_id", "credited",
+            }.issubset(_table_columns(conn, "payos_processed_events")):
+                joins = [
+                    "CAST(e.order_code AS TEXT)=CAST(o.order_code AS TEXT)",
+                    "COALESCE(e.credited,0)=1",
+                    "TRIM(COALESCE(e.transaction_id,''))<>''",
+                ]
+                if _table_exists(conn, "credit_events") and {
+                    "user_id", "event_type", "ref_id", "delta",
+                }.issubset(_table_columns(conn, "credit_events")):
+                    joins.append(
+                        "EXISTS (SELECT 1 FROM credit_events ce "
+                        "WHERE CAST(ce.user_id AS TEXT)=CAST(o.user_id AS TEXT) "
+                        "AND ce.event_type='payos_deposit' "
+                        "AND CAST(ce.ref_id AS TEXT)=CAST(o.order_code AS TEXT) "
+                        "AND COALESCE(ce.delta,0)>0)"
+                    )
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT CAST(o.order_code AS TEXT)) FROM payos_orders o "
+                    "JOIN payos_processed_events e "
+                    "ON " + " AND ".join(joins) + " "
+                    "WHERE CAST(o.user_id AS TEXT)=? AND " + " AND ".join(filters),
+                    (candidate,),
+                ).fetchone()
+                count += int(row[0] or 0) if row else 0
+    if _table_exists(conn, "pending_deposits"):
+        columns = _table_columns(conn, "pending_deposits")
+        if {"user_id", "status", "tx_hash"}.issubset(columns):
+            if _table_exists(conn, "credit_events"):
+                credit_columns = _table_columns(conn, "credit_events")
+                if {"user_id", "event_type", "ref_id", "delta"}.issubset(credit_columns):
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM pending_deposits p "
+                        "WHERE CAST(p.user_id AS TEXT)=? AND p.status='approved' "
+                        "AND TRIM(COALESCE(p.tx_hash,''))<>'' "
+                        "AND COALESCE(p.amount_vnd,p.amount,0)>0 "
+                        "AND EXISTS (SELECT 1 FROM credit_events ce "
+                        "WHERE CAST(ce.user_id AS TEXT)=CAST(p.user_id AS TEXT) "
+                        "AND ce.event_type='manual_deposit' "
+                        "AND CAST(ce.ref_id AS TEXT)=CAST(p.id AS TEXT) "
+                        "AND COALESCE(ce.delta,0)>0)",
+                        (candidate,),
+                    ).fetchone()
+                    count += int(row[0] or 0) if row else 0
+    return count
 
 
 def settled_topup_count(db: str | Path, user_id: Any) -> int:
@@ -1442,6 +1767,21 @@ def _enqueue_auto_notice(
                 "campaign_id": int(existing["campaign_id"] or 0),
                 "status": str(existing["status"] or ""),
             }
+        market_snapshot = _user_market_snapshot_conn(conn, user_id)
+        language_and_market_eligible = bool(
+            market_snapshot.get("initial_vietnamese")
+            and market_snapshot.get("user_market") == "VN"
+            and not market_snapshot.get("international_account")
+        )
+        if not language_and_market_eligible:
+            conn.rollback()
+            return {
+                "queued": False,
+                "reason": "initial_language_or_market_not_vietnamese",
+                "notice_type": notice_type,
+                "user_id": user_id,
+                "eligibility_snapshot": market_snapshot,
+            }
         topup_count = settled_topup_count_conn(conn, user_id)
         eligible = (notice_type == "first_topup_30" and topup_count == 0) or (
             notice_type == "second_topup_20" and topup_count == 1
@@ -1449,6 +1789,9 @@ def _enqueue_auto_notice(
         snapshot = {
             "settled_topup_count": topup_count,
             "eligible": bool(eligible),
+            "user_market": str(market_snapshot.get("user_market") or ""),
+            "initial_user_language": str(market_snapshot.get("initial_user_language") or ""),
+            "international_account": bool(market_snapshot.get("international_account")),
             "checked_at": _utc_now(now).isoformat(),
         }
         if not eligible:
@@ -1505,6 +1848,8 @@ def _enqueue_auto_notice(
             targets=[user_id],
             source=source,
             trigger_type=notice_type,
+            market_scope=MARKET_SCOPE_VN,
+            template_key="first_topup" if notice_type == "first_topup_30" else "second_topup",
             promotion_id=notice_type,
             priority=int(spec["priority"]),
             next_retry_by_user={user_id: retry_epoch} if retry_epoch else None,
@@ -1648,6 +1993,7 @@ def _schedule_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         value["ctas"] = normalize_ctas(json.loads(value.get("cta_json") or "[]"))
     except (TypeError, ValueError, json.JSONDecodeError):
         value["ctas"] = []
+    value["market_scope"] = normalize_market_scope(value.get("market_scope") or MARKET_SCOPE_ALL)
     return value
 
 
@@ -1663,6 +2009,8 @@ def create_schedule(
     media_file_id: str = "",
     media_type: str = "",
     ctas: Iterable[str] | None = None,
+    market_scope: str = MARKET_SCOPE_ALL,
+    template_key: str = "",
     timezone_name: str = DEFAULT_TIMEZONE,
     send_time: str = "09:00",
     day_of_week: int | None = None,
@@ -1682,6 +2030,8 @@ def create_schedule(
     audience_kind = str(audience_kind or "").strip()
     if audience_kind not in {"all", "tiers", "user", "test_list"}:
         raise ValueError("Nhóm người nhận không hợp lệ")
+    market_scope = normalize_market_scope(market_scope)
+    validate_template_market(template_key, market_scope)
     zone = _schedule_zone(timezone_name)
     timezone_name = str(getattr(zone, "key", DEFAULT_TIMEZONE))
     starts = _coerce_schedule_datetime(starts_at, zone)
@@ -1712,13 +2062,14 @@ def create_schedule(
         stamp = _utc_now(now).isoformat()
         conn.execute(
             """INSERT INTO broadcast_lite_schedules
-            (name,message_text,media_file_id,media_type,cta_json,audience_kind,audience_filter,cadence,
+            (name,message_text,media_file_id,media_type,cta_json,market_scope,template_key,audience_kind,audience_filter,cadence,
              timezone,send_time,day_of_week,day_of_month,starts_at,expires_at,is_active,priority,created_by,
              next_run_at,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(name or f"Lịch {cadence}"), message_text, str(media_file_id or ""), str(media_type or ""),
-                _json_ctas(ctas or []), audience_kind, str(audience_filter or ""), cadence, timezone_name,
+                _json_ctas(ctas or []), market_scope, str(template_key or ""),
+                audience_kind, str(audience_filter or ""), cadence, timezone_name,
                 f"{_parse_send_time(send_time)[0]:02d}:{_parse_send_time(send_time)[1]:02d}",
                 day_of_week, day_of_month, starts.isoformat() if starts else None,
                 expires.isoformat() if expires else None, int(bool(is_active)), resolved_priority, str(created_by),
@@ -1809,8 +2160,11 @@ def create_schedule_from_draft(db: str | Path, draft_id: str, admin_id: Any, *, 
                 conn.close()
     if str(draft.get("draft_kind") or "") != "schedule":
         raise ValueError("Bản nháp này không phải lịch thông báo")
+    if not draft.get("market_scope"):
+        raise ValueError("Cần chọn thị trường cho lịch")
     if not draft.get("audience_kind"):
         raise ValueError("Cần chọn người nhận cho lịch")
+    validate_template_market(draft.get("template_key"), draft.get("market_scope"))
     config = dict(draft.get("schedule_config") or {})
     cadence = normalize_cadence(draft.get("schedule_cadence"))
     schedule = create_schedule(
@@ -1820,6 +2174,8 @@ def create_schedule_from_draft(db: str | Path, draft_id: str, admin_id: Any, *, 
         media_file_id=str(draft.get("media_file_id") or ""),
         media_type=str(draft.get("media_type") or ""),
         ctas=draft.get("ctas") or [],
+        market_scope=str(draft["market_scope"]),
+        template_key=str(draft.get("template_key") or ""),
         audience_kind=str(draft["audience_kind"]),
         audience_filter=str(draft.get("audience_value") or ""),
         cadence=cadence,
@@ -1912,9 +2268,16 @@ def run_due_schedules(db: str | Path, *, now: datetime | None = None, limit: int
                     conn.commit()
                     duplicate += 1
                     continue
-                targets, _invalid = _audience_ids(
-                    conn, str(schedule.get("audience_kind") or ""), str(schedule.get("audience_filter") or "")
+                selection = _audience_selection_conn(
+                    conn,
+                    str(schedule.get("audience_kind") or ""),
+                    str(schedule.get("audience_filter") or ""),
+                    str(schedule.get("market_scope") or MARKET_SCOPE_ALL),
+                    require_initial_vietnamese=(
+                        str(schedule.get("market_scope") or "") == MARKET_SCOPE_VN
+                    ),
                 )
+                targets = list(selection["ids"])
                 ctas = normalize_ctas(schedule.get("ctas") or [])
                 content_hash = notification_content_hash(str(schedule.get("message_text") or ""), str(schedule.get("media_file_id") or ""))
                 cta_hash = notification_cta_hash(ctas)
@@ -1952,6 +2315,8 @@ def run_due_schedules(db: str | Path, *, now: datetime | None = None, limit: int
                     targets=accepted,
                     source=source,
                     trigger_type=source,
+                    market_scope=str(schedule.get("market_scope") or MARKET_SCOPE_ALL),
+                    template_key=str(schedule.get("template_key") or ""),
                     schedule_id=int(schedule["schedule_id"]),
                     promotion_id=f"schedule:{int(schedule['schedule_id'])}",
                     priority=int(schedule.get("priority") or CAMPAIGN_PRIORITY[source]),

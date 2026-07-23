@@ -189,6 +189,10 @@ from admin_broadcast import (
     MEMBER_TIER_REGISTRY as BROADCAST_LITE_TIER_REGISTRY,
     SPECIAL_FEATURE_CTA_KEYS as BROADCAST_LITE_SPECIAL_FEATURE_CTA_KEYS,
     TEMPLATES as BROADCAST_LITE_TEMPLATES,
+    MARKET_SCOPE_ALL as BROADCAST_LITE_MARKET_SCOPE_ALL,
+    MARKET_SCOPE_INTL as BROADCAST_LITE_MARKET_SCOPE_INTL,
+    MARKET_SCOPE_LABELS as BROADCAST_LITE_MARKET_SCOPE_LABELS,
+    MARKET_SCOPE_VN as BROADCAST_LITE_MARKET_SCOPE_VN,
     apply_template_to_draft as apply_broadcast_lite_template,
     campaign_stats as broadcast_lite_campaign_stats,
     clear_pending_drafts as clear_broadcast_lite_pending_drafts,
@@ -213,6 +217,7 @@ from admin_broadcast import (
     set_draft_ctas as set_broadcast_lite_ctas,
     set_draft_media as set_broadcast_lite_media,
     set_draft_message as set_broadcast_lite_message,
+    set_draft_market as set_broadcast_lite_market,
     set_draft_schedule_config as set_broadcast_lite_schedule_config,
     set_draft_state as set_broadcast_lite_state,
     set_promo_limits as set_broadcast_lite_promo_limits,
@@ -1572,6 +1577,11 @@ LAUNCH_BONUS_BY_AMOUNT = {
     200000: 150,
     500000: 500,
 }
+PROMOTION_MINIMUM_TOPUP_VND = 10_000
+AUTO_FIRST_TOPUP_PROMOTION_ID = "FIRST_TOPUP_AUTO_30"
+AUTO_SECOND_TOPUP_PROMOTION_ID = "SECOND_TOPUP_AUTO_20"
+AUTO_FIRST_TOPUP_PERCENT = 30
+AUTO_SECOND_TOPUP_PERCENT = 20
 PROMO_BETA50_CODE  = "BETA50"
 PROMO_STACKING_ALLOWED = False
 PROMO_DEFAULT_EXPIRY_HOURS = 24
@@ -1584,6 +1594,23 @@ PROMO_BETA_LIMITED_CODE = PROMO_BETA50_CODE
 PROMO_PUBLIC_MAX_PERCENT = 30
 PROMO_INTERNAL_MAX_PERCENT = 50
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+PROMOTION_BEHAVIOR_AUDIT = {
+    "current_behavior_before_promomarket1": (
+        "FIRST30 and SECOND15 required /promo activation; settlement credited base Xu, "
+        "automatic denomination Launch Bonus, then a pending code redemption."
+    ),
+    "current_code_paths_before_promomarket1": (
+        "handle_package_choice -> attach_pending_promo_to_order -> process_payos_paid_order "
+        "-> redeem_launch_bonus_for_order/redeem_promo_for_order"
+    ),
+    "idempotency_before_promomarket1": (
+        "payos_processed_events event_key plus PAID order status prevented duplicate base/promo credit"
+    ),
+    "gap_closed_by_promomarket1": (
+        "No automatic first/second ordinal promotion, SECOND was 15%, minimum was 50,000 VND, "
+        "and user/payment market snapshots were missing."
+    ),
+}
 PROMO_POLICY_CODES = [
     {
         "code": PROMO_FIRST_TOPUP_CODE,
@@ -1592,20 +1619,24 @@ PROMO_POLICY_CODES = [
         "value": 30,
         "usage_limit": 1000,
         "per_user_limit": 1,
-        "min_amount_vnd": 50000,
+        "min_amount_vnd": PROMOTION_MINIMUM_TOPUP_VND,
         "max_bonus_xu": 1500,
-        "note": "Nạp lần đầu từ 50k +30% Xu",
+        "note": "Deprecated code: lần đầu được tự động +30% từ 10k, không cần mã",
+        "code_required": False,
+        "status": "deprecated",
     },
     {
         "code": PROMO_SECOND_TOPUP_CODE,
         "name": "Second top-up bonus",
         "promo_type": "percent_bonus",
-        "value": 15,
+        "value": AUTO_SECOND_TOPUP_PERCENT,
         "usage_limit": 1000,
         "per_user_limit": 1,
-        "min_amount_vnd": 50000,
+        "min_amount_vnd": PROMOTION_MINIMUM_TOPUP_VND,
         "max_bonus_xu": 800,
-        "note": "Nạp lần 2 từ 50k +15% Xu",
+        "note": "Deprecated code: lần hai được tự động +20% từ 10k, không cần mã",
+        "code_required": False,
+        "status": "deprecated",
     },
     {
         "code": PROMO_WEEKLY_CODE,
@@ -1617,6 +1648,7 @@ PROMO_POLICY_CODES = [
         "min_amount_vnd": 50000,
         "max_bonus_xu": 500,
         "note": "Ưu đãi tuần từ 50k +10% Xu",
+        "code_required": True,
     },
     {
         "code": PROMO_MONTHLY_CODE,
@@ -1628,6 +1660,7 @@ PROMO_POLICY_CODES = [
         "min_amount_vnd": 100000,
         "max_bonus_xu": 1500,
         "note": "Ưu đãi tháng từ 100k +20% Xu",
+        "code_required": True,
     },
     {
         "code": PROMO_DAILY_CODE,
@@ -1639,6 +1672,7 @@ PROMO_POLICY_CODES = [
         "min_amount_vnd": 50000,
         "max_bonus_xu": 150,
         "note": "Ưu đãi ngày từ 50k +5% Xu",
+        "code_required": True,
     },
     {
         "code": PROMO_BETA_LIMITED_CODE,
@@ -1650,9 +1684,10 @@ PROMO_POLICY_CODES = [
         "min_amount_vnd": 50000,
         "max_bonus_xu": 1000,
         "note": "Beta/internal từ 50k +50% Xu",
+        "code_required": True,
     },
 ]
-PROMO_LEGACY_DISABLE_CODES = ("SECOND20", "WEEKLY15", "DAILY10")
+PROMO_LEGACY_DISABLE_CODES = (PROMO_FIRST_TOPUP_CODE, PROMO_SECOND_TOPUP_CODE, "SECOND20", "WEEKLY15", "DAILY10")
 
 # Pricing Engine V2: default prices are intentionally high enough to cover
 # provider cost, server cost, support, refund risk, and future promotions.
@@ -3062,7 +3097,12 @@ def init_db():
         is_vip INTEGER DEFAULT 0,
         join_date TEXT,
         total_spent INTEGER DEFAULT 0,
-        user_language TEXT DEFAULT ''
+        user_language TEXT DEFAULT '',
+        initial_user_language TEXT DEFAULT '',
+        user_market TEXT DEFAULT '',
+        country_code TEXT DEFAULT '',
+        account_region TEXT DEFAULT '',
+        international_account INTEGER DEFAULT 0
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS trial_grants (
         user_id TEXT PRIMARY KEY,
@@ -3115,6 +3155,11 @@ def init_db():
         expected_xu INTEGER DEFAULT 0,
         approved_xu INTEGER DEFAULT 0,
         foreign_manual INTEGER DEFAULT 0,
+        user_market_snapshot TEXT DEFAULT '',
+        payment_market TEXT DEFAULT '',
+        payment_transaction_id TEXT DEFAULT '',
+        domestic_eligibility INTEGER DEFAULT 0,
+        successful_topup_ordinal INTEGER DEFAULT 0,
         first_bonus_applied INTEGER DEFAULT 0,
         launch_bonus_applied INTEGER DEFAULT 0,
         rank_topup_reward_applied INTEGER DEFAULT 0,
@@ -3255,6 +3300,12 @@ def init_db():
         ("anomaly_reason", "anomaly_reason TEXT DEFAULT ''"),
         ("approved_by_admin_id", "approved_by_admin_id TEXT DEFAULT ''"),
         ("granted_at", "granted_at TEXT DEFAULT ''"),
+        ("user_market_snapshot", "user_market_snapshot TEXT DEFAULT ''"),
+        ("payment_market", "payment_market TEXT DEFAULT ''"),
+        ("payment_transaction_id", "payment_transaction_id TEXT DEFAULT ''"),
+        ("domestic_eligibility", "domestic_eligibility INTEGER DEFAULT 0"),
+        ("successful_topup_ordinal", "successful_topup_ordinal INTEGER DEFAULT 0"),
+        ("base_credit_applied", "base_credit_applied INTEGER DEFAULT 0"),
     ]:
         _add_column_if_missing(c, "payos_orders", column_name, column_sql, payos_order_columns)
     c.execute("""CREATE TABLE IF NOT EXISTS user_plans (
@@ -4193,6 +4244,33 @@ def init_db():
         applied_at TEXT,
         UNIQUE(code, user_id)
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS topup_promotion_redemptions (
+        redemption_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        promotion_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        payment_transaction_id TEXT NOT NULL,
+        order_code TEXT NOT NULL DEFAULT '',
+        successful_topup_ordinal INTEGER NOT NULL,
+        market_snapshot TEXT NOT NULL DEFAULT '{}',
+        user_market_snapshot TEXT NOT NULL DEFAULT '',
+        payment_market TEXT NOT NULL DEFAULT '',
+        payment_currency TEXT NOT NULL DEFAULT '',
+        payment_channel TEXT NOT NULL DEFAULT '',
+        domestic_eligibility INTEGER NOT NULL DEFAULT 0,
+        promotion_source TEXT NOT NULL DEFAULT 'automatic_settlement',
+        base_xu INTEGER NOT NULL DEFAULT 0,
+        bonus_percent INTEGER NOT NULL DEFAULT 0,
+        bonus_xu INTEGER NOT NULL DEFAULT 0,
+        total_credited_xu INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'credited',
+        idempotency_key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        credited_at TEXT NOT NULL,
+        UNIQUE(user_id, promotion_id),
+        UNIQUE(payment_transaction_id, promotion_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_topup_promo_redemption_user ON topup_promotion_redemptions(user_id, successful_topup_ordinal)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_topup_promo_redemption_market ON topup_promotion_redemptions(user_market_snapshot, payment_market, payment_currency)")
     c.execute("""CREATE TABLE IF NOT EXISTS gift_redemptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         code TEXT,
@@ -4997,11 +5075,35 @@ def init_db():
         ("vip_tier_override", "TEXT DEFAULT ''"),
         ("referred_by", "TEXT DEFAULT ''"),
         ("user_language", "TEXT DEFAULT ''"),
+        ("initial_user_language", "TEXT DEFAULT ''"),
+        ("user_market", "TEXT DEFAULT ''"),
+        ("country_code", "TEXT DEFAULT ''"),
+        ("account_region", "TEXT DEFAULT ''"),
+        ("international_account", "INTEGER DEFAULT 0"),
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
         except Exception:
             pass
+    c.execute(
+        """UPDATE users
+           SET initial_user_language=LOWER(TRIM(COALESCE(user_language,'')))
+           WHERE TRIM(COALESCE(initial_user_language,''))=''
+             AND TRIM(COALESCE(user_language,''))<>''"""
+    )
+    c.execute(
+        """UPDATE users
+           SET user_market=CASE WHEN LOWER(TRIM(initial_user_language))='vi' THEN 'VN' ELSE 'INTL' END
+           WHERE TRIM(COALESCE(user_market,''))=''
+             AND TRIM(COALESCE(initial_user_language,''))<>''"""
+    )
+    c.execute(
+        """UPDATE users
+           SET country_code=CASE WHEN UPPER(TRIM(user_market))='VN' THEN 'VN' ELSE COALESCE(country_code,'') END,
+               account_region=CASE WHEN UPPER(TRIM(user_market))='VN' THEN 'VIETNAM' ELSE 'INTERNATIONAL' END,
+               international_account=CASE WHEN UPPER(TRIM(user_market))='VN' THEN 0 ELSE 1 END
+           WHERE UPPER(TRIM(COALESCE(user_market,''))) IN ('VN','INTL')"""
+    )
     for col, col_type in [
         ("translate_mode_target", "TEXT DEFAULT ''"),
     ]:
@@ -5084,6 +5186,10 @@ def init_db():
         ("created_by", "TEXT"),
         ("requires_assignment", "INTEGER DEFAULT 0"),
         ("owner_user_id", "TEXT"),
+        ("code_required", "INTEGER DEFAULT 1"),
+        ("allowed_market", "TEXT DEFAULT 'VN'"),
+        ("allowed_currency", "TEXT DEFAULT 'VND'"),
+        ("domestic_only", "INTEGER DEFAULT 1"),
     ]:
         try:
             c.execute(f"ALTER TABLE promotion_codes ADD COLUMN {col} {col_type}")
@@ -5155,6 +5261,11 @@ def init_db():
         ("expected_xu", "INTEGER DEFAULT 0"),
         ("approved_xu", "INTEGER DEFAULT 0"),
         ("foreign_manual", "INTEGER DEFAULT 0"),
+        ("user_market_snapshot", "TEXT DEFAULT ''"),
+        ("payment_market", "TEXT DEFAULT ''"),
+        ("payment_transaction_id", "TEXT DEFAULT ''"),
+        ("domestic_eligibility", "INTEGER DEFAULT 0"),
+        ("successful_topup_ordinal", "INTEGER DEFAULT 0"),
         ("first_bonus_applied", "INTEGER DEFAULT 0"),
         ("launch_bonus_applied", "INTEGER DEFAULT 0"),
         ("rank_topup_reward_applied", "INTEGER DEFAULT 0"),
@@ -11798,6 +11909,97 @@ def normalize_user_language(lang: str | None) -> str:
     value = aliases.get(value, value)
     return value if value in USER_LANGUAGE_LABELS else ""
 
+def normalize_user_market(value: str | None) -> str:
+    raw = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "VI": "VN",
+        "VNM": "VN",
+        "VIETNAM": "VN",
+        "VIET_NAM": "VN",
+        "DOMESTIC": "VN",
+        "INTERNATIONAL": "INTL",
+        "GLOBAL": "INTL",
+        "FOREIGN": "INTL",
+        "OVERSEAS": "INTL",
+    }
+    raw = aliases.get(raw, raw)
+    return raw if raw in {"VN", "INTL"} else ""
+
+
+def canonical_user_market_snapshot_conn(conn, user_id) -> dict:
+    uid = str(user_id or "").strip()
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    wanted = [
+        name for name in (
+            "user_market", "country_code", "account_region", "international_account",
+            "user_language", "initial_user_language",
+        )
+        if name in columns
+    ]
+    values = {name: "" for name in wanted}
+    if uid and wanted:
+        row = conn.execute(
+            f"SELECT {','.join(wanted)} FROM users WHERE CAST(user_id AS TEXT)=? LIMIT 1",
+            (uid,),
+        ).fetchone()
+        if row:
+            values = dict(zip(wanted, row))
+    country = str(values.get("country_code") or "").strip().upper()
+    region = str(values.get("account_region") or "").strip().upper()
+    explicit_market = normalize_user_market(values.get("user_market"))
+    international = bool(int(values.get("international_account") or 0))
+    initial_language = normalize_user_language(values.get("initial_user_language"))
+    current_language = normalize_user_language(values.get("user_language"))
+    if international:
+        market = "INTL"
+    elif explicit_market:
+        market = explicit_market
+    elif country in {"VN", "VNM"} or region in {"VN", "VIETNAM", "VIET_NAM"}:
+        market = "VN"
+    elif country or region:
+        market = "INTL"
+    elif initial_language:
+        market = "VN" if initial_language == "vi" else "INTL"
+    elif current_language:
+        market = "VN" if current_language == "vi" else "INTL"
+    else:
+        market = ""
+    return {
+        "user_id": uid,
+        "user_market": market,
+        "country_code": country,
+        "account_region": region,
+        "international_account": international,
+        "user_language": normalize_user_language(values.get("user_language")),
+        "initial_user_language": initial_language,
+    }
+
+
+def canonical_user_market_snapshot(user_id) -> dict:
+    conn = db_connect()
+    try:
+        return canonical_user_market_snapshot_conn(conn, user_id)
+    finally:
+        conn.close()
+
+
+def user_selected_vietnamese_initially(user_id) -> bool:
+    snapshot = canonical_user_market_snapshot(user_id)
+    return bool(
+        snapshot.get("initial_user_language") == "vi"
+        and snapshot.get("user_market") == "VN"
+        and not snapshot.get("international_account")
+    )
+
+
+def user_is_vietnam_market(user_id) -> bool:
+    snapshot = canonical_user_market_snapshot(user_id)
+    return bool(
+        snapshot.get("user_market") == "VN"
+        and not snapshot.get("international_account")
+    )
+
+
 def get_user_language(user_id) -> str:
     uid = str(user_id)
     conn = db_connect()
@@ -11818,7 +12020,26 @@ def set_user_language(user_id, lang) -> str:
     get_user(uid)
     conn = db_connect()
     try:
-        conn.execute("UPDATE users SET user_language=? WHERE user_id=?", (selected, uid))
+        row = conn.execute(
+            "SELECT COALESCE(initial_user_language,''),COALESCE(user_market,'') "
+            "FROM users WHERE user_id=?",
+            (uid,),
+        ).fetchone()
+        initial = normalize_user_language(row[0] if row else "")
+        market = normalize_user_market(row[1] if row else "")
+        if not initial:
+            initial = selected
+        if not market:
+            market = "VN" if initial == "vi" else "INTL"
+        country = "VN" if market == "VN" else ""
+        region = "VIETNAM" if market == "VN" else "INTERNATIONAL"
+        conn.execute(
+            """UPDATE users
+               SET user_language=?,initial_user_language=?,user_market=?,country_code=?,
+                   account_region=?,international_account=?
+               WHERE user_id=?""",
+            (selected, initial, market, country, region, int(market == "INTL"), uid),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -12747,22 +12968,39 @@ def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
     get_user(user_id)
     conn = db_connect()
     c = conn.cursor()
-    c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (amount, str(user_id)))
-    record_credit_event(conn, user_id, amount, event_type, ref_id, note)
-    if event_type in {"admin_add", "manual_deposit"}:
-        record_audit(
-            conn,
-            ADMIN_ID,
-            "admin",
-            "credit.added",
-            "user",
-            str(user_id),
-            before=None,
-            after={"delta": int(amount), "event_type": event_type, "ref_id": ref_id},
-            note=note,
-        )
-    conn.commit()
-    conn.close()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        if str(event_type or "") == "manual_deposit" and str(ref_id or "").strip() and int(amount or 0) > 0:
+            duplicate = c.execute(
+                """SELECT 1 FROM credit_events
+                   WHERE user_id=? AND event_type=? AND ref_id=? AND delta>0
+                   LIMIT 1""",
+                (str(user_id), str(event_type), str(ref_id)),
+            ).fetchone()
+            if duplicate:
+                conn.rollback()
+                return False
+        c.execute("UPDATE users SET credits = credits + ? WHERE user_id=?", (amount, str(user_id)))
+        record_credit_event(conn, user_id, amount, event_type, ref_id, note)
+        if event_type in {"admin_add", "manual_deposit"}:
+            record_audit(
+                conn,
+                ADMIN_ID,
+                "admin",
+                "credit.added",
+                "user",
+                str(user_id),
+                before=None,
+                after={"delta": int(amount), "event_type": event_type, "ref_id": ref_id},
+                note=note,
+            )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def refund_charged_credit(user_id, amount, event_type="refund", ref_id="", note="", was_charged=True) -> bool:
     if not was_charged or is_admin_user(user_id) or int(amount or 0) <= 0:
@@ -13088,6 +13326,20 @@ def create_order(
     payment_type = normalize_payment_type(metadata.get("payment_type"), order_type, metadata)
     package_id = payment_package_id(order_type, plan_id, metadata)
     conn = db_connect()
+    if payment_type in TOPUP_PROMO_PAYMENT_TYPES:
+        user_snapshot = canonical_user_market_snapshot_conn(conn, user_id)
+        method = metadata.get("payment_method") or metadata.get("method") or "payos"
+        currency = str(metadata.get("currency") or "VND").upper()
+        metadata.update({
+            "user_market_snapshot": user_snapshot.get("user_market") or "",
+            "country_snapshot": user_snapshot.get("country_code") or "",
+            "account_region_snapshot": user_snapshot.get("account_region") or "",
+            "international_account": bool(user_snapshot.get("international_account")),
+            "initial_user_language": user_snapshot.get("initial_user_language") or "",
+            "payment_market": canonical_payment_market(method, currency, metadata.get("payment_market") or ""),
+            "payment_channel": canonical_topup_method(method),
+            "payment_currency": currency,
+        })
     c = conn.cursor()
     created_at = datetime.now()
     expires_at = created_at + timedelta(minutes=ORDER_TTL_MINUTES)
@@ -14069,8 +14321,9 @@ def has_used_launch_bonus(user_id, amount_vnd: int, conn=None) -> bool:
 def calculate_package_credit_for_user(user_id, amount_vnd: int, conn=None) -> dict:
     base_xu = package_base_xu(amount_vnd)
     launch_bonus_available = package_launch_bonus_xu(amount_vnd)
-    launch_bonus_eligible = launch_bonus_available > 0 and not has_used_launch_bonus(user_id, amount_vnd, conn=conn)
-    launch_bonus = launch_bonus_available if launch_bonus_eligible else 0
+    # PROMOMARKET1: Launch Bonus is never automatic. It requires a separately configured code/campaign.
+    launch_bonus_eligible = False
+    launch_bonus = 0
     return {
         "base_xu": base_xu,
         "launch_bonus_xu": launch_bonus,
@@ -16003,8 +16256,8 @@ BONUS_BLOCKED_METHODS = {
     "unknown_international",
 }
 TOPUP_PROMO_PAYMENT_TYPES = {"topup_xu", "manual_topup"}
-TOPUP_PROMO_EXCLUDED_AMOUNTS_VND = {10000, 20000}
-TOPUP_PROMO_EXCLUDED_PACKAGE_KEYS = {"10k", "20k", "manual_10k", "manual_20k"}
+TOPUP_PROMO_EXCLUDED_AMOUNTS_VND: set[int] = set()
+TOPUP_PROMO_EXCLUDED_PACKAGE_KEYS: set[str] = set()
 
 def payment_context_value(payment, key: str, default=None):
     if isinstance(payment, dict):
@@ -16033,6 +16286,16 @@ def is_international_payment_method(payment_method) -> bool:
     method = canonical_topup_method(payment_method)
     return bool(method in BONUS_BLOCKED_METHODS or method.startswith("foreign_"))
 
+def canonical_payment_market(payment_method: str, currency: str = "VND", explicit_market: str = "") -> str:
+    explicit = normalize_user_market(explicit_market)
+    if explicit:
+        return explicit
+    normalized_currency = str(currency or "").strip().upper()
+    if normalized_currency == "VND" and is_vietnam_local_payment_method(payment_method):
+        return "VN"
+    return "INTL"
+
+
 def is_topup_promo_excluded_package(package_key: str = "", amount_vnd: int = 0) -> bool:
     key = str(package_key or "").strip().lower()
     try:
@@ -16047,8 +16310,12 @@ def topup_promo_payment_eligibility(
     currency: str = "VND",
     amount_vnd: int = 0,
     package_key: str = "",
-    promo_min_amount: int = 50000,
+    promo_min_amount: int = PROMOTION_MINIMUM_TOPUP_VND,
     foreign_manual: bool = False,
+    user_market: str = "",
+    payment_market: str = "",
+    international_account: bool = False,
+    is_test: bool = False,
 ) -> dict:
     payment_type = normalize_payment_type(payment_type)
     currency = str(currency or "VND").strip().upper()
@@ -16057,8 +16324,16 @@ def topup_promo_payment_eligibility(
     except Exception:
         amount = 0
     method = canonical_topup_method(payment_method)
+    normalized_user_market = normalize_user_market(user_market)
+    normalized_payment_market = canonical_payment_market(method, currency, payment_market)
     if payment_type not in TOPUP_PROMO_PAYMENT_TYPES:
         return {"eligible": False, "reason": "not_topup_xu", "method": method}
+    if is_test:
+        return {"eligible": False, "reason": "test_payment", "method": method}
+    if international_account or (normalized_user_market and normalized_user_market != "VN"):
+        return {"eligible": False, "reason": "international_account", "method": method}
+    if normalized_payment_market != "VN":
+        return {"eligible": False, "reason": "payment_market_not_vn", "method": method}
     if foreign_manual or currency != "VND" or is_international_payment_method(method):
         return {"eligible": False, "reason": "international_or_non_vnd", "method": method}
     if not is_vietnam_local_payment_method(method):
@@ -16067,7 +16342,11 @@ def topup_promo_payment_eligibility(
         return {"eligible": False, "reason": "package_excluded", "method": method}
     if amount > 0 and amount < max(0, int(promo_min_amount or 0)):
         return {"eligible": False, "reason": "min_amount_not_met", "method": method}
-    return {"eligible": True, "reason": "ok", "method": method}
+    return {
+        "eligible": True, "reason": "ok", "method": method,
+        "user_market": normalized_user_market or "VN",
+        "payment_market": normalized_payment_market,
+    }
 
 def should_apply_topup_promo(
     payment_type: str = "topup_xu",
@@ -16075,8 +16354,12 @@ def should_apply_topup_promo(
     currency: str = "VND",
     amount_vnd: int = 0,
     package_key: str = "",
-    promo_min_amount: int = 50000,
+    promo_min_amount: int = PROMOTION_MINIMUM_TOPUP_VND,
     foreign_manual: bool = False,
+    user_market: str = "",
+    payment_market: str = "",
+    international_account: bool = False,
+    is_test: bool = False,
 ) -> bool:
     return bool(topup_promo_payment_eligibility(
         payment_type,
@@ -16086,6 +16369,10 @@ def should_apply_topup_promo(
         package_key,
         promo_min_amount,
         foreign_manual,
+        user_market,
+        payment_market,
+        international_account,
+        is_test,
     ).get("eligible"))
 
 def launch_bonus_eligible_for_payment(
@@ -16096,18 +16383,7 @@ def launch_bonus_eligible_for_payment(
     package_key: str = "",
     foreign_manual: bool = False,
 ) -> bool:
-    return bool(
-        package_launch_bonus_xu(amount_vnd) > 0
-        and should_apply_topup_promo(
-            payment_type,
-            payment_method,
-            currency,
-            amount_vnd,
-            package_key,
-            promo_min_amount=50000,
-            foreign_manual=foreign_manual,
-        )
-    )
+    return False
 
 def membership_rank_volume_eligible(payment_type: str = "topup_xu", payment_method: str = "payos", currency: str = "VND") -> bool:
     payment_type = normalize_payment_type(payment_type)
@@ -16118,10 +16394,10 @@ def membership_rank_volume_eligible(payment_type: str = "topup_xu", payment_meth
 
 def topup_promo_ineligibility_message(reason: str) -> str:
     reason = str(reason or "").strip().lower()
-    if reason in {"international_or_non_vnd", "payment_method_not_eligible"}:
+    if reason in {"international_account", "payment_market_not_vn", "international_or_non_vnd", "payment_method_not_eligible"}:
         return "Mã ưu đãi không áp dụng cho phương thức thanh toán này. Đơn của bạn vẫn được cộng Xu gốc."
-    if reason == "package_excluded":
-        return "Mệnh giá 10k/20k chỉ để thử nghiệm, không áp dụng mã ưu đãi. Đơn của bạn vẫn được cộng Xu gốc."
+    if reason == "test_payment":
+        return "Giao dịch thử nghiệm không áp dụng ưu đãi."
     if reason == "not_topup_xu":
         return "Mã ưu đãi nạp Xu không áp dụng cho sản phẩm này. Thanh toán vẫn xử lý theo đúng sản phẩm đã chọn."
     return "Mã ưu đãi chưa đủ điều kiện. Đơn của bạn vẫn được cộng Xu gốc nếu thanh toán thành công."
@@ -16132,6 +16408,9 @@ def is_domestic_vnd_topup(payment) -> bool:
     amount = int(payment_context_value(payment, "amount_vnd", 0) or 0)
     package_key = str(payment_context_value(payment, "pkg_key", "") or payment_context_value(payment, "package_key", "") or "")
     payment_type = str(payment_context_value(payment, "payment_type", "topup_xu") or "topup_xu")
+    user_market = str(payment_context_value(payment, "user_market", "") or payment_context_value(payment, "user_market_snapshot", "") or "")
+    payment_market = str(payment_context_value(payment, "payment_market", "") or "")
+    international_account = payment_context_bool(payment, "international_account", False)
     return bool(
         DOMESTIC_TOPUP_BONUS_ENABLED
         and should_apply_topup_promo(
@@ -16142,6 +16421,10 @@ def is_domestic_vnd_topup(payment) -> bool:
             package_key=package_key,
             promo_min_amount=0,
             foreign_manual=payment_context_bool(payment, "foreign_manual", False),
+            user_market=user_market,
+            payment_market=payment_market,
+            international_account=international_account,
+            is_test=payment_context_bool(payment, "is_test", False) or payment_context_bool(payment, "test_payment", False),
         )
     )
 
@@ -16231,9 +16514,12 @@ def foreign_topup_preview(currency: str, original_amount, method: str = "usdt_tr
 def domestic_topup_bonus_notice() -> str:
     return (
         "Lưu ý:\n"
-        "Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50k/100k/200k/500k và các ưu đãi cộng Xu khi lên hạng "
-        "chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.\n\n"
-        "ZaloPay, MoMo, USD, CNY và USDT TRC20 không áp dụng ưu đãi cộng Xu. "
+        "Khách Việt Nam nạp VND nội địa từ 10.000đ được tự động +30% ở lần nạp thành công thứ nhất "
+        "và +20% ở lần thứ hai; không cần nhập mã cho hai ưu đãi này.\n\n"
+        "Ưu đãi chỉ áp dụng sau khi giao dịch settled qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR. "
+        "Lần thứ ba trở đi không tự động thưởng. MONTHLY/WEEKLY/DAILY/Launch và ưu đãi đặc biệt "
+        "chỉ áp dụng khi có mã hợp lệ theo cấu hình.\n\n"
+        "ZaloPay, MoMo, USD, CNY, USDT TRC20 và thanh toán quốc tế không nhận +30%/+20% nội địa. "
         "Khách vẫn có thể hưởng chiết khấu % theo hạng thành viên nếu đủ điều kiện."
     )
 
@@ -16243,7 +16529,7 @@ def foreign_topup_policy_note(lang: str = "vi") -> str:
         return "国际充值按照 TOAN AAS 的内部固定汇率换算，不包含首次充值奖励、启动奖励或额外 Xu 充值奖励。符合条件时，会员等级折扣比例仍可使用。"
     if lang == "en":
         return "International top-up uses TOAN AAS fixed internal exchange rates and does not include first top-up bonus, launch bonus, or extra Xu top-up rewards. Rank-based discount percentage may still apply when eligible."
-    return domestic_topup_bonus_notice()
+    return "Nạp quốc tế dùng tỉ giá nội bộ cố định của TOAN AAS, chỉ nhận Xu gốc và không áp dụng bonus nạp lần đầu, lần hai, Launch Bonus hoặc ưu đãi cộng Xu nội địa. Chiết khấu theo hạng vẫn có thể áp dụng khi đủ điều kiện."
 
 MANUAL_PAYMENT_METHODS = {
     "bank_acb": "🏦 Ngân hàng ACB/VietQR",
@@ -16254,15 +16540,24 @@ MANUAL_PAYMENT_METHODS = {
     "usdt_trc20": "🪙 USDT TRC20",
 }
 
-def manual_payment_menu_text() -> str:
+def manual_payment_menu_text(user_id=None) -> str:
+    domestic_market = True if user_id is None else user_is_vietnam_market(user_id)
+    market_note = (
+        "Lưu ý:\n"
+        "Khách Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR từ 10.000đ: "
+        "lần settled thứ nhất tự động +30%, lần thứ hai tự động +20%. "
+        "Các ưu đãi tháng/tuần/ngày/Launch khác chỉ áp dụng khi có mã hợp lệ."
+        if domestic_market else
+        "Lưu ý:\n"
+        "Khách quốc tế chỉ nhận Xu gốc khi thanh toán quốc tế hoặc VND không thuộc thị trường nội địa; "
+        "không hiển thị và không áp dụng bonus nạp Việt Nam."
+    )
     return (
         "💵 <b>Nạp thủ công TOAN AAS</b>\n\n"
         "Bạn muốn nạp bằng loại tiền nào?\n\n"
         "TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật. Ảnh bill hoặc TXID không tự động xác nhận giao dịch.\n\n"
         f"{html.escape(manual_topup_rules_text())}\n\n"
-        "Lưu ý:\n"
-        "Ưu đãi nạp lần đầu, Launch Bonus 50k/100k/200k/500k và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam "
-        "nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.\n\n"
+        f"{market_note}\n\n"
         "CNY: nếu chưa có kênh tự động thật, dùng ZaloPay/manual hoặc liên hệ admin để được duyệt thủ công. "
         "MoMo chỉ dùng cho VND, không dùng cho CNY.\n\n"
         "USD/CNY/USDT không áp dụng ưu đãi cộng Xu. Chiết khấu hạng thành viên vẫn áp dụng nếu đủ điều kiện."
@@ -16281,11 +16576,28 @@ def manual_payment_menu_keyboard(uid) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(rows)
 
-def manual_domestic_amount_text() -> str:
+def manual_domestic_amount_text(user_id=None) -> str:
+    if user_id is not None and not user_is_vietnam_market(user_id):
+        return (
+            "🌍 <b>Nạp VND cho tài khoản quốc tế</b>\n\n"
+            "Tài khoản này chỉ nhận Xu gốc sau khi admin đối soát; bonus nạp nội địa Việt Nam không áp dụng."
+        )
     return (
         "🇻🇳 <b>Nạp Xu bằng VND</b>\n\n"
         "Chọn mệnh giá bạn muốn nạp. Sau đó bot sẽ hỏi phương thức thanh toán.\n\n"
-        "Ưu đãi cộng Xu chỉ áp dụng khi đủ điều kiện và thanh toán qua PayOS hoặc ACB/VietQR."
+        "Từ 10.000đ: lần nạp settled thứ nhất tự động +30%, lần thứ hai tự động +20% "
+        "khi thanh toán qua PayOS hoặc ACB/VietQR và tài khoản thuộc thị trường Việt Nam."
+    )
+
+def manual_vnd_method_notice(user_id=None) -> str:
+    if user_id is not None and not user_is_vietnam_market(user_id):
+        return (
+            "Tài khoản quốc tế chỉ nhận Xu gốc sau khi đối soát; "
+            "ACB/VietQR không kích hoạt bonus nạp nội địa Việt Nam."
+        )
+    return (
+        "ACB/VietQR có thể nhận ưu đãi cộng Xu nếu tài khoản đủ điều kiện. "
+        "ZaloPay không áp dụng ưu đãi cộng Xu."
     )
 
 def manual_domestic_amount_keyboard(uid) -> InlineKeyboardMarkup:
@@ -16410,7 +16722,15 @@ def manual_vnd_topup_preview(user_id, pkg_key: str, method: str) -> dict:
     if not pkg:
         raise ValueError("invalid_vnd_amount")
     amount = int(pkg["amount"])
-    payment = {"currency": "VND", "method": method, "foreign_manual": False}
+    market = canonical_user_market_snapshot(user_id)
+    payment = {
+        "currency": "VND",
+        "method": method,
+        "foreign_manual": False,
+        "user_market": market.get("user_market") or "",
+        "payment_market": canonical_payment_market(method, "VND"),
+        "international_account": bool(market.get("international_account")),
+    }
     bonus_allowed = is_topup_bonus_allowed(payment)
     credit = calculate_package_credit_for_user(user_id, amount)
     base_xu = int(credit.get("base_xu") or pkg["xu"])
@@ -16460,7 +16780,15 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
     pkg_key = str(state.get("pkg_key") or "").strip()
     currency = str(state.get("currency") or "VND").upper()
     foreign_manual = bool(state.get("foreign_manual"))
-    bonus_allowed = is_topup_bonus_allowed({"currency": currency, "method": method, "foreign_manual": foreign_manual})
+    market = canonical_user_market_snapshot(uid)
+    bonus_allowed = is_topup_bonus_allowed({
+        "currency": currency,
+        "method": method,
+        "foreign_manual": foreign_manual,
+        "user_market": market.get("user_market") or "",
+        "payment_market": canonical_payment_market(method, currency),
+        "international_account": bool(market.get("international_account")),
+    })
     transfer_content = str(state.get("transfer_content") or f"AAS {uid} MANUAL")
     selected = (
         f"{format_foreign_amount(state.get('original_amount'))} {currency} — quy đổi {amount:,}đ"
@@ -17970,7 +18298,10 @@ def gift_requires_assignment(promo: dict) -> bool:
     return int(value or 0) == 1
 
 def promo_min_amount(promo: dict) -> int:
-    return int(promo.get("min_amount_vnd") or promo.get("min_amount") or 0)
+    configured = int(promo.get("min_amount_vnd") or promo.get("min_amount") or 0)
+    if is_gift_promo(promo):
+        return configured
+    return configured if configured > 0 else PROMOTION_MINIMUM_TOPUP_VND
 
 def promo_usage_limit(promo: dict) -> int:
     return int(promo.get("usage_limit") or promo.get("max_uses") or 0)
@@ -18064,7 +18395,8 @@ def get_promo_code_dict(conn, code: str) -> dict:
     c.execute(
         """SELECT code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note,
                   name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count,
-                  per_user_limit, starts_at, ends_at, created_at, updated_at, requires_assignment, owner_user_id
+                  per_user_limit, starts_at, ends_at, created_at, updated_at, requires_assignment, owner_user_id,
+                  code_required,allowed_market,allowed_currency,domestic_only
         FROM promotion_codes WHERE code=?""",
         (normalize_promo_code(code),),
     )
@@ -18075,6 +18407,7 @@ def get_promo_code_dict(conn, code: str) -> dict:
         "code", "bonus_xu", "discount_percent", "max_uses", "used_count", "min_amount", "status", "note",
         "name", "promo_type", "value", "min_amount_vnd", "max_bonus_xu", "usage_limit", "usage_count",
         "per_user_limit", "starts_at", "ends_at", "created_at", "updated_at", "requires_assignment", "owner_user_id",
+        "code_required", "allowed_market", "allowed_currency", "domestic_only",
     ]
     promo = dict(zip(keys, row))
     if not promo.get("promo_type"):
@@ -18105,19 +18438,22 @@ def seed_promotion_policy(conn=None) -> dict:
         min_amount_vnd = int(item["min_amount_vnd"])
         max_bonus_xu = int(item["max_bonus_xu"])
         per_user_limit = int(item["per_user_limit"])
+        item_status = str(item.get("status") or "active")
+        code_required = int(bool(item.get("code_required", True)))
         bonus_xu = value if promo_type == "fixed_bonus_xu" else 0
         discount_percent = value if promo_type == "percent_bonus" else 0
         c.execute(
             """INSERT INTO promotion_codes
             (code, bonus_xu, discount_percent, max_uses, used_count, min_amount, status, note, created_at, updated_at,
-             name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             name, promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, usage_count, per_user_limit, created_by,
+             code_required,allowed_market,allowed_currency,domestic_only)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(code) DO UPDATE SET
                 bonus_xu=excluded.bonus_xu,
                 discount_percent=excluded.discount_percent,
                 max_uses=excluded.max_uses,
                 min_amount=excluded.min_amount,
-                status='active',
+                status=excluded.status,
                 note=excluded.note,
                 updated_at=excluded.updated_at,
                 name=excluded.name,
@@ -18126,17 +18462,24 @@ def seed_promotion_policy(conn=None) -> dict:
                 min_amount_vnd=excluded.min_amount_vnd,
                 max_bonus_xu=excluded.max_bonus_xu,
                 usage_limit=excluded.usage_limit,
-                per_user_limit=excluded.per_user_limit""",
+                per_user_limit=excluded.per_user_limit,
+                code_required=excluded.code_required,
+                allowed_market=excluded.allowed_market,
+                allowed_currency=excluded.allowed_currency,
+                domestic_only=excluded.domestic_only""",
             (
-                code, bonus_xu, discount_percent, usage_limit, 0, min_amount_vnd, "active", item["note"], now, now,
+                code, bonus_xu, discount_percent, usage_limit, 0, min_amount_vnd, item_status, item["note"], now, now,
                 item["name"], promo_type, value, min_amount_vnd, max_bonus_xu, usage_limit, 0, per_user_limit, ADMIN_ID,
+                code_required, "VN", "VND", 1,
             ),
         )
         seeded[code] = item
     for code in PROMO_LEGACY_DISABLE_CODES:
+        normalized = normalize_promo_code(code)
+        legacy_status = "deprecated" if normalized in {PROMO_FIRST_TOPUP_CODE, PROMO_SECOND_TOPUP_CODE} else "disabled"
         c.execute(
-            "UPDATE promotion_codes SET status='disabled', updated_at=? WHERE code=?",
-            (now, normalize_promo_code(code)),
+            "UPDATE promotion_codes SET status=?, updated_at=? WHERE code=?",
+            (legacy_status, now, normalized),
         )
     if own_conn:
         conn.commit()
@@ -18290,6 +18633,221 @@ def user_successful_topup_count(conn, user_id, exclude_order_code="") -> int:
         pass
 
     return len(payment_refs) + len(fallback_events)
+
+def qualifying_successful_topup_count_conn(conn, user_id, exclude_order_code: str = "") -> int:
+    """Count only settled top-ups with a durable transaction id and credited base wallet entry."""
+    uid = str(user_id or "").strip()
+    excluded = str(exclude_order_code or "").strip()
+    refs: set[str] = set()
+    try:
+        rows = conn.execute(
+            """SELECT DISTINCT CAST(o.order_code AS TEXT)
+               FROM payos_orders o
+               JOIN payos_processed_events e
+                 ON CAST(e.order_code AS TEXT)=CAST(o.order_code AS TEXT)
+                AND COALESCE(e.credited,0)=1
+                AND TRIM(COALESCE(e.transaction_id,''))<>''
+               WHERE CAST(o.user_id AS TEXT)=?
+                 AND UPPER(COALESCE(o.status,'')) IN ('PAID','SETTLED','SUCCESS','SUCCEEDED')
+                 AND LOWER(COALESCE(o.order_type,'topup')) IN ('topup','topup_xu')
+                 AND LOWER(COALESCE(o.payment_type,'topup_xu')) IN ('topup_xu','manual_topup')
+                 AND COALESCE(o.subtotal_amount_vnd,o.package_amount_vnd,o.amount,0)>0
+                 AND LOWER(COALESCE(o.metadata_json,'')) NOT LIKE '%\"is_test\": true%'
+                 AND LOWER(COALESCE(o.metadata_json,'')) NOT LIKE '%\"test_payment\": true%'
+                 AND REPLACE(LOWER(COALESCE(o.metadata_json,'')),' ','') NOT LIKE '%\"is_refund\":true%'
+                 AND REPLACE(LOWER(COALESCE(o.metadata_json,'')),' ','') NOT LIKE '%\"refunded\":true%'""",
+            (uid,),
+        ).fetchall()
+        refs.update(
+            str(row[0] or "").strip()
+            for row in rows
+            if str(row[0] or "").strip() and str(row[0] or "").strip() != excluded
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        rows = conn.execute(
+            """SELECT p.id,COALESCE(p.order_code,''),COALESCE(p.tx_hash,'')
+               FROM pending_deposits p
+               WHERE CAST(p.user_id AS TEXT)=?
+                 AND p.status='approved'
+                 AND TRIM(COALESCE(p.tx_hash,''))<>''
+                 AND COALESCE(p.amount_vnd,p.amount,0)>0
+                 AND EXISTS (
+                     SELECT 1 FROM credit_events ce
+                     WHERE CAST(ce.user_id AS TEXT)=CAST(p.user_id AS TEXT)
+                       AND ce.event_type='manual_deposit'
+                       AND CAST(ce.ref_id AS TEXT)=CAST(p.id AS TEXT)
+                       AND COALESCE(ce.delta,0)>0
+                 )""",
+            (uid,),
+        ).fetchall()
+        for deposit_id, order_code, _transaction_id in rows:
+            ref = str(order_code or "").strip() or f"manual:{int(deposit_id)}"
+            if ref != excluded:
+                refs.add(ref)
+    except sqlite3.OperationalError:
+        pass
+    return len(refs)
+
+
+def automatic_topup_promotion_spec(ordinal: int) -> dict:
+    if int(ordinal or 0) == 1:
+        return {
+            "promotion_id": AUTO_FIRST_TOPUP_PROMOTION_ID,
+            "bonus_percent": AUTO_FIRST_TOPUP_PERCENT,
+            "label": "Thưởng nạp lần đầu 30%",
+        }
+    if int(ordinal or 0) == 2:
+        return {
+            "promotion_id": AUTO_SECOND_TOPUP_PROMOTION_ID,
+            "bonus_percent": AUTO_SECOND_TOPUP_PERCENT,
+            "label": "Thưởng nạp lần hai 20%",
+        }
+    return {}
+
+
+def automatic_topup_promotion_eligibility_conn(
+    conn,
+    user_id,
+    payment_context: dict,
+    *,
+    exclude_order_code: str = "",
+) -> dict:
+    payment = dict(payment_context or {})
+    snapshot = canonical_user_market_snapshot_conn(conn, user_id)
+    ordinal = qualifying_successful_topup_count_conn(
+        conn,
+        user_id,
+        exclude_order_code=exclude_order_code,
+    ) + 1
+    spec = automatic_topup_promotion_spec(ordinal)
+    transaction_id = str(payment.get("transaction_id") or payment.get("payment_transaction_id") or "").strip()
+    status = str(payment.get("payment_status") or payment.get("status") or "").strip().upper()
+    currency = str(payment.get("currency") or payment.get("payment_currency") or "").strip().upper()
+    method = canonical_topup_method(payment.get("method") or payment.get("payment_channel") or "")
+    payment_market = canonical_payment_market(method, currency, payment.get("payment_market") or "")
+    amount_vnd = max(0, int(payment.get("amount_vnd") or 0))
+    base_xu = max(0, int(payment.get("base_xu") or 0))
+    flags = {
+        "is_test": payment_context_bool(payment, "is_test", False) or payment_context_bool(payment, "test_payment", False),
+        "is_refund": payment_context_bool(payment, "is_refund", False) or payment_context_bool(payment, "refunded", False),
+        "is_cancelled": payment_context_bool(payment, "is_cancelled", False),
+        "is_failed": payment_context_bool(payment, "is_failed", False),
+    }
+    domestic_reason = "ok"
+    if status not in {"PAID", "SETTLED", "SUCCESS", "SUCCEEDED"}:
+        domestic_reason = "payment_not_settled"
+    elif not transaction_id:
+        domestic_reason = "missing_transaction_id"
+    elif not payment_context_bool(payment, "amount_valid", True) or amount_vnd <= 0:
+        domestic_reason = "invalid_payment_amount"
+    elif not payment_context_bool(payment, "base_credit_success", True) or base_xu <= 0:
+        domestic_reason = "base_credit_not_applied"
+    elif any(flags.values()):
+        domestic_reason = "payment_not_eligible"
+    elif amount_vnd < PROMOTION_MINIMUM_TOPUP_VND:
+        domestic_reason = "minimum_not_met"
+    elif snapshot.get("international_account") or snapshot.get("user_market") != "VN":
+        domestic_reason = "user_market_not_vn"
+    elif payment_market != "VN":
+        domestic_reason = "payment_market_not_vn"
+    elif currency != "VND":
+        domestic_reason = "payment_currency_not_vnd"
+    elif not is_vietnam_local_payment_method(method):
+        domestic_reason = "payment_channel_not_domestic"
+    reason = domestic_reason
+    if domestic_reason == "ok" and not spec:
+        reason = "ordinal_not_promotional"
+    return {
+        **spec,
+        "eligible": reason == "ok",
+        "promotion_eligible": reason == "ok",
+        "reason": reason,
+        "domestic_reason": domestic_reason,
+        "successful_topup_ordinal": ordinal,
+        "transaction_id": transaction_id,
+        "amount_vnd": amount_vnd,
+        "base_xu": base_xu,
+        "payment_market": payment_market,
+        "payment_currency": currency,
+        "payment_channel": method,
+        "user_market_snapshot": snapshot.get("user_market") or "",
+        "market_snapshot": snapshot,
+        "domestic_eligibility": domestic_reason == "ok",
+    }
+
+
+def apply_automatic_topup_promotion_conn(
+    conn,
+    user_id,
+    order_code: str,
+    payment_context: dict,
+) -> dict:
+    eligibility = automatic_topup_promotion_eligibility_conn(
+        conn,
+        user_id,
+        payment_context,
+        exclude_order_code=str(order_code or ""),
+    )
+    if not eligibility.get("eligible"):
+        return {**eligibility, "bonus_xu": 0, "status": str(eligibility.get("reason") or "not_eligible")}
+    promotion_id = str(eligibility["promotion_id"])
+    transaction_id = str(eligibility["transaction_id"])
+    idempotency_key = f"{str(user_id)}:{transaction_id}:{promotion_id}"
+    existing = conn.execute(
+        """SELECT redemption_id,bonus_xu,status FROM topup_promotion_redemptions
+           WHERE idempotency_key=? OR (user_id=? AND promotion_id=?)
+           ORDER BY redemption_id LIMIT 1""",
+        (idempotency_key, str(user_id), promotion_id),
+    ).fetchone()
+    if existing:
+        return {
+            **eligibility,
+            "eligible": False,
+            "bonus_xu": 0,
+            "status": "already_credited",
+            "redemption_id": int(existing[0] or 0),
+        }
+    bonus_percent = int(eligibility["bonus_percent"])
+    base_xu = int(eligibility["base_xu"])
+    bonus_xu = (base_xu * bonus_percent) // 100
+    stamp = now_text()
+    cursor = conn.execute(
+        """INSERT INTO topup_promotion_redemptions
+        (promotion_id,user_id,payment_transaction_id,order_code,successful_topup_ordinal,
+         market_snapshot,user_market_snapshot,payment_market,payment_currency,payment_channel,
+         domestic_eligibility,promotion_source,base_xu,bonus_percent,bonus_xu,total_credited_xu,
+         status,idempotency_key,created_at,credited_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            promotion_id, str(user_id), transaction_id, str(order_code or ""),
+            int(eligibility["successful_topup_ordinal"]),
+            json.dumps(eligibility["market_snapshot"], ensure_ascii=False, separators=(",", ":")),
+            str(eligibility["user_market_snapshot"]), str(eligibility["payment_market"]),
+            str(eligibility["payment_currency"]), str(eligibility["payment_channel"]), 1,
+            "automatic_settlement", base_xu, bonus_percent, bonus_xu, base_xu + bonus_xu,
+            "credited", idempotency_key, stamp, stamp,
+        ),
+    )
+    return {
+        **eligibility,
+        "bonus_xu": bonus_xu,
+        "total_credited_xu": base_xu + bonus_xu,
+        "status": "credited",
+        "redemption_id": int(cursor.lastrowid or 0),
+        "idempotency_key": idempotency_key,
+    }
+
+
+def defer_pending_code_promo_for_auto_conn(conn, user_id, order_code: str, promotion_id: str) -> None:
+    conn.execute(
+        """UPDATE promotion_redemptions
+           SET order_code='',note=?
+           WHERE user_id=? AND order_code=? AND status='pending'""",
+        (f"Deferred because automatic promotion {promotion_id} applied; no stacking", str(user_id), str(order_code)),
+    )
+
 
 def count_user_promo_usage(conn, user_id, code: str) -> int:
     c = conn.cursor()
@@ -18679,6 +19237,13 @@ def validate_promo_code(user_id, code: str, amount_vnd=0, conn=None, after_paid=
     norm_code = normalize_promo_code(code)
     if not norm_code:
         return False, {}, "missing_code"
+    if norm_code in {PROMO_FIRST_TOPUP_CODE, PROMO_SECOND_TOPUP_CODE, "SECOND20"}:
+        return False, {
+            "code": norm_code,
+            "status": "deprecated",
+            "code_required": 0,
+            "note": "Ưu đãi lần đầu/lần hai hiện được tự động áp dụng sau settlement.",
+        }, "automatic_no_code"
     own_conn = conn is None
     if own_conn:
         conn = db_connect()
@@ -18699,8 +19264,6 @@ def validate_promo_code(user_id, code: str, amount_vnd=0, conn=None, after_paid=
             return False, promo, "sold_out"
         per_user_limit = max(1, int(promo.get("per_user_limit") or 1))
         amount_int = int(amount_vnd or 0)
-        if amount_int > 0 and amount_int < 50000:
-            return False, promo, "min_amount_not_met"
         if amount_int > 0 and amount_int < promo_min_amount(promo):
             return False, promo, "min_amount"
         if str(promo.get("promo_type") or "").lower() == "tier_up":
@@ -18916,6 +19479,12 @@ def attach_pending_promo_to_order(user_id, order_code: str, amount_vnd: int, bas
             conn.commit()
             return {"attached": False, "code": normalize_promo_code(state.get("code")), "reason": reason}
         payment_context = payment_context if isinstance(payment_context, dict) else {}
+        market_snapshot = canonical_user_market_snapshot_conn(conn, user_id)
+        payment_context = {
+            **payment_context,
+            "user_market": market_snapshot.get("user_market") or "",
+            "international_account": bool(market_snapshot.get("international_account")),
+        }
         eligibility = topup_promo_payment_eligibility(
             payment_context.get("payment_type") or "topup_xu",
             payment_context.get("method") or payment_context.get("payment_method") or "payos",
@@ -18924,6 +19493,10 @@ def attach_pending_promo_to_order(user_id, order_code: str, amount_vnd: int, bas
             package_key=payment_context.get("package_key") or payment_context.get("pkg_key") or "",
             promo_min_amount=promo_min_amount(promo),
             foreign_manual=bool(payment_context.get("foreign_manual") or False),
+            user_market=payment_context.get("user_market") or "",
+            payment_market=payment_context.get("payment_market") or "",
+            international_account=bool(payment_context.get("international_account")),
+            is_test=bool(payment_context.get("is_test") or payment_context.get("test_payment")),
         )
         if not eligibility.get("eligible"):
             conn.commit()
@@ -18999,6 +19572,12 @@ def redeem_promo_for_order(conn, user_id, order_code: str, amount_vnd: int, base
         current_order_code=order_code,
     )
     payment_context = payment_context if isinstance(payment_context, dict) else {}
+    market_snapshot = canonical_user_market_snapshot_conn(conn, user_id)
+    payment_context = {
+        **payment_context,
+        "user_market": market_snapshot.get("user_market") or "",
+        "international_account": bool(market_snapshot.get("international_account")),
+    }
     if ok:
         eligibility = topup_promo_payment_eligibility(
             payment_context.get("payment_type") or "topup_xu",
@@ -19008,6 +19587,10 @@ def redeem_promo_for_order(conn, user_id, order_code: str, amount_vnd: int, base
             package_key=payment_context.get("package_key") or payment_context.get("pkg_key") or "",
             promo_min_amount=promo_min_amount(promo),
             foreign_manual=bool(payment_context.get("foreign_manual") or False),
+            user_market=payment_context.get("user_market") or "",
+            payment_market=payment_context.get("payment_market") or "",
+            international_account=bool(payment_context.get("international_account")),
+            is_test=bool(payment_context.get("is_test") or payment_context.get("test_payment")),
         )
         if not eligibility.get("eligible"):
             ok = False
@@ -36689,6 +37272,14 @@ def process_payos_paid_order(
         invoice_vat_vnd = int(metadata.get("vat_amount_vnd") or max(0, int(expected_amount or 0) - int(invoice_subtotal_vnd or 0)))
         calculated_base_xu = package_base_xu(invoice_subtotal_vnd)
         base_xu = calculated_base_xu if calculated_base_xu > 0 else stored_xu
+        account_market = canonical_user_market_snapshot_conn(conn, target_id)
+        payment_method = metadata.get("payment_method") or metadata.get("method") or "payos"
+        payment_currency = str(metadata.get("currency") or "VND").strip().upper()
+        user_market_value = (
+            account_market.get("user_market")
+            or normalize_user_market(metadata.get("user_market_snapshot"))
+        )
+        payment_market_value = canonical_payment_market(payment_method, payment_currency, metadata.get("payment_market") or "")
         topup_payment_context = {
             "payment_type": payment_type,
             "method": metadata.get("payment_method") or metadata.get("method") or "payos",
@@ -36696,6 +37287,19 @@ def process_payos_paid_order(
             "amount_vnd": int(invoice_subtotal_vnd or 0),
             "package_key": package_id or metadata.get("pkg_key") or "",
             "foreign_manual": bool(metadata.get("foreign_manual") or False),
+            "user_market": user_market_value,
+            "user_market_snapshot": user_market_value,
+            "payment_market": payment_market_value,
+            "international_account": bool(
+                account_market.get("international_account")
+                or metadata.get("international_account")
+            ),
+            "transaction_id": clean_transaction_id,
+            "payment_status": webhook_status or PAYOS_STATUS_PAID,
+            "amount_valid": int(expected_amount or 0) == int(amount_vnd or 0),
+            "base_credit_success": base_xu > 0,
+            "is_test": bool(metadata.get("is_test") or metadata.get("test_payment")),
+            "is_refund": bool(metadata.get("is_refund") or metadata.get("refunded")),
         }
         info = {
             "target_id": target_id,
@@ -37121,19 +37725,15 @@ def process_payos_paid_order(
 
         old_total_paid = member_total_paid_vnd(target_id, conn=conn)
         old_tier = member_tier_by_total_paid(old_total_paid)
-        launch_bonus = (
-            redeem_launch_bonus_for_order(conn, target_id, order_code, invoice_subtotal_vnd)
-            if launch_bonus_eligible_for_payment(
-                topup_payment_context.get("payment_type"),
-                topup_payment_context.get("method"),
-                topup_payment_context.get("currency"),
-                invoice_subtotal_vnd,
-                topup_payment_context.get("package_key"),
-                bool(topup_payment_context.get("foreign_manual")),
-            )
-            else 0
+        auto_promotion = apply_automatic_topup_promotion_conn(
+            conn,
+            target_id,
+            str(order_code),
+            {**topup_payment_context, "base_xu": int(base_xu or 0)},
         )
-        total_credit = base_xu + launch_bonus
+        auto_bonus = int(auto_promotion.get("bonus_xu") or 0)
+        launch_bonus = 0
+        total_credit = int(base_xu or 0) + auto_bonus
         c.execute(
             "UPDATE users SET credits = credits + ?, has_deposited=1, total_paid_vnd = COALESCE(total_paid_vnd,0) + ? WHERE user_id=?",
             (int(total_credit), int(invoice_subtotal_vnd or 0), str(target_id))
@@ -37141,16 +37741,37 @@ def process_payos_paid_order(
         new_total_paid = int(old_total_paid or 0) + int(invoice_subtotal_vnd or 0)
         new_tier = member_tier_by_total_paid(new_total_paid)
         c.execute(
-            "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
-            (PAYOS_STATUS_PAID, now_text(), str(order_code))
+            """UPDATE payos_orders
+               SET status=?,paid_at=?,user_market_snapshot=?,payment_market=?,
+                   payment_transaction_id=?,domestic_eligibility=?,
+                   successful_topup_ordinal=?,base_credit_applied=1
+               WHERE order_code=?""",
+            (
+                PAYOS_STATUS_PAID, now_text(), str(user_market_value or ""),
+                str(payment_market_value or ""), clean_transaction_id,
+                int(bool(auto_promotion.get("domestic_eligibility"))),
+                int(auto_promotion.get("successful_topup_ordinal") or 0),
+                str(order_code),
+            ),
         )
         update_finance_invoice_status_conn(conn, str(order_code), "paid", paid_at=now_text())
         record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
         mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
         record_credit_event(conn, target_id, base_xu, "payos_deposit", order_code, f"Nạp PayOS {invoice_subtotal_vnd}đ trước thuế; VAT {invoice_vat_vnd}đ")
-        if launch_bonus > 0:
-            record_credit_event(conn, target_id, launch_bonus, "launch_bonus", order_code, f"Launch Bonus gói {invoice_subtotal_vnd}đ trước thuế")
-        promo_result = redeem_promo_for_order(conn, target_id, order_code, invoice_subtotal_vnd, base_xu, payment_context=topup_payment_context)
+        if auto_bonus > 0:
+            auto_event_type = (
+                "auto_first_topup_bonus"
+                if auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+                else "auto_second_topup_bonus"
+            )
+            record_credit_event(
+                conn, target_id, auto_bonus, auto_event_type, str(order_code),
+                f"{auto_promotion.get('promotion_id')} +{auto_bonus} Xu; ordinal={auto_promotion.get('successful_topup_ordinal')}",
+            )
+            defer_pending_code_promo_for_auto_conn(conn, target_id, str(order_code), str(auto_promotion.get("promotion_id") or ""))
+            promo_result = {"bonus_xu": 0, "code": "", "status": "deferred_for_auto_promotion"}
+        else:
+            promo_result = redeem_promo_for_order(conn, target_id, order_code, invoice_subtotal_vnd, base_xu, payment_context=topup_payment_context)
         promo_bonus = int(promo_result.get("bonus_xu") or 0)
         update_usage_event_amount_for_ref_conn(conn, target_id, order_code, invoice_subtotal_vnd, "xu_credit")
         record_usage_event_conn(
@@ -37160,7 +37781,7 @@ def process_payos_paid_order(
             tool_name="payment",
             command="/webhook/payos",
             status="paid",
-            xu_delta=int(base_xu or 0) + int(launch_bonus or 0) + int(promo_bonus or 0),
+            xu_delta=int(base_xu or 0) + auto_bonus + int(promo_bonus or 0),
             amount_vnd=int(invoice_subtotal_vnd or 0),
             provider="payos",
             detail=f"order={order_code}; promo={promo_result.get('code') or ''}",
@@ -37171,7 +37792,7 @@ def process_payos_paid_order(
             "payos_topup",
             str(order_code),
             int(invoice_subtotal_vnd or 0),
-            int(base_xu or 0) + int(launch_bonus or 0) + int(promo_bonus or 0),
+            int(base_xu or 0) + auto_bonus + int(promo_bonus or 0),
             "payos",
             "success",
             f"PayOS topup; promo={promo_result.get('code') or ''}",
@@ -37196,6 +37817,12 @@ def process_payos_paid_order(
         info["promo_code"] = promo_result.get("code") or ""
         info["promo_status"] = promo_result.get("status") or ""
         info["launch_bonus"] = launch_bonus
+        info["auto_bonus"] = auto_bonus
+        info["auto_promotion_id"] = auto_promotion.get("promotion_id") or ""
+        info["auto_bonus_percent"] = int(auto_promotion.get("bonus_percent") or 0)
+        info["auto_promotion_label"] = auto_promotion.get("label") or ""
+        info["successful_topup_ordinal"] = int(auto_promotion.get("successful_topup_ordinal") or 0)
+        info["domestic_eligibility"] = bool(auto_promotion.get("domestic_eligibility"))
         info["base_xu"] = base_xu
         info["total_credit_without_promo"] = total_credit
         info["referral_bonus"] = int(referral_result.get("reward_xu") or 0)
@@ -37209,18 +37836,21 @@ def process_payos_paid_order(
             "payos_order",
             str(order_code),
             before={"status": status, "amount": expected_amount},
-            after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "subtotal": invoice_subtotal_vnd, "vat": invoice_vat_vnd, "total": amount_vnd, "base_xu": base_xu, "launch_bonus": launch_bonus, "promo_bonus": promo_bonus},
+            after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "subtotal": invoice_subtotal_vnd, "vat": invoice_vat_vnd, "total": amount_vnd, "base_xu": base_xu, "auto_bonus": auto_bonus, "auto_promotion_id": auto_promotion.get("promotion_id") or "", "promo_bonus": promo_bonus},
             note="PayOS paid order credited",
         )
         emit_event(
             conn,
             "payment.paid",
             "payos",
-            {"order_code": str(order_code), "user_id": str(target_id), "amount": int(invoice_subtotal_vnd), "vat": int(invoice_vat_vnd), "total": int(amount_vnd), "base_xu": int(base_xu), "launch_bonus": int(launch_bonus or 0), "promo_bonus": int(promo_bonus or 0)},
+            {"order_code": str(order_code), "user_id": str(target_id), "amount": int(invoice_subtotal_vnd), "vat": int(invoice_vat_vnd), "total": int(amount_vnd), "base_xu": int(base_xu), "auto_bonus": auto_bonus, "auto_promotion_id": auto_promotion.get("promotion_id") or "", "promo_bonus": int(promo_bonus or 0)},
             status="processed",
         )
         conn.commit()
-        if is_first_deposit:
+        if (
+            clean_transaction_id
+            and int(auto_promotion.get("successful_topup_ordinal") or 0) == 1
+        ):
             enqueue_broadcast_after_first_topup_safe(target_id)
         return True, "success", info
     except Exception:
@@ -40460,14 +41090,15 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                     "package_key": pkg_key,
                 },
             )
-            launch_preview_line = (
-                f"🎁 Launch Bonus dự kiến: <b>+{launch_preview} Xu</b> nếu còn lần đầu mua mệnh giá này.\n"
-                if launch_preview else ""
-            )
-            total_preview_line = (
-                f"🧾 Tổng Xu mệnh giá này sau PayOS success: <b>+{xu} Xu</b>\n"
-                if launch_preview else ""
-            )
+            if user_is_vietnam_market(uid):
+                automatic_bonus_policy_line = (
+                    "🎁 Thưởng tự động sẽ được xác định sau settlement: "
+                    "lần đầu đủ điều kiện +30%, lần hai đủ điều kiện +20% từ 10.000đ.\n"
+                )
+            else:
+                automatic_bonus_policy_line = (
+                    "🌍 Tài khoản quốc tế chỉ nhận Xu gốc; không áp dụng thưởng nạp nội địa Việt Nam.\n"
+                )
             promo_line = ""
             if promo_attach.get("attached"):
                 promo_line = (
@@ -40486,8 +41117,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 f"📋 Mệnh giá lựa chọn: <b>{pkg['text']}</b>\n"
                 f"{finance_tax_block(invoice)}\n"
                 f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
-                f"{launch_preview_line}"
-                f"{total_preview_line}"
+                f"{automatic_bonus_policy_line}"
                 f"{promo_line}"
                 f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
                 f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
@@ -40622,14 +41252,13 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
                     "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
                     f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
                     f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
-                    "ACB/VietQR có thể nhận ưu đãi cộng Xu nếu tài khoản đủ điều kiện. "
-                    "ZaloPay không áp dụng ưu đãi cộng Xu.".replace(",", "."),
+                    f"{manual_vnd_method_notice(uid)}".replace(",", "."),
                     parse_mode="HTML",
                     reply_markup=manual_domestic_method_keyboard(uid),
                 )
             set_manual_bill_state(uid, order_code="MANUAL", currency="VND", foreign_manual=False, step="select_amount")
             return await query.edit_message_text(
-                manual_domestic_amount_text(),
+                manual_domestic_amount_text(uid),
                 parse_mode="HTML",
                 reply_markup=manual_domestic_amount_keyboard(uid),
             )
@@ -40647,15 +41276,14 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         if query.from_user.id != uid:
             return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         if pkg_key not in PAYMENT_PACKAGES:
-            return await query.edit_message_text(manual_domestic_amount_text(), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid))
+            return await query.edit_message_text(manual_domestic_amount_text(uid), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid))
         preview = manual_vnd_topup_preview(uid, pkg_key, "bank_acb")
         set_manual_bill_state(uid, order_code="MANUAL", step="select_method", **preview)
         return await query.edit_message_text(
             "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
             f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
             f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
-            "ACB/VietQR có thể nhận ưu đãi cộng Xu nếu tài khoản đủ điều kiện. "
-            "ZaloPay không áp dụng ưu đãi cộng Xu.".replace(",", "."),
+            f"{manual_vnd_method_notice(uid)}".replace(",", "."),
             parse_mode="HTML",
             reply_markup=manual_domestic_method_keyboard(uid),
         )
@@ -40727,7 +41355,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         state = get_active_manual_bill_state(uid)
         if not state:
             set_manual_bill_state(uid, order_code="MANUAL")
-        return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
+        return await query.edit_message_text(manual_payment_menu_text(uid), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
     if action == "history":
         text, keyboard = manual_topup_history_payload(uid)
         return await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
@@ -40742,7 +41370,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         pkg_key = str(state.get("pkg_key") or "")
         if pkg_key not in PAYMENT_PACKAGES:
             return await query.edit_message_text(
-                manual_domestic_amount_text(),
+                manual_domestic_amount_text(uid),
                 parse_mode="HTML",
                 reply_markup=manual_domestic_amount_keyboard(uid),
             )
@@ -40792,10 +41420,10 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
         )
         set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
-        return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
+        return await query.edit_message_text(manual_payment_menu_text(uid), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
     set_manual_bill_state(uid, order_code="MANUAL")
     return await query.edit_message_text(
-        manual_payment_menu_text(),
+        manual_payment_menu_text(uid),
         parse_mode="HTML",
         reply_markup=manual_payment_menu_keyboard(uid),
     )
@@ -40809,7 +41437,7 @@ async def handle_payos_alert_callback(update: Update, context: ContextTypes.DEFA
     action = (query.data or "").split("|", 1)[-1]
     if action == "manual":
         set_manual_bill_state(query.from_user.id, order_code="MANUAL")
-        return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(query.from_user.id))
+        return await query.edit_message_text(manual_payment_menu_text(query.from_user.id), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(query.from_user.id))
     if action == "test":
         return await query.edit_message_text(
             "🧪 Dùng <code>/payos_debug_create 10000</code> để kiểm tra tạo checkout hoặc "
@@ -40850,7 +41478,7 @@ def owner_and_admin_ids() -> list[str]:
 def broadcast_lite_admin_menu_text() -> str:
     return (
         "📣 Thông báo khách hàng\n\n"
-        "Soạn nội dung → chọn nút hành động → chọn người nhận → xem trước → xác nhận.\n\n"
+        "Soạn nội dung → chọn nút hành động → chọn thị trường → chọn người nhận → xem trước → xác nhận.\n\n"
         "Tin chỉ được đưa vào hàng đợi sau khi Admin xác nhận."
     )
 
@@ -40898,14 +41526,20 @@ def broadcast_lite_compose_keyboard(draft_id: str, *, back_to_content: bool = Fa
     ])
 
 
-def broadcast_lite_template_keyboard(draft_id: str = "") -> InlineKeyboardMarkup:
+def broadcast_lite_template_keyboard(draft_id: str = "", market_scope: str = "") -> InlineKeyboardMarkup:
     draft_id = str(draft_id or "")
+    market_scope = str(market_scope or "").strip().lower()
+    domestic_keys = {"first_topup", "second_topup"}
     buttons = [
         InlineKeyboardButton(
             str(item["label"]),
             callback_data=(f"broadcast_lite|tpl|{draft_id}|{key}" if draft_id else f"broadcast_lite|template|{key}"),
         )
         for key, item in BROADCAST_LITE_TEMPLATES.items()
+        if not (
+            market_scope in {BROADCAST_LITE_MARKET_SCOPE_INTL, BROADCAST_LITE_MARKET_SCOPE_ALL}
+            and key in domestic_keys
+        )
     ]
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     if draft_id:
@@ -40986,7 +41620,11 @@ def broadcast_lite_preview_keyboard(draft: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton("👥 Đổi người nhận", callback_data=f"broadcast_lite|audience|{draft_id}"),
         ],
         [
+            InlineKeyboardButton("🌍 Đổi thị trường", callback_data=f"broadcast_lite|market_screen|{draft_id}"),
             InlineKeyboardButton("❌ Hủy", callback_data=f"broadcast_lite|cancel|{draft_id}"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Soạn thông báo", callback_data=f"broadcast_lite|content|{draft_id}"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ],
     ])
@@ -41036,18 +41674,60 @@ def broadcast_lite_audience_label(draft: dict) -> str:
     return "chưa chọn"
 
 
+def broadcast_lite_market_text(draft: dict) -> str:
+    scope = str(draft.get("market_scope") or "").strip().lower()
+    selected = BROADCAST_LITE_MARKET_SCOPE_LABELS.get(scope, "chưa chọn")
+    lines = [
+        "🌍 Chọn thị trường nhận thông báo",
+        "",
+        "Chọn một phạm vi trước khi chọn hạng/người nhận.",
+    ]
+    if scope:
+        lines.extend(["", f"✅ Đang chọn: {selected}"])
+    return "\n".join(lines)
+
+
+def broadcast_lite_market_keyboard(draft: dict) -> InlineKeyboardMarkup:
+    draft_id = str(draft.get("draft_id") or "")
+    scope = str(draft.get("market_scope") or "").strip().lower()
+
+    def label(key: str) -> str:
+        return ("✅ " if scope == key else "") + BROADCAST_LITE_MARKET_SCOPE_LABELS[key]
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇻🇳 " + label(BROADCAST_LITE_MARKET_SCOPE_VN), callback_data=f"broadcast_lite|market|{draft_id}|v"),
+            InlineKeyboardButton("🌍 " + label(BROADCAST_LITE_MARKET_SCOPE_INTL), callback_data=f"broadcast_lite|market|{draft_id}|i"),
+        ],
+        [
+            InlineKeyboardButton("👥 " + label(BROADCAST_LITE_MARKET_SCOPE_ALL), callback_data=f"broadcast_lite|market|{draft_id}|a"),
+            InlineKeyboardButton("⬅️ Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
+        ],
+        [
+            InlineKeyboardButton("❌ Hủy", callback_data=f"broadcast_lite|cancel|{draft_id}"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+        ],
+    ])
+
+
 def broadcast_lite_audience_estimate(draft: dict) -> str:
     kind = str(draft.get("audience_kind") or "")
     if not kind:
         return ""
     try:
-        stats = preview_broadcast_lite_audience(DB_FILE, kind, str(draft.get("audience_value") or ""))
+        stats = preview_broadcast_lite_audience(
+            DB_FILE,
+            kind,
+            str(draft.get("audience_value") or ""),
+            str(draft.get("market_scope") or BROADCAST_LITE_MARKET_SCOPE_ALL),
+        )
     except Exception:
         return ""
     return (
         f"\n• Tổng khách dự kiến: {int(stats.get('total', 0) or 0)}"
         f"\n• Bị chặn bot: {int(stats.get('blocked', 0) or 0)}"
         f"\n• Không có chat ID hợp lệ: {int(stats.get('invalid', 0) or 0)}"
+        f"\n• Khác thị trường: {int(stats.get('wrong_market', 0) or 0)}"
         f"\n• Được gửi thực tế: {int(stats.get('eligible', 0) or 0)}"
     )
 
@@ -41082,6 +41762,7 @@ def broadcast_lite_audience_text(draft: dict) -> str:
         )
     return (
         "👥 Chọn người nhận\n\n"
+        f"🌍 Thị trường: {BROADCAST_LITE_MARKET_SCOPE_LABELS.get(str(draft.get('market_scope') or ''), 'chưa chọn')}\n\n"
         "• Toàn bộ bot: mọi chat ID hợp lệ đã từng dùng bot.\n"
         "• Hạng thành viên: chọn một hoặc nhiều hạng.\n"
         "• Một user hoặc danh sách test: nhập ID Telegram hợp lệ.\n\n"
@@ -41104,6 +41785,8 @@ def broadcast_lite_review_text(draft: dict) -> str:
     notice_type = "Tự động · " + str(draft.get("schedule_cadence") or "") if is_schedule else "Thủ công"
     limits = get_broadcast_lite_promo_limits(DB_FILE)
     limit_text = f"{limits.get('max_24h', 1)}/24h · {limits.get('max_7d', 3)}/7 ngày"
+    market_scope = str(draft.get("market_scope") or "").strip().lower()
+    market_label = BROADCAST_LITE_MARKET_SCOPE_LABELS.get(market_scope, "chưa chọn")
     schedule_config = dict(draft.get("schedule_config") or {})
     schedule_hint = ""
     if is_schedule:
@@ -41113,6 +41796,7 @@ def broadcast_lite_review_text(draft: dict) -> str:
         + f"• Nội dung:\n{message or '(không có nội dung chữ)'}\n"
         + f"• Ảnh: {'Có' if draft.get('media_file_id') else 'Không'}\n"
         + f"• Nút: {cta_labels}\n"
+        + f"• Thị trường: {market_label}\n"
         + f"• Người nhận: {broadcast_lite_audience_label(draft)}"
         + broadcast_lite_audience_estimate(draft)
         + f"\n• Loại: {notice_type}\n• Giới hạn gửi: {limit_text}"
@@ -41138,16 +41822,16 @@ def broadcast_lite_audience_keyboard(draft: dict) -> InlineKeyboardMarkup:
         rows.extend([
             [
                 InlineKeyboardButton("👁 Xem trước", callback_data=f"broadcast_lite|preview|{draft_id}"),
-                InlineKeyboardButton("⬅️ Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
+                InlineKeyboardButton("🌍 Đổi thị trường", callback_data=f"broadcast_lite|market_screen|{draft_id}"),
             ],
             [
+                InlineKeyboardButton("⬅️ Chọn thị trường", callback_data=f"broadcast_lite|market_screen|{draft_id}"),
                 InlineKeyboardButton("❌ Hủy", callback_data=f"broadcast_lite|cancel|{draft_id}"),
-                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
             ],
         ])
     else:
         rows.append([
-            InlineKeyboardButton("⬅️ Chọn nút", callback_data=f"broadcast_lite|ctas|{draft_id}"),
+            InlineKeyboardButton("⬅️ Chọn thị trường", callback_data=f"broadcast_lite|market_screen|{draft_id}"),
             InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
         ])
     return InlineKeyboardMarkup(rows)
@@ -41463,7 +42147,7 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             return await _broadcast_lite_edit(
                 query,
                 "🎁 Chọn mẫu tin nhắn\n\nMẫu chỉ điền nội dung. Nút hành động sẽ được chọn riêng ở bước tiếp theo.",
-                broadcast_lite_template_keyboard(draft["draft_id"]),
+                broadcast_lite_template_keyboard(draft["draft_id"], draft.get("market_scope") or ""),
             )
 
         if action == "compose_back" and len(parts) >= 3:
@@ -41570,6 +42254,22 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
                 raise ValueError("Không tìm thấy bản nháp")
             if not str(draft.get("message_text") or "").strip() and not draft.get("media_file_id"):
                 raise ValueError("Cần nhập hoặc chọn nội dung trước")
+            return await _broadcast_lite_edit(query, broadcast_lite_market_text(draft), broadcast_lite_market_keyboard(draft))
+
+        if action == "market_screen" and len(parts) >= 3:
+            draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid)
+            if not draft:
+                raise ValueError("Không tìm thấy bản nháp")
+            return await _broadcast_lite_edit(query, broadcast_lite_market_text(draft), broadcast_lite_market_keyboard(draft))
+
+        if action == "market" and len(parts) >= 4:
+            draft = get_broadcast_lite_draft(DB_FILE, parts[2], uid)
+            if not draft:
+                raise ValueError("Không tìm thấy bản nháp")
+            scope = {"v": BROADCAST_LITE_MARKET_SCOPE_VN, "i": BROADCAST_LITE_MARKET_SCOPE_INTL, "a": BROADCAST_LITE_MARKET_SCOPE_ALL}.get(parts[3])
+            if not scope:
+                raise ValueError("Thị trường nhận thông báo không hợp lệ")
+            draft = set_broadcast_lite_market(DB_FILE, draft["draft_id"], uid, scope)
             return await _broadcast_lite_edit(query, broadcast_lite_audience_text(draft), broadcast_lite_audience_keyboard(draft))
 
         if action == "audience":
@@ -41577,6 +42277,8 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
             draft = get_broadcast_lite_draft(DB_FILE, draft_id, uid) if draft_id else get_latest_broadcast_lite_draft(DB_FILE, uid)
             if not draft:
                 raise ValueError("Hãy soạn thông báo trước")
+            if not draft.get("market_scope"):
+                return await _broadcast_lite_edit(query, broadcast_lite_market_text(draft), broadcast_lite_market_keyboard(draft))
             return await _broadcast_lite_edit(query, broadcast_lite_audience_text(draft), broadcast_lite_audience_keyboard(draft))
 
         if action == "aud_all" and len(parts) >= 3:
@@ -41742,7 +42444,9 @@ async def handle_broadcast_lite_callback(update: Update, context: ContextTypes.D
         draft = get_broadcast_lite_draft(DB_FILE, draft_id, uid) if draft_id else get_latest_broadcast_lite_draft(DB_FILE, uid)
         if draft:
             if action in {"tpl", "tpls", "tpl_review"}:
-                return await _broadcast_lite_edit(query, "⚠️ " + str(error)[:300], broadcast_lite_template_keyboard(draft["draft_id"]))
+                return await _broadcast_lite_edit(query, "⚠️ " + str(error)[:300], broadcast_lite_template_keyboard(draft["draft_id"], draft.get("market_scope") or ""))
+            if action in {"market", "market_screen"}:
+                return await _broadcast_lite_edit(query, "⚠️ " + str(error)[:300], broadcast_lite_market_keyboard(draft))
             if action in {"audience", "aud_all", "aud_tiers", "au", "aud_mode"}:
                 return await _broadcast_lite_edit(query, "⚠️ " + str(error)[:300], broadcast_lite_audience_keyboard(draft))
             if action in {"tier", "tier_done"}:
@@ -103429,9 +104133,16 @@ def menu_text_main_quick_i18n(lang: str) -> str:
         "• <code>/profile</code> — account"
     )
 
-def menu_text_main_topup_i18n(lang: str) -> str:
+def menu_text_main_topup_i18n(lang: str, user_id=None) -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
+        if user_id is not None and not user_is_vietnam_market(user_id):
+            return (
+                "💳 <b>Nạp Xu quốc tế</b>\n\n"
+                "Chọn số tiền muốn nạp. Bot sẽ tạo QR thanh toán tự động nếu PayOS hoạt động.\n\n"
+                f"{foreign_topup_policy_note('vi')}\n\n"
+                "Các mệnh giá Xu gốc vẫn hiển thị trong nút chọn nạp; không có bonus nạp nội địa."
+            )
         return menu_text_main_topup()
     if lang == "zh":
         return (
@@ -103577,7 +104288,7 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_quick":
         return menu_text_main_quick_i18n(lang), main_quick_keyboard(lang)
     if action == "main_topup":
-        return menu_text_main_topup_i18n(lang), main_topup_keyboard(lang, user_id)
+        return menu_text_main_topup_i18n(lang, user_id), main_topup_keyboard(lang, user_id)
     if action == "main_profile":
         return menu_text_main_profile_i18n(user_id or "__customer__", lang), main_profile_keyboard(lang)
     if action == "profile_packages":
@@ -103737,8 +104448,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_existed_before = user_exists(uid)
     get_user(uid, update.effective_user.first_name)
-    if not is_admin_user(uid):
-        asyncio.create_task(enqueue_broadcast_first_start_safe(uid))
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -103769,6 +104478,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     lang = get_user_language(uid) or "vi"
+    if not is_admin_user(uid) and user_selected_vietnamese_initially(uid):
+        asyncio.create_task(enqueue_broadcast_first_start_safe(uid))
     await update.message.reply_text(
         pending_notice + localized_start_menu_text(uid, lang) + mode_start_notice(uid),
         parse_mode="HTML",
@@ -107779,7 +108490,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         set_memory_guided_pending(query.from_user.id, "search")
         return await safe_edit_query_message(query, memory_search_prompt_text(lang), reply_markup=memory_main_keyboard(lang))
     if action == "hint_pricing":
-        return await send_pricing_lines(query.message, pricing_hub_lines(lang), pricing_main_keyboard(lang))
+        return await send_pricing_lines(query.message, pricing_hub_lines(lang, query.from_user.id), pricing_main_keyboard(lang))
     if action in DOC_TOOL_MENU_ACTIONS:
         return await start_doc_tool_flow(query, query.from_user.id, DOC_TOOL_MENU_ACTIONS[action], lang)
     if action == "main_guide":
@@ -108764,6 +109475,8 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
         if not lang:
             return await query.answer("Language is not supported.", show_alert=True)
         selected = set_user_language(uid, lang)
+        if not is_admin_user(uid) and user_selected_vietnamese_initially(uid):
+            asyncio.create_task(enqueue_broadcast_first_start_safe(uid))
         username = query.from_user.username or query.from_user.first_name or ""
         record_usage_event(
             uid,
@@ -149610,19 +150323,19 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Gói trải nghiệm tài khoản mới</b>",
         "• Tạo tài khoản mới nhận 200 Xu trải nghiệm",
         "• Có thể thử 1 video basic trước khi nạp thêm",
-        "• Nạp lần đầu từ 50k nên dùng <code>FIRST30</code> để nhận thêm +30% Xu nếu mã còn hiệu lực",
-        "• Mệnh giá 100k/200k/500k có Launch Bonus lần đầu mua từng mệnh giá",
+        "• Khách Việt Nam nạp VND nội địa từ 10k nhận tự động +30% lần đầu và +20% lần hai, không cần mã",
+        "• Ưu đãi MONTHLY/WEEKLY/DAILY hoặc campaign đặc biệt chỉ dùng khi admin công bố mã hợp lệ",
         "• Mã beta/internal chỉ dùng khi admin gửi riêng, không public cho user",
         "• Khuyến nghị bắt đầu bằng mệnh giá 50k hoặc 100k để đủ Xu tạo nhiều Content Pack",
         "• Không cam kết doanh thu, công cụ giúp tạo nội dung nhanh hơn và có quy trình rõ hơn",
         "",
         "<b>Gói 2 — Creator Start</b>",
-        "• Nạp 50k nhận 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua mệnh giá 50k",
+        "• Nạp 50k nhận 500 Xu gốc; bonus tự động (nếu đủ điều kiện) được xác định sau settlement",
         "• Phù hợp tạo nhiều script/caption cho Facebook, TikTok, YouTube",
         "• Gợi ý dùng: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
         "<b>Gói 3 — Creator Builder</b>",
-        "• Nạp 100k nhận 1.000 Xu gốc + 50 Xu Launch Bonus nếu lần đầu mua mệnh giá 100k",
+        "• Nạp 100k nhận 1.000 Xu gốc; bonus tự động (nếu đủ điều kiện) được xác định sau settlement",
         "• Phù hợp test nội dung Facebook/TikTok/YouTube trong 7 ngày",
         "• Gồm: <code>/film</code>, <code>/growth_ai</code>, <code>/campaign_report</code>",
         "",
@@ -149636,7 +150349,7 @@ async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "Kết quả phụ thuộc nội dung, sản phẩm, nền tảng và cách triển khai. TOAN AAS không cam kết doanh thu chắc chắn và hiện chưa tự đăng bài cho khách.",
         "",
-        "Lệnh nhanh: <code>/khuyenmai</code> | <code>/promo FIRST30</code> | <code>/naptien</code> | <code>/film chủ đề</code>",
+        "Lệnh nhanh: <code>/khuyenmai</code> | <code>/naptien</code> | <code>/film chủ đề</code>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -149663,15 +150376,15 @@ async def cmd_promo_seed_policy(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(
         "✅ <b>Đã seed Promotion Policy V2.1</b>\n\n"
         "<b>Ưu đãi công khai:</b>\n"
-        "• <code>FIRST30</code> — từ 50k +30%\n"
-        "• <code>SECOND15</code> — từ 50k +15%\n"
+        "• Lần đầu — tự động +30% từ 10k, không cần mã\n"
+        "• Lần hai — tự động +20% từ 10k, không cần mã\n"
         "• <code>WEEKLY10</code> — từ 50k +10%\n"
         "• <code>DAILY5</code> — từ 50k +5%\n"
         "• <code>MONTHLY20</code> — từ 100k +20%\n\n"
         "<b>Giới hạn:</b>\n"
         "• <code>BETA50</code> — từ 50k +50%, beta/internal giới hạn\n\n"
         "<b>Quy tắc:</b>\n"
-        "• Gói 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi\n"
+        "• Các mã MONTHLY/WEEKLY/DAILY và mã đặc biệt áp dụng theo mức tối thiểu riêng\n"
         "• Mỗi đơn chỉ dùng 1 mã\n"
         "• Không cộng dồn mã\n"
         "• Bonus Xu dịch vụ chỉ cộng sau khi PayOS thanh toán thành công\n\n"
@@ -149693,10 +150406,9 @@ def promo_code_status_message(status: str) -> str:
         "already_applied": "Mã này đã được dùng cho tài khoản của bạn.",
         "already_used": "Mã này đã được dùng đủ lượt cho tài khoản của bạn.",
         "period_already_used": "Mã này đã được dùng trong kỳ hiện tại. Hãy chờ kỳ reset tiếp theo.",
-        "min_amount_not_met": "Gói 10k/20k không áp dụng mã ưu đãi. Vui lòng chọn gói từ 50k trở lên.",
+        "min_amount_not_met": "Mệnh giá chưa đạt mức tối thiểu được cấu hình cho ưu đãi này.",
         "min_amount": "Mệnh giá nạp chưa đạt số tiền tối thiểu của mã.",
-        "first_topup_only": "Mã FIRST30 chỉ dành cho lần nạp đầu tiên.",
-        "second_topup_only": "Mã SECOND15 chỉ dành cho lần nạp thứ 2.",
+        "automatic_no_code": "Ưu đãi lần đầu/lần hai được hệ thống tự động áp dụng sau settlement, không cần nhập mã.",
         "owner_only": "Mã ưu đãi cá nhân này chỉ dùng cho đúng tài khoản được cấp.",
     }
     return messages.get(status, "Mã không hợp lệ, hết lượt, hết hạn hoặc chưa đủ điều kiện.")
@@ -149719,16 +150431,19 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = [
             "🎁 <b>Mã ưu đãi TOAN AAS</b>",
             "",
+            "Nạp lần đầu từ 10.000đ tự động +30% Xu; lần hai tự động +20% Xu.",
+            "Hai ưu đãi này do hệ thống tự động áp dụng sau settlement, không cần nhập mã cũ.",
+            "",
             "Nhập mã được admin công bố:",
-            "<code>/promo FIRST30</code>",
             "<code>/promo WEEKLY10</code>",
+            "<code>/promo MONTHLY20</code>",
+            "<code>/promo DAILY5</code>",
             "",
             "Xem ưu đãi đang có: <code>/khuyenmai</code>",
             "Xem mã cá nhân của bạn: <code>/my_promos</code>",
             "",
             "<b>Chính sách:</b>",
-            "• Ưu đãi áp dụng cho đơn nạp từ 50k",
-            "• Gói 10k/20k chỉ để thử nghiệm",
+            "• Mức tối thiểu của mã khác lấy theo cấu hình từng mã",
             "• Mỗi đơn chỉ áp dụng 1 mã",
             "• Không cộng dồn mã",
             "• Bonus Xu dịch vụ chỉ cộng sau khi thanh toán/duyệt bill thành công",
@@ -149809,7 +150524,7 @@ async def _cmd_promo_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Mã đang chờ dùng đến: <code>{html.escape(info.get('expires_at') or '-')}</code>\n"
             "• Mỗi đơn chỉ áp dụng 1 mã\n"
             "• Không cộng dồn mã khác\n"
-            "• Có thể cộng với Launch Bonus nếu mệnh giá đó còn lần đầu mua\n"
+            "• Không cộng chồng với thưởng tự động lần đầu/lần hai\n"
             "• Áp dụng cho lần nạp tiếp theo nếu đủ điều kiện\n\n"
             "Dùng <code>/naptien</code> để mua/nạp Xu dịch vụ.",
             parse_mode="HTML",
@@ -149853,70 +150568,19 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_command_received("khuyenmai", update)
     uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
     conn = db_connect()
     try:
         pending = get_user_pending_promo(uid, conn)
-        paid_count = user_successful_topup_count(conn, uid)
     finally:
         conn.close()
-    if paid_count <= 0:
-        recommended = "FIRST30 — ưu đãi công khai tốt nhất cho lần nạp đầu."
-    elif paid_count == 1:
-        recommended = "SECOND15 — ưu đãi cho lần nạp thứ 2."
-    else:
-        recommended = "MONTHLY20 cho gói lớn, hoặc WEEKLY10/DAILY5 nếu đủ điều kiện."
-    lines = [
-        "🎁 <b>ƯU ĐÃI TOAN AAS</b>",
-        "",
-        "🎁 Mã ưu đãi áp dụng cho đơn nạp từ 50.000đ trở lên.",
-        "Gói 10k/20k chỉ để thử nghiệm, không áp dụng mã ưu đãi.",
-        "",
-        f"🔥 <b>Nên dùng trước:</b> {html.escape(recommended)}",
-        "",
-        "<b>Thứ tự gợi ý:</b>",
-        "1. <code>FIRST30</code> — nạp lần đầu từ 50k: +30% Xu dịch vụ",
-        "2. <code>SECOND15</code> — nạp lần 2 từ 50k: +15% Xu dịch vụ",
-        "3. <code>MONTHLY20</code> — ưu đãi tháng từ 100k: +20% Xu dịch vụ",
-        "4. <code>WEEKLY10</code> — ưu đãi tuần từ 50k: +10% Xu dịch vụ",
-        "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu dịch vụ",
-        "",
-        "🎁 <b>Launch Bonus theo mệnh giá:</b>",
-        "• Lần đầu mua mệnh giá 50k: +30 Xu dịch vụ",
-        "• Lần đầu mua mệnh giá 100k: +50 Xu dịch vụ",
-        "• Lần đầu mua mệnh giá 200k: +150 Xu dịch vụ",
-        "• Lần đầu mua mệnh giá 500k: +500 Xu dịch vụ",
-        "",
-        "Mỗi tài khoản chỉ nhận Launch Bonus 1 lần cho từng mệnh giá.",
-        "Các lần mua lại cùng mệnh giá sẽ nhận Xu dịch vụ gốc.",
-        "",
-        "⚠️ <b>Quy tắc:</b>",
-        "• FIRST30: mỗi tài khoản dùng 1 lần cho lần nạp đầu từ 50k",
-        "• SECOND15: mỗi tài khoản dùng 1 lần cho lần nạp thứ 2 từ 50k",
-        "• WEEKLY10: mỗi tài khoản dùng 1 lần/tuần, reset 00:00 thứ 2",
-        "• MONTHLY20: mỗi tài khoản dùng 1 lần/tháng, reset 00:00 ngày 1",
-        "• DAILY5: mỗi tài khoản dùng 1 lần/ngày, reset 00:00 mỗi ngày",
-        "• Mệnh giá 10k/20k không áp dụng mã ưu đãi",
-        "• Mỗi đơn nạp chỉ áp dụng 1 mã",
-        "• Không cộng dồn mã",
-        "• Mã mới sẽ thay mã đang chờ dùng",
-        "• Bonus Xu dịch vụ chỉ cộng sau khi thanh toán/duyệt bill thành công",
-        "• Launch Bonus không phải promo code",
-        "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
-        "",
-        "🎟 <b>Mã quà tặng:</b>",
-        "• Chỉ admin quản lý/cấp phát, không hiện public.",
-        "• Khách chỉ cần dùng mã nếu admin đã gửi riêng theo từng trường hợp hỗ trợ.",
-        "",
-        "<b>Cách dùng:</b>",
-        "<code>/promo FIRST30</code>",
-        "<code>/naptien</code>",
-    ]
-    if pending.get("promo"):
+    lines = billing_promotions_lines(lang, uid)
+    if user_is_vietnam_market(uid) and pending.get("promo"):
         lines.extend([
             "",
             f"🎫 Mã đang chờ áp dụng: <code>{html.escape(pending['promo']['code'])}</code>",
             f"Hiệu lực đến: <code>{html.escape(pending.get('expires_at') or '-')}</code>",
-            "Mã chỉ áp dụng nếu đơn nạp đủ điều kiện từ 50k.",
+            "Mã chỉ áp dụng khi đơn nạp đạt mức tối thiểu cấu hình của mã.",
             "Nếu nhập mã khác, mã mới sẽ thay mã này.",
         ])
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -150037,7 +150701,7 @@ async def cmd_promo_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value = safe_int(data.get("value"), 0)
     if not code or promo_type not in {"percent_bonus", "fixed_bonus_xu", "service_discount_future"} or value <= 0:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/promo_create code=FIRST30 type=percent_bonus value=30 limit=1000 per_user=1 min=50000 max_bonus=1500 note=...</code>",
+            "⚠️ Cú pháp: <code>/promo_create code=WEEKLY10 type=percent_bonus value=10 limit=1000 per_user=1 min=50000 max_bonus=1500 note=...</code>",
             parse_mode="HTML",
         )
     usage_limit = max(0, safe_int(data.get("limit") or data.get("usage_limit"), 0))
@@ -150089,7 +150753,7 @@ async def cmd_promo_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     code = normalize_promo_code(context.args[0] if context.args else "")
     if not code:
-        return await update.message.reply_text("⚠️ Cú pháp: <code>/promo_disable FIRST30</code>", parse_mode="HTML")
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/promo_disable WEEKLY10</code>", parse_mode="HTML")
     conn = db_connect()
     try:
         conn.execute("UPDATE promotion_codes SET status='disabled', updated_at=? WHERE code=?", (now_text(), code))
@@ -171933,7 +172597,7 @@ async def _handle_create_media_callback_impl(
         clear_media_creator_pending_states(uid)
         return await safe_edit_or_send(
             query,
-            "\n".join(pricing_hub_lines(lang)),
+            "\n".join(pricing_hub_lines(lang, uid)),
             parse_mode="HTML",
             reply_markup=pricing_main_keyboard(lang),
         )
@@ -175162,7 +175826,7 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "",
         "🎁 <b>Chính sách ưu đãi và thành viên vẫn giữ nguyên</b>",
         "• User mới nhận <b>200 Xu dịch vụ</b> trải nghiệm một lần theo ID Telegram.",
-        "• Launch Bonus lần đầu mua mệnh giá 50k/100k/200k/500k vẫn giữ theo chính sách đang bật.",
+        "• Thưởng nạp lần đầu/lần hai chạy tự động sau settlement; Launch Bonus không tự động cộng.",
         "• Mệnh giá nạp nhận Xu gốc giống nhau cho mọi user; hạng thành viên không làm tăng Xu theo mệnh giá nạp.",
         "• Hạng thành viên chỉ giảm Xu khi dùng dịch vụ đủ điều kiện:",
         "  🌱 Newbie: 0%",
@@ -175762,8 +176426,18 @@ async def edit_or_send_pricing_lines(query, lines: list[str], reply_markup: Inli
             reply_markup=reply_markup if idx == len(chunks) - 1 else None,
         )
 
-def pricing_hub_lines(lang: str = "vi") -> list[str]:
+def pricing_hub_lines(lang: str = "vi", user_id=None) -> list[str]:
     lang = normalize_user_language(lang) or "vi"
+    if lang == "vi" and user_id is not None and not user_is_vietnam_market(user_id):
+        return [
+            "💳 <b>Nạp Xu / Bảng giá TOAN AAS</b>", "",
+            "Bạn muốn xem bảng giá, nạp Xu, xem quyền lợi quốc tế hay mua gói/combo?", "",
+            "• Bảng giá: xem giá từng công cụ.",
+            "• Nạp Xu: thanh toán quốc tế chỉ nhận Xu gốc.",
+            "• Ưu đãi nạp +30%/+20% của Việt Nam không áp dụng cho tài khoản hoặc thanh toán quốc tế.",
+            "• Gói tháng, combo và thành viên được tính riêng theo chính sách tương ứng.",
+            "• Mã ưu đãi khác chỉ dùng khi đúng thị trường và đủ điều kiện.",
+        ]
     if lang == "zh":
         return [
             "💳 <b>TOAN AAS 充值 / 价格</b>", "",
@@ -175788,7 +176462,7 @@ def pricing_hub_lines(lang: str = "vi") -> list[str]:
         "💳 <b>Nạp Xu / Bảng giá TOAN AAS</b>", "",
         "Bạn muốn xem bảng giá, nạp Xu, xem ưu đãi hay mua gói/combo?", "",
         "• Bảng giá: xem giá từng công cụ.",
-        "• Ưu đãi: mã khuyến mãi và Launch Bonus cho thanh toán nội địa Việt Nam.",
+        "• Ưu đãi: lần đầu/lần hai tự động theo điều kiện nội địa; ưu đãi khác dùng mã khi có.",
         "• Nạp Xu: tự do, thích dùng công cụ nào thì dùng công cụ đó.",
         "• Gói tháng: dùng đều mỗi tháng, có hạn mức trong 30 ngày.",
         "• Combo thành phẩm: mua theo mục đích hoàn chỉnh, ví dụ video quảng cáo, review sản phẩm, content 1 tuần.",
@@ -175796,79 +176470,91 @@ def pricing_hub_lines(lang: str = "vi") -> list[str]:
         "• Mã quà tặng: chỉ admin quản lý/cấp phát, không hiện public.",
     ]
 
-def billing_promotions_lines(lang: str = "vi") -> list[str]:
+def billing_promotions_lines(lang: str = "vi", user_id=None) -> list[str]:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
+    domestic = lang == "vi" if user_id is None else user_is_vietnam_market(user_id)
+    if not domestic and lang == "zh":
         return [
             "🎁 <b>国际用户权益</b>",
             "",
-            "越南 PayOS/银行转账充值活动不适用于国际付款。",
+            "此账户属于国际市场，不适用越南本地充值优惠活动。",
             "国际用户可享受符合条件的会员等级服务折扣、生日或忠诚度权益。",
-            "此页面不提供越南本地充值奖励或首次活动奖励。",
+            "国际付款只获得基础 Xu，不计入越南本地奖励报告。",
         ]
-    if lang == "en":
+    if not domestic and lang == "en":
         return [
             "🎁 <b>International Benefits</b>",
             "",
-            "Deposit promotions are available only for Vietnam PayOS/bank-transfer campaigns.",
+            "This account is in the international market and is not eligible for Vietnam domestic top-up promotions.",
             "International users receive member-tier service discounts and eligible birthday or loyalty benefits only.",
-            "Vietnam domestic deposit bonuses and launch bonuses are not offered on international payments.",
+            "International payments receive base Xu only and are kept separate from domestic bonus reporting.",
+        ]
+    if not domestic:
+        return [
+            "🎁 <b>QUYỀN LỢI KHÁCH QUỐC TẾ</b>",
+            "",
+            "Tài khoản này thuộc thị trường quốc tế nên không áp dụng ưu đãi nạp nội địa Việt Nam.",
+            "Thanh toán quốc tế chỉ nhận Xu gốc; bonus nội địa không xuất hiện trong thông báo hoặc báo cáo quốc tế.",
+            "Chiết khấu hạng thành viên và quyền lợi hợp lệ khác vẫn áp dụng theo chính sách.",
+        ]
+    if lang == "zh":
+        return [
+            "🎁 <b>越南本地充值优惠</b>",
+            "",
+            "• 首次成功充值满 10.000đ：自动 +30% Xu。",
+            "• 第二次成功充值满 10.000đ：自动 +20% Xu。",
+            "• 这两项优惠无需输入代码。",
+            "",
+            "月度、每周、每日、Launch 或特别活动仍需使用有效代码。",
+            "优惠只在越南账户通过越南 PayOS/银行渠道以 VND 完成结算后发放。",
+        ]
+    if lang == "en":
+        return [
+            "🎁 <b>VIETNAM DOMESTIC TOP-UP OFFERS</b>",
+            "",
+            "• First settled top-up from 10,000 VND: automatic +30% Xu.",
+            "• Second settled top-up from 10,000 VND: automatic +20% Xu.",
+            "• No code is needed for these two offers.",
+            "",
+            "Monthly, weekly, daily, Launch, and special promotions still require a valid code when configured.",
+            "The offer is credited only after a verified Vietnam VND payment settles through an eligible domestic channel.",
         ]
     return [
         "🎁 <b>ƯU ĐÃI TOAN AAS</b>",
         "",
-        "🎁 Mã ưu đãi áp dụng cho đơn nạp từ <b>50.000đ</b> trở lên.",
-        "Gói 10k/20k chỉ để thử nghiệm, không áp dụng mã ưu đãi.",
+        "• Nạp lần đầu từ <b>10.000đ</b>: tự động <b>+30% Xu</b>.",
+        "• Nạp lần hai từ <b>10.000đ</b>: tự động <b>+20% Xu</b>.",
+        "• Không cần nhập mã cho hai ưu đãi này.",
         "",
-        "🔥 Nên dùng trước: <code>SECOND15</code> — ưu đãi cho lần nạp thứ 2.",
+        "<b>Các ưu đãi khác:</b>",
+        "• MONTHLY / WEEKLY / DAILY / Launch Bonus / campaign đặc biệt vẫn phải nhập mã hợp lệ khi được cấu hình.",
+        "• Mức nạp tối thiểu lấy theo cấu hình từng mã; nếu mã không cấu hình riêng thì mặc định 10.000đ.",
+        "• Không cộng chồng mã cũ FIRST30/SECOND15 với thưởng tự động.",
         "",
-        "<b>Thứ tự gợi ý:</b>",
-        "1. <code>FIRST30</code> — nạp lần đầu từ 50k: +30% Xu dịch vụ",
-        "2. <code>SECOND15</code> — nạp lần 2 từ 50k: +15% Xu dịch vụ",
-        "3. <code>MONTHLY20</code> — ưu đãi tháng từ 100k: +20% Xu dịch vụ",
-        "4. <code>WEEKLY10</code> — ưu đãi tuần từ 50k: +10% Xu dịch vụ",
-        "5. <code>DAILY5</code> — ưu đãi ngày từ 50k: +5% Xu dịch vụ",
-        "",
-        "🎁 <b>Launch Bonus theo mệnh giá:</b>",
-        "• Lần đầu mua mệnh giá 50k: +30 Xu dịch vụ",
-        "• Lần đầu mua mệnh giá 100k: +50 Xu dịch vụ",
-        "• Lần đầu mua mệnh giá 200k: +150 Xu dịch vụ",
-        "• Lần đầu mua mệnh giá 500k: +500 Xu dịch vụ",
-        "",
-        "Mỗi tài khoản chỉ nhận Launch Bonus 1 lần cho từng mệnh giá.",
-        "Các lần mua lại cùng mệnh giá sẽ nhận Xu dịch vụ gốc.",
-        "",
-        "⚠️ <b>Quy tắc:</b>",
-        "• FIRST30: mỗi tài khoản dùng 1 lần cho lần nạp đầu từ 50k",
-        "• SECOND15: mỗi tài khoản dùng 1 lần cho lần nạp thứ 2 từ 50k",
-        "• WEEKLY10: mỗi tài khoản dùng 1 lần/tuần, reset 00:00 thứ 2",
-        "• MONTHLY20: mỗi tài khoản dùng 1 lần/tháng, reset 00:00 ngày 1",
-        "• DAILY5: mỗi tài khoản dùng 1 lần/ngày, reset 00:00 mỗi ngày",
-        "• Mệnh giá 10k/20k không áp dụng mã ưu đãi",
-        "• Mỗi đơn nạp chỉ áp dụng 1 mã",
-        "• Không cộng dồn mã",
-        "• Mã mới sẽ thay mã đang chờ dùng",
-        "• Bonus Xu dịch vụ chỉ cộng sau khi thanh toán/duyệt bill thành công",
-        "• Launch Bonus không phải promo code",
-        "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
-        "",
-        "🌏 <b>Lưu ý thanh toán:</b>",
-        "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam.",
-        "Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.",
-        "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng mã ưu đãi hoặc Launch Bonus.",
+        "<b>Điều kiện thưởng tự động:</b>",
+        "• Giao dịch đã settled, đúng số tiền, có transaction ID và Xu gốc đã cộng thành công.",
+        "• Tài khoản Việt Nam + thanh toán VND nội địa qua PayOS hoặc ACB/VietQR.",
+        "• Lần thứ ba trở đi không tự động nhận lại +30%/+20%.",
+        "• ZaloPay/MoMo, ngoại tệ, USDT và thanh toán quốc tế không nhận bonus nội địa.",
     ]
 
-def billing_promotions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def billing_promotions_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
+    domestic = lang == "vi" if user_id is None else user_is_vietnam_market(user_id)
+    if not domestic and lang == "zh":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 价格表", callback_data="pricing|catalog"), InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("⬅️ 返回", callback_data="pricing|main"), InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
         ])
-    if lang == "en":
+    if not domestic and lang == "en":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 Pricing", callback_data="pricing|catalog"), InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("⬅️ Back", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+        ])
+    if not domestic:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 Bảng giá", callback_data="pricing|catalog"), InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎁 Nhập mã ưu đãi", callback_data="pricing|promo_apply")],
@@ -175876,18 +176562,26 @@ def billing_promotions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
-def billing_promo_apply_lines(lang: str = "vi") -> list[str]:
+def billing_promo_apply_lines(lang: str = "vi", user_id=None) -> list[str]:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "zh":
+    domestic = lang == "vi" if user_id is None else user_is_vietnam_market(user_id)
+    if not domestic and lang == "zh":
         return ["🎁 <b>充值优惠码</b>", "", "越南本地充值活动不适用于国际付款。"]
-    if lang == "en":
+    if not domestic and lang == "en":
         return ["🎁 <b>Promotion code</b>", "", "Vietnam local top-up promotions are not available for international payments."]
+    if not domestic:
+        return [
+            "🎁 <b>Mã ưu đãi</b>",
+            "",
+            "Tài khoản quốc tế không áp dụng mã promotion nạp VND nội địa.",
+        ]
     return [
         "🎁 <b>Nhập mã ưu đãi</b>",
         "",
+        "Lần đầu +30% và lần hai +20% được tự động áp dụng, không cần mã.",
+        "",
+        "Các mã khác khi được công bố:",
         "Gõ lệnh theo mẫu:",
-        "<code>/promo FIRST30</code>",
-        "<code>/promo SECOND15</code>",
         "<code>/promo WEEKLY10</code>",
         "<code>/promo MONTHLY20</code>",
         "<code>/promo DAILY5</code>",
@@ -176325,13 +177019,9 @@ def pricing_xu_lines() -> list[str]:
         "• 500.000đ → 5.000 Xu",
         "• 1.000.000đ → 10.000 Xu nếu có mở",
         "",
-        "<b>Launch Bonus lần đầu mua mệnh giá:</b>",
-        "• 50k: 500 Xu gốc + 30 Xu = 530 Xu",
-        "• 100k: 1.000 Xu gốc + 50 Xu = 1.050 Xu",
-        "• 200k: 2.000 Xu gốc + 150 Xu = 2.150 Xu",
-        "• 500k: 5.000 Xu gốc + 500 Xu = 5.500 Xu",
-        "",
         "<b>Quy tắc:</b>",
+        "• Khách Việt Nam nạp VND nội địa từ 10.000đ: lần settled đầu tự động +30%, lần hai tự động +20%.",
+        "• Lần thứ ba trở đi không tự động thưởng; ưu đãi khác cần mã khi được cấu hình.",
         "• Nạp Xu thủ công CÓ tính vào tổng nạp để xét hạng thành viên.",
         "• Mệnh giá nạp nhận Xu gốc giống nhau cho mọi user.",
         "• Hạng thành viên không làm tăng Xu theo mệnh giá nạp.",
@@ -176633,9 +177323,20 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         "• If a task cannot be completed, TOAN AAS does not charge Xu or applies the refund policy when a charge was already made.",
     ]
 
-def pricing_xu_lines_i18n(lang: str = "vi") -> list[str]:
+def pricing_xu_lines_i18n(lang: str = "vi", user_id=None) -> list[str]:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
+        if user_id is not None and not user_is_vietnam_market(user_id):
+            return [
+                "💰 <b>BẢNG GIÁ XU QUỐC TẾ</b>",
+                "",
+                "10.000đ = 100 Xu dịch vụ theo quy đổi nội bộ.",
+                "Các mệnh giá khác nhận Xu gốc theo bảng giá.",
+                "",
+                "Tài khoản quốc tế không áp dụng ưu đãi nạp nội địa Việt Nam và chỉ nhận Xu gốc.",
+                "Không hiển thị bonus nạp nội địa; ưu đãi khác chỉ áp dụng khi đúng điều kiện.",
+                "Hạng thành viên chỉ ảnh hưởng chiết khấu khi dùng dịch vụ, không làm tăng Xu nạp.",
+            ]
         return pricing_xu_lines()
     if lang == "zh":
         return [
@@ -176702,14 +177403,14 @@ def pricing_plans_lines_i18n(lang: str = "vi") -> list[str]:
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
     try:
-        await send_pricing_lines(update.message, pricing_hub_lines(lang), pricing_main_keyboard(lang), limit=3600)
+        await send_pricing_lines(update.message, pricing_hub_lines(lang, update.effective_user.id if update.effective_user else None), pricing_main_keyboard(lang), limit=3600)
     except Exception as e:
         logger.warning("Pricing command failed | %s", sanitize_log_text(str(e))[:240])
         await update.message.reply_text("⚠️ Bảng giá đang tải lỗi tạm thời. Bot chưa trừ Xu. Vui lòng thử lại sau.")
 
 async def cmd_pricing_xu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
-    await send_pricing_lines(update.message, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
+    await send_pricing_lines(update.message, pricing_xu_lines_i18n(lang, update.effective_user.id if update.effective_user else None), pricing_xu_keyboard(lang))
 
 async def cmd_pricing_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
@@ -177365,18 +178066,19 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
     lang = get_user_language(query.from_user.id) if query.from_user else "vi"
+    uid = query.from_user.id if query.from_user else None
     if query.from_user:
         clear_media_creator_pending_states(query.from_user.id)
     if action == "main":
-        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang), pricing_main_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang))
     if action == "promotions":
-        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang), billing_promotions_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang, uid), billing_promotions_keyboard(lang, uid))
     if action == "promo_apply":
-        return await edit_or_send_pricing_lines(query, billing_promo_apply_lines(lang), billing_promotions_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, billing_promo_apply_lines(lang, uid), billing_promotions_keyboard(lang, uid))
     if action == "gift_code":
         if query.from_user and is_admin_user(query.from_user.id):
             return await safe_edit_or_send(query, admin_gift_code_text(), parse_mode="HTML", reply_markup=admin_gift_code_keyboard())
-        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang), billing_promotions_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang, uid), billing_promotions_keyboard(lang, uid))
     if action == "catalog":
         return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), pricing_catalog_keyboard(lang))
     if action == "total":
@@ -177391,7 +178093,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "need_larger":
         return await render_pkgcombo_large_order(query, context, ["home"])
     if action == "xu":
-        return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang, uid), pricing_xu_keyboard(lang))
     if action == "free":
         return await edit_or_send_pricing_lines(query, pricing_free_lines(), pricing_detail_keyboard("free", lang))
     if action == "music":
@@ -177453,7 +178155,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=member_policy_keyboard(lang))
     if action == "terms":
         return await edit_or_send_pricing_lines(query, pricing_terms_lines(), pricing_terms_keyboard(lang))
-    return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang), pricing_main_keyboard(lang))
+    return await edit_or_send_pricing_lines(query, pricing_hub_lines(lang, uid), pricing_main_keyboard(lang))
 
 def parse_chat_pro_args(raw: str) -> dict:
     kv, remainder = parse_loose_kv_args(raw)
@@ -177941,24 +178643,27 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "• <b>REAL PAYMENT PASS</b>: chỉ được đánh dấu sau khi admin thanh toán thật và xác minh Xu cộng đúng, không cộng trùng.",
         "• Không chạy <code>/mark_payos_test pass</code> nếu chưa có giao dịch thật.",
         "",
-        "<b>A. Test PayOS 10k thường</b>",
+        "<b>A. Test PayOS 10k base-only (user đã có ít nhất hai lần nạp settled)</b>",
         "1. Chạy <code>/backup_db</code> trước khi test.",
         "2. Chạy <code>/providers</code> và kiểm tra PayOS đủ 3 khóa.",
         "3. Test code-ready: <code>/payos_debug_create 10000</code> và <code>/payos_debug_create 50000</code> phải trả checkoutUrl.",
         "4. Dùng user test gọi <code>/naptien</code>, chọn gói 10k/50k và kiểm tra bot tạo checkoutUrl.",
         "5. Chưa cần chuyển khoản thật nếu chỉ đang test code-ready.",
-        "6. Khi admin quyết định test thật: thanh toán 10k qua QR PayOS.",
-        "7. Kiểm tra <code>/profile</code>: user nhận đúng <b>100 Xu</b>.",
+        "6. Khi admin quyết định test thật: dùng user đã có ít nhất hai lần nạp settled rồi thanh toán 10k qua QR PayOS.",
+        "7. Kiểm tra <code>/profile</code>: user chỉ nhận đúng <b>100 Xu gốc</b>, không nhận lại +30%/+20%.",
         "8. Kiểm tra <code>/dashboard</code>: doanh thu và giao dịch tăng.",
         "9. Kiểm tra duplicate webhook/order không cộng Xu lần 2.",
         "",
-        "<b>B. Test Promo Policy V2.1</b>",
+        "<b>B. Test thưởng nạp tự động Việt Nam</b>",
         "1. Admin chạy <code>/promo_seed_policy</code> hoặc <code>/promo_seed_beta</code>.",
-        "2. User test khác chạy <code>/promo FIRST30</code>.",
-        "3. User test gọi <code>/naptien</code>, chọn gói 50k và thanh toán PayOS.",
-        "4. Kỳ vọng user nhận <b>500 Xu gốc + 150 Xu bonus</b> sau thanh toán thành công.",
-        "5. <code>BETA50</code> chỉ dùng beta/internal giới hạn, nên test với gói từ 50k.",
-        "6. Gửi/replay cùng webhook/order nếu có môi trường an toàn: không cộng thêm Xu gốc hoặc bonus lần hai.",
+        "2. Dùng user thị trường Việt Nam chưa có lần nạp settled; không nhập mã.",
+        "3. Nạp 10k qua PayOS nội địa: kỳ vọng <b>100 Xu gốc + 30 Xu bonus</b>.",
+        "4. Nạp settled lần hai từ 10k: kỳ vọng Xu gốc + <b>20% bonus</b>.",
+        "5. Nạp settled lần ba: chỉ nhận Xu gốc, không nhận lại +30%/+20%.",
+        "6. Pending/failed/refund và giao dịch thiếu transaction ID không làm tăng thứ tự.",
+        "7. Tài khoản/thanh toán quốc tế chỉ nhận Xu gốc, không có bonus nội địa.",
+        "8. <code>BETA50</code> chỉ dùng beta/internal giới hạn, nên test với gói từ 50k.",
+        "9. Gửi/replay cùng webhook/order nếu có môi trường an toàn: không cộng thêm Xu gốc hoặc bonus lần hai.",
         "",
         "<b>Nếu PayOS báo signature invalid</b>",
         "• Kiểm tra PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY cùng một kênh PayOS.",
@@ -177966,7 +178671,7 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
         "• Sau khi sửa ENV phải redeploy Railway.",
         "",
         "<b>C. Khóa sales</b>",
-        "1. Chỉ khi đã có thanh toán thật và A/B đạt kỳ vọng, chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"Test FIRST30 OK\"</code>.",
+        "1. Chỉ khi đã có thanh toán thật và A/B đạt kỳ vọng, chạy <code>/mark_payos_test pass order=&lt;order_code&gt; note=\"Test auto bonus #1/#2 OK\"</code>.",
         "2. Ghi kết quả vào checklist trước khi bán public.",
         "",
         "Nếu PayOS lỗi, dùng <code>/thucong</code> là fallback. Admin chỉ <code>/duyet</code> sau khi đối soát tiền thật vào tài khoản.",
@@ -178787,6 +179492,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     USER_BILL_STATE.pop(uid, None)
+    domestic_market = user_is_vietnam_market(uid)
     record_usage_event(
         uid,
         username=update.effective_user.username or update.effective_user.first_name or "",
@@ -178798,13 +179504,21 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
     credits, _, _ = get_user(uid, update.effective_user.first_name)
     pending = get_user_pending_promo(uid)
     pending_text = ""
-    if pending.get("promo"):
+    if domestic_market and pending.get("promo"):
         pending_text = (
             f"🎫 Mã đang áp dụng: <code>{html.escape(pending['promo']['code'])}</code> "
             f"({html.escape(promo_public_label(pending['promo']))})\n"
-            "Lưu ý: mã chỉ áp dụng nếu đơn nạp đủ điều kiện từ 50k.\n"
+            "Lưu ý: mã chỉ áp dụng nếu đơn nạp đạt mức tối thiểu riêng của mã.\n"
             "Lưu ý: nếu nhập mã khác, mã mới sẽ thay mã này.\n\n"
         )
+    market_policy_text = (
+        "🇻🇳 <b>Chính sách khách Việt Nam:</b>\n"
+        "Nạp VND nội địa từ 10.000đ: lần settled đầu tự động +30%, lần settled hai tự động +20%, không cần mã.\n"
+        "Lần thứ ba trở đi không tự động thưởng; mã khác chỉ áp dụng khi có code hợp lệ.\n\n"
+        if domestic_market else
+        "🌍 <b>Chính sách khách quốc tế:</b>\n"
+        "Thanh toán quốc tế chỉ nhận Xu gốc; không hiển thị và không nhận bonus nạp nội địa Việt Nam.\n\n"
+    )
     payment_freeze_on = flag_on("payment_freeze")
     payment_title = "NẠP XU DỊCH VỤ — QR THỦ CÔNG AN TOÀN" if payment_freeze_on else "NẠP XU DỊCH VỤ (QR ĐỘNG) — TOAN AAS"
     payment_mode_note = (
@@ -178815,27 +179529,35 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡ Hệ thống tự động khởi tạo link mã QR PayOS thời gian thực. "
         "Xu chỉ được cộng tự động khi PayOS xác nhận thanh toán thành công.\n\n"
     )
+    market_bonus_notice = (
+        domestic_topup_bonus_notice()
+        if domestic_market
+        else (
+            "Khách quốc tế chỉ nhận Xu gốc khi thanh toán quốc tế; "
+            "không áp dụng hoặc hiển thị bonus nạp nội địa Việt Nam."
+        )
+    )
     msg = (
         f"💳 <b>{payment_title}</b>\n\n"
         f"👤 ID Telegram: <code>{uid}</code>\n"
         f"🪙 Số dư hiện tại: <b>{credits} Xu dịch vụ</b>\n\n"
-        f"🎁 <b>Có mã ưu đãi?</b>\n"
-        f"Nhập <code>/promo FIRST30</code> trước khi chọn mệnh giá nạp.\n"
-        f"Ưu đãi áp dụng cho đơn nạp từ 50.000đ trở lên.\n"
-        f"Mệnh giá 10k/20k dùng để thử nghiệm, không áp dụng mã ưu đãi.\n"
-        f"Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
-        f"{pending_text}"
+        f"{market_policy_text}"
+        + (
+            "🎁 <b>Có mã ưu đãi khác?</b>\n"
+            "Nhập mã admin công bố trước khi chọn mệnh giá nạp.\n"
+            "Mỗi đơn chỉ áp dụng 1 mã, không cộng dồn.\n\n"
+            if domestic_market else ""
+        )
+        + f"{pending_text}"
         f"<b>🛒 MỆNH GIÁ NẠP XU:</b>\n"
         f"Quy đổi sử dụng nội bộ: 10.000đ = 100 Xu dịch vụ.\n"
         f"• 10k: <b>100 Xu dịch vụ</b>\n"
         f"• 20k: <b>200 Xu dịch vụ</b>\n"
-        f"• 50k: <b>500 Xu dịch vụ</b> + 30 Xu dịch vụ Launch Bonus lần đầu mua = <b>530 Xu dịch vụ</b>\n"
-        f"• 100k: <b>1.000 Xu dịch vụ</b> + 50 Xu dịch vụ Launch Bonus lần đầu mua = <b>1.050 Xu dịch vụ</b>\n"
-        f"• 200k: <b>2.000 Xu dịch vụ</b> + 150 Xu dịch vụ Launch Bonus lần đầu mua = <b>2.150 Xu dịch vụ</b>\n"
-        f"• 500k: <b>5.000 Xu dịch vụ</b> + 500 Xu dịch vụ Launch Bonus lần đầu mua = <b>5.500 Xu dịch vụ</b>\n\n"
-        f"🎁 Launch Bonus theo mệnh giá chỉ áp dụng 1 lần cho mỗi tài khoản ở từng mệnh giá 50k/100k/200k/500k.\n"
-        f"Các lần mua lại cùng mệnh giá sẽ nhận Xu dịch vụ gốc.\n\n"
-        f"⚠️ {domestic_topup_bonus_notice()}\n\n"
+        f"• 50k: <b>500 Xu dịch vụ</b>\n"
+        f"• 100k: <b>1.000 Xu dịch vụ</b>\n"
+        f"• 200k: <b>2.000 Xu dịch vụ</b>\n"
+        f"• 500k: <b>5.000 Xu dịch vụ</b>\n\n"
+        f"⚠️ {market_bonus_notice}\n\n"
         f"🪪 Hạng thành viên không làm tăng Xu theo mệnh giá nạp. Ưu đãi hạng chỉ áp dụng khi bạn tiêu Xu cho dịch vụ đủ điều kiện.\n\n"
         f"🎁 Trial {TRIAL_CREDITS} Xu chỉ cấp 1 lần theo ID Telegram. Xóa chat hoặc start lại không làm nhận lại trial.\n\n"
         f"{service_credit_legal_note()}\n\n"
@@ -178886,7 +179608,7 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         set_manual_bill_state(uid, order_code="MANUAL")
     await update.message.reply_text(
-        manual_payment_menu_text(),
+        manual_payment_menu_text(uid),
         parse_mode="HTML",
         reply_markup=manual_payment_menu_keyboard(uid),
     )
@@ -192127,29 +192849,34 @@ async def cmd_admin_gopy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
+    approval_conn = None
     try:
         lookup_key, amount = context.args[0], int(context.args[1])
         admin_adjustment_reason = sanitize_log_text(" ".join(context.args[2:]).strip())[:300]
         lookup_conn = db_connect()
+        approval_conn = lookup_conn
         lookup_c = lookup_conn.cursor()
+        lookup_c.execute("BEGIN IMMEDIATE")
         pending_deposit_id = 0
         pending_order = None
         if str(lookup_key).isdigit():
             lookup_c.execute(
-                "SELECT id,user_id,order_code,amount,xu,foreign_manual,currency,method,amount_vnd,base_xu,bonus_xu,expected_xu,member_points_eligible,rank_discount_percent_preserved "
+                "SELECT id,user_id,order_code,amount,xu,foreign_manual,currency,method,amount_vnd,base_xu,bonus_xu,expected_xu,member_points_eligible,rank_discount_percent_preserved,tx_hash "
                 "FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
                 (str(lookup_key),),
             )
             pending_order = lookup_c.fetchone()
         if not pending_order:
             lookup_c.execute(
-                "SELECT id,user_id,order_code,amount,xu,foreign_manual,currency,method,amount_vnd,base_xu,bonus_xu,expected_xu,member_points_eligible,rank_discount_percent_preserved "
+                "SELECT id,user_id,order_code,amount,xu,foreign_manual,currency,method,amount_vnd,base_xu,bonus_xu,expected_xu,member_points_eligible,rank_discount_percent_preserved,tx_hash "
                 "FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
                 (str(lookup_key),),
             )
             pending_order = lookup_c.fetchone()
         if not pending_order:
+            lookup_conn.rollback()
             lookup_conn.close()
+            approval_conn = None
             return await update.message.reply_text(
                 "⚠️ Không có bill thủ công đang chờ cho ID/mã bill này.\n\n"
                 "Nếu muốn cộng Xu trực tiếp, dùng <code>/add &lt;ID&gt; &lt;Xu&gt;</code>.",
@@ -192163,16 +192890,44 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "method": str(pending_order[7] or "bank_acb"),
             "foreign_manual": foreign_manual,
         }
-        topup_bonus_allowed = is_topup_bonus_allowed(payment_context)
+        topup_bonus_allowed = False
         expected_order_xu = int(pending_order[11] or pending_order[4] or 0)
         member_points_eligible = bool(int(pending_order[12] if pending_order[12] is not None else 1))
         first_deposit_before_credit = not user_has_successful_deposit_conn(lookup_conn, target_id)
-        lookup_conn.close()
-
-        add_credit(target_id, amount, "manual_deposit", str(pending_deposit_id), "Admin duyệt bill thủ công")
-        conn = db_connect()
-        c = conn.cursor()
+        user_market_snapshot = canonical_user_market_snapshot_conn(lookup_conn, target_id)
+        payment_transaction_id = str(pending_order[14] or "").strip()
+        existing_base_credit = lookup_c.execute(
+            """SELECT 1 FROM credit_events
+               WHERE user_id=? AND event_type='manual_deposit' AND ref_id=? AND delta>0
+               LIMIT 1""",
+            (str(target_id), str(pending_deposit_id)),
+        ).fetchone()
+        if not existing_base_credit:
+            lookup_c.execute(
+                "UPDATE users SET credits=credits+? WHERE user_id=?",
+                (int(amount), str(target_id)),
+            )
+            record_credit_event(
+                lookup_conn, target_id, int(amount), "manual_deposit",
+                str(pending_deposit_id), "Admin duyệt bill thủ công",
+            )
+            record_audit(
+                lookup_conn, ADMIN_ID, "admin", "credit.added", "user", str(target_id),
+                before=None,
+                after={"delta": int(amount), "event_type": "manual_deposit", "ref_id": str(pending_deposit_id)},
+                note="Admin duyệt bill thủ công",
+            )
+        conn = lookup_conn
+        c = lookup_c
         launch_recorded = 0
+        auto_promotion = {
+            "bonus_xu": 0,
+            "promotion_id": "",
+            "label": "",
+            "successful_topup_ordinal": 0,
+            "domestic_eligibility": False,
+        }
+        auto_bonus = 0
         promo_result = {"bonus_xu": 0, "code": "", "status": "none"}
         pending_order_code = str(pending_order[2]) if pending_order and pending_order[2] else ""
         order_amount = int(pending_order[8] or pending_order[3] or 0) if pending_order else 0
@@ -192186,62 +192941,106 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_subtotal_amount = int(invoice_row[0] or order_amount or 0) if invoice_row else int(order_amount or 0)
         order_vat_amount = int(invoice_row[1] or max(0, order_amount - order_subtotal_amount)) if invoice_row else 0
         order_total_amount = int(invoice_row[2] or order_amount or 0) if invoice_row else int(order_amount or 0)
+        payment_market_snapshot = canonical_payment_market(
+            str(payment_context.get("method") or ""),
+            str(payment_context.get("currency") or "VND"),
+        )
+        credited_base_xu = max(0, int(amount or 0))
         payment_context.update({
             "payment_type": "topup_xu",
             "amount_vnd": int(order_subtotal_amount or 0),
             "package_key": str(pending_order_code or ""),
+            "user_market": str(user_market_snapshot.get("user_market") or ""),
+            "user_market_snapshot": str(user_market_snapshot.get("user_market") or ""),
+            "payment_market": payment_market_snapshot,
+            "payment_channel": canonical_topup_method(str(payment_context.get("method") or "")),
+            "international_account": bool(user_market_snapshot.get("international_account")),
+            "transaction_id": payment_transaction_id,
+            "payment_status": "SETTLED",
+            "amount_valid": int(order_subtotal_amount or 0) > 0,
+            "base_credit_success": credited_base_xu > 0,
+            "is_test": False,
+            "is_refund": False,
+            "is_cancelled": False,
+            "is_failed": False,
         })
         if order_base_xu <= 0 and order_subtotal_amount:
             order_base_xu = package_base_xu(order_subtotal_amount)
+        order_base_xu = credited_base_xu or int(order_base_xu or 0)
+        topup_bonus_allowed = is_topup_bonus_allowed(payment_context)
         is_first_deposit = bool(first_deposit_before_credit)
         referral_result = {"reward_xu": 0, "status": "none", "referrer_user_id": ""}
         old_total_paid = member_total_paid_vnd(target_id, conn=conn)
         old_tier = member_tier_by_total_paid(old_total_paid)
         tier_up_result = {"upgraded": False, "promos": []}
-        if pending_order_code and not foreign_manual and is_launch_bonus_allowed(payment_context):
+        auto_order_reference = pending_order_code or f"manual:{pending_deposit_id}"
+        auto_promotion = apply_automatic_topup_promotion_conn(
+            conn,
+            target_id,
+            auto_order_reference,
+            {**payment_context, "base_xu": credited_base_xu},
+        )
+        auto_bonus = int(auto_promotion.get("bonus_xu") or 0)
+        if auto_bonus > 0:
             c.execute(
-                "SELECT amount, base_xu, launch_bonus_xu FROM payos_orders WHERE order_code=? LIMIT 1",
-                (pending_order_code,)
+                "UPDATE users SET credits=credits+? WHERE user_id=?",
+                (auto_bonus, str(target_id)),
             )
-            order_meta = c.fetchone()
-            if order_meta:
-                order_amount = int(order_meta[0] or pending_order[3] or 0)
-                order_base_xu = int(order_meta[1] or package_base_xu(order_amount))
-                order_launch_xu = int(order_meta[2] or 0)
-                if order_launch_xu <= 0:
-                    credit_info = calculate_package_credit_for_user(target_id, order_subtotal_amount, conn=conn)
-                    order_launch_xu = int(credit_info.get("launch_bonus_xu") or 0)
-                    order_base_xu = int(credit_info.get("base_xu") or order_base_xu)
-                launch_recorded = record_launch_bonus_redemption(
-                    conn,
-                    target_id,
-                    order_subtotal_amount,
-                    order_base_xu,
-                    order_launch_xu,
-                    pending_order_code,
-                )
-            else:
-                manual_launch_xu = int(pending_order[10] or 0)
-                launch_recorded = record_launch_bonus_redemption(
-                    conn,
-                    target_id,
-                    order_subtotal_amount,
-                    order_base_xu,
-                    manual_launch_xu,
-                    pending_order_code,
-                )
+            auto_event_type = (
+                "auto_first_topup_bonus"
+                if auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+                else "auto_second_topup_bonus"
+            )
+            record_credit_event(
+                conn,
+                target_id,
+                auto_bonus,
+                auto_event_type,
+                auto_order_reference,
+                f"{auto_promotion.get('promotion_id')} +{auto_bonus} Xu; "
+                f"ordinal={auto_promotion.get('successful_topup_ordinal')}",
+            )
+            defer_pending_code_promo_for_auto_conn(
+                conn,
+                target_id,
+                pending_order_code,
+                str(auto_promotion.get("promotion_id") or ""),
+            )
+            promo_result = {"bonus_xu": 0, "code": "", "status": "deferred_for_auto_promotion"}
         c.execute(
             """UPDATE pending_deposits SET status='approved',approved_xu=?,admin_note=?,approved_by=?,approved_at=?,updated_at=?,
-               first_bonus_applied=0,launch_bonus_applied=?,rank_topup_reward_applied=0,extra_xu_percent_bonus_applied=0
+               user_market_snapshot=?,payment_market=?,payment_transaction_id=?,domestic_eligibility=?,
+               successful_topup_ordinal=?,first_bonus_applied=?,launch_bonus_applied=0,
+               rank_topup_reward_applied=0,extra_xu_percent_bonus_applied=0
                WHERE id=? AND status IN ('pending','pending_admin_review')""",
-            (int(amount), admin_adjustment_reason, str(update.effective_user.id), now_text(), now_text(), int(launch_recorded > 0), pending_deposit_id)
+            (
+                int(amount), admin_adjustment_reason, str(update.effective_user.id), now_text(), now_text(),
+                str(user_market_snapshot.get("user_market") or ""), payment_market_snapshot,
+                payment_transaction_id, int(bool(auto_promotion.get("domestic_eligibility"))),
+                int(auto_promotion.get("successful_topup_ordinal") or 0),
+                int(
+                    auto_bonus > 0
+                    and auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+                ),
+                pending_deposit_id,
+            ),
         )
-        if pending_order_code and topup_bonus_allowed:
+        if pending_order_code:
             c.execute(
-                "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
-                (PAYOS_STATUS_PAID, now_text(), pending_order_code)
+                """UPDATE payos_orders
+                   SET status=?,paid_at=?,user_market_snapshot=?,payment_market=?,
+                       payment_transaction_id=?,domestic_eligibility=?,
+                       successful_topup_ordinal=?,base_credit_applied=1
+                   WHERE order_code=?""",
+                (
+                    PAYOS_STATUS_PAID, now_text(), str(user_market_snapshot.get("user_market") or ""),
+                    payment_market_snapshot, payment_transaction_id,
+                    int(bool(auto_promotion.get("domestic_eligibility"))),
+                    int(auto_promotion.get("successful_topup_ordinal") or 0),
+                    pending_order_code,
+                ),
             )
-            if order_subtotal_amount and order_base_xu and topup_bonus_allowed:
+            if order_subtotal_amount and order_base_xu and topup_bonus_allowed and auto_bonus <= 0:
                 promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_subtotal_amount, order_base_xu, payment_context=payment_context)
         if pending_order_code:
             update_finance_invoice_status_conn(
@@ -192279,13 +193078,16 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         promo_bonus = int(promo_result.get("bonus_xu") or 0)
         promo_code = promo_result.get("code") or ""
-        first_bonus_applied = int(topup_bonus_allowed and normalize_promo_code(promo_code) == normalize_promo_code(PROMO_FIRST_TOPUP_CODE) and promo_bonus > 0)
+        first_bonus_applied = int(
+            auto_bonus > 0
+            and auto_promotion.get("promotion_id") == AUTO_FIRST_TOPUP_PROMOTION_ID
+        )
         rank_reward_applied = int(topup_bonus_allowed and any(item.get("promo_code") for item in (tier_up_result.get("promos") or [])))
-        extra_percent_applied = int(topup_bonus_allowed and promo_bonus > 0 and not first_bonus_applied)
+        extra_percent_applied = int(topup_bonus_allowed and promo_bonus > 0)
         c.execute(
             """UPDATE pending_deposits SET first_bonus_applied=?,launch_bonus_applied=?,
                rank_topup_reward_applied=?,extra_xu_percent_bonus_applied=? WHERE id=?""",
-            (first_bonus_applied, int(launch_recorded > 0), rank_reward_applied, extra_percent_applied, pending_deposit_id),
+            (first_bonus_applied, 0, rank_reward_applied, extra_percent_applied, pending_deposit_id),
         )
         record_audit(
             conn,
@@ -192295,7 +193097,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "pending_deposit",
             str(pending_deposit_id),
             before={"status": "pending", "order_code": pending_order_code, "user_id": str(target_id)},
-            after={"status": "approved", "deposit_id": int(pending_deposit_id), "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0), "promo_code": promo_code, "promo_bonus": promo_bonus},
+            after={"status": "approved", "deposit_id": int(pending_deposit_id), "user_id": str(target_id), "base_xu": int(amount), "auto_promotion_id": auto_promotion.get("promotion_id") or "", "auto_bonus": auto_bonus, "promo_code": promo_code, "promo_bonus": promo_bonus},
             note="Admin approved manual bill",
         )
         if int(order_subtotal_amount or 0) > 0:
@@ -192305,7 +193107,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "manual_revenue",
                 f"manual_deposit:{pending_deposit_id}",
                 int(order_subtotal_amount or 0),
-                int(amount or 0) + int(promo_bonus or 0),
+                int(amount or 0) + auto_bonus + int(promo_bonus or 0),
                 "bank",
                 "success",
                 f"Manual bill approved; order={pending_order_code}; vat={order_vat_amount}; total={order_total_amount}",
@@ -192313,19 +193115,25 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         conn.commit()
         conn.close()
+        approval_conn = None
         record_usage_event(
             target_id,
             event_type="payment_manual_approved",
             tool_name="payment",
             command="/duyet",
             status="approved",
-            xu_delta=int(amount or 0),
+            xu_delta=int(amount or 0) + auto_bonus + int(promo_bonus or 0),
             amount_vnd=int(order_subtotal_amount or 0),
             provider="manual_qr",
             detail=f"order={pending_order_code}",
         )
         if pending_order_code and order_subtotal_amount:
             update_usage_event_amount_for_ref(target_id, pending_order_code, order_subtotal_amount, "xu_credit")
+        if (
+            payment_transaction_id
+            and int(auto_promotion.get("successful_topup_ordinal") or 0) == 1
+        ):
+            enqueue_broadcast_after_first_topup_safe(target_id)
         credits, _, _ = get_user(target_id)
         mismatch_line = ""
         if expected_order_xu and int(amount) != int(expected_order_xu):
@@ -192333,7 +193141,13 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"\n⚠️ Lưu ý: pending order dự kiến <b>{expected_order_xu} Xu</b>, "
                 f"admin vừa duyệt <b>{amount} Xu</b>."
             )
+        auto_label = str(auto_promotion.get("label") or "")
+        auto_user_line = (
+            f"🎁 {html.escape(auto_label)}: +<b>{auto_bonus} Xu</b>.\n"
+            if auto_bonus and auto_label else ""
+        )
         promo_user_line = f"🎁 Mã {html.escape(promo_code)}: +<b>{promo_bonus} Xu</b>.\n" if promo_bonus else ""
+        auto_admin_line = f" | Auto {html.escape(auto_label)} +{auto_bonus} Xu" if auto_bonus and auto_label else ""
         promo_admin_line = f" | Promo {html.escape(promo_code)} +{promo_bonus} Xu" if promo_bonus else ""
         referral_admin_line = ""
         tier_admin_line = ""
@@ -192367,8 +193181,10 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=target_id,
             text=(
                 f"🎉 <b>NẠP TIỀN THÀNH CÔNG!</b>\n\n"
-                f"Admin đã xác nhận +<b>{amount} Xu</b>.\n"
+                f"• Xu đã mua: <b>+{amount} Xu</b>\n"
+                f"{auto_user_line}"
                 f"{promo_user_line}"
+                f"• Tổng nhận: <b>{int(amount) + auto_bonus + promo_bonus} Xu</b>\n"
                 f"{tier_user_line}"
                 f"🪙 Số dư mới: <b>{credits} Xu</b>\n\n"
                 f"Cảm ơn bạn đã tin dùng TOAN AAS! 🙏"
@@ -192382,6 +193198,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Tier-up notify failed: {notify_error}")
         await update.message.reply_text(
             f"✅ Đã duyệt bill <code>#{pending_deposit_id}</code>: +{amount} Xu cho ID <code>{html.escape(str(target_id))}</code>"
+            f"{auto_admin_line}"
             f"{promo_admin_line}"
             f"{referral_admin_line}"
             f"{tier_admin_line}"
@@ -192391,7 +193208,28 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     except (IndexError, ValueError):
+        if approval_conn is not None:
+            try:
+                approval_conn.rollback()
+            except Exception:
+                pass
+            try:
+                approval_conn.close()
+            except Exception:
+                pass
+            approval_conn = None
         await update.message.reply_text("⚠️ Cú pháp: <code>/duyet &lt;deposit_id|user_id&gt; &lt;Số_Xu&gt;</code>", parse_mode="HTML")
+    except Exception:
+        if approval_conn is not None:
+            try:
+                approval_conn.rollback()
+            except Exception:
+                pass
+            try:
+                approval_conn.close()
+            except Exception:
+                pass
+        raise
 
 def billing_bridge_status_lines() -> list[str]:
     status = web_billing_bridge_status_payload()
@@ -192527,7 +193365,17 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = payment_data.get("status", "")
         amount_vnd = int(payment_data.get("amount", 0) or 0)
         if res.status_code == 200 and data.get("code") == "00" and status == PAYOS_STATUS_PAID:
-            processed, desc, info = process_payos_paid_order(str(order_code), amount_vnd)
+            processed, desc, info = process_payos_paid_order(
+                str(order_code),
+                amount_vnd,
+                webhook_payment_link_id=payos_payment_link_id_from_webhook_data(payment_data) or payment_link_id,
+                transaction_id=payos_transaction_id_from_webhook_data(payment_data),
+                webhook_status=status,
+                webhook_currency=payos_payload_text(payment_data, "currency"),
+                raw_hash=hashlib.sha256(
+                    json.dumps(payment_data, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest(),
+            )
             if processed:
                 if info.get("order_type") == "plan_purchase":
                     target_id = info["target_id"]
@@ -192561,26 +193409,27 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 target_id = info["target_id"]
                 base_xu = int(info.get("base_xu") or info.get("xu") or 0)
-                launch_bonus = int(info.get("launch_bonus", 0) or 0)
+                auto_bonus = int(info.get("auto_bonus", 0) or 0)
+                auto_label = str(info.get("auto_promotion_label") or "")
                 promo_bonus = int(info.get("promo_bonus", 0) or 0)
                 promo_code = info.get("promo_code") or ""
-                launch_line = (
-                    f"🎁 Launch Bonus: <b>+{launch_bonus} Xu</b>\n"
-                    if launch_bonus else ""
+                auto_line = (
+                    f"🎁 {html.escape(auto_label)}: <b>+{auto_bonus} Xu</b>\n"
+                    if auto_bonus and auto_label else ""
                 )
                 promo_line = (
                     f"🎁 <code>{html.escape(promo_code)}</code>: <b>+{promo_bonus} Xu</b>\n"
                     if promo_bonus else ""
                 )
-                total_xu = base_xu + launch_bonus + promo_bonus
+                total_xu = base_xu + auto_bonus + promo_bonus
                 credits_now, _, _ = get_user(target_id)
                 await context.bot.send_message(
                     chat_id=target_id,
                     text=(
-                        f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
+                        f"✅ <b>NẠP XU THÀNH CÔNG</b>\n\n"
                         f"PayOS đã xác nhận đơn <code>{order_code}</code>.\n"
                         f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
-                        f"{launch_line}"
+                        f"{auto_line}"
                         f"{promo_line}"
                         f"🧾 Tổng cộng đơn này: <b>+{total_xu} Xu</b>\n"
                         f"💼 Số dư hiện tại: <b>{credits_now} Xu</b>"
@@ -227520,30 +228369,34 @@ async def webhook_payos(request: Request):
 
     target_id = info["target_id"]
     xu = info["xu"]
-    launch_bonus = int(info.get("launch_bonus", 0) or 0)
+    auto_bonus = int(info.get("auto_bonus", 0) or 0)
+    auto_label = str(info.get("auto_promotion_label") or "")
     promo_bonus = int(info.get("promo_bonus", 0) or 0)
     promo_code = info.get("promo_code") or ""
     referral_bonus = info.get("referral_bonus", 0)
     referral_result = info.get("referral_result") or {}
     credits_now, _, _ = get_user(target_id)
-    launch_line = f"🎁 Launch Bonus: <b>+{launch_bonus} Xu</b>\n" if launch_bonus else ""
+    auto_line = (
+        f"🎁 {html.escape(auto_label)}: <b>+{auto_bonus} Xu</b>\n"
+        if auto_bonus and auto_label else ""
+    )
     promo_line = (
         f"🎁 <code>{html.escape(promo_code)}</code>: <b>+{promo_bonus} Xu</b>\n"
         if promo_bonus else ""
     )
-    total_line = f"🧾 Tổng cộng đơn này: <b>+{int(xu) + launch_bonus + promo_bonus} Xu</b>\n"
-    logger.info(f"✅ PayOS dynamic QR nạp thành công {int(xu) + launch_bonus + promo_bonus} Xu cho {target_id} | Đơn: {order_code}")
+    total_line = f"🧾 Tổng nhận: <b>+{int(xu) + auto_bonus + promo_bonus} Xu</b>\n"
+    logger.info(f"✅ PayOS dynamic QR nạp thành công {int(xu) + auto_bonus + promo_bonus} Xu cho {target_id} | Đơn: {order_code}")
 
     if tg_app:
         try:
             await tg_app.bot.send_message(
                 chat_id=target_id,
                 text=(
-                    f"🎉 <b>NẠP TỰ ĐỘNG THÀNH CÔNG!</b>\n\n"
+                    f"✅ <b>NẠP XU THÀNH CÔNG</b>\n\n"
                     f"✅ PayOS xác nhận cổng QR Động trực tuyến!\n"
                     f"💰 Số tiền giao dịch: <b>{amount_vnd:,}đ</b>\n"
                     f"🪙 Xu gốc: <b>+{xu} Xu</b>\n"
-                    f"{launch_line}"
+                    f"{auto_line}"
                     f"{promo_line}"
                     f"{total_line}"
                     f"💼 Số dư tài khoản hiện tại: <b>{credits_now} Xu</b>\n\n"
@@ -227574,7 +228427,7 @@ async def webhook_payos(request: Request):
                     f"💸 <b>AUTO NẠP PAYOS (QR ĐỘNG SUCCESS)</b>\n\n"
                     f"🆔 Khách hàng: <code>{target_id}</code>\n"
                     f"💰 {amount_vnd:,}đ → base +{xu} Xu\n"
-                    f"🎁 Launch bonus: <b>{launch_bonus} Xu</b>\n"
+                    f"🎁 Auto first/second bonus: <b>{auto_bonus} Xu</b>\n"
                     f"🎁 Promo bonus: <b>{promo_bonus} Xu</b>\n"
                     f"📋 Order Code: <code>{order_code}</code>\n"
                     f"🎁 Referral bonus: <b>{referral_bonus} Xu</b>"
