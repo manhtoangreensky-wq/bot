@@ -168040,7 +168040,7 @@ async def cmd_tool_test_frame_video(update: Update, context: ContextTypes.DEFAUL
 FRAME_VIDEO_CANONICAL_ACTIONS = {
     "source", "how", "image_count", "image_count_menu", "image_count_custom",
     "ratio_first_menu", "ratio_first_set", "ratio_first_recommend", "ratio_first_custom",
-    "panel", "upload", "images", "sort", "image_select", "image_action", "image_caption", "image_receipt", "image_duration",
+    "assets_done", "panel", "upload", "images", "sort", "image_select", "image_action", "image_caption", "image_receipt", "image_duration",
     "duration_menu", "duration_set", "duration_custom", "duration_done", "ratio_menu", "ratio_set", "ratio_custom",
     "fit_menu", "fit_set", "transition_menu", "transition_set", "transition_time",
     "motion_menu", "motion_set", "music_menu", "music_upload", "music_off", "volume_menu",
@@ -168051,6 +168051,11 @@ FRAME_VIDEO_CANONICAL_ACTIONS = {
     "text_style_menu", "text_style_set", "quality_menu", "quality_set", "quality_info", "review",
     "continue", "status_back", "confirm", "done", "ai_stitch_generated",
 }
+FRAME_VIDEO_IMG2VID_ACTIONS = frozenset(
+    action
+    for action, route in frame_video_flow.FRAME_VIDEO_ROUTE_MATRIX.items()
+    if str(route.get("owner") or "") == "handle_img2vid_lock1_callback"
+)
 FRAME_VIDEO_LEGACY_REDIRECT_ACTIONS = {
     "planning_refresh", "planning_continue", "ratio", "duration", "effect", "music", "back",
     "img2vid_seconds_menu", "img2vid_seconds", "img2vid_seconds_custom", "img2vid_confirm",
@@ -168668,6 +168673,35 @@ async def handle_frame_video_assets_done(
                     sanitize_log_text(str(final_exc))[:240],
                 )
     return None
+
+
+def frame_video3_current_screen(state: dict, lang: str) -> tuple[str, InlineKeyboardMarkup, str | None]:
+    """Render the current FrameVideo3 screen without falling into legacy routes."""
+
+    clean = normalize_frame_video_state(state)
+    step = str(clean.get("step") or "")
+    if step in {"image_count", "image_count_custom"}:
+        return ivf.frame_video_image_count_text(int(clean.get("image_count") or 0), lang), ivf.frame_video_image_count_keyboard(lang), "HTML"
+    if step in {"ratio_first", "ratio_first_custom"}:
+        return ivf.frame_video_ratio_first_text(str(clean.get("ratio") or "9x16"), lang), ivf.frame_video_ratio_first_keyboard(lang), "HTML"
+    if step in {"collect", "replace_image"}:
+        return frame_video_collect_text(len(clean.get("photos") or []), _safe_int(clean.get("image_count"), 0)), frame_video_collect_keyboard("framevideo|ratio_first_menu", clean), None
+    if step in {"images", "image_regenerate_invoice"}:
+        return frame_video_images_text(clean), frame_video_images_keyboard(clean), "HTML"
+    if step in {"duration", "duration_custom", "image_duration_custom"}:
+        return frame_video_duration_menu_text(clean), frame_video_duration_menu_keyboard(False, clean), "HTML"
+    if step in {"transition", "transition_time_custom"}:
+        count = max(0, len(clean.get("photos") or []) - 1)
+        label = FRAME_VIDEO_TRANSITION_LABELS.get(str(clean.get("transition") or "fade"), "Mờ dần")
+        return f"🔗 <b>Chuyển cảnh</b>\n\nCó <b>{count}</b> điểm nối. Hiện tại: <b>{html.escape(label)}</b>.", frame_video_transition_keyboard(clean), "HTML"
+    if step == "motion":
+        current = FRAME_VIDEO_MOTION_LABELS.get(str(clean.get("motion") or "none"), "Ảnh tĩnh")
+        return f"🎥 <b>Chuyển động ảnh</b>\n\nHiện tại: <b>{html.escape(current)}</b>.", frame_video_motion_keyboard(clean), "HTML"
+    if step in {"addons", "audio", "music", "volume", "logo_upload", "voice_upload", "music_upload"}:
+        return frame_video_addons_text(clean), frame_video_addons_keyboard(clean), "HTML"
+    if step in {"review", "quality", "invoice"}:
+        return frame_video_review_text(clean, 0, step == "invoice"), frame_video_review_keyboard(step == "invoice", clean), "HTML"
+    return frame_video_panel_text(clean), frame_video_panel_keyboard(), "HTML"
 
 
 async def handle_frame_video_canonical_callback(
@@ -170499,12 +170533,19 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
     if action in FRAME_VIDEO_CANONICAL_ACTIONS or action in FRAME_VIDEO_LEGACY_REDIRECT_ACTIONS:
         return await handle_frame_video_canonical_callback(query, context, uid, lang, action, parts, state)
 
-    img2vid_result = await handle_img2vid_lock1_callback(query, context, uid, lang, action, parts, state)
-    if isinstance(img2vid_result, dict) and img2vid_result.get("continue_confirm"):
-        action = "confirm"
-        state = img2vid_result.get("state") or get_frame_video_state(uid) or state
-    elif img2vid_result is not None:
-        return img2vid_result
+    if action in FRAME_VIDEO_IMG2VID_ACTIONS:
+        img2vid_result = await handle_img2vid_lock1_callback(query, context, uid, lang, action, parts, state)
+        if isinstance(img2vid_result, dict) and img2vid_result.get("continue_confirm"):
+            action = "confirm"
+            state = img2vid_result.get("state") or get_frame_video_state(uid) or state
+        elif img2vid_result is not None:
+            return img2vid_result
+    elif is_frame_video3_state(state):
+        # A stale or no-longer-supported FrameVideo callback must remain in the
+        # isolated image-count flow.  Do not fall through into the legacy
+        # Img2Video wizard, which can otherwise overwrite the active screen.
+        text, markup, parse_mode = frame_video3_current_screen(state, lang)
+        return await safe_edit_or_send(query, text, parse_mode=parse_mode, reply_markup=markup)
 
     if action == "preview_check":
         local_job_id = _safe_int(parts[2] if len(parts) > 2 else state.get("paid_preview_local_job_id"), 0)

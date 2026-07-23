@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -8,9 +9,11 @@ import struct
 import subprocess
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import local_worker
 from services import frame_video_commercial as commercial
 from services import frame_video_flow as flow
 from services import frame_video_runtime as runtime
@@ -73,6 +76,12 @@ def _state(paths: list[Path] | None = None, count: int = 0, **overrides) -> dict
             **overrides,
         }
     )
+
+
+def _function_source(start_marker: str, end_marker: str) -> str:
+    start = BOT_SOURCE.index(start_marker)
+    end = BOT_SOURCE.index(end_marker, start)
+    return BOT_SOURCE[start:end]
 
 
 def test_public_entry_is_image_count_only_and_keeps_exact_source_order() -> None:
@@ -197,11 +206,93 @@ def test_all_public_framevideo_callbacks_are_catalogued_once_without_generic_x()
     assert all(route.get("owner") and route.get("screen") and route.get("back") for route in flow.FRAME_VIDEO_ROUTE_MATRIX.values())
     assert BOT_SOURCE.count("CallbackQueryHandler(handle_frame_video_callback") == 1
 
-    handler_source = BOT_SOURCE[
-        BOT_SOURCE.index("async def handle_frame_video_callback") :
-        BOT_SOURCE.index("async def handle_frame_video_pending_media")
-    ]
+    handler_source = _function_source(
+        "async def handle_frame_video_callback",
+        "async def cmd_storyboard_video",
+    )
     assert "Có lỗi khi xử lý lệnh" not in handler_source
+    assert '"assets_done", "panel"' in BOT_SOURCE
+    assert "FRAME_VIDEO_IMG2VID_ACTIONS" in BOT_SOURCE
+    assert "elif is_frame_video3_state(state):" in handler_source
+    assert "frame_video3_current_screen(state, lang)" in handler_source
+
+
+def test_assets_done_outer_callback_has_one_owner_and_opens_duration_once() -> None:
+    handler_source = _function_source(
+        "async def handle_frame_video_callback",
+        "async def cmd_storyboard_video",
+    )
+    events: list[tuple[str, object]] = []
+
+    async def fake_assets_done(query, context, uid, lang, state):
+        events.append(("assets_done", {"uid": uid, "lang": lang, "state": dict(state)}))
+        return "duration-panel"
+
+    class Query:
+        data = "framevideo|assets_done"
+        from_user = SimpleNamespace(id=881)
+
+        async def answer(self):
+            events.append(("answer", None))
+
+    namespace = {
+        "get_user_language": lambda _uid: "vi",
+        "get_frame_video_state": lambda _uid: {"commercial_flow_version": "framevideo3", "image_count": 2},
+        "handle_frame_video_assets_done": fake_assets_done,
+        "sanitize_log_text": str,
+        "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+    }
+    exec("from __future__ import annotations\n" + handler_source, namespace)
+    result = asyncio.run(namespace["handle_frame_video_callback"](SimpleNamespace(callback_query=Query()), SimpleNamespace()))
+    assert result == "duration-panel"
+    assert [event[0] for event in events] == ["answer", "assets_done"]
+
+
+def test_assets_done_persists_duration_without_legacy_fallback() -> None:
+    handler_source = _function_source(
+        "async def handle_frame_video_assets_done",
+        "def frame_video3_current_screen",
+    )
+    saved: list[dict] = []
+    sent: list[dict] = []
+
+    async def fake_edit(_query, text, **kwargs):
+        sent.append({"text": text, **kwargs})
+        return "duration-panel"
+
+    namespace = {
+        "normalize_frame_video_state": lambda state: dict(state),
+        "_safe_int": lambda value, default=0: int(value or default),
+        "frame_video_duration_menu_text": lambda _state: "duration",
+        "frame_video_duration_menu_keyboard": lambda _single, _state: "duration-keyboard",
+        "frame_video_collect_keyboard": lambda *_args, **_kwargs: "collect-keyboard",
+        "set_frame_video_state": lambda _uid, state: saved.append(dict(state)),
+        "safe_edit_or_send": fake_edit,
+        "ivf": SimpleNamespace(
+            frame_video_image_count_text=lambda *_args: "count",
+            frame_video_image_count_keyboard=lambda *_args: "count-keyboard",
+        ),
+        "logger": SimpleNamespace(error=lambda *_args, **_kwargs: None, warning=lambda *_args, **_kwargs: None),
+        "sanitize_log_text": str,
+        "html": __import__("html"),
+        "re": re,
+    }
+    exec("from __future__ import annotations\n" + handler_source, namespace)
+    state = {"commercial_flow_version": "framevideo3", "image_count": 2, "photos": [{}, {}]}
+    result = asyncio.run(
+        namespace["handle_frame_video_assets_done"](
+            SimpleNamespace(message=SimpleNamespace(chat_id=22)),
+            SimpleNamespace(),
+            881,
+            "vi",
+            state,
+        )
+    )
+    assert result == "duration-panel"
+    assert saved[-1]["step"] == "duration"
+    assert len(sent) == 1
+    assert sent[0]["text"] == "duration"
+    assert sent[0]["reply_markup"] == "duration-keyboard"
 
 
 def test_exact_image_count_blocks_partial_batch_and_builds_n_minus_one_transitions() -> None:
@@ -331,6 +422,72 @@ def test_quality_screen_exposes_codec_route_price_eta_and_preflight_truth() -> N
     assert preflight["ok"] is True
     assert preflight["execution_owner"] == "local_ffmpeg"
     assert all(value == 0 for value in preflight["side_effects"].values())
+
+
+def test_local_worker_renders_valid_mp4_and_records_one_delivery_receipt(tmp_path: Path, monkeypatch) -> None:
+    ffmpeg = _binary("ffmpeg")
+    ffprobe = _binary("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe not available locally")
+
+    inputs = []
+    for index, color in enumerate(((20, 80, 180), (180, 80, 20)), start=1):
+        path = tmp_path / f"worker-input-{index}.png"
+        _write_png(path, color)
+        inputs.append(path)
+    state = _state(inputs)
+    updates: list[dict] = []
+    deliveries: list[dict] = []
+    real_probe = runtime.probe_mp4
+
+    def fake_download(file_id: str, destination: str, **_kwargs) -> None:
+        shutil.copyfile(file_id, destination)
+
+    def fake_delivery(chat_id: str, output_path: str, caption: str, **_kwargs) -> dict:
+        probe = real_probe(output_path, 1.0, False, ffprobe)
+        assert probe["ok"], json.dumps(probe, ensure_ascii=False)
+        deliveries.append({"chat_id": chat_id, "caption": caption, "probe": probe})
+        return {"sent": True, "message_id": 19001, "file_id": "telegram-framevideo-mp4"}
+
+    def fake_update(job_id, status, error_short="", output_url="", output_file_id="", **_kwargs) -> None:
+        updates.append(
+            {
+                "job_id": job_id,
+                "status": status,
+                "error_short": error_short,
+                "output_url": output_url,
+                "output_file_id": output_file_id,
+            }
+        )
+
+    monkeypatch.setattr(local_worker, "telegram_download_file", fake_download)
+    monkeypatch.setattr(local_worker, "telegram_send_video_receipt", fake_delivery)
+    monkeypatch.setattr(local_worker, "update_job", fake_update)
+    monkeypatch.setattr(local_worker, "local_ffmpeg_path", lambda: ffmpeg)
+    monkeypatch.setattr(
+        local_worker.frame_video_runtime,
+        "probe_mp4",
+        lambda path, expected_duration, expects_audio: real_probe(path, expected_duration, expects_audio, ffprobe),
+    )
+
+    payload = {
+        "chat_id": "test-chat",
+        "photos": [{"file_id": str(path)} for path in inputs],
+        "state": state,
+        "image_count": 2,
+        "caption": "FrameVideo worker smoke",
+        "max_render_seconds": 120,
+    }
+    local_worker.run_frame_video_render({"id": 551, "input_file_id": json.dumps(payload)})
+
+    assert len(deliveries) == 1
+    assert updates[-1]["status"] == "succeeded"
+    receipt = json.loads(updates[-1]["output_url"])
+    assert receipt["delivery_message_id"] == "19001"
+    assert receipt["charge_policy"] == "post_delivery"
+    assert receipt["wallet_charge_amount_xu"] == 0
+    assert receipt["ffprobe"]["ok"] is True
+    assert receipt["ffprobe"]["video_stream_count"] == 1
 
 
 @pytest.mark.parametrize("image_count", [2, 4, 10, 20])
