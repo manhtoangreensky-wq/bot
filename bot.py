@@ -70009,8 +70009,7 @@ def video_scene3_full_review_text(state: dict) -> str:
     lines.extend([
         "",
         "Mỗi cảnh phải hoàn tất một ý hoặc hành động trước khi nối sang cảnh tiếp theo.",
-        "Khả năng thực thi chỉ được kiểm tra ở bước xác nhận cuối; màn lập kế hoạch không gọi nguồn dựng.",
-        "Màn này chỉ duyệt kế hoạch. Chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.",
+        "Khi mọi phần đã đúng, tiếp tục cấu hình âm thanh, logo và gói phù hợp trước khi xác nhận tạo video.",
     ])
     return "\n".join(lines)[:4050]
 
@@ -70020,7 +70019,6 @@ def video_scene3_full_review_keyboard(state: dict) -> InlineKeyboardMarkup:
         [("👁️ Xem từng cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
         [("🎬 Prompt video", "video_tail|review|prompts"), ("🎚️ Âm thanh & Add-on", "video_tail|audio|open")],
         [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|review|summary")],
-        [("⭐ Hoàn thiện video", "video_tail|quality|open"), ("🔄 Làm lại kế hoạch", "video_tail|review|redo")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -85898,6 +85896,187 @@ def video_ai_realistic_restore_legacy_content_mode(state: dict | None) -> dict:
     return video_flow6.sync_scene_state(current)
 
 
+def video_tail12_compile_content_contract(state: dict | None, *, product_type: str = "") -> dict:
+    """Persist one explicit, provider-free content contract before the shared tail.
+
+    The commercial tail must never guess a completed content choice from a
+    button label or a chat message.  Older product lanes persisted different
+    structured fields, however, so this adapter consolidates only those fields
+    into the FLOW6-compatible ``content_mode`` plus the richer public-tail
+    contract used by review, invoice and exact Back routing.
+    """
+
+    current = dict(state or {})
+    flow_context = dict(current.get("video_flow_context") or {})
+    source_fields = dict(current.get("source_fields") or flow_context.get("source_fields") or {})
+    requested_product = str(
+        product_type
+        or current.get("product_type")
+        or current.get("source_product_id")
+        or flow_context.get("product_id")
+        or "video_ai_real"
+    ).strip()
+    requested_product = str(
+        video_tail9.adapter_for(requested_product).get("adapter_key")
+        or requested_product
+    ).strip()
+    source = str(
+        current.get("content_source")
+        or source_fields.get("content_source")
+        or flow_context.get("content_source")
+        or ""
+    ).strip()
+    raw_plan = current.get("plan") or current.get("scene_plan") or flow_context.get("scene_plan") or {}
+    plan = dict(raw_plan) if isinstance(raw_plan, dict) else {}
+    scene_content = []
+    for candidate in (
+        current.get("per_scene_content"),
+        current.get("idea_scene_contents"),
+        current.get("idea_scene_content"),
+        current.get("scene_drafts"),
+        plan.get("scenes"),
+    ):
+        values = [dict(item) for item in list(candidate or []) if isinstance(item, dict)]
+        if values:
+            scene_content = values
+            break
+    selection = dict(
+        current.get("content_choice")
+        or current.get("selected_suggestion")
+        or flow_context.get("content_choice")
+        or {}
+    )
+    profile = str(
+        current.get("primary_profile_key")
+        or current.get("primary_profile")
+        or current.get("technical_profile")
+        or current.get("selected_profile")
+        or flow_context.get("primary_profile_key")
+        or ""
+    ).strip()
+    idea_id = str(
+        current.get("idea_id")
+        or current.get("idea_preset_id")
+        or current.get("catalog_idea_id")
+        or flow_context.get("idea_preset_id")
+        or ""
+    ).strip()
+    selected_prompt = str(
+        current.get("selected_prompt_text")
+        or current.get("idea_selected_prompt")
+        or current.get("selected_prompt")
+        or flow_context.get("selected_prompt_text")
+        or ""
+    ).strip()
+    manual_text = str(
+        current.get("manual_content")
+        or current.get("manual_script_raw")
+        or current.get("script_text")
+        or source_fields.get("manual_content")
+        or ""
+    ).strip()
+    source_video_id = str(
+        current.get("source_video_id")
+        or current.get("source_file_id")
+        or (current.get("source_video") or {}).get("file_id")
+        or source_fields.get("source_video_id")
+        or ""
+    ).strip()
+    storyboard_session_id = str(
+        current.get("storyboard_session_id")
+        or (current.get("storyboard2") or {}).get("session_id")
+        or ""
+    ).strip()
+    scene_count = max(1, safe_int(current.get("scene_count") or flow_context.get("scene_count"), 1))
+    ratio = str(current.get("aspect_ratio") or current.get("ratio") or flow_context.get("aspect_ratio") or "").strip()
+    existing_mode = str(current.get("content_mode") or flow_context.get("content_mode") or "").strip()
+    semantic_mode = ""
+    flow_mode = existing_mode if existing_mode in video_flow6.CONTENT_MODES else ""
+
+    if requested_product == "script_image_video" and manual_text:
+        source = "manual"
+        flow_mode = "manual"
+        semantic_mode = "long_script"
+        current["script_session_id"] = str(current.get("script_session_id") or current.get("video_session_id") or "")
+        current["scene_count_confirmed"] = True
+    elif requested_product == "storyboard_prompt" and (storyboard_session_id or scene_content or plan):
+        source = "storyboard_plan"
+        flow_mode = "manual"
+        semantic_mode = "storyboard_plan"
+        current["storyboard_session_id"] = storyboard_session_id or str(current.get("video_session_id") or "")
+    elif requested_product == video_selfshot2.PRODUCT_ID and source_video_id:
+        source = source or "manual"
+        flow_mode = "manual"
+        semantic_mode = "self_shot_scene_change"
+        current["source_video_id"] = source_video_id
+    elif requested_product == video_selfshot3.PRODUCT_ID and source_video_id:
+        source = source or "manual"
+        flow_mode = "manual"
+        semantic_mode = "self_shot_cinematic_transform"
+        current["source_video_id"] = source_video_id
+    elif requested_product == "multi_scene_film" and (manual_text or scene_content or plan):
+        source = source or "manual"
+        flow_mode = "manual"
+        semantic_mode = "long_video_plan"
+    elif (idea_id or source == "idea_catalog") and (selected_prompt or scene_content or plan):
+        source = "idea_catalog"
+        flow_mode = "suggestions"
+        semantic_mode = "idea_catalog"
+    elif source in {"manual", "custom", "manual_content"} and manual_text:
+        source = "manual"
+        flow_mode = "manual"
+        semantic_mode = "manual"
+    elif source in {"content_profiles", "profiles", "profile", "suggestions"} and (selection or profile or scene_content):
+        source = "content_profiles"
+        flow_mode = "suggestions"
+        semantic_mode = "content_profiles"
+    elif selection and profile:
+        source = "content_profiles"
+        flow_mode = "suggestions"
+        semantic_mode = "content_profiles"
+
+    if not flow_mode:
+        return current
+
+    if not selection and idea_id:
+        selection = {
+            "id": idea_id,
+            "title": str(current.get("idea_title") or current.get("subject") or "").strip(),
+        }
+
+    current.update({
+        "product_type": requested_product,
+        "flow_owner": str(
+            current.get("idea_parent_flow_owner")
+            or current.get("flow_owner")
+            or video_tail9.adapter_for(requested_product).get("flow_owner")
+            or "scene3"
+        ),
+        "parent_session_id": str(
+            current.get("idea_parent_session_id")
+            or current.get("parent_session_id")
+            or current.get("video_session_id")
+            or current.get("flow_session_id")
+            or ""
+        ),
+        "scene_count": scene_count,
+        "aspect_ratio": ratio or "9:16",
+        "content_source": source,
+        "content_mode": flow_mode,
+        "canonical_content_mode": semantic_mode or flow_mode,
+        "content_choice": selection,
+        "content_revision": max(1, safe_int(current.get("content_revision") or current.get("plan_revision") or current.get("suggestion_version"), 1)),
+        "per_scene_content": scene_content,
+        "selected_prompt": selected_prompt,
+        "selected_prompt_revision": max(
+            1 if selected_prompt else 0,
+            safe_int(current.get("selected_prompt_revision"), 0),
+        ),
+        "plan_status": "ready",
+    })
+    return video_flow6.sync_scene_state(current)
+
+
 def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
     """Return one scoped tail state and the canonical host that owns it."""
 
@@ -85969,10 +86148,14 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
         owner = "scene3"
         host = video_profile_studio_state(context)
         restored_host = video_ai_realistic_restore_legacy_content_mode(host)
-        if restored_host != host:
-            host = save_video_profile_studio_state(context, restored_host)
+        host = save_video_profile_studio_state(context, restored_host)
         requested = str(host.get("product_type") or host.get("source_product_id") or session_product or "video_ai_real")
-        product_type = requested if requested in video_tail9.PRODUCT_ADAPTERS else "video_ai_real"
+        product_type = str(video_tail9.adapter_for(requested).get("adapter_key") or "video_ai_real")
+        compiled_host = video_tail12_compile_content_contract(host, product_type=product_type)
+        if compiled_host != host:
+            host = save_video_profile_studio_state(context, compiled_host)
+        else:
+            host = compiled_host
         session_id = str(host.get("video_session_id") or host.get("flow_session_id") or f"{uid}:{product_type}")
         revision = max(1, safe_int(host.get("plan_revision") or host.get("suggestion_version"), 1))
         scene_count = max(1, safe_int(host.get("scene_count"), 1))
@@ -86348,18 +86531,80 @@ def video_tail9_review_text(tail: dict) -> str:
         f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>\n"
         f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
         f"• Thời lượng dự kiến: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
-        f"• Đường dựng: <b>{html.escape(str(tail.get('engine_route') or 'chưa xác định'))}</b>\n\n"
-        "Kế hoạch riêng của sản phẩm đã được giữ nguyên. Phần dưới đây dùng chung giao diện, giá, hóa đơn, xác nhận và trạng thái; engine vẫn tách đúng sản phẩm."
+        "• Nội dung và câu lệnh: <b>Đã sẵn sàng</b>\n\n"
+        "Kiểm tra lần cuối trước khi chọn âm thanh, logo và gói chất lượng."
     )
 
 
-def video_tail9_review_keyboard() -> InlineKeyboardMarkup:
+def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
+    product = str((tail or {}).get("video_product_type") or "")
+    if product == "storyboard_prompt":
+        content_row = [("👁️ Xem Storyboard", "video_tail|review|scenes"), ("📎 Quản lý ảnh", "video_tail|review|edit")]
+    else:
+        content_row = [("👁️ Xem nội dung", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")]
     return video_scene3_keyboard([
-        [("👁️ Xem từng cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
+        content_row,
         [("🎬 Prompt video", "video_tail|review|prompts"), ("🎚️ Âm thanh & Add-on", "video_tail|audio|open")],
         [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|review|summary")],
-        [("⭐ Hoàn thiện video", "video_tail|quality|open"), ("🔄 Làm lại kế hoạch", "video_tail|review|redo")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_tail9_summary_text(tail: dict) -> str:
+    audio = dict(tail.get("audio_config") or {})
+    logo = dict(tail.get("logo_config") or {})
+    watermark = dict(tail.get("watermark_config") or {})
+    source_labels = {
+        "content_profiles": "Loại nội dung đã chọn",
+        "idea_catalog": "Kho Ý tưởng video",
+        "manual": "Nội dung tự nhập",
+        "storyboard_plan": "Storyboard",
+    }
+    enabled_audio = [
+        VIDEO_TAIL9_AUDIO_LABELS[key]
+        for key in ("source_audio", "dubbing", "music", "sfx", "subtitles")
+        if audio.get(key)
+    ]
+    brand_items = []
+    if logo.get("enabled") and logo.get("asset_file_id"):
+        brand_items.append("Logo")
+    if watermark.get("enabled") and watermark.get("text"):
+        brand_items.append("Watermark")
+    return (
+        "📄 <b>Tổng hợp video</b>\n\n"
+        f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(str(tail.get('video_product_type') or ''), str(tail.get('video_product_type') or 'Video AI')))}</b>\n"
+        f"• Nguồn nội dung: <b>{html.escape(source_labels.get(str(tail.get('content_source') or ''), 'Kế hoạch video'))}</b>\n"
+        f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>\n"
+        f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>\n"
+        f"• Thời lượng: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>\n"
+        f"• Âm thanh/Add-on: <b>{html.escape(', '.join(enabled_audio) or 'Không thêm')}</b>\n"
+        f"• Logo/Watermark: <b>{html.escape(', '.join(brand_items) or 'Không thêm')}</b>\n\n"
+        "Mọi lựa chọn sẽ được giữ nguyên khi chuyển sang bước chọn gói."
+    )
+
+
+def video_tail9_summary_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
+    is_video_edit = str((tail or {}).get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE
+    content_label = "🎛 Sửa thao tác" if is_video_edit else "✍️ Sửa nội dung"
+    content_callback = "video_tail|review|edit_operation" if is_video_edit else "video_tail|review|edit"
+    return video_scene3_keyboard([
+        [(content_label, content_callback), ("🎚️ Sửa Add-on", "video_tail|audio|open")],
+        [("🖼️ Sửa Logo/Watermark", "video_tail|logo|open"), ("⭐ Hoàn thiện video", "video_tail|quality|open")],
+        [("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_tail9_public_blocker_text() -> str:
+    return (
+        "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+        "Vui lòng quay lại kiểm tra nội dung hoặc cấu hình đã chọn."
+    )
+
+
+def video_tail9_public_blocker_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📄 Xem cấu hình", "video_tail|review|open")],
+        [("⬅️ Quay lại", "video_tail|review|summary"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -86387,9 +86632,7 @@ def video_tail9_video_edit_review_text(tail: dict, host: dict) -> str:
         f"• Thời lượng nguồn: <b>{duration} giây</b>\n"
         "• Tỉ lệ: <b>Giữ nguyên</b>\n"
         f"• Âm thanh: <b>{'Giữ nguyên nếu nguồn có' if source_audio else 'Nguồn không có âm thanh'}</b>\n"
-        f"• Engine: <code>{video_editengine1.ENGINE_ROUTE}</code>\n\n"
-        "Video này chỉ được chỉnh sửa từ file đã gửi. Không tạo cảnh, không viết prompt và không chuyển sang flow tạo video mới. "
-        "Chưa tạo tác vụ, chưa tạo file và chưa trừ Xu."
+        "\nVideo này chỉ chỉnh sửa từ file đã gửi. Không tạo cảnh, không viết prompt và không chuyển sang flow tạo video mới."
     )
 
 
@@ -86397,7 +86640,7 @@ def video_tail9_video_edit_review_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🎛 Xem thao tác", "video_tail|review|operations"), ("✍️ Sửa thao tác", "video_tail|review|edit_operation")],
         [("🎚️ Âm thanh & Add-on", "video_tail|audio|open"), ("🖼️ Logo/Watermark", "video_tail|logo|open")],
-        [("📄 Xem tổng hợp", "video_tail|review|summary"), ("⭐ Hoàn thiện video", "video_tail|quality|open")],
+        [("📄 Xem tổng hợp", "video_tail|review|summary"), ("🎞 Thông tin video", "video_tail|review|source")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -86411,7 +86654,7 @@ def video_tail9_video_edit_operations_text(host: dict) -> str:
         lines.append("• Giữ nguyên nội dung video")
     lines.extend([
         "",
-        "Các thao tác chỉ áp dụng lên video nguồn đã gửi. Chưa render file và chưa trừ Xu.",
+        "Các thao tác chỉ áp dụng lên video nguồn đã gửi khi anh/chị xác nhận tạo video.",
     ])
     return "\n".join(lines)
 
@@ -86441,7 +86684,7 @@ def video_tail9_audio_text(tail: dict) -> str:
             continue
         volume = f" · {safe_int(volumes.get(key), 100)}%" if key in volumes else ""
         lines.append(f"• {VIDEO_TAIL9_AUDIO_LABELS[key]}: <b>{'Bật' if audio.get(key) else 'Tắt'}</b>{volume}")
-    lines.extend(["", "Chưa gọi nguồn âm thanh, chưa tạo file và chưa trừ Xu."])
+    lines.extend(["", "Các lựa chọn này sẽ được áp dụng sau khi video hoàn tất."])
     return "\n".join(lines)
 
 
@@ -86487,27 +86730,47 @@ def video_tail9_volume_keyboard(key: str) -> InlineKeyboardMarkup:
 def video_tail9_logo_text(tail: dict) -> str:
     logo = dict(tail.get("logo_config") or {})
     watermark = dict(tail.get("watermark_config") or {})
-    return (
-        "🖼️ <b>Logo và watermark</b>\n\n"
-        f"• Logo hình: <b>{'Đã bật' if logo.get('enabled') else 'Tắt'}</b> · {html.escape(str(logo.get('position') or 'bottom_right'))}\n"
-        f"• Watermark chữ: <b>{'Đã bật' if watermark.get('enabled') else 'Tắt'}</b> · {html.escape(str(watermark.get('position') or 'bottom_right'))}\n\n"
-        "Logo dùng ảnh, watermark dùng chữ. Cả hai chỉ được lưu vào kế hoạch; chưa tạo file và chưa trừ Xu."
-    )
+    lines = ["🖼️ <b>Logo và watermark</b>", ""]
+    if logo.get("enabled") and logo.get("asset_file_id"):
+        lines.extend([
+            "• Logo: <b>Đã nhận</b>",
+            f"• Vị trí logo: <b>{html.escape(PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI.get(str(logo.get('position') or ''), 'Chưa chọn'))}</b>",
+        ])
+    if watermark.get("enabled") and watermark.get("text"):
+        lines.extend([
+            f"• Watermark: <b>{html.escape(str(watermark.get('text') or ''))}</b>",
+            f"• Vị trí watermark: <b>{html.escape(PRODUCT_VIDEO_LOGO_POSITION_LABELS_VI.get(str(watermark.get('position') or ''), 'Chưa chọn'))}</b>",
+        ])
+    if len(lines) == 2:
+        lines.append("• Chưa thêm logo hoặc watermark.")
+    lines.extend(["", "Logo dùng ảnh; watermark dùng chữ. Mỗi mục chỉ được lưu sau khi chọn vị trí."])
+    return "\n".join(lines)
 
 
 def video_tail9_logo_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("📎 Gửi logo hình ảnh", "video_tail|logo|upload"), ("✍️ Watermark chữ", "video_tail|logo|watermark")],
-        [("📍 Vị trí logo", "video_tail|logo|position|logo"), ("📍 Vị trí watermark", "video_tail|logo|position|watermark")],
+        [("🖼️ Thêm logo", "video_tail|logo|upload"), ("✍️ Thêm watermark", "video_tail|logo|watermark")],
         [("🗑️ Xóa logo", "video_tail|logo|clear|logo"), ("🗑️ Xóa watermark", "video_tail|logo|clear|watermark")],
         [("✅ Xong bổ sung", "video_tail|logo|done"), ("⏭️ Bỏ qua", "video_tail|logo|skip")],
         [("⬅️ Quay lại", "video_tail|audio|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
+def video_tail9_position_text(target: str) -> str:
+    label = "logo" if target == "logo" else "watermark"
+    return (
+        f"📍 <b>Chọn vị trí {label}</b>\n\n"
+        "Chọn một vị trí rõ ràng, tránh che chủ thể và nội dung quan trọng."
+    )
+
+
 def video_tail9_position_keyboard(target: str) -> InlineKeyboardMarkup:
-    labels = (("Trên trái", "top_left"), ("Trên giữa", "top_center"), ("Trên phải", "top_right"), ("Dưới trái", "bottom_left"), ("Dưới giữa", "bottom_center"), ("Dưới phải", "bottom_right"))
-    rows = [[(labels[index][0], f"video_tail|logo|setpos|{target}|{labels[index][1]}"), (labels[index + 1][0], f"video_tail|logo|setpos|{target}|{labels[index + 1][1]}")] for index in range(0, len(labels), 2)]
+    labels = (("↖️ Trên trái", "top_left"), ("↗️ Trên phải", "top_right"), ("⏺ Giữa trên", "top_center"), ("↙️ Dưới trái", "bottom_left"), ("↘️ Dưới phải", "bottom_right"))
+    rows = [
+        [(labels[0][0], f"video_tail|logo|setpos|{target}|{labels[0][1]}"), (labels[1][0], f"video_tail|logo|setpos|{target}|{labels[1][1]}")],
+        [(labels[2][0], f"video_tail|logo|setpos|{target}|{labels[2][1]}")],
+        [(labels[3][0], f"video_tail|logo|setpos|{target}|{labels[3][1]}"), (labels[4][0], f"video_tail|logo|setpos|{target}|{labels[4][1]}")],
+    ]
     rows.append([("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
@@ -86530,28 +86793,21 @@ def video_tail9_catalog_report(tail: dict, capability: dict | None = None) -> di
 
 def video_tail9_quality_text(tail: dict, capability: dict, catalog: dict | None = None) -> str:
     catalog = dict(catalog or video_tail9_catalog_report(tail, capability))
+    if not capability.get("ok") or not catalog.get("ok"):
+        return video_tail9_public_blocker_text()
     lines = [
         "⭐ <b>Hoàn thiện video</b>", "",
         f"• Sản phẩm: <b>{html.escape(VIDEO_TAIL9_PRODUCT_LABELS.get(str(tail.get('video_product_type') or ''), str(tail.get('video_product_type') or 'Video AI')))}</b>",
-        f"• Đường dựng riêng: <b>{html.escape(str(tail.get('engine_route') or 'chưa xác định'))}</b>",
-        f"• Kế hoạch và gói: <b>{'Hợp lệ' if capability.get('ok') else 'Cần chỉnh lại'}</b>",
+        f"• Số cảnh: <b>{safe_int(tail.get('scene_count'), 1)}</b>",
+        f"• Thời lượng dự kiến: <b>{safe_int(tail.get('estimated_duration'), 8)} giây</b>",
+        f"• Tỉ lệ: <b>{html.escape(str(tail.get('ratio') or '9:16'))}</b>",
     ]
-    if not capability.get("ok"):
-        lines.append(f"• Lý do: <code>{html.escape(str(capability.get('reason') or 'engine_route_unavailable'))}</code>")
-    if not catalog.get("ok"):
-        lines.extend([
-            "",
-            "Hiện không có gói nào tương thích với loại đầu vào, số cảnh và tỉ lệ đã chọn.",
-            f"• Mã chặn: <code>{html.escape(str(catalog.get('reason') or 'no_compatible_quality_package'))}</code>",
-            "Hãy bấm Kiểm tra lại sau khi chỉnh kế hoạch. Chưa tạo job và chưa trừ Xu.",
-        ])
-        return "\n".join(lines)[:4050]
-    lines.extend(["", "Các gói tương thích từ bảng giá chung; đường dựng riêng của sản phẩm không bị thay đổi:"])
+    lines.extend(["", "Chọn gói phù hợp với độ chi tiết và độ ổn định mong muốn:"])
     for offer in catalog.get("offers") or []:
         price = safe_int(offer.get("tier_id"), 0)
         level, detail = video_scene3_public_quality_spec(price, scene_count=safe_int(tail.get("scene_count"), 1))
         lines.append(f"• <b>{price} Xu/cảnh</b> · {html.escape(level)}: {html.escape(detail)}")
-    lines.extend(["", "Gói và trạng thái hệ thống dựng được kiểm tra tách biệt. Hệ thống kiểm tra readiness lần cuối khi xác nhận; màn này chưa tạo job, chưa gọi provider và chưa trừ Xu."])
+    lines.extend(["", "Giá cuối sẽ hiện đầy đủ trong hóa đơn trước khi xác nhận tạo video."])
     return "\n".join(lines)[:4050]
 
 
@@ -86573,8 +86829,8 @@ def video_tail9_quality_keyboard(
             row.append(("🔄 Kiểm tra lại", "video_tail|quality|open"))
         rows.append(row)
     if not rows:
-        rows.append([("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📋 Xem lại kế hoạch", "video_tail|review|open")])
-    rows.append([("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")])
+        return video_tail9_public_blocker_keyboard()
+    rows.append([("⬅️ Quay lại", "video_tail|review|summary"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
 
@@ -86588,6 +86844,7 @@ def video_tail9_invoice_keyboard() -> InlineKeyboardMarkup:
 
 def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str = "vi") -> str:
     pricing = dict(tail.get("pricing_snapshot") or {})
+    delivery_message_id = str(tail.get("delivery_message_id") or tail.get("message_id") or "")
     audio = dict(tail.get("audio_config") or {})
     enabled_audio = [
         VIDEO_TAIL9_AUDIO_LABELS[key]
@@ -86627,7 +86884,9 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
         f"• Logo/Watermark: <b>{html.escape(branding)}</b>\n"
         f"• Tổng: <b>{xu_number(total)} Xu</b>\n"
         f"{balance_line}\n"
-        "Bấm xác nhận để hệ thống kiểm tra readiness lần cuối. Chỉ trừ Xu sau khi MP4 hợp lệ đã được gửi qua Telegram, có message_id và biên nhận thành công."
+        "Bấm xác nhận để bắt đầu tạo video. Xu chỉ được trừ sau khi video hợp lệ đã được gửi thành công."
+        if not delivery_message_id
+        else "Video đã được giao thành công; hệ thống sẽ gửi biên nhận trước khi trừ Xu."
     )[:4050]
 
 
@@ -86636,7 +86895,7 @@ def video_tail9_long_maintenance_text(tail: dict) -> str:
         "🛠️ <b>Video dài tập đang được nâng cấp</b>\n\n"
         f"Kế hoạch <b>{safe_int(tail.get('scene_count'), 1)} cảnh</b>, khoảng "
         f"<b>{safe_int(tail.get('estimated_duration'), 600) // 60} phút</b> và gói đã chọn vẫn được giữ nguyên.\n\n"
-        "TOAN AAS chưa tạo job, chưa tạo outbox, chưa gọi provider và chưa trừ Xu. Anh/chị có thể xem lại cấu hình hoặc kiểm tra lại sau."
+        "Chức năng tạo video dài tập chưa khả dụng. Anh/chị có thể xem lại cấu hình hoặc kiểm tra lại sau."
     )
 
 
@@ -86657,12 +86916,23 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         tail["status_stage"] = "logo_watermark"
         save_video_tail9_state(user_id, context, tail, owner, host)
         return await safe_edit_or_send(query, video_tail9_logo_text(tail), parse_mode="HTML", reply_markup=video_tail9_logo_keyboard())
+    if screen == "summary":
+        tail["status_stage"] = "summary"
+        save_video_tail9_state(user_id, context, tail, owner, host)
+        return await safe_edit_or_send(query, video_tail9_summary_text(tail), parse_mode="HTML", reply_markup=video_tail9_summary_keyboard(tail))
     if screen == "quality":
         capability = video_tail9_commercial_preflight(user_id, context, tail, owner, host)
         catalog = video_tail9_catalog_report(tail, capability)
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
         save_video_tail9_state(user_id, context, tail, owner, host)
+        if not capability.get("ok") or not catalog.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                video_tail9_public_blocker_text(),
+                parse_mode="HTML",
+                reply_markup=video_tail9_public_blocker_keyboard(),
+            )
         return await safe_edit_or_send(
             query,
             video_tail9_quality_text(tail, capability, catalog),
@@ -86678,7 +86948,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             parse_mode="HTML",
             reply_markup=video_tail9_video_edit_review_keyboard(),
         )
-    return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard())
+    return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard(tail))
 
 
 def video_tail9_callback_guard(callback_handler):
@@ -86697,7 +86967,7 @@ def video_tail9_callback_guard(callback_handler):
                 return True
 
             try:
-                await query.answer("Không thể cập nhật lựa chọn này. Kế hoạch vẫn được giữ.", show_alert=True)
+                await query.answer("Không thể cập nhật lựa chọn này.", show_alert=True)
             except Exception:
                 pass
 
@@ -86706,6 +86976,7 @@ def video_tail9_callback_guard(callback_handler):
                 "audio": "audio",
                 "logo": "logo",
                 "quality": "quality",
+                "summary": "summary",
                 "confirm": "quality",
             }.get(section, "review")
             try:
@@ -86716,12 +86987,13 @@ def video_tail9_callback_guard(callback_handler):
                     "audio": "video_tail|audio|open",
                     "logo": "video_tail|logo|open",
                     "quality": "video_tail|quality|open",
+                    "summary": "video_tail|review|summary",
                     "confirm": "video_tail|quality|open",
                 }.get(section, "video_tail|review|open")
                 try:
                     return await safe_edit_or_send(
                         query,
-                        "⚠️ Không thể áp dụng lựa chọn này ở phiên hiện tại. Kế hoạch chưa bị thay đổi; hãy quay lại đúng bước trước để thử lại.",
+                        video_tail9_public_blocker_text(),
                         parse_mode="HTML",
                         reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", back_callback), ("🏠 Menu chính", "menu|main")]]),
                     )
@@ -86793,11 +87065,13 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     parse_mode="HTML",
                     reply_markup=video_local_manual_options_keyboard(get_user_language(uid) or "vi"),
                 )
-        if action in {"open", "summary", "scenes"}:
+        if action == "summary":
+            return await video_tail9_render(query, uid, context, "summary")
+        if action in {"open", "scenes"}:
             return await video_tail9_render(query, uid, context, "review")
         if action in {"edit", "redo", "prompts", "back"}:
             if owner == "scene3":
-                target = "video_prompts" if action == "prompts" else ("scene_plan" if action in {"edit", "redo"} else "full_review")
+                target = "video_prompts" if action in {"prompts", "back"} else "scene_plan"
                 state = video_profile_studio_step(context, host, target, push=action != "back")
                 return await video_profile_scene1_render(query, state, get_user_language(uid) or "vi")
             screen = "review" if action in {"prompts", "back"} else "content"
@@ -86898,15 +87172,29 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 save_video_session(uid, session)
             return await safe_edit_or_send(
                 query,
-                "✍️ <b>Nhập watermark chữ</b>\n\nGửi nội dung ngắn tối đa 120 ký tự. Vị trí được chọn ở màn trước.",
+                "✍️ <b>Nhập watermark chữ</b>\n\nGửi nội dung ngắn tối đa 120 ký tự. Sau đó chọn vị trí hiển thị.",
                 parse_mode="HTML",
                 reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")]]),
             )
         if action == "position":
-            return await safe_edit_or_send(query, "📍 <b>Chọn vị trí</b>\n\nKhông che chủ thể, phụ đề hoặc nội dung quan trọng.", parse_mode="HTML", reply_markup=video_tail9_position_keyboard(argument))
+            config = dict(tail.get("logo_config" if argument == "logo" else "watermark_config") or {})
+            if argument == "logo" and not config.get("asset_file_id"):
+                return await video_tail9_render(query, uid, context, "logo")
+            if argument == "watermark" and not config.get("text"):
+                return await video_tail9_render(query, uid, context, "logo")
+            return await safe_edit_or_send(
+                query,
+                video_tail9_position_text(argument),
+                parse_mode="HTML",
+                reply_markup=video_tail9_position_keyboard(argument),
+            )
         if action == "setpos":
             key = "logo_config" if argument == "logo" else "watermark_config"
             config = dict(tail.get(key) or {})
+            if argument == "logo" and not config.get("asset_file_id"):
+                return await video_tail9_render(query, uid, context, "logo")
+            if argument == "watermark" and not config.get("text"):
+                return await video_tail9_render(query, uid, context, "logo")
             config["position"] = extra if extra in PRODUCT_VIDEO_LOGO_POSITIONS else "bottom_right"
             tail[key] = config
             save_video_tail9_state(uid, context, tail, owner, host)
@@ -86938,9 +87226,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 ),
             }
             save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "quality")
+            return await video_tail9_render(query, uid, context, "summary")
         if action == "done":
-            return await video_tail9_render(query, uid, context, "quality")
+            return await video_tail9_render(query, uid, context, "summary")
     if section == "quality":
         if action == "open":
             return await video_tail9_render(query, uid, context, "quality")
@@ -86951,18 +87239,18 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if quality not in set(catalog.get("tier_ids") or []):
                 return await safe_edit_or_send(
                     query,
-                    video_tail9_quality_text(tail, capability, catalog),
+                    video_tail9_public_blocker_text(),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=bool(capability.get("ok"))),
+                    reply_markup=video_tail9_public_blocker_keyboard(),
                 )
             if not capability.get("ok"):
                 tail = video_tail9.set_capability(tail, capability)
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await safe_edit_or_send(
                     query,
-                    video_tail9_quality_text(tail, capability, catalog),
+                    video_tail9_public_blocker_text(),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=False),
+                    reply_markup=video_tail9_public_blocker_keyboard(),
                 )
             try:
                 tail["quality_tier_id"] = str(quality)
@@ -87004,9 +87292,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await safe_edit_or_send(
                     query,
-                    "⚠️ Chưa thể lập hóa đơn từ kế hoạch hiện tại. Dữ liệu vẫn được giữ; hãy xem lại kế hoạch rồi chọn gói lại. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                    video_tail9_public_blocker_text(),
                     parse_mode="HTML",
-                    reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=bool(capability.get("ok"))),
+                    reply_markup=video_tail9_public_blocker_keyboard(),
                 )
     if section == "confirm":
         allowed, reason = video_tail9.invoice_allowed(tail)
@@ -87015,9 +87303,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             catalog = video_tail9_catalog_report(tail, dict(tail.get("capability_snapshot") or {}))
             return await safe_edit_or_send(
                 query,
-                f"⚠️ Chưa thể xác nhận: {html.escape(str(reason))}. TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
+                video_tail9_public_blocker_text(),
                 parse_mode="HTML",
-                reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=False),
+                reply_markup=video_tail9_public_blocker_keyboard(),
             )
         contract = video_tail9.commercial_contract(str(tail.get("video_product_type") or ""))
         if not contract.get("execution_enabled"):
@@ -87119,7 +87407,12 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
         session = get_video_session(uid)
         session["current_step"] = "video_tail9_logo"
         save_video_session(uid, session)
-    await safe_edit_or_send(update.message, video_tail9_logo_text(tail), parse_mode="HTML", reply_markup=video_tail9_logo_keyboard())
+    await safe_edit_or_send(
+        update.message,
+        video_tail9_position_text("watermark"),
+        parse_mode="HTML",
+        reply_markup=video_tail9_position_keyboard("watermark"),
+    )
     return True
 
 
@@ -91570,9 +91863,9 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
             save_video_session(uid, current_session)
             await safe_edit_or_send(
                 update.message,
-                "✅ Đã lưu logo vào kế hoạch.\n\n" + video_tail9_logo_text(tail),
+                "✅ <b>Đã nhận logo</b>\n\n" + video_tail9_position_text("logo"),
                 parse_mode="HTML",
-                reply_markup=video_tail9_logo_keyboard(),
+                reply_markup=video_tail9_position_keyboard("logo"),
             )
             return True
         if current_step == "awaiting_selfshot2_logo" and product_id == video_selfshot2.PRODUCT_ID:
@@ -100379,6 +100672,14 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
     drafts = [dict(item) for item in source.get("scene_drafts") or [] if isinstance(item, dict)]
     requested_count = safe_int(source.get("scene_count"), 0)
     count = max(1, min(20, requested_count or len(drafts) or 1))
+    selected_ratio = str(
+        source.get("aspect_ratio")
+        or source.get("ratio")
+        or source.get("recommended_aspect_ratio")
+        or preset.get("recommended_aspect_ratio")
+        or preset.get("aspect_ratio")
+        or "9:16"
+    ).strip()
     selected_prompt = str(source.get("idea_selected_prompt") or "").strip()
     custom_note = "\n\n".join(
         item
@@ -100447,12 +100748,7 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_return_step": str(source.get("idea_return_step") or ""),
         "content_source": "idea_catalog",
         "selected_profile": str(source.get("selected_profile") or ""),
-        "recommended_aspect_ratio": str(
-            source.get("recommended_aspect_ratio")
-            or preset.get("recommended_aspect_ratio")
-            or preset.get("aspect_ratio")
-            or "9:16"
-        ),
+        "recommended_aspect_ratio": selected_ratio,
         "voice_plan": str(preset.get("voice_plan") or ""),
         "music_plan": str(preset.get("music_plan") or ""),
         "audio_plan": str(preset.get("audio_plan") or ""),
@@ -100515,8 +100811,9 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "content_source": "idea_catalog",
         "selected_profile": str(plan.get("selected_profile") or ""),
         "scene_count": count,
-        "recommended_aspect_ratio": plan["recommended_aspect_ratio"],
-        "aspect_ratio": plan["recommended_aspect_ratio"],
+        "recommended_aspect_ratio": selected_ratio,
+        "ratio": selected_ratio,
+        "aspect_ratio": selected_ratio,
         "voice_plan": plan["voice_plan"],
         "music_plan": plan["music_plan"],
         "visual_plan": plan["visual_plan"],
@@ -100599,6 +100896,34 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_parent_public_product_type": str(plan.get("idea_parent_public_product_type") or ""),
         "idea_return_step": str(plan.get("idea_return_step") or ""),
         "content_source": "idea_catalog",
+        "content_mode": "suggestions",
+        "canonical_content_mode": "idea_catalog",
+        "content_choice": {
+            "id": str(plan.get("idea_id") or plan.get("idea_preset_id") or ""),
+            "title": str(plan.get("idea_title") or plan.get("subject") or ""),
+        },
+        "per_scene_content": list(
+            plan.get("idea_scene_contents")
+            or plan.get("idea_scene_content")
+            or drafts
+        ),
+        "content_revision": max(
+            1,
+            safe_int(plan.get("idea_preset_version") or source.get("idea_preset_version"), 1),
+        ),
+        "selected_prompt": selected_prompt,
+        "plan_status": "ready",
+        "flow_owner": str(
+            plan.get("idea_parent_flow_owner")
+            or source.get("idea_parent_flow_owner")
+            or "scene3"
+        ),
+        "parent_session_id": str(
+            plan.get("idea_parent_session_id")
+            or source.get("parent_session_id")
+            or source.get("flow_session_id")
+            or ""
+        ),
         "selected_profile": str(plan.get("selected_profile") or ""),
         "trend_id": str(plan.get("trend_id") or ""),
         "trend_title": str(plan.get("trend_title") or ""),
@@ -100648,6 +100973,8 @@ async def video_idea_render_exact_parent(
     ).strip()
     idea_metadata = {
         "content_source": "idea_catalog",
+        "content_mode": "suggestions",
+        "canonical_content_mode": "idea_catalog",
         "idea_id": str(idea_state.get("idea_id") or handoff.get("idea_id") or ""),
         "idea_title": str(idea_state.get("idea_title") or handoff.get("idea_title") or subject),
         "idea_preset_id": safe_int(idea_state.get("idea_preset_id") or handoff.get("idea_preset_id"), 0),
@@ -100663,7 +100990,32 @@ async def video_idea_render_exact_parent(
         "idea_scene_contents": list(
             idea_state.get("idea_scene_contents")
             or idea_state.get("idea_scene_content")
-            or []
+            or scene_drafts
+        ),
+        "per_scene_content": list(
+            idea_state.get("idea_scene_contents")
+            or idea_state.get("idea_scene_content")
+            or scene_drafts
+        ),
+        "content_choice": {
+            "id": str(idea_state.get("idea_id") or handoff.get("idea_id") or idea_state.get("idea_preset_id") or ""),
+            "title": str(idea_state.get("idea_title") or handoff.get("idea_title") or subject),
+        },
+        "content_revision": max(
+            1,
+            safe_int(idea_state.get("idea_preset_version") or handoff.get("idea_preset_version"), 1),
+        ),
+        "plan_status": "ready",
+        "flow_owner": str(
+            handoff.get("idea_parent_flow_owner")
+            or handoff.get("flow_owner")
+            or video_tail9.adapter_for(product_id or "video_ai_real").get("flow_owner")
+            or "scene3"
+        ),
+        "parent_session_id": str(
+            handoff.get("idea_parent_session_id")
+            or handoff.get("parent_session_id")
+            or ""
         ),
         "idea_parent_handoff": dict(idea_state.get("idea_parent_handoff") or {}),
     }
@@ -100801,9 +101153,8 @@ async def video_idea_continue_to_exact_parent(
         restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
         return await safe_edit_or_send_long_html(
             target,
-            "⚠️ <b>Phiên liên kết với sản phẩm cha không còn hợp lệ.</b>\n\n"
-            "TOAN AAS giữ nguyên preset và prompt hiện tại. Hãy quay lại đúng màn chọn nguồn nội dung "
-            "của sản phẩm để mở lại Kho Ý tưởng; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+            "Vui lòng quay lại chọn lại Ý tưởng video từ sản phẩm đang làm.\n\n"
             + video_idea_prompt_selection_text(current),
             reply_markup=video_idea_prompt_selection_keyboard(current),
         )
@@ -100814,8 +101165,8 @@ async def video_idea_continue_to_exact_parent(
         restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
         return await safe_edit_or_send_long_html(
             target,
-            "⚠️ <b>Phiên liên kết với sản phẩm cha không còn hợp lệ.</b>\n\n"
-            "Preset và prompt hiện tại vẫn được giữ; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+            "Vui lòng quay lại chọn lại Ý tưởng video từ sản phẩm đang làm.\n\n"
             + video_idea_prompt_selection_text(current),
             reply_markup=video_idea_prompt_selection_keyboard(current),
         )
@@ -100832,9 +101183,8 @@ async def video_idea_continue_to_exact_parent(
         restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
         return await safe_edit_or_send_long_html(
             target,
-            "⚠️ <b>Phiên liên kết không khớp sản phẩm đang mở.</b>\n\n"
-            "TOAN AAS giữ nguyên preset, prompt, số cảnh và tỉ lệ. Hãy quay lại đúng màn chọn nguồn nội dung "
-            "để nối lại phiên; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+            "Vui lòng quay lại kiểm tra nội dung hoặc cấu hình đã chọn.\n\n"
             + video_idea_prompt_selection_text(current),
             reply_markup=video_idea_prompt_selection_keyboard(current),
         )
@@ -100854,6 +101204,23 @@ async def video_idea_continue_to_exact_parent(
                 "idea_parent_public_product_type": parent_handoff["idea_parent_public_product_type"],
                 "idea_return_step": parent_handoff["idea_return_step"],
                 "content_source": "idea_catalog",
+                "content_mode": "suggestions",
+                "canonical_content_mode": "idea_catalog",
+                "content_choice": {
+                    "id": str(current.get("idea_id") or current.get("idea_preset_id") or ""),
+                    "title": str(current.get("idea_title") or current.get("subject") or ""),
+                },
+                "per_scene_content": list(
+                    current.get("idea_scene_contents")
+                    or current.get("idea_scene_content")
+                    or current.get("scene_drafts")
+                    or []
+                ),
+                "content_revision": max(1, safe_int(current.get("idea_preset_version"), 1)),
+                "selected_prompt": str(current.get("idea_selected_prompt") or ""),
+                "plan_status": "ready",
+                "flow_owner": str(parent_handoff["idea_parent_flow_owner"] or handoff.get("flow_owner") or "scene3"),
+                "parent_session_id": str(parent_handoff["idea_parent_session_id"] or handoff.get("parent_session_id") or ""),
                 "selected_profile": str(current.get("selected_profile") or ""),
                 "idea_id": str(current.get("idea_id") or ""),
                 "idea_title": str(current.get("idea_title") or ""),
@@ -100882,7 +101249,7 @@ async def video_idea_continue_to_exact_parent(
         if str(exc) == "self_shot_source_video_required":
             return await safe_edit_or_send(
                 target,
-                "⚠️ Tự quay & đổi cảnh AI cần video nguồn trước khi dùng ý tưởng. Hệ thống chưa bắt đầu tạo video và chưa trừ Xu.",
+                "⚠️ Tự quay & đổi cảnh AI cần video nguồn trước khi dùng ý tưởng.",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("⬅️ Gửi video nguồn", callback_data="vproduct|idea_back|self_shot_scene_change"),
                     InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
@@ -100897,8 +101264,8 @@ async def video_idea_continue_to_exact_parent(
         restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
         return await safe_edit_or_send_long_html(
             target,
-            "⚠️ <b>Contract của sản phẩm chưa chấp nhận prompt này.</b>\n\n"
-            "Phiên cha và lựa chọn hiện tại vẫn được giữ; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+            "Vui lòng quay lại kiểm tra nội dung hoặc cấu hình đã chọn.\n\n"
             + video_idea_prompt_selection_text(current),
             reply_markup=video_idea_prompt_selection_keyboard(current),
         )
@@ -100912,8 +101279,8 @@ async def video_idea_continue_to_exact_parent(
         restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
         return await safe_edit_or_send_long_html(
             target,
-            "⚠️ <b>Chưa thể mở bước tiếp theo của sản phẩm.</b>\n\n"
-            "TOAN AAS giữ nguyên prompt và flow cha; chưa tạo tác vụ, chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+            "Vui lòng quay lại kiểm tra nội dung hoặc cấu hình đã chọn.\n\n"
             + video_idea_prompt_selection_text(current),
             reply_markup=video_idea_prompt_selection_keyboard(current),
         )
@@ -100950,9 +101317,8 @@ async def video_idea_continue_to_exact_parent(
         restore_developing_video_pending(user_id, "videoidea", current, "idea2_prompt")
         return await safe_edit_or_send_long_html(
             target,
-            "⚠️ <b>Chưa thể mở đúng màn kế tiếp.</b>\n\n"
-            "TOAN AAS giữ nguyên prompt, số cảnh, tỉ lệ và flow cha; chưa tạo tác vụ, "
-            "chưa gọi nguồn dựng và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+            "Vui lòng quay lại kiểm tra nội dung hoặc cấu hình đã chọn.\n\n"
             + video_idea_prompt_selection_text(current),
             reply_markup=video_idea_prompt_selection_keyboard(current),
         )
@@ -100984,7 +101350,7 @@ async def handle_video_idea_prompt_callback(update: Update, context: ContextType
         page = max(1, safe_int(context.user_data.get("video_idea_catalog_page"), 1))
         return await safe_edit_or_send_long_html(
             query,
-            "⚠️ <b>Phiên chọn prompt đã hết hạn.</b> Hãy chọn lại ý tưởng; hệ thống chưa tạo tác vụ và chưa trừ Xu.\n\n"
+            "⚠️ <b>Chưa thể tiếp tục</b>\n\nHãy mở lại Ý tưởng video từ sản phẩm đang làm.\n\n"
             + video_idea_dynamic_page_text(page, lang),
             reply_markup=video_idea_dynamic_page_keyboard(
                 page,
@@ -100998,8 +101364,8 @@ async def handle_video_idea_prompt_callback(update: Update, context: ContextType
             state,
             lang,
             notice=(
-                "⚠️ <b>Thiếu flow cha của ý tưởng này.</b> Phiên và preset vẫn được giữ; "
-                "hãy chọn lại preset trong đúng nhóm. Hệ thống chưa tạo tác vụ và chưa trừ Xu."
+                "⚠️ <b>Chưa thể tiếp tục</b>\n\n"
+                "Hãy chọn lại preset từ đúng sản phẩm đang làm."
             ),
         )
         return await safe_edit_or_send_long_html(query, text, reply_markup=keyboard)
