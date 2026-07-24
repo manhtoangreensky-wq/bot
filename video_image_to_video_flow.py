@@ -109,7 +109,6 @@ def frame_video_ratio_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Dọc 9:16", callback_data="framevideo|ratio_first_set|9x16"), InlineKeyboardButton("Ngang 16:9", callback_data="framevideo|ratio_first_set|16x9")],
         [InlineKeyboardButton("Vuông 1:1", callback_data="framevideo|ratio_first_set|1x1"), InlineKeyboardButton("Dọc 4:5", callback_data="framevideo|ratio_first_set|4x5")],
-        [InlineKeyboardButton("✍️ Tự nhập" if is_vi else "✍️ Custom ratio", callback_data="framevideo|ratio_first_custom")],
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="framevideo|image_count_menu"),
             InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),

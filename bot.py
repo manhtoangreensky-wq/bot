@@ -146152,7 +146152,6 @@ def frame_video_ratio_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Dọc 9:16", callback_data="framevideo|ratio_set|9x16"), InlineKeyboardButton("Ngang 16:9", callback_data="framevideo|ratio_set|16x9")],
         [InlineKeyboardButton("Vuông 1:1", callback_data="framevideo|ratio_set|1x1"), InlineKeyboardButton("Dọc 4:5", callback_data="framevideo|ratio_set|4x5")],
-        [InlineKeyboardButton("🖼️ Cách đặt ảnh", callback_data="framevideo|fit_menu"), InlineKeyboardButton("✍️ Tỉ lệ riêng", callback_data="framevideo|ratio_custom")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|panel"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
@@ -146269,11 +146268,65 @@ def frame_video_audio_menu_text(state: dict) -> str:
 
 def frame_video_audio_menu_keyboard(state: dict) -> InlineKeyboardMarkup:
     clean = normalize_frame_video_state(state)
+    back_callback = "framevideo|review" if str(clean.get("tail_return_to") or "") == "review" else "framevideo|motion_menu"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"{'✅' if clean.get('music_file_id') else '□'} Nhạc nền", callback_data="framevideo|music_menu"), InlineKeyboardButton(f"{'✅' if clean.get('voice_file_id') else '□'} Lồng tiếng", callback_data="framevideo|addon|voice")],
-        [InlineKeyboardButton(f"{'✅' if clean.get('subtitle_text') else '□'} Phụ đề", callback_data="framevideo|addon|subtitle"), InlineKeyboardButton("👁️ Xem cấu hình", callback_data="framevideo|addons")],
+        [InlineKeyboardButton(f"{'✅' if clean.get('subtitle_text') else '□'} Phụ đề", callback_data="framevideo|addon|subtitle"), InlineKeyboardButton("👁️ Xem cấu hình", callback_data="framevideo|audio_menu")],
         [InlineKeyboardButton("🔊 Âm lượng nhạc", callback_data="framevideo|volume_menu|music"), InlineKeyboardButton("🔊 Âm lượng lời", callback_data="framevideo|volume_menu|voice")],
-        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [InlineKeyboardButton("✅ Xong âm thanh", callback_data="framevideo|audio_done"), InlineKeyboardButton("⏭️ Bỏ qua âm thanh", callback_data="framevideo|audio_skip")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+
+def frame_video_branding_text(state: dict) -> str:
+    clean = normalize_frame_video_state(state)
+    logo_position = FRAME_VIDEO_POSITION_LABELS.get(
+        str(clean.get("logo_position") or ""),
+        "Chưa chọn",
+    )
+    watermark_position = FRAME_VIDEO_POSITION_LABELS.get(
+        str(clean.get("watermark_position") or ""),
+        "Chưa chọn",
+    )
+    return (
+        "🖼️ <b>Logo và watermark</b>\n\n"
+        f"• Logo hình: <b>{'Đã thêm' if clean.get('logo_enabled') and clean.get('logo_file_id') else 'Chưa thêm'}</b>"
+        f" · {html.escape(logo_position)}\n"
+        f"• Watermark chữ: <b>{'Đã thêm' if clean.get('watermark_enabled') and clean.get('watermark_text') else 'Chưa thêm'}</b>"
+        f" · {html.escape(watermark_position)}\n\n"
+        "Logo dùng ảnh; watermark dùng chữ. Mỗi mục chỉ được lưu sau khi đã chọn vị trí."
+    )
+
+
+def frame_video_branding_keyboard(state: dict) -> InlineKeyboardMarkup:
+    clean = normalize_frame_video_state(state)
+    logo_ready = bool(clean.get("logo_enabled") and clean.get("logo_file_id"))
+    watermark_ready = bool(clean.get("watermark_enabled") and clean.get("watermark_text"))
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼️ Thêm logo" if not logo_ready else "🖼️ Thay logo", callback_data="framevideo|branding|logo"), InlineKeyboardButton("✍️ Thêm watermark" if not watermark_ready else "✍️ Sửa watermark", callback_data="framevideo|branding|watermark")],
+        [InlineKeyboardButton("📍 Vị trí logo", callback_data="framevideo|branding|position|logo"), InlineKeyboardButton("📍 Vị trí watermark", callback_data="framevideo|branding|position|watermark")],
+        [InlineKeyboardButton("🗑️ Xóa logo", callback_data="framevideo|branding|remove|logo"), InlineKeyboardButton("🗑️ Xóa watermark", callback_data="framevideo|branding|remove|watermark")],
+        [InlineKeyboardButton("✅ Xong bổ sung", callback_data="framevideo|branding|done"), InlineKeyboardButton("⏭️ Bỏ qua", callback_data="framevideo|branding|skip")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|audio_menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+
+def frame_video_branding_confirm_text(kind: str, state: dict) -> str:
+    clean = normalize_frame_video_state(state)
+    label = "logo" if kind == "logo" else "watermark"
+    position = str(clean.get("pending_brand_position") or clean.get(f"{kind}_position") or "bottom_right")
+    position_label = FRAME_VIDEO_POSITION_LABELS.get(position, position)
+    return (
+        f"✅ <b>Xác nhận {label}</b>\n\n"
+        f"Vị trí đã chọn: <b>{html.escape(position_label)}</b>.\n\n"
+        "Bấm Lưu để đưa cấu hình này vào video."
+    )
+
+
+def frame_video_branding_confirm_keyboard(kind: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Lưu cấu hình", callback_data=f"framevideo|branding_confirm|{kind}"), InlineKeyboardButton("📍 Chọn lại vị trí", callback_data=f"framevideo|branding|position|{kind}")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|branding"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
 
@@ -146503,7 +146556,7 @@ def frame_video_review_keyboard(invoice: bool = False, state: dict | None = None
             ])
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("⭐ Hoàn thiện video", callback_data="framevideo|quality_menu"), InlineKeyboardButton("✏️ Sửa bổ sung", callback_data="framevideo|addons")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|addons"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+            [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|branding"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
         ])
     if invoice:
         return InlineKeyboardMarkup([
@@ -147720,6 +147773,20 @@ async def handle_frame_video_pending_media(update: Update, context: ContextTypes
         return True
     if target == "logo_upload":
         return_to = str(state.get("addon_return_to") or "addons")
+        if is_frame_video3_state(state):
+            state.update({
+                "logo_file_id": file_id,
+                "pending_brand_kind": "logo",
+                "pending_brand_position": str(state.get("logo_position") or "top_right"),
+                "pending_input": "",
+                "step": "logo_position",
+            })
+            set_frame_video_state(uid, state)
+            await update.message.reply_text(
+                "✅ Đã nhận ảnh logo. Hãy chọn vị trí rồi xác nhận lưu.",
+                reply_markup=frame_video_position_keyboard("logo", "framevideo|branding"),
+            )
+            return True
         state.update({"logo_enabled": True, "logo_file_id": file_id, "pending_input": "", "step": "addons"})
         set_frame_video_state(uid, state)
         await update.message.reply_text(
@@ -147731,9 +147798,10 @@ async def handle_frame_video_pending_media(update: Update, context: ContextTypes
         )
         return True
     audio_key = "music" if target == "music_upload" else "voice"
+    stored_return_to = state.get("music_return_to") if audio_key == "music" else state.get("addon_return_to")
     return_to = str(
-        state.get("music_return_to") if audio_key == "music" else state.get("addon_return_to")
-        or ("music_menu" if audio_key == "music" else "addons")
+        stored_return_to
+        or ("audio_menu" if is_frame_video3_state(state) else ("music_menu" if audio_key == "music" else "addons"))
     )
     state.update({
         f"{audio_key}_enabled": True,
@@ -147869,7 +147937,10 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
                 return True
             kind = str(state.get("pending_volume_kind") or "music")
             state = frame_video_flow.set_volume(state, kind, int(value))
-            return_to = str(state.get("pending_return_to") or ("music_menu" if kind == "music" else "addons"))
+            return_to = str(
+                state.get("pending_return_to")
+                or ("audio_menu" if is_frame_video3_state(state) else ("music_menu" if kind == "music" else "addons"))
+            )
             state.update({"step": "audio" if return_to == "audio_menu" else ("music" if return_to == "music_menu" else "addons"), "pending_volume_kind": "", "pending_return_to": ""})
             set_frame_video_state(uid, state)
             if return_to == "audio_menu":
@@ -147949,6 +148020,20 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
             await update.message.reply_text("⚠️ Nội dung đang trống. Anh/chị nhập lại nhé.")
             return True
         if step == "watermark_input":
+            if is_frame_video3_state(state):
+                state.update({
+                    "watermark_text": content,
+                    "pending_brand_kind": "watermark",
+                    "pending_brand_position": str(state.get("watermark_position") or "top_right"),
+                    "pending_input": "",
+                    "step": "watermark_position",
+                })
+                set_frame_video_state(uid, state)
+                await update.message.reply_text(
+                    "✅ Đã nhận watermark chữ. Hãy chọn vị trí rồi xác nhận lưu.",
+                    reply_markup=frame_video_position_keyboard("watermark", "framevideo|branding"),
+                )
+                return True
             state.update({"watermark_enabled": True, "watermark_text": content, "step": "addons"})
             set_frame_video_state(uid, state)
             await update.message.reply_text("✅ Đã lưu watermark. Chọn vị trí hiển thị.", reply_markup=frame_video_position_keyboard("watermark"))
@@ -169495,12 +169580,12 @@ async def cmd_tool_test_frame_video(update: Update, context: ContextTypes.DEFAUL
 FRAME_VIDEO_CANONICAL_ACTIONS = {
     "source", "how", "image_count", "image_count_menu", "image_count_custom",
     "ratio_first_menu", "ratio_first_set", "ratio_first_recommend", "ratio_first_custom",
-    "assets_done", "panel", "upload", "images", "sort", "image_select", "image_action", "image_caption", "image_receipt", "image_duration",
+    "panel", "upload", "images", "sort", "image_select", "image_action", "image_caption", "image_receipt", "image_duration",
     "duration_menu", "duration_set", "duration_custom", "duration_done", "ratio_menu", "ratio_set", "ratio_custom",
     "fit_menu", "fit_set", "transition_menu", "transition_set", "transition_time",
     "motion_menu", "motion_set", "music_menu", "music_upload", "music_off", "volume_menu",
-    "volume", "volume_custom", "audio_fade", "addons", "audio_menu", "addons_done", "addons_skip",
-    "addon", "position_menu", "position_set",
+    "volume", "volume_custom", "audio_fade", "addons", "audio_menu", "audio_done", "audio_skip", "addons_done", "addons_skip",
+    "branding", "branding_confirm", "addon", "position_menu", "position_set",
     "text_list", "text_select", "text_editor", "text_action", "text_edit", "text_scope_menu",
     "text_scope_set", "text_timing", "text_animation_menu", "text_animation_set",
     "text_style_menu", "text_style_set", "quality_menu", "quality_set", "quality_info", "review",
@@ -170152,10 +170237,66 @@ def frame_video3_current_screen(state: dict, lang: str) -> tuple[str, InlineKeyb
     if step == "motion":
         current = FRAME_VIDEO_MOTION_LABELS.get(str(clean.get("motion") or "none"), "Ảnh tĩnh")
         return f"🎥 <b>Chuyển động ảnh</b>\n\nHiện tại: <b>{html.escape(current)}</b>.", frame_video_motion_keyboard(clean), "HTML"
-    if step in {"addons", "audio", "music", "volume", "logo_upload", "voice_upload", "music_upload"}:
-        return frame_video_addons_text(clean), frame_video_addons_keyboard(clean), "HTML"
-    if step in {"review", "quality", "invoice"}:
-        return frame_video_review_text(clean, 0, step == "invoice"), frame_video_review_keyboard(step == "invoice", clean), "HTML"
+    if step in {"addons", "audio"}:
+        return frame_video_audio_menu_text(clean), frame_video_audio_menu_keyboard(clean), "HTML"
+    if step == "music":
+        return frame_video_music_menu_text(clean), frame_video_music_menu_keyboard(clean, "framevideo|audio_menu"), "HTML"
+    if step in {"volume", "volume_custom"}:
+        kind = str(clean.get("pending_volume_kind") or "music")
+        label = "nhạc nền" if kind == "music" else "lồng tiếng"
+        return (
+            f"🔊 <b>Âm lượng {label}</b>\n\nHiện tại: <b>{int(clean.get(f'{kind}_volume_percent') or 0)}%</b>. Giới hạn 0–200%, có chống vỡ tiếng.",
+            frame_video_volume_keyboard(kind, "framevideo|audio_menu"),
+            "HTML",
+        )
+    if step == "logo_upload":
+        return (
+            "📎 <b>Gửi ảnh logo</b>\n\nGửi một ảnh PNG, JPG hoặc WebP. Sau đó anh/chị sẽ chọn vị trí và xác nhận trước khi lưu.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|branding"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            "HTML",
+        )
+    if step == "watermark_input":
+        return (
+            "✍️ <b>Nhập watermark chữ</b>\n\nGửi nội dung watermark. Sau đó anh/chị sẽ chọn vị trí và xác nhận trước khi lưu.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|branding"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            "HTML",
+        )
+    if step == "voice_upload":
+        return (
+            "📎 <b>Gửi file lồng tiếng</b>\n\nGửi MP3, WAV, M4A, AAC, OGG hoặc FLAC. Chỉ lưu file vào kế hoạch, chưa tạo video.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|audio_menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            "HTML",
+        )
+    if step == "music_upload":
+        return (
+            "📎 <b>Gửi file nhạc</b>\n\nGửi MP3, WAV, M4A, AAC, OGG hoặc FLAC. Chỉ lưu file vào kế hoạch, chưa tạo video.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|music_menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            "HTML",
+        )
+    if step == "subtitle_input":
+        return (
+            "✍️ <b>Nhập phụ đề</b>\n\nPhụ đề mặc định hiển thị ở dưới giữa.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|audio_menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            "HTML",
+        )
+    if step == "branding":
+        return frame_video_branding_text(clean), frame_video_branding_keyboard(clean), "HTML"
+    if step in {"logo_position", "watermark_position"}:
+        kind = "logo" if step == "logo_position" else "watermark"
+        return (
+            f"📍 <b>Chọn vị trí {'logo' if kind == 'logo' else 'watermark'}</b>",
+            frame_video_position_keyboard(kind, "framevideo|branding"),
+            "HTML",
+        )
+    if step in {"logo_confirm", "watermark_confirm"}:
+        kind = "logo" if step == "logo_confirm" else "watermark"
+        return frame_video_branding_confirm_text(kind, clean), frame_video_branding_confirm_keyboard(kind), "HTML"
+    if step == "review":
+        return frame_video_review_text(clean, 0, False), frame_video_review_keyboard(False, clean), "HTML"
+    if step == "quality":
+        return frame_video_quality_text(clean), frame_video_quality_keyboard(clean), "HTML"
+    if step == "invoice":
+        return frame_video_review_text(clean, 0, True), frame_video_review_keyboard(True, clean), "HTML"
     return frame_video_panel_text(clean), frame_video_panel_keyboard(), "HTML"
 
 
@@ -170387,18 +170528,18 @@ async def handle_frame_video_canonical_callback(
         state["motion"] = parts[2] if parts[2] in frame_video_runtime.MOTIONS else "none"
         set_frame_video_state(uid, state)
         if is_frame_video3_state(state):
-            state["step"] = "addons"
+            state["step"] = "audio"
             set_frame_video_state(uid, state)
             return await safe_edit_or_send(
                 query,
-                frame_video_addons_text(state),
+                frame_video_audio_menu_text(state),
                 parse_mode="HTML",
-                reply_markup=frame_video_addons_keyboard(state),
+                reply_markup=frame_video_audio_menu_keyboard(state),
             )
         return await safe_edit_or_send(query, frame_video_panel_text(state), parse_mode="HTML", reply_markup=frame_video_panel_keyboard())
     if action == "music_menu":
         current_step = str(state.get("step") or "")
-        return_to = "audio_menu" if current_step == "audio" else ("addons" if current_step == "addons" else "panel")
+        return_to = "audio_menu" if current_step in {"audio", "addons"} else "panel"
         state["music_return_to"] = return_to
         back_callback = {
             "audio_menu": "framevideo|audio_menu",
@@ -170438,7 +170579,7 @@ async def handle_frame_video_canonical_callback(
         kind = parts[2] if parts[2] in {"music", "voice"} else "music"
         label = "nhạc nền" if kind == "music" else "lồng tiếng"
         current_step = str(state.get("step") or "")
-        return_to = "audio_menu" if current_step == "audio" else ("music_menu" if kind == "music" else "addons")
+        return_to = "audio_menu" if is_frame_video3_state(state) or current_step == "audio" else ("music_menu" if kind == "music" else "addons")
         state["volume_return_to"] = return_to
         return await show(
             f"🔊 <b>Âm lượng {label}</b>\n\nHiện tại: <b>{int(state.get(f'{kind}_volume_percent') or 0)}%</b>. Giới hạn 0–200%, có chống vỡ tiếng.",
@@ -170448,7 +170589,7 @@ async def handle_frame_video_canonical_callback(
     if action == "volume" and len(parts) > 3:
         kind = parts[2]
         state = frame_video_flow.set_volume(state, kind, _safe_int(parts[3], 0))
-        return_to = str(state.get("volume_return_to") or ("music_menu" if kind == "music" else "addons"))
+        return_to = str(state.get("volume_return_to") or ("audio_menu" if is_frame_video3_state(state) else ("music_menu" if kind == "music" else "addons")))
         set_frame_video_state(uid, state)
         if return_to == "audio_menu":
             return await safe_edit_or_send(query, frame_video_audio_menu_text(state), parse_mode="HTML", reply_markup=frame_video_audio_menu_keyboard(state))
@@ -170471,7 +170612,7 @@ async def handle_frame_video_canonical_callback(
         )
     if action == "volume_custom" and len(parts) > 2:
         kind = parts[2] if parts[2] in {"music", "voice"} else "music"
-        return_to = str(state.get("volume_return_to") or ("music_menu" if kind == "music" else "addons"))
+        return_to = str(state.get("volume_return_to") or ("audio_menu" if is_frame_video3_state(state) else ("music_menu" if kind == "music" else "addons")))
         state.update({"step": "volume_custom", "pending_input": "volume", "pending_volume_kind": kind, "pending_return_to": return_to})
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(
@@ -170511,14 +170652,18 @@ async def handle_frame_video_canonical_callback(
             ),
         )
     if action == "addons":
+        if is_frame_video3_state(state):
+            if str(state.get("step") or "") == "review":
+                state["tail_return_to"] = "review"
+            return await show(frame_video_audio_menu_text(state), frame_video_audio_menu_keyboard(state), "audio")
         return await show(frame_video_addons_text(state), frame_video_addons_keyboard(state), "addons")
     if action == "audio_menu":
         return await show(frame_video_audio_menu_text(state), frame_video_audio_menu_keyboard(state), "audio")
-    if action == "addons_done":
+    if action in {"audio_done", "addons_done"}:
         if is_frame_video3_state(state):
-            return await show(frame_video_review_text(state, uid, False), frame_video_review_keyboard(False, state), "review")
+            return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
         return await show(frame_video_panel_text(state), frame_video_panel_keyboard(), "panel")
-    if action == "addons_skip":
+    if action in {"audio_skip", "addons_skip"}:
         state.update(
             {
                 "music_enabled": False,
@@ -170527,20 +170672,100 @@ async def handle_frame_video_canonical_callback(
                 "voice_file_id": "",
                 "subtitle_enabled": False,
                 "subtitle_text": "",
-                "logo_enabled": False,
-                "logo_file_id": "",
-                "watermark_enabled": False,
-                "watermark_text": "",
-                "text_overlays": [],
-                "selected_text_id": "",
             }
         )
+        if not is_frame_video3_state(state):
+            state.update(
+                {
+                    "logo_enabled": False,
+                    "logo_file_id": "",
+                    "watermark_enabled": False,
+                    "watermark_text": "",
+                    "text_overlays": [],
+                    "selected_text_id": "",
+                }
+            )
         state = frame_video_flow.sync_render_overlays(state)
         if is_frame_video3_state(state):
-            return await show(frame_video_review_text(state, uid, False), frame_video_review_keyboard(False, state), "review")
+            return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
         return await show(frame_video_panel_text(state), frame_video_panel_keyboard(), "panel")
+    if action == "branding":
+        operation = str(parts[2] if len(parts) > 2 else "menu")
+        if operation == "logo":
+            state.update({"step": "logo_upload", "pending_input": "logo_upload", "pending_brand_kind": "logo"})
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                "📎 <b>Gửi ảnh logo</b>\n\nGửi một ảnh PNG, JPG hoặc WebP. Sau đó chọn vị trí rồi xác nhận lưu.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|branding"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            )
+        if operation == "watermark":
+            state.update({"step": "watermark_input", "pending_input": "watermark", "pending_brand_kind": "watermark"})
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                "✍️ <b>Nhập watermark chữ</b>\n\nGửi nội dung watermark. Sau đó chọn vị trí rồi xác nhận lưu.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|branding"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
+            )
+        if operation == "position" and len(parts) > 3:
+            kind = str(parts[3])
+            has_value = bool(state.get("logo_file_id")) if kind == "logo" else bool(state.get("watermark_text"))
+            if kind not in {"logo", "watermark"} or not has_value:
+                return await show(
+                    frame_video_branding_text(state) + "\n\n⚠️ Hãy thêm " + ("logo" if kind == "logo" else "watermark") + " trước khi chọn vị trí.",
+                    frame_video_branding_keyboard(state),
+                    "branding",
+                )
+            state.update({"pending_brand_kind": kind, "step": f"{kind}_position"})
+            return await show(
+                f"📍 <b>Chọn vị trí {'logo' if kind == 'logo' else 'watermark'}</b>",
+                frame_video_position_keyboard(kind, "framevideo|branding"),
+                f"{kind}_position",
+            )
+        if operation == "remove" and len(parts) > 3:
+            kind = str(parts[3])
+            if kind == "logo":
+                state.update({"logo_enabled": False, "logo_file_id": "", "logo_position": "top_right"})
+            elif kind == "watermark":
+                state.update({"watermark_enabled": False, "watermark_text": "", "watermark_position": "top_right"})
+            state = frame_video_flow.sync_render_overlays(state)
+            return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
+        if operation in {"done", "skip"}:
+            if operation == "skip":
+                state.update({
+                    "logo_enabled": False,
+                    "logo_file_id": "",
+                    "watermark_enabled": False,
+                    "watermark_text": "",
+                    "pending_brand_kind": "",
+                    "pending_brand_position": "",
+                })
+                state = frame_video_flow.sync_render_overlays(state)
+            state["tail_return_to"] = ""
+            return await show(frame_video_review_text(state, uid, False), frame_video_review_keyboard(False, state), "review")
+        return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
+    if action == "branding_confirm" and len(parts) > 2:
+        kind = str(parts[2])
+        position = str(state.get("pending_brand_position") or state.get(f"{kind}_position") or "bottom_right")
+        if kind == "logo" and state.get("logo_file_id"):
+            state.update({"logo_enabled": True, "logo_position": position})
+        elif kind == "watermark" and state.get("watermark_text"):
+            state.update({"watermark_enabled": True, "watermark_position": position})
+        else:
+            return await show(
+                frame_video_branding_text(state) + "\n\n⚠️ Dữ liệu chưa đủ để lưu. Hãy thêm lại mục này.",
+                frame_video_branding_keyboard(state),
+                "branding",
+            )
+        state.update({"pending_brand_kind": "", "pending_brand_position": ""})
+        state = frame_video_flow.sync_render_overlays(state)
+        return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
     if action == "addon" and len(parts) > 2:
         kind = parts[2]
+        if is_frame_video3_state(state) and kind in {"logo", "watermark"}:
+            return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
         return_to = "audio_menu" if str(state.get("step") or "") == "audio" and kind in {"voice", "subtitle"} else "addons"
         state["addon_return_to"] = return_to
         existing_key = {"logo": "logo_file_id", "watermark": "watermark_text", "subtitle": "subtitle_text", "voice": "voice_file_id"}.get(kind, "")
@@ -170593,6 +170818,8 @@ async def handle_frame_video_canonical_callback(
             )
     if action == "position_menu" and len(parts) > 2:
         kind = parts[2]
+        if is_frame_video3_state(state) and kind in {"logo", "watermark"}:
+            return await show(frame_video_branding_text(state), frame_video_branding_keyboard(state), "branding")
         label = {"logo": "logo", "watermark": "watermark", "text": "chữ"}.get(kind, "nội dung")
         back = "framevideo|text_editor" if kind == "text" else "framevideo|addons"
         return await show(f"📍 <b>Chọn vị trí {html.escape(label)}</b>", frame_video_position_keyboard(kind, back), "position")
@@ -170605,6 +170832,20 @@ async def handle_frame_video_canonical_callback(
                 state = frame_video_flow.update_selected_text(state, position=position)
             except ValueError:
                 return await safe_edit_or_send(query, "⚠️ Chưa chọn mục chữ.", parse_mode=None, reply_markup=frame_video_text_list_keyboard(state))
+        elif is_frame_video3_state(state) and kind in {"logo", "watermark"}:
+            has_value = bool(state.get("logo_file_id")) if kind == "logo" else bool(state.get("watermark_text"))
+            if not has_value:
+                return await show(
+                    frame_video_branding_text(state) + "\n\n⚠️ Hãy thêm mục này trước khi chọn vị trí.",
+                    frame_video_branding_keyboard(state),
+                    "branding",
+                )
+            state.update({"pending_brand_kind": kind, "pending_brand_position": position})
+            return await show(
+                frame_video_branding_confirm_text(kind, state),
+                frame_video_branding_confirm_keyboard(kind),
+                f"{kind}_confirm",
+            )
         elif kind in {"logo", "watermark"}:
             state[f"{kind}_position"] = position
         set_frame_video_state(uid, state)
