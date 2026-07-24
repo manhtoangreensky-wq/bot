@@ -91,6 +91,12 @@ def test_review_requires_summary_before_quality_for_all_tail_owners() -> None:
     assert "video_tail|review|summary" not in edit_review
     assert "video_tail|audio|open" in tail_review
     assert "video_tail|audio|open" in edit_review
+    assert "video_tail|logo|open" in scene_review
+    assert "video_tail|logo|open" in tail_review
+    assert "video_tail|logo|open" in edit_review
+    assert "video_tail|summary|open" in scene_review
+    assert "video_tail|summary|open" in tail_review
+    assert "video_tail|summary|open" in edit_review
     assert "video_tail|logo|open" in summary
     assert '("⬅️ Quay lại", "video_tail|logo|open")' in summary
 
@@ -116,6 +122,29 @@ def test_completed_legacy_ai_plan_restores_the_missing_content_contract() -> Non
     assert compiled["content_mode"] == "suggestions"
     assert compiled["content_source"] == "content_profiles"
     assert compiled["primary_profile_key"]
+    assert compiled["content_choice"]
+    assert compiled["plan_status"] == "ready"
+
+
+def test_completed_non_ai_scene_plan_restores_the_missing_content_contract() -> None:
+    compiled = _compile_contract(
+        {
+            "source_product_id": "video_trend",
+            "selected_prompt": "Giữ mạch trend rõ ràng giữa các cảnh.",
+            "plan": {
+                "scenes": [
+                    {"title": "Mở trend", "goal": "Tạo điểm vào"},
+                    {"title": "Khép trend", "goal": "Đưa kết quả"},
+                ],
+            },
+            "scene_count": 2,
+            "aspect_ratio": "9:16",
+        },
+        "video_trend",
+    )
+
+    assert compiled["content_mode"] == "suggestions"
+    assert compiled["content_source"] == "content_profiles"
     assert compiled["content_choice"]
     assert compiled["plan_status"] == "ready"
 
@@ -158,6 +187,24 @@ def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positio
     assert '"video_tail|logo|open"' in summary
     assert '"video_tail|quality|open"' in summary
     assert '"video_tail|summary|open"' in quality
+
+
+def test_legacy_review_audio_and_audio_exit_use_the_shared_branding_route() -> None:
+    callback = _function_source("handle_video_tail_callback")
+    legacy_review = _function_source("handle_video_profile_studio_callback")
+
+    audio_start = callback.index('if section == "audio":')
+    logo_start = callback.index('if section == "logo":', audio_start)
+    audio = callback[audio_start:logo_start]
+    legacy_start = legacy_review.index('if action == "review_audio":')
+    legacy_end = legacy_review.index('if action == "review_post":', legacy_start)
+    legacy_audio = legacy_review[legacy_start:legacy_end]
+
+    assert audio.count('video_tail9_render(query, uid, context, "logo")') == 2
+    assert 'if action == "skip":' in audio
+    assert 'if action == "done":' in audio
+    assert 'video_tail9_render(query, uid, context, "audio")' in legacy_audio
+    assert 'audio_plan' not in legacy_audio
 
 
 def test_idea_handoff_preserves_parent_ratio_and_public_recovery_copy() -> None:

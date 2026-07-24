@@ -70703,6 +70703,7 @@ def video_scene3_full_review_keyboard(state: dict) -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("👁️ Xem từng cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
         [("🎬 Prompt video", "video_tail|review|prompts"), ("🎚️ Âm thanh & Add-on", "video_tail|audio|open")],
+        [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -86771,6 +86772,25 @@ def video_tail12_compile_content_contract(state: dict | None, *, product_type: s
             }
         current["primary_profile"] = str(current.get("primary_profile") or profile)
         current["primary_profile_key"] = profile
+    elif scene_content and (selected_prompt or plan):
+        # Completed legacy plans from Trend/Script and the other Scene3
+        # products did not always persist FLOW6's explicit content mode.  A
+        # real scene plan plus a selected prompt is sufficient evidence to
+        # restore its contract; never infer this from a bare topic.
+        source = source or "content_profiles"
+        flow_mode = "manual" if source in {"manual", "custom", "manual_content"} else "suggestions"
+        semantic_mode = "manual" if flow_mode == "manual" else "content_profiles"
+        if flow_mode == "suggestions":
+            profile = profile or "storytelling_life"
+            current["primary_profile"] = str(current.get("primary_profile") or profile)
+            current["primary_profile_key"] = profile
+            if not selection:
+                first_scene = dict(scene_content[0] or {})
+                selection = {
+                    "id": str(current.get("selected_suggestion_id") or "restored_completed_plan"),
+                    "title": str(first_scene.get("title") or first_scene.get("goal") or current.get("subject") or "Nội dung đã chọn"),
+                    "concept": str(first_scene.get("summary") or first_scene.get("goal") or current.get("subject") or ""),
+                }
 
     if not flow_mode:
         return current
@@ -87340,6 +87360,7 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
     return video_scene3_keyboard([
         content_row,
         [("🎬 Prompt video", "video_tail|review|prompts"), ("➡️ Âm thanh & Add-on", "video_tail|audio|open")],
+        [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -87434,6 +87455,7 @@ def video_tail9_video_edit_review_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🎛 Xem thao tác", "video_tail|review|operations"), ("✍️ Sửa thao tác", "video_tail|review|edit_operation")],
         [("➡️ Âm thanh & Add-on", "video_tail|audio|open"), ("🎞 Thông tin video", "video_tail|review|source")],
+        [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -219656,13 +219678,9 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         )
         return await video_profile_scene1_render(query, state, lang)
     if action == "review_audio":
-        state = video_profile_studio_step(
-            context,
-            state,
-            "audio_plan",
-            audio_plan_return_step="full_review",
-        )
-        return await video_profile_scene1_render(query, state, lang)
+        # A stale Review message must enter the same shared Audio →
+        # Logo/Watermark → Summary route as the current UI.
+        return await video_tail9_render(query, uid, context, "audio")
     if action == "review_post":
         # Legacy Review messages must enter the same individual Logo and
         # Watermark flow as the current tail, never reopen the old list.
