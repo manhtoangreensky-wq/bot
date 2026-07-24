@@ -89,6 +89,7 @@ def _create(conn: sqlite3.Connection, *, session: str = "edit-session-1") -> dic
         worker_payload={
             "source_file_id": state["source_file_id"],
             "source_file_name": "input.mp4",
+            "source_video_hash": "c" * 64,
             "manual_edit_plan": state["manual_edit_plan"],
             "provider_call": False,
         },
@@ -235,6 +236,7 @@ def test_editengine1_final_confirm_is_idempotent_and_persists_owner_truth() -> N
     assert job["engine_route"] == "local_worker_ffmpeg"
     assert job["worker_owner"] == "local_video_edit"
     assert job["source_video_path"] == "input.mp4"
+    assert job["source_sha256"] == "c" * 64
 
 
 def test_editengine1_second_connection_reuses_same_job_after_restart(tmp_path: Path) -> None:
@@ -410,6 +412,7 @@ def test_editengine1_real_ffmpeg_brightness_preserves_h264_aac_and_duration(tmp_
     assert result["validation"]["video_codec"] == "h264"
     assert result["validation"]["has_audio"] is True
     assert abs(int(result["validation"]["duration_ms"]) - 2_000) <= 750
+    assert not list(tmp_path.glob("*.partial.mp4"))
     audio_probe = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", str(output)],
         capture_output=True,
@@ -500,6 +503,11 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
         "id": 901,
         "job_type": video_editengine1.WORKER_JOB_TYPE,
         "input_file_id": json.dumps({
+            "local1_contract": 1,
+            "product_type": video_editengine1.PRODUCT_TYPE,
+            "engine_route": video_editengine1.ENGINE_ROUTE,
+            "worker_owner": video_editengine1.OUTBOX_OWNER,
+            "worker_capability": video_editengine1.WORKER_CAPABILITY,
             "source_file_id": "source-telegram-file",
             "source_file_name": "source.mp4",
             "chat_id": "88",
@@ -520,6 +528,49 @@ def test_editengine1_worker_renders_and_delivers_one_real_mp4(tmp_path: Path, mo
     assert receipt["ffprobe"]["ok"] is True
     assert receipt["ffprobe"]["video_codec"] == "h264"
     assert receipt["ffprobe"]["has_audio"] is True
+
+
+def test_editengine1_worker_rejects_wrong_contract_before_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    downloads: list[str] = []
+    deliveries: list[dict] = []
+    updates: list[dict] = []
+
+    monkeypatch.setattr(local_worker, "telegram_download_file", lambda file_id, *_args, **_kwargs: downloads.append(file_id))
+    monkeypatch.setattr(
+        local_worker,
+        "telegram_send_video_receipt",
+        lambda *args, **kwargs: deliveries.append({"args": args, "kwargs": kwargs}),
+    )
+    monkeypatch.setattr(
+        local_worker,
+        "update_job",
+        lambda job_id, status, error_short="", **_kwargs: updates.append(
+            {"job_id": job_id, "status": status, "detail": error_short}
+        ),
+    )
+
+    local_worker.run_video_local_edit({
+        "id": 902,
+        "job_type": video_editengine1.WORKER_JOB_TYPE,
+        "input_file_id": json.dumps({
+            "local1_contract": 1,
+            "product_type": "frame_video",
+            "engine_route": video_editengine1.ENGINE_ROUTE,
+            "worker_owner": video_editengine1.OUTBOX_OWNER,
+            "worker_capability": video_editengine1.WORKER_CAPABILITY,
+            "source_file_id": "wrong-source",
+            "chat_id": "88",
+        }),
+    })
+
+    assert downloads == []
+    assert deliveries == []
+    assert len(updates) == 1
+    assert updates[0]["job_id"] == 902
+    assert updates[0]["status"] == "failed"
+    receipt = json.loads(updates[0]["detail"])
+    assert receipt["reason"] == "video_local_edit_contract_product_type"
+    assert receipt["charge"] == 0
 
 
 def test_editengine1_worker_dispatches_only_to_its_local_renderer(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -58,7 +58,7 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
-from services import frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_local_validation
+from services import frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
 
 
 def load_dotenv(path: str) -> None:
@@ -647,6 +647,18 @@ def run_video_local_edit(job: dict) -> None:
     terminal_receipt: dict = {}
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        if not isinstance(payload, dict):
+            raise LocalVideoEditError("video_local_edit_contract_missing")
+        contract = {
+            "local1_contract": int(payload.get("local1_contract") or 0) == 1,
+            "product_type": str(payload.get("product_type") or "") == video_editengine1.PRODUCT_TYPE,
+            "engine_route": str(payload.get("engine_route") or "") == video_editengine1.ENGINE_ROUTE,
+            "worker_owner": str(payload.get("worker_owner") or "") == video_editengine1.OUTBOX_OWNER,
+            "worker_capability": str(payload.get("worker_capability") or "") == video_editengine1.WORKER_CAPABILITY,
+        }
+        failed_contract = next((name for name, accepted in contract.items() if not accepted), "")
+        if failed_contract:
+            raise LocalVideoEditError(f"video_local_edit_contract_{failed_contract}")
         source_file_id = str(payload.get("source_file_id") or "")
         chat_id = str(payload.get("chat_id") or "")
         if not source_file_id or not chat_id:

@@ -583,6 +583,8 @@ def execute_manual_edit(
 ) -> dict[str, Any]:
     workspace_path = Path(workspace).resolve(strict=False)
     output = require_path_within(output_path, workspace_path)
+    staging = output.with_name(f".{output.stem}.{os.getpid()}.partial{output.suffix}")
+    staging = require_path_within(staging, workspace_path)
     ffmpeg = find_ffmpeg(ffmpeg_path)
     probe_bin = find_ffprobe(ffprobe_path, ffmpeg_path=ffmpeg)
     if not ffmpeg:
@@ -608,29 +610,49 @@ def execute_manual_edit(
         normalized["trim"] = {"start_ms": 0, "end_ms": int(source_probe.get("duration_ms") or 0)}
     if progress:
         progress({"stage": "processing_video", "processed": 0, "total": 1})
-    command = build_manual_ffmpeg_command(normalized, output_path=str(output), source_probe=source_probe, ffmpeg_path=ffmpeg)
-    _run_checked(command, timeout=timeout)
-    enforce_workspace_limit(workspace_path)
-    if progress:
-        progress({"stage": "validating_output", "processed": 1, "total": 1})
-    expected = expected_manual_duration_ms(normalized)
-    validation = validate_mp4_output(
-        output,
-        expected_duration_ms=expected,
-        require_audio=bool(source_probe.get("has_audio") and float(normalized.get("volume") or 0) > 0),
-        ffprobe_path=probe_bin,
-    )
-    if not validation.get("ok"):
-        raise LocalVideoEditError(str(validation.get("reason") or "output_validation_failed"))
-    return {
-        "ok": True,
-        "output_path": str(output),
-        "validation": validation,
-        "expected_duration_ms": expected,
-        "audio_preserved": bool(validation.get("has_audio")) if source_probe.get("has_audio") else False,
-        "provider_called": False,
-        "xu_charged": 0,
-    }
+    try:
+        if staging.exists():
+            staging.unlink()
+        command = build_manual_ffmpeg_command(
+            normalized,
+            output_path=str(staging),
+            source_probe=source_probe,
+            ffmpeg_path=ffmpeg,
+        )
+        _run_checked(command, timeout=timeout)
+        enforce_workspace_limit(workspace_path)
+        if progress:
+            progress({"stage": "validating_output", "processed": 1, "total": 1})
+        expected = expected_manual_duration_ms(normalized)
+        validation = validate_mp4_output(
+            staging,
+            expected_duration_ms=expected,
+            require_audio=bool(source_probe.get("has_audio") and float(normalized.get("volume") or 0) > 0),
+            ffprobe_path=probe_bin,
+        )
+        if not validation.get("ok"):
+            raise LocalVideoEditError(str(validation.get("reason") or "output_validation_failed"))
+        os.replace(staging, output)
+        validation = validate_mp4_output(
+            output,
+            expected_duration_ms=expected,
+            require_audio=bool(source_probe.get("has_audio") and float(normalized.get("volume") or 0) > 0),
+            ffprobe_path=probe_bin,
+        )
+        if not validation.get("ok"):
+            raise LocalVideoEditError(str(validation.get("reason") or "output_finalize_validation_failed"))
+        return {
+            "ok": True,
+            "output_path": str(output),
+            "validation": validation,
+            "expected_duration_ms": expected,
+            "audio_preserved": bool(validation.get("has_audio")) if source_probe.get("has_audio") else False,
+            "provider_called": False,
+            "xu_charged": 0,
+        }
+    finally:
+        if staging.exists():
+            staging.unlink()
 
 
 def execute_split_plan(
