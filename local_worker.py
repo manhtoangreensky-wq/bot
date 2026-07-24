@@ -128,6 +128,8 @@ REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
 VIDEO_EDIT_WORKER_OWNER = "local_video_edit"
 VIDEO_EDIT_ENGINE_ROUTE = "local_worker_ffmpeg"
 VIDEO_EDIT_CAPABILITIES = ("video_edit",)
+FRAME_VIDEO_WORKER_CAPABILITY = "frame_video_render"
+LOCAL_WORKER_CAPABILITIES = VIDEO_EDIT_CAPABILITIES + (FRAME_VIDEO_WORKER_CAPABILITY,)
 LOCAL_WORKER_STARTED_AT_UTC = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 LOCAL_WORKER_INSTANCE_ID = f"{LOCAL_WORKER_ID}:{socket.gethostname()}:{os.getpid()}"
 LOCAL_WORKER_LAST_ERROR = ""
@@ -162,7 +164,9 @@ def local_worker_heartbeat_payload(*, last_error: str = "", queue_depth: int = 0
         "worker_id": LOCAL_WORKER_ID,
         "worker_owner": VIDEO_EDIT_WORKER_OWNER,
         "engine_route": VIDEO_EDIT_ENGINE_ROUTE,
-        "capabilities": list(VIDEO_EDIT_CAPABILITIES),
+        # This worker executes both canonical local-edit and frame-video jobs.
+        # Advertising both avoids admitting a queued job to a worker that cannot own it.
+        "capabilities": list(LOCAL_WORKER_CAPABILITIES),
         "instance_id": LOCAL_WORKER_INSTANCE_ID,
         "process_id": int(os.getpid()),
         "started_at_utc": LOCAL_WORKER_STARTED_AT_UTC,

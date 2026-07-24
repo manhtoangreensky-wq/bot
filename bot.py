@@ -145046,12 +145046,33 @@ def frame_video_total_input_mb(state: dict) -> float:
 def frame_video_estimated_output_seconds(state: dict) -> float:
     return round(frame_video_runtime.expected_duration_seconds(state or {}), 2)
 
-def frame_video_worker_connected() -> bool:
+
+def local_worker_supports_capability(required_capability: str) -> bool:
+    """Accept a queued local job only from the current canonical worker contract."""
+
     try:
-        worker = local_worker_status_payload()
-        return bool(worker.get("enabled") and worker.get("poll_enabled") and worker.get("token_configured") and worker.get("connected"))
+        worker = video_edit_worker_status_payload()
+        capabilities = {
+            str(item).strip()
+            for item in list(worker.get("capabilities") or [])
+            if str(item).strip()
+        }
+        return bool(
+            worker.get("enabled")
+            and worker.get("poll_enabled")
+            and worker.get("token_configured")
+            and worker.get("connected")
+            and int(worker.get("heartbeat_contract_version") or 0) >= 1
+            and str(worker.get("worker_owner") or "") == video_editengine1.OUTBOX_OWNER
+            and str(worker.get("engine_route") or "") == video_editengine1.ENGINE_ROUTE
+            and str(required_capability or "").strip() in capabilities
+        )
     except Exception:
         return False
+
+
+def frame_video_worker_connected() -> bool:
+    return local_worker_supports_capability("frame_video_render")
 
 def frame_video_maintenance_text() -> str:
     return "🎞 Công cụ ghép ảnh thành video đang bảo trì hoặc cần worker xử lý. TOAN AAS chưa trừ Xu. Vui lòng thử lại sau."
@@ -145076,10 +145097,7 @@ def frame_video_commercial_preflight(state: dict, user_id=0) -> dict:
     worker = local_worker_status_payload()
     worker_ffmpeg_path = str(worker.get("ffmpeg_path") or get_system_setting("local_worker:ffmpeg_path_seen", "") or "").strip()
     worker_ready = bool(
-        worker.get("enabled")
-        and worker.get("poll_enabled")
-        and worker.get("token_configured")
-        and worker.get("connected")
+        local_worker_supports_capability("frame_video_render")
         and worker_ffmpeg_path
         and worker.get("ffprobe_path_configured")
     )
