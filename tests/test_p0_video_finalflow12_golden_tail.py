@@ -86,7 +86,78 @@ def test_review_requires_summary_before_quality_for_all_tail_owners() -> None:
     assert "video_tail|quality|open" in summary
     assert '[("⭐ Hoàn thiện video", "video_tail|quality|open")]' not in summary
     assert "video_tail|quality|open" not in edit_review
-    assert "video_tail|review|summary" in edit_review
+    assert "video_tail|review|summary" not in scene_review
+    assert "video_tail|review|summary" not in tail_review
+    assert "video_tail|review|summary" not in edit_review
+    assert "video_tail|audio|open" in tail_review
+    assert "video_tail|audio|open" in edit_review
+    assert "video_tail|logo|open" in summary
+    assert '("⬅️ Quay lại", "video_tail|logo|open")' in summary
+
+
+def test_completed_legacy_ai_plan_restores_the_missing_content_contract() -> None:
+    compiled = _compile_contract(
+        {
+            "source_product_id": "video_ai_realistic",
+            "subject": "Giới thiệu sản phẩm theo mạch rõ ràng",
+            "selected_prompt": "Camera nối tự nhiên giữa các cảnh.",
+            "plan": {
+                "scenes": [
+                    {"title": "Mở đầu", "goal": "Nêu vấn đề"},
+                    {"title": "Kết thúc", "goal": "Khép bằng kết quả"},
+                ],
+            },
+            "scene_count": 2,
+            "aspect_ratio": "9:16",
+        },
+        "video_ai_realistic",
+    )
+
+    assert compiled["content_mode"] == "suggestions"
+    assert compiled["content_source"] == "content_profiles"
+    assert compiled["primary_profile_key"]
+    assert compiled["content_choice"]
+    assert compiled["plan_status"] == "ready"
+
+
+def test_stale_summary_callback_resumes_audio_and_summary_has_its_own_owner() -> None:
+    callback = _function_source("handle_video_tail_callback")
+    blocker = _function_source("video_tail9_public_blocker_keyboard")
+    quality = _function_source("video_tail9_quality_keyboard")
+
+    assert 'if action == "summary":' in callback
+    assert 'video_tail9_render(query, uid, context, "audio")' in callback
+    assert 'if section == "summary":' in callback
+    assert 'video_tail9_render(query, uid, context, "summary")' in callback
+    assert "video_tail|summary|open" in blocker
+    assert "video_tail|review|summary" not in blocker
+    assert "video_tail|summary|open" in quality
+    assert "video_tail|review|summary" not in quality
+    assert "video_tail|review|summary" not in BOT_SOURCE
+
+
+def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positions() -> None:
+    audio = _function_source("video_tail9_audio_keyboard")
+    logo = _function_source("video_tail9_logo_keyboard")
+    positions = _function_source("video_tail9_position_keyboard")
+    summary = _function_source("video_tail9_summary_keyboard")
+    quality = _function_source("video_tail9_quality_keyboard")
+
+    assert '"video_tail|audio|done"' in audio
+    assert '"video_tail|audio|skip"' in audio
+    assert '"video_tail|review|open"' in audio
+    assert '"video_tail|logo|done"' in logo
+    assert '"video_tail|logo|skip"' in logo
+    assert '"video_tail|audio|open"' in logo
+    for position in (
+        "top_left", "top_center", "top_right",
+        "center_left", "center", "center_right",
+        "bottom_left", "bottom_center", "bottom_right",
+    ):
+        assert f'"{position}"' in positions
+    assert '"video_tail|logo|open"' in summary
+    assert '"video_tail|quality|open"' in summary
+    assert '"video_tail|summary|open"' in quality
 
 
 def test_idea_handoff_preserves_parent_ratio_and_public_recovery_copy() -> None:
