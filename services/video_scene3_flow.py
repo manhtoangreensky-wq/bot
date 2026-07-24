@@ -367,6 +367,9 @@ LOGO_POSITIONS = (
     ("top_left", "↖️ Trên trái"),
     ("top_center", "⬆️ Trên giữa"),
     ("top_right", "↗️ Trên phải"),
+    ("center_left", "⬅️ Giữa trái"),
+    ("center", "⏺ Chính giữa"),
+    ("center_right", "➡️ Giữa phải"),
     ("bottom_left", "↙️ Dưới trái"),
     ("bottom_center", "⬇️ Dưới giữa"),
     ("bottom_right", "↘️ Dưới phải"),
@@ -2121,12 +2124,21 @@ def validate_adaptive_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple
 
 
 def validate_two_column_rows(rows: list[list[tuple[str, str]]]) -> list[list[tuple[str, str]]]:
-    """Keep two columns, with one compact 1-5 suggestion-row exception."""
+    """Keep two columns, with compact suggestions and 3x3 position grids."""
 
     normalized = validate_adaptive_rows(rows)
     for row in normalized:
         compact_suggestions = len(row) == 5 and [label for label, _callback in row] == ["1", "2", "3", "4", "5"]
-        if len(row) != 2 and not compact_suggestions:
+        position_grid = len(row) == 3 and all(
+            len(callback.split("|")) >= 3
+            and callback.split("|")[1] in {
+                "content_position_set",
+                "post_position_set",
+                "logo_position_set",
+            }
+            for _label, callback in row
+        )
+        if len(row) != 2 and not compact_suggestions and not position_grid:
             raise ValueError("video_scene3_keyboard_requires_exactly_two_buttons_per_row")
     return normalized
 

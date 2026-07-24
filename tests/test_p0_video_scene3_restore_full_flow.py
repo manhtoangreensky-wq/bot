@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import video_flow6, video_profile_catalog, video_scene3_flow
+from services import video_flow6, video_flow7, video_profile_catalog, video_scene3_flow, video_uifreeze1
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,13 +17,18 @@ SCENE3_SOURCE = (ROOT / "services" / "video_scene3_flow.py").read_text(encoding=
 
 
 def _function_source(name: str) -> str:
-    start = BOT_SOURCE.index(f"def {name}(")
-    candidates = [
-        position
-        for marker in ("\ndef ", "\nasync def ")
-        if (position := BOT_SOURCE.find(marker, start + 1)) >= 0
-    ]
-    end = min(candidates) if candidates else len(BOT_SOURCE)
+    declaration = re.search(rf"^(async )?def {re.escape(name)}\(", BOT_SOURCE, re.MULTILINE)
+    assert declaration, f"missing function: {name}"
+    start = declaration.start()
+    next_declaration = re.search(r"^(?:async )?def [A-Za-z_]\w*\(", BOT_SOURCE[declaration.end() :], re.MULTILINE)
+    if not next_declaration:
+        return BOT_SOURCE[start:]
+    end = declaration.end() + next_declaration.start()
+    # A decorator belongs to the following top-level handler, not to the
+    # isolated source being compiled. Trim it when it sits between functions.
+    decorator = BOT_SOURCE.rfind("\n\n@", start, end)
+    if decorator >= start:
+        end = decorator
     return BOT_SOURCE[start:end]
 
 
@@ -42,7 +47,9 @@ def _keyboard_namespace(*names: str) -> dict:
     namespace = {
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
+        "video_flow7": video_flow7,
         "video_scene3_flow": video_scene3_flow,
+        "video_uifreeze1": video_uifreeze1,
         "video_ai_edit_entry_back": lambda *_args, **_kwargs: "videoedit|ai",
         "ui_text": lambda _lang, key: "⬅️ Quay lại" if key == "common.back" else "🏠 Menu chính",
         "VIDEO_B14_2_QUALITY_OPTIONS": (200, 300, 400, 500, 600, 800, 1000, 1200, 1500),
@@ -267,8 +274,8 @@ def test_content_and_post_addons_default_off_and_support_history():
     assert restored["postproduction_addons"]["logo_image"]["enabled"] is True
 
 
-def test_logo_reference_has_six_positions_safe_size_and_never_claims_mp4_overlay():
-    assert len(video_scene3_flow.LOGO_POSITIONS) == 6
+def test_logo_reference_has_nine_positions_safe_size_and_never_claims_mp4_overlay():
+    assert len(video_scene3_flow.LOGO_POSITIONS) == 9
     state = video_scene3_flow.configure_logo_reference(_state(2), position="top_right", enabled=True)
     config = state["reference_assets"]["logo_config"]
     assert config == {
@@ -547,9 +554,9 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
 
     suggestion_markup = namespace["video_scene3_suggestion_keyboard"]()
     assert [[button.text for button in row] for row in suggestion_markup.inline_keyboard[:3]] == [
-        ["1", "2"],
-        ["3", "4"],
-        ["5", "🔄 Đổi 5 gợi ý"],
+        ["1", "2", "3", "4", "5"],
+        ["🔄 Đổi 5 gợi ý", "✍️ Tự nhập nội dung"],
+        ["⬅️ Quay lại", "🏠 Menu chính"],
     ]
     assert sum(
         "|suggest|" in str(button.callback_data)
@@ -557,9 +564,9 @@ def test_actual_scene3_and_local_editor_keyboards_have_adaptive_unique_real_butt
         for button in row
     ) == 5
     creative_markup = namespace["video_scene3_creative_suggestions_keyboard"]({**state, "active_creative": "visual_style"})
-    assert [button.text for button in creative_markup.inline_keyboard[0]] == ["1", "2"]
+    assert [button.text for button in creative_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
     content_markup = namespace["video_scene3_content_suggestions_keyboard"]({**state, "active_content_addon": "captions"})
-    assert [button.text for button in content_markup.inline_keyboard[0]] == ["1", "2"]
+    assert [button.text for button in content_markup.inline_keyboard[0]] == ["1", "2", "3", "4", "5"]
 
     microflow_namespace = _keyboard_namespace(
         "video_scene3_keyboard",
@@ -819,8 +826,6 @@ def test_changed_scene3_bot_functions_compile_in_isolation():
     )
     for name in names:
         source = _function_source(name)
-        if f"async def {name}(" in BOT_SOURCE:
-            source = "async " + source
         compile("from __future__ import annotations\n" + source, f"<scene3ux1:{name}>", "exec")
 
 

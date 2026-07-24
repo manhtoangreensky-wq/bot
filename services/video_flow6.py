@@ -308,7 +308,15 @@ def context_from_scene_state(state: dict[str, Any] | None) -> dict[str, Any]:
             or context.get("content_source")
             or ""
         ),
-        "primary_profile_key": str(source.get("primary_profile_key") or source.get("primary_profile") or context.get("primary_profile_key") or ""),
+        "primary_profile_key": str(
+            source.get("primary_profile_key")
+            or source.get("primary_profile")
+            or source.get("selected_profile")
+            or context.get("primary_profile_key")
+            or context.get("primary_profile")
+            or context.get("selected_profile")
+            or ""
+        ),
         "content_choice": dict(source.get("content_choice") or source.get("selected_suggestion") or context.get("content_choice") or {}),
         "character_config": dict(source.get("character_config") or context.get("character_config") or {}),
         "style_config": dict(source.get("creative_controls") or context.get("style_config") or {}),

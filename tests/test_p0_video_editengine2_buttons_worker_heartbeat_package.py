@@ -76,11 +76,12 @@ def test_video_edit_review_has_only_exact_product_buttons() -> None:
         "video_tail|audio|open",
         "video_tail|logo|open",
         "video_tail|review|summary",
-        "video_tail|quality|open",
+        "video_tail|review|source",
         "video_tail|review|back",
         "menu|main",
     }
     assert all(callback in section for callback in expected)
+    assert "video_tail|quality|open" not in section
     assert "review|scenes" not in section
     assert "review|prompts" not in section
     assert "review|redo" not in section
@@ -137,8 +138,9 @@ def test_stale_worker_never_exposes_quality_selection_or_payable_invoice() -> No
     render = _section(BOT_SOURCE, "async def video_tail9_render", "async def handle_video_tail_callback")
     assert "selectable=bool(capability.get(\"ok\"))" in render
     handler = _section(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
-    assert "video_tail9_quality_keyboard(tail, catalog, selectable=False)" in handler
-    assert "TOAN AAS chưa tạo tác vụ và chưa trừ Xu" in handler
+    assert 'if not capability.get("ok"):' in handler
+    assert "video_tail9_public_blocker_text()" in handler
+    assert "video_tail9_public_blocker_keyboard()" in handler
 
 
 def test_fresh_canonical_heartbeat_admits_video_edit() -> None:
@@ -172,11 +174,48 @@ def test_worker_heartbeat_payload_registers_exact_adapter_contract() -> None:
     assert payload["heartbeat_contract_version"] == 1
     assert payload["worker_owner"] == "local_video_edit"
     assert payload["engine_route"] == "local_worker_ffmpeg"
-    assert payload["capabilities"] == ["video_edit"]
+    assert payload["capabilities"] == ["video_edit", "frame_video_render"]
     assert payload["instance_id"]
     assert payload["process_id"] > 0
     assert payload["timestamp_utc"].endswith("Z")
     assert payload["queue_depth"] == 2
+
+
+def test_frame_video_requires_the_worker_render_capability() -> None:
+    section = _section(
+        BOT_SOURCE,
+        "def local_worker_supports_capability",
+        "def frame_video_maintenance_text",
+    )
+    assert 'local_worker_supports_capability("frame_video_render")' in section
+    assert "heartbeat_contract_version" in section
+    assert "worker_owner" in section
+    assert "engine_route" in section
+    preflight = _section(
+        BOT_SOURCE,
+        "def frame_video_commercial_preflight",
+        "def frame_video_runtime_guard",
+    )
+    assert 'local_worker_supports_capability("frame_video_render")' in preflight
+
+
+def test_worker_dispatch_supports_each_advertised_video_capability(monkeypatch) -> None:
+    dispatched: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        local_worker,
+        "run_frame_video_render",
+        lambda job: dispatched.append(("frame", str(job["id"]))),
+    )
+    monkeypatch.setattr(
+        local_worker,
+        "run_video_local_edit",
+        lambda job: dispatched.append(("edit", str(job["id"]))),
+    )
+
+    local_worker.process_job({"id": "frame-1", "job_type": "frame_video_render"})
+    local_worker.process_job({"id": "edit-1", "job_type": "video_local_edit"})
+
+    assert dispatched == [("frame", "frame-1"), ("edit", "edit-1")]
 
 
 def test_worker_heartbeat_loop_publishes_immediately_and_periodically(monkeypatch) -> None:
