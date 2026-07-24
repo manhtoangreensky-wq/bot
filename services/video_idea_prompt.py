@@ -289,6 +289,14 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
     if not updated.get("scene_drafts"):
         updated["scene_drafts"] = deepcopy(scene_content)
 
+    selected_profile = _clean(
+        updated.get("selected_profile")
+        or updated.get("primary_profile")
+        or updated.get("primary_profile_key")
+        or parent.get("selected_profile")
+        or preset_content.get("recommended_profile_id"),
+        500,
+    )
     updated.update({
         "idea_parent_product": product,
         "idea_parent_flow": parent_flow,
@@ -301,12 +309,9 @@ def hydrate_parent_state(state: dict, handoff: dict) -> dict:
         "idea_parent_engine_route": parent_engine_route,
         "idea_parent_public_product_type": parent_public_product_type,
         "content_source": "idea_catalog",
-        "selected_profile": _clean(
-            updated.get("selected_profile")
-            or parent.get("selected_profile")
-            or preset_content.get("recommended_profile_id"),
-            500,
-        ),
+        "selected_profile": selected_profile,
+        "primary_profile": selected_profile,
+        "primary_profile_key": selected_profile,
         "idea_preset_id": _bounded_int(updated.get("idea_preset_id"), 0, 0, 2_147_483_647),
         "idea_id": _clean(
             updated.get("idea_id")

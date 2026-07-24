@@ -6,6 +6,9 @@ import re
 from types import SimpleNamespace
 
 from services import video_edit_state_machine
+from services import video_flow6
+from services import video_idea_handoff
+from services import video_idea_prompt
 from services import video_local_editing
 
 
@@ -189,6 +192,7 @@ def test_tail_hydrates_missing_scene3_content_from_its_persisted_handoff_only() 
         {
             "draft": {
                 "content_source": "idea_catalog",
+                "selected_profile": "product_review",
                 "content_choice": {"id": "idea-demo", "title": "Mở hộp"},
                 "selected_prompt": "Mạch kể rõ và khép bằng kết quả.",
                 "scene3_data_contract": {
@@ -204,6 +208,7 @@ def test_tail_hydrates_missing_scene3_content_from_its_persisted_handoff_only() 
     assert result["content_mode"] == "suggestions"
     assert result["canonical_content_mode"] == "idea_catalog"
     assert result["content_source"] == "idea_catalog"
+    assert result["selected_profile"] == "product_review"
     assert result["content_choice"]["id"] == "idea-demo"
     assert result["selected_prompt"] == "Mạch kể rõ và khép bằng kết quả."
     assert result["per_scene_content"] == [{"scene_number": 1, "goal": "Mở đầu"}]
@@ -214,6 +219,81 @@ def test_tail_hydrates_missing_scene3_content_from_its_persisted_handoff_only() 
     )
     assert newer["content_source"] == "manual"
     assert newer["selected_prompt"] == "Prompt khách vừa sửa"
+
+
+def test_idea_parent_handoff_keeps_the_preset_profile_for_video_ai_preflight() -> None:
+    parent = video_idea_handoff.build_parent_handoff(
+        {
+            "flow_session_id": "idea-parent-7",
+            "flow_revision": 2,
+            "scene_count": 2,
+            "aspect_ratio": "9:16",
+            "selected_profile": "product_review",
+        },
+        product_id="video_ai_real",
+        return_callback="vproduct|content_source|video_ai_real",
+    )
+    state = {
+        "idea_parent_product": "video_ai_real",
+        "idea_parent_session_id": parent["idea_parent_session_id"],
+        "idea_parent_revision": parent["idea_parent_revision"],
+        "scene_count": 2,
+        "aspect_ratio": "9:16",
+        "idea_id": "review-demo",
+        "idea_preset_id": 14,
+        "idea_selected_prompt": "Giới thiệu rõ, hành động trọn vẹn và kết cảnh tự nhiên.",
+        "idea_preset_content": {
+            "preset_key": "review-demo",
+            "title": "Review demo sản phẩm",
+            "recommended_profile_id": "product_review",
+        },
+        "scene_drafts": [
+            {"scene_index": 1, "content": "Mở vấn đề và sản phẩm."},
+            {"scene_index": 2, "content": "Trải nghiệm, kết quả và lời mời."},
+        ],
+    }
+
+    hydrated = video_idea_prompt.hydrate_parent_state(state, parent)
+
+    assert hydrated["selected_profile"] == "product_review"
+    assert hydrated["primary_profile"] == "product_review"
+    assert hydrated["primary_profile_key"] == "product_review"
+
+    context = video_flow6.context_from_scene_state({
+        "product_type": "video_ai_real",
+        "content_mode": "suggestions",
+        "content_source": "idea_catalog",
+        "scene_count": 2,
+        "aspect_ratio": "9:16",
+        "selected_profile": hydrated["selected_profile"],
+        "content_choice": {"id": "review-demo", "title": "Review demo sản phẩm"},
+        "idea_preset_id": "review-demo",
+    })
+    preflight = video_flow6.preflight(
+        context,
+        package_available=True,
+        engine_ready=True,
+        worker_ready=True,
+        capability_ready=True,
+        duration_seconds=16,
+    )
+
+    assert context["primary_profile_key"] == "product_review"
+    assert preflight["ok"] is True
+
+
+def test_idea_scene3_and_parent_return_keep_the_selected_profile_contract() -> None:
+    scene3 = _function_source("video_idea_dynamic_scene3_state")
+    parent_render = _async_function_source("video_idea_render_exact_parent")
+    continuation = _async_function_source("video_idea_continue_to_exact_parent")
+
+    assert 'preset_content.get("recommended_profile_id")' in scene3
+    assert '"primary_profile_key": selected_profile' in scene3
+    assert '"primary_profile": selected_profile' in scene3
+    assert 'preset_content.get("recommended_profile_id")' in parent_render
+    assert '"primary_profile_key": selected_profile' in parent_render
+    assert 'preset_content.get("recommended_profile_id")' in continuation
+    assert '"primary_profile_key": selected_profile' in continuation
 
 
 def test_tail_context_hydrates_handoff_before_compiling_the_commercial_contract() -> None:

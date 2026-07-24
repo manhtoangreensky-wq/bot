@@ -86832,6 +86832,7 @@ def video_tail9_hydrate_scene3_host(host: dict | None, session: dict | None) -> 
         "content_revision",
         "scene_count",
         "aspect_ratio",
+        "selected_profile",
         "primary_profile",
         "primary_profile_key",
         "technical_profile",
@@ -101461,6 +101462,17 @@ def video_idea_dynamic_build_drafts(state: dict, *, brief: str = "") -> dict:
 def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") -> dict:
     source = dict(state or {})
     preset = dict(source.get("idea_preset") or {})
+    preset_content = dict(source.get("idea_preset_content") or preset)
+    selected_profile = str(
+        source.get("selected_profile")
+        or source.get("primary_profile")
+        or source.get("primary_profile_key")
+        or preset_content.get("recommended_profile_id")
+        or preset_content.get("profile_id")
+        or preset.get("recommended_profile_id")
+        or preset.get("profile_id")
+        or ""
+    ).strip()
     drafts = [dict(item) for item in source.get("scene_drafts") or [] if isinstance(item, dict)]
     requested_count = safe_int(source.get("scene_count"), 0)
     count = max(1, min(20, requested_count or len(drafts) or 1))
@@ -101509,7 +101521,7 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_source": str(source.get("idea_source") or "preset_auto"),
         "subject": str(source.get("subject") or preset.get("title") or "Ý tưởng video"),
         "manual_script_raw": str(source.get("manual_script_raw") or ""),
-        "idea_preset_content": dict(source.get("idea_preset_content") or preset),
+        "idea_preset_content": preset_content,
         "idea_id": str(
             source.get("idea_id")
             or preset.get("preset_key")
@@ -101539,7 +101551,9 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_parent_public_product_type": str(source.get("idea_parent_public_product_type") or ""),
         "idea_return_step": str(source.get("idea_return_step") or ""),
         "content_source": "idea_catalog",
-        "selected_profile": str(source.get("selected_profile") or ""),
+        "selected_profile": selected_profile,
+        "primary_profile": selected_profile,
+        "primary_profile_key": selected_profile,
         "recommended_aspect_ratio": selected_ratio,
         "voice_plan": str(preset.get("voice_plan") or ""),
         "music_plan": str(preset.get("music_plan") or ""),
@@ -101576,7 +101590,7 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_source": plan["idea_source"],
         "subject": plan["subject"],
         "manual_script_raw": plan["manual_script_raw"],
-        "idea_preset_content": dict(plan.get("idea_preset_content") or preset),
+        "idea_preset_content": dict(plan.get("idea_preset_content") or preset_content),
         "idea_id": str(plan.get("idea_id") or ""),
         "idea_title": str(plan.get("idea_title") or ""),
         "scene_drafts": drafts,
@@ -101601,7 +101615,9 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "idea_parent_public_product_type": str(plan.get("idea_parent_public_product_type") or ""),
         "idea_return_step": str(plan.get("idea_return_step") or ""),
         "content_source": "idea_catalog",
-        "selected_profile": str(plan.get("selected_profile") or ""),
+        "selected_profile": str(plan.get("selected_profile") or selected_profile),
+        "primary_profile": str(plan.get("primary_profile") or selected_profile),
+        "primary_profile_key": str(plan.get("primary_profile_key") or selected_profile),
         "scene_count": count,
         "recommended_aspect_ratio": selected_ratio,
         "ratio": selected_ratio,
@@ -101664,7 +101680,7 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
         "origin": "video_idea_product_lane" if lane_product else "video_idea_dynamic_catalog",
         "idea_origin_product": lane_product,
         "idea_return_callback": f"videa|preset|{plan['idea_preset_id']}",
-        "idea_preset_content": dict(plan.get("idea_preset_content") or preset),
+        "idea_preset_content": dict(plan.get("idea_preset_content") or preset_content),
         "idea_id": str(plan.get("idea_id") or ""),
         "idea_title": str(plan.get("idea_title") or ""),
         "idea_scene_content": list(plan.get("idea_scene_content") or []),
@@ -101716,7 +101732,9 @@ def video_idea_dynamic_scene3_state(state: dict, *, origin_product: str = "") ->
             or source.get("flow_session_id")
             or ""
         ),
-        "selected_profile": str(plan.get("selected_profile") or ""),
+        "selected_profile": str(plan.get("selected_profile") or selected_profile),
+        "primary_profile": str(plan.get("primary_profile") or selected_profile),
+        "primary_profile_key": str(plan.get("primary_profile_key") or selected_profile),
         "trend_id": str(plan.get("trend_id") or ""),
         "trend_title": str(plan.get("trend_title") or ""),
         "trend_context": str(plan.get("trend_context") or ""),
@@ -101763,6 +101781,24 @@ async def video_idea_render_exact_parent(
         or idea_state.get("idea_selected_prompt")
         or ""
     ).strip()
+    preset_content = dict(
+        idea_state.get("idea_preset_content")
+        or idea_state.get("idea_preset")
+        or handoff.get("idea_preset_content")
+        or {}
+    )
+    selected_profile = str(
+        idea_state.get("selected_profile")
+        or idea_state.get("primary_profile")
+        or idea_state.get("primary_profile_key")
+        or handoff.get("selected_profile")
+        or parent_state.get("selected_profile")
+        or parent_state.get("primary_profile")
+        or parent_state.get("primary_profile_key")
+        or preset_content.get("recommended_profile_id")
+        or preset_content.get("profile_id")
+        or ""
+    ).strip()
     idea_metadata = {
         "content_source": "idea_catalog",
         "content_mode": "suggestions",
@@ -101797,6 +101833,9 @@ async def video_idea_render_exact_parent(
             1,
             safe_int(idea_state.get("idea_preset_version") or handoff.get("idea_preset_version"), 1),
         ),
+        "selected_profile": selected_profile,
+        "primary_profile": selected_profile,
+        "primary_profile_key": selected_profile,
         "plan_status": "ready",
         "flow_owner": str(
             handoff.get("idea_parent_flow_owner")
@@ -101984,6 +102023,23 @@ async def video_idea_continue_to_exact_parent(
         handoff = video_idea_dynamic_scene3_state(current, origin_product=origin_product)
         if origin_product:
             handoff = video_idea_handoff.apply_parent_handoff(handoff, parent_handoff)
+            preset_content = dict(
+                current.get("idea_preset_content")
+                or current.get("idea_preset")
+                or handoff.get("idea_preset_content")
+                or parent_handoff.get("idea_preset_content")
+                or {}
+            )
+            selected_profile = str(
+                current.get("selected_profile")
+                or current.get("primary_profile")
+                or current.get("primary_profile_key")
+                or handoff.get("selected_profile")
+                or parent_handoff.get("selected_profile")
+                or preset_content.get("recommended_profile_id")
+                or preset_content.get("profile_id")
+                or ""
+            ).strip()
             handoff.update({
                 "idea_parent_product": parent_handoff["idea_parent_product"],
                 "idea_parent_flow": parent_handoff["idea_parent_flow"],
@@ -102013,7 +102069,9 @@ async def video_idea_continue_to_exact_parent(
                 "plan_status": "ready",
                 "flow_owner": str(parent_handoff["idea_parent_flow_owner"] or handoff.get("flow_owner") or "scene3"),
                 "parent_session_id": str(parent_handoff["idea_parent_session_id"] or handoff.get("parent_session_id") or ""),
-                "selected_profile": str(current.get("selected_profile") or ""),
+                "selected_profile": selected_profile,
+                "primary_profile": selected_profile,
+                "primary_profile_key": selected_profile,
                 "idea_id": str(current.get("idea_id") or ""),
                 "idea_title": str(current.get("idea_title") or ""),
                 "idea_preset_content": dict(current.get("idea_preset_content") or {}),
