@@ -10,6 +10,7 @@ from services import video_flow6
 from services import video_idea_handoff
 from services import video_idea_prompt
 from services import video_local_editing
+from services import video_tail9
 
 
 CANONICAL_POSITIONS = {
@@ -98,6 +99,62 @@ def test_tail_audio_completion_routes_to_logo_before_summary() -> None:
     assert audio.count('video_tail9_render(query, uid, context, "logo")') >= 2
     assert 'if action == "done":' in audio
     assert 'if action == "skip":' in audio
+
+
+def test_legacy_review_audio_completion_enters_the_canonical_logo_tail() -> None:
+    handler = _async_function_source("handle_video_profile_studio_callback")
+    audio = handler[handler.index('if action in {"audio_done", "audio_skip"}:'):handler.index('if action == "content":')]
+    assert 'if return_step == "full_review":' in audio
+    assert 'video_tail9_render(query, uid, context, "logo")' in audio
+    assert 'target = "scene_plan"' in audio
+
+
+def test_legacy_review_and_logo_callbacks_do_not_skip_the_canonical_tail() -> None:
+    handler = _async_function_source("handle_video_profile_studio_callback")
+    review = handler[handler.index('if action == "review_post":'):handler.index('if action == "review_summary":')]
+    assert 'video_tail9_render(query, uid, context, "logo")' in review
+
+    post_skip = handler[handler.index('if action == "post_skip":'):handler.index('if action == "post_suggest":')]
+    post_done = handler[handler.index('if action == "post_done":'):handler.index('if action == "ratio":')]
+    assert 'video_tail9_render(query, uid, context, "summary")' in post_skip
+    assert 'video_tail9_render(query, uid, context, "summary")' in post_done
+
+    review_done = handler[handler.index('if action in {"review_done", "review_continue"}:'):handler.index('if action == "post_toggle":')]
+    assert 'video_tail9_render(query, uid, context, "audio")' in review_done
+
+
+def test_logo_and_watermark_need_a_nine_position_confirmation_before_enable() -> None:
+    handler = _async_function_source("handle_video_tail_callback")
+    logo = handler[handler.index('if section == "logo":'):handler.index('if section == "quality":')]
+    assert 'if action == "setpos":' in logo
+    assert 'if action == "confirm":' in logo
+    assert logo.index('if action == "setpos":') < logo.index('if action == "confirm":')
+    assert 'tail["brand_pending_target"] = argument' in logo
+    assert 'tail["brand_pending_position"] = extra' in logo
+    assert 'video_tail9_render(query, uid, context, "logo_confirm")' in logo
+    assert 'config["enabled"] = True' in logo
+
+
+def test_tail_logo_and_watermark_intakes_wait_for_position_confirmation() -> None:
+    watermark_input = _async_function_source("handle_video_tail9_pending_text")
+    assert 'watermark.update({"enabled": False, "text": text[:120], "position": ""})' in watermark_input
+    assert 'tail["brand_pending_target"] = "watermark"' in watermark_input
+    assert 'video_tail9_position_keyboard("watermark")' in watermark_input
+
+    public_media = _async_function_source("handle_video_product_pending_media")
+    assert 'tail["brand_pending_target"] = "logo"' in public_media
+    assert '"enabled": False' in public_media[public_media.index('if current_step == "awaiting_video_tail9_logo":'):]
+    assert 'video_tail9_position_keyboard("logo")' in public_media
+
+    edit_media = _async_function_source("handle_video_editor_pending_upload")
+    assert 'tail["brand_pending_target"] = "logo"' in edit_media
+    assert 'video_tail9_position_keyboard("logo")' in edit_media
+
+
+def test_tail_summary_is_a_valid_canonical_stage() -> None:
+    state = video_tail9.normalize_state({"status_stage": "summary"})
+    assert state["status_stage"] == "summary"
+    assert video_tail9.public_progress(state) == 9
 
 
 def test_watermark_submission_keeps_the_exact_three_by_three_position() -> None:

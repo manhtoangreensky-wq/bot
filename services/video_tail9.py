@@ -37,6 +37,8 @@ STATE_FIELDS = (
     "receipt_state",
     "charge_state",
     "return_to",
+    "brand_pending_target",
+    "brand_pending_position",
 )
 
 VOLUME_KEYS = ("source_audio", "dubbing", "music", "sfx", "environment")
@@ -45,6 +47,7 @@ STATUS_STAGES = (
     "review",
     "audio_addons",
     "logo_watermark",
+    "summary",
     "quality",
     "invoice",
     "confirmed",
@@ -436,6 +439,8 @@ def new_state(
         "receipt_state": "not_created",
         "charge_state": "not_charged",
         "return_to": str(return_to or adapter["return_to"]),
+        "brand_pending_target": "",
+        "brand_pending_position": "",
         "handled_callback_ids": [],
         "confirm_token": "",
     }
@@ -483,6 +488,12 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         if str(current.get("status_stage") or "review") in STATUS_STAGES
         else "review"
     )
+    current["brand_pending_target"] = (
+        str(current.get("brand_pending_target") or "")
+        if str(current.get("brand_pending_target") or "") in {"logo", "watermark"}
+        else ""
+    )
+    current["brand_pending_position"] = str(current.get("brand_pending_position") or "")
     current["handled_callback_ids"] = [
         str(item) for item in current.get("handled_callback_ids") or [] if str(item).strip()
     ][-100:]
@@ -652,6 +663,7 @@ def public_progress(state: dict[str, Any]) -> int:
         "review": 0,
         "audio_addons": 5,
         "logo_watermark": 8,
+        "summary": 9,
         "quality": 10,
         "invoice": 12,
         "confirmed": 20,
