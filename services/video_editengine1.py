@@ -272,13 +272,14 @@ def create_job(
     cursor = conn.execute(
         """INSERT INTO video_edit_jobs
            (idempotency_key,user_id,chat_id,product_type,worker_job_type,engine_route,worker_owner,
-            edit_session_id,status,source_file_id,source_video_path,source_metadata_json,plan_json,
+            edit_session_id,status,source_file_id,source_video_path,source_sha256,source_metadata_json,plan_json,
             tail_json,quality_tier_id,price_xu,local_worker_job_id,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             token, str(user_id or ""), str(chat_id or ""), PRODUCT_TYPE, WORKER_JOB_TYPE,
             ENGINE_ROUTE, OUTBOX_OWNER, str(edit_session_id or ""), "queued",
             str(source_file_id or ""), str(worker_payload.get("source_file_name") or "")[:240],
+            str(worker_payload.get("source_video_hash") or worker_payload.get("source_sha256") or "")[:128],
             _json(source_metadata or {}), _json(plan or {}), _json(tail or {}),
             str(quality_tier_id or ""), max(0, int(price_xu or 0)), worker_job_id, now, now,
         ),
