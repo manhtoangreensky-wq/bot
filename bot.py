@@ -70703,7 +70703,6 @@ def video_scene3_full_review_keyboard(state: dict) -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("👁️ Xem từng cảnh", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")],
         [("🎬 Prompt video", "video_tail|review|prompts"), ("🎚️ Âm thanh & Add-on", "video_tail|audio|open")],
-        [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|review|summary")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -86754,6 +86753,24 @@ def video_tail12_compile_content_contract(state: dict | None, *, product_type: s
         source = "content_profiles"
         flow_mode = "suggestions"
         semantic_mode = "content_profiles"
+    elif requested_product == "video_ai_real" and scene_content and (selected_prompt or plan):
+        # Some last-green Video AI sessions persisted a complete scene plan and
+        # selected prompt but predated FLOW6's explicit content fields.  This is
+        # a compatibility repair for a completed plan, never an inference from
+        # a bare topic or an unfinished entry screen.
+        first_scene = dict(scene_content[0] or {})
+        source = "content_profiles"
+        flow_mode = "suggestions"
+        semantic_mode = "content_profiles"
+        profile = profile or "storytelling_life"
+        if not selection:
+            selection = {
+                "id": str(current.get("selected_suggestion_id") or "restored_completed_plan"),
+                "title": str(first_scene.get("title") or first_scene.get("goal") or current.get("subject") or "Nội dung đã chọn"),
+                "concept": str(first_scene.get("summary") or first_scene.get("goal") or current.get("subject") or ""),
+            }
+        current["primary_profile"] = str(current.get("primary_profile") or profile)
+        current["primary_profile_key"] = profile
 
     if not flow_mode:
         return current
@@ -87322,8 +87339,7 @@ def video_tail9_review_keyboard(tail: dict | None = None) -> InlineKeyboardMarku
         content_row = [("👁️ Xem nội dung", "video_tail|review|scenes"), ("✍️ Sửa nội dung", "video_tail|review|edit")]
     return video_scene3_keyboard([
         content_row,
-        [("🎬 Prompt video", "video_tail|review|prompts"), ("🎚️ Âm thanh & Add-on", "video_tail|audio|open")],
-        [("🖼️ Logo/Watermark", "video_tail|logo|open"), ("📄 Xem tổng hợp", "video_tail|review|summary")],
+        [("🎬 Prompt video", "video_tail|review|prompts"), ("➡️ Âm thanh & Add-on", "video_tail|audio|open")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -87368,7 +87384,7 @@ def video_tail9_summary_keyboard(tail: dict | None = None) -> InlineKeyboardMark
     return video_scene3_keyboard([
         [(content_label, content_callback), ("🎚️ Sửa Add-on", "video_tail|audio|open")],
         [("🖼️ Sửa Logo/Watermark", "video_tail|logo|open"), ("⭐ Hoàn thiện video", "video_tail|quality|open")],
-        [("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -87381,8 +87397,8 @@ def video_tail9_public_blocker_text() -> str:
 
 def video_tail9_public_blocker_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📄 Xem cấu hình", "video_tail|review|open")],
-        [("⬅️ Quay lại", "video_tail|review|summary"), ("🏠 Menu chính", "menu|main")],
+        [("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
+        [("⬅️ Quay lại", "video_tail|summary|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -87417,8 +87433,7 @@ def video_tail9_video_edit_review_text(tail: dict, host: dict) -> str:
 def video_tail9_video_edit_review_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🎛 Xem thao tác", "video_tail|review|operations"), ("✍️ Sửa thao tác", "video_tail|review|edit_operation")],
-        [("🎚️ Âm thanh & Add-on", "video_tail|audio|open"), ("🖼️ Logo/Watermark", "video_tail|logo|open")],
-        [("📄 Xem tổng hợp", "video_tail|review|summary"), ("🎞 Thông tin video", "video_tail|review|source")],
+        [("➡️ Âm thanh & Add-on", "video_tail|audio|open"), ("🎞 Thông tin video", "video_tail|review|source")],
         [("⬅️ Quay lại", "video_tail|review|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -87640,7 +87655,7 @@ def video_tail9_quality_keyboard(
         rows.append(row)
     if not rows:
         return video_tail9_public_blocker_keyboard()
-    rows.append([("⬅️ Quay lại", "video_tail|review|summary"), ("🏠 Menu chính", "menu|main")])
+    rows.append([("⬅️ Quay lại", "video_tail|summary|open"), ("🏠 Menu chính", "menu|main")])
     return video_scene3_keyboard(rows)
 
 
@@ -87789,7 +87804,9 @@ def video_tail9_callback_guard(callback_handler):
                 return True
 
             try:
-                await query.answer("Không thể cập nhật lựa chọn này.", show_alert=True)
+                # The recovery renderer below keeps the user inside the same
+                # product route.  Do not add a second generic error alert.
+                await query.answer()
             except Exception:
                 pass
 
@@ -87809,7 +87826,7 @@ def video_tail9_callback_guard(callback_handler):
                     "audio": "video_tail|audio|open",
                     "logo": "video_tail|logo|open",
                     "quality": "video_tail|quality|open",
-                    "summary": "video_tail|review|summary",
+                    "summary": "video_tail|summary|open",
                     "confirm": "video_tail|quality|open",
                 }.get(section, "video_tail|review|open")
                 try:
@@ -87846,7 +87863,11 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer()
     if section == "review":
         if owner == "video_edit":
-            if action in {"open", "summary", "scenes", "prompts", "redo"}:
+            if action == "summary":
+                # Legacy direct-summary callbacks must resume the canonical
+                # forward edge instead of bypassing Audio and Logo/Watermark.
+                return await video_tail9_render(query, uid, context, "audio")
+            if action in {"open", "scenes", "prompts", "redo"}:
                 return await video_tail9_render(query, uid, context, "review")
             if action == "operations":
                 return await safe_edit_or_send(
@@ -87888,7 +87909,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     reply_markup=video_local_manual_options_keyboard(get_user_language(uid) or "vi"),
                 )
         if action == "summary":
-            return await video_tail9_render(query, uid, context, "summary")
+            # Keep stale callbacks compatible without allowing a review-stage
+            # bypass around Audio and Logo/Watermark.
+            return await video_tail9_render(query, uid, context, "audio")
         if action in {"open", "scenes"}:
             return await video_tail9_render(query, uid, context, "review")
         if action in {"edit", "redo", "prompts", "back"}:
@@ -87900,6 +87923,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if tail.get("video_product_type") == video_selfshot2.PRODUCT_ID:
                 return await video_selfshot2_render(query, uid, screen if screen in video_selfshot2.SCREEN_PARENTS else "review", draft=host)
             return await video_selfshot3_render(query, uid, screen if screen in video_selfshot3.SCREEN_PARENTS else "review", draft=host)
+    if section == "summary":
+        if action in {"open", "back"}:
+            return await video_tail9_render(query, uid, context, "summary")
     if section == "audio":
         if action == "open":
             return await video_tail9_render(query, uid, context, "audio")

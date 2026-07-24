@@ -74,8 +74,6 @@ def test_video_edit_review_has_only_exact_product_buttons() -> None:
         "video_tail|review|operations",
         "video_tail|review|edit_operation",
         "video_tail|audio|open",
-        "video_tail|logo|open",
-        "video_tail|review|summary",
         "video_tail|review|source",
         "video_tail|review|back",
         "menu|main",
@@ -85,6 +83,8 @@ def test_video_edit_review_has_only_exact_product_buttons() -> None:
     assert "review|scenes" not in section
     assert "review|prompts" not in section
     assert "review|redo" not in section
+    assert "video_tail|logo|open" not in section
+    assert "video_tail|review|summary" not in section
 
 
 def test_brightness_200_routes_directly_to_video_edit_review() -> None:
