@@ -321,3 +321,88 @@ def test_assets_done_duration_screen_renders_with_two_real_images() -> None:
     assert "Số ảnh: <b>2</b>" in text
     assert "Chưa chọn" in text
     assert "Nhanh 50 Xu" in text
+
+
+def test_framevideo3_tail_requires_audio_then_branding_then_review() -> None:
+    audio_keyboard = _source_between(
+        "def frame_video_audio_menu_keyboard",
+        "def frame_video_branding_text",
+    )
+    branding_keyboard = _source_between(
+        "def frame_video_branding_keyboard",
+        "def frame_video_branding_confirm_text",
+    )
+    handler = _source_between(
+        "async def handle_frame_video_canonical_callback",
+        "async def handle_frame_video_image_regeneration",
+    )
+
+    assert 'callback_data="framevideo|audio_done"' in audio_keyboard
+    assert 'callback_data="framevideo|audio_skip"' in audio_keyboard
+    assert 'callback_data="framevideo|branding|done"' in branding_keyboard
+    assert 'callback_data="framevideo|branding|skip"' in branding_keyboard
+    assert 'if action in {"audio_done", "addons_done"}:' in handler
+    assert 'frame_video_branding_text(state)' in handler
+    assert 'if action == "branding":' in handler
+    assert 'return await show(frame_video_review_text(state, uid, False)' in handler
+
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["audio_done"]["screen"] == "branding"
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["audio_skip"]["screen"] == "branding"
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["review"]["back"] == "branding"
+
+
+def test_framevideo3_branding_is_staged_and_uses_a_position_confirmation() -> None:
+    handler = _source_between(
+        "async def handle_frame_video_canonical_callback",
+        "async def handle_frame_video_image_regeneration",
+    )
+    media_handler = _source_between(
+        "async def handle_frame_video_pending_media",
+        "async def handle_frame_video_pending_text",
+    )
+    text_handler = _source_between(
+        "async def handle_frame_video_pending_text",
+        "async def render_video_with_audio",
+    )
+    position_keyboard = _source_between(
+        "def frame_video_position_keyboard",
+        "def frame_video_quality_keyboard",
+    )
+    confirm_keyboard = _source_between(
+        "def frame_video_branding_confirm_keyboard",
+        "def frame_video_text_list_text",
+    )
+
+    for callback in (
+        "framevideo|branding|logo",
+        "framevideo|branding|watermark",
+        "framevideo|branding|position|logo",
+        "framevideo|branding|position|watermark",
+    ):
+        assert callback in BOT_SOURCE
+    assert 'f"framevideo|branding_confirm|{kind}"' in confirm_keyboard
+
+    assert '"pending_brand_kind": "logo"' in media_handler
+    assert '"pending_brand_kind": "watermark"' in text_handler
+    assert 'f"{kind}_confirm"' in handler
+    assert '"logo_enabled": True' in handler
+    assert '"watermark_enabled": True' in handler
+    assert "tokens = list(FRAME_VIDEO_POSITION_LABELS)" in position_keyboard
+    assert "framevideo|position_set|{kind}|{token}" in position_keyboard
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["branding_confirm"]["screen"] == "branding"
+
+
+def test_framevideo3_removes_public_ratio_customization_and_legacy_addon_bypass() -> None:
+    ratio_keyboard = _source_between(
+        "def frame_video_ratio_menu_keyboard",
+        "def frame_video_fit_keyboard",
+    )
+    canonical_handler = _source_between(
+        "async def handle_frame_video_canonical_callback",
+        "async def handle_frame_video_image_regeneration",
+    )
+
+    assert "Tự nhập" not in ratio_keyboard
+    assert 'if action == "addons":\n        if is_frame_video3_state(state):' in canonical_handler
+    assert 'return await show(frame_video_audio_menu_text(state), frame_video_audio_menu_keyboard(state), "audio")' in canonical_handler
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["addons"]["mutation"] == "legacy_redirect"

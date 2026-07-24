@@ -186,7 +186,7 @@ def test_route_matrix_has_one_owner_and_exact_ai_back_stack() -> None:
         assert route["back"]
     assert flow.FRAME_VIDEO_ROUTE_MATRIX["ai_generate_confirm"]["side_effect"] == "explicit_image_confirm_only"
     assert flow.FRAME_VIDEO_ROUTE_MATRIX["duration_done"]["screen"] == "transition"
-    assert flow.FRAME_VIDEO_ROUTE_MATRIX["motion_set"]["screen"] == "addons"
+    assert flow.FRAME_VIDEO_ROUTE_MATRIX["motion_set"]["screen"] == "audio"
     assert flow.FRAME_VIDEO_ROUTE_MATRIX["continue"]["screen"] == "invoice"
     assert flow.FRAME_VIDEO_ROUTE_MATRIX["status"]["back"] == "invoice_or_review"
     assert flow.FRAME_VIDEO_ROUTE_MATRIX["status_back"]["screen"] == "invoice_or_review"
@@ -211,7 +211,7 @@ def test_all_public_framevideo_callbacks_are_catalogued_once_without_generic_x()
         "async def cmd_storyboard_video",
     )
     assert "Có lỗi khi xử lý lệnh" not in handler_source
-    assert '"assets_done", "panel"' in BOT_SOURCE
+    assert 'if action == "assets_done":' in BOT_SOURCE
     assert "FRAME_VIDEO_IMG2VID_ACTIONS" in BOT_SOURCE
     assert "elif is_frame_video3_state(state):" in handler_source
     assert "frame_video3_current_screen(state, lang)" in handler_source
