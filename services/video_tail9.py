@@ -20,10 +20,22 @@ STATE_FIELDS = (
     "ratio",
     "estimated_duration",
     "source_asset_ids",
+    "content_source",
+    "content_mode",
+    "content_revision",
+    "scene_content",
+    "selected_prompt",
+    "prompt_revision",
+    "plan_status",
+    "review_status",
     "audio_config",
+    "audio_status",
     "addon_config",
     "logo_config",
+    "logo_status",
     "watermark_config",
+    "watermark_status",
+    "summary_status",
     "quality_tier_id",
     "package_id",
     "pricing_snapshot",
@@ -43,6 +55,7 @@ STATE_FIELDS = (
 
 VOLUME_KEYS = ("source_audio", "dubbing", "music", "sfx", "environment")
 TOGGLE_KEYS = ("source_audio", "dubbing", "music", "sfx", "subtitles")
+OPTIONAL_STATUSES = ("not_configured", "configured", "skipped")
 STATUS_STAGES = (
     "review",
     "audio_addons",
@@ -420,12 +433,24 @@ def new_state(
         "ratio": str(ratio or "9:16"),
         "estimated_duration": max(1, duration),
         "source_asset_ids": [str(item) for item in source_asset_ids or [] if str(item).strip()],
+        "content_source": "",
+        "content_mode": "",
+        "content_revision": 1,
+        "scene_content": [],
+        "selected_prompt": "",
+        "prompt_revision": 0,
+        "plan_status": "approved",
+        "review_status": "ready",
         "audio_config": default_audio_config(
             source_audio_available=bool(adapter["source_audio_available"]),
         ),
+        "audio_status": "not_configured",
         "addon_config": {"automatic_text": [], "postprocessing": {}},
-        "logo_config": {"enabled": False, "asset_file_id": "", "position": "bottom_right"},
-        "watermark_config": {"enabled": False, "text": "", "position": "bottom_right", "opacity_percent": 45},
+        "logo_config": {"enabled": False, "asset_file_id": "", "position": ""},
+        "logo_status": "not_configured",
+        "watermark_config": {"enabled": False, "text": "", "position": "", "opacity_percent": 45},
+        "watermark_status": "not_configured",
+        "summary_status": "not_ready",
         "quality_tier_id": "",
         "package_id": "",
         "pricing_snapshot": {},
@@ -463,6 +488,18 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     current["source_asset_ids"] = [
         str(item) for item in current.get("source_asset_ids") or [] if str(item).strip()
     ]
+    current["content_source"] = str(current.get("content_source") or "").strip()
+    current["content_mode"] = str(current.get("content_mode") or "").strip()
+    current["content_revision"] = max(1, int(current.get("content_revision") or 1))
+    current["scene_content"] = [
+        deepcopy(item)
+        for item in list(current.get("scene_content") or [])
+        if isinstance(item, dict)
+    ]
+    current["selected_prompt"] = str(current.get("selected_prompt") or "").strip()
+    current["prompt_revision"] = max(0, int(current.get("prompt_revision") or 0))
+    current["plan_status"] = str(current.get("plan_status") or "approved")
+    current["review_status"] = str(current.get("review_status") or "ready")
     audio = default_audio_config(source_audio_available=bool(adapter["source_audio_available"]))
     audio.update(dict(current.get("audio_config") or {}))
     audio["source_audio_available"] = bool(
@@ -478,8 +515,46 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     audio["ducking"] = bool(audio.get("ducking", True))
     current["audio_config"] = audio
     current["addon_config"] = dict(current.get("addon_config") or {})
-    current["logo_config"] = dict(current.get("logo_config") or {})
-    current["watermark_config"] = dict(current.get("watermark_config") or {})
+    logo = {
+        "enabled": False,
+        "asset_file_id": "",
+        "position": "",
+        **dict(current.get("logo_config") or {}),
+    }
+    logo["enabled"] = bool(logo.get("enabled"))
+    logo["asset_file_id"] = str(logo.get("asset_file_id") or "").strip()
+    logo["position"] = str(logo.get("position") or "").strip()
+    if not logo["asset_file_id"]:
+        logo["enabled"] = False
+        logo["position"] = ""
+    watermark = {
+        "enabled": False,
+        "text": "",
+        "position": "",
+        "opacity_percent": 45,
+        **dict(current.get("watermark_config") or {}),
+    }
+    watermark["enabled"] = bool(watermark.get("enabled"))
+    watermark["text"] = str(watermark.get("text") or "").strip()
+    watermark["position"] = str(watermark.get("position") or "").strip()
+    try:
+        watermark_opacity = int(watermark.get("opacity_percent") or 45)
+    except (TypeError, ValueError):
+        watermark_opacity = 45
+    watermark["opacity_percent"] = max(0, min(100, watermark_opacity))
+    if not watermark["text"]:
+        watermark["enabled"] = False
+        watermark["position"] = ""
+    current["logo_config"] = logo
+    current["watermark_config"] = watermark
+    for field in ("audio_status", "logo_status", "watermark_status"):
+        status = str(current.get(field) or "not_configured")
+        current[field] = status if status in OPTIONAL_STATUSES else "not_configured"
+    current["summary_status"] = (
+        str(current.get("summary_status") or "not_ready")
+        if str(current.get("summary_status") or "not_ready") in {"not_ready", "ready"}
+        else "not_ready"
+    )
     current["pricing_snapshot"] = dict(current.get("pricing_snapshot") or {})
     current["capability_snapshot"] = dict(current.get("capability_snapshot") or {})
     current["engine_route"] = adapter["engine_route"]
@@ -500,6 +575,106 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     for field in STATE_FIELDS:
         current.setdefault(field, "")
     return current
+
+
+def apply_content_contract(state: dict[str, Any], contract: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy an already-completed product content contract into the shared tail.
+
+    Product flows own content selection.  The commercial tail only persists a
+    normalized snapshot so Summary, pricing and invoice never reinterpret an
+    already selected source or prompt.
+    """
+
+    current = normalize_state(state)
+    source = dict(contract or {})
+    content_source = str(source.get("content_source") or "").strip()
+    content_mode = str(
+        source.get("canonical_content_mode") or source.get("content_mode") or ""
+    ).strip()
+    selected_prompt = str(
+        source.get("selected_prompt")
+        or source.get("selected_prompt_text")
+        or source.get("idea_selected_prompt")
+        or ""
+    ).strip()
+    scene_content = next(
+        (
+            [deepcopy(item) for item in list(value or []) if isinstance(item, dict)]
+            for value in (
+                source.get("per_scene_content"),
+                source.get("idea_scene_contents"),
+                source.get("idea_scene_content"),
+                source.get("scene_drafts"),
+                (source.get("scene_plan") or {}).get("scenes") if isinstance(source.get("scene_plan"), dict) else [],
+                (source.get("plan") or {}).get("scenes") if isinstance(source.get("plan"), dict) else [],
+            )
+            if value
+        ),
+        [],
+    )
+    if content_source:
+        current["content_source"] = content_source
+    if content_mode:
+        current["content_mode"] = content_mode
+    if scene_content:
+        current["scene_content"] = scene_content
+    if selected_prompt:
+        current["selected_prompt"] = selected_prompt
+    current["content_revision"] = max(
+        int(current.get("content_revision") or 1),
+        int(source.get("content_revision") or source.get("plan_revision") or 1),
+    )
+    current["prompt_revision"] = max(
+        int(current.get("prompt_revision") or 0),
+        int(source.get("selected_prompt_revision") or source.get("prompt_revision") or (1 if selected_prompt else 0)),
+    )
+    if source.get("plan_status"):
+        current["plan_status"] = str(source.get("plan_status") or "approved")
+    current["plan_approved"] = bool(source.get("plan_approved", current.get("plan_approved", True)))
+    return normalize_state(current)
+
+
+def mark_audio_complete(state: dict[str, Any], *, skipped: bool = False) -> dict[str, Any]:
+    current = normalize_state(state)
+    audio = dict(current.get("audio_config") or {})
+    enabled = any(bool(audio.get(key)) for key in TOGGLE_KEYS)
+    current["audio_status"] = "skipped" if skipped else ("configured" if enabled else "not_configured")
+    current["status_stage"] = "audio_addons"
+    return normalize_state(current)
+
+
+def mark_branding_skipped(state: dict[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    current["logo_config"] = {"enabled": False, "asset_file_id": "", "position": ""}
+    current["watermark_config"] = {"enabled": False, "text": "", "position": "", "opacity_percent": 45}
+    current["logo_status"] = "skipped"
+    current["watermark_status"] = "skipped"
+    current["brand_pending_target"] = ""
+    current["brand_pending_position"] = ""
+    current["status_stage"] = "logo_watermark"
+    return normalize_state(current)
+
+
+def mark_branding_configured(state: dict[str, Any], target: str) -> dict[str, Any]:
+    current = normalize_state(state)
+    if target == "logo":
+        current["logo_status"] = "configured"
+    elif target == "watermark":
+        current["watermark_status"] = "configured"
+    return normalize_state(current)
+
+
+def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """Normalize optional tail fields without making them invoice blockers."""
+
+    current = normalize_state(state)
+    current["summary_status"] = "ready" if (
+        bool(current.get("plan_approved"))
+        and bool(current.get("content_mode"))
+        and bool(current.get("selected_prompt"))
+    ) else "not_ready"
+    current["status_stage"] = "summary"
+    return normalize_state(current)
 
 
 def scope_key(state: dict[str, Any]) -> tuple[str, str, int]:

@@ -87168,17 +87168,18 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
             tail["logo_config"] = {
                 "enabled": bool(logo_entry.get("enabled") and logo_value.get("asset_file_id")),
                 "asset_file_id": str(logo_value.get("asset_file_id") or ""),
-                "position": str(logo_value.get("position") or "bottom_right"),
+                "position": str(logo_value.get("position") or ""),
             }
             watermark_entry = dict(post.get("watermark_text") or {})
             watermark_value = dict(watermark_entry.get("value") or {})
             tail["watermark_config"] = {
                 "enabled": bool(watermark_entry.get("enabled") and watermark_value.get("text")),
                 "text": str(watermark_value.get("text") or ""),
-                "position": str(watermark_value.get("position") or "bottom_right"),
+                "position": str(watermark_value.get("position") or ""),
                 "opacity_percent": max(0, min(100, safe_int(watermark_value.get("opacity_percent"), 45))),
             }
         tail = video_tail9.normalize_state(tail)
+    tail = video_tail9.apply_content_contract(tail, host)
     if source_audio_available is not None:
         audio = dict(tail.get("audio_config") or {})
         audio["source_audio_available"] = bool(source_audio_available)
@@ -87241,13 +87242,13 @@ def save_video_tail9_state(user_id: int, context, tail: dict, owner: str, host: 
             **dict(visuals.get("logo") or {}),
             "enabled": bool(clean.get("logo_config", {}).get("enabled")),
             "file_id": str(clean.get("logo_config", {}).get("asset_file_id") or ""),
-            "position": str(clean.get("logo_config", {}).get("position") or "bottom_right"),
+            "position": str(clean.get("logo_config", {}).get("position") or ""),
         }
         visuals["watermark"] = {
             **dict(visuals.get("watermark") or {}),
             "enabled": bool(clean.get("watermark_config", {}).get("enabled")),
             "text": str(clean.get("watermark_config", {}).get("text") or ""),
-            "position": str(clean.get("watermark_config", {}).get("position") or "bottom_right"),
+            "position": str(clean.get("watermark_config", {}).get("position") or ""),
         }
         current["visual_addons"] = visuals
         save_video_selfshot2_draft(uid, current, step="selfshot2:tail")
@@ -87283,7 +87284,7 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
             "logo_enabled": bool((clean.get("watermark_config") or {}).get("enabled")),
             "logo_source": "text" if (clean.get("watermark_config") or {}).get("enabled") else "none",
             "logo_text": str((clean.get("watermark_config") or {}).get("text") or ""),
-            "logo_position": str((clean.get("watermark_config") or {}).get("position") or "bottom_right"),
+            "logo_position": str((clean.get("watermark_config") or {}).get("position") or ""),
         })
         draft = {
             VIDEO_TAIL9_STATE_KEY: clean,
@@ -87354,14 +87355,14 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
         "logo_enabled": bool(clean.get("watermark_config", {}).get("enabled")),
         "logo_source": "text" if clean.get("watermark_config", {}).get("enabled") else "none",
         "logo_text": str(clean.get("watermark_config", {}).get("text") or ""),
-        "logo_position": str(clean.get("watermark_config", {}).get("position") or "bottom_right"),
+        "logo_position": str(clean.get("watermark_config", {}).get("position") or ""),
     })
     draft["b14_addon_plan"] = addon_plan
     logo = dict(clean.get("logo_config") or {})
     if logo.get("enabled") and logo.get("asset_file_id"):
         draft["product_video_logo_material"] = product_video_logo_material_config(
             logo_file_id=str(logo.get("asset_file_id") or ""),
-            logo_position=str(logo.get("position") or "bottom_right"),
+            logo_position=str(logo.get("position") or ""),
             logo_enabled=True,
         )
     else:
@@ -87536,7 +87537,7 @@ def video_tail9_summary_keyboard(tail: dict | None = None) -> InlineKeyboardMark
     return video_scene3_keyboard([
         [(content_label, content_callback), ("🎚️ Sửa Add-on", "video_tail|audio|open")],
         [("🖼️ Sửa Logo/Watermark", "video_tail|logo|open"), ("⭐ Hoàn thiện video", "video_tail|quality|open")],
-        [("⬅️ Quay lại", "video_tail|logo|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -87696,10 +87697,9 @@ def video_tail9_logo_text(tail: dict) -> str:
 def video_tail9_logo_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🖼️ Thêm logo", "video_tail|logo|upload"), ("✍️ Thêm watermark", "video_tail|logo|watermark")],
-        [("📍 Vị trí logo", "video_tail|logo|position|logo"), ("📍 Vị trí watermark", "video_tail|logo|position|watermark")],
         [("🗑️ Xóa logo", "video_tail|logo|clear|logo"), ("🗑️ Xóa watermark", "video_tail|logo|clear|watermark")],
         [("✅ Xong bổ sung", "video_tail|logo|done"), ("⏭️ Bỏ qua", "video_tail|logo|skip")],
-        [("⬅️ Quay lại", "video_tail|audio|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -87907,6 +87907,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             reply_markup=video_tail9_brand_confirm_keyboard(target),
         )
     if screen == "summary":
+        tail = video_tail9.prepare_summary(tail)
         tail["status_stage"] = "summary"
         save_video_tail9_state(user_id, context, tail, owner, host)
         return await safe_edit_or_send(query, video_tail9_summary_text(tail), parse_mode="HTML", reply_markup=video_tail9_summary_keyboard(tail))
@@ -88017,9 +88018,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if section == "review":
         if owner == "video_edit":
             if action == "summary":
-                # Legacy direct-summary callbacks must resume the canonical
-                # forward edge instead of bypassing Audio and Logo/Watermark.
-                return await video_tail9_render(query, uid, context, "audio")
+                tail = video_tail9.prepare_summary(tail)
+                save_video_tail9_state(uid, context, tail, owner, host)
+                return await video_tail9_render(query, uid, context, "summary")
             if action in {"open", "scenes", "prompts", "redo"}:
                 return await video_tail9_render(query, uid, context, "review")
             if action == "operations":
@@ -88062,9 +88063,9 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     reply_markup=video_local_manual_options_keyboard(get_user_language(uid) or "vi"),
                 )
         if action == "summary":
-            # Keep stale callbacks compatible without allowing a review-stage
-            # bypass around Audio and Logo/Watermark.
-            return await video_tail9_render(query, uid, context, "audio")
+            tail = video_tail9.prepare_summary(tail)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            return await video_tail9_render(query, uid, context, "summary")
         if action in {"open", "scenes"}:
             return await video_tail9_render(query, uid, context, "review")
         if action in {"edit", "redo", "prompts", "back"}:
@@ -88083,8 +88084,10 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return await video_selfshot2_render(query, uid, screen if screen in video_selfshot2.SCREEN_PARENTS else "review", draft=host)
             return await video_selfshot3_render(query, uid, screen if screen in video_selfshot3.SCREEN_PARENTS else "review", draft=host)
     if section == "summary":
-        if action in {"open", "back"}:
+        if action == "open":
             return await video_tail9_render(query, uid, context, "summary")
+        if action == "back":
+            return await video_tail9_render(query, uid, context, "review")
     if section == "audio":
         if action == "open":
             return await video_tail9_render(query, uid, context, "audio")
@@ -88135,9 +88138,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             for key in ("dubbing", "music", "sfx", "subtitles"):
                 audio[key] = False
             tail["audio_config"] = audio
+            tail = video_tail9.mark_audio_complete(tail, skipped=True)
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
         if action == "done":
+            tail = video_tail9.mark_audio_complete(tail)
+            save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
     if section == "logo":
         if action == "open":
@@ -88234,6 +88240,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             config["enabled"] = True
             config["position"] = position
             tail[key] = config
+            tail = video_tail9.mark_branding_configured(tail, target)
             tail["brand_pending_target"] = ""
             tail["brand_pending_position"] = ""
             save_video_tail9_state(uid, context, tail, owner, host)
@@ -88244,8 +88251,10 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             config["enabled"] = False
             if argument == "logo":
                 config["asset_file_id"] = ""
+                tail["logo_status"] = "not_configured"
             else:
                 config["text"] = ""
+                tail["watermark_status"] = "not_configured"
             tail[key] = config
             if video_tail9_pending_brand_target(tail) == argument:
                 tail["brand_pending_target"] = ""
@@ -88253,22 +88262,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
         if action == "skip":
-            tail["logo_config"] = {
-                "enabled": False,
-                "asset_file_id": "",
-                "position": str((tail.get("logo_config") or {}).get("position") or "bottom_right"),
-            }
-            tail["watermark_config"] = {
-                "enabled": False,
-                "text": "",
-                "position": str((tail.get("watermark_config") or {}).get("position") or "bottom_right"),
-                "opacity_percent": max(
-                    0,
-                    min(100, safe_int((tail.get("watermark_config") or {}).get("opacity_percent"), 45)),
-                ),
-            }
-            tail["brand_pending_target"] = ""
-            tail["brand_pending_position"] = ""
+            tail = video_tail9.mark_branding_skipped(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "summary")
         if action == "done":
@@ -219873,8 +219867,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         # Watermark flow as the current tail, never reopen the old list.
         return await video_tail9_render(query, uid, context, "logo")
     if action == "review_summary":
-        state = video_profile_studio_step(context, state, "full_review", push=False)
-        return await video_profile_scene1_render(query, state, lang)
+        return await video_tail9_render(query, uid, context, "summary")
     if action in {"review_done", "review_continue"}:
         # Old Review buttons remain usable, but must enter the current
         # sequence rather than skipping Audio and Logo/Watermark.

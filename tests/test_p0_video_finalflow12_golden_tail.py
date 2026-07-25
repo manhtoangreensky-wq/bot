@@ -98,7 +98,7 @@ def test_review_requires_summary_before_quality_for_all_tail_owners() -> None:
     assert "video_tail|summary|open" in tail_review
     assert "video_tail|summary|open" in edit_review
     assert "video_tail|logo|open" in summary
-    assert '("⬅️ Quay lại", "video_tail|logo|open")' in summary
+    assert '("⬅️ Quay lại", "video_tail|review|open")' in summary
 
 
 def test_completed_legacy_ai_plan_restores_the_missing_content_contract() -> None:
@@ -149,13 +149,13 @@ def test_completed_non_ai_scene_plan_restores_the_missing_content_contract() -> 
     assert compiled["plan_status"] == "ready"
 
 
-def test_stale_summary_callback_resumes_audio_and_summary_has_its_own_owner() -> None:
+def test_direct_summary_callback_keeps_summary_as_its_own_owner() -> None:
     callback = _function_source("handle_video_tail_callback")
     blocker = _function_source("video_tail9_public_blocker_keyboard")
     quality = _function_source("video_tail9_quality_keyboard")
 
     assert 'if action == "summary":' in callback
-    assert 'video_tail9_render(query, uid, context, "audio")' in callback
+    assert 'video_tail9.prepare_summary(tail)' in callback
     assert 'if section == "summary":' in callback
     assert 'video_tail9_render(query, uid, context, "summary")' in callback
     assert "video_tail|summary|open" in blocker
@@ -177,7 +177,7 @@ def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positio
     assert '"video_tail|review|open"' in audio
     assert '"video_tail|logo|done"' in logo
     assert '"video_tail|logo|skip"' in logo
-    assert '"video_tail|audio|open"' in logo
+    assert '"video_tail|review|open"' in logo
     for position in (
         "top_left", "top_center", "top_right",
         "center_left", "center", "center_right",

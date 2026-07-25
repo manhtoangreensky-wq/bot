@@ -92,6 +92,54 @@ def test_audio_toggles_and_zero_to_two_hundred_volume_are_canonical() -> None:
     assert state["audio_config"]["ducking"] is True
 
 
+def test_new_tail_state_keeps_optional_branding_unconfigured() -> None:
+    state = video_tail9.new_state(
+        product_type="video_ai_real",
+        session_id="unconfigured-branding",
+    )
+
+    assert state["logo_status"] == "not_configured"
+    assert state["watermark_status"] == "not_configured"
+    assert state["logo_config"]["position"] == ""
+    assert state["watermark_config"]["position"] == ""
+
+
+def test_summary_preparation_keeps_optional_tail_parts_nonblocking() -> None:
+    state = video_tail9.new_state(
+        product_type="video_trend",
+        session_id="summary-optional",
+    )
+    state.update({
+        "content_source": "content_profiles",
+        "content_mode": "suggestions",
+        "selected_prompt": "Prompt video đã duyệt",
+        "prompt_revision": 1,
+    })
+
+    summary = video_tail9.prepare_summary(state)
+
+    assert summary["audio_status"] == "not_configured"
+    assert summary["logo_status"] == "not_configured"
+    assert summary["watermark_status"] == "not_configured"
+    assert summary["summary_status"] == "ready"
+
+
+def test_summary_back_and_direct_open_use_the_review_contract() -> None:
+    summary_keyboard = _between(
+        "def video_tail9_summary_keyboard",
+        "def video_tail9_public_blocker_text",
+    )
+    handler = _between(
+        "async def handle_video_tail_callback",
+        "async def handle_video_tail9_pending_text",
+    )
+
+    assert '[("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard
+    assert 'if action == "summary":\n            tail = video_tail9.prepare_summary(tail)' in handler
+    assert 'return await video_tail9_render(query, uid, context, "summary")' in handler
+    assert 'if action == "back":\n            return await video_tail9_render(query, uid, context, "review")' in handler
+
+
 def test_source_audio_capability_does_not_override_missing_source_stream() -> None:
     state = video_tail9.new_state(
         product_type="self_shot_scene_change",
