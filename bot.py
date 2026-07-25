@@ -109,7 +109,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
+from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
@@ -86189,10 +86189,16 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
     current = video_selfshot2_draft({"draft": draft} if draft is not None else get_video_session(user_id))
     current["selfshot2_screen"] = str(screen)
     session = save_video_selfshot2_draft(user_id, current, step=f"selfshot2:{screen}")
-    model = video_selfshot2.screen_model(screen, session.get("draft"))
-    parent = video_selfshot2.screen_parent(screen, session.get("draft"))
-    expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss2|show|{parent}"
-    validation = video_selfshot2.validate_rows(model["rows"], back_callback=expected_back)
+    if video_selfshotflow4.enabled("ss2", session.get("draft")):
+        model = video_selfshotflow4.screen_model("ss2", screen, session.get("draft"))
+        parent = video_selfshotflow4.screen_parent("ss2", screen, session.get("draft"))
+        expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss2|c4show|{parent}"
+        validation = video_selfshotflow4.validate_rows(model["rows"], back_callback=expected_back)
+    else:
+        model = video_selfshot2.screen_model(screen, session.get("draft"))
+        parent = video_selfshot2.screen_parent(screen, session.get("draft"))
+        expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss2|show|{parent}"
+        validation = video_selfshot2.validate_rows(model["rows"], back_callback=expected_back)
     if not validation.get("ok"):
         logger.error("selfshot2_keyboard_invalid | screen=%s errors=%s", screen, validation.get("errors"))
         return await safe_edit_or_send(
@@ -86366,10 +86372,16 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
     if screen not in {"types", "project", "help", "analysis", "finish"}:
         current["selfshot3_resume_screen"] = str(screen)
     session = save_video_selfshot3_draft(user_id, current, step=f"selfshot3:{screen}")
-    model = video_selfshot3.screen_model(screen, session.get("draft"))
-    parent = video_selfshot3.screen_parent(screen)
-    expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|show|{parent}"
-    validation = video_selfshot3.validate_rows(model["rows"], back_callback=expected_back)
+    if video_selfshotflow4.enabled("ss3", session.get("draft")):
+        model = video_selfshotflow4.screen_model("ss3", screen, session.get("draft"))
+        parent = video_selfshotflow4.screen_parent("ss3", screen, session.get("draft"))
+        expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|c4show|{parent}"
+        validation = video_selfshotflow4.validate_rows(model["rows"], back_callback=expected_back)
+    else:
+        model = video_selfshot3.screen_model(screen, session.get("draft"))
+        parent = video_selfshot3.screen_parent(screen)
+        expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|show|{parent}"
+        validation = video_selfshot3.validate_rows(model["rows"], back_callback=expected_back)
     if not validation.get("ok"):
         logger.error("selfshot3_keyboard_invalid | screen=%s errors=%s", screen, validation.get("errors"))
         return await safe_edit_or_send(
@@ -86383,6 +86395,125 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
         parse_mode="HTML",
         reply_markup=video_scene3_keyboard(model["rows"]),
     )
+
+
+def video_selfshotflow4_input_keyboard(flow: str, back_screen: str) -> InlineKeyboardMarkup:
+    target = str(back_screen or "segment").strip()
+    return video_scene3_keyboard([
+        [("⬅️ Quay lại", f"vproduct|{flow}|c4show|{target}"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_selfshotflow4_source_keyboard() -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("⬅️ Quay lại", "vproduct|selfshot_hub"), ("🏠 Menu chính", "menu|main")],
+    ])
+
+
+def video_selfshot_source_input_keyboard(flow: str, draft: dict | None = None) -> InlineKeyboardMarkup:
+    if video_selfshotflow4.enabled(flow, draft):
+        return video_selfshotflow4_source_keyboard()
+    return video_selfshot2_input_keyboard("intro") if flow == "ss2" else video_selfshot3_source_request_keyboard()
+
+
+def video_selfshotflow4_draft(flow: str, session: dict | None = None) -> dict:
+    return (
+        video_selfshot2_draft(session)
+        if str(flow) == "ss2"
+        else video_selfshot3_draft(session)
+    )
+
+
+def save_video_selfshotflow4_draft(user_id: int, flow: str, draft: dict, *, step: str = "") -> dict:
+    return (
+        save_video_selfshot2_draft(user_id, draft, step=step)
+        if str(flow) == "ss2"
+        else save_video_selfshot3_draft(user_id, draft, step=step)
+    )
+
+
+async def video_selfshotflow4_handle_result(target, user_id: int, context: ContextTypes.DEFAULT_TYPE, flow: str, result: dict):
+    """Persist one canonical SelfShot4 transition and render exactly one next screen."""
+
+    current = video_selfshotflow4_draft(flow, {"draft": dict(result.get("state") or {})})
+    current[video_selfshotflow4.FLOW_FLAGS[flow]] = True
+    pending = str(result.get("pending") or "").strip()
+    if pending:
+        back_screen = str(result.get("back") or "segment").strip()
+        step = f"selfshotflow4_{flow}_{pending}_input"
+        save_video_selfshotflow4_draft(user_id, flow, current, step=f"selfshot{flow[-1]}:{back_screen}")
+        pending_session = task3d_session_step(
+            user_id,
+            step,
+            input_mode="text",
+            input_purpose=f"selfshotflow4:{flow}:{pending}",
+            provider_called=False,
+            job_created=False,
+            outbox_created=False,
+            generated_files=0,
+            xu_charged=0,
+        )
+        pending_session.update({
+            "draft": current,
+            "product_id": video_selfshotflow4.FLOW_PRODUCT_IDS[flow],
+            "flow_owner": f"selfshot{flow[-1]}",
+            "flow_session_id": str(current.get("session_id") or ""),
+            "flow_revision": safe_int(current.get("revision"), 1),
+            "return_to": "vproduct|selfshot_hub",
+            "selfshotflow4_pending": pending,
+            "selfshotflow4_pending_back": back_screen,
+            "selfshotflow4_owner": flow,
+            "selfshotflow4_session_id": str(current.get("session_id") or ""),
+            "selfshotflow4_revision": safe_int(current.get("revision"), 1),
+            "awaiting_media": False,
+            "provider_called": False,
+            "job_created": False,
+            "outbox_created": False,
+            "generated_files": 0,
+            "wallet_mutations": 0,
+            "xu_charged": 0,
+        })
+        save_video_session(user_id, pending_session)
+        return await safe_edit_or_send(
+            target,
+            video_selfshotflow4.pending_copy(flow, pending),
+            parse_mode="HTML",
+            reply_markup=video_selfshotflow4_input_keyboard(flow, back_screen),
+        )
+
+    screen = str(result.get("screen") or video_selfshotflow4.current_screen(flow, current))
+    if screen == "tail_review":
+        save_video_selfshotflow4_draft(user_id, flow, current, step=f"selfshot{flow[-1]}:tail_review")
+        return await video_tail9_render(target, user_id, context, "review")
+    save_video_selfshotflow4_draft(user_id, flow, current, step=f"selfshot{flow[-1]}:{screen}")
+    if flow == "ss2":
+        return await video_selfshot2_render(target, user_id, screen, draft=current)
+    return await video_selfshot3_render(target, user_id, screen, draft=current)
+
+
+async def video_selfshotflow4_handle_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: str, session: dict) -> bool:
+    step = str(session.get("current_step") or "")
+    prefix = f"selfshotflow4_{flow}_"
+    if not step.startswith(prefix) or not step.endswith("_input"):
+        return False
+    pending = str(session.get("selfshotflow4_pending") or step[len(prefix):-len("_input")]).strip()
+    current = video_selfshotflow4_draft(flow, session)
+    if not video_selfshotflow4.enabled(flow, current):
+        return False
+    text = re.sub(r"\s+", " ", str(update.message.text or "").strip())[:5000]
+    try:
+        result = video_selfshotflow4.apply_text(flow, current, pending, text)
+    except (TypeError, ValueError):
+        await update.message.reply_text(
+            "⚠️ Nội dung chưa hợp lệ. Phiên vẫn được giữ; anh/chị có thể nhập lại.",
+            reply_markup=video_selfshotflow4_input_keyboard(
+                flow,
+                str(session.get("selfshotflow4_pending_back") or "segment"),
+            ),
+        )
+        return True
+    await video_selfshotflow4_handle_result(update.message, update.effective_user.id, context, flow, result)
+    return True
 
 
 def video_selfshot3_input_keyboard(back_screen: str) -> InlineKeyboardMarkup:
@@ -87941,6 +88072,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 target = "video_prompts" if action in {"prompts", "back"} else "scene_plan"
                 state = video_profile_studio_step(context, host, target, push=action != "back")
                 return await video_profile_scene1_render(query, state, get_user_language(uid) or "vi")
+            if tail.get("video_product_type") == video_selfshot2.PRODUCT_ID and video_selfshotflow4.enabled("ss2", host):
+                target = "prompt" if action in {"prompts", "back"} else "content_source"
+                return await video_selfshot2_render(query, uid, target, draft=host)
+            if tail.get("video_product_type") == video_selfshot3.PRODUCT_ID and video_selfshotflow4.enabled("ss3", host):
+                target = "prompt" if action in {"prompts", "back"} else "content_source"
+                return await video_selfshot3_render(query, uid, target, draft=host)
             screen = "review" if action in {"prompts", "back"} else "content"
             if tail.get("video_product_type") == video_selfshot2.PRODUCT_ID:
                 return await video_selfshot2_render(query, uid, screen if screen in video_selfshot2.SCREEN_PARENTS else "review", draft=host)
@@ -88580,6 +88717,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         current_screen = str(current.get("selfshot2_screen") or "intro").strip()
         valid_screens = set(video_selfshot2.SCREEN_PARENTS)
         try:
+            if video_selfshotflow4.enabled("ss2", current):
+                if operation.startswith("c4"):
+                    result = video_selfshotflow4.apply_action("ss2", current, operation, argument)
+                    return await video_selfshotflow4_handle_result(query, uid, context, "ss2", result)
+                # A legacy callback from an earlier SelfShot2 screen is read-only.
+                return await video_selfshot2_render(query, uid, current_screen, draft=current)
             legacy_tail_screen = {
                 ("show", "review"): "review",
                 ("show", "addons"): "audio",
@@ -88609,6 +88752,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await video_selfshot2_render(query, uid, "intro", draft=reset.get("draft"))
             if operation == "source":
                 current = video_selfshot2_draft({"draft": current})
+                current["selfshot2_canonical_flow"] = True
+                current["selfshotflow4_revision"] = safe_int(current.get("revision"), 1)
                 save_video_selfshot2_draft(uid, current, step="selfshot2:source")
                 session = task3d_session_step(
                     uid,
@@ -88624,6 +88769,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 session["flow_owner"] = "selfshot2"
                 session["flow_session_id"] = str(current.get("session_id") or "")
                 session["flow_revision"] = safe_int(current.get("revision"), 1)
+                session["selfshotflow4_owner"] = "ss2"
+                session["selfshotflow4_session_id"] = str(current.get("session_id") or "")
+                session["selfshotflow4_revision"] = safe_int(current.get("revision"), 1)
                 session["media_owner"] = "selfshot2"
                 session["media_session_id"] = str(current.get("session_id") or "")
                 session["awaiting_media"] = True
@@ -88636,7 +88784,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     "📎 <b>Gửi video nguồn</b>\n\nGửi đúng một video có người, vật hoặc sản phẩm cần giữ. "
                     "TOAN AAS chỉ đọc metadata và phân tích cục bộ ở bước này; chưa gọi nguồn dựng, chưa tạo tác vụ và chưa trừ Xu.",
                     parse_mode="HTML",
-                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                    reply_markup=video_selfshot_source_input_keyboard("ss2", current),
                 )
             result = video_selfshot2.apply_action(current, operation, argument)
             current = dict(result.get("state") or current)
@@ -88733,6 +88881,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         current = video_selfshot3_draft(session)
         valid_screens = set(video_selfshot3.SCREEN_PARENTS) | {"intro", "package"}
         try:
+            if video_selfshotflow4.enabled("ss3", current):
+                if operation.startswith("c4"):
+                    result = video_selfshotflow4.apply_action("ss3", current, operation, argument)
+                    return await video_selfshotflow4_handle_result(query, uid, context, "ss3", result)
+                # Stale SelfShot3 callbacks are deliberately read-only.
+                return await video_selfshot3_render(query, uid, str(current.get("selfshot3_screen") or "segment"), draft=current)
             legacy_tail_screen = {
                 ("show", "review"): "review",
                 ("show", "audio"): "audio",
@@ -88758,6 +88912,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await video_selfshot3_render(query, uid, current_screen, draft=current)
             if operation == "source":
                 current = video_selfshot3_draft({"draft": current})
+                current["selfshot3_canonical_flow"] = True
+                current["selfshotflow4_revision"] = safe_int(current.get("revision"), 1)
                 save_video_selfshot3_draft(uid, current, step="selfshot3:source")
                 session = task3d_session_step(
                     uid,
@@ -88773,6 +88929,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 session["flow_owner"] = "selfshot3"
                 session["flow_session_id"] = str(current.get("session_id") or "")
                 session["flow_revision"] = safe_int(current.get("revision"), 1)
+                session["selfshotflow4_owner"] = "ss3"
+                session["selfshotflow4_session_id"] = str(current.get("session_id") or "")
+                session["selfshotflow4_revision"] = safe_int(current.get("revision"), 1)
                 session["media_owner"] = "selfshot3"
                 session["media_session_id"] = str(current.get("session_id") or "")
                 session["awaiting_media"] = True
@@ -88785,7 +88944,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                     "📎 <b>Gửi video mộc</b>\n\nGửi một video có người, vật hoặc thú cưng cần giữ. "
                     "TOAN AAS chỉ đọc thông tin cục bộ để lập kế hoạch; chưa gọi nguồn dựng và chưa trừ Xu.",
                     parse_mode="HTML",
-                    reply_markup=video_selfshot3_source_request_keyboard(),
+                    reply_markup=video_selfshot_source_input_keyboard("ss3", current),
                 )
             if operation == "segment":
                 analysis = dict(current.get("source_analysis") or {})
@@ -91342,6 +91501,16 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         return False
     session = get_video_session(uid)
     if str(session.get("product_id") or "") == video_selfshot2.PRODUCT_ID:
+        canonical = video_selfshot2_draft(session)
+        if video_selfshotflow4.enabled("ss2", canonical):
+            if await video_selfshotflow4_handle_pending_text(update, context, "ss2", session):
+                return True
+    if str(session.get("product_id") or "") == video_selfshot3.PRODUCT_ID:
+        canonical = video_selfshot3_draft(session)
+        if video_selfshotflow4.enabled("ss3", canonical):
+            if await video_selfshotflow4_handle_pending_text(update, context, "ss3", session):
+                return True
+    if str(session.get("product_id") or "") == video_selfshot2.PRODUCT_ID:
         step = str(session.get("current_step") or "")
         owned_steps = {value[0] for value in video_selfshot2.PENDING_INPUTS.values()}
         if step in owned_steps:
@@ -92738,9 +92907,9 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         if current_step in video_steps and media_type != "video":
             active_product = str(session.get("product_id") or "")
             if current_step == "awaiting_selfshot2_video" and active_product == video_selfshot2.PRODUCT_ID:
-                keyboard = video_selfshot2_input_keyboard("intro")
+                keyboard = video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {}))
             elif current_step == "awaiting_selfshot3_video" and active_product == video_selfshot3.PRODUCT_ID:
-                keyboard = video_selfshot3_source_request_keyboard()
+                keyboard = video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {}))
             else:
                 keyboard = video_microflow_keyboard(current_step, active_product, lang)
             await update.message.reply_text(video_microflow_missing_input_text(lang), reply_markup=keyboard)
@@ -92855,14 +93024,14 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 await update.message.reply_text(
                     "⚠️ Chưa đọc được video nguồn. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
                     "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                    reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
                 )
                 return True
             if not local_probe.get("ok"):
                 reason = str(local_probe.get("reason") or "invalid_video_metadata")
                 await update.message.reply_text(
                     f"{video_local_public_error(reason)} TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                    reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
                 )
                 return True
             source_asset = {
@@ -92889,14 +93058,14 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 await update.message.reply_text(
                     "⚠️ Chưa phân tích được video nguồn. Anh/chị có thể gửi lại video khác; phiên Tự quay & đổi cảnh AI vẫn được giữ. "
                     "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                    reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
                 )
                 return True
             if not gate.get("ok"):
                 await update.message.reply_text(
                     "⚠️ Video chưa có đủ thời lượng hoặc kích thước. Hãy gửi lại dưới dạng video/tệp video, không gửi liên kết. "
                     "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot2_input_keyboard("intro"),
+                    reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
                 )
                 return True
             current = video_selfshot2_draft(session)
@@ -92905,6 +93074,10 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "source_asset": source_asset,
                 "source_analysis": analysis,
                 "source_file_id": file_id,
+                "source_video_id": file_id,
+                "source_video_hash": video_selfshot2.source_fingerprint(source_asset),
+                "source_duration_seconds": float(source_asset.get("duration_seconds") or 0),
+                "source_has_audio": bool(source_asset.get("audio_streams")),
                 "source_materialization_required": True,
                 "source_probe_policy": "telegram_metadata_then_worker_ffprobe",
                 "source_media_ref": file_id,
@@ -92913,6 +93086,8 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "awaiting_media": False,
                 "selfshot2_last_media_message_id": message_id,
                 "selfshot2_metadata_read_count": 1,
+                "selfshotflow4_owner": "ss2",
+                "selfshotflow4_session_id": str(current.get("session_id") or ""),
                 "provider_called": False,
                 "job_created": False,
                 "outbox_created": False,
@@ -92920,8 +93095,11 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "wallet_mutations": 0,
                 "xu_charged": 0,
             })
-            save_video_selfshot2_draft(uid, current, step="selfshot2:analysis")
-            await video_selfshot2_render(update.message, uid, "analysis", draft=current)
+            current["source_ratio"] = video_selfshotflow4.source_ratio(current)
+            current["selfshot2_canonical_flow"] = True
+            current["selfshotflow4_revision"] = safe_int(current.get("revision"), 1)
+            save_video_selfshot2_draft(uid, current, step="selfshot2:segment")
+            await video_selfshot2_render(update.message, uid, "segment", draft=current)
             return True
         if current_step == "awaiting_selfshot3_video" and product_id == video_selfshot3.PRODUCT_ID:
             if not video_selfshot_media_owner_valid(
@@ -92955,14 +93133,14 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 await update.message.reply_text(
                     "⚠️ Chưa đọc được video mộc. Anh/chị hãy gửi lại video MP4/MOV/MKV/WebM trong đúng phiên này. "
                     "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot3_source_request_keyboard(),
+                    reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
                 )
                 return True
             if not local_probe.get("ok"):
                 reason = str(local_probe.get("reason") or "invalid_video_metadata")
                 await update.message.reply_text(
                     f"{video_local_public_error(reason)} TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot3_source_request_keyboard(),
+                    reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
                 )
                 return True
             source_asset = {
@@ -92989,14 +93167,14 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 await update.message.reply_text(
                     "⚠️ Chưa phân tích được video mộc. Anh/chị có thể gửi lại video khác; phiên biến đổi điện ảnh vẫn được giữ. "
                     "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot3_source_request_keyboard(),
+                    reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
                 )
                 return True
             if not gate.get("ok"):
                 await update.message.reply_text(
                     "⚠️ Video chưa có đủ thông tin thời lượng hoặc khung hình. Hãy gửi lại video dạng video, không gửi liên kết. "
                     "TOAN AAS chưa tạo tác vụ và chưa trừ Xu.",
-                    reply_markup=video_selfshot3_source_request_keyboard(),
+                    reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
                 )
                 return True
             current = video_selfshot3_draft(session)
@@ -93005,6 +93183,10 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "source_asset": source_asset,
                 "source_analysis": analysis,
                 "source_file_id": file_id,
+                "source_video_id": file_id,
+                "source_video_hash": video_selfshot3.source_fingerprint(source_asset),
+                "source_duration_seconds": float(source_asset.get("duration_seconds") or 0),
+                "source_has_audio": bool(source_asset.get("audio_streams")),
                 "source_materialization_required": True,
                 "source_probe_policy": "local_ffprobe_once_then_worker_revalidate",
                 "source_media_ref": file_id,
@@ -93013,13 +93195,18 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "awaiting_media": False,
                 "selfshot3_last_media_message_id": message_id,
                 "selfshot3_probe_count": 1,
+                "selfshotflow4_owner": "ss3",
+                "selfshotflow4_session_id": str(current.get("session_id") or ""),
                 "provider_called": False,
                 "job_created": False,
                 "outbox_created": False,
                 "xu_charged": 0,
             })
-            save_video_selfshot3_draft(uid, current, step="selfshot3:source_ready")
-            await video_selfshot3_render(update.message, uid, "source_ready", draft=current)
+            current["source_ratio"] = video_selfshotflow4.source_ratio(current)
+            current["selfshot3_canonical_flow"] = True
+            current["selfshotflow4_revision"] = safe_int(current.get("revision"), 1)
+            save_video_selfshot3_draft(uid, current, step="selfshot3:segment")
+            await video_selfshot3_render(update.message, uid, "segment", draft=current)
             return True
         if current_step in {"awaiting_multiple_images", "storyboard_upload_images"}:
             session = task3d_session_step(
