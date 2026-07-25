@@ -59,14 +59,15 @@ def test_tail_logo_and_watermark_share_the_full_nine_position_grid() -> None:
     assert "menu|main" in keyboard
 
 
-def test_logo_hub_keeps_both_position_entries_before_the_nine_position_grid() -> None:
+def test_logo_hub_starts_each_branding_flow_before_the_nine_position_grid() -> None:
     start = BOT_SOURCE.index("def video_tail9_logo_keyboard")
     end = BOT_SOURCE.index("def video_tail9_position_text", start)
     keyboard = BOT_SOURCE[start:end]
-    assert "video_tail|logo|position|logo" in keyboard
-    assert "video_tail|logo|position|watermark" in keyboard
-    assert "Vị trí logo" in keyboard
-    assert "Vị trí watermark" in keyboard
+    assert "video_tail|logo|upload" in keyboard
+    assert "video_tail|logo|watermark" in keyboard
+    assert "video_tail|logo|position|logo" not in keyboard
+    assert "video_tail|logo|position|watermark" not in keyboard
+    assert "video_tail|review|open" in keyboard
 
 
 def test_local_editor_preserves_each_canonical_overlay_position() -> None:
