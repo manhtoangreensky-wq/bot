@@ -87551,7 +87551,7 @@ def video_tail9_public_blocker_text() -> str:
 def video_tail9_public_blocker_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🔄 Kiểm tra lại", "video_tail|quality|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
-        [("⬅️ Quay lại", "video_tail|summary|open"), ("🏠 Menu chính", "menu|main")],
+        [("⬅️ Quay lại", "video_tail|quality|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
 
@@ -87814,8 +87814,8 @@ def video_tail9_quality_keyboard(
 
 def video_tail9_invoice_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✅ Xác nhận tạo video", "video_tail|confirm")],
-        [("✍️ Sửa cấu hình", "video_tail|review|open"), ("⭐ Đổi gói", "video_tail|quality|open")],
+        [("✅ Xác nhận tạo video", "video_tail|confirm"), ("⭐ Đổi gói", "video_tail|quality|change")],
+        [("✍️ Sửa cấu hình", "video_tail|review|open"), ("📄 Xem tổng hợp", "video_tail|summary|open")],
         [("⬅️ Quay lại", "video_tail|quality|open"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -88278,8 +88278,10 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 )
             return await video_tail9_render(query, uid, context, "summary")
     if section == "quality":
-        if action == "open":
+        if action in {"open", "change"}:
             return await video_tail9_render(query, uid, context, "quality")
+        if action == "back":
+            return await video_tail9_render(query, uid, context, "summary")
         if action == "select":
             quality = max(200, min(1500, safe_int(argument, 300)))
             capability = video_tail9_commercial_preflight(uid, context, tail, owner, host, quality)
@@ -213766,6 +213768,28 @@ async def video_dubbing_store_dialogue_text_and_route(
     )
     return next_state
 
+VIDEO_DUBBING_PENDING_TEXT_STEPS = frozenset({
+    "language_custom",
+    "voice_custom",
+    "voice_saved_select",
+    "voice_speed",
+    "link_input",
+    "subtitle_edit_line_number",
+    "subtitle_edit_line_text",
+    "subtitle_find_text",
+    "subtitle_replace_text",
+    "subtitle_time_shift",
+    "dialogue_text_input",
+    "subdub_original_volume_input",
+    "subdub_dub_volume_input",
+})
+
+
+def subdub_text_input_owns_message(user_id: int) -> bool:
+    state = get_video_dubbing_pending(user_id) or {}
+    return str(state.get("step") or "") in VIDEO_DUBBING_PENDING_TEXT_STEPS
+
+
 async def handle_video_dubbing_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
@@ -221927,10 +221951,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_architecture_profile_pending_text(update, context):
         return
 
-    if await handle_video_profile_studio_pending_text(update, context):
+    if await handle_video_tail9_pending_text(update, context):
         return
 
-    if await handle_video_tail9_pending_text(update, context):
+    if await handle_video_profile_studio_pending_text(update, context):
         return
 
     if await handle_video_product_pending_text(update, context):
