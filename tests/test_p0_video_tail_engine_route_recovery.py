@@ -92,12 +92,14 @@ def test_local_editor_preserves_each_canonical_overlay_position() -> None:
         assert "drawtext=" in complex_filter
 
 
-def test_tail_audio_completion_routes_to_logo_before_summary() -> None:
+def test_tail_audio_completion_routes_to_quality_without_reopening_branding() -> None:
     start = BOT_SOURCE.index("async def handle_video_tail_callback")
     end = BOT_SOURCE.index("async def handle_video_tail9_pending_text", start)
     handler = BOT_SOURCE[start:end]
     audio = handler[handler.index('if section == "audio":'):handler.index('if section == "logo":')]
-    assert audio.count('video_tail9_render(query, uid, context, "logo")') >= 2
+    assert audio.count('video_tail9_render(query, uid, context, "quality")') == 2
+    assert 'video_tail9_render(query, uid, context, "logo")' not in audio
+    assert 'video_tail9_render(query, uid, context, "summary")' not in audio
     assert 'if action == "done":' in audio
     assert 'if action == "skip":' in audio
 
@@ -155,7 +157,7 @@ def test_tail_logo_and_watermark_intakes_wait_for_position_confirmation() -> Non
 def test_tail_summary_is_a_valid_canonical_stage() -> None:
     state = video_tail9.normalize_state({"status_stage": "summary"})
     assert state["status_stage"] == "summary"
-    assert video_tail9.public_progress(state) == 9
+    assert video_tail9.public_progress(state) == 5
 
 
 def test_watermark_submission_keeps_the_exact_three_by_three_position() -> None:

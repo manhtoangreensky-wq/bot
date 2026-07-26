@@ -83,22 +83,19 @@ def test_review_requires_summary_before_quality_for_all_tail_owners() -> None:
 
     assert "video_tail|quality|open" not in scene_review
     assert "video_tail|quality|open" not in tail_review
-    assert "video_tail|quality|open" in summary
+    assert "video_tail|quality|open" not in summary
     assert '[("⭐ Hoàn thiện video", "video_tail|quality|open")]' not in summary
     assert "video_tail|quality|open" not in edit_review
-    assert "video_tail|review|summary" not in scene_review
-    assert "video_tail|review|summary" not in tail_review
-    assert "video_tail|review|summary" not in edit_review
-    assert "video_tail|audio|open" in tail_review
-    assert "video_tail|audio|open" in edit_review
-    assert "video_tail|logo|open" in scene_review
-    assert "video_tail|logo|open" in tail_review
-    assert "video_tail|logo|open" in edit_review
-    assert "video_tail|summary|open" in scene_review
-    assert "video_tail|summary|open" in tail_review
-    assert "video_tail|summary|open" in edit_review
-    assert "video_tail|logo|open" in summary
-    assert '("⬅️ Quay lại", "video_tail|review|open")' in summary
+    assert "video_tail|review|audio" in tail_review
+    assert "video_tail|review|audio" in edit_review
+    assert "video_tail|review|logo" in scene_review
+    assert "video_tail|review|logo" in tail_review
+    assert "video_tail|review|logo" in edit_review
+    assert "video_tail|review|summary" in scene_review
+    assert "video_tail|review|summary" in tail_review
+    assert "video_tail|review|summary" in edit_review
+    assert "video_tail|summary|logo" in summary
+    assert '("⬅️ Quay lại", "video_tail|summary|back")' in summary
 
 
 def test_completed_legacy_ai_plan_restores_the_missing_content_contract() -> None:
@@ -149,6 +146,63 @@ def test_completed_non_ai_scene_plan_restores_the_missing_content_contract() -> 
     assert compiled["plan_status"] == "ready"
 
 
+def test_last_green_scene_prompts_restore_the_shared_tail_sequence() -> None:
+    compiled = _compile_contract(
+        {
+            "source_product_id": "video_ai_realistic",
+            "subject": "Giới thiệu sản phẩm trong một cảnh",
+            "plan": {
+                "scenes": [
+                    {"scene_index": 1, "title": "Mở đầu", "goal": "Giới thiệu sản phẩm"},
+                ],
+            },
+            "video_prompt_versions": {
+                "1": {
+                    "active_version": 2,
+                    "approved": True,
+                    "versions": [
+                        {"version": 1, "prompt": "Prompt cũ"},
+                        {
+                            "version": 2,
+                            "prompt": "Cảnh 1 giới thiệu sản phẩm, camera tiến nhẹ và kết thúc trọn vẹn.",
+                            "provider_prompt": "Scene 1 product reveal with a gentle camera push-in.",
+                        },
+                    ],
+                },
+            },
+            "scene_count": 1,
+            "aspect_ratio": "9:16",
+        },
+        "video_ai_realistic",
+    )
+
+    assert compiled["selected_prompt"] == (
+        "Cảnh 1 giới thiệu sản phẩm, camera tiến nhẹ và kết thúc trọn vẹn."
+    )
+
+    tail = video_tail9.new_state(
+        product_type="video_ai_real",
+        session_id="last-green-tail",
+        scene_count=1,
+        ratio="9:16",
+    )
+    tail = video_tail9.apply_content_contract(tail, compiled)
+    assert video_tail9.next_required_screen(tail) == "logo"
+
+    tail = video_tail9.mark_branding_skipped(tail)
+    assert video_tail9.next_required_screen(tail) == "summary"
+
+    tail = video_tail9.prepare_summary(tail)
+    assert tail["summary_status"] == "ready"
+    assert video_tail9.next_required_screen(tail) == "review"
+
+    tail = video_tail9.mark_review_complete(tail)
+    assert video_tail9.next_required_screen(tail) == "audio"
+
+    tail = video_tail9.mark_audio_complete(tail, skipped=True)
+    assert video_tail9.next_required_screen(tail) == ""
+
+
 def test_direct_summary_callback_keeps_summary_as_its_own_owner() -> None:
     callback = _function_source("handle_video_tail_callback")
     blocker = _function_source("video_tail9_public_blocker_keyboard")
@@ -160,9 +214,9 @@ def test_direct_summary_callback_keeps_summary_as_its_own_owner() -> None:
     assert 'video_tail9_render(query, uid, context, "summary")' in callback
     assert "video_tail|summary|open" in blocker
     assert "video_tail|review|summary" not in blocker
-    assert "video_tail|summary|open" in quality
-    assert "video_tail|review|summary" not in quality
-    assert "video_tail|review|summary" not in BOT_SOURCE
+    assert "video_tail|quality|back" in quality
+    assert "video_tail|summary|open" not in quality
+    assert "video_tail|review|summary" in BOT_SOURCE
 
 
 def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positions() -> None:
@@ -184,12 +238,13 @@ def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positio
         "bottom_left", "bottom_center", "bottom_right",
     ):
         assert f'"{position}"' in positions
-    assert '"video_tail|logo|open"' in summary
-    assert '"video_tail|quality|open"' in summary
-    assert '"video_tail|summary|open"' in quality
+    assert '"video_tail|summary|logo"' in summary
+    assert '"video_tail|summary|continue"' in summary
+    assert '"video_tail|quality|open"' not in summary
+    assert '"video_tail|quality|back"' in quality
 
 
-def test_legacy_review_audio_and_audio_exit_use_the_shared_branding_route() -> None:
+def test_legacy_review_audio_and_audio_exit_use_the_corrected_tail_order() -> None:
     callback = _function_source("handle_video_tail_callback")
     legacy_review = _function_source("handle_video_profile_studio_callback")
 
@@ -200,7 +255,8 @@ def test_legacy_review_audio_and_audio_exit_use_the_shared_branding_route() -> N
     legacy_end = legacy_review.index('if action == "review_post":', legacy_start)
     legacy_audio = legacy_review[legacy_start:legacy_end]
 
-    assert audio.count('video_tail9_render(query, uid, context, "logo")') == 2
+    assert audio.count('video_tail9_render(query, uid, context, "quality")') == 2
+    assert 'video_tail9_render(query, uid, context, "logo")' not in audio
     assert 'if action == "skip":' in audio
     assert 'if action == "done":' in audio
     assert 'video_tail9_render(query, uid, context, "audio")' in legacy_audio

@@ -51,14 +51,10 @@ def _ready_content_state() -> dict:
     )
 
 
-def test_tail_requires_audio_then_branding_before_summary_and_quality() -> None:
+def test_tail_requires_branding_summary_review_then_audio_before_quality() -> None:
     state = _ready_content_state()
-    assert video_tail9.next_required_screen(state) == "audio"
-    assert video_tail9.prepare_summary(state)["summary_status"] == "not_ready"
-
-    state = video_tail9.mark_audio_complete(state)
-    assert state["audio_status"] == "skipped"
     assert video_tail9.next_required_screen(state) == "logo"
+    assert video_tail9.prepare_summary(state)["summary_status"] == "not_ready"
 
     state = video_tail9.mark_branding_complete(state)
     assert state["logo_status"] == "skipped"
@@ -67,6 +63,13 @@ def test_tail_requires_audio_then_branding_before_summary_and_quality() -> None:
 
     state = video_tail9.prepare_summary(state)
     assert state["summary_status"] == "ready"
+    assert video_tail9.next_required_screen(state) == "review"
+
+    state = video_tail9.mark_review_complete(state)
+    assert video_tail9.next_required_screen(state) == "audio"
+
+    state = video_tail9.mark_audio_complete(state)
+    assert state["audio_status"] == "skipped"
     assert video_tail9.next_required_screen(state) == ""
 
 
@@ -112,9 +115,10 @@ def test_invoice_opens_a_distinct_confirmation_screen_before_submit() -> None:
 
 
 def test_confirm_open_is_side_effect_free_and_renders_only_the_confirmation() -> None:
-    tail = video_tail9.mark_audio_complete(_ready_content_state(), skipped=True)
-    tail = video_tail9.mark_branding_skipped(tail)
+    tail = video_tail9.mark_branding_skipped(_ready_content_state())
     tail = video_tail9.prepare_summary(tail)
+    tail = video_tail9.mark_review_complete(tail)
+    tail = video_tail9.mark_audio_complete(tail, skipped=True)
     tail = video_tail9.select_package(
         tail,
         quality_tier_id="300",
@@ -158,7 +162,7 @@ def test_confirm_open_is_side_effect_free_and_renders_only_the_confirmation() ->
     assert saved[-1]["final_confirmed"] is False
 
 
-def test_audio_done_always_routes_to_logo_before_summary() -> None:
+def test_stale_audio_done_cannot_bypass_branding_and_summary() -> None:
     tail = _ready_content_state()
     rendered: list[str] = []
 
