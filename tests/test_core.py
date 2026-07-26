@@ -38,21 +38,38 @@ def test_health_status_and_runtime_endpoints(monkeypatch):
     status = client.get("/status")
     assert status.status_code == 200
     assert status.json()["health"] == "/health"
+    # Unauthenticated /health reports liveness and nothing else. The provider
+    # inventory, database detail and freeze state are internal facts and now
+    # live behind the operator token.
     health = client.get("/health")
     assert health.status_code == 200
     health_payload = health.json()
-    assert health_payload["service"] == "TOAN AAS"
-    assert "db_ok" in health_payload
-    assert "db_file" in health_payload
-    assert "payos_configured" in health_payload
-    assert "telegram_configured" in health_payload
-    assert "public_base_url_configured" in health_payload
+    assert set(health_payload) == {"status", "version", "timestamp"}
+    for internal in (
+        "service",
+        "db_ok",
+        "db_file",
+        "payos_configured",
+        "telegram_configured",
+        "public_base_url_configured",
+    ):
+        assert internal not in health_payload
     runtime = client.get("/runtime")
     assert runtime.status_code == 403
     monkeypatch.setattr(bot, "OPERATOR_API_TOKEN", "runtime-test-token")
     runtime = client.get("/runtime?token=runtime-test-token")
     assert runtime.status_code == 200
     assert runtime.json()["service"].startswith("TOAN AAS")
+    # The operator still sees the full payload, unchanged.
+    full_payload = client.get(
+        "/health", headers={"x-operator-token": "runtime-test-token"}
+    ).json()
+    assert full_payload["service"] == "TOAN AAS"
+    assert "db_ok" in full_payload
+    assert "db_file" in full_payload
+    assert "payos_configured" in full_payload
+    assert "telegram_configured" in full_payload
+    assert "public_base_url_configured" in full_payload
 
 
 def test_data_persistence_guard_backup_and_status(monkeypatch, tmp_path):
