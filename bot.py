@@ -213216,6 +213216,28 @@ async def video_dubbing_store_dialogue_text_and_route(
     )
     return next_state
 
+VIDEO_DUBBING_PENDING_TEXT_STEPS = frozenset({
+    "language_custom",
+    "voice_custom",
+    "voice_saved_select",
+    "voice_speed",
+    "link_input",
+    "subtitle_edit_line_number",
+    "subtitle_edit_line_text",
+    "subtitle_find_text",
+    "subtitle_replace_text",
+    "subtitle_time_shift",
+    "dialogue_text_input",
+    "subdub_original_volume_input",
+    "subdub_dub_volume_input",
+})
+
+
+def subdub_text_input_owns_message(user_id: int) -> bool:
+    state = get_video_dubbing_pending(user_id) or {}
+    return str(state.get("step") or "") in VIDEO_DUBBING_PENDING_TEXT_STEPS
+
+
 async def handle_video_dubbing_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
