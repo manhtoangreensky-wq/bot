@@ -311,5 +311,7 @@ def test_live8_scope_is_subdub_only():
         "tests/test_p0_subdub_live10_tts_checkpoint_resume.py",
         "tests/test_p0_subdub_live13_selective_recent_mp4_restore.py",
         "tests/test_p0_subdub_live14_blackbox_lane_language_contract.py",
+        "tests/test_p0_19m6a_subdub_one_terminal_public_outcome_late_error_duplicate_fix.py",
+        "tests/test_p0_subdub_live21_four_lane_media_pipeline_truth.py",
     }
     assert set(changed) <= allowed

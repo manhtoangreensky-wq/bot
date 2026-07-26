@@ -260,7 +260,7 @@ def test_90_percent_validation_fail_finalizes_failed_no_charge():
 
     assert stored["terminal_state"] == "failed_no_charge"
     assert stored["panel_finalized"] is True
-    assert stored["panel_final_percent"] == 95
+    assert stored["panel_final_percent"] == 90
     assert stored["validation_started"] is True
     assert stored["validation_passed"] is False
     assert "Có lỗi khi xử lý lệnh" not in message.texts[0]

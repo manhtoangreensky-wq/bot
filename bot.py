@@ -29,6 +29,7 @@ import inspect
 import subprocess
 import tempfile
 import mimetypes
+import platform
 import shutil
 import traceback
 import zipfile
@@ -1189,7 +1190,7 @@ ARTIFACT_PUBLIC_BASE_URL = _env("ARTIFACT_PUBLIC_BASE_URL", "")
 ARTIFACT_TTL_HOURS = max(1, env_int("ARTIFACT_TTL_HOURS", 24))
 ARTIFACT_TMP_TTL_HOURS = max(1, env_int("ARTIFACT_TMP_TTL_HOURS", 6))
 ARTIFACT_MAX_MB = max(1, env_int("ARTIFACT_MAX_MB", 1024))
-LOCAL_FFMPEG_PATH = _env("LOCAL_FFMPEG_PATH", r"D:\TOANAAS\ffmpeg-8.1.1\bin\ffmpeg.exe")
+LOCAL_FFMPEG_PATH = _env("LOCAL_FFMPEG_PATH", "")
 LOCAL_COMFY_URL = _env("LOCAL_COMFY_URL", "http://127.0.0.1:8188")
 LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
 
@@ -1984,6 +1985,8 @@ TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_M
 GENERATED_MEDIA_MAX_MB = max(1, env_int("GENERATED_MEDIA_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
 SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", TELEGRAM_VIDEO_PREVIEW_MAX_MB))
 SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
+SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB = max(1, min(20, env_int("SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 20)))
+SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS = max(1, min(15, env_int("SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS", 5)))
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
@@ -7919,13 +7922,13 @@ def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
         for lookup_id in [wanted, wanted.lstrip("#"), *sorted(wanted_variants)]:
             job = get_engine_async_job(lookup_id)
             if job and _matches(job):
-                return subdub_merge_debug_job(job)
+                candidates.append(subdub_merge_debug_job(job, lookup_store_hit="engine_async_direct"))
     for candidate in SUBTITLE_DUB_PIPELINE_JOBS.values():
         if _matches(candidate):
-            candidates.append(subdub_merge_debug_job(candidate))
+            candidates.append(subdub_merge_debug_job(candidate, lookup_store_hit="memory_registry"))
     for candidate in list_engine_async_jobs("subtitle_dub", limit=120):
         if _matches(candidate):
-            candidates.append(subdub_merge_debug_job(candidate))
+            candidates.append(subdub_merge_debug_job(candidate, lookup_store_hit="engine_async_feature_index"))
     for candidate in subdub_engine_async_persisted_scan(limit=240):
         if _matches(candidate):
             candidates.append(subdub_merge_debug_job(candidate, lookup_store_hit="engine_async_persisted_scan"))
@@ -7935,7 +7938,25 @@ def subdub_progress_job_for_user(job_id: str = "", user_id=0) -> dict:
     def _sort_time(item: dict) -> float:
         return subdub_job_timestamp(item.get("updated_at") or item.get("started_at") or item.get("created_at") or 0)
 
-    return max(candidates, key=_sort_time)
+    persisted_sources = {
+        "engine_async_direct",
+        "engine_async_feature_index",
+        "engine_async_persisted_scan",
+    }
+
+    def _truth_priority(item: dict) -> tuple[int, float]:
+        source = str(item.get("lookup_store_hit") or "")
+        terminal = str(item.get("terminal_state") or "").strip().lower()
+        persisted = source in persisted_sources
+        if persisted and terminal in SUBDUB_TERMINAL_STATES:
+            priority = 3
+        elif persisted:
+            priority = 2
+        else:
+            priority = 1
+        return priority, _sort_time(item)
+
+    return max(candidates, key=_truth_priority)
 
 
 def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", user_id=0) -> dict:
@@ -9531,7 +9552,11 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         if subdub_job:
             job = subdub_enrich_job_identity(subdub_job)
             resolved_type = "subdub"
-            recovered_from_persisted_subdub_job = str(job.get("lookup_store_hit") or "") == "engine_async_persisted_scan"
+            recovered_from_persisted_subdub_job = str(job.get("lookup_store_hit") or "") in {
+                "engine_async_direct",
+                "engine_async_feature_index",
+                "engine_async_persisted_scan",
+            }
     if job_id and not job and not progress_product_type_is_music(resolved_type, job_id):
         recovered_job, recovered_type = _video_progress_debug_recover_job_from_db(job_id)
         if recovered_job:
@@ -9540,6 +9565,20 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             recovered_from_db_for_status_debug = True
     payload = product_progress_status.product_progress_debug_payload(resolved_type, job_id, job)
     normalized_progress_type = product_progress_status.normalize_product_type(resolved_type)
+    if normalized_progress_type == "subdub" and job:
+        truthful_stage = str(
+            job.get("progress_stage")
+            or job.get("current_stage")
+            or job.get("lifecycle_state")
+            or "received_file"
+        )
+        truthful_terminal = str(job.get("terminal_state") or "")
+        payload["current_stage"] = truthful_stage
+        payload["percent"] = safe_int(
+            job.get("progress_percent"),
+            subdub_progress_percent_for_lifecycle(truthful_stage, truthful_terminal),
+        )
+        payload["terminal_state"] = truthful_terminal
     if normalized_progress_type in product_progress_status.VIDEO_PROGRESS_TYPES:
         final_reconciled = safe_int((job or {}).get("final_progress_after_reconcile"), 0)
         if final_reconciled > 0:
@@ -62119,7 +62158,7 @@ def asr_smoke_status() -> str:
 def asr_smoke_ready() -> bool:
     return provider_status_is_pass(asr_smoke_status())
 
-def get_asr_adapter_readiness(public: bool = True) -> dict:
+def get_asr_adapter_readiness(public: bool = True, audio_extract_ready: bool | None = None) -> dict:
     provider = str(ASR_PROVIDER or "auto").strip().lower()
     if provider in {"shopai"}:
         provider = "shopaikey"
@@ -62163,7 +62202,8 @@ def get_asr_adapter_readiness(public: bool = True) -> dict:
     configured = bool(configured_names)
     public_ready = bool(configured and smoke_ready and enabled)
     ready = public_ready if public else configured
-    audio_extract_ready = video_dubbing_audio_extract_ready()
+    if audio_extract_ready is None:
+        audio_extract_ready = video_dubbing_audio_extract_ready()
     reason = "ready" if ready else (
         "asr_adapter_missing"
         if not configured
@@ -115156,7 +115196,9 @@ def subdub_classify_bad_request(reason: str = "", *, stage: str = "", job: dict 
 
 def subdub_merge_debug_job(job: dict | None = None, *, lookup_store_hit: str = "") -> dict:
     current = dict(job or {})
-    merged = {**current, **dict(current.get("debug_job") or {})}
+    # Nested debug snapshots are historical context. Canonical persisted root
+    # fields must win so a stale in-memory stage cannot overwrite DB truth.
+    merged = {**dict(current.get("debug_job") or {}), **current}
     merged = subdub_enrich_job_identity(merged, job_key=str(current.get("job_key") or ""))
     if lookup_store_hit and not merged.get("lookup_store_hit"):
         merged["lookup_store_hit"] = lookup_store_hit
@@ -144441,14 +144483,106 @@ def frame_video_effect_payload(token: str) -> dict:
     }
     return effects.get(str(token or "").lower(), effects["fade"])
 
-def frame_video_ffmpeg_path() -> str:
-    detected = shutil.which("ffmpeg")
+def probe_media_binary_candidate(candidate: str, name: str) -> dict:
+    binary_name = str(name or "").strip().lower()
+    if binary_name not in {"ffmpeg", "ffprobe"}:
+        raise ValueError("unsupported_media_binary")
+    requested = str(candidate or "").strip()
+    resolved = str(shutil.which(requested) or requested or "").strip()
+    base = {
+        "name": binary_name,
+        "resolved_path": resolved,
+        "executable": False,
+        "version_probe_ok": False,
+        "version_summary": "",
+        "blocker": f"{binary_name}_missing",
+    }
+    if not resolved or not os.path.isfile(resolved) or not os.access(resolved, os.X_OK):
+        return {**base, "resolved_path": "", "blocker": f"{binary_name}_not_executable"}
+    try:
+        completed = subprocess.run(
+            [resolved, "-version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=float(SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS),
+        )
+    except subprocess.TimeoutExpired:
+        return {**base, "resolved_path": resolved, "executable": True, "blocker": f"{binary_name}_version_probe_timeout"}
+    except Exception:
+        return {**base, "resolved_path": resolved, "executable": True, "blocker": f"{binary_name}_version_probe_failed"}
+    output = str(completed.stdout or completed.stderr or "").strip()
+    if completed.returncode != 0 or not output:
+        return {**base, "resolved_path": resolved, "executable": True, "blocker": f"{binary_name}_version_probe_failed"}
+    summary = sanitize_log_text(output.splitlines()[0])[:180]
+    return {
+        **base,
+        "resolved_path": resolved,
+        "executable": True,
+        "version_probe_ok": True,
+        "version_summary": summary,
+        "blocker": "",
+    }
+
+
+def resolve_media_binary(name: str) -> dict:
+    binary_name = str(name or "").strip().lower()
+    if binary_name not in {"ffmpeg", "ffprobe"}:
+        raise ValueError("unsupported_media_binary")
+    env_keys = {
+        "ffmpeg": ("FFMPEG_BINARY", "FFMPEG_PATH", "LOCAL_FFMPEG_PATH", "IMAGEIO_FFMPEG_EXE"),
+        "ffprobe": ("FFPROBE_BINARY", "FFPROBE_PATH", "LOCAL_FFPROBE_PATH"),
+    }[binary_name]
+    configured_path = next(
+        (str(os.environ.get(key) or "").strip() for key in env_keys if str(os.environ.get(key) or "").strip()),
+        "",
+    )
+    configured_probe = {}
+    if configured_path:
+        configured_probe = probe_media_binary_candidate(configured_path, binary_name)
+        if configured_probe.get("version_probe_ok"):
+            return {
+                **configured_probe,
+                "configured": True,
+                "configured_path_present": True,
+                "configured_valid": True,
+                "source": "configured",
+                "path_directories_inspected": len(str(os.environ.get("PATH") or "").split(os.pathsep)),
+            }
+    detected = str(shutil.which(binary_name) or "").strip()
     if detected:
-        return detected
-    configured = str(LOCAL_FFMPEG_PATH or "").strip()
-    if configured and os.path.exists(configured):
-        return configured
-    return ""
+        detected_probe = probe_media_binary_candidate(detected, binary_name)
+        if detected_probe.get("version_probe_ok"):
+            return {
+                **detected_probe,
+                "configured": bool(configured_path),
+                "configured_path_present": bool(configured_path),
+                "configured_valid": False if configured_path else None,
+                "source": "PATH",
+                "path_directories_inspected": len(str(os.environ.get("PATH") or "").split(os.pathsep)),
+            }
+    blocker = str(configured_probe.get("blocker") or f"{binary_name}_missing")
+    if configured_path and blocker.endswith("_not_executable"):
+        blocker = f"{binary_name}_missing"
+    return {
+        "name": binary_name,
+        "configured": bool(configured_path),
+        "configured_path_present": bool(configured_path),
+        "configured_valid": False if configured_path else None,
+        "resolved_path": "",
+        "executable": False,
+        "version_probe_ok": False,
+        "version_summary": "",
+        "source": "unavailable",
+        "blocker": blocker or f"{binary_name}_missing",
+        "path_directories_inspected": len(str(os.environ.get("PATH") or "").split(os.pathsep)),
+    }
+
+
+def frame_video_ffmpeg_path() -> str:
+    status = resolve_media_binary("ffmpeg")
+    return str(status.get("resolved_path") or "") if status.get("version_probe_ok") else ""
 
 def xu_number(value: int = 0) -> str:
     return f"{int(value or 0):,}".replace(",", ".")
@@ -180339,6 +180473,116 @@ async def cmd_tool_test_remote_worker_ping(update: Update, context: ContextTypes
     return await update.message.reply_text("\n".join(lines))
 
 
+def subdub_ass_filter_probe(ffmpeg_status: dict | None = None) -> dict:
+    status = dict(ffmpeg_status or resolve_media_binary("ffmpeg"))
+    ffmpeg = str(status.get("resolved_path") or "")
+    if not status.get("version_probe_ok") or not ffmpeg:
+        return {"ok": False, "ass_filter_ready": False, "blocker": "ffmpeg_missing"}
+    try:
+        completed = subprocess.run(
+            [ffmpeg, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=float(SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS),
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "ass_filter_ready": False, "blocker": "ffmpeg_filter_probe_timeout"}
+    except Exception:
+        return {"ok": False, "ass_filter_ready": False, "blocker": "ffmpeg_filter_probe_failed"}
+    output = f"{completed.stdout or ''}\n{completed.stderr or ''}"
+    ass_ready = bool(
+        completed.returncode == 0
+        and re.search(r"(?m)^\s*[TSC\.]{3}\s+(ass|subtitles)\s", output)
+    )
+    return {
+        "ok": ass_ready,
+        "ass_filter_ready": ass_ready,
+        "blocker": "" if ass_ready else "ffmpeg_ass_filter_missing",
+    }
+
+
+def subdub_runtime_status_payload() -> dict:
+    ffmpeg = resolve_media_binary("ffmpeg")
+    ffprobe = resolve_media_binary("ffprobe")
+    ass = subdub_ass_filter_probe(ffmpeg)
+    latin_font = resolve_subdub_subtitle_font({"sample_text": "Tiếng Việt", "target_language": "vi"})
+    unicode_font = resolve_subdub_subtitle_font({"sample_text": "字幕 한글", "target_language": "zh"})
+    noto_ready = bool(
+        "noto" in str(unicode_font.get("family") or "").lower()
+        or "noto" in os.path.basename(str(unicode_font.get("path") or "")).lower()
+    )
+    media_ready = bool(ffmpeg.get("version_probe_ok") and ffprobe.get("version_probe_ok"))
+    unicode_ready = bool(latin_font.get("ok") and unicode_font.get("ok"))
+    return {
+        "build": APP_BUILD,
+        "runtime_sha": APP_BUILD_SHA,
+        "deploy_id": APP_DEPLOY_ID or "",
+        "python_version": platform.python_version(),
+        "platform": platform.system() or os.name,
+        "service_root": os.path.basename(os.getcwd()) or ".",
+        "ffmpeg_resolved": bool(ffmpeg.get("resolved_path")),
+        "ffmpeg_binary": os.path.basename(str(ffmpeg.get("resolved_path") or "")),
+        "ffmpeg_resolution_source": str(ffmpeg.get("source") or "unavailable"),
+        "ffmpeg_version_probe_ok": bool(ffmpeg.get("version_probe_ok")),
+        "ffmpeg_version_summary": str(ffmpeg.get("version_summary") or "")[:180],
+        "ffmpeg_blocker": str(ffmpeg.get("blocker") or ""),
+        "ffprobe_resolved": bool(ffprobe.get("resolved_path")),
+        "ffprobe_binary": os.path.basename(str(ffprobe.get("resolved_path") or "")),
+        "ffprobe_resolution_source": str(ffprobe.get("source") or "unavailable"),
+        "ffprobe_version_probe_ok": bool(ffprobe.get("version_probe_ok")),
+        "ffprobe_version_summary": str(ffprobe.get("version_summary") or "")[:180],
+        "ffprobe_blocker": str(ffprobe.get("blocker") or ""),
+        "fontconfig_available": bool(shutil.which("fc-match")),
+        "unicode_font_ready": unicode_ready,
+        "unicode_font_family": str(unicode_font.get("family") or ""),
+        "noto_font_ready": noto_ready,
+        "ass_filter_ready": bool(ass.get("ass_filter_ready")),
+        "ass_filter_blocker": str(ass.get("blocker") or ""),
+        "media_preprocessing_ready": media_ready,
+        "subtitle_render_ready": bool(media_ready and ass.get("ass_filter_ready") and unicode_ready),
+        "telegram_direct_download_limit_mb": int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB),
+        "telegram_video_delivery_limit_mb": int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB),
+        "telegram_document_delivery_limit_mb": int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB),
+        "duration_policy_limit_seconds": int(subdub_full_duration_limit_seconds(False)),
+    }
+
+
+def subdub_runtime_status_text(payload: dict | None = None) -> str:
+    current = dict(payload or subdub_runtime_status_payload())
+    flag = lambda value: "PASS" if value else "FAIL"
+    return "\n".join([
+        "🧩 <b>SUBDUB RUNTIME STATUS</b>",
+        "",
+        f"• Build: <code>{html.escape(str(current.get('build') or '-'))}</code>",
+        f"• Deploy: <code>{html.escape(str(current.get('deploy_id') or '-'))}</code>",
+        f"• Python: <code>{html.escape(str(current.get('python_version') or '-'))}</code>",
+        f"• Platform: <code>{html.escape(str(current.get('platform') or '-'))}</code>",
+        f"• Service root: <code>{html.escape(str(current.get('service_root') or '-'))}</code>",
+        f"• FFmpeg resolved: <code>{flag(current.get('ffmpeg_resolved'))}</code>",
+        f"• FFmpeg version probe: <code>{flag(current.get('ffmpeg_version_probe_ok'))}</code>",
+        f"• FFprobe resolved: <code>{flag(current.get('ffprobe_resolved'))}</code>",
+        f"• FFprobe version probe: <code>{flag(current.get('ffprobe_version_probe_ok'))}</code>",
+        f"• ASS/subtitles filter: <code>{flag(current.get('ass_filter_ready'))}</code>",
+        f"• Fontconfig: <code>{flag(current.get('fontconfig_available'))}</code>",
+        f"• Unicode font: <code>{flag(current.get('unicode_font_ready'))}</code>",
+        f"• Noto font: <code>{flag(current.get('noto_font_ready'))}</code>",
+        f"• Media preprocessing: <code>{flag(current.get('media_preprocessing_ready'))}</code>",
+        f"• Subtitle rendering: <code>{flag(current.get('subtitle_render_ready'))}</code>",
+        f"• Direct ingress: <code>{int(current.get('telegram_direct_download_limit_mb') or 0)} MB</code>",
+        f"• Duration policy: <code>{int(current.get('duration_policy_limit_seconds') or 0)} s</code>",
+    ])
+
+
+async def cmd_subdub_runtime_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    del context
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return
+    return await update.message.reply_text(subdub_runtime_status_text(), parse_mode="HTML")
+
+
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
@@ -203323,7 +203567,12 @@ def video_dubbing_needs_translation_provider(mode: str, state: dict | None = Non
         and not keep_original
     )
 
-def video_dubbing_configured_readiness(mode: str, state: dict | None = None, public: bool = True) -> dict:
+def video_dubbing_configured_readiness(
+    mode: str,
+    state: dict | None = None,
+    public: bool = True,
+    asr_readiness: dict | None = None,
+) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     missing: list[str] = []
@@ -203331,7 +203580,8 @@ def video_dubbing_configured_readiness(mode: str, state: dict | None = None, pub
         missing.append("mode")
     if TRANSLATION_DUB_MAINTENANCE:
         missing.append("maintenance")
-    if mode and video_dubbing_mode_needs_asr_provider(mode, state) and not get_asr_adapter_readiness(public=False).get("configured"):
+    resolved_asr_readiness = dict(asr_readiness or get_asr_adapter_readiness(public=False))
+    if mode and video_dubbing_mode_needs_asr_provider(mode, state) and not resolved_asr_readiness.get("configured"):
         missing.append("asr")
     if mode and video_dubbing_needs_translation_provider(mode, state) and not video_translation_provider_configured():
         missing.append("translation")
@@ -203689,8 +203939,8 @@ def video_dubbing_job_progress_keyboard(job_id, lang: str = "vi") -> InlineKeybo
 SUBDUB_PROGRESS_STAGES = {
     "received_file": (5, "Nhận video", "Đang nhận file"),
     "received_video": (10, "Nhận video", "Đã nhận video"),
-    "saved_input": (10, "Chuẩn bị file", "Đang chuẩn bị file"),
-    "extracting_audio": (20, "Tách âm thanh", "Đang tách âm thanh"),
+    "saved_input": (15, "Chuẩn bị file", "Đã lưu file đầu vào"),
+    "extracting_audio": (25, "Tách âm thanh", "Đang tách âm thanh"),
     "extracted_audio": (25, "Tách âm thanh", "Đã tách âm thanh"),
     "reading_source_captions": (25, "Đọc phụ đề/lời thoại gốc", "Đang đọc phụ đề/lời thoại gốc"),
     "transcribing": (35, "Nhận diện lời thoại", "Đang nhận diện lời thoại"),
@@ -203721,7 +203971,7 @@ SUBDUB_TERMINAL_STATES = {"delivered", "failed_no_charge", "failed_refunded", "n
 SUBDUB_LIFECYCLE_STAGE_MAP = {
     "received": "received_file",
     "received_video": "received_file",
-    "saved_input": "received_file",
+    "saved_input": "saved_input",
     "input_save": "input_save_failed",
     "input_save_failed": "input_save_failed",
     "received_file_failed": "input_save_failed",
@@ -203732,7 +203982,7 @@ SUBDUB_LIFECYCLE_STAGE_MAP = {
     "extracting_audio": "extracting_audio",
     "transcribing": "transcribing",
     "speech_recognized": "transcribing",
-    "reading_source_captions": "transcribing",
+    "reading_source_captions": "reading_source_captions",
     "translating": "translating",
     "translating_subtitle": "translating",
     "auto_subtitle_ready": "generating_voice",
@@ -203774,13 +204024,15 @@ def subdub_canonical_lifecycle_state(value: str = "") -> str:
 
 def subdub_progress_percent_for_lifecycle(value: str = "", terminal_state: str = "") -> int:
     terminal = str(terminal_state or "").strip().lower()
+    raw_stage = str(value or "").strip().lower().replace("-", "_")
     stage = subdub_canonical_lifecycle_state(value)
     if terminal == "delivered" or subdub_canonical_lifecycle_state(value) == "delivered":
         return 100
+    stage_definition = SUBDUB_PROGRESS_STAGES.get(raw_stage) or SUBDUB_PROGRESS_STAGES.get(stage)
+    if stage_definition:
+        return int(stage_definition[0])
     if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
-        if stage in {"input_save_failed", "received_file"}:
-            return 5
-        return 95
+        return 5
     try:
         return int(product_progress_status.product_progress_stage("subdub", stage).get("percent") or 5)
     except Exception:
@@ -203858,6 +204110,9 @@ def subdub_should_suppress_dub_generic_public_fail(mode: str = "", reason: str =
     ):
         return False
     current = dict(job or {})
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    if terminal.startswith("failed") and not subdub_job_has_failure_public_outcome(current):
+        return False
     if subdub_should_suppress_generic_fail_for_active_job(current, {"detail": reason_text}):
         return True
     stage = subdub_canonical_lifecycle_state(
@@ -204153,6 +204408,12 @@ def subdub_clean_failure_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return "TOAN AAS could not process this video right now. No Xu was charged. Please try a clearer video or another file."
     return "TOAN AAS chưa xử lý được video này lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể thử video rõ tiếng hơn hoặc gửi video khác."
+
+
+def subdub_media_runtime_unavailable_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "TOAN AAS cannot process video right now. No Xu was charged. Please try again later."
+    return "⚠️ TOAN AAS chưa thể xử lý video lúc này.\n\nHệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
 
 def subdub_video_requires_final_mp4(mode: str = "", product_type: str = "") -> bool:
     normalized_mode = normalize_video_translate_mode(mode)
@@ -204528,12 +204789,10 @@ def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
 def subdub_job_has_failure_public_outcome(job: dict | None = None) -> bool:
     current = dict(job or {})
     outcome = str(current.get("terminal_public_outcome_type") or "").strip().lower()
-    terminal = str(current.get("terminal_state") or "").strip().lower()
     return bool(
         outcome == "failure"
         or int(current.get("public_error_sent_count") or 0) > 0
         or (current.get("public_error_sent") and outcome != "success")
-        or terminal.startswith("failed")
     )
 
 def subdub_terminal_outcome_debug_defaults() -> dict:
@@ -204644,10 +204903,24 @@ def subdub_begin_delivery_once(job_key: str) -> bool:
     SUBTITLE_DUB_PIPELINE_JOBS[key] = job
     return True
 
-async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason: str = "", lang: str = "vi", reply_markup=None) -> dict:
+async def send_subdub_fail_once(
+    message,
+    job_key: str,
+    *,
+    mode: str = "",
+    reason: str = "",
+    lang: str = "vi",
+    reply_markup=None,
+    terminalize_active: bool = False,
+) -> dict:
     key = str(job_key or "")
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
     safe_mode = normalize_video_translate_mode(mode)
+    reason_token = str(reason or "").strip().lower().replace("-", "_")
+    terminalize_active = bool(
+        terminalize_active
+        or reason_token in {"validation_failed", "delivery_failed"}
+    )
     if safe_mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         user_from_key = key.split("|", 1)[0] if key else ""
         fallback_user_id = _safe_int(user_from_key, 0)
@@ -204659,7 +204932,7 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
             ):
                 job = dict(fallback_job)
                 key = str(job.get("job_key") or key)
-    if subdub_should_suppress_dub_generic_public_fail(safe_mode, reason, job):
+    if not terminalize_active and subdub_should_suppress_dub_generic_public_fail(safe_mode, reason, job):
         if key:
             current = dict(job or SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
             current["job_key"] = str(current.get("job_key") or key)
@@ -204675,7 +204948,7 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
             SUBTITLE_DUB_PIPELINE_JOBS[key] = current
             persist_subtitle_dub_pipeline_job_snapshot(key, current, reason="generic_dub_video_fail_public_suppressed")
         return {"sent": False, "suppressed": True, "reason": "generic_dub_video_fail_public_suppressed"}
-    if job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
+    if not terminalize_active and job and subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason}):
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
         job["late_public_error_suppressed"] = True
@@ -204726,9 +204999,16 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
     if job and subdub_job_has_failure_public_outcome(job):
         subdub_record_duplicate_terminal(key, job, outcome="failure", reason="failure_public_outcome_already_sent")
         return {"sent": False, "suppressed": True, "reason": "already_failed"}
-    text = subdub_mode_fail_text(mode, lang)
+    text = (
+        subdub_media_runtime_unavailable_text(lang)
+        if reason_token in {"ffmpeg_missing", "ffprobe_missing", "media_runtime_missing"}
+        else subdub_mode_fail_text(mode, lang)
+    )
     message_id = ""
-    if callable(getattr(message, "reply_text", None)):
+    if callable(getattr(message, "edit_message_text", None)):
+        sent_msg = await safe_edit_or_send(message, text, parse_mode="HTML", reply_markup=reply_markup)
+        message_id = str(getattr(sent_msg, "message_id", "") or "")
+    elif callable(getattr(message, "reply_text", None)):
         sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
         message_id = str(getattr(sent_msg, "message_id", "") or "")
     if key:
@@ -204740,7 +205020,15 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
                 "last_error_stage": "input_save" if str(reason or "").strip() in SUBDUB_INPUT_SAVE_FAILURE_BLOCKERS else job.get("last_error_stage"),
             }
         )
-        fail_stage = "input_save_failed" if input_save_fail else "failed_no_charge"
+        last_truthful_stage = str(
+            job.get("progress_stage")
+            or job.get("current_stage")
+            or job.get("lifecycle_state")
+            or "received_file"
+        )
+        if subdub_canonical_lifecycle_state(last_truthful_stage) in SUBDUB_TERMINAL_STATES:
+            last_truthful_stage = "received_file"
+        fail_stage = "input_save_failed" if input_save_fail else last_truthful_stage
         fail_percent = subdub_progress_percent_for_lifecycle(fail_stage, "failed_no_charge")
         update_subtitle_dub_pipeline_job(
             key,
@@ -204769,8 +205057,8 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
             status_panel_terminalized=True,
             refresh_stopped_after_terminal=True,
             panel_finalized=True,
-            panel_final_percent=95,
-            panel_final_message_id=str(job.get("status_panel_message_id") or ""),
+            panel_final_percent=fail_percent,
+            panel_final_message_id=message_id or str(job.get("status_panel_message_id") or ""),
             validation_started=bool(subdub_canonical_lifecycle_state(job.get("progress_stage") or "") == "validating_output"),
             validation_passed=False,
             delivery_started=bool(job.get("delivery_attempted")),
@@ -205133,11 +205421,25 @@ def subdub_long_video_chunk_plan(duration_seconds: float | int = 0, chunk_second
             if end <= start:
                 end = min(duration, start + 1)
             ranges.append({"index": position + 1, "start": start, "end": end})
+    chunk_metadata = [
+        {
+            **item,
+            "chunk_index": int(item.get("index") or index),
+            "source_start_ms": int(item.get("start") or 0) * 1000,
+            "source_end_ms": int(item.get("end") or 0) * 1000,
+            "duration_ms": max(0, int(item.get("end") or 0) - int(item.get("start") or 0)) * 1000,
+            "overlap_left_ms": 0,
+            "overlap_right_ms": 0,
+            "local_audio_path": "",
+        }
+        for index, item in enumerate(ranges, start=1)
+    ]
     return {
         "chunking_enabled": True,
         "chunk_count": len(ranges),
         "chunk_seconds": chunk_size,
         "chunk_ranges": ranges,
+        "chunk_metadata": chunk_metadata,
         "concat_required": len(ranges) > 1,
         "global_timing_preserved": True,
     }
@@ -205168,10 +205470,22 @@ def subdub_duration_gate_payload(
     )
     ffprobe_seconds = max(0, _safe_int(ffprobe_duration or current.get("ffprobe_duration"), 0))
     input_duration = ffprobe_seconds or telegram_duration or _safe_int(current.get("duration"), 0)
+    input_size = _safe_int(
+        current.get("telegram_file_size")
+        or current.get("size")
+        or state.get("video_file_size")
+        or state.get("source_file_size"),
+        0,
+    )
     duration_source = "ffprobe" if ffprobe_seconds else ("telegram" if telegram_duration else ("saved_input" if input_duration else "missing"))
     limit = subdub_full_duration_limit_seconds(is_admin)
     preview = subdub_preview_duration_seconds()
     over_limit = bool(input_duration and input_duration > limit)
+    input_download_limit_bytes = int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB) * 1024 * 1024
+    output_delivery_limit_bytes = max(
+        int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB),
+        int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB),
+    ) * 1024 * 1024
     is_long = bool(input_duration and input_duration > preview)
     long_allowed = bool(is_long and not over_limit)
     gate_result = "fail_over_limit" if over_limit else ("pass_long" if long_allowed else ("pass_unknown_duration" if not input_duration else "pass"))
@@ -205186,6 +205500,17 @@ def subdub_duration_gate_payload(
         "ffprobe_duration": int(ffprobe_seconds or 0),
         "duration_limit": int(limit),
         "duration_limit_seconds": int(limit),
+        "duration_policy_limit_seconds": int(limit),
+        "duration_limit_blocker": "duration_over_limit" if over_limit else "",
+        "input_size_bytes": int(input_size or 0),
+        "input_download_limit_bytes": input_download_limit_bytes,
+        "output_delivery_limit_bytes": output_delivery_limit_bytes,
+        "size_limit_blocker": (
+            "telegram_direct_download_over_limit"
+            if input_size > input_download_limit_bytes
+            and str(current.get("telegram_download_method") or "bot_api_direct") == "bot_api_direct"
+            else ""
+        ),
         "duration_limit_source": "SUBDUB_MAX_DURATION_SECONDS",
         "duration_gate_result": gate_result,
         "duration_guard_stage": "after_input_save",
@@ -205199,6 +205524,7 @@ def subdub_duration_gate_payload(
         "chunk_count": int(chunk_plan.get("chunk_count") or 0),
         "chunk_seconds": int(chunk_plan.get("chunk_seconds") or SUBDUB_LONG_CHUNK_SECONDS),
         "chunk_ranges": list(chunk_plan.get("chunk_ranges") or []),
+        "chunk_metadata": list(chunk_plan.get("chunk_metadata") or []),
         "chunk_strategy": "asr_audio_chunks" if chunk_plan.get("chunking_enabled") else "single_pass",
         "concat_required": bool(chunk_plan.get("concat_required")),
         "global_timing_preserved": bool(chunk_plan.get("global_timing_preserved")),
@@ -206078,10 +206404,18 @@ def subdub_telegram_file_too_big(detail: str = "") -> bool:
     return any(marker in normalized for marker in markers)
 
 def subdub_large_telegram_media_public_text(lang: str = "vi") -> str:
+    limit_mb = int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"Telegram direct download currently supports files up to {limit_mb} MB for this workflow.\n"
+            "No Xu was charged.\n"
+            "Please send a smaller file or use a supported upload source."
+        )
     return (
-        "TOAN AAS chưa tải trực tiếp được file này từ Telegram vì file quá lớn hoặc Telegram chưa cho hệ thống tải trực tiếp.\n"
+        "TOAN AAS chưa tải trực tiếp được file này từ Telegram; chưa tải được video này vì file quá lớn hoặc Telegram chưa cho hệ thống tải trực tiếp.\n"
+        f"Giới hạn tải trực tiếp hiện tại cho luồng này là {limit_mb} MB.\n"
         "Hệ thống chưa trừ Xu.\n"
-        "Anh/chị có thể gửi lại dưới dạng tệp hoặc qua nguồn tải được hỗ trợ để hệ thống xử lý tiếp."
+        "Anh/chị vui lòng gửi file nhỏ hơn hoặc dùng nguồn tải được hỗ trợ."
     )
 
 def subdub_input_save_failure_public_text(input_save: dict | None = None, lang: str = "vi") -> str:
@@ -206126,6 +206460,15 @@ def subdub_input_save_debug_fields(input_save: dict | None = None, state: dict |
         "input_save_attempted": True,
         "input_save_success": bool(item.get("ok") and item.get("file_saved") and item.get("exists") and int(item.get("size") or 0) > 0),
         "telegram_file_size": file_size,
+        "input_size_bytes": file_size,
+        "input_download_limit_bytes": int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB) * 1024 * 1024,
+        "output_delivery_limit_bytes": max(
+            int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB),
+            int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB),
+        ) * 1024 * 1024,
+        "duration_policy_limit_seconds": subdub_full_duration_limit_seconds(bool(state.get("_pipeline_is_admin"))),
+        "duration_limit_blocker": "",
+        "size_limit_blocker": "telegram_direct_download_over_limit" if limit_hit and not supported else "",
         "telegram_download_method": method,
         "telegram_download_limit_hit": limit_hit,
         "large_telegram_media_detected": bool(limit_hit or item.get("large_telegram_media_detected")),
@@ -206174,6 +206517,19 @@ async def video_dubbing_save_input_for_pipeline(
         source_bytes = b""
     content_type = str(state.get("_pipeline_source_content_type_override") or result["content_type"])
     if source_bytes:
+        max_input_bytes = subdub_input_limit_mb(bool(state.get("_pipeline_is_admin"))) * 1024 * 1024
+        if len(source_bytes) > max_input_bytes:
+            result.update({
+                "error": "RuntimeError",
+                "detail": "video_too_large",
+                "content_type": content_type,
+                "telegram_download_method": "source_bytes_override",
+                "large_media_intake_supported": True,
+                "large_media_intake_source": "source_bytes_override",
+                "input_save_blocker": "video_too_large",
+                "no_charge_reason": "video_too_large",
+            })
+            return result
         result.update({
             "telegram_download_method": "source_bytes_override",
             "large_media_intake_supported": True,
@@ -206301,7 +206657,32 @@ def video_dubbing_product_gate_matrix(
     state = dict(state or {})
     mode = normalize_video_translate_mode(mode)
     access = dict(access or {})
-    configured = video_dubbing_configured_readiness(mode, state, public=False)
+    wants_video_output = mode in {
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    } and str(state.get("source_mime_type") or "video/mp4").lower().startswith("video/")
+    ffmpeg_status = resolve_media_binary("ffmpeg") if wants_video_output else {}
+    ffprobe_status = resolve_media_binary("ffprobe") if wants_video_output else {}
+    ffmpeg_path = str(ffmpeg_status.get("resolved_path") or "")
+    ffprobe_path = str(ffprobe_status.get("resolved_path") or "")
+    ffmpeg_available = bool(ffmpeg_path and ffmpeg_status.get("version_probe_ok"))
+    ffprobe_available = bool(ffprobe_path and ffprobe_status.get("version_probe_ok"))
+    media_prerequisites_ready = bool(not wants_video_output or (ffmpeg_available and ffprobe_available))
+    try:
+        asr_readiness = get_asr_adapter_readiness(
+            public=False,
+            audio_extract_ready=ffmpeg_available if wants_video_output else True,
+        )
+    except TypeError:
+        asr_readiness = get_asr_adapter_readiness(public=False)
+    configured = video_dubbing_configured_readiness(
+        mode,
+        state,
+        public=False,
+        asr_readiness=asr_readiness,
+    )
     readiness = dict(
         access.get("readiness")
         or {"reason": configured.get("reason") or "ready", "public_blockers": []}
@@ -206309,7 +206690,7 @@ def video_dubbing_product_gate_matrix(
     configured_missing = list(dict.fromkeys(str(item) for item in (configured.get("missing") or []) if str(item or "").strip()))
     asr_enabled = bool(
         not video_dubbing_mode_needs_asr_provider(mode, state)
-        or get_asr_adapter_readiness(public=False).get("configured")
+        or asr_readiness.get("configured")
     )
     translation_enabled = bool(
         not video_dubbing_needs_translation_provider(mode, state)
@@ -206326,16 +206707,10 @@ def video_dubbing_product_gate_matrix(
         technical_missing.append("translation")
     if not tts_enabled and "tts" not in technical_missing:
         technical_missing.append("tts")
-    ffmpeg_path = str(frame_video_ffmpeg_path() or "")
-    ffmpeg_available = bool(ffmpeg_path)
-    wants_video_output = mode in {
-        VIDEO_SUBTITLE_MODE_CREATE,
-        VIDEO_SUBTITLE_MODE_TRANSLATE,
-        VIDEO_SUBTITLE_MODE_DUB,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    } and str(state.get("source_mime_type") or "video/mp4").lower().startswith("video/")
     if wants_video_output and not ffmpeg_available and "ffmpeg" not in technical_missing:
         technical_missing.append("ffmpeg")
+    if wants_video_output and not ffprobe_available and "ffprobe" not in technical_missing:
+        technical_missing.append("ffprobe")
     product_config_ready = not bool(technical_missing)
     gate_reason = ":".join(
         item for item in (
@@ -206370,6 +206745,7 @@ def video_dubbing_product_gate_matrix(
         "translation": "translation_missing",
         "tts": "tts_missing",
         "ffmpeg": "ffmpeg_missing",
+        "ffprobe": "ffprobe_missing",
         "mode": "unsupported_input",
         "maintenance": "product_route_not_allowed",
     }
@@ -206389,7 +206765,15 @@ def video_dubbing_product_gate_matrix(
         "tts_enabled": bool(tts_enabled),
         "ffmpeg_available": ffmpeg_available,
         "ffmpeg_path": ffmpeg_path,
-        "mux_enabled": bool(ffmpeg_available),
+        "ffmpeg_version_probe_ok": bool(ffmpeg_status.get("version_probe_ok")),
+        "ffmpeg_resolution_source": str(ffmpeg_status.get("source") or "not_required"),
+        "ffprobe_available": ffprobe_available,
+        "ffprobe_path": ffprobe_path,
+        "ffprobe_version_probe_ok": bool(ffprobe_status.get("version_probe_ok")),
+        "ffprobe_resolution_source": str(ffprobe_status.get("source") or "not_required"),
+        "media_prerequisites_required": bool(wants_video_output),
+        "media_prerequisites_ready": media_prerequisites_ready,
+        "mux_enabled": bool(ffmpeg_available and ffprobe_available),
         "provider_gate_reason": gate_reason or "ready",
         "technical_missing": technical_missing,
         "gate_blockers": gate_blockers,
@@ -206409,6 +206793,7 @@ def video_dubbing_product_gate_allows_pipeline(access: dict | None, gate_matrix:
     gate_matrix = dict(gate_matrix or {})
     return bool(
         gate_matrix.get("product_route_allowed")
+        and gate_matrix.get("media_prerequisites_ready", True)
         and gate_matrix.get("input_file_saved")
         and gate_matrix.get("input_file_exists")
         and int(gate_matrix.get("input_file_size") or 0) > 0
@@ -206432,6 +206817,10 @@ def video_dubbing_pipeline_blocker(
         return "large_telegram_download_unsupported"
     if "telegram_download_failed" in normalized:
         return "telegram_download_failed"
+    if normalized.startswith("audio_extract_failed") or normalized.startswith("audio_chunk_extract_failed"):
+        return "audio_extract_failed"
+    if normalized in {"audio_extract_unavailable", "audio_chunk_extract_unavailable"}:
+        return "ffmpeg_missing"
     if not (
         input_save.get("file_saved")
         and input_save.get("exists")
@@ -206445,7 +206834,6 @@ def video_dubbing_pipeline_blocker(
         ("duplicate", "duplicate_lock"),
         ("unsupported", "unsupported_input"),
         ("ffmpeg", "ffmpeg_missing"),
-        ("audio_extract", "ffmpeg_missing"),
         ("asr", "asr_missing"),
         ("transcri", "asr_missing"),
         ("translation", "translation_missing"),
@@ -206468,6 +206856,8 @@ def video_dubbing_product_public_failure_text(mode: str, state: dict | None = No
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     technical_missing = set(str(item) for item in (dict(gate_matrix or {}).get("technical_missing") or []))
+    if technical_missing & {"ffmpeg", "ffprobe"}:
+        return subdub_media_runtime_unavailable_text(lang)
     if "asr" in technical_missing and video_dubbing_mode_needs_asr_provider(mode, state):
         return video_dubbing_asr_missing_guard_text(lang)
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -208584,8 +208974,7 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
     if not file_id:
         raise RuntimeError("missing_video_file_id")
-    max_input_mb = subdub_input_limit_mb(bool(state.get("_pipeline_is_admin")))
-    max_bytes = max_input_mb * 1024 * 1024
+    max_bytes = int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB) * 1024 * 1024
     # The root SubDub input may be longer than one render part. It must reach
     # the duration gate so execute_subdub_long_project_parts can split it into
     # bounded 300-second MP4 parts. Keeping the per-part limit here made that
@@ -208593,9 +208982,14 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
     max_duration = int(SUBDUB_LONG_PROJECT_MAX_DURATION_SECONDS)
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
     duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
-    if file_size > max_bytes or duration > max_duration:
+    if duration > max_duration:
         raise RuntimeError("video_too_large")
+    if file_size > max_bytes:
+        raise RuntimeError("telegram_download_failed:file is too big")
     tg_file = await context.bot.get_file(file_id)
+    declared_size = _safe_int(getattr(tg_file, "file_size", 0), 0)
+    if declared_size > max_bytes:
+        raise RuntimeError("telegram_download_failed:file is too big")
     data = b""
     bytearray_error = ""
     if callable(getattr(tg_file, "download_as_bytearray", None)):
@@ -208608,13 +209002,13 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
             source_path = os.path.join(tmpdir, os.path.basename(str(state.get("source_file_name") or "source.bin")))
             await tg_file.download_to_drive(custom_path=source_path)
             if not os.path.exists(source_path) or os.path.getsize(source_path) > max_bytes:
-                raise RuntimeError("video_too_large")
+                raise RuntimeError("telegram_download_failed:file is too big")
             with open(source_path, "rb") as handle:
                 data = handle.read()
     if not data:
         raise RuntimeError(f"empty_video:{bytearray_error}" if bytearray_error else "empty_video")
     if len(data) > max_bytes:
-        raise RuntimeError("video_too_large")
+        raise RuntimeError("telegram_download_failed:file is too big")
     return data, str(state.get("source_mime_type") or "video/mp4")
 
 def video_dubbing_plain_script(subtitle_or_text: str) -> str:
@@ -209394,6 +209788,21 @@ async def translate_subtitle_segments(
         **timing_validation,
     }
 
+async def subdub_emit_progress_callback(progress_callback, stage: str) -> None:
+    if not callable(progress_callback):
+        return
+    try:
+        result = progress_callback(str(stage or ""))
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:
+        logger.warning(
+            "subdub progress callback skipped | stage=%s | error=%s",
+            sanitize_log_text(str(stage or ""))[:80],
+            type(exc).__name__,
+        )
+
+
 async def transcribe_media_to_segments(
     file_ref,
     source_language: str = "auto",
@@ -209403,6 +209812,7 @@ async def transcribe_media_to_segments(
     max_seconds: int = 0,
     allow_admin: bool = False,
     updated_by="",
+    progress_callback=None,
 ) -> dict:
     source_bytes = b""
     content_type = "application/octet-stream"
@@ -209465,6 +209875,15 @@ async def transcribe_media_to_segments(
             "provider": "",
         }
     long_plan = subdub_long_video_chunk_plan(duration_seconds)
+    asr_progress_emitted = False
+
+    async def _emit_asr_progress_once() -> None:
+        nonlocal asr_progress_emitted
+        if asr_progress_emitted:
+            return
+        asr_progress_emitted = True
+        await subdub_emit_progress_callback(progress_callback, "transcribing")
+
     if int(max_seconds or 0) <= 0 and long_plan.get("chunking_enabled"):
         async def _extract_long_chunk(source, media_type, chunk_start, chunk_duration):
             return await video_dubbing_extract_audio_chunk(
@@ -209475,6 +209894,7 @@ async def transcribe_media_to_segments(
             )
 
         async def _transcribe_long_chunk(chunk_audio, chunk_content_type):
+            await _emit_asr_progress_once()
             if getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes":
                 try:
                     provider, transcript, detail = await video_dubbing_transcribe_bytes(
@@ -209587,6 +210007,7 @@ async def transcribe_media_to_segments(
                 "confidence": 0.0,
                 "provider": "",
             }
+    await _emit_asr_progress_once()
     try:
         if getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes":
             try:
@@ -209692,6 +210113,7 @@ async def video_dubbing_resolve_source_script(
     media_kind: str = "",
     source_language: str = "auto",
     prefer_visual_subtitles: bool = False,
+    progress_callback=None,
 ) -> dict:
     embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
     if embedded_subtitle:
@@ -209761,6 +210183,7 @@ async def video_dubbing_resolve_source_script(
         source_language=source_language,
         allow_admin=allow_admin,
         updated_by=updated_by,
+        progress_callback=progress_callback,
     )
     if not result.get("output_valid"):
         raise RuntimeError(str(result.get("status") or "asr_failed"))
@@ -210260,13 +210683,9 @@ def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
 
 
 def ffprobe_path_for_ffmpeg(ffmpeg_path: str = "") -> str:
-    ffmpeg = str(ffmpeg_path or frame_video_ffmpeg_path() or "")
-    if not ffmpeg:
-        return ""
-    directory = os.path.dirname(ffmpeg)
-    executable = "ffprobe.exe" if os.name == "nt" else "ffprobe"
-    candidate = os.path.join(directory, executable) if directory else executable
-    return candidate if os.path.exists(candidate) or shutil.which(candidate) else ""
+    del ffmpeg_path
+    status = resolve_media_binary("ffprobe")
+    return str(status.get("resolved_path") or "") if status.get("version_probe_ok") else ""
 
 async def video_dubbing_audio_duration_seconds(audio_bytes: bytes, suffix: str = ".mp3") -> float:
     ffprobe = ffprobe_path_for_ffmpeg()
@@ -210566,7 +210985,13 @@ def subdub_mode_requests_translation(mode: str, state: dict | None = None) -> bo
     return bool(target)
 
 
-async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, state: dict, user_id, allow_admin: bool = False) -> dict:
+async def video_dubbing_prepare_subtitles(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    user_id,
+    allow_admin: bool = False,
+    progress_callback=None,
+) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
@@ -210629,21 +211054,29 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                 "detected_language": subdub_detect_language_from_text(source_subtitle, state.get("source_language") or "auto"),
             }
         else:
-            source_info = await video_dubbing_resolve_source_script(
-                source_bytes,
-                content_type,
-                context,
-                duration_seconds=duration_hint,
-                allow_admin=allow_admin,
-                updated_by=user_id,
-                file_name=str(state.get("source_file_name") or ""),
-                media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
-                source_language=str(state.get("source_language") or "auto"),
-                prefer_visual_subtitles=bool(
+            resolve_kwargs = {
+                "duration_seconds": duration_hint,
+                "allow_admin": allow_admin,
+                "updated_by": user_id,
+                "file_name": str(state.get("source_file_name") or ""),
+                "media_kind": str(state.get("source_media_type") or state.get("media_kind") or ""),
+                "source_language": str(state.get("source_language") or "auto"),
+                "prefer_visual_subtitles": bool(
                     SUBDUB_VISUAL_OCR_PUBLIC_ENABLED
                     and mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
                     and video_dubbing_has_existing_subtitle_metadata(state) is not False
                 ),
+            }
+            try:
+                if "progress_callback" in inspect.signature(video_dubbing_resolve_source_script).parameters:
+                    resolve_kwargs["progress_callback"] = progress_callback
+            except Exception:
+                pass
+            source_info = await video_dubbing_resolve_source_script(
+                source_bytes,
+                content_type,
+                context,
+                **resolve_kwargs,
             )
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
@@ -210697,6 +211130,7 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             )
         if not output_subtitle:
             # translate_subtitle_segments calls translate_subtitle_text per segment so timestamps stay intact.
+            await subdub_emit_progress_callback(progress_callback, "translating_subtitle")
             translated = await translate_subtitle_segments(
                 source_segments,
                 target_language,
@@ -211105,15 +211539,18 @@ async def _execute_video_dubbing_pipeline_core(
 
     async def _prepare_subtitles_for_blackbox(service_state: dict) -> dict:
         route_attempts["subtitle_prepare"] = True
-        if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-            await _progress("reading_source_captions")
-        else:
-            await _progress("transcribing")
+        await _progress("reading_source_captions")
+        prepare_kwargs = {"allow_admin": is_admin_user(uid)}
+        try:
+            if "progress_callback" in inspect.signature(video_dubbing_prepare_subtitles).parameters:
+                prepare_kwargs["progress_callback"] = _progress
+        except Exception:
+            pass
         prepared = await video_dubbing_prepare_subtitles(
             context,
             service_state,
             uid,
-            allow_admin=is_admin_user(uid),
+            **prepare_kwargs,
         )
         prepared_dict = dict(prepared or {})
         prepared_state = dict(prepared_dict.get("state") or service_state or {})
@@ -211126,9 +211563,7 @@ async def _execute_video_dubbing_pipeline_core(
         route_attempts["asr"] = bool(prepared_dict.get("asr_provider"))
         route_attempts["translation"] = bool(prepared_dict.get("translation_provider"))
         route_attempts["transcript_length"] = len(str(prepared_dict.get("output_script") or prepared_dict.get("output_text") or ""))
-        if route_attempts["translation"]:
-            await _progress("translating_subtitle" if mode == VIDEO_SUBTITLE_MODE_TRANSLATE else "translating")
-        elif mode == VIDEO_SUBTITLE_MODE_CREATE:
+        if mode == VIDEO_SUBTITLE_MODE_CREATE:
             await _progress("auto_subtitle_ready")
         return prepared_dict
 
@@ -214343,7 +214778,7 @@ async def _terminalize_subdub_background_failure(
         return
     try:
         await send_subdub_fail_once(
-            query.message,
+            query,
             task_key,
             mode=mode,
             reason=safe_reason,
@@ -215880,12 +216315,13 @@ async def handle_video_dubbing_callback(
                 return None
             set_video_dubbing_pending(uid, "confirm", processing="0")
             await send_subdub_fail_once(
-                query.message,
+                query,
                 pipeline_job_key,
                 mode=mode,
                 reason=type(exc).__name__,
                 lang=lang,
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
+                terminalize_active=True,
             )
             return None
         if not result.get("ok") and mode in {
@@ -215965,7 +216401,10 @@ async def handle_video_dubbing_callback(
                     or not subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result)
                 ):
                     latest_failure_job = fallback_failure_job
-            if latest_failure_job and subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result):
+            if latest_failure_job and (
+                subdub_result_has_delivered_video({**latest_failure_job, **result})
+                or subdub_job_video_delivery_succeeded(latest_failure_job)
+            ):
                 suppression_job_key = str(latest_failure_job.get("job_key") or pipeline_job_key)
                 latest_failure_job["late_public_error_suppressed"] = True
                 latest_failure_job["late_fail_suppressed"] = True
@@ -216059,21 +216498,23 @@ async def handle_video_dubbing_callback(
                 return rendered
             if str(result.get("status") or "") == "DIALOGUE_UNAVAILABLE":
                 await send_subdub_fail_once(
-                    query.message,
+                    query,
                     pipeline_job_key,
                     mode=mode,
                     reason=str(result.get("detail") or result.get("status") or "dialogue_unavailable"),
                     lang=lang,
                     reply_markup=video_dubbing_dialogue_unavailable_keyboard(lang),
+                    terminalize_active=True,
                 )
                 return None
             await send_subdub_fail_once(
-                query.message,
+                query,
                 pipeline_job_key,
                 mode=mode,
                 reason=str(result.get("detail") or result.get("status") or "subdub_failed"),
                 lang=lang,
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
+                terminalize_active=True,
             )
             return None
         latest_pipeline_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
@@ -222586,6 +223027,16 @@ async def lifespan(app: FastAPI):
         "yes" if data_summary.get("data_loss_risk") else "no",
         data_summary.get("backup_last_status") or "-",
     )
+    subdub_runtime = subdub_runtime_status_payload()
+    logger.info(
+        "SUBDUB_RUNTIME_READY | build=%s | ffmpeg=%s | ffprobe=%s | ass=%s | unicode_font=%s | ready=%s",
+        APP_BUILD,
+        "pass" if subdub_runtime.get("ffmpeg_version_probe_ok") else "fail",
+        "pass" if subdub_runtime.get("ffprobe_version_probe_ok") else "fail",
+        "pass" if subdub_runtime.get("ass_filter_ready") else "fail",
+        "pass" if subdub_runtime.get("unicode_font_ready") else "fail",
+        "yes" if subdub_runtime.get("media_preprocessing_ready") else "no",
+    )
     if not TELEGRAM_TOKEN:
         TELEGRAM_STARTUP_ERROR = "TELEGRAM_TOKEN chưa được set"
         logger.error("TELEGRAM_TOKEN: missing")
@@ -222992,6 +223443,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subtitle_dub_last_debug", cmd_subtitle_dub_last_debug))
     tg_app.add_handler(CommandHandler("subdub_status", cmd_subdub_status))
     tg_app.add_handler(CommandHandler("subdub_status_debug", cmd_subdub_status_debug))
+    tg_app.add_handler(CommandHandler("subdub_runtime_status", cmd_subdub_runtime_status))
     tg_app.add_handler(CommandHandler("subdub_job_debug", cmd_subdub_job_debug))
     tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
     tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
