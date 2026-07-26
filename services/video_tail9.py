@@ -657,7 +657,7 @@ def mark_audio_complete(state: dict[str, Any], *, skipped: bool = False) -> dict
     current = normalize_state(state)
     audio = dict(current.get("audio_config") or {})
     enabled = any(bool(audio.get(key)) for key in TOGGLE_KEYS)
-    current["audio_status"] = "skipped" if skipped else ("configured" if enabled else "not_configured")
+    current["audio_status"] = "configured" if enabled and not skipped else "skipped"
     current["status_stage"] = "audio_addons"
     return normalize_state(current)
 
@@ -683,6 +683,53 @@ def mark_branding_configured(state: dict[str, Any], target: str) -> dict[str, An
     return normalize_state(current)
 
 
+def mark_branding_complete(state: dict[str, Any]) -> dict[str, Any]:
+    """Finish the optional branding hub without discarding saved assets."""
+
+    current = normalize_state(state)
+    logo = dict(current.get("logo_config") or {})
+    watermark = dict(current.get("watermark_config") or {})
+    logo_ready = bool(
+        logo.get("enabled")
+        and logo.get("asset_file_id")
+        and logo.get("position")
+    )
+    watermark_ready = bool(
+        watermark.get("enabled")
+        and watermark.get("text")
+        and watermark.get("position")
+    )
+    current["logo_status"] = "configured" if logo_ready else "skipped"
+    current["watermark_status"] = "configured" if watermark_ready else "skipped"
+    current["brand_pending_target"] = ""
+    current["brand_pending_position"] = ""
+    current["status_stage"] = "logo_watermark"
+    return normalize_state(current)
+
+
+def next_required_screen(state: dict[str, Any]) -> str:
+    """Return the first missing screen in the canonical shared video tail."""
+
+    current = normalize_state(state)
+    core_ready = bool(
+        current.get("plan_approved")
+        and current.get("content_mode")
+        and current.get("selected_prompt")
+    )
+    if not core_ready:
+        return "review"
+    if current.get("audio_status") not in {"configured", "skipped"}:
+        return "audio"
+    if (
+        current.get("logo_status") not in {"configured", "skipped"}
+        or current.get("watermark_status") not in {"configured", "skipped"}
+    ):
+        return "logo"
+    if current.get("summary_status") != "ready":
+        return "summary"
+    return ""
+
+
 def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
     """Normalize optional tail fields without making them invoice blockers."""
 
@@ -691,6 +738,9 @@ def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
         bool(current.get("plan_approved"))
         and bool(current.get("content_mode"))
         and bool(current.get("selected_prompt"))
+        and current.get("audio_status") in {"configured", "skipped"}
+        and current.get("logo_status") in {"configured", "skipped"}
+        and current.get("watermark_status") in {"configured", "skipped"}
     ) else "not_ready"
     current["status_stage"] = "summary"
     return normalize_state(current)

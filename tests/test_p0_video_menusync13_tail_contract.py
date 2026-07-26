@@ -47,14 +47,19 @@ def test_each_shared_tail_product_keeps_completed_content_contract(product_type:
         },
     )
 
-    summary = video_tail9.prepare_summary(state)
+    pending = video_tail9.prepare_summary(state)
+    assert pending["summary_status"] == "not_ready"
+
+    summary = video_tail9.mark_audio_complete(state, skipped=True)
+    summary = video_tail9.mark_branding_skipped(summary)
+    summary = video_tail9.prepare_summary(summary)
 
     assert summary["summary_status"] == "ready"
     assert summary["content_source"] == "idea_catalog"
     assert summary["selected_prompt"]
-    assert summary["audio_status"] == "not_configured"
-    assert summary["logo_status"] == "not_configured"
-    assert summary["watermark_status"] == "not_configured"
+    assert summary["audio_status"] == "skipped"
+    assert summary["logo_status"] == "skipped"
+    assert summary["watermark_status"] == "skipped"
 
 
 def test_optional_branding_skip_clears_legacy_positions() -> None:
@@ -89,6 +94,8 @@ def test_tail_routes_keep_summary_direct_and_back_to_review() -> None:
 
     assert 'return await video_tail9_render(query, uid, context, "audio")' not in review
     assert 'if action == "summary":\n            tail = video_tail9.prepare_summary(tail)' in review
+    renderer = _between("async def video_tail9_render", "def video_tail9_callback_guard")
+    assert "video_tail9.next_required_screen(tail)" in renderer
     assert 'if action == "back":\n            return await video_tail9_render(query, uid, context, "review")' in summary
     assert '[("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")]' in logo_keyboard
     assert '[("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard

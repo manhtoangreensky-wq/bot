@@ -104,7 +104,7 @@ def test_new_tail_state_keeps_optional_branding_unconfigured() -> None:
     assert state["watermark_config"]["position"] == ""
 
 
-def test_summary_preparation_keeps_optional_tail_parts_nonblocking() -> None:
+def test_summary_requires_an_explicit_optional_tail_decision() -> None:
     state = video_tail9.new_state(
         product_type="video_trend",
         session_id="summary-optional",
@@ -116,11 +116,17 @@ def test_summary_preparation_keeps_optional_tail_parts_nonblocking() -> None:
         "prompt_revision": 1,
     })
 
-    summary = video_tail9.prepare_summary(state)
+    pending = video_tail9.prepare_summary(state)
 
-    assert summary["audio_status"] == "not_configured"
-    assert summary["logo_status"] == "not_configured"
-    assert summary["watermark_status"] == "not_configured"
+    assert pending["audio_status"] == "not_configured"
+    assert pending["logo_status"] == "not_configured"
+    assert pending["watermark_status"] == "not_configured"
+    assert pending["summary_status"] == "not_ready"
+
+    summary = video_tail9.mark_audio_complete(state, skipped=True)
+    summary = video_tail9.mark_branding_skipped(summary)
+    summary = video_tail9.prepare_summary(summary)
+
     assert summary["summary_status"] == "ready"
 
 

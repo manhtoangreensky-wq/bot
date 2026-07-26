@@ -43,7 +43,7 @@ def test_invoice_keyboard_renders_with_one_owner_per_callback() -> None:
     callbacks = _callbacks(keyboard())
 
     assert len(callbacks) == len(set(callbacks))
-    assert callbacks.count("video_tail|confirm") == 1
+    assert callbacks.count("video_tail|confirm|open") == 1
     assert callbacks.count("video_tail|quality|open") == 1
 
 
@@ -189,6 +189,20 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
         "selected_prompt": "Prompt video hoàn chỉnh.",
         "scene_count": 1,
     }
+    tail = video_tail9.apply_content_contract(
+        tail,
+        {
+            "content_source": "content_profiles",
+            "canonical_content_mode": "content_profiles",
+            "selected_prompt_text": "Prompt video hoàn chỉnh.",
+            "per_scene_content": [{"scene": 1}],
+            "plan_status": "ready",
+        },
+    )
+    tail = video_tail9.mark_audio_complete(tail, skipped=True)
+    tail = video_tail9.mark_branding_skipped(tail)
+    tail = video_tail9.prepare_summary(tail)
+    tail["status_stage"] = "quality"
     invoices: list[dict] = []
     invoice_keyboard = _load_function(
         "video_tail9_invoice_keyboard",
@@ -250,7 +264,7 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
     assert asyncio.run(handler(update, SimpleNamespace())) is True
     assert len(invoices) == 1
     assert "Hóa đơn" in invoices[0]["text"]
-    assert _callbacks(invoices[0]["reply_markup"]).count("video_tail|confirm") == 1
+    assert _callbacks(invoices[0]["reply_markup"]).count("video_tail|confirm|open") == 1
 
 
 def test_quality_back_is_owned_by_quality_and_returns_to_summary() -> None:
