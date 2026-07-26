@@ -66080,6 +66080,102 @@ async def notify_ops_alert(context: ContextTypes.DEFAULT_TYPE, title: str, lines
         except Exception as e:
             logger.warning(f"Ops alert send failed chat_id={chat_id}: {e}")
 
+# ── Per-user dispatch throttle ───────────────────────────────────────────────
+# Job locks already stop one account from running two renders at once, but
+# nothing limited how fast a single account could push updates into the
+# handlers. This is a token bucket applied before any handler runs: generous
+# enough that a real person never meets it, tight enough that an automated
+# flood stops here instead of reaching job creation or the wallet.
+DISPATCH_THROTTLE_ENABLED = env_flag("DISPATCH_THROTTLE_ENABLED", "true")
+DISPATCH_THROTTLE_BURST = max(1, env_int("DISPATCH_THROTTLE_BURST", 30))
+DISPATCH_THROTTLE_PER_MINUTE = max(1, env_int("DISPATCH_THROTTLE_PER_MINUTE", 60))
+DISPATCH_THROTTLE_NOTICE_SECONDS = max(1, env_int("DISPATCH_THROTTLE_NOTICE_SECONDS", 20))
+DISPATCH_THROTTLE_MAX_TRACKED = max(100, env_int("DISPATCH_THROTTLE_MAX_TRACKED", 5000))
+DISPATCH_THROTTLE_BUCKETS: dict[str, tuple[float, float]] = {}
+DISPATCH_THROTTLE_NOTICE_AT: dict[str, float] = {}
+DISPATCH_THROTTLE_TEXT_VI = "⏳ Anh/chị thao tác hơi nhanh. Vui lòng chờ vài giây rồi thử lại."
+
+
+def dispatch_throttle_reset_state() -> None:
+    DISPATCH_THROTTLE_BUCKETS.clear()
+    DISPATCH_THROTTLE_NOTICE_AT.clear()
+
+
+def dispatch_throttle_prune(now: float) -> None:
+    # Keep the in-memory maps bounded; idle callers are forgotten.
+    if len(DISPATCH_THROTTLE_BUCKETS) <= DISPATCH_THROTTLE_MAX_TRACKED:
+        return
+    cutoff = now - 300.0
+    for key in [key for key, value in DISPATCH_THROTTLE_BUCKETS.items() if value[1] < cutoff]:
+        DISPATCH_THROTTLE_BUCKETS.pop(key, None)
+        DISPATCH_THROTTLE_NOTICE_AT.pop(key, None)
+
+
+def dispatch_throttle_allow(user_id, now: float | None = None) -> bool:
+    """Token bucket per caller. True when this update may reach the handlers."""
+    if not DISPATCH_THROTTLE_ENABLED:
+        return True
+    uid = str(user_id or "").strip()
+    if not uid:
+        return True
+    if is_admin_user(uid):
+        return True
+    moment = time.time() if now is None else float(now)
+    dispatch_throttle_prune(moment)
+    refill_per_second = float(DISPATCH_THROTTLE_PER_MINUTE) / 60.0
+    tokens, last_seen = DISPATCH_THROTTLE_BUCKETS.get(
+        uid, (float(DISPATCH_THROTTLE_BURST), moment)
+    )
+    tokens = min(
+        float(DISPATCH_THROTTLE_BURST),
+        tokens + max(0.0, moment - last_seen) * refill_per_second,
+    )
+    if tokens < 1.0:
+        DISPATCH_THROTTLE_BUCKETS[uid] = (tokens, moment)
+        return False
+    DISPATCH_THROTTLE_BUCKETS[uid] = (tokens - 1.0, moment)
+    return True
+
+
+def dispatch_throttle_should_notify(user_id, now: float | None = None) -> bool:
+    """Answer a throttled caller once per window, not on every dropped update."""
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    moment = time.time() if now is None else float(now)
+    if moment - DISPATCH_THROTTLE_NOTICE_AT.get(uid, 0.0) < DISPATCH_THROTTLE_NOTICE_SECONDS:
+        return False
+    DISPATCH_THROTTLE_NOTICE_AT[uid] = moment
+    return True
+
+
+async def dispatch_throttle_message_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or not update.effective_user:
+        return
+    if dispatch_throttle_allow(update.effective_user.id):
+        return
+    if dispatch_throttle_should_notify(update.effective_user.id):
+        try:
+            await message.reply_text(DISPATCH_THROTTLE_TEXT_VI)
+        except Exception as exc:
+            logger.warning("dispatch throttle notice skipped: %s", type(exc).__name__)
+    raise ApplicationHandlerStop
+
+
+async def dispatch_throttle_callback_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+    if dispatch_throttle_allow(query.from_user.id):
+        return
+    try:
+        await query.answer(DISPATCH_THROTTLE_TEXT_VI)
+    except Exception as exc:
+        logger.warning("dispatch throttle answer skipped: %s", type(exc).__name__)
+    raise ApplicationHandlerStop
+
+
 async def safe_mode_message_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message:
@@ -224678,6 +224774,10 @@ async def lifespan(app: FastAPI):
         yield
         return
 
+    # Group -11 runs before every other handler, including the safe-mode
+    # guards, so a flood is dropped before it can reach job creation.
+    tg_app.add_handler(MessageHandler(filters.ALL, dispatch_throttle_message_guard), group=-11)
+    tg_app.add_handler(CallbackQueryHandler(dispatch_throttle_callback_guard), group=-11)
     tg_app.add_handler(MessageHandler(filters.ALL, safe_mode_message_guard), group=-10)
     tg_app.add_handler(CallbackQueryHandler(safe_mode_callback_guard), group=-10)
     tg_app.add_handler(CallbackQueryHandler(video_public_callback_dedupe_guard), group=-9)
