@@ -108755,6 +108755,7 @@ async def cmd_aichat_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payload = ai_chatbot_copilot.status_payload(aichat_state(), update.effective_user.id)
     await update.message.reply_text(aichat_status_text(payload), parse_mode="HTML", reply_markup=aichat_trace_keyboard(payload))
 
+@admin_internal_command
 async def cmd_aichat_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not update.message:
         return
@@ -226790,8 +226791,38 @@ async def asset_check():
         "terms_pdf": bool(find_terms_pdf_path()),
     }
 
+def operator_request_authorized(request) -> bool:
+    # True only when the caller presents a valid operator token.
+    # Never raises: unauthenticated callers simply receive the minimal payload.
+    if request is None:
+        return False
+    try:
+        verify_runtime_access(request)
+    except Exception:
+        return False
+    return True
+
+
+def public_health_payload() -> dict:
+    # Minimal public health shape. Deliberately excludes provider inventory,
+    # freeze/maintenance state, database details, build and PID: those are
+    # internal facts and must not be readable without the operator token.
+    db_status = db_status_payload()
+    return {
+        "status": "ok" if db_status["ok"] else "degraded",
+        "version": PUBLIC_VERSION,
+        "timestamp": now_text(),
+    }
+
+
 @fastapi_app.get("/health")
-async def health_check():
+async def health_check(request: Request):
+    if not operator_request_authorized(request):
+        return public_health_payload()
+    return detailed_health_payload()
+
+
+def detailed_health_payload() -> dict:
     db_status = db_status_payload()
     data_persistence = data_persistence_status_payload(include_counts=False)
     providers = provider_status_payload()
@@ -226832,11 +226863,11 @@ async def health_check():
     }
 
 @fastapi_app.get("/api/v1/health")
-async def api_v1_health_check():
-    return await health_check()
+async def api_v1_health_check(request: Request):
+    return await health_check(request)
 
 @fastapi_app.get("/api/v1/metrics-lite")
-async def api_v1_metrics_lite():
+async def api_v1_metrics_lite(request: Request):
     db_status = db_status_payload()
     queue = {"queued": 0, "processing": 0, "failed_15m": 0}
     try:
@@ -226862,21 +226893,25 @@ async def api_v1_metrics_lite():
             conn.close()
     except Exception:
         queue = {"queued": 0, "processing": 0, "failed_15m": 0}
-    return {
+    payload = {
         "ok": bool(db_status.get("ok")),
         "time": now_text(),
         "db_ok": bool(db_status.get("ok")),
         "queue": queue,
-        "providers": {
+    }
+    if operator_request_authorized(request):
+        # Provider freeze state, PID and build are internal facts: they stay
+        # behind the operator token and never appear in the public shape.
+        payload["providers"] = {
             "shopaikey_freeze": bool(provider_freeze_runtime_on("shopaikey")),
             "video_freeze": bool(provider_freeze_runtime_on("shopaikey_video")),
-        },
-        "runtime": {
+        }
+        payload["runtime"] = {
             "pid": str(os.getpid()),
             "uptime_seconds": int(time.time() - START_TIME),
             "build": APP_BUILD,
-        },
-    }
+        }
+    return payload
 
 @fastapi_app.get("/runtime")
 async def runtime_health(request: Request):
