@@ -478,6 +478,148 @@ def parse_id_set(raw: str) -> set[str]:
     return {x.strip() for x in str(raw or "").replace(";", ",").split(",") if x.strip()}
 
 TELEGRAM_TOKEN      = _env("TELEGRAM_TOKEN") or _env("BOT_TOKEN")
+
+# ─── INFRA.LOCALBOTAPI ───────────────────────────────────────────────────────
+# Self-hosted (local) Telegram Bot API server support.
+# TELEGRAM_API_BASE_URL unset/empty => cloud Bot API, byte-for-byte today's
+# behaviour (including the ~20 MB getFile ceiling). Set it to the root of a
+# local Bot API server (e.g. https://tg.example.com) to lift that ceiling.
+TELEGRAM_CLOUD_API_ROOT = "https://api.telegram.org"
+TELEGRAM_API_BASE_URL = _first_env_line(_env("TELEGRAM_API_BASE_URL"))
+TELEGRAM_API_PROXY_SECRET_HEADER = (
+    _first_env_line(_env("TELEGRAM_API_PROXY_SECRET_HEADER")) or "X-Toanaas-Proxy-Secret"
+)
+TELEGRAM_API_PROXY_SECRET = _first_env_line(_env("TELEGRAM_API_PROXY_SECRET"))
+# In --local mode (the only mode where Telegram lifts the 20 MB getFile wall)
+# the server answers getFile with an ABSOLUTE path on its own disk and its
+# /file/ endpoint stops serving bytes. The reverse proxy therefore republishes
+# the same media tree under TELEGRAM_LOCAL_API_MEDIA_PATH, behind the same TLS
+# and shared secret, so the Railway-hosted bot can still fetch over HTTPS.
+TELEGRAM_LOCAL_API_FILE_ROOT = (
+    _first_env_line(_env("TELEGRAM_LOCAL_API_FILE_ROOT")) or "/var/lib/telegram-bot-api"
+).rstrip("/")
+TELEGRAM_LOCAL_API_MEDIA_PATH = "/" + (
+    _first_env_line(_env("TELEGRAM_LOCAL_API_MEDIA_PATH")) or "localfile"
+).strip("/")
+
+def normalize_telegram_api_root(value: str = "") -> str:
+    root = str(value or "").strip().rstrip("/")
+    if not root:
+        return ""
+    for suffix in ("/file/bot", "/bot"):
+        if root.endswith(suffix):
+            root = root[: -len(suffix)].rstrip("/")
+            break
+    if not root:
+        return ""
+    if not root.startswith(("http://", "https://")):
+        root = "https://" + root
+    return root.rstrip("/")
+
+TELEGRAM_API_ROOT = normalize_telegram_api_root(TELEGRAM_API_BASE_URL)
+
+def telegram_local_api_enabled() -> bool:
+    """True only when a non-cloud Bot API root is explicitly configured."""
+    return bool(TELEGRAM_API_ROOT) and TELEGRAM_API_ROOT != TELEGRAM_CLOUD_API_ROOT
+
+def telegram_api_urls() -> tuple[str, str]:
+    """(base_url, base_file_url) in the shape python-telegram-bot expects."""
+    root = TELEGRAM_API_ROOT or TELEGRAM_CLOUD_API_ROOT
+    return f"{root}/bot", f"{root}/file/bot"
+
+def telegram_api_source_label() -> str:
+    return "local_bot_api" if telegram_local_api_enabled() else "cloud_bot_api"
+
+def telegram_api_proxy_headers() -> dict:
+    """Shared-secret header sent to the local server (never to the cloud API)."""
+    if telegram_local_api_enabled() and TELEGRAM_API_PROXY_SECRET:
+        return {TELEGRAM_API_PROXY_SECRET_HEADER: TELEGRAM_API_PROXY_SECRET}
+    return {}
+
+def telegram_local_media_url(file_path: str = "") -> str:
+    """Absolute Bot API server path -> HTTPS URL the bot host can actually GET.
+
+    Accepts both the raw path the local server returns
+    (``/var/lib/telegram-bot-api/<token>/videos/file_0``) and the URL
+    python-telegram-bot builds from it when it cannot see that path locally.
+    Returns "" when the local Bot API server is not configured, so the cloud
+    download path is untouched.
+    """
+    raw = str(file_path or "").strip()
+    if not raw or not telegram_local_api_enabled():
+        return ""
+    root = TELEGRAM_LOCAL_API_FILE_ROOT
+    index = raw.find(root + "/")
+    if index < 0:
+        return ""
+    relative = raw[index + len(root):].lstrip("/")
+    if not relative or ".." in relative:
+        return ""
+    return f"{TELEGRAM_API_ROOT}{TELEGRAM_LOCAL_API_MEDIA_PATH}/{relative}"
+
+async def telegram_local_media_fetch(url: str, max_bytes: int, read_timeout: float = 180.0) -> bytes:
+    """Stream media from the local Bot API server through the reverse proxy.
+
+    Never lets the URL (which embeds the bot token) reach an exception message
+    or a log line: every failure is re-raised with a classified reason only.
+    """
+    if not url:
+        raise RuntimeError("telegram_download_failed:api")
+    limit = max(1, int(max_bytes))
+    buffer = bytearray()
+    timeout = httpx.Timeout(float(read_timeout), connect=30.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            async with client.stream("GET", url, headers=telegram_api_proxy_headers()) as response:
+                if response.status_code == 403:
+                    raise RuntimeError("telegram_download_failed:api:forbidden")
+                if response.status_code == 404:
+                    raise RuntimeError("telegram_download_failed:api:not_found")
+                if response.status_code >= 500:
+                    raise RuntimeError("telegram_download_failed:network")
+                if response.status_code != 200:
+                    raise RuntimeError("telegram_download_failed:api")
+                async for chunk in response.aiter_bytes(512 * 1024):
+                    buffer.extend(chunk)
+                    if len(buffer) > limit:
+                        raise RuntimeError("telegram_download_failed:file is too big")
+    except RuntimeError as exc:
+        # Only our own classified reasons may pass through untouched; any other
+        # message can carry the token URL and must be scrubbed.
+        if str(exc).startswith("telegram_download_failed:"):
+            raise
+        raise RuntimeError("telegram_download_failed:network") from None
+    except httpx.TimeoutException:
+        raise RuntimeError("telegram_download_failed:timeout") from None
+    except Exception:
+        # Deliberately drops the original message: it can contain the token URL.
+        raise RuntimeError("telegram_download_failed:network") from None
+    if not buffer:
+        raise RuntimeError("telegram_download_failed:api")
+    return bytes(buffer)
+
+def build_telegram_application():
+    """Build the PTB Application against the configured Bot API base.
+
+    TELEGRAM_API_BASE_URL unset -> Application.builder().token(...).build(),
+    identical to the pre-INFRA.LOCALBOTAPI behaviour. Set -> base_url and
+    base_file_url point at the local server and, when a shared secret is
+    configured, every request carries the proxy header.
+    """
+    builder = Application.builder().token(TELEGRAM_TOKEN)
+    if not telegram_local_api_enabled():
+        return builder.build()
+    base_url, base_file_url = telegram_api_urls()
+    builder = builder.base_url(base_url).base_file_url(base_file_url)
+    headers = telegram_api_proxy_headers()
+    if headers:
+        from telegram.request import HTTPXRequest
+        builder = builder.request(HTTPXRequest(httpx_kwargs={"headers": dict(headers)}))
+        builder = builder.get_updates_request(
+            HTTPXRequest(connection_pool_size=1, httpx_kwargs={"headers": dict(headers)})
+        )
+    return builder.build()
+
 ADMIN_ID            = _env("ADMIN_ID", "7126457028")
 ADMIN_IDS_RAW       = _env("ADMIN_IDS", ADMIN_ID)
 ADMIN_IDS           = parse_id_set(ADMIN_IDS_RAW)
@@ -1958,7 +2100,15 @@ VIDEO_LARGE_FILE_WARNING_MB = max(1, env_int("VIDEO_LARGE_FILE_WARNING_MB", 80))
 VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", 150))
 PIPELINE_MAX_INPUT_MB_ADMIN = max(1, env_int("PIPELINE_MAX_INPUT_MB_ADMIN", 100))
 PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50))
-SUBDUB_MAX_INPUT_MB = max(1, min(50, env_int("SUBDUB_MAX_INPUT_MB", 50)))
+# INFRA.LOCALBOTAPI: the cloud Bot API caps intake at ~20 MB (getFile), so the
+# pipeline cap stays at 50 MB there. With a local Bot API server the cap rises,
+# but stays deliberately below the protocol maximum (2000 MB) because the SubDub
+# intake path still buffers the file in memory on the bot host.
+SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT = 300
+if telegram_local_api_enabled():
+    SUBDUB_MAX_INPUT_MB = max(1, min(2000, env_int("SUBDUB_MAX_INPUT_MB", SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT)))
+else:
+    SUBDUB_MAX_INPUT_MB = max(1, min(50, env_int("SUBDUB_MAX_INPUT_MB", 50)))
 PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 300))
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 300))
 SUBDUB_MAX_DURATION_SECONDS = max(1, env_int("SUBDUB_MAX_DURATION_SECONDS", PIPELINE_MAX_DURATION_SECONDS_PUBLIC))
@@ -1985,7 +2135,22 @@ TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_M
 GENERATED_MEDIA_MAX_MB = max(1, env_int("GENERATED_MEDIA_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
 SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", TELEGRAM_VIDEO_PREVIEW_MAX_MB))
 SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
-SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB = max(1, min(20, env_int("SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 20)))
+# INFRA.LOCALBOTAPI: hard ceiling of the transport that actually fetches the
+# file. Cloud Bot API = 20 MB at getFile and no ENV can raise it. Local Bot API
+# server = up to 2000 MB; the effective customer-facing limit is still
+# subdub_input_limit_mb() = min(SUBDUB_MAX_INPUT_MB, this).
+SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB = 20
+SUBDUB_TELEGRAM_LOCAL_DOWNLOAD_LIMIT_MAX_MB = 2000
+if telegram_local_api_enabled():
+    SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB = max(1, min(
+        SUBDUB_TELEGRAM_LOCAL_DOWNLOAD_LIMIT_MAX_MB,
+        env_int("SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", SUBDUB_LOCAL_API_MAX_INPUT_MB_DEFAULT),
+    ))
+else:
+    SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB = max(1, min(
+        SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB,
+        env_int("SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 20),
+    ))
 SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS = max(30, env_int("SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS", 180))
 SUBDUB_TELEGRAM_DOWNLOAD_RETRIES = max(1, min(5, env_int("SUBDUB_TELEGRAM_DOWNLOAD_RETRIES", 3)))
 SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS = max(1, min(15, env_int("SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS", 5)))
@@ -114965,6 +115130,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• input save success: <code>{yes_no(job.get('input_save_success'))}</code>",
         f"• telegram file size: <code>{intval(job.get('telegram_file_size'))}</code>",
         f"• telegram download method: <code>{esc(job.get('telegram_download_method'))}</code>",
+        f"• telegram api source: <code>{esc(job.get('telegram_api_source'))}</code>",
         f"• telegram download limit hit: <code>{yes_no(job.get('telegram_download_limit_hit'))}</code>",
         f"• large telegram media detected: <code>{yes_no(job.get('large_telegram_media_detected'))}</code>",
         f"• large media intake supported: <code>{yes_no(job.get('large_media_intake_supported'))}</code>",
@@ -181338,6 +181504,9 @@ def subdub_runtime_status_payload() -> dict:
         "media_preprocessing_ready": media_ready,
         "subtitle_render_ready": bool(media_ready and ass.get("ass_filter_ready") and unicode_ready),
         "telegram_direct_download_limit_mb": int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB),
+        "telegram_api_source": telegram_api_source_label(),
+        "large_media_intake_supported": bool(telegram_local_api_enabled()),
+        "subdub_input_limit_mb": int(subdub_input_limit_mb(False)),
         "telegram_video_delivery_limit_mb": int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB),
         "telegram_document_delivery_limit_mb": int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB),
         "duration_policy_limit_seconds": int(subdub_full_duration_limit_seconds(False)),
@@ -181366,6 +181535,8 @@ def subdub_runtime_status_text(payload: dict | None = None) -> str:
         f"• Media preprocessing: <code>{flag(current.get('media_preprocessing_ready'))}</code>",
         f"• Subtitle rendering: <code>{flag(current.get('subtitle_render_ready'))}</code>",
         f"• Direct ingress: <code>{int(current.get('telegram_direct_download_limit_mb') or 0)} MB</code>",
+        f"• Telegram api source: <code>{html.escape(str(current.get('telegram_api_source') or '-'))}</code>",
+        f"• Large media intake supported: <code>{flag(current.get('large_media_intake_supported'))}</code>",
         f"• Duration policy: <code>{int(current.get('duration_policy_limit_seconds') or 0)} s</code>",
     ])
 
@@ -206584,9 +206755,10 @@ def pipeline_input_limit_mb(is_admin: bool = False) -> int:
 
 def subdub_input_limit_mb(is_admin: bool = False) -> int:
     del is_admin
-    # Single source of truth for every customer-facing size limit: the cloud
-    # Bot API cannot DOWNLOAD above SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB (~20 MB
-    # at getFile), so never advertise more than the bot can actually intake.
+    # Single source of truth for every customer-facing size limit: the bot can
+    # never intake more than the transport allows. On the cloud Bot API that is
+    # ~20 MB at getFile; with a local Bot API server (INFRA.LOCALBOTAPI) both
+    # constants rise together, so this function needs no special case.
     return min(int(SUBDUB_MAX_INPUT_MB), int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB))
 
 def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
@@ -207613,6 +207785,31 @@ def subdub_telegram_file_too_big(detail: str = "") -> bool:
     )
     return any(marker in normalized for marker in markers)
 
+def subdub_telegram_api_base_unreachable(detail: str = "") -> bool:
+    """INFRA.LOCALBOTAPI: the configured Bot API base could not be reached.
+
+    Only meaningful when a local Bot API server is configured; on the cloud
+    endpoint these same markers are ordinary transient network errors.
+    """
+    normalized = str(detail or "").strip().lower()
+    if not normalized:
+        return False
+    markers = (
+        "telegram_download_failed:network",
+        "telegram_download_failed:timeout",
+        "connecterror",
+        "connect error",
+        "connection refused",
+        "name or service not known",
+        "temporary failure in name resolution",
+        "ssl",
+        "bad gateway",
+        "502",
+        "503",
+        "504",
+    )
+    return any(marker in normalized for marker in markers)
+
 def subdub_download_failure_public_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
@@ -207649,6 +207846,10 @@ def subdub_input_save_failure_public_text(input_save: dict | None = None, lang: 
         or subdub_telegram_file_too_big(detail)
     ):
         return subdub_large_telegram_media_public_text(lang)
+    # INFRA.LOCALBOTAPI degraded mode: the configured Bot API base is down.
+    # Never leak the endpoint; never charge; never silently retry the cloud.
+    if str(item.get("input_save_blocker") or "") == "telegram_api_base_unreachable":
+        return subdub_download_failure_public_text(lang)
     return ""
 
 def subdub_input_save_debug_fields(input_save: dict | None = None, state: dict | None = None) -> dict:
@@ -207665,7 +207866,14 @@ def subdub_input_save_debug_fields(input_save: dict | None = None, state: dict |
     method = str(item.get("telegram_download_method") or ("source_bytes_override" if item.get("source_bytes") else "bot_api_direct"))
     limit_hit = bool(item.get("telegram_download_limit_hit") or subdub_telegram_file_too_big(detail))
     supported_source = str(item.get("large_media_intake_source") or "")
-    supported = bool(item.get("large_media_intake_supported") or supported_source in {"source_bytes_override", "local_path_override"})
+    # INFRA.LOCALBOTAPI: a configured local Bot API server is itself a large
+    # media intake source, so report it truthfully even for plain bot_api_direct.
+    if not supported_source and telegram_local_api_enabled() and method == "bot_api_direct":
+        supported_source = "local_bot_api"
+    supported = bool(
+        item.get("large_media_intake_supported")
+        or supported_source in {"source_bytes_override", "local_path_override", "local_bot_api"}
+    )
     blocker = str(item.get("input_save_blocker") or "")
     if not blocker:
         if limit_hit and not supported:
@@ -207692,6 +207900,7 @@ def subdub_input_save_debug_fields(input_save: dict | None = None, state: dict |
         "duration_limit_blocker": "",
         "size_limit_blocker": "telegram_direct_download_over_limit" if limit_hit and not supported else "",
         "telegram_download_method": method,
+        "telegram_api_source": str(item.get("telegram_api_source") or telegram_api_source_label()),
         "telegram_download_limit_hit": limit_hit,
         "large_telegram_media_detected": bool(limit_hit or item.get("large_telegram_media_detected")),
         "large_media_intake_supported": supported,
@@ -207724,6 +207933,7 @@ async def video_dubbing_save_input_for_pipeline(
         "input_save_success": False,
         "telegram_file_size": _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0),
         "telegram_download_method": "",
+        "telegram_api_source": telegram_api_source_label(),
         "telegram_download_limit_hit": False,
         "large_telegram_media_detected": False,
         "large_media_intake_supported": False,
@@ -207800,26 +208010,45 @@ async def video_dubbing_save_input_for_pipeline(
                 "no_charge_reason": "missing_video_file_id",
             })
             return result
+        local_api = telegram_local_api_enabled()
         try:
             source_bytes, content_type = await video_dubbing_download_source(context, state)
         except Exception as exc:
             safe_detail = sanitize_log_text(str(exc))[:140]
             limit_hit = subdub_telegram_file_too_big(safe_detail)
-            blocker = "large_telegram_download_unsupported" if limit_hit else "telegram_download_failed"
+            # INFRA.LOCALBOTAPI: with a local Bot API server the large-media
+            # intake path DOES exist, so an oversize file is an honest
+            # "video_too_large", not "the bot cannot fetch large media at all".
+            # A dead local server must never silently fall back to the cloud
+            # endpoint (the token is logged out of it) - it degrades instead.
+            if limit_hit:
+                blocker = "video_too_large" if local_api else "large_telegram_download_unsupported"
+            elif local_api and subdub_telegram_api_base_unreachable(safe_detail):
+                blocker = "telegram_api_base_unreachable"
+            else:
+                blocker = "telegram_download_failed"
             result.update({
                 "error": type(exc).__name__,
                 "detail": "telegram_download_failed:" + safe_detail,
                 "content_type": content_type,
                 "telegram_download_method": "bot_api_direct",
+                "telegram_api_source": telegram_api_source_label(),
                 "telegram_download_limit_hit": limit_hit,
                 "large_telegram_media_detected": limit_hit,
-                "large_media_intake_supported": False,
-                "large_media_intake_source": "",
+                "large_media_intake_supported": local_api,
+                "large_media_intake_source": "local_bot_api" if local_api else "",
                 "input_save_blocker": blocker,
                 "input_save_public_action": "send_smaller_or_supported_upload" if limit_hit else "",
                 "no_charge_reason": blocker,
             })
             return result
+        else:
+            result.update({
+                "telegram_download_method": "bot_api_direct",
+                "telegram_api_source": telegram_api_source_label(),
+                "large_media_intake_supported": local_api,
+                "large_media_intake_source": "local_bot_api" if local_api else "",
+            })
     if not source_bytes:
         result.update({
             "error": "RuntimeError",
@@ -210240,7 +210469,13 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
             declared_size = _safe_int(getattr(tg_file, "file_size", 0), 0)
             if declared_size > max_bytes:
                 raise RuntimeError("telegram_download_failed:file is too big")
-            if callable(getattr(tg_file, "download_as_bytearray", None)):
+            # INFRA.LOCALBOTAPI: a local Bot API server in --local mode hands back
+            # an absolute path on ITS disk, which this host cannot open. The same
+            # tree is republished over HTTPS by the reverse proxy, so fetch there.
+            local_media_url = telegram_local_media_url(getattr(tg_file, "file_path", ""))
+            if local_media_url:
+                data = await telegram_local_media_fetch(local_media_url, max_bytes, read_timeout)
+            elif callable(getattr(tg_file, "download_as_bytearray", None)):
                 data = bytes(
                     await tg_file.download_as_bytearray(
                         read_timeout=read_timeout,
@@ -224333,7 +224568,7 @@ async def lifespan(app: FastAPI):
     TELEGRAM_STARTUP_ERROR = ""
 
     try:
-        tg_app = Application.builder().token(TELEGRAM_TOKEN).build()
+        tg_app = build_telegram_application()
     except Exception as e:
         TELEGRAM_STARTUP_ERROR = str(e)
         ACTIVE_TELEGRAM_UPDATE_MODE = "telegram_startup_error"

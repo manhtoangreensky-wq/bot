@@ -3028,14 +3028,42 @@ async def get_business_status(bot: Any) -> dict:
         }
 
 
+def raw_bot_api_endpoint(bot: Any, method: str) -> str:
+    """INFRA.LOCALBOTAPI: follow whatever Bot API base the bot was built with.
+
+    ``Bot.base_url`` already carries the token, so a bot pointed at a local Bot
+    API server keeps working after its token is logged out of the cloud API.
+    Falls back to the cloud endpoint only when the bot exposes no base_url.
+    """
+    base = str(_get(bot, "base_url") or "").strip().rstrip("/")
+    if base:
+        return f"{base}/{method}"
+    token = str(_get(bot, "token") or "").strip()
+    if not token:
+        raise RuntimeError("bot_token_unavailable_for_raw_business_send")
+    return f"https://api.telegram.org/bot{token}/{method}"
+
+
+def raw_bot_api_headers(url: str = "") -> dict:
+    """Shared-secret header for a self-hosted Bot API server behind a proxy."""
+    if "api.telegram.org" in str(url or ""):
+        return {}
+    secret = str(os.environ.get("TELEGRAM_API_PROXY_SECRET", "") or "").strip()
+    if not secret:
+        return {}
+    name = str(os.environ.get("TELEGRAM_API_PROXY_SECRET_HEADER", "") or "").strip() or "X-Toanaas-Proxy-Secret"
+    return {name: secret}
+
+
 async def raw_bot_api_request(bot: Any, method: str, payload: dict) -> dict:
     if hasattr(bot, "raw_bot_api_request"):
         return await bot.raw_bot_api_request(method, payload)
     token = str(_get(bot, "token") or "").strip()
-    if not token:
+    url = raw_bot_api_endpoint(bot, method)
+    if not token and "api.telegram.org" in url:
         raise RuntimeError("bot_token_unavailable_for_raw_business_send")
     async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(f"https://api.telegram.org/bot{token}/{method}", json=payload)
+        response = await client.post(url, json=payload, headers=raw_bot_api_headers(url))
         response.raise_for_status()
         return response.json()
 
