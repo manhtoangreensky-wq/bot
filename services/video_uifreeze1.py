@@ -50,7 +50,7 @@ QUALITY_TIERS: dict[int, dict[str, Any]] = {
         "descriptions": ("Video gốc, không add-ons", "Phù hợp test nhanh"),
         "public_level": "Thử ý tưởng nhanh",
         "public_detail": "Chuyển động cơ bản, phù hợp thử mạch nội dung đơn giản.",
-        "capabilities": ("text_to_video", "single_scene"),
+        "capabilities": ("text_to_video", "video_to_video", "single_scene"),
         "max_scenes": 1,
     },
     300: {
