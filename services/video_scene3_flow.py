@@ -2130,12 +2130,15 @@ def validate_two_column_rows(rows: list[list[tuple[str, str]]]) -> list[list[tup
     for row in normalized:
         compact_suggestions = len(row) == 5 and [label for label, _callback in row] == ["1", "2", "3", "4", "5"]
         position_grid = len(row) == 3 and all(
-            len(callback.split("|")) >= 3
-            and callback.split("|")[1] in {
-                "content_position_set",
-                "post_position_set",
-                "logo_position_set",
-            }
+            (
+                len(callback.split("|")) >= 3
+                and callback.split("|")[1] in {
+                    "content_position_set",
+                    "post_position_set",
+                    "logo_position_set",
+                }
+            )
+            or callback.startswith("video_tail|logo|setpos|")
             for _label, callback in row
         )
         if len(row) != 2 and not compact_suggestions and not position_grid:

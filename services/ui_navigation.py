@@ -21,10 +21,23 @@ def is_main_menu_button(button: Any) -> bool:
     return _button_callback(button) == CANONICAL_MAIN_CALLBACK
 
 
+def is_position_choice_button(button: Any) -> bool:
+    callback = _button_callback(button)
+    parts = callback.split("|")
+    return callback.startswith("video_tail|logo|setpos|") or (
+        len(parts) >= 3
+        and parts[1] in {
+            "content_position_set",
+            "post_position_set",
+            "logo_position_set",
+        }
+    )
+
+
 def is_back_button(button: Any) -> bool:
     text = _button_text(button).casefold()
     callback = _button_callback(button).casefold()
-    if is_main_menu_button(button):
+    if is_main_menu_button(button) or is_position_choice_button(button):
         return False
     pagination_terms = (
         "trang trước",
@@ -55,6 +68,10 @@ def is_numeric_suggestion_row(row: Sequence[Any]) -> bool:
         return False
     labels = [_button_text(button).replace("️⃣", "").strip() for button in row]
     return labels == ["1", "2", "3", "4", "5"]
+
+
+def is_position_grid_row(row: Sequence[Any]) -> bool:
+    return len(row) == 3 and all(is_position_choice_button(button) for button in row)
 
 
 def canonical_bottom_nav(
@@ -101,7 +118,7 @@ def canonicalize_bottom_navigation(
             if not is_main_menu_button(button) and not is_back_button(button)
         ]
         if kept:
-            if is_numeric_suggestion_row(kept):
+            if is_numeric_suggestion_row(kept) or is_position_grid_row(kept):
                 kept_rows.append(kept)
             else:
                 kept_rows.extend(kept[index:index + 2] for index in range(0, len(kept), 2))
