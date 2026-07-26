@@ -10,6 +10,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from services import ffmpeg_text
+
 
 FRAME_VIDEO_MIN_IMAGES = 2
 FRAME_VIDEO_MAX_IMAGES = 20
@@ -344,8 +346,10 @@ def validate_plan(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _escape_drawtext(value: str) -> str:
-    value = re.sub(r"\s+", " ", str(value or "").strip())[:500]
-    return value.replace("\\", r"\\").replace(":", r"\:").replace("'", r"\'").replace("%", r"\%")
+    # Single definition lives in services/ffmpeg_text: a quote cannot be
+    # escaped inside a quoted filtergraph value, so it has to be replaced.
+    # `%` is handled by passing expansion=none to drawtext instead.
+    return ffmpeg_text.escape_filter_text(re.sub(r"\s+", " ", str(value or "").strip())[:500])
 
 
 def _position_xy(position: str, margin: int = 36) -> tuple[str, str]:
@@ -513,14 +517,14 @@ def build_ffmpeg_command(
             x = f"if(lt(t,{start + 0.35:.3f}),w-(w-({x}))*(t-{start:.3f})/0.35,{x})"
         text_filters.append(
             "drawtext="
-            f"text='{content}':fontcolor={font_color}:fontsize={size}:borderw=2:bordercolor=black@0.8:"
+            f"text='{content}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor={font_color}:fontsize={size}:borderw=2:bordercolor=black@0.8:"
             f"box=1:boxcolor={box_color}:boxborderw=12:x={x}:y={y}:alpha='{alpha}':enable='between(t,{start:.3f},{end:.3f})'"
         )
     watermark = _escape_drawtext(str(state.get("watermark_text") or ""))
     if watermark:
         x, y = _position_xy(str(state.get("watermark_position") or "top_right"), margin=28)
         text_filters.append(
-            f"drawtext=text='{watermark}':fontcolor=white@0.68:fontsize={max(18, width // 34)}:borderw=1:bordercolor=black@0.45:x={x}:y={y}"
+            f"drawtext=text='{watermark}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor=white@0.68:fontsize={max(18, width // 34)}:borderw=1:bordercolor=black@0.45:x={x}:y={y}"
         )
     if text_filters:
         filters.append(f"{video_label}{','.join(text_filters)}[vtext]")

@@ -96,6 +96,7 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
+from services import ffmpeg_text
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
 from services.video_provider_base import VideoPollResult, mask_provider_task_id
@@ -45425,7 +45426,11 @@ def image_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: 
     )
 
 def logo_watermark_clean_text(text: str = "") -> str:
-    return re.sub(r"\s+", " ", str(text or "").strip())[:300]
+    # First of two independent layers. This text is rendered by FFmpeg
+    # drawtext, so the quote and backslash forms that could break out of a
+    # quoted filter value are removed here, at capture, as well as in
+    # services/ffmpeg_text when the filter string is built.
+    return ffmpeg_text.sanitize_overlay_text(text, 300)
 
 LOGO_WATERMARK_POSITION_LABELS = {
     "top_left": ("góc trái trên", "top left", "左上角"),
@@ -92605,7 +92610,7 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                     current["audio_plan"] = plan
                     screen = "audio"
                 elif step == "selfshot2_watermark_input":
-                    watermark_text = text[:120].strip()
+                    watermark_text = ffmpeg_text.sanitize_overlay_text(text, 120)
                     if not watermark_text:
                         raise ValueError("watermark_text_required")
                     addons = {
@@ -149502,7 +149507,8 @@ async def handle_frame_video_pending_text(update: Update, context: ContextTypes.
         await update.message.reply_text(frame_video_text_editor_text(state), parse_mode="HTML", reply_markup=frame_video_text_editor_keyboard())
         return True
     if step in {"watermark_input", "subtitle_input", "text_input", "text_edit_input"}:
-        content = " ".join(text.split())[:500]
+        # All four land in an FFmpeg drawtext/subtitles filter later.
+        content = ffmpeg_text.sanitize_overlay_text(text, 500)
         if not content:
             await update.message.reply_text("⚠️ Nội dung đang trống. Anh/chị nhập lại nhé.")
             return True
@@ -209747,7 +209753,9 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     return "\n".join(header + events) + "\n"
 
 def subdub_ffmpeg_filter_path(path: str) -> str:
-    return str(path or "").replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    # Single definition lives in services/ffmpeg_text: a quote cannot be
+    # escaped inside a quoted filtergraph value, so it has to be replaced.
+    return ffmpeg_text.escape_filter_path(path, resolve=False)
 
 def subdub_cover_filter(style_or_state: dict | None = None) -> str:
     style = subdub_normalize_style(style_or_state)

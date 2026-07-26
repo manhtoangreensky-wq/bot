@@ -14,6 +14,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from services import ffmpeg_text
+
 
 @dataclass
 class VideoPostprocessPlan:
@@ -98,10 +100,9 @@ def probe_duration(path: str) -> float:
 
 
 def _filter_path(path: str) -> str:
-    value = os.path.abspath(path).replace("\\", "/")
-    if re.match(r"^[A-Za-z]:", value):
-        value = f"{value[0]}\\:{value[2:]}"
-    return value.replace("'", "\\'")
+    # Single definition lives in services/ffmpeg_text: a quote cannot be
+    # escaped inside a quoted filtergraph value, so it has to be replaced.
+    return ffmpeg_text.escape_filter_path(path)
 
 
 def _overlay_expr(position: str) -> str:
