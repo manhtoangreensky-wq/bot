@@ -8,6 +8,19 @@ from types import SimpleNamespace
 BOT_SOURCE = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
 
 
+def test_module_level_subdub_env_map_does_not_reference_late_mode_constants():
+    start = BOT_SOURCE.index("SUBDUB_LANE_PUBLIC_ENV = {")
+    end = BOT_SOURCE.index("}\n\ndef subdub_provider_status_text", start)
+    mapping_source = BOT_SOURCE[start:end]
+
+    assert BOT_SOURCE.index("VIDEO_SUBTITLE_MODE_CREATE =") > start
+    assert "VIDEO_SUBTITLE_MODE_CREATE:" not in mapping_source
+    assert '"subtitle_create": "VIDEO_SUBTITLE_PUBLIC_ENABLED"' in mapping_source
+    assert '"subtitle_translate": "VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED"' in mapping_source
+    assert '"dub": "VIDEO_DUB_PUBLIC_ENABLED"' in mapping_source
+    assert '"subtitle_plus_dub": "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED"' in mapping_source
+
+
 def test_pr400_background_task_registry_exists_before_confirm_handler():
     definition = "SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}"
     handler = "async def handle_video_dubbing_callback("
