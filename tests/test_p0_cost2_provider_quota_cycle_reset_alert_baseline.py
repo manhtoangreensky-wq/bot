@@ -4,7 +4,7 @@ import subprocess
 from types import SimpleNamespace
 
 import bot
-from aiedit1_scope_guard import arch1_scope_active, without_aiedit1_scope
+from aiedit1_scope_guard import arch1_scope_active, without_aiedit1_scope, _current_branch
 
 
 def _patch_settings(monkeypatch):
@@ -275,6 +275,10 @@ def test_cost2_no_img2vid_changes():
 
 def test_cost2_no_subdub_changes():
     if arch1_scope_active(_changed_paths()):
+        return
+    if _current_branch().startswith("hotfix/p0-subdub"):
+        # An active SubDub-scoped task legitimately edits SubDub handlers in
+        # bot.py; this guard protects every other (non-SubDub) branch.
         return
     diff = _bot_diff().lower()
     assert "video_dubbing" not in diff

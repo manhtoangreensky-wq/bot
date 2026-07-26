@@ -204485,9 +204485,13 @@ def get_subdub_lane_readiness(
     *,
     public: bool,
     admin_smoke: bool = False,
+    admin_interactive_confirm: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
+    admin_interactive_confirm = bool(admin_interactive_confirm and not public)
+    if admin_interactive_confirm:
+        admin_smoke = True
     freeze = subdub_effective_freeze_status(mode)
     runtime = dict(subdub_runtime_status_payload() or {})
     ffmpeg_ready = bool(runtime.get("ffmpeg_ready", runtime.get("ffmpeg_version_probe_ok", runtime.get("media_preprocessing_ready"))))
@@ -204519,7 +204523,7 @@ def get_subdub_lane_readiness(
         blockers.append("mode_missing")
     if public and not video_dubbing_public_flag(mode):
         blockers.append("public_flag_off")
-    if freeze.get("global_provider_freeze"):
+    if freeze.get("global_provider_freeze") and not admin_interactive_confirm:
         blockers.append("provider_freeze")
     if TRANSLATION_DUB_MAINTENANCE:
         blockers.append("maintenance")
@@ -204601,9 +204605,12 @@ def video_dubbing_configured_readiness(
     category_tokens = (
         ("mode", "mode"),
         ("maintenance", "maintenance"),
-        ("provider_freeze", "provider_freeze"),
-        ("public_flag", "public_flag"),
+        ("provider_freeze", "lane_closed"),
+        ("public_flag", "lane_closed"),
         ("media_runtime", "ffmpeg"),
+        ("smoke_not_pass", "lane_closed"),
+        ("public_not_allowed", "lane_closed"),
+        ("provider_policy_required", "lane_closed"),
         ("asr_", "asr"),
         ("translation_", "translation"),
         ("tts_", "tts"),
@@ -204781,6 +204788,12 @@ def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "
             if not is_vi
             else "Dịch / Phụ đề / Lồng tiếng đang bảo trì. TOAN AAS chưa xử lý file và chưa trừ Xu."
         )
+    elif "lane_closed" in missing:
+        text = (
+            "Video translation, subtitles and dubbing are temporarily paused for an upgrade. TOAN AAS has not processed the file and has not charged Xu. Please try again later."
+            if not is_vi
+            else "Dịch / Phụ đề / Lồng tiếng đang tạm ngưng để nâng cấp. TOAN AAS chưa xử lý file và chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+        )
     elif "asr" in missing:
         text = video_dubbing_asr_missing_guard_text(lang)
     elif "translation" in missing:
@@ -204804,29 +204817,24 @@ def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "
             VIDEO_SUBTITLE_MODE_DUB: "TOAN AAS chưa thể tạo giọng lồng tiếng lúc này. Hệ thống chưa xử lý file và chưa trừ Xu.",
             VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "TOAN AAS chưa thể tạo phụ đề + lồng tiếng lúc này. Hệ thống chưa xử lý file và chưa trừ Xu.",
         }.get(mode, "TOAN AAS chưa thể tiếp tục công cụ này. Hệ thống chưa xử lý file và chưa trừ Xu.")
-    if admin:
-        blockers = video_translation_admin_blockers(mode, state)
-        text += (
-            "\n\n<b>Admin blocker:</b>\n"
-            f"<code>{html.escape(', '.join(blockers) if blockers else 'No static blocker; run smoke checks')}</code>"
-        )
+    # Internal diagnostics never render on guard screens (admin uses slash
+    # commands such as /subdub_status_debug instead). Keep the signature for
+    # existing call sites.
+    del admin
     return text
 
 def video_dubbing_guard_keyboard(lang: str = "vi", admin: bool = False) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    rows = []
-    if admin:
-        rows.append([
-            InlineKeyboardButton("🧪 Kiểm tra factory" if is_vi else "🧪 Test factory", callback_data="videodub|admin_smoke"),
-            InlineKeyboardButton("⚙️ Trạng thái dịch" if is_vi else "⚙️ Translation status", callback_data="videodub|admin_status"),
-        ])
-        rows.append([
-            InlineKeyboardButton("📋 cURL provider" if is_vi else "📋 Provider cURL", callback_data="videodub|admin_curl"),
-        ])
-    rows.append([
-        InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|guard_back"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-    ])
+    # Guard screens never expose internal operations buttons (factory smoke,
+    # translation status, provider cURL). Admin diagnostics stay in slash
+    # commands only. Keep the signature for existing call sites.
+    del admin
+    rows = [
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|guard_back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ]
     return InlineKeyboardMarkup(rows)
 
 
@@ -209356,6 +209364,12 @@ def subdub_original_audio_volume(mode: str = "", keep_original_audio: bool = Fal
     if token.endswith("%") or token.isdigit():
         return subdub_percent_value(token, SUBDUB_ORIGINAL_AUDIO_DEFAULT_VOLUME_PERCENT, 0, 100) / 100.0
     return 0.0
+
+
+# Captured base reference for the delegation identity check below:
+# when tests monkeypatch bot.run_ffmpeg_command, run_subdub_ffmpeg_command
+# delegates to the patched function instead of spawning a real process.
+_SUBDUB_BASE_RUN_FFMPEG_COMMAND = run_ffmpeg_command
 
 
 async def run_subdub_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> tuple[bool, str]:
@@ -217292,6 +217306,7 @@ async def handle_video_dubbing_callback(
             state,
             public=not is_admin_user(uid),
             admin_smoke=bool(is_admin_user(uid) and state.get("admin_real_test")),
+            admin_interactive_confirm=bool(is_admin_user(uid)),
         )
         if not access.get("allowed") or not confirm_readiness.get("effective_ready"):
             set_video_dubbing_pending(
