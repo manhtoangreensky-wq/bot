@@ -39934,6 +39934,15 @@ def normalize_translate_target(value: str) -> str:
     }
     return aliases.get(raw, raw if raw in TRANSLATE_LANGUAGE_OPTIONS else "")
 
+def resolve_translate_target(value: str = "", default: str = "vi") -> str:
+    normalized = normalize_translate_target(value)
+    if normalized:
+        return normalized
+    custom = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(value or "")).strip())[:80]
+    if custom and custom.casefold() not in {"auto", "detect", "unknown", "default"}:
+        return custom
+    return normalize_translate_target(default) or "vi"
+
 def translate_target_label(target: str) -> str:
     key = normalize_translate_target(target)
     return TRANSLATE_LANGUAGE_OPTIONS.get(key, TRANSLATE_LANGUAGE_OPTIONS["vi"])["name"]
@@ -114923,6 +114932,9 @@ def subtitle_dub_debug_text(job: dict) -> str:
         "",
         f"• job: <code>{esc(job.get('internal_job_id'))}</code>",
         f"• job id: <code>{esc(job.get('job_id') or job.get('internal_job_id'))}</code>",
+        f"• job created at: <code>{esc(job.get('created_at'))}</code>",
+        f"• job updated at: <code>{esc(job.get('updated_at') or job.get('started_at'))}</code>",
+        "• snapshot: <code>persisted job history (kiểm tra timestamps — job có thể thuộc deploy cũ)</code>",
         f"• mode: <code>{esc(job.get('mode'))}</code>",
         f"• product type: <code>{esc(job.get('product_type'))}</code>",
         f"• selected public entrypoint: <code>{esc(job.get('selected_public_entrypoint'))}</code>",
@@ -115570,8 +115582,6 @@ def subdub_voice_style_state_fields(
         "cover_height_ratio": float(style.get("cover_height_ratio") or 0.0),
         "cover_y_ratio": float(style.get("cover_y_ratio") or 0.0),
     }
-def subdub_missing_origin_back_callback() -> str:
-    return "videodub|back_type"
 
 def subdub_pipeline_audit_payload() -> dict:
     core_modes = {
@@ -126930,21 +126940,66 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
     async def _run_smoke_pipeline():
         return await _run_admin_video_pipeline_smoke_core(update, context, mode)
 
-    engine_result = await execute_engine(
-        feature,
-        {
-            "runner": _run_smoke_pipeline,
-            "mode": normalize_video_translate_mode(mode),
-            "state": {"admin_real_test": True},
-        },
-        {
-            "user_id": uid,
-            "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
-            "confirm_paid": True,
-            "is_paid_job": True,
-            "gate_prechecked": True,
-        },
-    )
+    smoke_command_label = {
+        VIDEO_SUBTITLE_MODE_CREATE: "/tool_test_video_subtitle",
+        VIDEO_SUBTITLE_MODE_TRANSLATE: "/tool_test_subtitle_translate",
+        VIDEO_SUBTITLE_MODE_DUB: "/tool_test_video_dub",
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "/tool_test_subtitle_plus_dub",
+    }.get(normalize_video_translate_mode(mode), "/tool_test_video_dub")
+    smoke_record_key = {
+        VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
+        VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
+        VIDEO_SUBTITLE_MODE_DUB: "video_dub",
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
+    }.get(normalize_video_translate_mode(mode), "video_pipeline")
+    try:
+        engine_result = await execute_engine(
+            feature,
+            {
+                "runner": _run_smoke_pipeline,
+                "mode": normalize_video_translate_mode(mode),
+                "state": {"admin_real_test": True},
+            },
+            {
+                "user_id": uid,
+                "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
+                "confirm_paid": True,
+                "is_paid_job": True,
+                "gate_prechecked": True,
+            },
+        )
+    except Exception as exc:
+        error_class = type(exc).__name__
+        save_tool_test_result(smoke_record_key, "FAIL", f"error_class={error_class}; smoke wrapper crashed before terminal", uid)
+        logger.warning("admin video pipeline smoke crashed | mode=%s error_class=%s", mode, error_class)
+        return await update.message.reply_text(
+            f"🧪 {smoke_command_label}\n"
+            "• Status: FAIL\n"
+            f"• Error class: {error_class}\n"
+            "• Provider calls: unknown (kiểm tra log) | Xu charged: 0\n"
+            "• Smoke dừng vì lỗi hệ thống. Không trừ Xu."
+        )
+    if isinstance(engine_result, dict) and str(engine_result.get("status") or "").upper() == "GATE_BLOCKED":
+        gate = dict(engine_result.get("gate") or {})
+        reason = sanitize_log_text(
+            str(engine_result.get("detail") or gate.get("reason") or gate.get("status") or "engine_gate_blocked")
+        )[:200]
+        save_tool_test_result(smoke_record_key, "BLOCKED", f"gate={reason}; provider_calls=0; no charge", uid)
+        return await update.message.reply_text(
+            f"🧪 {smoke_command_label}\n"
+            "• Status: BLOCKED\n"
+            f"• Reason: {reason}\n"
+            "• Provider calls: 0 | Xu charged: 0\n"
+            "• Engine gate chặn trước khi chạy pipeline — chưa gọi provider nào. Xử lý blocker rồi chạy lại lệnh."
+        )
+    if not isinstance(engine_result, dict):
+        save_tool_test_result(smoke_record_key, "FAIL", "engine returned no result payload", uid)
+        return await update.message.reply_text(
+            f"🧪 {smoke_command_label}\n"
+            "• Status: FAIL\n"
+            "• Reason: engine_no_result\n"
+            "• Provider calls: unknown (kiểm tra log) | Xu charged: 0"
+        )
     return engine_result.get("runner_result")
 
 async def cmd_tool_test_video_subtitle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161289,6 +161344,7 @@ def can_admin_run_real_test(
         return {
             "allowed": False,
             "status": "blocked_admin_missing_provider_config",
+            "reason": ",".join(missing) or "provider_not_configured",
             "message": admin_product_engine_missing_text(feature, readiness),
             "readiness": readiness or {},
         }
@@ -161664,10 +161720,16 @@ def can_user_access_product_engine(
                 "readiness": readiness,
             }
         if is_provider_call and (not readiness.get("configured") or technical_missing):
+            readiness_reason = str(readiness.get("reason") or "").strip()
+            blocked_reason = (
+                ",".join(technical_missing)
+                or (readiness_reason if readiness_reason and readiness_reason != "ready" else "")
+                or "provider_not_configured"
+            )
             return {
                 "allowed": False,
                 "status": "blocked_admin_missing_provider_config",
-                "reason": readiness.get("reason") or ",".join(technical_missing),
+                "reason": blocked_reason,
                 "message": admin_product_engine_missing_text(product_area, readiness),
                 "readiness": readiness,
             }
@@ -204587,7 +204649,22 @@ def get_subdub_lane_readiness(
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }
     media_runtime_ready = bool(ffmpeg_ready and ffprobe_ready and (subtitle_render_ready or not subtitle_output))
-    asr_required = bool(mode and video_dubbing_mode_needs_asr_provider(mode, state))
+    asr_state_known = bool(
+        video_dubbing_state_has_subtitle_or_transcript(state)
+        or any(
+            str(state.get(key) or "").strip()
+            for key in ("source_file_name", "source_mime_type", "mime_type", "media_kind", "source_media_kind")
+        )
+    )
+    if asr_state_known:
+        asr_required = bool(mode and video_dubbing_mode_needs_asr_provider(mode, state))
+    else:
+        # Lane-level probe (no customer input yet): assume the worst-case job for this
+        # lane — raw media with no subtitle/transcript attached — so ASR readiness
+        # (explicit provider + configured + smoke PASS on current SHA) cannot be
+        # skipped just because the probe state is empty. A lane must not open on an
+        # unverified ASR chain.
+        asr_required = bool(mode and video_dubbing_state_requires_asr(mode, {"media_kind": "video"}))
     translation_required = bool(mode and video_dubbing_needs_translation_provider(mode, state))
     tts_required = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     asr_provider = subdub_asr_provider_name()
@@ -206309,7 +206386,9 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
     if status.startswith("failed") or terminal.startswith("failed"):
-        safe = sanitize_public_copy(str(job.get("last_error_safe") or job.get("public_safe_error") or ""), "")
+        safe = sanitize_log_text(
+            str(job.get("last_error_safe") or job.get("public_safe_error") or "")
+        ).strip()[:500]
         if safe:
             return safe
         return subdub_clean_failure_text(lang)
@@ -207855,12 +207934,15 @@ def video_dubbing_product_gate_matrix(
     if wants_video_output and not ffprobe_available and "ffprobe" not in technical_missing:
         technical_missing.append("ffprobe")
     product_config_ready = not bool(technical_missing)
+    access_status = str(access.get("status") or "")
+    access_reason = str(access.get("reason") or "").strip()
+    if not access_reason or (access_status.startswith("blocked") and access_reason == "ready"):
+        blocked_fallback = ",".join(technical_missing) if access_status.startswith("blocked") else ""
+        access_reason = blocked_fallback or str(readiness.get("reason") or configured.get("reason") or "")
+        if access_status.startswith("blocked") and (not access_reason or access_reason == "ready"):
+            access_reason = "provider_not_configured"
     gate_reason = ":".join(
-        item for item in (
-            str(access.get("status") or ""),
-            str(access.get("reason") or readiness.get("reason") or configured.get("reason") or ""),
-        )
-        if item
+        item for item in (access_status, access_reason) if item
     )
     input_save = dict(input_save or {})
     input_ready = bool(
