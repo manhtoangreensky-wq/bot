@@ -92,7 +92,10 @@ def test_subject_layout_stays_two_buttons_per_row_when_detection_count_is_odd():
     model = video_selfshotflow4.screen_model("ss2", "subject", state)
     subject_rows = model["rows"][:-1]
     assert all(len(row) == 2 for row in subject_rows)
-    assert any(label == "🚫 Không có nhân vật chính" for row in subject_rows for label, _callback in row)
+    labels = [label for row in subject_rows for label, _callback in row]
+    assert "🚫 Không có nhân vật chính" not in labels
+    assert "✍️ Tự mô tả" in labels
+    assert "🔎 Xem phân tích" in labels
 
     state = video_selfshotflow4.apply_action("ss2", state, "c4subject", "none")["state"]
     assert state["subject_manifest"]["selection_mode"] == "motion_only"
@@ -118,7 +121,8 @@ def test_skip_always_keeps_a_nonempty_prompt(flow: str):
     state = video_selfshotflow4.apply_text(flow, state, "content", "Biến đổi thế giới quanh chủ thể nhưng giữ hành động nguồn.")["state"]
     result = video_selfshotflow4.apply_action(flow, state, "c4prompt", "skip")
     assert result["screen"] == "tail_review"
-    assert result["state"]["selected_prompt"]["text"]
+    assert result["state"]["selected_prompt"]
+    assert result["state"]["selected_prompt_text"] == result["state"]["selected_prompt"]
 
 
 def test_ss3_creates_exactly_four_transformation_stages():
@@ -127,7 +131,10 @@ def test_ss3_creates_exactly_four_transformation_stages():
     state = _open_subject("ss3", state)
     state = video_selfshotflow4.apply_action("ss3", state, "c4subject", "person")["state"]
     state = video_selfshotflow4.apply_action("ss3", state, "c4source", "ideas")["state"]
-    state = video_selfshotflow4.apply_action("ss3", state, "c4idea", "0")["state"]
+    group_id = video_selfshotflow4.idea_groups()[0]["category_id"]
+    state = video_selfshotflow4.apply_action("ss3", state, "c4idea_group", group_id)["state"]
+    idea_id = video_selfshotflow4.ideas_for_group(group_id)[0]["idea_id"]
+    state = video_selfshotflow4.apply_action("ss3", state, "c4idea", idea_id)["state"]
     result = video_selfshotflow4.apply_action("ss3", state, "c4prompt", "1")
     assert len(result["state"]["transformation_stages"]) == 4
 
@@ -209,8 +216,7 @@ def test_every_canonical_screen_has_its_exact_back_owner(flow: str):
     for screen in sorted(video_selfshotflow4.FLOW_SCREENS[flow]):
         state[video_selfshotflow4.FLOW_SCREEN_KEYS[flow]] = screen
         model = video_selfshotflow4.screen_model(flow, screen, state)
-        parent = video_selfshotflow4.screen_parent(flow, screen)
-        expected = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|{flow}|c4show|{parent}"
+        expected = video_selfshotflow4.back_callback(flow, screen, state)
         assert model["rows"][-1][0][1] == expected
         assert model["rows"][-1][1][1] == "menu|main"
         assert video_selfshotflow4.validate_rows(model["rows"], back_callback=expected)["ok"]

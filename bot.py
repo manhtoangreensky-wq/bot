@@ -109,7 +109,7 @@ from services import video_ai_edit_prompt, video_ai_edit_provider, video_ai_edit
 from services import video_idea_catalog, video_idea_script_intake, video_idea_store, video_profile_catalog, video_prompt_vault
 from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
-from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
+from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
@@ -80273,6 +80273,30 @@ VIDEO_B14_STATUS_STEP_LABELS = (
     "Gửi kết quả",
 )
 
+VIDEO_B14_SELFSHOT_STATUS_STEP_LABELS = {
+    video_selfshot2.PRODUCT_ID: (
+        "Nhận video",
+        "Phân tích chủ thể",
+        "Lập kế hoạch đổi cảnh",
+        "Biến đổi từng cảnh",
+        "Kiểm tra continuity",
+        "Ghép video",
+        "Kiểm tra MP4",
+        "Gửi kết quả",
+    ),
+    video_selfshot3.PRODUCT_ID: (
+        "Nhận video",
+        "Phân tích chủ thể",
+        "Lập timeline điện ảnh",
+        "Biến đổi môi trường",
+        "Biến đổi trang phục/hiệu ứng",
+        "Kiểm tra continuity",
+        "Ghép video",
+        "Kiểm tra MP4",
+        "Gửi kết quả",
+    ),
+}
+
 
 def video_b14_provider_telemetry(job: dict | None = None, payload: dict | None = None, *, refresh_source: str = "panel") -> dict:
     try:
@@ -80593,9 +80617,26 @@ def video_b14_status_step_rows(
     delivery_done: bool = False,
     blocked_reason: str = "",
     visual_classification: str = "",
+    product_type: str = "",
 ) -> list[tuple[str, str]]:
     status = str(status or "").strip().lower()
     progress = max(0, min(100, safe_int(progress, 0)))
+    product_labels = VIDEO_B14_SELFSHOT_STATUS_STEP_LABELS.get(str(product_type or "").strip())
+    if product_labels:
+        labels = tuple(product_labels)
+        icons = ["⬜"] * len(labels)
+        failed = status in {"failed", "error"} or bool(blocked_reason) or visual_classification == "partial_simple_video"
+        if status in {"completed", "success"} and has_final_artifact:
+            return list(zip(["✅"] * (len(labels) - 1) + ["✅" if delivery_done else "⏳"], labels))
+        icons[0] = "✅"
+        icons[1] = "✅"
+        remaining = max(1, len(labels) - 2)
+        completed_after_analysis = max(0, min(remaining - 1, int(progress * remaining / 100)))
+        for index in range(2, 2 + completed_after_analysis):
+            icons[index] = "✅"
+        active_index = min(len(labels) - 1, 2 + completed_after_analysis)
+        icons[active_index] = "⚠️" if failed else "⏳"
+        return list(zip(icons, labels))
     icons = ["⬜", "⬜", "⬜", "⬜", "⬜"]
     final_missing = status in {"completed", "success"} and not has_final_artifact
     failed = status in {"failed", "error"} or bool(blocked_reason) or visual_classification == "partial_simple_video" or final_missing
@@ -80637,6 +80678,7 @@ def video_b14_status_steps_text(
     delivery_done: bool = False,
     blocked_reason: str = "",
     visual_classification: str = "",
+    product_type: str = "",
 ) -> str:
     rows = video_b14_status_step_rows(
         status,
@@ -80645,6 +80687,7 @@ def video_b14_status_steps_text(
         delivery_done=delivery_done,
         blocked_reason=blocked_reason,
         visual_classification=visual_classification,
+        product_type=product_type,
     )
     lines = ["<b>Tiến trình:</b>"]
     lines.extend(f"{icon} {label}" for icon, label in rows)
@@ -80955,6 +80998,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             delivery_done=delivery_done,
             blocked_reason=blocked_reason,
             visual_classification=visual_classification,
+            product_type=str(draft.get("product_type") or draft.get("source_product_id") or session.get("product_id") or ""),
         ),
         "",
     ])
@@ -86192,7 +86236,7 @@ async def video_selfshot2_render(target, user_id: int, screen: str, *, draft: di
     if video_selfshotflow4.enabled("ss2", session.get("draft")):
         model = video_selfshotflow4.screen_model("ss2", screen, session.get("draft"))
         parent = video_selfshotflow4.screen_parent("ss2", screen, session.get("draft"))
-        expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss2|c4show|{parent}"
+        expected_back = video_selfshotflow4.back_callback("ss2", screen, session.get("draft"))
         validation = video_selfshotflow4.validate_rows(model["rows"], back_callback=expected_back)
     else:
         model = video_selfshot2.screen_model(screen, session.get("draft"))
@@ -86375,7 +86419,7 @@ async def video_selfshot3_render(target, user_id: int, screen: str, *, draft: di
     if video_selfshotflow4.enabled("ss3", session.get("draft")):
         model = video_selfshotflow4.screen_model("ss3", screen, session.get("draft"))
         parent = video_selfshotflow4.screen_parent("ss3", screen, session.get("draft"))
-        expected_back = "vproduct|selfshot_hub" if parent == "hub" else f"vproduct|ss3|c4show|{parent}"
+        expected_back = video_selfshotflow4.back_callback("ss3", screen, session.get("draft"))
         validation = video_selfshotflow4.validate_rows(model["rows"], back_callback=expected_back)
     else:
         model = video_selfshot3.screen_model(screen, session.get("draft"))
@@ -86432,11 +86476,67 @@ def save_video_selfshotflow4_draft(user_id: int, flow: str, draft: dict, *, step
     )
 
 
+async def video_selfshotflow4_request_source(target, user_id: int, flow: str, current: dict):
+    owner = "selfshot2" if flow == "ss2" else "selfshot3"
+    product_id = video_selfshotflow4.FLOW_PRODUCT_IDS[flow]
+    step = "awaiting_selfshot2_video" if flow == "ss2" else "awaiting_selfshot3_video"
+    current = video_selfshotflow4_draft(flow, {"draft": current})
+    current[video_selfshotflow4.FLOW_FLAGS[flow]] = True
+    save_video_selfshotflow4_draft(user_id, flow, current, step=f"{owner}:source")
+    session = task3d_session_step(
+        user_id,
+        step,
+        input_mode="media",
+        input_purpose="source_video",
+        provider_called=False,
+        job_created=False,
+        outbox_created=False,
+        generated_files=0,
+        xu_charged=0,
+    )
+    session.update({
+        "draft": current,
+        "product_id": product_id,
+        "flow_owner": owner,
+        "flow_session_id": str(current.get("session_id") or ""),
+        "flow_revision": safe_int(current.get("revision"), 1),
+        "selfshotflow4_owner": flow,
+        "selfshotflow4_session_id": str(current.get("session_id") or ""),
+        "selfshotflow4_revision": safe_int(current.get("revision"), 1),
+        "media_owner": owner,
+        "media_session_id": str(current.get("session_id") or ""),
+        "awaiting_media": True,
+        "source_file_id": None,
+        "return_to": "vproduct|selfshot_hub",
+        "provider_called": False,
+        "job_created": False,
+        "outbox_created": False,
+        "generated_files": 0,
+        "wallet_mutations": 0,
+        "xu_charged": 0,
+    })
+    save_video_session(user_id, session)
+    title = "Gửi video nguồn" if flow == "ss2" else "Gửi video mộc"
+    description = (
+        "Gửi đúng một video có người, vật hoặc sản phẩm cần giữ."
+        if flow == "ss2"
+        else "Gửi đúng một video có người, vật hoặc thú cưng cần giữ."
+    )
+    return await safe_edit_or_send(
+        target,
+        f"📎 <b>{title}</b>\n\n{description} Video chỉ được đọc và phân tích cục bộ sau khi anh/chị chọn đoạn.",
+        parse_mode="HTML",
+        reply_markup=video_selfshotflow4_source_keyboard(),
+    )
+
+
 async def video_selfshotflow4_handle_result(target, user_id: int, context: ContextTypes.DEFAULT_TYPE, flow: str, result: dict):
     """Persist one canonical SelfShot4 transition and render exactly one next screen."""
 
     current = video_selfshotflow4_draft(flow, {"draft": dict(result.get("state") or {})})
     current[video_selfshotflow4.FLOW_FLAGS[flow]] = True
+    if str(result.get("pending_media") or "") == "source_upload":
+        return await video_selfshotflow4_request_source(target, user_id, flow, current)
     pending = str(result.get("pending") or "").strip()
     if pending:
         back_screen = str(result.get("back") or "segment").strip()
@@ -86482,6 +86582,63 @@ async def video_selfshotflow4_handle_result(target, user_id: int, context: Conte
         )
 
     screen = str(result.get("screen") or video_selfshotflow4.current_screen(flow, current))
+    if screen == "analysis" and str(current.get("analysis_status") or "") == "pending":
+        expected_session_id = str(current.get("session_id") or "")
+        expected_signature = str(current.get("analysis_signature") or "")
+        expected_source_revision = max(1, safe_int(current.get("source_revision"), 1))
+        current["analysis_status"] = "running"
+        save_video_selfshotflow4_draft(user_id, flow, current, step=f"selfshot{flow[-1]}:analysis")
+        try:
+            inspection = await inspect_selfshot_source(context, current, flow)
+        except Exception as exc:
+            logger.warning("selfshot_local_analysis_failed | flow=%s exception=%s", flow, type(exc).__name__)
+            inspection = {"ok": False, "reason": f"local_analysis_{type(exc).__name__}"}
+        latest = video_selfshotflow4_draft(flow, get_video_session(user_id))
+        if (
+            str(latest.get("session_id") or "") != expected_session_id
+            or str(latest.get("analysis_signature") or "") != expected_signature
+            or max(1, safe_int(latest.get("source_revision"), 1)) != expected_source_revision
+        ):
+            latest_screen = video_selfshotflow4.current_screen(flow, latest)
+            if flow == "ss2":
+                return await video_selfshot2_render(target, user_id, latest_screen, draft=latest)
+            return await video_selfshot3_render(target, user_id, latest_screen, draft=latest)
+        if inspection.get("ok"):
+            merged_analysis = dict(current.get("source_analysis") or {})
+            merged_analysis.update(dict(inspection.get("analysis") or {}))
+            current["source_analysis"] = merged_analysis
+            current["source_video_hash"] = str(
+                inspection.get("source_video_hash")
+                or merged_analysis.get("source_hash")
+                or current.get("source_video_hash")
+                or ""
+            )
+            current["analysis_status"] = str(merged_analysis.get("analysis_status") or "ready_no_tracks")
+            current["analysis_revision"] = max(1, safe_int(merged_analysis.get("analysis_revision"), 1))
+            current["subject_candidates"] = list(merged_analysis.get("subject_candidates") or [])
+            current["relationship_candidates"] = list(merged_analysis.get("relationship_candidates") or [])
+            current["motion_summary"] = str(merged_analysis.get("motion_summary") or "")
+            current["camera_summary"] = str(merged_analysis.get("camera_summary") or "")
+            current["track_confidence"] = float(merged_analysis.get("track_confidence") or 0)
+            current["source_reference_frames"] = list(merged_analysis.get("source_reference_frames") or [])
+            segment = dict(current.get("source_segment") or {})
+            current["analysis_signature"] = ":".join((
+                str(current.get("source_video_hash") or ""),
+                str(segment.get("start_ms") or 0),
+                str(segment.get("end_ms") or 0),
+                str(max(1, safe_int(current.get("source_revision"), 1))),
+            ))
+            merged_analysis["analysis_signature"] = current["analysis_signature"]
+        else:
+            merged_analysis = dict(current.get("source_analysis") or {})
+            merged_analysis.update({
+                "analysis_status": "failed",
+                "analysis_error": str(inspection.get("reason") or "local_analysis_failed"),
+                "tracking_ready": False,
+            })
+            current["source_analysis"] = merged_analysis
+            current["analysis_status"] = "failed"
+            current["analysis_error"] = str(inspection.get("reason") or "local_analysis_failed")
     if screen == "tail_review":
         save_video_selfshotflow4_draft(user_id, flow, current, step=f"selfshot{flow[-1]}:tail_review")
         return await video_tail9_render(target, user_id, context, "review")
@@ -87938,6 +88095,21 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             video_tail9_video_edit_review_text(tail, host),
             parse_mode="HTML",
             reply_markup=video_tail9_video_edit_review_keyboard(),
+        )
+    product_type = str(tail.get("video_product_type") or "")
+    if product_type == video_selfshot2.PRODUCT_ID and video_selfshotflow4.enabled("ss2", host):
+        return await safe_edit_or_send(
+            query,
+            video_selfshotflow4.review_text("ss2", host),
+            parse_mode="HTML",
+            reply_markup=video_tail9_review_keyboard(tail),
+        )
+    if product_type == video_selfshot3.PRODUCT_ID and video_selfshotflow4.enabled("ss3", host):
+        return await safe_edit_or_send(
+            query,
+            video_selfshotflow4.review_text("ss3", host),
+            parse_mode="HTML",
+            reply_markup=video_tail9_review_keyboard(tail),
         )
     return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard(tail))
 
@@ -93064,7 +93236,12 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                     reply_markup=video_selfshot_source_input_keyboard("ss2", dict(session.get("draft") or {})),
                 )
                 return True
-            current = video_selfshot2_draft(session)
+            current = video_selfshotflow4.reset_for_new_source("ss2", video_selfshot2_draft(session))
+            analysis.update({
+                "analysis_status": "awaiting_segment",
+                "analysis_revision": 0,
+                "tracking_ready": False,
+            })
             current.update({
                 "source_video": source_asset,
                 "source_asset": source_asset,
@@ -93072,8 +93249,12 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "source_file_id": file_id,
                 "source_video_id": file_id,
                 "source_video_hash": video_selfshot2.source_fingerprint(source_asset),
+                "source_duration": float(source_asset.get("duration_seconds") or 0),
                 "source_duration_seconds": float(source_asset.get("duration_seconds") or 0),
                 "source_has_audio": bool(source_asset.get("audio_streams")),
+                "source_revision": max(1, safe_int(current.get("source_revision"), 0) + 1),
+                "analysis_status": "awaiting_segment",
+                "analysis_revision": 0,
                 "source_materialization_required": True,
                 "source_probe_policy": "telegram_metadata_then_worker_ffprobe",
                 "source_media_ref": file_id,
@@ -93173,7 +93354,12 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                     reply_markup=video_selfshot_source_input_keyboard("ss3", dict(session.get("draft") or {})),
                 )
                 return True
-            current = video_selfshot3_draft(session)
+            current = video_selfshotflow4.reset_for_new_source("ss3", video_selfshot3_draft(session))
+            analysis.update({
+                "analysis_status": "awaiting_segment",
+                "analysis_revision": 0,
+                "tracking_ready": False,
+            })
             current.update({
                 "source_video": source_asset,
                 "source_asset": source_asset,
@@ -93181,8 +93367,12 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
                 "source_file_id": file_id,
                 "source_video_id": file_id,
                 "source_video_hash": video_selfshot3.source_fingerprint(source_asset),
+                "source_duration": float(source_asset.get("duration_seconds") or 0),
                 "source_duration_seconds": float(source_asset.get("duration_seconds") or 0),
                 "source_has_audio": bool(source_asset.get("audio_streams")),
+                "source_revision": max(1, safe_int(current.get("source_revision"), 0) + 1),
+                "analysis_status": "awaiting_segment",
+                "analysis_revision": 0,
                 "source_materialization_required": True,
                 "source_probe_policy": "local_ffprobe_once_then_worker_revalidate",
                 "source_media_ref": file_id,
@@ -216505,6 +216695,75 @@ async def inspect_video_editor_source(context: ContextTypes.DEFAULT_TYPE, source
             return {"ok": False, "reason": "video_too_large"}
         probe = await asyncio.to_thread(video_local_validation.probe_video_file, path)
         return video_local_validation.validate_source_metadata(probe, file_size=actual_size)
+
+
+async def inspect_selfshot_source(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    flow: str,
+) -> dict:
+    """Download and analyze one selected SelfShot segment without a provider."""
+
+    if str(flow or "") not in {"ss2", "ss3"}:
+        return {"ok": False, "reason": "selfshot_flow_invalid"}
+    current = dict(state or {})
+    source = dict(current.get("source_asset") or current.get("source_video") or {})
+    segment = dict(current.get("source_segment") or {})
+    file_id = str(current.get("source_video_id") or source.get("file_id") or "").strip()
+    if not file_id or safe_int(segment.get("end_ms"), 0) <= safe_int(segment.get("start_ms"), 0):
+        return {"ok": False, "reason": "selfshot_source_segment_missing"}
+    file_name = video_local_validation.validate_extension(
+        str(source.get("file_name") or f"{flow}-source.mp4"),
+        video_local_validation.ALLOWED_SOURCE_EXTENSIONS,
+    )
+    file_size = safe_int(source.get("file_size"), 0)
+    if file_size > video_local_validation.MAX_UPLOAD_BYTES:
+        return {"ok": False, "reason": "video_too_large"}
+    with tempfile.TemporaryDirectory(prefix=f"toanaas_{flow}_analysis_") as tmpdir:
+        path = os.path.join(tmpdir, file_name)
+        telegram_file = await context.bot.get_file(file_id)
+        if callable(getattr(telegram_file, "download_to_drive", None)):
+            await telegram_file.download_to_drive(custom_path=path)
+        else:
+            data = bytes(await telegram_file.download_as_bytearray())
+            if len(data) > video_local_validation.MAX_UPLOAD_BYTES:
+                return {"ok": False, "reason": "video_too_large"}
+            with open(path, "wb") as handle:
+                handle.write(data)
+        actual_size = os.path.getsize(path) if os.path.exists(path) else 0
+        if actual_size <= 0 or actual_size > video_local_validation.MAX_UPLOAD_BYTES:
+            return {"ok": False, "reason": "video_too_large" if actual_size else "source_video_missing"}
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        content_hash = digest.hexdigest()
+        probe = await asyncio.to_thread(video_local_validation.probe_video_file, path)
+        metadata = video_local_validation.validate_source_metadata(probe, file_size=actual_size)
+        if not metadata.get("ok"):
+            return metadata
+        revision = max(1, safe_int(current.get("analysis_revision"), 0) + 1)
+        report = await asyncio.to_thread(
+            video_selfshot_local_analysis.analyze_video_file,
+            path,
+            start_seconds=float(segment.get("start_seconds") or safe_int(segment.get("start_ms"), 0) / 1000),
+            end_seconds=float(segment.get("end_seconds") or safe_int(segment.get("end_ms"), 0) / 1000),
+            source_hash=content_hash,
+            analysis_revision=revision,
+            source_has_audio=bool(
+                safe_int(metadata.get("audio_stream_count"), 0)
+                or current.get("source_has_audio")
+            ),
+        )
+        report.update({
+            "format": str(metadata.get("format_name") or source.get("format") or ""),
+            "video_codec": str(metadata.get("video_codec") or source.get("video_codec") or ""),
+            "audio_streams": safe_int(metadata.get("audio_stream_count"), 0),
+            "audio_manifest": {"stream_count": safe_int(metadata.get("audio_stream_count"), 0)},
+            "source_hash": content_hash,
+            "analysis_signature": str(current.get("analysis_signature") or ""),
+        })
+        return {"ok": True, "analysis": report, "metadata": metadata, "source_video_hash": content_hash}
 
 
 async def inspect_video_editor_srt(context: ContextTypes.DEFAULT_TYPE, source: dict) -> dict:
