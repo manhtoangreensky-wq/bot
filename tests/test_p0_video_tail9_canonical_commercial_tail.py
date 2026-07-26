@@ -123,14 +123,13 @@ def test_summary_requires_an_explicit_optional_tail_decision() -> None:
     assert pending["watermark_status"] == "not_configured"
     assert pending["summary_status"] == "not_ready"
 
-    summary = video_tail9.mark_audio_complete(state, skipped=True)
-    summary = video_tail9.mark_branding_skipped(summary)
+    summary = video_tail9.mark_branding_skipped(state)
     summary = video_tail9.prepare_summary(summary)
 
     assert summary["summary_status"] == "ready"
 
 
-def test_summary_back_and_direct_open_use_the_review_contract() -> None:
+def test_summary_back_and_direct_open_use_the_exact_owner_stack() -> None:
     summary_keyboard = _between(
         "def video_tail9_summary_keyboard",
         "def video_tail9_public_blocker_text",
@@ -140,10 +139,11 @@ def test_summary_back_and_direct_open_use_the_review_contract() -> None:
         "async def handle_video_tail9_pending_text",
     )
 
-    assert '[("⬅️ Quay lại", "video_tail|review|open"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard
-    assert 'if action == "summary":\n            tail = video_tail9.prepare_summary(tail)' in handler
+    assert '[("⬅️ Quay lại", "video_tail|summary|back"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard
+    assert 'if action == "summary":' in handler
+    assert 'tail["summary_return_to"] = "review"' in handler
     assert 'return await video_tail9_render(query, uid, context, "summary")' in handler
-    assert 'if action == "back":\n            return await video_tail9_render(query, uid, context, "review")' in handler
+    assert 'target = "review" if str(tail.get("summary_return_to") or "logo") == "review" else "logo"' in handler
 
 
 def test_source_audio_capability_does_not_override_missing_source_stream() -> None:

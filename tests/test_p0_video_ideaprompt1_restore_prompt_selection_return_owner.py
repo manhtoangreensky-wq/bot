@@ -252,7 +252,7 @@ def test_exact_parent_render_map_uses_existing_product_owners_and_long_prompt_sh
     assert 'product_id == "multi_scene_film"' in renderer
     assert 'handoff["step"] = "full_review"' in renderer
     assert "save_video_profile_studio_state" in renderer
-    assert "video_profile_scene1_render" in renderer
+    assert 'video_tail9_render(query, user_id, context, "logo")' in renderer
 
     assert "video_idea_prompt.validate_return_state" in continuation
     assert "video_idea_render_exact_parent" in continuation

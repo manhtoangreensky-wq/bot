@@ -82,11 +82,11 @@ def test_embedded_idea_builds_semantic_drafts_before_scene3_quality_gate() -> No
     assert result["xu_charged"] == 0
 
 
-def test_storyboard_finish_enters_canonical_review_not_legacy_scene3() -> None:
+def test_storyboard_finish_enters_canonical_branding_not_legacy_scene3() -> None:
     handler = _function_source("_handle_storyboard2_callback_impl")
     finish = handler[handler.index('if action == "finish":') : handler.index("if action in deferred_answer_actions")]
     assert "storyboard2_scene3_handoff(context, board)" in finish
-    assert 'video_tail9_render(query, uid, context, "review")' in finish
+    assert 'video_tail9_render(query, uid, context, "logo")' in finish
     assert "video_profile_scene1_render" not in finish
 
 

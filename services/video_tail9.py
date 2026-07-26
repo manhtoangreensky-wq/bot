@@ -10,7 +10,10 @@ from copy import deepcopy
 from typing import Any
 
 
+TAIL_FLOW_VERSION = 15
+
 STATE_FIELDS = (
+    "tail_flow_version",
     "video_product_type",
     "video_flow_owner",
     "video_session_id",
@@ -51,16 +54,19 @@ STATE_FIELDS = (
     "return_to",
     "brand_pending_target",
     "brand_pending_position",
+    "branding_return_to",
+    "summary_return_to",
 )
 
 VOLUME_KEYS = ("source_audio", "dubbing", "music", "sfx", "environment")
 TOGGLE_KEYS = ("source_audio", "dubbing", "music", "sfx", "subtitles")
 OPTIONAL_STATUSES = ("not_configured", "configured", "skipped")
 STATUS_STAGES = (
-    "review",
-    "audio_addons",
+    "content_ready",
     "logo_watermark",
     "summary",
+    "review",
+    "audio_addons",
     "quality",
     "invoice",
     "confirmed",
@@ -322,6 +328,8 @@ def package_compatibility(
         blockers.append("single_scene_not_supported")
     if tier_id and tier_id not in set(contract["supported_quality_tiers"]):
         blockers.append("quality_tier_not_supported")
+    if tier_id == 200 and count != 1 and "quality_tier_not_supported" not in blockers:
+        blockers.append("quality_tier_not_supported")
     if not input_valid:
         blockers.append("input_not_ready")
     if not asset_ready:
@@ -443,6 +451,7 @@ def new_state(
     count = max(1, int(scene_count or 1))
     duration = int(estimated_duration or count * int(adapter["scene_duration_seconds"]))
     state = {
+        "tail_flow_version": TAIL_FLOW_VERSION,
         "video_product_type": adapter["video_product_type"],
         "video_flow_owner": adapter["flow_owner"],
         "video_session_id": str(session_id or "").strip(),
@@ -459,7 +468,7 @@ def new_state(
         "selected_prompt": "",
         "prompt_revision": 0,
         "plan_status": "approved",
-        "review_status": "ready",
+        "review_status": "not_ready",
         "audio_config": default_audio_config(
             source_audio_available=bool(adapter["source_audio_available"]),
         ),
@@ -478,13 +487,15 @@ def new_state(
         "final_confirmed": False,
         "job_id": "",
         "engine_route": adapter["engine_route"],
-        "status_stage": "review",
+        "status_stage": "content_ready",
         "delivery_message_id": "",
         "receipt_state": "not_created",
         "charge_state": "not_charged",
         "return_to": str(return_to or adapter["return_to"]),
         "brand_pending_target": "",
         "brand_pending_position": "",
+        "branding_return_to": "summary",
+        "summary_return_to": "logo",
         "handled_callback_ids": [],
         "confirm_token": "",
     }
@@ -493,7 +504,12 @@ def new_state(
 
 def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     current = deepcopy(dict(state or {}))
+    try:
+        stored_flow_version = int(current.get("tail_flow_version") or 0)
+    except (TypeError, ValueError):
+        stored_flow_version = 0
     adapter = adapter_for(str(current.get("video_product_type") or "video_ai_real"))
+    current["tail_flow_version"] = TAIL_FLOW_VERSION
     current["video_product_type"] = adapter["video_product_type"]
     current["video_flow_owner"] = str(current.get("video_flow_owner") or adapter["flow_owner"])
     current["video_session_id"] = str(current.get("video_session_id") or "").strip()
@@ -518,7 +534,7 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     current["selected_prompt"] = str(current.get("selected_prompt") or "").strip()
     current["prompt_revision"] = max(0, int(current.get("prompt_revision") or 0))
     current["plan_status"] = str(current.get("plan_status") or "approved")
-    current["review_status"] = str(current.get("review_status") or "ready")
+    current["review_status"] = str(current.get("review_status") or "not_ready")
     audio = default_audio_config(source_audio_available=bool(adapter["source_audio_available"]))
     audio.update(dict(current.get("audio_config") or {}))
     audio["source_audio_available"] = bool(
@@ -578,9 +594,9 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     current["capability_snapshot"] = dict(current.get("capability_snapshot") or {})
     current["engine_route"] = adapter["engine_route"]
     current["status_stage"] = (
-        str(current.get("status_stage") or "review")
-        if str(current.get("status_stage") or "review") in STATUS_STAGES
-        else "review"
+        str(current.get("status_stage") or "content_ready")
+        if str(current.get("status_stage") or "content_ready") in STATUS_STAGES
+        else "content_ready"
     )
     current["brand_pending_target"] = (
         str(current.get("brand_pending_target") or "")
@@ -588,6 +604,35 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         else ""
     )
     current["brand_pending_position"] = str(current.get("brand_pending_position") or "")
+    current["branding_return_to"] = (
+        str(current.get("branding_return_to") or "summary")
+        if str(current.get("branding_return_to") or "summary") in {"summary", "review"}
+        else "summary"
+    )
+    current["summary_return_to"] = (
+        str(current.get("summary_return_to") or "logo")
+        if str(current.get("summary_return_to") or "logo") in {"logo", "review"}
+        else "logo"
+    )
+    if stored_flow_version < TAIL_FLOW_VERSION:
+        terminal_or_commercial = current["status_stage"] in {
+            "quality", "invoice", "confirmed", "rendering", "validating",
+            "delivering", "delivered", "failed",
+        }
+        if terminal_or_commercial:
+            current["review_status"] = "ready"
+            if current.get("audio_status") not in {"configured", "skipped"}:
+                current["audio_status"] = "skipped"
+            if current.get("logo_status") not in {"configured", "skipped"}:
+                current["logo_status"] = "skipped"
+            if current.get("watermark_status") not in {"configured", "skipped"}:
+                current["watermark_status"] = "skipped"
+            current["summary_status"] = "ready"
+        else:
+            current["review_status"] = "not_ready"
+            current["audio_status"] = "not_configured"
+            current["branding_return_to"] = "summary"
+            current["summary_return_to"] = "logo"
     current["handled_callback_ids"] = [
         str(item) for item in current.get("handled_callback_ids") or [] if str(item).strip()
     ][-100:]
@@ -662,6 +707,32 @@ def mark_audio_complete(state: dict[str, Any], *, skipped: bool = False) -> dict
     return normalize_state(current)
 
 
+def content_contract_ready(state: dict[str, Any]) -> bool:
+    current = normalize_state(state)
+    adapter = adapter_for(str(current.get("video_product_type") or "video_ai_real"))
+    prompt_ready = bool(current.get("selected_prompt")) or any(
+        str(
+            scene.get("provider_prompt")
+            or scene.get("video_prompt")
+            or scene.get("prompt")
+            or ""
+        ).strip()
+        for scene in current.get("scene_content") or []
+        if isinstance(scene, dict)
+    )
+    source_ready = bool(current.get("source_asset_ids")) and str(adapter.get("input_type") or "") in {
+        "source_video", "scene_images", "storyboard_frames",
+    }
+    return bool(current.get("plan_approved") and (prompt_ready or source_ready))
+
+
+def mark_review_complete(state: dict[str, Any]) -> dict[str, Any]:
+    current = normalize_state(state)
+    current["review_status"] = "ready"
+    current["status_stage"] = "review"
+    return normalize_state(current)
+
+
 def mark_branding_skipped(state: dict[str, Any]) -> dict[str, Any]:
     current = normalize_state(state)
     current["logo_config"] = {"enabled": False, "asset_file_id": "", "position": ""}
@@ -711,15 +782,8 @@ def next_required_screen(state: dict[str, Any]) -> str:
     """Return the first missing screen in the canonical shared video tail."""
 
     current = normalize_state(state)
-    core_ready = bool(
-        current.get("plan_approved")
-        and current.get("content_mode")
-        and current.get("selected_prompt")
-    )
-    if not core_ready:
+    if not content_contract_ready(current):
         return "review"
-    if current.get("audio_status") not in {"configured", "skipped"}:
-        return "audio"
     if (
         current.get("logo_status") not in {"configured", "skipped"}
         or current.get("watermark_status") not in {"configured", "skipped"}
@@ -727,6 +791,10 @@ def next_required_screen(state: dict[str, Any]) -> str:
         return "logo"
     if current.get("summary_status") != "ready":
         return "summary"
+    if current.get("review_status") != "ready":
+        return "review"
+    if current.get("audio_status") not in {"configured", "skipped"}:
+        return "audio"
     return ""
 
 
@@ -735,10 +803,7 @@ def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
 
     current = normalize_state(state)
     current["summary_status"] = "ready" if (
-        bool(current.get("plan_approved"))
-        and bool(current.get("content_mode"))
-        and bool(current.get("selected_prompt"))
-        and current.get("audio_status") in {"configured", "skipped"}
+        content_contract_ready(current)
         and current.get("logo_status") in {"configured", "skipped"}
         and current.get("watermark_status") in {"configured", "skipped"}
     ) else "not_ready"
@@ -904,10 +969,11 @@ def update_delivery_truth(
 def public_progress(state: dict[str, Any]) -> int:
     stage = normalize_state(state)["status_stage"]
     return {
-        "review": 0,
-        "audio_addons": 5,
-        "logo_watermark": 8,
-        "summary": 9,
+        "content_ready": 0,
+        "logo_watermark": 3,
+        "summary": 5,
+        "review": 7,
+        "audio_addons": 9,
         "quality": 10,
         "invoice": 12,
         "confirmed": 20,
