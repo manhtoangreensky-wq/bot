@@ -10,7 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 
-TAIL_FLOW_VERSION = 16
+TAIL_FLOW_VERSION = 17
 
 STATE_FIELDS = (
     "tail_flow_version",
@@ -59,7 +59,9 @@ STATE_FIELDS = (
     "brand_pending_target",
     "brand_pending_position",
     "branding_return_to",
+    "branding_back_to",
     "summary_return_to",
+    "submit_preflight_snapshot",
 )
 
 VOLUME_KEYS = ("source_audio", "dubbing", "music", "sfx", "environment")
@@ -502,8 +504,10 @@ def new_state(
         "return_to": str(return_to or adapter["return_to"]),
         "brand_pending_target": "",
         "brand_pending_position": "",
-        "branding_return_to": "audio",
-        "summary_return_to": "audio",
+        "branding_return_to": "summary",
+        "branding_back_to": "prompt",
+        "summary_return_to": "logo",
+        "submit_preflight_snapshot": {},
         "handled_callback_ids": [],
         "confirm_token": "",
     }
@@ -621,17 +625,17 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         else ""
     )
     current["brand_pending_position"] = str(current.get("brand_pending_position") or "")
-    branding_return_to = str(current.get("branding_return_to") or "audio")
-    if branding_return_to == "review":
+    branding_return_to = str(current.get("branding_return_to") or "summary")
+    if branding_return_to in {"review", "audio"}:
         branding_return_to = "summary"
-    current["branding_return_to"] = (
-        branding_return_to if branding_return_to in {"audio", "summary"} else "audio"
+    current["branding_return_to"] = "summary"
+    current["branding_back_to"] = (
+        str(current.get("branding_back_to") or "prompt")
+        if str(current.get("branding_back_to") or "prompt") in {"prompt", "summary"}
+        else "prompt"
     )
-    current["summary_return_to"] = (
-        str(current.get("summary_return_to") or "audio")
-        if str(current.get("summary_return_to") or "audio") in {"audio", "summary"}
-        else "audio"
-    )
+    current["summary_return_to"] = "logo"
+    current["submit_preflight_snapshot"] = dict(current.get("submit_preflight_snapshot") or {})
     if stored_flow_version < TAIL_FLOW_VERSION:
         terminal_or_commercial = current["status_stage"] in {
             "quality", "invoice", "confirmed", "rendering", "validating",
@@ -649,8 +653,9 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         else:
             current["review_status"] = "not_ready"
             current["summary_status"] = "not_ready"
-            current["branding_return_to"] = "audio"
-            current["summary_return_to"] = "audio"
+            current["branding_return_to"] = "summary"
+            current["branding_back_to"] = "prompt"
+            current["summary_return_to"] = "logo"
     current["handled_callback_ids"] = [
         str(item) for item in current.get("handled_callback_ids") or [] if str(item).strip()
     ][-100:]
@@ -713,6 +718,49 @@ def apply_content_contract(state: dict[str, Any], contract: dict[str, Any] | Non
     if source.get("plan_status"):
         current["plan_status"] = str(source.get("plan_status") or "approved")
     current["plan_approved"] = bool(source.get("plan_approved", current.get("plan_approved", True)))
+    return normalize_state(current)
+
+
+def apply_planning_audio_contract(
+    state: dict[str, Any],
+    postproduction_addons: dict[str, Any] | None,
+    *,
+    planning_complete: bool,
+) -> dict[str, Any]:
+    """Mirror the single planning-audio owner into the commercial tail.
+
+    Scene planning remains authoritative because dialogue, subtitles and audio
+    choices affect scene duration. The commercial tail only carries the same
+    values forward to Summary, invoice and the executor contract.
+    """
+
+    current = normalize_state(state)
+    entries = dict(postproduction_addons or {})
+    audio = dict(current.get("audio_config") or {})
+    volumes = dict(audio.get("volumes") or {})
+    before_audio = deepcopy(audio)
+    before_status = str(current.get("audio_status") or "not_configured")
+
+    for key in TOGGLE_KEYS:
+        entry = dict(entries.get(key) or {})
+        enabled = bool(entry.get("enabled"))
+        if key == "source_audio" and not audio.get("source_audio_available"):
+            enabled = False
+        audio[key] = enabled
+        value = dict(entry.get("value") or {}) if isinstance(entry.get("value"), dict) else {}
+        if key in volumes and value.get("volume") not in (None, ""):
+            volumes[key] = _volume(value.get("volume"), volumes[key])
+
+    audio["volumes"] = volumes
+    current["audio_config"] = audio
+    if planning_complete:
+        current["audio_status"] = (
+            "configured" if any(bool(audio.get(key)) for key in TOGGLE_KEYS) else "skipped"
+        )
+
+    if before_audio != audio or before_status != current.get("audio_status"):
+        current["summary_status"] = "not_ready"
+        current["review_status"] = "not_ready"
     return normalize_state(current)
 
 
@@ -815,8 +863,6 @@ def next_required_screen(state: dict[str, Any]) -> str:
         or current.get("watermark_status") not in {"configured", "skipped"}
     ):
         return "logo"
-    if current.get("audio_status") not in {"configured", "skipped"}:
-        return "audio"
     if current.get("summary_status") != "ready":
         return "summary"
     return ""
@@ -830,7 +876,6 @@ def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
         content_contract_ready(current)
         and current.get("logo_status") in {"configured", "skipped"}
         and current.get("watermark_status") in {"configured", "skipped"}
-        and current.get("audio_status") in {"configured", "skipped"}
     ) else "not_ready"
     current["review_status"] = "ready" if current["summary_status"] == "ready" else "not_ready"
     current["status_stage"] = "summary"
@@ -955,6 +1000,109 @@ def invoice_allowed(state: dict[str, Any]) -> tuple[bool, str]:
     if not current.get("pricing_snapshot"):
         return False, "pricing_snapshot_missing"
     return True, "ok"
+
+
+def evaluate_submit_preflight(
+    state: dict[str, Any],
+    *,
+    available_xu: Any,
+    provider_ready: bool,
+    worker_ready: bool,
+    is_admin_or_owner: bool = False,
+    existing_job_id: Any = "",
+    admin_detail: str = "",
+) -> dict[str, Any]:
+    """Return exactly one submit outcome in the public confirmation order."""
+
+    current = normalize_state(state)
+    persisted_job_id = str(existing_job_id or current.get("job_id") or "").strip()
+    try:
+        invoice_valid, invoice_reason = invoice_allowed(current)
+    except (TypeError, ValueError, OverflowError):
+        invoice_valid, invoice_reason = False, "invalid_pricing_snapshot"
+    pricing = dict(current.get("pricing_snapshot") or {})
+    raw_quoted_xu = pricing.get("total_xu") or pricing.get("price_xu") or 0
+    try:
+        quoted_xu = int(raw_quoted_xu)
+    except (TypeError, ValueError, OverflowError):
+        quoted_xu = 0
+        invoice_valid, invoice_reason = False, "invalid_pricing_snapshot"
+    if quoted_xu < 0:
+        quoted_xu = 0
+        invoice_valid, invoice_reason = False, "invalid_pricing_snapshot"
+    required_xu = 0 if is_admin_or_owner else quoted_xu
+    try:
+        available = max(0, int(available_xu or 0))
+    except (TypeError, ValueError):
+        available = 0
+    missing_xu = max(0, required_xu - available)
+
+    result = {
+        "allowed": False,
+        "blocker_code": "",
+        "public_message": "",
+        "admin_detail": str(admin_detail or ""),
+        "required_xu": required_xu,
+        "quoted_xu": quoted_xu,
+        "available_xu": available,
+        "missing_xu": missing_xu,
+        "provider_ready": bool(provider_ready),
+        "worker_ready": bool(worker_ready),
+        "invoice_valid": bool(invoice_valid),
+        "invoice_reason": str(invoice_reason or ""),
+        "existing_job_id": persisted_job_id,
+        "is_admin_or_owner": bool(is_admin_or_owner),
+    }
+
+    if persisted_job_id:
+        result["allowed"] = True
+        return result
+    if not invoice_valid:
+        result.update({
+            "blocker_code": "invoice_invalid",
+            "public_message": (
+                "⚠️ <b>Hóa đơn chưa sẵn sàng để xác nhận.</b>\n\n"
+                "Toàn bộ cấu hình vẫn được giữ nguyên. Anh/chị vui lòng quay lại hóa đơn để kiểm tra. "
+                "Hệ thống chưa tạo tác vụ và chưa trừ Xu."
+            ),
+        })
+        return result
+    if missing_xu:
+        result.update({
+            "blocker_code": "insufficient_balance",
+            "public_message": (
+                "💰 <b>Chưa đủ Xu để bắt đầu tạo video</b>\n\n"
+                f"• Tổng thanh toán: <b>{required_xu} Xu</b>\n"
+                f"• Số dư hiện tại: <b>{available} Xu</b>\n"
+                f"• Còn thiếu: <b>{missing_xu} Xu</b>\n\n"
+                "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Hệ thống chưa tạo tác vụ, "
+                "chưa gọi nguồn dựng và chưa trừ Xu."
+            ),
+        })
+        return result
+    if not provider_ready:
+        result.update({
+            "blocker_code": "provider_unavailable",
+            "public_message": (
+                "⚙️ <b>TOAN AAS chưa thể bắt đầu xử lý video lúc này.</b>\n\n"
+                "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Hệ thống chưa tạo tác vụ và "
+                "chưa trừ Xu. Anh/chị vui lòng kiểm tra lại sau."
+            ),
+        })
+        return result
+    if not worker_ready:
+        result.update({
+            "blocker_code": "worker_unavailable",
+            "public_message": (
+                "⚙️ <b>TOAN AAS chưa thể bắt đầu xử lý video lúc này.</b>\n\n"
+                "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Hệ thống chưa tạo tác vụ và "
+                "chưa trừ Xu. Anh/chị vui lòng kiểm tra lại sau."
+            ),
+        })
+        return result
+
+    result["allowed"] = True
+    return result
 
 
 def confirm_once(state: dict[str, Any], confirm_token: str) -> tuple[dict[str, Any], bool]:

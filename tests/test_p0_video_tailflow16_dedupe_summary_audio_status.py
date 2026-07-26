@@ -80,13 +80,10 @@ def _invoice_ready_tail() -> dict:
 
 def test_tailflow16_exact_state_order_has_no_separate_review() -> None:
     state = _ready_tail()
-    assert video_tail9.TAIL_FLOW_VERSION == 16
+    assert video_tail9.TAIL_FLOW_VERSION == 17
     assert video_tail9.next_required_screen(state) == "logo"
 
     state = video_tail9.mark_branding_skipped(state)
-    assert video_tail9.next_required_screen(state) == "audio"
-
-    state = video_tail9.mark_audio_complete(state, skipped=True)
     assert video_tail9.next_required_screen(state) == "summary"
 
     state = video_tail9.prepare_summary(state)
@@ -115,7 +112,7 @@ def test_unified_summary_has_exact_title_and_four_rows() -> None:
     ]
 
 
-def test_logo_and_audio_forward_and_back_buttons_match_contract() -> None:
+def test_logo_and_planning_audio_forward_and_back_buttons_match_contract() -> None:
     namespace = {
         "video_scene3_keyboard": video_scene3_flow.validate_two_column_rows,
         "video_editengine1": SimpleNamespace(PRODUCT_TYPE="video_local_edit"),
@@ -128,16 +125,13 @@ def test_logo_and_audio_forward_and_back_buttons_match_contract() -> None:
         },
     }
     logo = _load_function("video_tail9_logo_keyboard", namespace)
-    audio = _load_function("video_tail9_audio_keyboard", namespace)
-
     normal_logo = _callbacks(logo(_ready_tail()))
-    edit_logo = _callbacks(logo({**_ready_tail(), "branding_return_to": "summary"}))
-    audio_rows = _callbacks(audio(_ready_tail()))
+    edit_logo = _callbacks(logo({**_ready_tail(), "branding_back_to": "summary"}))
 
     assert normal_logo[-1] == ["video_tail|review|prompts", "menu|main"]
     assert edit_logo[-1] == ["video_tail|summary|open", "menu|main"]
-    assert audio_rows[-2] == ["video_tail|audio|done", "video_tail|audio|skip"]
-    assert audio_rows[-1] == ["video_tail|audio|back", "menu|main"]
+    assert "def video_tail9_audio_keyboard" not in BOT_SOURCE
+    assert "def video_tail9_volume_keyboard" not in BOT_SOURCE
 
 
 def test_legacy_review_and_summary_callbacks_cannot_form_a_loop() -> None:
@@ -148,13 +142,15 @@ def test_legacy_review_and_summary_callbacks_cannot_form_a_loop() -> None:
     assert 'action in {"open", "summary", "review"}' in review
     assert 'video_tail9_render(query, uid, context, "summary")' in review
     assert 'if action == "audio":' in review
-    assert 'video_tail9_render(query, uid, context, "audio")' in review
+    assert "video_tail9_open_planning_audio" in review
+    assert 'video_tail9_render(query, uid, context, "audio")' not in review
     assert 'video_tail9_render(query, uid, context, "review")' not in summary
     assert 'if action in {"open", "review"}:' in summary
     assert 'if action == "continue":' in summary
     assert 'video_tail9_render(query, uid, context, "quality")' in summary
     assert 'if action == "audio":' in summary
-    assert 'video_tail9_render(query, uid, context, "audio")' in summary
+    assert "video_tail9_open_planning_audio" in summary
+    assert 'video_tail9_render(query, uid, context, "audio")' not in summary
     assert 'if action == "back":' in summary
 
 
@@ -179,23 +175,23 @@ def test_normal_logo_and_audio_completion_each_advance_once() -> None:
     audio = handler[handler.index('if section == "audio":') : handler.index('if section == "logo":')]
     logo = handler[handler.index('if section == "logo":') : handler.index('if section == "quality":')]
 
-    assert audio.count('video_tail9_render(query, uid, context, "summary")') >= 2
+    assert audio.count('video_tail9_render(query, uid, context, "summary")') == 1
+    assert "video_tail9_open_planning_audio" in audio
     assert 'video_tail9_render(query, uid, context, "quality")' not in audio
-    assert 'if action == "back":' in audio
-    assert 'video_tail9_render(query, uid, context, "logo")' in audio
-    assert 'target = "summary" if str(tail.get("branding_return_to") or "audio") == "summary" else "audio"' in logo
+    assert 'action in {"back", "done", "skip"}' in audio
+    assert logo.count('video_tail9_render(query, uid, context, "summary")') >= 2
 
 
-def test_duplicate_scene3_audio_wizard_is_not_on_normal_or_legacy_path() -> None:
+def test_single_scene3_audio_owner_is_restored_on_normal_and_summary_paths() -> None:
     handler = _function_source("handle_video_profile_studio_callback")
-    action_gate = handler.index("if not video_scene2_action_allowed(state, action):")
-    legacy_redirect = handler.index('if action in {"audio_open", "audio_review", "audio_done", "audio_skip"}:')
     requirements = handler[handler.index('if action == "req_none":') : handler.index('if action == "material":')]
 
-    assert legacy_redirect < action_gate
-    assert 'video_tail9_render(query, uid, context, "audio")' in handler[legacy_redirect:action_gate]
-    assert 'video_profile_studio_step(context, state, "audio_plan")' not in requirements
-    assert 'video_profile_studio_step(context, state, "scene_plan")' in requirements
+    assert 'if action == "audio_open":' in handler
+    assert 'post_return_step="audio_plan"' in handler
+    assert 'if action in {"audio_done", "audio_skip"}:' in handler
+    assert 'return_step == "summary"' in handler
+    assert 'video_profile_studio_step(context, state, "audio_plan")' in requirements
+    assert 'video_profile_studio_step(context, state, "scene_plan")' not in requirements
 
 
 def test_required_back_stack_is_single_parent_chain() -> None:
@@ -366,6 +362,10 @@ def test_submit_with_accepted_job_always_hands_off_to_status() -> None:
             "get_video_session": lambda _uid: session,
             "save_video_session": lambda _uid, current: current,
             "video_tail9_render_confirmed_status": render_status,
+            "video_b14_is_admin_or_owner": lambda _uid: False,
+            "get_user": lambda _uid: (200, None, None),
+            "product_video_public_preflight_evaluation": lambda *_args, **_kwargs: {"ready": True},
+            "product_video_worker_admission_status": lambda: {"worker_version_compatible": True},
             "now_text_safe": lambda: "2026-07-26T14:00:00+07:00",
             "safe_int": lambda value, default=0: int(value) if str(value).isdigit() else default,
             "VIDEO_TAIL9_STATE_KEY": "video_tail9",

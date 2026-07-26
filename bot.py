@@ -46480,6 +46480,20 @@ def product_video_charge_after_final_delivery(
         amount = safe_int(decision.get("amount_xu"), 0)
         user_id = safe_int(project.get("user_id") or job.get("user_id"), 0)
         idempotency_key = str(decision.get("charge_idempotency_key") or f"product_video_final_delivery:{jid}:{amount}")
+        if video_b14_is_admin_or_owner(user_id):
+            updates = {
+                **amount_info,
+                "charge_after_delivery_attempted": True,
+                "charge_idempotency_key": idempotency_key,
+                "charge_source": source,
+                "wallet_charge_recorded": False,
+                "charged_amount_xu": 0,
+                "charged_xu": 0,
+                "total_xu_charged": 0,
+                "charge_skip_reason": "admin_owner_free",
+            }
+            _video_provider_update_job_result(conn, jid, updates)
+            return {"ok": True, "charged_xu": 0, **updates}
         charge_runner = charge_func or spend_fixed_credit_info
         try:
             charge = charge_runner(
@@ -81018,12 +81032,17 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         progress_line = "Tiến độ: <b>Theo từng cảnh</b>"
     else:
         progress_line = f"Tiến độ: <b>{max(0, min(100, progress))}%</b>"
+    public_processing_code = str(
+        draft.get("public_processing_code")
+        or job_result.get("public_processing_code")
+        or (f"#{job_id or project_id}" if (job_id or project_id) else "-")
+    )
     lines = [
         "🎬 <b>TOAN AAS đang xử lý video</b>",
         "",
         "✅ <b>Đã xác nhận tạo video</b>" if job_id else "ℹ️ <b>Video chưa xác nhận</b>",
         "",
-        f"Mã xử lý: <b>#{job_id or project_id or '-'}</b>",
+        f"Mã xử lý: <b>{html.escape(public_processing_code)}</b>",
         f"Gói: <b>{html.escape(package_label)}</b>",
         progress_line,
         f"Trạng thái: <b>{html.escape(status_label)}</b>",
@@ -81865,26 +81884,23 @@ def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
 def video_b14_insufficient_balance_text(current_credits: int, required_credits: int, lang: str = "vi") -> str:
     missing = max(0, int(required_credits or 0) - int(current_credits or 0))
     return (
-        "⚠️ <b>Số dư chưa đủ để xác nhận tạo video.</b>\n\n"
+        "💰 <b>Chưa đủ Xu để bắt đầu tạo video</b>\n\n"
+        f"• Tổng thanh toán: <b>{int(required_credits or 0)} Xu</b>\n"
         f"• Số dư hiện tại: <b>{int(current_credits or 0)} Xu</b>\n"
-        f"• Tổng cần: <b>{int(required_credits or 0)} Xu</b>\n"
         f"• Còn thiếu: <b>{missing} Xu</b>\n\n"
-        "TOAN AAS chưa xử lý video và chưa trừ Xu. Anh/chị có thể nạp thêm hoặc giảm gói/số cảnh."
+        "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Hệ thống chưa tạo tác vụ, "
+        "chưa gọi nguồn dựng và chưa trừ Xu."
     )
 
 
 def video_b14_insufficient_balance_keyboard(uid: int, lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("💳 Nạp 50k", callback_data=payos_package_callback_data("50k", uid)),
-            InlineKeyboardButton("⭐ Nạp 100k", callback_data=payos_package_callback_data("100k", uid)),
+            InlineKeyboardButton("💳 Nạp thêm Xu", callback_data="menu|main_topup"),
+            InlineKeyboardButton("⭐ Đổi gói", callback_data="vproduct|b14_quality_screen"),
         ],
         [
-            InlineKeyboardButton("🚀 Nạp 200k", callback_data=payos_package_callback_data("200k", uid)),
-            InlineKeyboardButton("📦 Xem tất cả gói", callback_data="pricing|main"),
-        ],
-        [
-            InlineKeyboardButton("🎬 Giảm gói/số cảnh", callback_data="vproduct|b14_quality_screen"),
+            InlineKeyboardButton("⬅️ Quay lại hóa đơn", callback_data="vproduct|b14_invoice_screen"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -87418,6 +87434,12 @@ def video_tail9_context(user_id: int, context) -> tuple[dict, str, dict]:
             }
         tail = video_tail9.normalize_state(tail)
     tail = video_tail9.apply_content_contract(tail, host)
+    if owner == "scene3":
+        tail = video_tail9.apply_planning_audio_contract(
+            tail,
+            dict(host.get("postproduction_addons") or {}),
+            planning_complete=bool(host.get("scene_plan") or host.get("plan")),
+        )
     if owner == "video_edit":
         persisted_job_id = safe_int(host.get("job_id"), 0)
         if persisted_job_id > 0:
@@ -87872,7 +87894,7 @@ def video_tail9_summary_keyboard(tail: dict | None = None) -> InlineKeyboardMark
     return video_scene3_keyboard([
         [(view_label, view_callback), (edit_label, edit_callback)],
         [(prompt_label, prompt_callback), ("🖼️ Sửa Logo/Watermark", "video_tail|summary|logo")],
-        [("🎚️ Sửa Âm thanh & Add-on", "video_tail|summary|audio"), ("➡️ Tiếp tục chọn gói", "video_tail|summary|continue")],
+        [("🎙️ Sửa lời thoại & âm thanh", "video_tail|summary|audio"), ("➡️ Tiếp tục chọn gói", "video_tail|summary|continue")],
         [("⬅️ Quay lại", "video_tail|summary|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -88018,55 +88040,11 @@ def video_edit_review_return_action(state: dict) -> str:
     return step_targets.get(step, "options")
 
 
-def video_tail9_audio_text(tail: dict) -> str:
-    audio = dict(tail.get("audio_config") or {})
-    volumes = dict(audio.get("volumes") or {})
-    lines = [
-        "🎚️ <b>Âm thanh & Add-on</b>", "",
-        "Mỗi mục mặc định tắt, riêng âm thanh gốc chỉ mặc định bật khi video nguồn thật sự có âm thanh. Âm lượng hỗ trợ 0–200%; luôn bật chống vỡ tiếng và tự hạ nền khi có lời.", "",
-    ]
-    for key in ("source_audio", "dubbing", "music", "sfx", "subtitles"):
-        if key == "source_audio" and not audio.get("source_audio_available"):
-            continue
-        volume = f" · {safe_int(volumes.get(key), 100)}%" if key in volumes else ""
-        lines.append(f"• {VIDEO_TAIL9_AUDIO_LABELS[key]}: <b>{'Bật' if audio.get(key) else 'Tắt'}</b>{volume}")
-    lines.extend(["", "Các lựa chọn này sẽ được áp dụng sau khi video hoàn tất."])
-    return "\n".join(lines)
-
-
-def video_tail9_audio_keyboard(tail: dict) -> InlineKeyboardMarkup:
-    audio = dict(tail.get("audio_config") or {})
-    def toggle(key: str) -> tuple[str, str]:
-        return (f"{'✅' if audio.get(key) else '☐'} {VIDEO_TAIL9_AUDIO_LABELS[key]}", f"video_tail|audio|toggle|{key}")
-    rows = []
-    toggles = []
-    if audio.get("source_audio_available"):
-        toggles.append(toggle("source_audio"))
-    toggles.extend([toggle("dubbing"), toggle("music"), toggle("sfx"), toggle("subtitles")])
-    for index in range(0, len(toggles), 2):
-        row = toggles[index:index + 2]
-        if len(row) == 1:
-            row.append(("👁️ Xem cấu hình", "video_tail|audio|open"))
-        rows.append(row)
-    volume_keys = [key for key in ("source_audio", "dubbing", "music", "sfx") if key != "source_audio" or audio.get("source_audio_available")]
-    volume_buttons = [(f"🔊 Âm lượng {VIDEO_TAIL9_AUDIO_LABELS[key].lower()}", f"video_tail|audio|volume|{key}") for key in volume_keys]
-    for index in range(0, len(volume_buttons), 2):
-        row = volume_buttons[index:index + 2]
-        if len(row) == 1:
-            row.append(("👁️ Xem cấu hình", "video_tail|audio|open"))
-        rows.append(row)
-    rows.extend([
-        [("✅ Xong âm thanh", "video_tail|audio|done"), ("⏭️ Bỏ qua", "video_tail|audio|skip")],
-        [("⬅️ Quay lại", "video_tail|audio|back"), ("🏠 Menu chính", "menu|main")],
-    ])
-    return video_scene3_keyboard(rows)
-
-
 def video_tail9_submit_blocker_text() -> str:
     return (
-        "⚠️ <b>Chưa thể bắt đầu tạo video</b>\n\n"
-        "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. TOAN AAS chưa tạo thêm tác vụ, "
-        "chưa xử lý video và chưa trừ Xu. Anh/chị vui lòng kiểm tra lại hoặc đổi gói."
+        "⚙️ <b>TOAN AAS chưa thể bắt đầu xử lý video lúc này.</b>\n\n"
+        "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Hệ thống chưa tạo tác vụ và "
+        "chưa trừ Xu. Anh/chị vui lòng kiểm tra lại sau."
     )
 
 
@@ -88077,15 +88055,17 @@ def video_tail9_submit_blocker_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def video_tail9_volume_keyboard(key: str) -> InlineKeyboardMarkup:
-    options = list(range(0, 201, 25))
-    rows = []
-    buttons = [(f"{value}%", f"video_tail|audio|set|{key}|{value}") for value in options]
-    buttons.append(("✍️ Tự nhập", f"video_tail|audio|custom|{key}"))
-    for index in range(0, len(buttons), 2):
-        rows.append(buttons[index:index + 2])
-    rows.append([("⬅️ Quay lại", "video_tail|audio|open"), ("🏠 Menu chính", "menu|main")])
-    return video_scene3_keyboard(rows)
+def video_tail9_submit_preflight_keyboard(result: dict) -> InlineKeyboardMarkup:
+    blocker = str((result or {}).get("blocker_code") or "")
+    first_row = (
+        [("💳 Nạp thêm Xu", "menu|main_topup"), ("⭐ Đổi gói", "video_tail|quality|change")]
+        if blocker == "insufficient_balance"
+        else [("🔄 Kiểm tra lại", "video_tail|confirm|submit"), ("⭐ Đổi gói", "video_tail|quality|change")]
+    )
+    return video_scene3_keyboard([
+        first_row,
+        [("⬅️ Quay lại hóa đơn", "video_tail|confirm|back"), ("🏠 Menu chính", "menu|main")],
+    ])
 
 
 def video_tail9_logo_text(tail: dict) -> str:
@@ -88110,7 +88090,7 @@ def video_tail9_logo_text(tail: dict) -> str:
 
 def video_tail9_logo_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
     current = dict(tail or {})
-    if str(current.get("branding_return_to") or "audio") == "summary":
+    if str(current.get("branding_back_to") or "prompt") == "summary":
         back_callback = "video_tail|summary|open"
     elif str(current.get("video_product_type") or "") == video_editengine1.PRODUCT_TYPE:
         back_callback = "video_tail|review|edit_operation"
@@ -88252,13 +88232,16 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
     ]
     quality = safe_int(tail.get("quality_tier_id") or pricing.get("quality_xu"), 0)
     package_label = str(pricing.get("package_label") or video_b14_package_full_label(quality))
-    total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
-    balance_line = ""
-    try:
-        credits, _, _ = get_user(user_id)
-        balance_line = f"• Số dư hiện tại: <b>{xu_number(int(credits or 0))} Xu</b>\n"
-    except Exception:
-        pass
+    quoted_total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
+    is_internal = video_b14_is_admin_or_owner(user_id)
+    total = 0 if is_internal else quoted_total
+    balance_line = "• Tài khoản owner/admin: <b>Không trừ Xu</b>\n" if is_internal else ""
+    if not is_internal:
+        try:
+            credits, _, _ = get_user(user_id)
+            balance_line = f"• Số dư hiện tại: <b>{xu_number(int(credits or 0))} Xu</b>\n"
+        except Exception:
+            pass
     logo = dict(tail.get("logo_config") or {})
     watermark = dict(tail.get("watermark_config") or {})
     branding = ", ".join(
@@ -88292,14 +88275,17 @@ def video_tail9_invoice_text(tail: dict, session: dict, user_id: int, lang: str 
 def video_tail9_confirm_text(tail: dict, user_id: int) -> str:
     pricing = dict(tail.get("pricing_snapshot") or {})
     quality = safe_int(tail.get("quality_tier_id") or pricing.get("quality_xu"), 0)
-    total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
+    quoted_total = safe_int(pricing.get("total_xu") or pricing.get("price_xu"), 0)
+    is_internal = video_b14_is_admin_or_owner(user_id)
+    total = 0 if is_internal else quoted_total
     package_label = str(pricing.get("package_label") or video_b14_package_full_label(quality))
-    balance_line = ""
-    try:
-        credits, _, _ = get_user(user_id)
-        balance_line = f"• Số dư hiện tại: <b>{xu_number(int(credits or 0))} Xu</b>\n"
-    except Exception:
-        pass
+    balance_line = "• Tài khoản owner/admin: <b>Không trừ Xu</b>\n" if is_internal else ""
+    if not is_internal:
+        try:
+            credits, _, _ = get_user(user_id)
+            balance_line = f"• Số dư hiện tại: <b>{xu_number(int(credits or 0))} Xu</b>\n"
+        except Exception:
+            pass
     return (
         "✅ <b>Xác nhận tạo video</b>\n\n"
         f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or 'chưa tạo'))}</code>\n"
@@ -88454,21 +88440,60 @@ async def video_tail9_render_confirmed_status(query, context, uid: int, tail: di
     )
 
 
+async def video_tail9_open_planning_audio(query, context, uid: int, tail: dict, owner: str, host: dict):
+    """Open the product's existing audio owner without creating a tail duplicate."""
+
+    lang = get_user_language(uid) or "vi"
+    if owner == "scene3":
+        state = video_profile_studio_step(
+            context,
+            host,
+            "audio_plan",
+            push=False,
+            audio_plan_return_step="summary",
+            video_tail_return_to="summary",
+        )
+        state = save_video_profile_studio_state(context, state)
+        return await video_profile_scene1_render(query, state, lang)
+    if owner == "video_edit":
+        current = dict(get_video_editor_pending(uid) or host)
+        update_video_editor_pending(
+            uid,
+            "audio",
+            return_to="video_tail|summary|open",
+            video_tail9=tail,
+        )
+        return await safe_edit_or_send(
+            query,
+            video_edit_audio_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_edit_audio_keyboard(current, lang),
+        )
+    product_type = str(tail.get("video_product_type") or "")
+    if product_type == video_selfshot2.PRODUCT_ID:
+        current = {**dict(host or {}), "video_tail_return_to": "summary"}
+        save_video_selfshot2_draft(uid, current, step="selfshot2:audio")
+        return await video_selfshot2_render(query, uid, "audio", draft=current)
+    if product_type == video_selfshot3.PRODUCT_ID:
+        current = {**dict(host or {}), "video_tail_return_to": "summary"}
+        save_video_selfshot3_draft(uid, current, step="selfshot3:audio")
+        return await video_selfshot3_render(query, uid, "audio", draft=current)
+    return await video_tail9_render(query, uid, context, "summary")
+
+
 async def video_tail9_render(query, user_id: int, context, screen: str):
     tail, owner, host = video_tail9_context(user_id, context)
     if screen == "review":
         screen = "summary"
     if screen == "audio":
-        if not video_tail9.content_contract_ready(tail):
-            return await video_tail9_render(query, user_id, context, "summary")
-        if (
-            tail.get("logo_status") not in {"configured", "skipped"}
-            or tail.get("watermark_status") not in {"configured", "skipped"}
-        ):
-            return await video_tail9_render(query, user_id, context, "logo")
-        tail["status_stage"] = "audio_addons"
-        save_video_tail9_state(user_id, context, tail, owner, host)
-        return await safe_edit_or_send(query, video_tail9_audio_text(tail), parse_mode="HTML", reply_markup=video_tail9_audio_keyboard(tail))
+        return await video_tail9_open_planning_audio(
+            query,
+            context,
+            int(user_id),
+            tail,
+            owner,
+            host,
+        )
     if screen == "logo":
         if not video_tail9.content_contract_ready(tail):
             return await video_tail9_render(query, user_id, context, "summary")
@@ -88489,7 +88514,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
         )
     if screen == "summary":
         required_screen = video_tail9.next_required_screen(tail)
-        if required_screen in {"logo", "audio"}:
+        if required_screen == "logo":
             return await video_tail9_render(query, user_id, context, required_screen)
         tail = video_tail9.prepare_summary(tail)
         tail["status_stage"] = "summary"
@@ -88646,17 +88671,17 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action in {"open", "summary", "review"}:
             return await video_tail9_render(query, uid, context, "summary")
         if action == "back":
-            return await video_tail9_render(query, uid, context, "audio")
+            return await video_tail9_render(query, uid, context, "logo")
         if action == "logo":
             tail["branding_return_to"] = "summary"
+            tail["branding_back_to"] = "summary"
             tail["summary_status"] = "not_ready"
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
         if action == "audio":
-            tail["summary_status"] = "not_ready"
-            tail["review_status"] = "not_ready"
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "audio")
+            return await video_tail9_open_planning_audio(
+                query, context, uid, tail, owner, host
+            )
         if action == "continue":
             return await video_tail9_render(query, uid, context, "summary")
         if owner == "video_edit":
@@ -88821,84 +88846,25 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             return await video_tail9_render(query, uid, context, "quality")
         if action == "logo":
             tail["branding_return_to"] = "summary"
+            tail["branding_back_to"] = "summary"
             tail["summary_status"] = "not_ready"
             save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
         if action == "audio":
-            tail["summary_status"] = "not_ready"
-            tail["review_status"] = "not_ready"
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "audio")
+            return await video_tail9_open_planning_audio(
+                query, context, uid, tail, owner, host
+            )
         if action == "back":
-            return await video_tail9_render(query, uid, context, "audio")
+            return await video_tail9_render(query, uid, context, "logo")
     if section == "audio":
-        if not video_tail9.content_contract_ready(tail):
+        # Old messages may still contain the removed tail-audio callbacks.
+        # Route them to the surviving planning owner instead of reviving the
+        # duplicate Audio & Add-on screen.
+        if action in {"back", "done", "skip"}:
             return await video_tail9_render(query, uid, context, "summary")
-        if (
-            tail.get("logo_status") not in {"configured", "skipped"}
-            or tail.get("watermark_status") not in {"configured", "skipped"}
-        ):
-            return await video_tail9_render(query, uid, context, "logo")
-        if action == "open":
-            return await video_tail9_render(query, uid, context, "audio")
-        if action == "back":
-            tail["branding_return_to"] = "audio"
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "logo")
-        if action == "toggle":
-            try:
-                tail = video_tail9.toggle_audio(tail, argument)
-            except ValueError:
-                return await video_tail9_render(query, uid, context, "audio")
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "audio")
-        if action == "volume":
-            return await safe_edit_or_send(
-                query,
-                f"🔊 <b>Âm lượng {html.escape(VIDEO_TAIL9_AUDIO_LABELS.get(argument, argument))}</b>\n\nChọn từ 0–200%. 100% giữ nguyên; hệ thống luôn dùng chống vỡ tiếng.",
-                parse_mode="HTML",
-                reply_markup=video_tail9_volume_keyboard(argument),
-            )
-        if action == "set":
-            try:
-                tail = video_tail9.set_volume(tail, argument, extra)
-            except ValueError:
-                return await video_tail9_render(query, uid, context, "audio")
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "audio")
-        if action == "custom":
-            if owner == "video_edit":
-                update_video_editor_pending(
-                    uid,
-                    "video_tail9_volume_input",
-                    video_tail9=tail,
-                    audio_component=argument,
-                )
-            else:
-                session = get_video_session(uid)
-                draft = dict(session.get("draft") or {})
-                draft[VIDEO_TAIL9_STATE_KEY] = tail
-                session["draft"] = draft
-                session.update({"current_step": "video_tail9_volume_input", "video_tail9_volume_target": argument})
-                save_video_session(uid, session)
-            return await safe_edit_or_send(
-                query,
-                "✍️ <b>Nhập âm lượng</b>\n\nGửi một số từ 0 đến 200. 100 giữ nguyên; chưa tạo file và chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=video_scene3_keyboard([[("⬅️ Quay lại", "video_tail|audio|open"), ("🏠 Menu chính", "menu|main")]]),
-            )
-        if action == "skip":
-            audio = dict(tail.get("audio_config") or {})
-            for key in ("dubbing", "music", "sfx", "subtitles"):
-                audio[key] = False
-            tail["audio_config"] = audio
-            tail = video_tail9.mark_audio_complete(tail, skipped=True)
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "summary")
-        if action == "done":
-            tail = video_tail9.mark_audio_complete(tail)
-            save_video_tail9_state(uid, context, tail, owner, host)
-            return await video_tail9_render(query, uid, context, "summary")
+        return await video_tail9_open_planning_audio(
+            query, context, uid, tail, owner, host
+        )
     if section == "logo":
         if action == "open":
             return await video_tail9_render(query, uid, context, "logo")
@@ -89020,8 +88986,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         if action == "skip":
             tail = video_tail9.mark_branding_skipped(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            target = "summary" if str(tail.get("branding_return_to") or "audio") == "summary" else "audio"
-            return await video_tail9_render(query, uid, context, target)
+            return await video_tail9_render(query, uid, context, "summary")
         if action == "done":
             pending_target = video_tail9_pending_brand_target(tail)
             if pending_target:
@@ -89035,8 +89000,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 )
             tail = video_tail9.mark_branding_complete(tail)
             save_video_tail9_state(uid, context, tail, owner, host)
-            target = "summary" if str(tail.get("branding_return_to") or "audio") == "summary" else "audio"
-            return await video_tail9_render(query, uid, context, target)
+            return await video_tail9_render(query, uid, context, "summary")
     if section == "quality":
         if tail.get("final_confirmed"):
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
@@ -89113,7 +89077,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     reply_markup=video_tail9_public_blocker_keyboard(),
                 )
     if section == "confirm":
-        if tail.get("final_confirmed"):
+        if tail.get("final_confirmed") or str(tail.get("job_id") or "").strip():
             await query.answer("Yêu cầu này đã được xác nhận.")
             if action == "back":
                 return await video_tail9_render(query, uid, context, "invoice")
@@ -89152,6 +89116,67 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 parse_mode="HTML",
                 reply_markup=video_tail9_long_maintenance_keyboard(),
             )
+        is_internal = video_b14_is_admin_or_owner(uid)
+        try:
+            credits, _, _ = get_user(uid)
+            available_xu = safe_int(credits, 0)
+        except Exception as exc:
+            available_xu = 0
+            logger.warning(
+                "video_tail_submit_balance_read_failed | user_id=%s | error=%s",
+                uid,
+                type(exc).__name__,
+            )
+        balance_preflight = video_tail9.evaluate_submit_preflight(
+            tail,
+            available_xu=available_xu,
+            provider_ready=True,
+            worker_ready=True,
+            is_admin_or_owner=is_internal,
+        )
+        if not balance_preflight.get("allowed"):
+            tail["submit_preflight_snapshot"] = dict(balance_preflight)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                str(balance_preflight.get("public_message") or video_tail9_submit_blocker_text()),
+                parse_mode="HTML",
+                reply_markup=video_tail9_submit_preflight_keyboard(balance_preflight),
+            )
+        if owner != "video_edit":
+            admission_evaluation = product_video_public_preflight_evaluation(
+                max(1, safe_int(tail.get("scene_count"), 1)),
+                explicit_public_final_confirm=True,
+            )
+            worker_snapshot = product_video_worker_admission_status()
+            internal_detail = ":".join(
+                item
+                for item in (
+                    str(admission_evaluation.get("preflight_resolved_state") or ""),
+                    str(admission_evaluation.get("blocker_code") or admission_evaluation.get("reason") or ""),
+                    str(worker_snapshot.get("worker_admission_block_reason") or ""),
+                )
+                if item
+            )
+            submit_preflight = video_tail9.evaluate_submit_preflight(
+                tail,
+                available_xu=available_xu,
+                provider_ready=bool(admission_evaluation.get("ready")),
+                worker_ready=bool(worker_snapshot.get("worker_version_compatible")),
+                is_admin_or_owner=is_internal,
+                admin_detail=internal_detail,
+            )
+            tail["submit_preflight_snapshot"] = dict(submit_preflight)
+            save_video_tail9_state(uid, context, tail, owner, host)
+            if not submit_preflight.get("allowed"):
+                await query.answer()
+                return await safe_edit_or_send(
+                    query,
+                    str(submit_preflight.get("public_message") or video_tail9_submit_blocker_text()),
+                    parse_mode="HTML",
+                    reply_markup=video_tail9_submit_preflight_keyboard(submit_preflight),
+                )
         if owner == "video_edit":
             await query.answer()
             response = await submit_local_video_editor_job(update, context, host, tail=tail)
@@ -89251,7 +89276,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
     if required_screen:
         return await video_tail9_render(query, uid, context, required_screen)
     current_screen = {
-        "audio_addons": "audio",
+        "audio_addons": "summary",
         "summary": "summary",
         "quality": "quality",
         "invoice": "invoice",
@@ -89273,23 +89298,23 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
     tail, owner, host = video_tail9_context(uid, context)
     text = str(update.message.text or "").strip()
     if step == "video_tail9_volume_input":
-        target = str((edit_state.get("audio_component") if edit_owned else session.get("video_tail9_volume_target")) or "")
-        try:
-            value = int(text)
-            if value < 0 or value > 200:
-                raise ValueError
-            tail = video_tail9.set_volume(tail, target, value)
-        except (TypeError, ValueError):
-            await update.message.reply_text("⚠️ Vui lòng gửi một số từ 0 đến 200. TOAN AAS chưa thay đổi kế hoạch.")
-            return True
-        save_video_tail9_state(uid, context, tail, owner, host)
+        # Stale messages from the removed tail-audio screen must not mutate
+        # the new planning owner. Reopen the canonical editor instead.
         if edit_owned:
             update_video_editor_pending(uid, "confirmation", video_tail9=tail, audio_component="")
         else:
             session = get_video_session(uid)
-            session["current_step"] = "video_tail9_audio"
+            session["current_step"] = "video_tail9_summary"
+            session["video_tail9_volume_target"] = ""
             save_video_session(uid, session)
-        await safe_edit_or_send(update.message, video_tail9_audio_text(tail), parse_mode="HTML", reply_markup=video_tail9_audio_keyboard(tail))
+        await video_tail9_open_planning_audio(
+            update.message,
+            context,
+            uid,
+            tail,
+            owner,
+            host,
+        )
         return True
     watermark = dict(tail.get("watermark_config") or {})
     watermark.update({"enabled": False, "text": text[:120], "position": ""})
@@ -220270,11 +220295,20 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             if str(config.get("logo_position") or "") not in dict(video_scene3_flow.LOGO_POSITIONS):
                 state = video_scene3_flow.configure_logo_reference(state, enabled=False)
                 state = save_video_profile_studio_state(context, state)
+        if step == "audio_plan" and str(state.get("audio_plan_return_step") or "") == "summary":
+            state = save_video_profile_studio_state(
+                context,
+                {
+                    **state,
+                    "step": "full_review",
+                    "audio_plan_return_step": "",
+                    "video_tail_return_to": "",
+                },
+            )
+            return await video_tail9_render(query, uid, context, "summary")
         target = video_scene3_flow.canonical_back_step(state)
         if step == "scene_detail":
             target = str(state.get("scene_detail_return_step") or "scene_plan")
-        elif step == "scene_plan" and target == "audio_plan":
-            target = "requirements"
         elif step in {"image_prompts", "video_prompts"} and str(state.get("prompt_return_step") or ""):
             target = str(state.get("prompt_return_step"))
         route_cleanup = {}
@@ -220297,10 +220331,6 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             },
         )
         return await video_profile_scene1_render(query, state, lang)
-    if action in {"audio_open", "audio_review", "audio_done", "audio_skip"}:
-        # Compatibility for old Scene3 audio buttons. Product Video now has
-        # one canonical Audio & Add-on owner inside the shared commercial tail.
-        return await video_tail9_render(query, uid, context, "audio")
     if action in {"image_ai_return", "asset_ai_return"}:
         clear_quick_image_flow(uid)
         if isinstance(getattr(context, "user_data", None), dict):
@@ -220905,13 +220935,11 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         state["preservation_requirements"] = video_scene3_flow.default_state()["preservation_requirements"]
         state["requirements"] = {}
         state["no_preservation_requirements"] = True
-        state = video_scene3_flow.finalize_audio_planning(state, skip=True)
-        state = video_profile_studio_step(context, state, "scene_plan")
+        state = video_profile_studio_step(context, state, "audio_plan")
         return await video_profile_scene1_render(query, state, lang)
     if action == "req_done":
         state["requirements"] = video_scene3_flow.public_requirements(state)
-        state = video_scene3_flow.finalize_audio_planning(state, skip=True)
-        state = video_profile_studio_step(context, state, "scene_plan")
+        state = video_profile_studio_step(context, state, "audio_plan")
         return await video_profile_scene1_render(query, state, lang)
     if action == "material":
         key = str(parts[2] if len(parts) > 2 else "")
@@ -221065,6 +221093,73 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         return await video_profile_scene1_render(query, state, lang)
     if action in {"creative_done", "creative_skip"}:
         state = video_profile_studio_step(context, state, "requirements")
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "audio_open":
+        key = str(parts[2] if len(parts) > 2 else "")
+        if key in dict(video_scene3_flow.AUDIO_PLANNING_ADDONS):
+            state = video_profile_studio_step(
+                context,
+                state,
+                "post_detail",
+                active_post_addon=key,
+                post_return_step="audio_plan",
+            )
+        return await video_profile_scene1_render(query, state, lang)
+    if action == "audio_review":
+        state = video_profile_studio_step(context, state, "audio_plan", push=False)
+        return await video_profile_scene1_render(query, state, lang)
+    if action in {"audio_done", "audio_skip"}:
+        return_step = str(state.get("audio_plan_return_step") or "")
+        try:
+            state = video_scene3_flow.finalize_audio_planning(
+                state,
+                skip=action == "audio_skip",
+            )
+        except Exception as exc:
+            logger.warning(
+                "video_scene3_audio_planning_failed | action=%s | error=%s",
+                action,
+                type(exc).__name__,
+            )
+            state = save_video_profile_studio_state(
+                context,
+                {**state, "step": "audio_plan"},
+            )
+            return await safe_edit_or_send(
+                query,
+                video_scene3_audio_plan_text(state)
+                + "\n\n⚠️ Chưa đủ dữ liệu để lập đúng số cảnh. Anh/chị hãy quay lại kiểm tra chủ đề, số cảnh và profile. Hệ thống chưa tạo tác vụ và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=video_scene3_audio_plan_keyboard(state),
+            )
+        if return_step == "summary":
+            state = video_profile_studio_step(
+                context,
+                state,
+                "full_review",
+                push=False,
+                quality_xu=0,
+                audio_plan_return_step="",
+                video_tail_return_to="",
+            )
+            return await video_tail9_render(query, uid, context, "summary")
+        if return_step == "full_review":
+            state = video_profile_studio_step(
+                context,
+                state,
+                "full_review",
+                push=False,
+                quality_xu=0,
+                audio_plan_return_step="",
+            )
+            return await video_tail9_render(query, uid, context, "logo")
+        state = video_profile_studio_step(
+            context,
+            state,
+            "scene_plan",
+            quality_xu=0,
+            audio_plan_return_step="",
+        )
         return await video_profile_scene1_render(query, state, lang)
     if action == "content":
         key = str(parts[2] if len(parts) > 2 else "")
@@ -221650,9 +221745,10 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
         )
         return await video_profile_scene1_render(query, state, lang)
     if action == "review_audio":
-        # A stale Review message must enter the same shared Audio →
-        # Logo/Watermark → Summary route as the current UI.
-        return await video_tail9_render(query, uid, context, "audio")
+        tail, owner, host = video_tail9_context(uid, context)
+        return await video_tail9_open_planning_audio(
+            query, context, uid, tail, owner, host
+        )
     if action == "review_post":
         # Legacy Review messages must enter the same individual Logo and
         # Watermark flow as the current tail, never reopen the old list.
@@ -221660,9 +221756,9 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
     if action == "review_summary":
         return await video_tail9_render(query, uid, context, "summary")
     if action in {"review_done", "review_continue"}:
-        # Old Review buttons remain usable, but must enter the current
-        # sequence rather than skipping Audio and Logo/Watermark.
-        return await video_tail9_render(query, uid, context, "audio")
+        # Planning audio is already complete before scene planning. Old Review
+        # buttons therefore continue at the canonical branding hub.
+        return await video_tail9_render(query, uid, context, "logo")
     if action == "post_toggle":
         key = str(parts[2] if len(parts) > 2 else "")
         if key == "watermark_image":

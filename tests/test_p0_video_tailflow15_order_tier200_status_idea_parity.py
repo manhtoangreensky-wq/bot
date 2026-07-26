@@ -25,6 +25,7 @@ def _function_source(name: str) -> str:
 def _load_keyboard(name: str):
     namespace = {
         "video_scene3_keyboard": video_scene3_flow.validate_two_column_rows,
+        "video_scene3_nav_rows": lambda: [[("⬅️ Quay lại", "vprofile|back"), ("🏠 Menu chính", "menu|main")]],
         "video_editengine1": SimpleNamespace(PRODUCT_TYPE="video_local_edit"),
         "VIDEO_TAIL9_AUDIO_LABELS": {
             "source_audio": "Âm thanh gốc",
@@ -86,14 +87,11 @@ def _idea_tail(scene_count: int = 2) -> dict:
     )
 
 
-def test_exact_idea_tail_order_is_branding_audio_unified_summary_quality() -> None:
+def test_exact_idea_tail_order_is_branding_unified_summary_quality() -> None:
     state = _idea_tail(2)
     assert video_tail9.next_required_screen(state) == "logo"
 
     state = video_tail9.mark_branding_skipped(state)
-    assert video_tail9.next_required_screen(state) == "audio"
-
-    state = video_tail9.mark_audio_complete(state, skipped=True)
     assert video_tail9.next_required_screen(state) == "summary"
 
     state = video_tail9.prepare_summary(state)
@@ -103,10 +101,10 @@ def test_exact_idea_tail_order_is_branding_audio_unified_summary_quality() -> No
     assert state["status_stage"] == "summary"
 
 
-def test_branding_audio_and_unified_summary_buttons_follow_the_exact_order() -> None:
+def test_branding_planning_audio_and_unified_summary_buttons_follow_the_exact_order() -> None:
     logo_callbacks = _callbacks(_load_keyboard("video_tail9_logo_keyboard")(_idea_tail(2)))
     summary_callbacks = _callbacks(_load_keyboard("video_tail9_summary_keyboard")(_idea_tail(2)))
-    audio_callbacks = _callbacks(_load_keyboard("video_tail9_audio_keyboard")(_idea_tail(2)))
+    audio_callbacks = _callbacks(_load_keyboard("video_scene3_audio_plan_keyboard")(_idea_tail(2)))
 
     assert "video_tail|logo|done" in logo_callbacks
     assert "video_tail|logo|skip" in logo_callbacks
@@ -114,21 +112,21 @@ def test_branding_audio_and_unified_summary_buttons_follow_the_exact_order() -> 
     assert "video_tail|summary|back" in summary_callbacks
     assert "video_tail|summary|audio" in summary_callbacks
     assert "video_tail|quality|open" not in summary_callbacks
-    assert "video_tail|audio|done" in audio_callbacks
-    assert "video_tail|audio|skip" in audio_callbacks
-    assert "video_tail|audio|back" in audio_callbacks
-    assert "video_tail|summary|open" not in audio_callbacks
+    assert "vprofile|audio_done" in audio_callbacks
+    assert "vprofile|audio_skip" in audio_callbacks
+    assert "vprofile|back" in audio_callbacks
+    assert not any(item.startswith("video_tail|audio|") for item in audio_callbacks)
 
 
 def test_logo_back_uses_the_exact_owner_instead_of_looping_or_leaking() -> None:
     keyboard = _load_keyboard("video_tail9_logo_keyboard")
     edit_callbacks = _callbacks(keyboard({
         "video_product_type": "video_local_edit",
-        "branding_return_to": "summary",
+        "branding_back_to": "summary",
     }))
     standard_callbacks = _callbacks(keyboard({
         "video_product_type": "video_ai_real",
-        "branding_return_to": "summary",
+        "branding_back_to": "summary",
     }))
 
     assert "video_tail|summary|open" in edit_callbacks

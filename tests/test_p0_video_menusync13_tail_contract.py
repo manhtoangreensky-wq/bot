@@ -100,7 +100,8 @@ def test_tail_routes_keep_the_exact_logo_audio_unified_summary_back_stack() -> N
     assert 'return await video_tail9_render(query, uid, context, "quality")' in summary
     assert 'if action == "audio":' in summary
     assert 'if action == "back":' in summary
-    assert 'return await video_tail9_render(query, uid, context, "audio")' in summary
+    assert "video_tail9_open_planning_audio" in summary
+    assert 'return await video_tail9_render(query, uid, context, "audio")' not in summary
     assert 'else "video_tail|review|prompts"' not in logo_keyboard
     assert 'back_callback = "video_tail|review|prompts"' in logo_keyboard
     assert '[("⬅️ Quay lại", "video_tail|summary|back"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard
