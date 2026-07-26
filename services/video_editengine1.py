@@ -259,6 +259,8 @@ def create_job(
     worker_payload["product_type"] = PRODUCT_TYPE
     worker_payload["worker_job_type"] = WORKER_JOB_TYPE
     worker_payload["engine_route"] = ENGINE_ROUTE
+    worker_payload["worker_owner"] = OUTBOX_OWNER
+    worker_payload["worker_capability"] = WORKER_CAPABILITY
     cursor = conn.execute(
         """INSERT INTO local_worker_jobs
            (user_id,command,job_type,status,provider,input_file_id,created_at,xu_cost,admin_only,updated_at)

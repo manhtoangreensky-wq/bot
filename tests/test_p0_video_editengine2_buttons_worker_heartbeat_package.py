@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import bot
 import local_worker
 from services import video_editengine1
 from services import video_uifreeze1
@@ -75,6 +79,8 @@ def test_video_edit_review_has_only_exact_product_buttons() -> None:
         "video_tail|review|edit_operation",
         "video_tail|audio|open",
         "video_tail|review|source",
+        "video_tail|logo|open",
+        "video_tail|summary|open",
         "video_tail|review|back",
         "menu|main",
     }
@@ -83,8 +89,142 @@ def test_video_edit_review_has_only_exact_product_buttons() -> None:
     assert "review|scenes" not in section
     assert "review|prompts" not in section
     assert "review|redo" not in section
-    assert "video_tail|logo|open" not in section
-    assert "video_tail|review|summary" not in section
+
+
+def test_video_edit_review_describes_cut_without_claiming_brightness() -> None:
+    host = {
+        **_state(),
+        "brightness_percent": 100,
+        "manual_edit_plan": {
+            "input_video": "source.mp4",
+            "trim": {"start_ms": 5_000, "end_ms": 20_000},
+            "brightness_percent": 100,
+        },
+        "edit_operations": [{"operation": "trim", "label": "Cắt đầu/cuối"}],
+    }
+    text = bot.video_tail9_video_edit_review_text(
+        {"estimated_duration": 15, "video_product_type": "video_edit"},
+        host,
+    )
+    assert "Cắt đầu/cuối" in text
+    assert "Điều chỉnh độ sáng" not in text
+    assert "Mức sáng" not in text
+
+
+def test_custom_brightness_200_keeps_video_edit_session_and_opens_review(monkeypatch) -> None:
+    uid = 90200
+    state = {
+        **_state(),
+        "step": "await_brightness",
+        "edit_mode": "manual_edit",
+        "edit_session_id": "edit-brightness-200",
+        "state_revision": 3,
+        "revision": 3,
+        "source_duration_ms": 4_000,
+    }
+    saved: dict = {}
+    rendered: list[tuple[int, str, str]] = []
+
+    class Message:
+        text = "200"
+
+        async def reply_text(self, *_args, **_kwargs):
+            raise AssertionError("valid brightness must route directly to Video Edit Review")
+
+    def update_pending(_uid: int, step: str = "", **fields) -> dict:
+        saved.clear()
+        saved.update(state)
+        saved.update(fields)
+        saved["step"] = step
+        return dict(saved)
+
+    async def render(target, user_id: int, _context, screen: str):
+        rendered.append((user_id, screen, str(getattr(target, "text", ""))))
+        return True
+
+    monkeypatch.setattr(bot, "get_video_editor_pending", lambda _uid: dict(state))
+    monkeypatch.setattr(bot, "update_video_editor_pending", update_pending)
+    monkeypatch.setattr(bot, "clear_video_editor_competing_video_states", lambda *_args: {})
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "video_tail9_render", render)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=uid),
+        message=Message(),
+    )
+    assert asyncio.run(bot.handle_video_editor_pending_text(update, SimpleNamespace(user_data={}))) is True
+    assert saved["product_type"] == "video_edit"
+    assert saved["flow_owner"] == "video_edit"
+    assert saved["edit_session_id"] == "edit-brightness-200"
+    assert saved["brightness_percent"] == 200
+    assert saved["manual_edit_plan"]["brightness_percent"] == 200
+    assert saved["current_screen"] == "review"
+    assert saved["return_to"] == "brightness"
+    assert rendered == [(uid, "review", "200")]
+
+
+def test_cut_input_keeps_cut_back_target_instead_of_default_brightness(monkeypatch) -> None:
+    uid = 90201
+    state = {
+        **_state(),
+        "step": "await_trim_edges",
+        "edit_mode": "manual_edit",
+        "edit_session_id": "edit-cut-1",
+        "source_duration_ms": 30_000,
+        "source_metadata": {
+            "ok": True,
+            "duration": 30.0,
+            "duration_ms": 30_000,
+            "has_audio": True,
+        },
+    }
+    saved: dict = {}
+    replies: list[str] = []
+
+    class Message:
+        text = "00:05-00:20"
+
+        async def reply_text(self, text: str, **_kwargs):
+            replies.append(text)
+            return True
+
+    def update_pending(_uid: int, step: str = "", **fields) -> dict:
+        saved.clear()
+        saved.update(state)
+        saved.update(fields)
+        saved["step"] = step
+        return dict(saved)
+
+    monkeypatch.setattr(bot, "get_video_editor_pending", lambda _uid: dict(state))
+    monkeypatch.setattr(bot, "update_video_editor_pending", update_pending)
+    monkeypatch.setattr(bot, "clear_video_editor_competing_video_states", lambda *_args: {})
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "video_local_manual_options_text", lambda *_args: "cut-saved")
+    monkeypatch.setattr(bot, "video_local_manual_options_keyboard", lambda *_args: "manual-keyboard")
+
+    update = SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=Message())
+    assert asyncio.run(bot.handle_video_editor_pending_text(update, SimpleNamespace(user_data={}))) is True
+    assert saved["manual_edit_plan"]["trim"] == {"start_ms": 5_000, "end_ms": 20_000}
+    assert saved["return_to"] == "manual_cut"
+    assert saved["edit_operations"][0]["operation"] == "trim"
+    assert replies == ["cut-saved"]
+
+
+def test_video_edit_review_back_uses_explicit_operation_owner() -> None:
+    resolver = getattr(bot, "video_edit_review_return_action", None)
+    assert callable(resolver)
+    default_plan = {"brightness_percent": 100}
+    assert resolver({"manual_edit_plan": default_plan, "return_to": "manual_cut"}) == "manual_cut"
+    assert resolver({"manual_edit_plan": default_plan, "return_to": "brightness"}) == "brightness"
+    assert resolver({"manual_edit_plan": default_plan, "return_to": "manual_join"}) == "manual_join"
+    assert resolver({"manual_edit_plan": default_plan}) == "options"
+
+    editor = _section(BOT_SOURCE, "async def handle_video_editor_callback", "async def handle_video_upload_callback")
+    review = _section(editor, 'if action == "review":', 'if action == "start":')
+    assert "video_edit_review_return_action(state)" in review
+    tail = _section(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
+    assert "video_edit_review_return_action(current)" in tail
+    assert 'if "brightness_percent" in plan:' not in tail
 
 
 def test_brightness_200_routes_directly_to_video_edit_review() -> None:
@@ -136,9 +276,9 @@ def test_shared_tail_has_one_callback_owner_and_claims_each_callback_once() -> N
 
 def test_stale_worker_never_exposes_quality_selection_or_payable_invoice() -> None:
     render = _section(BOT_SOURCE, "async def video_tail9_render", "async def handle_video_tail_callback")
-    assert "selectable=bool(capability.get(\"ok\"))" in render
+    assert 'owner != "video_edit" or capability.get("runtime_ready")' in render
     handler = _section(BOT_SOURCE, "async def handle_video_tail_callback", "async def handle_video_tail9_pending_text")
-    assert 'if not capability.get("ok"):' in handler
+    assert 'owner != "video_edit" or capability.get("runtime_ready")' in handler
     assert "video_tail9_public_blocker_text()" in handler
     assert "video_tail9_public_blocker_keyboard()" in handler
 
@@ -261,6 +401,7 @@ def test_video_edit_keep_ratio_has_compatible_canonical_packages() -> None:
     )
     assert report["ok"] is True
     assert len(report["offers"]) >= 1
+    assert report["tier_ids"][0] == 200
     assert report["uses_canonical_pricing"] is True
     assert report["framevideo_excluded"] is False
     assert all("video_to_video" in offer["capabilities"] for offer in report["offers"])
@@ -272,6 +413,44 @@ def test_video_edit_keep_ratio_has_compatible_canonical_packages() -> None:
         "wallet_mutations": 0,
         "xu_charged": 0,
     }
+
+
+def test_create_job_stamps_worker_contract_even_when_caller_omits_it(tmp_path) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / "video-edit.db"))
+    conn.execute(
+        """CREATE TABLE local_worker_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT, command TEXT, job_type TEXT, status TEXT, provider TEXT,
+            input_file_id TEXT, created_at TEXT, xu_cost INTEGER, admin_only INTEGER,
+            updated_at TEXT
+        )"""
+    )
+    created = video_editengine1.create_job(
+        conn,
+        user_id=7,
+        chat_id=8,
+        edit_session_id="edit-contract-1",
+        source_file_id="telegram-source",
+        source_metadata={"ok": True, "duration_ms": 4_000, "has_audio": True},
+        plan={"input_video": "source.mp4", "brightness_percent": 120},
+        tail={"quality_tier_id": "200"},
+        quality_tier_id="200",
+        price_xu=200,
+        worker_payload={"local1_contract": 1, "source_file_id": "telegram-source"},
+    )
+    payload = json.loads(
+        conn.execute(
+            "SELECT input_file_id FROM local_worker_jobs WHERE id=?",
+            (created["local_worker_job_id"],),
+        ).fetchone()[0]
+    )
+    assert payload["product_type"] == "video_edit"
+    assert payload["engine_route"] == "local_worker_ffmpeg"
+    assert payload["worker_owner"] == "local_video_edit"
+    assert payload["worker_capability"] == "video_edit"
+    conn.close()
 
 
 def test_video_edit_catalog_adapter_requests_video_to_video_capability() -> None:

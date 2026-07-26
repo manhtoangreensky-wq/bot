@@ -87715,6 +87715,23 @@ def video_tail9_public_blocker_keyboard() -> InlineKeyboardMarkup:
 def video_tail9_video_edit_review_text(tail: dict, host: dict) -> str:
     plan = dict((host or {}).get("manual_edit_plan") or {})
     brightness = max(20, min(200, safe_int(plan.get("brightness_percent") or (host or {}).get("brightness_percent"), 100)))
+    operation_items = [
+        dict(item)
+        for item in list((host or {}).get("edit_operations") or [])
+        if isinstance(item, dict)
+    ]
+    operation_labels = [
+        str(item.get("label") or "").strip()
+        for item in operation_items
+        if str(item.get("label") or "").strip()
+    ]
+    if not operation_labels:
+        operation_labels = list(video_local_editing.public_plan_summary(plan))
+    operation_text = " · ".join(dict.fromkeys(operation_labels)) or "Giữ nguyên video"
+    brightness_selected = bool(
+        brightness != 100
+        or any(str(item.get("operation") or "") == "brightness" for item in operation_items)
+    )
     metadata = dict((host or {}).get("source_metadata") or {})
     duration = max(
         1,
@@ -87729,15 +87746,22 @@ def video_tail9_video_edit_review_text(tail: dict, host: dict) -> str:
         metadata.get("has_audio")
         or safe_int(metadata.get("audio_streams"), 0) > 0
     )
-    return (
-        "🎬 <b>Review chỉnh sửa video</b>\n\n"
-        "• Thao tác: <b>Điều chỉnh độ sáng</b>\n"
-        f"• Mức sáng: <b>{brightness}%</b>\n"
-        f"• Thời lượng nguồn: <b>{duration} giây</b>\n"
-        "• Tỉ lệ: <b>Giữ nguyên</b>\n"
-        f"• Âm thanh: <b>{'Giữ nguyên nếu nguồn có' if source_audio else 'Nguồn không có âm thanh'}</b>\n"
-        "\nVideo này chỉ chỉnh sửa từ file đã gửi. Không tạo cảnh, không viết prompt và không chuyển sang flow tạo video mới."
-    )
+    lines = [
+        "🎬 <b>Review chỉnh sửa video</b>",
+        "",
+        f"• Thao tác: <b>{html.escape(operation_text)}</b>",
+    ]
+    if brightness_selected:
+        lines.append(f"• Mức sáng: <b>{brightness}%</b>")
+    lines.extend([
+        f"• Thời lượng nguồn: <b>{duration} giây</b>",
+        "• Tỉ lệ: <b>Giữ nguyên</b>",
+        f"• Âm thanh: <b>{'Giữ nguyên nếu nguồn có' if source_audio else 'Nguồn không có âm thanh'}</b>",
+        f"• Engine: <code>{video_editengine1.ENGINE_ROUTE}</code>",
+        "",
+        "Video này chỉ chỉnh sửa từ file đã gửi. Không tạo cảnh, không viết prompt và không chuyển sang flow tạo video mới.",
+    ])
+    return "\n".join(lines)
 
 
 def video_tail9_video_edit_review_keyboard() -> InlineKeyboardMarkup:
@@ -87774,6 +87798,45 @@ def video_tail9_video_edit_source_keyboard() -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("⬅️ Quay lại", "video_tail|review|operations"), ("🏠 Menu chính", "menu|main")],
     ])
+
+
+def video_edit_review_return_action(state: dict) -> str:
+    """Resolve the exact Video Edit screen that owned the current review."""
+
+    current = dict(state or {})
+    explicit = str(current.get("return_to") or "").strip()
+    if explicit.startswith("videoedit|"):
+        explicit = explicit.split("|", 1)[1]
+    allowed = {
+        "brightness",
+        "manual_cut",
+        "manual_join",
+        "manual_audio",
+        "manual_effects",
+        "manual_rotate_flip",
+        "speed",
+        "split",
+        "options",
+    }
+    if explicit in allowed:
+        return explicit
+    step = str(current.get("step") or "")
+    step_targets = {
+        "brightness": "brightness",
+        "await_brightness": "brightness",
+        "manual_cut": "manual_cut",
+        "await_trim_edges": "manual_cut",
+        "await_trim_range": "manual_cut",
+        "manual_join": "manual_join",
+        "await_concat": "manual_join",
+        "await_concat_order": "manual_join",
+        "audio": "manual_audio",
+        "await_audio_volume": "manual_audio",
+        "manual_effects": "manual_effects",
+        "manual_rotate_flip": "manual_rotate_flip",
+        "choose_speed": "speed",
+    }
+    return step_targets.get(step, "options")
 
 
 def video_tail9_audio_text(tail: dict) -> str:
@@ -88071,10 +88134,14 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
     if screen == "quality":
         capability = video_tail9_commercial_preflight(user_id, context, tail, owner, host)
         catalog = video_tail9_catalog_report(tail, capability)
+        selection_ready = bool(
+            capability.get("ok")
+            and (owner != "video_edit" or capability.get("runtime_ready"))
+        )
         tail = video_tail9.set_capability(tail, capability)
         tail["status_stage"] = "quality"
         save_video_tail9_state(user_id, context, tail, owner, host)
-        if not capability.get("ok") or not catalog.get("ok"):
+        if not selection_ready or not catalog.get("ok"):
             return await safe_edit_or_send(
                 query,
                 video_tail9_public_blocker_text(),
@@ -88085,7 +88152,7 @@ async def video_tail9_render(query, user_id: int, context, screen: str):
             query,
             video_tail9_quality_text(tail, capability, catalog),
             parse_mode="HTML",
-            reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=bool(capability.get("ok"))),
+            reply_markup=video_tail9_quality_keyboard(tail, catalog, selectable=selection_ready),
         )
     tail["status_stage"] = "review"
     save_video_tail9_state(user_id, context, tail, owner, host)
@@ -88211,8 +88278,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 )
             if action in {"edit_operation", "edit", "back"}:
                 current = dict(get_video_editor_pending(uid) or host)
-                plan = dict(current.get("manual_edit_plan") or {})
-                if "brightness_percent" in plan:
+                return_action = video_edit_review_return_action(current)
+                if return_action == "brightness":
                     update_video_editor_pending(uid, "brightness", selected_tool="manual", last_section="manual")
                     return await safe_edit_or_send(
                         query,
@@ -88220,8 +88287,56 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                         parse_mode="HTML",
                         reply_markup=video_local_brightness_keyboard(get_user_language(uid) or "vi"),
                     )
+                if return_action == "manual_cut":
+                    update_video_editor_pending(uid, "manual_cut", selected_tool="manual", last_section="manual")
+                    return await safe_edit_or_send(
+                        query,
+                        video_local_cut_options_text(get_user_language(uid) or "vi"),
+                        parse_mode="HTML",
+                        reply_markup=video_local_cut_options_keyboard(get_user_language(uid) or "vi"),
+                    )
+                if return_action == "manual_join":
+                    update_video_editor_pending(uid, "manual_join", selected_tool="manual", last_section="manual")
+                    return await safe_edit_or_send(
+                        query,
+                        video_local_join_options_text(current, get_user_language(uid) or "vi"),
+                        parse_mode="HTML",
+                        reply_markup=video_local_join_options_keyboard(get_user_language(uid) or "vi"),
+                    )
+                if return_action == "manual_audio":
+                    update_video_editor_pending(uid, "audio", selected_tool="manual", last_section="manual")
+                    return await safe_edit_or_send(
+                        query,
+                        video_edit_audio_text(current, get_user_language(uid) or "vi"),
+                        parse_mode="HTML",
+                        reply_markup=video_edit_audio_keyboard(current, get_user_language(uid) or "vi"),
+                    )
+                if return_action == "manual_effects":
+                    update_video_editor_pending(uid, "manual_effects", selected_tool="manual", entry_context="manual_effects", last_section="manual")
+                    return await safe_edit_or_send(
+                        query,
+                        video_edit_effects_text(get_user_language(uid) or "vi", source_ready=True),
+                        parse_mode="HTML",
+                        reply_markup=video_edit_effects_keyboard(get_user_language(uid) or "vi", back_callback="videoedit|options|manual"),
+                    )
+                if return_action == "manual_rotate_flip":
+                    update_video_editor_pending(uid, "manual_rotate_flip", selected_tool="manual", last_section="manual")
+                    return await safe_edit_or_send(
+                        query,
+                        video_local_rotate_flip_text(get_user_language(uid) or "vi"),
+                        parse_mode="HTML",
+                        reply_markup=video_local_rotate_flip_keyboard(get_user_language(uid) or "vi"),
+                    )
+                if return_action == "speed":
+                    update_video_editor_pending(uid, "choose_speed", selected_tool="manual", last_section="manual", return_to="speed")
+                    return await safe_edit_or_send(
+                        query,
+                        "Chọn giá trị phù hợp cho video.",
+                        parse_mode=None,
+                        reply_markup=video_local_choice_keyboard("speed", get_user_language(uid) or "vi"),
+                    )
                 tool = str(current.get("selected_tool") or "manual")
-                if tool == "split":
+                if return_action == "split" or tool == "split":
                     return await safe_edit_or_send(
                         query,
                         video_local_split_options_text(current, get_user_language(uid) or "vi"),
@@ -88465,7 +88580,10 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                     parse_mode="HTML",
                     reply_markup=video_tail9_public_blocker_keyboard(),
                 )
-            if not capability.get("ok"):
+            if not bool(
+                capability.get("ok")
+                and (owner != "video_edit" or capability.get("runtime_ready"))
+            ):
                 tail = video_tail9.set_capability(tail, capability)
                 save_video_tail9_state(uid, context, tail, owner, host)
                 return await safe_edit_or_send(
@@ -217872,7 +217990,18 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
                 raise video_smart_splitter.SplitPlanError("range_after_duration")
             plan = dict(state.get("manual_edit_plan") or {})
             plan["trim"] = {"start_ms": start_ms, "end_ms": end_ms}
-            current = update_video_editor_pending(uid, "options", manual_edit_plan=plan)
+            current = update_video_editor_pending(
+                uid,
+                "options",
+                manual_edit_plan=plan,
+                edit_operations=[{
+                    "operation": "trim",
+                    "label": "Cắt đầu/cuối",
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                }],
+                return_to="manual_cut",
+            )
             await update.message.reply_text(
                 video_local_manual_options_text(current, lang),
                 parse_mode="HTML",
@@ -221271,7 +221400,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             uid,
             "confirmation",
             current_screen="review",
-            return_to="brightness",
+            return_to=video_edit_review_return_action(state),
             status="review_ready",
         )
         return await video_tail9_render(query, uid, context, "review")
@@ -221284,16 +221413,16 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             reply_markup=video_local_upload_keyboard(tool, lang),
         )
     if action == "manual_cut":
-        update_video_editor_pending(uid, "manual_cut", selected_tool="manual", last_section="manual")
+        update_video_editor_pending(uid, "manual_cut", selected_tool="manual", last_section="manual", return_to="manual_cut")
         return await safe_edit_or_send(query, video_local_cut_options_text(lang), parse_mode="HTML", reply_markup=video_local_cut_options_keyboard(lang))
     if action == "manual_join":
-        current = update_video_editor_pending(uid, "manual_join", selected_tool="manual", last_section="manual")
+        current = update_video_editor_pending(uid, "manual_join", selected_tool="manual", last_section="manual", return_to="manual_join")
         return await safe_edit_or_send(query, video_local_join_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_join_options_keyboard(lang))
     if action == "manual_audio":
-        current = update_video_editor_pending(uid, "audio", selected_tool="manual", last_section="manual")
+        current = update_video_editor_pending(uid, "audio", selected_tool="manual", last_section="manual", return_to="manual_audio")
         return await safe_edit_or_send(query, video_edit_audio_text(current, lang), parse_mode="HTML", reply_markup=video_edit_audio_keyboard(current, lang))
     if action == "manual_effects":
-        update_video_editor_pending(uid, "manual_effects", selected_tool="manual", entry_context="manual_effects", last_section="manual")
+        update_video_editor_pending(uid, "manual_effects", selected_tool="manual", entry_context="manual_effects", last_section="manual", return_to="manual_effects")
         return await safe_edit_or_send(
             query,
             video_edit_effects_text(lang, source_ready=True),
@@ -221301,10 +221430,10 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             reply_markup=video_edit_effects_keyboard(lang, back_callback="videoedit|options|manual"),
         )
     if action == "manual_rotate_flip":
-        update_video_editor_pending(uid, "manual_rotate_flip", selected_tool="manual", last_section="manual")
+        update_video_editor_pending(uid, "manual_rotate_flip", selected_tool="manual", last_section="manual", return_to="manual_rotate_flip")
         return await safe_edit_or_send(query, video_local_rotate_flip_text(lang), parse_mode="HTML", reply_markup=video_local_rotate_flip_keyboard(lang))
     if action == "brightness":
-        current = update_video_editor_pending(uid, "brightness", selected_tool="manual", last_section="manual")
+        current = update_video_editor_pending(uid, "brightness", selected_tool="manual", last_section="manual", return_to="brightness")
         return await safe_edit_or_send(
             query,
             video_local_brightness_text(current, lang),
@@ -221453,7 +221582,11 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             reply_markup=video_local_input_keyboard("manual", lang),
         )
     if action in {"aspect", "resolution", "rotation", "flip", "speed", "volume", "color_preset"}:
-        update_video_editor_pending(uid, f"choose_{action}")
+        update_video_editor_pending(
+            uid,
+            f"choose_{action}",
+            return_to=action if action == "speed" else "options",
+        )
         return await safe_edit_or_send(query, "Chọn giá trị phù hợp cho video.", parse_mode=None, reply_markup=video_local_choice_keyboard(action, lang))
     if action == "text_overlay":
         update_video_editor_pending(uid, "await_text_overlay")
