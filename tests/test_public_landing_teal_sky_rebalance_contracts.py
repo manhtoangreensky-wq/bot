@@ -111,3 +111,16 @@ def test_landing_keeps_url_locale_display_and_escape_focus_restoration() -> None
     assert 'if (restoreFocus && wasOpen) menuToggle.focus();' in LANDING
     assert 'if (event.key === "Escape" && header.getAttribute("data-menu-open") === "true") {' in LANDING
     assert 'closeMenu({ restoreFocus: true });' in LANDING
+
+
+def test_mobile_hash_navigation_moves_focus_to_the_visible_destination() -> None:
+    """Closing the responsive menu must not leave focus on its hidden link."""
+
+    assert "const focusHashDestination = function (link)" in LANDING
+    assert "link.origin !== window.location.origin" in LANDING
+    assert "link.pathname !== window.location.pathname" in LANDING
+    assert "const target = document.getElementById(link.hash.slice(1));" in LANDING
+    assert 'destination.setAttribute("tabindex", "-1");' in LANDING
+    assert "destination.focus({ preventScroll: true });" in LANDING
+    assert "link.addEventListener(\"click\", function (event) {" in LANDING
+    assert "focusHashDestination(link);" in LANDING
