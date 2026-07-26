@@ -1986,6 +1986,8 @@ GENERATED_MEDIA_MAX_MB = max(1, env_int("GENERATED_MEDIA_MAX_MB", TELEGRAM_DOCUM
 SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", TELEGRAM_VIDEO_PREVIEW_MAX_MB))
 SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
 SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB = max(1, min(20, env_int("SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB", 20)))
+SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS = max(30, env_int("SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS", 180))
+SUBDUB_TELEGRAM_DOWNLOAD_RETRIES = max(1, min(5, env_int("SUBDUB_TELEGRAM_DOWNLOAD_RETRIES", 3)))
 SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS = max(1, min(15, env_int("SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS", 5)))
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
@@ -181351,29 +181353,61 @@ async def cmd_subdub_public_open_safe(update: Update, context: ContextTypes.DEFA
     selected_asr = subdub_asr_provider_name()
     selected_translation = subdub_translation_provider_name()
     selected_tts = subdub_tts_provider_name()
+    admin_id = update.effective_user.id
+    switch_blockers = {"public_flag_off", "provider_freeze"}
+    enable_blockers = {
+        "asr_public_not_allowed",
+        "translation_public_not_allowed",
+        "tts_public_not_allowed",
+    }
+    candidates: list[str] = []
+    kept_closed: list[tuple[str, list[str]]] = []
+    for mode, env_name in SUBDUB_LANE_PUBLIC_ENV.items():
+        probe = get_subdub_lane_readiness(mode, {}, public=True)
+        hard_blockers = [
+            item
+            for item in (probe.get("blockers") or [])
+            if item not in switch_blockers and item not in enable_blockers
+        ]
+        if hard_blockers:
+            kept_closed.append((env_name, hard_blockers))
+        else:
+            candidates.append(env_name)
+    if candidates:
+        subdub_set_public_override("PROVIDER_FREEZE", "false", admin_id)
+        subdub_set_public_override("VIDEO_ASR_ENABLED", "true", admin_id)
+        subdub_set_public_override("VIDEO_DUB_TTS_ENABLED", "true", admin_id)
+        for env_name in candidates:
+            subdub_set_public_override(env_name, "true", admin_id)
+    opened: list[str] = []
+    for mode, env_name in SUBDUB_LANE_PUBLIC_ENV.items():
+        if env_name not in candidates:
+            continue
+        verify = get_subdub_lane_readiness(mode, {}, public=True)
+        if verify.get("effective_ready"):
+            opened.append(env_name)
+        else:
+            subdub_set_public_override(env_name, "false", admin_id)
+            kept_closed.append((env_name, list(verify.get("blockers") or [])))
     lines = [
         "SUBDUB PUBLIC OPEN SAFE",
         "",
-        "No runtime ENV was changed.",
-        "Required Railway policy before opening lanes:",
-        "PROVIDER_FREEZE=FALSE",
-        "PROVIDER_FREEZE_ENABLED=FALSE",
-        f"ASR_PROVIDER={selected_asr if selected_asr in {'deepgram', 'key4u', 'shopaikey'} else 'deepgram'}",
-        f"TRANSLATE_PROVIDER={selected_translation or 'deepl'}",
-        f"TTS_PROVIDER={selected_tts if selected_tts in {'direct_minimax', 'key4u_minimax', 'shopaikey_minimax'} else 'direct_minimax'}",
-        "VIDEO_ASR_ENABLED=TRUE",
-        "VIDEO_DUB_TTS_ENABLED=TRUE",
+        f"asr={selected_asr} translation={selected_translation} tts={selected_tts}",
         "",
-        "Open a lane only after its provider smoke is PASS on the current runtime SHA:",
     ]
-    for mode, env_name in SUBDUB_LANE_PUBLIC_ENV.items():
-        readiness = get_subdub_lane_readiness(mode, {}, public=True)
-        blockers = [item for item in readiness.get("blockers") or [] if item != "public_flag_off"]
-        if blockers:
-            lines.append(f"{env_name}=FALSE | KEEP CLOSED | blockers={','.join(blockers)}")
-        else:
-            lines.append(f"{env_name}=TRUE | READY TO OPEN")
-    lines.extend(["", "Railway redeploy required after ENV changes.", "provider_calls=0 | wallet_mutation=0 | Xu_charged=0"])
+    lines.extend(f"{env_name}=OPEN" for env_name in opened)
+    lines.extend(
+        f"{env_name}=CLOSED | blockers={','.join(blockers)}"
+        for env_name, blockers in kept_closed
+    )
+    lines.extend(
+        [
+            "",
+            "Runtime override persisted in system_settings (no Railway ENV change, no redeploy).",
+            "Use /subdub_public_close to re-guard all lanes instantly.",
+            "provider_calls=0 | wallet_mutation=0 | Xu_charged=0",
+        ]
+    )
     for chunk in subdub_admin_debug_chunks("\n".join(lines)):
         await update.message.reply_text(chunk)
 
@@ -181381,9 +181415,21 @@ async def cmd_subdub_public_close(update: Update, context: ContextTypes.DEFAULT_
     del context
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return
-    lines = ["SUBDUB PUBLIC CLOSE", "", "Set these Railway variables:"]
-    lines.extend(f"{env_name}=FALSE" for env_name in SUBDUB_LANE_PUBLIC_ENV.values())
-    lines.extend(["", "No runtime ENV was changed.", "Railway redeploy required.", "provider_calls=0 | wallet_mutation=0 | Xu_charged=0"])
+    admin_id = update.effective_user.id
+    for env_name in SUBDUB_LANE_PUBLIC_ENV.values():
+        subdub_set_public_override(env_name, "false", admin_id)
+    subdub_set_public_override("VIDEO_ASR_ENABLED", "false", admin_id)
+    subdub_set_public_override("VIDEO_DUB_TTS_ENABLED", "false", admin_id)
+    subdub_set_public_override("PROVIDER_FREEZE", "", admin_id)
+    lines = ["SUBDUB PUBLIC CLOSE", ""]
+    lines.extend(f"{env_name}=CLOSED" for env_name in SUBDUB_LANE_PUBLIC_ENV.values())
+    lines.extend(
+        [
+            "",
+            "All four public lanes re-guarded instantly (runtime override; no redeploy).",
+            "provider_calls=0 | wallet_mutation=0 | Xu_charged=0",
+        ]
+    )
     await update.message.reply_text("\n".join(lines))
 
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202816,12 +202862,12 @@ def subdub_media_limits_notice(lang: str = "vi") -> str:
     max_parts = int(SUBDUB_LONG_PROJECT_MAX_PARTS)
     if normalize_user_language(lang) != "vi":
         return (
-            f"File limit: {SUBDUB_MAX_INPUT_MB} MB. Each result video is up to "
+            f"File limit: {subdub_input_limit_mb()} MB. Each result video is up to "
             f"{SUBDUB_MAX_DURATION_SECONDS} seconds. Longer videos are split into up to "
             f"{max_parts} parts and sent in order."
         )
     return (
-        f"Lưu ý: File tối đa {SUBDUB_MAX_INPUT_MB} MB. Mỗi video kết quả tối đa "
+        f"Lưu ý: File tối đa {subdub_input_limit_mb()} MB. Mỗi video kết quả tối đa "
         f"{SUBDUB_MAX_DURATION_SECONDS} giây. Video dài hơn sẽ được chia tối đa "
         f"{max_parts} phần và gửi lần lượt."
     )
@@ -204231,13 +204277,50 @@ def video_dubbing_mode_flag(mode: str) -> bool:
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_ENABLED,
     }.get(normalize_video_translate_mode(mode), False)
 
+SUBDUB_PUBLIC_OVERRIDE_PREFIX = "subdub_public_override"
+
+
+def subdub_public_override_value(name: str) -> str:
+    """Persisted runtime override for SubDub public go-live switches.
+
+    Values: "true" / "false" force the switch; "" (absent) falls back to the
+    Railway ENV default. Stored in system_settings so it survives restarts
+    and needs no redeploy. Scoped to SubDub public readiness only.
+    """
+    return str(get_system_setting(f"{SUBDUB_PUBLIC_OVERRIDE_PREFIX}:{name}", "") or "").strip().lower()
+
+
+def subdub_set_public_override(name: str, value: str, updated_by="") -> None:
+    set_system_setting(
+        f"{SUBDUB_PUBLIC_OVERRIDE_PREFIX}:{name}",
+        str(value or "").strip().lower(),
+        "subdub_public_open_safe",
+        updated_by,
+    )
+
+
+def subdub_public_flag_with_override(env_name: str, env_value) -> bool:
+    override = subdub_public_override_value(env_name)
+    if override in {"true", "false"}:
+        return override == "true"
+    return bool(env_value)
+
+
+def subdub_public_freeze_override_active() -> bool:
+    return subdub_public_override_value("PROVIDER_FREEZE") == "false"
+
+
 def video_dubbing_public_flag(mode: str) -> bool:
-    return {
-        VIDEO_SUBTITLE_MODE_CREATE: VIDEO_SUBTITLE_PUBLIC_ENABLED,
-        VIDEO_SUBTITLE_MODE_TRANSLATE: VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED,
-        VIDEO_SUBTITLE_MODE_DUB: VIDEO_DUB_PUBLIC_ENABLED,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED,
-    }.get(normalize_video_translate_mode(mode), False)
+    mode = normalize_video_translate_mode(mode)
+    entry = {
+        VIDEO_SUBTITLE_MODE_CREATE: ("VIDEO_SUBTITLE_PUBLIC_ENABLED", VIDEO_SUBTITLE_PUBLIC_ENABLED),
+        VIDEO_SUBTITLE_MODE_TRANSLATE: ("VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED", VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED),
+        VIDEO_SUBTITLE_MODE_DUB: ("VIDEO_DUB_PUBLIC_ENABLED", VIDEO_DUB_PUBLIC_ENABLED),
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: ("VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED),
+    }.get(mode)
+    if not entry:
+        return False
+    return subdub_public_flag_with_override(entry[0], entry[1])
 
 def video_dubbing_effective_mode_enabled(mode: str, public: bool = True) -> bool:
     mode = normalize_video_translate_mode(mode)
@@ -204465,7 +204548,7 @@ def subdub_provider_public_allowed(kind: str, provider: str) -> bool:
             "key4u": bool(KEY4U_PUBLIC_ENABLED),
             "shopaikey": not bool(SHOPAIKEY_ADMIN_ONLY),
         }.get(provider, False)
-        return bool(VIDEO_ASR_ENABLED and route_allowed)
+        return bool(subdub_public_flag_with_override("VIDEO_ASR_ENABLED", VIDEO_ASR_ENABLED) and route_allowed)
     if kind == "translation":
         return {
             "deepl": True,
@@ -204477,7 +204560,7 @@ def subdub_provider_public_allowed(kind: str, provider: str) -> bool:
         "key4u_minimax": bool(KEY4U_PUBLIC_ENABLED),
         "shopaikey_minimax": not bool(SHOPAIKEY_ADMIN_ONLY),
     }.get(provider, False)
-    return bool(VIDEO_DUB_TTS_ENABLED and route_allowed)
+    return bool(subdub_public_flag_with_override("VIDEO_DUB_TTS_ENABLED", VIDEO_DUB_TTS_ENABLED) and route_allowed)
 
 def get_subdub_lane_readiness(
     mode: str,
@@ -204523,7 +204606,11 @@ def get_subdub_lane_readiness(
         blockers.append("mode_missing")
     if public and not video_dubbing_public_flag(mode):
         blockers.append("public_flag_off")
-    if freeze.get("global_provider_freeze") and not admin_interactive_confirm:
+    if (
+        freeze.get("global_provider_freeze")
+        and not admin_interactive_confirm
+        and not subdub_public_freeze_override_active()
+    ):
         blockers.append("provider_freeze")
     if TRANSLATION_DUB_MAINTENANCE:
         blockers.append("maintenance")
@@ -206214,8 +206301,10 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
     blocker = str(job.get("pipeline_blocker") or job.get("input_save_blocker") or job.get("no_charge_reason") or "").strip()
     if outcome == "partial_audio_delivered" or job.get("partial_audio_delivered"):
         return subdub_audio_fallback_text(str(job.get("mode") or ""), lang)
-    if blocker == "large_telegram_download_unsupported":
+    if blocker == "large_telegram_download_unsupported" or "file is too big" in blocker.lower():
         return subdub_large_telegram_media_public_text(lang)
+    if blocker.startswith("telegram_download_failed"):
+        return subdub_download_failure_public_text(lang)
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
     if status.startswith("failed") or terminal.startswith("failed"):
@@ -206415,7 +206504,10 @@ def pipeline_input_limit_mb(is_admin: bool = False) -> int:
 
 def subdub_input_limit_mb(is_admin: bool = False) -> int:
     del is_admin
-    return int(SUBDUB_MAX_INPUT_MB)
+    # Single source of truth for every customer-facing size limit: the cloud
+    # Bot API cannot DOWNLOAD above SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB (~20 MB
+    # at getFile), so never advertise more than the bot can actually intake.
+    return min(int(SUBDUB_MAX_INPUT_MB), int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB))
 
 def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
@@ -207440,6 +207532,18 @@ def subdub_telegram_file_too_big(detail: str = "") -> bool:
         "bad request: file is too big",
     )
     return any(marker in normalized for marker in markers)
+
+def subdub_download_failure_public_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "⚠️ TOAN AAS could not fetch the video from Telegram right now.\n"
+            "No Xu was charged. Please send the video again."
+        )
+    return (
+        "⚠️ TOAN AAS chưa tải được video từ Telegram lúc này.\n"
+        "Hệ thống chưa trừ Xu. Anh/chị vui lòng gửi lại giúp em."
+    )
+
 
 def subdub_large_telegram_media_public_text(lang: str = "vi") -> str:
     limit_mb = int(SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB)
@@ -210033,27 +210137,57 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
         raise RuntimeError("video_too_large")
     if file_size > max_bytes:
         raise RuntimeError("telegram_download_failed:file is too big")
-    tg_file = await context.bot.get_file(file_id)
-    declared_size = _safe_int(getattr(tg_file, "file_size", 0), 0)
-    if declared_size > max_bytes:
-        raise RuntimeError("telegram_download_failed:file is too big")
+    def _classify_download_error(exc: Exception) -> str:
+        detail = str(exc or "").lower()
+        if "file is too big" in detail:
+            return "telegram_download_failed:file is too big"
+        if any(token in detail for token in ("timed out", "timeout", "readtimeout", "pool timeout")):
+            return "telegram_download_failed:timeout"
+        if any(token in detail for token in ("network", "connect", "disconnected", "reset", "ssl")):
+            return "telegram_download_failed:network"
+        return "telegram_download_failed:api"
+
+    read_timeout = float(SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS)
+    attempts = int(SUBDUB_TELEGRAM_DOWNLOAD_RETRIES)
     data = b""
-    bytearray_error = ""
-    if callable(getattr(tg_file, "download_as_bytearray", None)):
+    last_class = ""
+    for attempt in range(1, attempts + 1):
         try:
-            data = bytes(await tg_file.download_as_bytearray())
-        except Exception as exc:
-            bytearray_error = sanitize_log_text(str(exc))[:120]
-    if not data and callable(getattr(tg_file, "download_to_drive", None)):
-        with tempfile.TemporaryDirectory(prefix="toanaas_pipeline_source_") as tmpdir:
-            source_path = os.path.join(tmpdir, os.path.basename(str(state.get("source_file_name") or "source.bin")))
-            await tg_file.download_to_drive(custom_path=source_path)
-            if not os.path.exists(source_path) or os.path.getsize(source_path) > max_bytes:
+            tg_file = await context.bot.get_file(file_id, read_timeout=read_timeout)
+            declared_size = _safe_int(getattr(tg_file, "file_size", 0), 0)
+            if declared_size > max_bytes:
                 raise RuntimeError("telegram_download_failed:file is too big")
-            with open(source_path, "rb") as handle:
-                data = handle.read()
+            if callable(getattr(tg_file, "download_as_bytearray", None)):
+                data = bytes(
+                    await tg_file.download_as_bytearray(
+                        read_timeout=read_timeout,
+                        connect_timeout=30,
+                        pool_timeout=30,
+                    )
+                )
+            elif callable(getattr(tg_file, "download_to_drive", None)):
+                with tempfile.TemporaryDirectory(prefix="toanaas_pipeline_source_") as tmpdir:
+                    source_path = os.path.join(tmpdir, os.path.basename(str(state.get("source_file_name") or "source.bin")))
+                    await tg_file.download_to_drive(custom_path=source_path)
+                    if not os.path.exists(source_path) or os.path.getsize(source_path) > max_bytes:
+                        raise RuntimeError("telegram_download_failed:file is too big")
+                    with open(source_path, "rb") as handle:
+                        data = handle.read()
+            if data:
+                break
+            last_class = "telegram_download_failed:api"
+        except RuntimeError as exc:
+            if "file is too big" in str(exc).lower():
+                raise
+            last_class = _classify_download_error(exc)
+        except Exception as exc:
+            last_class = _classify_download_error(exc)
+            if last_class == "telegram_download_failed:file is too big":
+                raise RuntimeError(last_class)
+        if attempt < attempts:
+            await asyncio.sleep(min(8, 2 * attempt))
     if not data:
-        raise RuntimeError(f"empty_video:{bytearray_error}" if bytearray_error else "empty_video")
+        raise RuntimeError(last_class or "telegram_download_failed:api")
     if len(data) > max_bytes:
         raise RuntimeError("telegram_download_failed:file is too big")
     return data, str(state.get("source_mime_type") or "video/mp4")
