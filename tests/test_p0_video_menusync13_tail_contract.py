@@ -51,9 +51,8 @@ def test_each_shared_tail_product_keeps_completed_content_contract(product_type:
     assert pending["summary_status"] == "not_ready"
 
     summary = video_tail9.mark_branding_skipped(state)
-    summary = video_tail9.prepare_summary(summary)
-    summary = video_tail9.mark_review_complete(summary)
     summary = video_tail9.mark_audio_complete(summary, skipped=True)
+    summary = video_tail9.prepare_summary(summary)
 
     assert summary["summary_status"] == "ready"
     assert summary["content_source"] == "idea_catalog"
@@ -76,7 +75,7 @@ def test_optional_branding_skip_clears_legacy_positions() -> None:
     assert skipped["watermark_config"]["position"] == ""
 
 
-def test_tail_routes_keep_the_exact_logo_summary_review_audio_back_stack() -> None:
+def test_tail_routes_keep_the_exact_logo_audio_unified_summary_back_stack() -> None:
     handler = _between(
         "async def handle_video_tail_callback",
         "async def handle_video_tail9_pending_text",
@@ -93,16 +92,15 @@ def test_tail_routes_keep_the_exact_logo_summary_review_audio_back_stack() -> No
     review = handler[handler.index('if section == "review":'):handler.index('if section == "summary":')]
     summary = handler[handler.index('if section == "summary":'):handler.index('if section == "audio":')]
 
-    assert 'if action == "summary":' in review
-    assert 'tail["summary_return_to"] = "review"' in review
-    assert 'if action in {"audio", "continue"}:' in review
-    assert 'tail = video_tail9.mark_review_complete(tail)' in review
-    assert 'return await video_tail9_render(query, uid, context, "audio")' in review
+    assert 'action in {"open", "summary", "review"}' in review
+    assert 'return await video_tail9_render(query, uid, context, "summary")' in review
     renderer = _between("async def video_tail9_render", "def video_tail9_callback_guard")
     assert "video_tail9.next_required_screen(tail)" in renderer
     assert 'if action == "continue":' in summary
+    assert 'return await video_tail9_render(query, uid, context, "quality")' in summary
+    assert 'if action == "audio":' in summary
     assert 'if action == "back":' in summary
-    assert 'target = "review" if str(tail.get("summary_return_to") or "logo") == "review" else "logo"' in summary
+    assert 'return await video_tail9_render(query, uid, context, "audio")' in summary
     assert 'else "video_tail|review|prompts"' not in logo_keyboard
     assert 'back_callback = "video_tail|review|prompts"' in logo_keyboard
     assert '[("⬅️ Quay lại", "video_tail|summary|back"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard

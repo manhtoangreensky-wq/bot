@@ -10,7 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 
-TAIL_FLOW_VERSION = 15
+TAIL_FLOW_VERSION = 16
 
 STATE_FIELDS = (
     "tail_flow_version",
@@ -46,6 +46,10 @@ STATE_FIELDS = (
     "invoice_id",
     "final_confirmed",
     "job_id",
+    "submit_user_id",
+    "public_processing_code",
+    "submitted_at",
+    "execution_state",
     "engine_route",
     "status_stage",
     "delivery_message_id",
@@ -486,6 +490,10 @@ def new_state(
         "invoice_id": "",
         "final_confirmed": False,
         "job_id": "",
+        "submit_user_id": "",
+        "public_processing_code": "",
+        "submitted_at": "",
+        "execution_state": "",
         "engine_route": adapter["engine_route"],
         "status_stage": "content_ready",
         "delivery_message_id": "",
@@ -494,8 +502,8 @@ def new_state(
         "return_to": str(return_to or adapter["return_to"]),
         "brand_pending_target": "",
         "brand_pending_position": "",
-        "branding_return_to": "summary",
-        "summary_return_to": "logo",
+        "branding_return_to": "audio",
+        "summary_return_to": "audio",
         "handled_callback_ids": [],
         "confirm_token": "",
     }
@@ -592,6 +600,15 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     )
     current["pricing_snapshot"] = dict(current.get("pricing_snapshot") or {})
     current["capability_snapshot"] = dict(current.get("capability_snapshot") or {})
+    current["invoice_id"] = str(current.get("invoice_id") or "").strip()
+    current["quality_tier_id"] = str(current.get("quality_tier_id") or "").strip()
+    current["package_id"] = str(current.get("package_id") or "").strip()
+    current["final_confirmed"] = bool(current.get("final_confirmed"))
+    current["job_id"] = str(current.get("job_id") or "").strip()
+    current["submit_user_id"] = str(current.get("submit_user_id") or "").strip()
+    current["public_processing_code"] = str(current.get("public_processing_code") or "").strip()
+    current["submitted_at"] = str(current.get("submitted_at") or "").strip()
+    current["execution_state"] = str(current.get("execution_state") or "").strip()
     current["engine_route"] = adapter["engine_route"]
     current["status_stage"] = (
         str(current.get("status_stage") or "content_ready")
@@ -604,15 +621,16 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
         else ""
     )
     current["brand_pending_position"] = str(current.get("brand_pending_position") or "")
+    branding_return_to = str(current.get("branding_return_to") or "audio")
+    if branding_return_to == "review":
+        branding_return_to = "summary"
     current["branding_return_to"] = (
-        str(current.get("branding_return_to") or "summary")
-        if str(current.get("branding_return_to") or "summary") in {"summary", "review"}
-        else "summary"
+        branding_return_to if branding_return_to in {"audio", "summary"} else "audio"
     )
     current["summary_return_to"] = (
-        str(current.get("summary_return_to") or "logo")
-        if str(current.get("summary_return_to") or "logo") in {"logo", "review"}
-        else "logo"
+        str(current.get("summary_return_to") or "audio")
+        if str(current.get("summary_return_to") or "audio") in {"audio", "summary"}
+        else "audio"
     )
     if stored_flow_version < TAIL_FLOW_VERSION:
         terminal_or_commercial = current["status_stage"] in {
@@ -630,9 +648,9 @@ def normalize_state(state: dict[str, Any]) -> dict[str, Any]:
             current["summary_status"] = "ready"
         else:
             current["review_status"] = "not_ready"
-            current["audio_status"] = "not_configured"
-            current["branding_return_to"] = "summary"
-            current["summary_return_to"] = "logo"
+            current["summary_status"] = "not_ready"
+            current["branding_return_to"] = "audio"
+            current["summary_return_to"] = "audio"
     current["handled_callback_ids"] = [
         str(item) for item in current.get("handled_callback_ids") or [] if str(item).strip()
     ][-100:]
@@ -703,6 +721,8 @@ def mark_audio_complete(state: dict[str, Any], *, skipped: bool = False) -> dict
     audio = dict(current.get("audio_config") or {})
     enabled = any(bool(audio.get(key)) for key in TOGGLE_KEYS)
     current["audio_status"] = "configured" if enabled and not skipped else "skipped"
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
     current["status_stage"] = "audio_addons"
     return normalize_state(current)
 
@@ -741,6 +761,8 @@ def mark_branding_skipped(state: dict[str, Any]) -> dict[str, Any]:
     current["watermark_status"] = "skipped"
     current["brand_pending_target"] = ""
     current["brand_pending_position"] = ""
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
     current["status_stage"] = "logo_watermark"
     return normalize_state(current)
 
@@ -751,6 +773,8 @@ def mark_branding_configured(state: dict[str, Any], target: str) -> dict[str, An
         current["logo_status"] = "configured"
     elif target == "watermark":
         current["watermark_status"] = "configured"
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
     return normalize_state(current)
 
 
@@ -774,6 +798,8 @@ def mark_branding_complete(state: dict[str, Any]) -> dict[str, Any]:
     current["watermark_status"] = "configured" if watermark_ready else "skipped"
     current["brand_pending_target"] = ""
     current["brand_pending_position"] = ""
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
     current["status_stage"] = "logo_watermark"
     return normalize_state(current)
 
@@ -783,18 +809,16 @@ def next_required_screen(state: dict[str, Any]) -> str:
 
     current = normalize_state(state)
     if not content_contract_ready(current):
-        return "review"
+        return "summary"
     if (
         current.get("logo_status") not in {"configured", "skipped"}
         or current.get("watermark_status") not in {"configured", "skipped"}
     ):
         return "logo"
-    if current.get("summary_status") != "ready":
-        return "summary"
-    if current.get("review_status") != "ready":
-        return "review"
     if current.get("audio_status") not in {"configured", "skipped"}:
         return "audio"
+    if current.get("summary_status") != "ready":
+        return "summary"
     return ""
 
 
@@ -806,7 +830,9 @@ def prepare_summary(state: dict[str, Any]) -> dict[str, Any]:
         content_contract_ready(current)
         and current.get("logo_status") in {"configured", "skipped"}
         and current.get("watermark_status") in {"configured", "skipped"}
+        and current.get("audio_status") in {"configured", "skipped"}
     ) else "not_ready"
+    current["review_status"] = "ready" if current["summary_status"] == "ready" else "not_ready"
     current["status_stage"] = "summary"
     return normalize_state(current)
 
@@ -851,6 +877,8 @@ def toggle_audio(state: dict[str, Any], key: str) -> dict[str, Any]:
         raise ValueError("source_audio_unavailable")
     audio[name] = not bool(audio.get(name))
     current["audio_config"] = audio
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
     current["status_stage"] = "audio_addons"
     return normalize_state(current)
 
@@ -867,6 +895,8 @@ def set_volume(state: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
     volumes[name] = _volume(value)
     audio["volumes"] = volumes
     current["audio_config"] = audio
+    current["summary_status"] = "not_ready"
+    current["review_status"] = "not_ready"
     current["status_stage"] = "audio_addons"
     return normalize_state(current)
 
@@ -942,6 +972,106 @@ def confirm_once(state: dict[str, Any], confirm_token: str) -> tuple[dict[str, A
     current["confirm_token"] = token
     current["status_stage"] = "confirmed"
     return current, True
+
+
+def mark_submitted(
+    state: dict[str, Any],
+    *,
+    user_id: Any,
+    job_id: Any,
+    public_processing_code: str = "",
+    submitted_at: str = "",
+    execution_state: str = "queued",
+) -> tuple[dict[str, Any], bool]:
+    """Persist one accepted submit without allowing a second job identity."""
+
+    current = normalize_state(state)
+    accepted_job_id = str(job_id or "").strip()
+    if not accepted_job_id:
+        raise ValueError("submitted_job_missing")
+    existing_job_id = str(current.get("job_id") or "").strip()
+    if existing_job_id and existing_job_id != accepted_job_id:
+        raise ValueError("submitted_job_conflict")
+    created = not bool(existing_job_id and current.get("final_confirmed"))
+    current["job_id"] = accepted_job_id
+    current["submit_user_id"] = str(user_id or "").strip()
+    current["public_processing_code"] = str(
+        current.get("public_processing_code")
+        or public_processing_code
+        or f"#{accepted_job_id}"
+    ).strip()
+    current["submitted_at"] = str(current.get("submitted_at") or submitted_at or "").strip()
+    current["execution_state"] = str(current.get("execution_state") or execution_state or "queued").strip()
+    current["final_confirmed"] = True
+    current["status_stage"] = "confirmed"
+    return normalize_state(current), created
+
+
+def recover_submission(state: dict[str, Any], persisted: dict[str, Any] | None) -> dict[str, Any]:
+    """Recover the canonical invoice/job identity after volatile UI state loss."""
+
+    current = normalize_state(state)
+    record = deepcopy(dict(persisted or {}))
+    job = dict(record.get("job") or record.get("b14_queue_job") or {})
+    invoice = dict(record.get("invoice") or record.get("b14_invoice") or {})
+    job_id = str(
+        record.get("job_id")
+        or record.get("b14_queue_job_id")
+        or job.get("id")
+        or ""
+    ).strip()
+    if not job_id:
+        return current
+
+    quality_tier_id = str(
+        record.get("quality_tier_id")
+        or invoice.get("quality_tier_id")
+        or invoice.get("quality_xu")
+        or current.get("quality_tier_id")
+        or ""
+    ).strip()
+    package_id = str(
+        record.get("package_id")
+        or invoice.get("package_id")
+        or current.get("package_id")
+        or (f"product_video_{quality_tier_id}" if quality_tier_id else "")
+    ).strip()
+    invoice_id = str(
+        record.get("invoice_id")
+        or invoice.get("invoice_id")
+        or current.get("invoice_id")
+        or ""
+    ).strip()
+    if quality_tier_id:
+        current["quality_tier_id"] = quality_tier_id
+    if package_id:
+        current["package_id"] = package_id
+    if invoice_id:
+        current["invoice_id"] = invoice_id
+    if record.get("scene_count") or invoice.get("scene_count"):
+        current["scene_count"] = max(
+            1,
+            int(record.get("scene_count") or invoice.get("scene_count") or current.get("scene_count") or 1),
+        )
+
+    pricing = dict(current.get("pricing_snapshot") or {})
+    pricing.update(invoice)
+    total_xu = record.get("total_xu")
+    if total_xu is not None:
+        pricing["total_xu"] = int(total_xu or 0)
+    if quality_tier_id:
+        pricing.setdefault("quality_xu", int(quality_tier_id or 0))
+    current["pricing_snapshot"] = pricing
+
+    recovered, _created = mark_submitted(
+        current,
+        user_id=record.get("user_id") or job.get("user_id") or current.get("submit_user_id"),
+        job_id=job_id,
+        public_processing_code=str(record.get("public_processing_code") or record.get("public_code") or ""),
+        submitted_at=str(record.get("submitted_at") or job.get("created_at") or ""),
+        execution_state=str(record.get("execution_state") or record.get("status") or job.get("status") or "queued"),
+    )
+    return recovered
 
 
 def update_delivery_truth(
