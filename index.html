@@ -1,985 +1,682 @@
-<!DOCTYPE html>
-<html lang="vi">
+<!doctype html>
+<html lang="vi" dir="ltr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TOAN AAS — AI Automation System</title>
-  <meta name="description" content="Hệ thống tự động hóa AI cho hình ảnh, nội dung, video, âm thanh, tài liệu và marketing. Tạo nội dung bằng bot Telegram, báo giá trước khi xử lý và hỗ trợ Xu.">
-  <meta name="theme-color" content="#052e24">
-  <meta property="og:title" content="TOAN AAS — AI Automation System">
-  <meta property="og:description" content="Hệ thống tự động hóa AI cho hình ảnh, nội dung, video, âm thanh, tài liệu và marketing.">
-  <meta property="og:image" content="https://www.toanaas.vn/banner.png?v=20260619">
-  <meta property="og:image:alt" content="TOAN AAS — Hệ thống tự động hóa AI">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#062a36">
+  <meta name="description" content="TOAN AAS giúp bạn tổ chức nội dung và công việc AI bằng quy trình rõ ràng, có kiểm soát.">
+  <meta property="og:title" content="TOAN AAS — Không gian làm việc AI có kiểm soát">
+  <meta property="og:description" content="Workspace cho công việc chuyên sâu. Telegram cho thao tác nhanh khi cần.">
+  <meta property="og:image" content="https://www.toanaas.vn/banner.png?v=20260727">
+  <meta property="og:image:alt" content="TOAN AAS">
   <meta property="og:url" content="https://www.toanaas.vn/">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="TOAN AAS — AI Automation System">
-  <meta name="twitter:description" content="Hệ thống tự động hóa AI cho hình ảnh, nội dung, video, âm thanh, tài liệu và marketing.">
-  <meta name="twitter:image" content="https://www.toanaas.vn/banner.png?v=20260619">
   <link rel="canonical" href="https://www.toanaas.vn/">
-  <link rel="icon" type="image/png" href="/logo.png?v=20260619">
-  <link rel="apple-touch-icon" href="/logo.png?v=20260619">
+  <link rel="icon" type="image/png" href="/logo.png?v=20260727">
+  <link rel="apple-touch-icon" href="/logo.png?v=20260727">
+  <title>TOAN AAS — Không gian làm việc AI có kiểm soát</title>
   <style>
     :root {
-      --ink: #10271f;
-      --muted: #5a6e65;
-      --jade-950: #031f18;
-      --jade-900: #052e24;
-      --jade-800: #074b38;
-      --jade-700: #087b55;
-      --jade-600: #0b9b68;
-      --jade-500: #14c784;
-      --jade-100: #dff5ea;
-      --jade-50: #f1faf6;
-      --mint: #eaf8f1;
-      --paper: #f7faf8;
-      --white: #ffffff;
-      --amber: #f5b94c;
-      --line: #d8e7df;
-      --line-dark: rgba(255, 255, 255, 0.14);
-      --shadow-sm: 0 10px 28px rgba(3, 31, 24, 0.07);
-      --shadow-lg: 0 24px 72px rgba(3, 31, 24, 0.15);
-      --radius-sm: 14px;
-      --radius: 22px;
-      --radius-lg: 30px;
+      --teal-950: #062a36;
+      --teal-900: #0b3440;
+      --teal-800: #104352;
+      --teal-700: #146173;
+      --teal-500: #14b8a6;
+      --teal-400: #2dd4bf;
+      --sky-400: #38bdf8;
+      --canvas: #f4fbfc;
+      --surface: #ffffff;
+      --surface-soft: #e8f5f6;
+      --line: #d7ecef;
+      --line-strong: #9ccfd5;
+      --ink: #092b36;
+      --muted: #486b75;
+      --success: #0f766e;
+      --danger: #bd4750;
+      --shadow-sm: 0 12px 28px rgba(9, 43, 54, .08);
+      --shadow-lg: 0 24px 60px rgba(9, 43, 54, .13);
+      --radius-sm: 12px;
+      --radius: 18px;
+      --radius-lg: 24px;
+      --transition: 180ms ease;
     }
 
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
-    html { scroll-behavior: smooth; scroll-padding-top: 116px; }
+    html { scroll-behavior: smooth; scroll-padding-top: 96px; }
     body {
       margin: 0;
-      overflow-x: hidden;
+      overflow-x: clip;
       color: var(--ink);
-      background: var(--paper);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.65;
+      background: var(--canvas);
+      font-family: Inter, "Be Vietnam Pro", "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
       -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
+    a { color: inherit; text-decoration: none; }
     button, input, select, textarea { font: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
     h1, h2, h3, p { margin-top: 0; }
     h1, h2, h3 { text-wrap: balance; }
     p { text-wrap: pretty; }
-    a { color: inherit; text-decoration: none; }
-    img { display: block; max-width: 100%; }
-    button, a { -webkit-tap-highlight-color: transparent; }
-    :focus-visible { outline: 3px solid rgba(20, 199, 132, 0.5); outline-offset: 3px; }
+    svg { display: block; }
+    :focus-visible { outline: 3px solid var(--sky-400); outline-offset: 3px; }
 
     .skip-link {
       position: fixed;
+      top: -64px;
       left: 16px;
-      top: -80px;
       z-index: 100;
       padding: 10px 14px;
       border-radius: 10px;
-      color: var(--jade-950);
-      background: var(--white);
-      font-weight: 800;
-      transition: top 0.2s ease;
+      color: var(--surface);
+      background: var(--teal-950);
+      font-weight: 760;
+      transition: top var(--transition);
     }
     .skip-link:focus { top: 12px; }
+    .container { width: min(1260px, calc(100% - 48px)); margin-inline: auto; }
 
-    .container {
-      width: min(1180px, calc(100% - 40px));
-      margin-inline: auto;
-    }
-
-    .topbar {
+    .site-header {
       position: sticky;
       top: 0;
-      z-index: 50;
-      color: var(--white);
-      background: rgba(3, 31, 24, 0.96);
-      border-bottom: 1px solid var(--line-dark);
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
-      backdrop-filter: blur(16px);
+      z-index: 40;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 94%, transparent);
+      backdrop-filter: blur(14px);
     }
-    .nav-main {
-      min-height: 76px;
-      display: flex;
+    .header-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 20px;
       align-items: center;
-      justify-content: space-between;
-      gap: 24px;
+      min-height: 76px;
     }
     .brand {
-      min-width: 206px;
       display: inline-flex;
+      gap: 10px;
       align-items: center;
-      gap: 12px;
-      font-weight: 900;
-      letter-spacing: -0.02em;
+      min-width: 0;
+      color: var(--teal-950);
+      font-size: 18px;
+      font-weight: 850;
+      letter-spacing: -.035em;
+      white-space: nowrap;
     }
-    .brand-logo,
-    .brand-mark {
-      width: 44px;
-      height: 44px;
-      flex: 0 0 44px;
-      border-radius: 12px;
-      background: var(--white);
+    .brand img {
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      border-radius: 11px;
       object-fit: contain;
     }
     .brand-mark {
-      display: grid;
+      display: none;
+      width: 38px;
+      height: 38px;
       place-items: center;
-      color: var(--jade-800);
-      font-size: 15px;
-      letter-spacing: -0.06em;
+      border-radius: 11px;
+      color: var(--teal-950);
+      background: var(--teal-500);
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: -.08em;
     }
-    .brand-copy { line-height: 1.05; }
-    .brand-copy small {
-      display: block;
-      margin-top: 5px;
-      color: #a8cabe;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    .nav-links {
+    .site-nav {
       display: flex;
+      gap: 22px;
       align-items: center;
       justify-content: flex-end;
-      gap: 20px;
-      color: #d7ebe3;
-      font-size: 13px;
-      font-weight: 750;
-      white-space: nowrap;
-    }
-    .nav-links a:not(.nav-cta):hover { color: #72efb8; }
-    .nav-cta {
-      min-height: 42px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 17px;
-      border-radius: 12px;
-      color: var(--jade-950);
-      background: var(--jade-500);
-      box-shadow: 0 8px 22px rgba(20, 199, 132, 0.2);
-      font-weight: 900;
-    }
-
-    .hero-shell {
-      padding: 46px 0 0;
-      background:
-        radial-gradient(circle at 14% 18%, rgba(20, 199, 132, 0.18), transparent 28%),
-        linear-gradient(180deg, #e9f8f1 0%, #f7faf8 82%);
-    }
-    .hero-banner-card {
-      overflow: hidden;
-      border: 1px solid rgba(7, 75, 56, 0.24);
-      border-radius: var(--radius-lg);
-      background: var(--jade-950);
-      box-shadow: var(--shadow-lg);
-    }
-    .hero-banner-card img {
-      width: 100%;
-      height: auto;
-      aspect-ratio: 4 / 1;
-      object-fit: cover;
-    }
-    .banner-fallback {
-      min-height: 280px;
-      display: grid;
-      place-items: center;
-      padding: 42px;
-      color: var(--white);
-      background: linear-gradient(135deg, var(--jade-950), var(--jade-700));
-      text-align: center;
-      font-size: clamp(30px, 5vw, 64px);
-      font-weight: 900;
-      letter-spacing: -0.04em;
-    }
-
-    .hero-copy-panel {
-      max-width: 930px;
-      margin: 0 auto;
-      padding: 64px 0 76px;
-      text-align: center;
-    }
-    .eyebrow,
-    .section-label {
-      margin-bottom: 12px;
-      color: var(--jade-700);
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-    h1 {
-      max-width: 900px;
-      margin: 0 auto 20px;
-      font-size: clamp(40px, 5.8vw, 70px);
-      line-height: 1.06;
-      letter-spacing: -0.055em;
-      font-weight: 900;
-    }
-    .hero-lead {
-      max-width: 850px;
-      margin: 0 auto 14px;
-      color: #345348;
-      font-size: clamp(18px, 2.15vw, 22px);
-      line-height: 1.55;
-      font-weight: 650;
-    }
-    .hero-description {
-      max-width: 760px;
-      margin: 0 auto 30px;
+      min-width: 0;
       color: var(--muted);
-      font-size: 16px;
+      font-size: 14px;
+      font-weight: 700;
     }
-    .cta-primary-row,
-    .cta-secondary-row {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 12px;
+    .site-nav a:not(.button):hover,
+    .site-nav a:not(.button):focus-visible { color: var(--teal-700); }
+    .site-nav .nav-workspace,
+    .site-nav .nav-locales { display: none; }
+    .nav-locales {
+      gap: 4px;
+      align-items: center;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
     }
-    .cta-secondary-row { margin-top: 12px; }
-    .button {
-      min-height: 50px;
+    .header-actions { display: flex; gap: 8px; align-items: center; }
+    .locale-switcher {
       display: inline-flex;
+      gap: 2px;
+      align-items: center;
+      padding: 2px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .locale-switcher a {
+      display: grid;
+      min-width: 36px;
+      min-height: 36px;
+      place-items: center;
+      padding-inline: 6px;
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .locale-switcher a[aria-current="true"],
+    .locale-switcher a:hover { color: var(--teal-950); background: var(--surface-soft); }
+    .menu-toggle {
+      display: none;
+      width: 44px;
+      min-height: 44px;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--teal-950);
+      background: var(--surface);
+      cursor: pointer;
+    }
+    .menu-toggle svg { width: 20px; height: 20px; }
+
+    .button {
+      display: inline-flex;
+      min-height: 44px;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 0 20px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      color: var(--jade-900);
-      background: var(--white);
-      cursor: pointer;
-      font-weight: 850;
-      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-    }
-    .button:hover { transform: translateY(-2px); border-color: #9ccdb8; box-shadow: var(--shadow-sm); }
-    .button.primary {
-      min-height: 56px;
-      padding-inline: 26px;
-      border-color: var(--jade-600);
-      color: var(--white);
-      background: linear-gradient(135deg, var(--jade-700), var(--jade-600));
-      box-shadow: 0 14px 30px rgba(8, 123, 85, 0.22);
-    }
-    .button.secondary {
-      min-height: 56px;
-      padding-inline: 24px;
-      border-color: #9fc8b6;
-      background: transparent;
-    }
-    .button.subtle { min-height: 42px; padding-inline: 14px; border-color: transparent; background: transparent; font-size: 14px; }
-    .button.light { border-color: transparent; color: var(--jade-950); background: var(--jade-500); }
-
-    .section { padding: 92px 0; }
-    .section.white { background: var(--white); }
-    .section.mint { background: var(--mint); }
-    .section.soft { background: var(--jade-50); }
-    .section.dark { color: var(--white); background: var(--jade-950); }
-    .section-head {
-      max-width: 780px;
-      margin-bottom: 38px;
-    }
-    .section-head.center { margin-inline: auto; text-align: center; }
-    .section.dark .section-label { color: #6beeb5; }
-    h2 {
-      margin-bottom: 14px;
-      font-size: clamp(32px, 4vw, 48px);
-      line-height: 1.12;
-      letter-spacing: -0.04em;
-      font-weight: 900;
-    }
-    h3 {
-      margin-bottom: 9px;
-      font-size: 19px;
-      line-height: 1.35;
-      letter-spacing: -0.015em;
-      font-weight: 850;
-    }
-    .section-copy { margin-bottom: 0; color: var(--muted); font-size: 17px; }
-    .section.dark .section-copy { color: #b9d0c6; }
-
-    .feature-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 18px;
-    }
-    .feature-card,
-    .compact-card {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--white);
-      box-shadow: var(--shadow-sm);
-    }
-    .feature-card {
-      min-height: 245px;
-      padding: 25px;
-      transition: transform 0.18s ease, border-color 0.18s ease;
-    }
-    .feature-card:hover { transform: translateY(-4px); border-color: #99cbb6; }
-    .icon-box {
-      width: 46px;
-      height: 46px;
-      display: grid;
-      place-items: center;
-      margin-bottom: 20px;
-      border-radius: 14px;
-      background: var(--jade-100);
-      font-size: 23px;
-    }
-    .feature-card p,
-    .compact-card p { margin-bottom: 0; color: var(--muted); font-size: 14px; }
-
-    .workflow-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 16px;
-    }
-    .workflow-step {
-      min-height: 225px;
-      padding: 25px;
-      border: 1px solid var(--line-dark);
-      border-radius: var(--radius);
-      background: rgba(255, 255, 255, 0.055);
-    }
-    .step-number {
-      width: 38px;
-      height: 38px;
-      display: grid;
-      place-items: center;
-      margin-bottom: 28px;
-      border: 1px solid rgba(111, 240, 184, 0.36);
-      border-radius: 50%;
-      color: #7cf0bd;
-      font-size: 13px;
-      font-weight: 900;
-    }
-    .workflow-step p { margin-bottom: 0; color: #b9d0c6; font-size: 14px; }
-    .guard-note {
-      margin-top: 22px;
-      padding: 18px 20px;
-      border: 1px solid rgba(245, 185, 76, 0.35);
-      border-radius: 16px;
-      color: #f8e2b8;
-      background: rgba(245, 185, 76, 0.08);
+      padding: 10px 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      color: var(--teal-950);
+      background: var(--surface);
       font-size: 14px;
+      font-weight: 780;
+      line-height: 1.2;
+      cursor: pointer;
+      transition: border-color var(--transition), background var(--transition), color var(--transition), transform var(--transition), box-shadow var(--transition);
     }
+    .button:hover:not(:disabled),
+    .button:focus-visible { border-color: var(--teal-500); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+    .button--primary { border-color: var(--teal-500); color: var(--teal-950); background: var(--teal-500); }
+    .button--primary:hover:not(:disabled),
+    .button--primary:focus-visible { border-color: var(--teal-400); background: var(--teal-400); color: var(--teal-950); }
+    .button--quiet { border-color: transparent; color: var(--teal-700); background: transparent; }
+    .button--quiet:hover:not(:disabled),
+    .button--quiet:focus-visible { border-color: var(--line); color: var(--teal-950); background: var(--surface); }
+    .button:disabled { cursor: not-allowed; opacity: .56; transform: none; }
 
-    .two-column {
+    .hero { padding: clamp(46px, 5vw, 72px) 0 clamp(54px, 6vw, 84px); }
+    .hero-grid {
       display: grid;
-      grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
-      gap: 70px;
-      align-items: start;
+      grid-template-columns: minmax(0, 1.12fr) minmax(420px, .88fr);
+      gap: clamp(30px, 4vw, 56px);
+      align-items: center;
     }
-    .sticky-intro { position: sticky; top: 126px; }
-    .card-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
+    .hero-copy { max-width: 650px; }
+    .hero h1 {
+      max-width: 17ch;
+      margin-bottom: 22px;
+      color: var(--ink);
+      font-size: clamp(42px, 4.3vw, 60px);
+      font-weight: 830;
+      letter-spacing: -.06em;
+      line-height: 1.03;
     }
-    .compact-card { min-height: 178px; padding: 23px; }
-    .compact-card .mini-label {
-      display: inline-flex;
-      margin-bottom: 16px;
-      padding: 5px 9px;
-      border-radius: 999px;
-      color: var(--jade-800);
-      background: var(--jade-100);
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
+    .hero p { max-width: 58ch; margin-bottom: 0; color: var(--muted); font-size: clamp(17px, 1.7vw, 20px); line-height: 1.65; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+    .hero-actions .button { min-height: 52px; padding-inline: 20px; }
+    .hero-note { display: flex; gap: 9px; align-items: flex-start; margin: 22px 0 0; color: var(--muted); font-size: 13px; }
+    .hero-note svg { width: 18px; height: 18px; flex: 0 0 18px; color: var(--teal-500); }
 
-    .capability-list,
-    .trust-list,
-    .pricing-list {
-      display: grid;
-      gap: 13px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    .capability-list li,
-    .trust-list li,
-    .pricing-list li {
-      position: relative;
-      padding-left: 28px;
-    }
-    .capability-list li::before,
-    .trust-list li::before,
-    .pricing-list li::before {
-      content: "✓";
-      position: absolute;
-      left: 0;
-      color: var(--jade-600);
-      font-weight: 950;
-    }
-    .image-doc-panel {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 1px;
+    .workflow-preview {
       overflow: hidden;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--line);
-      box-shadow: var(--shadow-sm);
-    }
-    .capability-item { min-height: 122px; padding: 21px; background: var(--white); }
-    .capability-item strong { display: block; margin-bottom: 5px; }
-    .capability-item span { color: var(--muted); font-size: 14px; }
-
-    .roadmap-shell {
-      padding: 44px;
-      border: 1px solid #bddfce;
       border-radius: var(--radius-lg);
-      background: linear-gradient(135deg, #ffffff 0%, #edf9f3 100%);
-      box-shadow: var(--shadow-sm);
-    }
-    .roadmap-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 28px;
-    }
-    .roadmap-item {
-      min-height: 105px;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.82);
-    }
-    .roadmap-item strong { display: block; margin-bottom: 4px; }
-    .roadmap-item span { color: var(--muted); font-size: 13px; }
-    .status-pill {
-      display: inline-flex;
-      margin-top: 20px;
-      padding: 7px 11px;
-      border-radius: 999px;
-      color: #684a10;
-      background: #fff2cf;
-      font-size: 12px;
-      font-weight: 850;
-    }
-
-    .pricing-shell {
-      display: grid;
-      grid-template-columns: 1fr 0.9fr;
-      gap: 48px;
-      align-items: center;
-    }
-    .pricing-card {
-      padding: 34px;
-      border: 1px solid var(--line-dark);
-      border-radius: var(--radius-lg);
-      background: rgba(255, 255, 255, 0.06);
-    }
-    .pricing-card h3 { color: #7cf0bd; font-size: 24px; }
-    .pricing-card p { color: #bed5cb; }
-    .pricing-list { margin: 24px 0 28px; color: #e5f2ec; }
-    .pricing-list li::before { color: #6beeb5; }
-    .pricing-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-
-    .trust-grid {
-      display: grid;
-      grid-template-columns: 0.8fr 1.2fr;
-      gap: 58px;
-      align-items: center;
-    }
-    .trust-badge {
-      min-height: 330px;
-      display: grid;
-      align-content: center;
-      justify-items: center;
-      padding: 38px;
-      border-radius: var(--radius-lg);
-      color: var(--white);
-      background:
-        radial-gradient(circle at 50% 28%, rgba(20, 199, 132, 0.32), transparent 35%),
-        var(--jade-950);
-      text-align: center;
+      background: var(--surface);
       box-shadow: var(--shadow-lg);
     }
-    .trust-badge-icon {
-      width: 76px;
-      height: 76px;
-      display: grid;
-      place-items: center;
-      margin-bottom: 20px;
-      border: 1px solid rgba(124, 240, 189, 0.38);
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.07);
-      font-size: 32px;
-    }
-    .trust-badge p { max-width: 300px; margin-bottom: 0; color: #bed5cb; }
-    .trust-list { gap: 17px; }
-    .trust-list li { padding: 0 0 17px 32px; border-bottom: 1px solid var(--line); }
+    .preview-topbar { display: flex; gap: 7px; align-items: center; min-height: 48px; padding-inline: 18px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
+    .preview-topbar i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+    .preview-topbar i:first-child { background: var(--teal-500); }
+    .preview-topbar strong { margin-left: 4px; color: var(--teal-700); font-size: 12px; }
+    .preview-body { display: grid; gap: 22px; padding: clamp(22px, 4vw, 34px); }
+    .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .preview-heading strong { color: var(--ink); font-size: 18px; }
+    .preview-heading span { padding: 5px 8px; border-radius: 7px; color: var(--teal-700); background: var(--surface-soft); font-size: 11px; font-weight: 800; }
+    .preview-lines { display: grid; gap: 9px; }
+    .preview-lines i { height: 11px; border-radius: 999px; background: var(--surface-soft); }
+    .preview-lines i:nth-child(1) { width: 92%; }
+    .preview-lines i:nth-child(2) { width: 72%; }
+    .preview-lines i:nth-child(3) { width: 82%; }
+    .preview-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .preview-stages div { display: grid; gap: 5px; min-height: 92px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+    .preview-stages b { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; color: var(--teal-950); background: var(--teal-500); font-size: 12px; }
+    .preview-stages span { color: var(--muted); font-size: 11px; font-weight: 750; line-height: 1.3; }
+    .preview-stages div:nth-child(2) b { background: var(--sky-400); }
+    .preview-stages div:nth-child(3) b { background: var(--surface-soft); }
+    .preview-stages div:nth-child(4) b { background: var(--teal-400); }
 
-    .contact-shell {
-      display: grid;
-      grid-template-columns: 0.82fr 1.18fr;
-      gap: 54px;
-      padding: 48px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-lg);
-      background: var(--white);
-      box-shadow: var(--shadow-lg);
-    }
-    .contact-links { display: grid; gap: 10px; margin-top: 24px; }
-    .contact-links a { color: var(--jade-700); font-weight: 850; }
-    .lead-form { display: grid; gap: 16px; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .section { padding: clamp(72px, 9vw, 120px) 0; }
+    .section--surface { background: var(--surface); }
+    .section--soft { background: var(--surface-soft); }
+    .section-heading { max-width: 710px; margin-bottom: clamp(30px, 5vw, 48px); }
+    .section-heading--center { margin-inline: auto; text-align: center; }
+    h2 { margin-bottom: 14px; color: var(--ink); font-size: clamp(31px, 4.1vw, 48px); font-weight: 820; letter-spacing: -.05em; line-height: 1.08; }
+    h3 { margin-bottom: 8px; color: var(--ink); font-size: 18px; font-weight: 790; letter-spacing: -.025em; line-height: 1.3; }
+    .section-heading p, .section-copy { margin-bottom: 0; color: var(--muted); font-size: 16px; line-height: 1.65; }
+
+    .process-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+    .process-step { position: relative; display: grid; gap: 14px; min-height: 218px; padding: 24px; border-right: 1px solid var(--line); }
+    .process-step:last-child { border-right: 0; }
+    .process-step-number { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; color: var(--teal-950); background: var(--teal-500); font-size: 12px; font-weight: 850; }
+    .process-step:nth-child(2) .process-step-number { background: var(--sky-400); }
+    .process-step:nth-child(3) .process-step-number { background: var(--surface-soft); }
+    .process-step:nth-child(4) .process-step-number { background: var(--teal-400); }
+    .process-step p { margin: 0; color: var(--muted); font-size: 14px; }
+    .process-icon { width: 30px; height: 30px; color: var(--teal-700); }
+
+    .companion-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .companion-card { padding: clamp(24px, 4vw, 34px); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+    .companion-card--workspace { border-color: color-mix(in srgb, var(--teal-500) 52%, var(--line)); }
+    .companion-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 24px; border-radius: 14px; color: var(--teal-700); background: var(--surface-soft); }
+    .companion-icon svg { width: 25px; height: 25px; }
+    .companion-list { display: grid; gap: 10px; margin: 20px 0 0; padding: 0; color: var(--muted); list-style: none; font-size: 14px; }
+    .companion-list li { position: relative; padding-left: 22px; }
+    .companion-list li::before { content: ""; position: absolute; left: 0; top: .48em; width: 7px; height: 7px; border-radius: 50%; background: var(--teal-500); }
+    .companion-card--telegram .companion-list li::before { background: var(--sky-400); }
+    .companion-bridge { max-width: 780px; margin: 20px auto 0; color: var(--muted); text-align: center; font-size: 14px; }
+
+    .capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .capability { min-height: 244px; padding: 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .capability-icon { display: grid; width: 46px; height: 46px; place-items: center; margin-bottom: 20px; border-radius: 13px; color: var(--teal-700); background: var(--surface-soft); }
+    .capability-icon svg { width: 24px; height: 24px; }
+    .capability p { margin-bottom: 18px; color: var(--muted); font-size: 14px; }
+    .capability-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+    .capability-tags li { padding: 5px 7px; border-radius: 7px; color: var(--teal-700); background: var(--surface-soft); font-size: 11px; font-weight: 730; }
+
+    .trust-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+    .trust-list article { min-height: 180px; padding: 24px; border-right: 1px solid var(--line); }
+    .trust-list article:last-child { border-right: 0; }
+    .trust-list svg { width: 28px; height: 28px; margin-bottom: 18px; color: var(--teal-700); }
+    .trust-list p { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .lead-layout { display: grid; grid-template-columns: minmax(0, .72fr) minmax(0, 1.28fr); gap: clamp(32px, 7vw, 76px); align-items: start; }
+    .lead-copy { max-width: 440px; }
+    .lead-links { display: grid; gap: 9px; margin-top: 22px; }
+    .lead-links a { display: inline-flex; gap: 8px; align-items: center; width: fit-content; color: var(--teal-700); font-size: 14px; font-weight: 760; }
+    .lead-links a:hover { color: var(--teal-950); text-decoration: underline; }
+    .lead-form { display: grid; gap: 16px; padding: clamp(22px, 4vw, 34px); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); }
+    .form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     .field { display: grid; gap: 7px; }
-    .field label { font-size: 13px; font-weight: 850; }
-    .field input,
-    .field select,
-    .field textarea {
-      width: 100%;
-      border: 1px solid #c8ddd3;
-      border-radius: 13px;
-      color: var(--ink);
-      background: #fbfdfc;
-      outline: none;
-    }
-    .field input,
-    .field select { min-height: 50px; padding: 0 14px; }
-    .field textarea { min-height: 124px; padding: 13px 14px; resize: vertical; }
-    .field input:focus,
-    .field select:focus,
-    .field textarea:focus { border-color: var(--jade-600); box-shadow: 0 0 0 4px rgba(11, 155, 104, 0.1); }
-    .form-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .field label { color: var(--ink); font-size: 13px; font-weight: 770; }
+    .field input, .field select, .field textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: var(--surface); outline: none; }
+    .field input, .field select { min-height: 48px; padding: 0 13px; }
+    .field textarea { min-height: 128px; padding: 12px 13px; resize: vertical; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--sky-400); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky-400) 24%, transparent); }
+    .form-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
     .form-note { margin: 0; color: var(--muted); font-size: 12px; }
-    .form-status {
-      min-height: 24px;
-      margin: 0;
-      color: var(--jade-800);
-      font-size: 14px;
-      font-weight: 750;
+    .form-status { min-height: 24px; margin: 0; color: var(--success); font-size: 14px; font-weight: 700; }
+    .form-status.error { color: var(--danger); }
+    .form-status a { color: currentColor; text-decoration: underline; }
+
+    .final-cta { padding: clamp(28px, 6vw, 56px); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface-soft); text-align: center; }
+    .final-cta h2 { max-width: 18ch; margin-inline: auto; }
+    .final-cta p { max-width: 56ch; margin: 0 auto 24px; color: var(--muted); }
+    footer { padding: 38px 0 max(38px, calc(24px + env(safe-area-inset-bottom))); color: #b5d1d6; background: var(--teal-950); }
+    .footer-row { display: flex; gap: 30px; align-items: flex-start; justify-content: space-between; }
+    .footer-brand { max-width: 360px; }
+    .footer-brand strong { display: block; color: var(--surface); font-size: 18px; letter-spacing: -.03em; }
+    .footer-brand p { margin: 6px 0 0; color: #a5c4ca; font-size: 13px; }
+    .footer-links { display: grid; justify-items: end; gap: 10px; color: #c8e1e5; font-size: 13px; font-weight: 690; }
+    .footer-links-title { margin: 0; color: var(--surface); font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .footer-resource-list { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14px 18px; }
+    .footer-links a:hover { color: var(--teal-400); }
+
+    @media (max-width: 980px) {
+      .header-row { grid-template-columns: auto minmax(0, 1fr); }
+      .menu-toggle { display: grid; justify-self: end; }
+      .site-nav { display: none; grid-column: 1 / -1; grid-row: 2; justify-content: stretch; gap: 6px; padding: 8px 0 16px; border-top: 1px solid var(--line); }
+      .site-header[data-menu-open="true"] .site-nav { display: grid; }
+      .site-nav a { display: flex; min-height: 44px; align-items: center; padding: 10px 12px; border-radius: 10px; }
+      .site-nav a:hover { background: var(--surface-soft); }
+      .site-nav .button { width: 100%; }
+      .site-nav .nav-workspace { display: inline-flex; }
+      .site-nav .nav-locales { display: inline-flex; }
+      .site-nav .nav-locales a { min-width: 44px; justify-content: center; padding-inline: 8px; border: 1px solid var(--line); }
+      .header-actions { display: none; }
+      .hero-grid, .lead-layout { grid-template-columns: minmax(0, 1fr); }
+      .hero-copy { max-width: 700px; }
+      .workflow-preview { max-width: 680px; }
+      .process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .process-step:nth-child(2) { border-right: 0; }
+      .process-step:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .trust-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .trust-list article:nth-child(2) { border-right: 0; }
+      .trust-list article:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
     }
-    .form-status.error { color: #8a3f27; }
-    .form-status a { text-decoration: underline; }
-
-    footer { padding: 42px 0; color: #c6dcd2; background: #021812; }
-    .footer-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 30px; }
-    .footer-title { display: block; color: var(--white); font-size: 18px; }
-    .footer-copy { max-width: 480px; margin: 6px 0 0; color: #91ada1; font-size: 13px; }
-    .footer-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 16px; font-size: 13px; font-weight: 750; }
-    .footer-links a:hover { color: #6beeb5; }
-
-    @media (max-width: 1050px) {
-      .nav-links { gap: 14px; }
-      .nav-links a:nth-child(4),
-      .nav-links a:nth-child(5) { display: none; }
-      .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .two-column { gap: 40px; }
-    }
-
-    @media (max-width: 780px) {
-      html { scroll-padding-top: 128px; }
-      .container { width: min(100% - 28px, 1180px); }
-      .topbar .container { width: 100%; }
-      .nav-main { min-height: 64px; padding: 0 14px; }
-      .brand { min-width: 0; }
-      .brand-logo, .brand-mark { width: 38px; height: 38px; flex-basis: 38px; border-radius: 10px; }
-      .brand-copy small { display: none; }
-      .nav-links {
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: 64px;
-        min-height: 48px;
-        justify-content: flex-start;
-        gap: 18px;
-        padding: 0 14px;
-        overflow-x: auto;
-        color: #cfe6dc;
-        background: var(--jade-900);
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        scrollbar-width: none;
-      }
-      .nav-links::-webkit-scrollbar { display: none; }
-      .nav-links a:nth-child(4), .nav-links a:nth-child(5) { display: inline-flex; }
-      .nav-cta { min-height: 34px; padding: 0 13px; order: -1; }
-      .hero-shell { padding-top: 76px; }
-      .hero-banner-card { border-radius: 18px; }
-      .hero-copy-panel { padding: 46px 0 62px; }
+    @media (max-width: 680px) {
+      html { scroll-padding-top: 80px; }
+      .container { width: min(100% - 32px, 1180px); }
+      .header-row { min-height: 68px; gap: 12px; }
+      .brand { font-size: 16px; }
+      .brand img { width: 34px; height: 34px; flex-basis: 34px; border-radius: 10px; }
+      .hero { padding: 50px 0 72px; }
+      .hero h1 { max-width: 13ch; font-size: clamp(38px, 11vw, 52px); }
+      .hero p { font-size: 17px; }
+      .hero-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+      .hero-actions .button { width: 100%; }
+      .preview-body { padding: 20px; }
+      .preview-stages { gap: 6px; }
+      .preview-stages div { min-height: 78px; padding: 9px; }
+      .preview-stages span { font-size: 10px; }
       .section { padding: 72px 0; }
-      .two-column,
-      .pricing-shell,
-      .trust-grid,
-      .contact-shell { grid-template-columns: 1fr; gap: 34px; }
-      .sticky-intro { position: static; }
-      .roadmap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .contact-shell { padding: 32px; }
-      .footer-row { flex-direction: column; }
-      .footer-links { justify-content: flex-start; }
+      .companion-grid, .capability-grid { grid-template-columns: minmax(0, 1fr); }
+      .companion-card, .capability { min-height: 0; }
+      .form-row { grid-template-columns: minmax(0, 1fr); }
+      .form-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+      .form-actions .button { width: 100%; }
+      .footer-row { display: grid; }
+      .footer-links { justify-items: start; }
+      .footer-resource-list { justify-content: flex-start; }
     }
-
-    @media (max-width: 560px) {
-      .hero-banner-card img { aspect-ratio: 4 / 1; object-fit: contain; }
-      .banner-fallback { min-height: 160px; padding: 24px; }
-      .hero-copy-panel { overflow: hidden; }
-      h1 {
-        max-width: 100%;
-        font-size: clamp(31px, 8.6vw, 38px);
-        line-height: 1.14;
-        letter-spacing: -0.045em;
-        overflow-wrap: break-word;
-      }
-      .hero-lead { font-size: 16px; }
-      .hero-lead,
-      .hero-description { overflow-wrap: break-word; }
-      .cta-primary-row,
-      .cta-secondary-row { display: grid; grid-template-columns: 1fr; }
-      .button, .button.primary, .button.secondary { width: 100%; }
-      .button.subtle { min-height: 44px; border-color: var(--line); background: var(--white); }
-      .feature-grid,
-      .workflow-grid,
-      .card-grid,
-      .image-doc-panel,
-      .roadmap-grid,
-      .form-row { grid-template-columns: 1fr; }
-      .feature-card { min-height: 0; }
-      .workflow-step { min-height: 0; }
-      .roadmap-shell, .pricing-card, .contact-shell { padding: 24px; border-radius: 20px; }
-      .trust-badge { min-height: 270px; padding: 28px; }
-      .pricing-actions { display: grid; }
+    @media (max-width: 460px) {
+      .process-grid, .trust-list { grid-template-columns: minmax(0, 1fr); }
+      .process-step, .process-step:nth-child(2), .trust-list article, .trust-list article:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--line); }
+      .process-step:last-child, .trust-list article:last-child { border-bottom: 0; }
+      .process-step { min-height: 0; padding: 20px; }
+      .trust-list article { min-height: 0; }
+      .locale-switcher { display: none; }
     }
-
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      *, *::before, *::after { transition-duration: 0.01ms !important; }
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; scroll-behavior: auto !important; }
     }
   </style>
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Bỏ qua điều hướng</a>
-
-  <header class="topbar">
-    <div class="container nav-main">
-      <a class="brand" href="#top" aria-label="TOAN AAS — Trang chủ">
-        <img src="/logo.png?v=20260619" alt="" class="brand-logo" width="44" height="44" onerror="this.hidden=true;this.nextElementSibling.hidden=false">
-        <span class="brand-mark" hidden aria-hidden="true">TA</span>
-        <span class="brand-copy">TOAN AAS<small>AI Automation System</small></span>
+  <a class="skip-link" href="#main-content" data-i18n="skip">Bỏ qua điều hướng</a>
+  <header class="site-header" data-menu-open="false">
+    <div class="container header-row">
+      <a class="brand" href="#top" aria-label="TOAN AAS">
+        <img src="/logo.png?v=20260727" alt="" width="38" height="38" onerror="this.hidden=true;this.nextElementSibling.style.display='grid'">
+        <span class="brand-mark" aria-hidden="true">TA</span>
+        <span>TOAN AAS</span>
       </a>
-      <nav class="nav-links" aria-label="Điều hướng chính">
-        <a href="#features">Tính năng</a>
-        <a href="#video">Video</a>
-        <a href="#audio">Âm thanh</a>
-        <a href="#pricing">Thanh toán</a>
-        <a href="#documents">Tài liệu</a>
-        <a href="#contact">Hỗ trợ</a>
-        <a class="nav-cta" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Mở bot</a>
+      <nav id="site-menu" class="site-nav" aria-label="Điều hướng chính" data-i18n-aria="nav.label">
+        <a href="#how-it-works" data-i18n="nav.workflow">Quy trình</a>
+        <a href="#capabilities" data-i18n="nav.capabilities">Năng lực</a>
+        <a href="#support" data-i18n="nav.support">Hỗ trợ</a>
+        <a href="https://t.me/toanaasbot" target="_blank" rel="noopener" data-i18n="nav.telegram">Telegram</a>
+        <a class="button button--primary nav-workspace" href="https://app.toanaas.vn/login" data-i18n="nav.workspace">Mở Workspace</a>
+        <div class="nav-locales" role="group" aria-label="Ngôn ngữ giao diện" data-i18n-aria="locale.label">
+          <a href="?lang=vi" data-locale="vi" aria-current="true">VI</a>
+          <a href="?lang=en" data-locale="en" aria-current="false">EN</a>
+          <a href="?lang=zh" data-locale="zh" aria-current="false">中文</a>
+        </div>
       </nav>
+      <div class="header-actions">
+        <nav class="locale-switcher" aria-label="Ngôn ngữ giao diện" data-i18n-aria="locale.label">
+          <a href="?lang=vi" data-locale="vi" aria-current="true">VI</a>
+          <a href="?lang=en" data-locale="en" aria-current="false">EN</a>
+          <a href="?lang=zh" data-locale="zh" aria-current="false">中文</a>
+        </nav>
+        <a class="button button--primary" href="https://app.toanaas.vn/login" data-i18n="nav.workspace">Mở Workspace</a>
+      </div>
+      <button class="menu-toggle" type="button" aria-label="Mở menu" data-i18n-aria="nav.menuOpen" aria-controls="site-menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
     </div>
   </header>
 
   <main id="main-content">
-    <section id="top" class="hero-shell" aria-label="Giới thiệu TOAN AAS">
-      <div class="container">
-        <div class="hero-banner-card">
-          <img src="/banner.png?v=20260619" alt="TOAN AAS — Hệ thống tự động hóa AI" width="2048" height="512" fetchpriority="high" onerror="this.hidden=true;this.nextElementSibling.hidden=false">
-          <div class="banner-fallback" hidden>TOAN AAS — AI Automation System</div>
-        </div>
-
-        <div class="hero-copy-panel">
-          <div class="eyebrow">Nền tảng sáng tạo &amp; vận hành AI</div>
-          <h1>Hệ thống tự động hóa AI cho nội dung, video, âm thanh và vận hành số</h1>
-          <p class="hero-lead">TOAN AAS giúp cá nhân, creator, shop và doanh nghiệp tạo hình ảnh, video, giọng đọc, nhạc, phụ đề, tài liệu và gói nội dung marketing bằng AI trong một quy trình dễ dùng.</p>
-          <p class="hero-description">Bản hướng dẫn cập nhật ngày 23/06/2026: khách chọn công cụ, nhập ý tưởng, xem báo giá, nghe hoặc xem thử ngắn và xác nhận trước khi hệ thống xử lý bản đầy đủ.</p>
-          <div class="cta-primary-row">
-            <a class="button primary" href="https://t.me/toanaasbot" target="_blank" rel="noopener">🚀 Mở bot Telegram</a>
-            <a class="button secondary" href="/download/huong-dan-toan-aas.docx">📘 Hướng dẫn V2 cập nhật</a>
+    <section id="top" class="hero" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <h1 id="hero-title" data-i18n="hero.title">Biến ý tưởng thành nội dung và quy trình có kiểm soát.</h1>
+          <p data-i18n="hero.body">TOAN AAS giúp bạn tổ chức nội dung, tài sản và công việc AI theo từng bước rõ ràng để dễ bắt đầu, dễ rà soát và dễ bàn giao.</p>
+          <div class="hero-actions">
+            <a class="button button--primary" href="https://app.toanaas.vn/login" data-i18n="hero.workspace">Mở Workspace</a>
+            <a class="button" href="https://t.me/toanaasbot" target="_blank" rel="noopener" data-i18n="hero.telegram">Dùng Telegram nhanh</a>
           </div>
-          <div class="cta-secondary-row">
-            <a class="button subtle" href="#pricing">💰 Bảng giá / Nạp Xu</a>
-            <a class="button subtle" href="https://t.me/toanaas" target="_blank" rel="noopener">👤 Liên hệ admin</a>
-          </div>
+          <p class="hero-note"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v5c0 5.1 3.4 8.8 8 10 4.6-1.2 8-4.9 8-10V6l-8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg><span data-i18n="hero.note">Bạn luôn nhìn thấy bước tiếp theo; trạng thái chưa sẵn sàng được nói rõ, không được thay bằng kết quả giả.</span></p>
         </div>
-      </div>
-    </section>
-
-    <section id="features" class="section white">
-      <div class="container">
-        <div class="section-head center">
-          <div class="section-label">Hệ sinh thái TOAN AAS</div>
-          <h2>Một nơi cho toàn bộ quy trình sáng tạo số</h2>
-          <p class="section-copy">Chọn đúng công cụ, nhận báo giá rõ ràng và kiểm soát từng bước trước khi xử lý bản đầy đủ.</p>
-        </div>
-        <div class="feature-grid">
-          <article class="feature-card"><div class="icon-box">🎬</div><h3>Tạo video AI</h3><p>Tạo video từ ý tưởng, prompt, ảnh hoặc workflow có sẵn. Hệ thống hỗ trợ chọn add-on, xem thử ngắn và xác nhận trước khi xuất bản đầy đủ.</p></article>
-          <article class="feature-card"><div class="icon-box">📈</div><h3>Trend &amp; Storyboard</h3><p>Gợi ý trend, concept, storyboard, chuyển động camera, caption và hashtag cho Facebook, TikTok, YouTube.</p></article>
-          <article class="feature-card"><div class="icon-box">🎧</div><h3>Studio âm thanh</h3><p>Văn bản thành giọng nói, giọng nói thành văn bản, kho voice, tạo voice riêng, nhạc nền và bài hát có lời.</p></article>
-          <article class="feature-card"><div class="icon-box">🌐</div><h3>Phụ đề / Dịch / Lồng tiếng</h3><p>Tạo phụ đề, dịch phụ đề, lồng tiếng và chuẩn bị nội dung đa ngôn ngữ cho video.</p></article>
-          <article class="feature-card"><div class="icon-box">🖼</div><h3>Hình ảnh AI</h3><p>Tạo ảnh, chỉnh sửa ảnh bằng AI, cắt hoặc đổi tỉ lệ, thêm chữ/logo và nâng chất lượng ảnh.</p></article>
-          <article class="feature-card"><div class="icon-box">📄</div><h3>Tài liệu / PDF</h3><p>Công cụ tài liệu, ghi chú, PDF, gộp PDF và xử lý file phục vụ vận hành.</p></article>
-          <article class="feature-card"><div class="icon-box">💰</div><h3>Xu &amp; Thanh toán</h3><p>Nạp Xu, kiểm tra số dư, báo giá trước khi xử lý và chỉ trừ Xu sau bước xác nhận theo chính sách.</p></article>
-          <article class="feature-card"><div class="icon-box">🤖</div><h3>Marketing tự động</h3><p>Định hướng gói nội dung marketing, caption, lịch đăng, chiến dịch và tự động hóa đăng bài sau khi khách kết nối tài khoản và xác nhận.</p></article>
-        </div>
-      </div>
-    </section>
-
-    <section id="video" class="section dark">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-label">Video workflow</div>
-          <h2>Quy trình tạo video TOAN AAS</h2>
-          <p class="section-copy">Một luồng rõ ràng từ ý tưởng đến preview và xác nhận, giúp khách biết gói, số cảnh và tổng Xu trước khi hệ thống xử lý.</p>
-        </div>
-        <div class="workflow-grid">
-          <article class="workflow-step"><div class="step-number">01</div><h3>Chọn loại video</h3><p>Trend, prompt, storyboard, ảnh thành video, tự quay hoặc đổi cảnh, hoặc video beta.</p></article>
-          <article class="workflow-step"><div class="step-number">02</div><h3>Nhập ý tưởng hoặc upload file</h3><p>Nhập mô tả, ảnh, video nguồn hoặc nội dung sản phẩm cần triển khai.</p></article>
-          <article class="workflow-step"><div class="step-number">03</div><h3>Chọn add-on</h3><p>Giọng đọc, nhạc, phụ đề, dịch, lồng tiếng, SFX hoặc media riêng của khách.</p></article>
-          <article class="workflow-step"><div class="step-number">04</div><h3>Chọn gói và xem hóa đơn</h3><p>Video có 9 gói từ 200 Xu đến 1500 Xu; add-on miễn phí hoặc có phí; tổng Xu được hiển thị rõ ràng.</p></article>
-          <article class="workflow-step"><div class="step-number">05</div><h3>Nghe hoặc xem thử ngắn</h3><p>Preview tối đa 6 giây, không gửi full output trước bước xác nhận.</p></article>
-          <article class="workflow-step"><div class="step-number">06</div><h3>Xác nhận xuất bản đầy đủ</h3><p>Hệ thống chỉ tiếp tục xử lý bản đầy đủ sau khi khách xác nhận.</p></article>
-        </div>
-        <div class="guard-note"><strong>Gói video & giảm theo cảnh:</strong> 1 cảnh khoảng 6 giây. 3 cảnh khoảng 18 giây, 5 cảnh khoảng 30 giây, 10 cảnh khoảng 60 giây, 20 cảnh khoảng 120 giây. Ví dụ gói Cơ bản 300 Xu/cảnh, 3 cảnh giảm 10% còn 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.</div>
-      </div>
-    </section>
-
-    <section id="audio" class="section mint">
-      <div class="container two-column">
-        <div class="sticky-intro">
-          <div class="section-label">Voice, music &amp; sound</div>
-          <h2>Studio âm thanh TOAN AAS</h2>
-          <p class="section-copy">Từ chọn giọng, nhập text đến nghe thử; từ nhạc nền theo thời lượng đến bài hát có lời theo phạm vi khách chọn.</p>
-          <ul class="capability-list" style="margin-top:26px;">
-            <li>Voice riêng lần đầu có thể được mở dùng thử theo chính sách.</li>
-            <li>Nhạc có lựa chọn 15, 30, 60 giây hoặc thời lượng tùy chỉnh.</li>
-            <li>Bài hát có lời hỗ trợ theo giây, nửa bài hoặc full bài.</li>
-            <li>Preview là bản nghe thử ngắn, không phải bản đầy đủ.</li>
-          </ul>
-        </div>
-        <div class="card-grid">
-          <article class="compact-card"><span class="mini-label">Giọng đọc</span><h3>Văn bản thành giọng nói</h3><p>Chọn giọng, nhập nội dung, kiểm tra cấu hình và nghe bản thử ngắn trước khi xác nhận.</p></article>
-          <article class="compact-card"><span class="mini-label">Ghi âm</span><h3>Giọng nói thành văn bản</h3><p>Chuyển audio thành nội dung chữ để làm phụ đề, ghi chú hoặc tái sử dụng nội dung.</p></article>
-          <article class="compact-card"><span class="mini-label">Voice</span><h3>Kho voice &amp; voice riêng</h3><p>Chọn voice có sẵn hoặc tạo voice riêng theo phạm vi sử dụng hợp lệ và được kiểm soát.</p></article>
-          <article class="compact-card"><span class="mini-label">Music</span><h3>Nhạc nền AI</h3><p>Tạo nhạc theo phong cách và thời lượng 15, 30, 60 giây hoặc tùy chỉnh.</p></article>
-          <article class="compact-card"><span class="mini-label">Song</span><h3>Bài hát có lời</h3><p>Chuẩn bị ý tưởng, lời và phạm vi theo giây, nửa bài hoặc full bài trước khi xử lý.</p></article>
-          <article class="compact-card"><span class="mini-label">Library</span><h3>Kho nhạc / SFX / Media</h3><p>Hỗ trợ chọn tài nguyên âm thanh và media phù hợp cho từng nội dung hoặc video.</p></article>
-        </div>
-      </div>
-    </section>
-
-    <section id="documents" class="section white">
-      <div class="container two-column">
-        <div>
-          <div class="section-label">Image &amp; document tools</div>
-          <h2>Hình ảnh &amp; Tài liệu</h2>
-          <p class="section-copy">Những công cụ thiết thực để tạo, chỉnh sửa và chuẩn bị tài sản số cho công việc hằng ngày. Một số chức năng được hỗ trợ hoặc đang mở dần theo trạng thái hệ thống.</p>
-          <div class="cta-secondary-row" style="justify-content:flex-start;margin-top:26px;">
-            <a class="button secondary" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Thử trong bot</a>
-            <a class="button subtle" href="/download/huong-dan-toan-aas.docx">Xem hướng dẫn V2 cập nhật</a>
-          </div>
-        </div>
-        <div class="image-doc-panel">
-          <div class="capability-item"><strong>✨ Tạo ảnh nhanh</strong><span>Tạo hình ảnh từ ý tưởng và prompt.</span></div>
-          <div class="capability-item"><strong>🪄 Chỉnh sửa ảnh AI</strong><span>Hỗ trợ chỉnh sửa theo yêu cầu cụ thể.</span></div>
-          <div class="capability-item"><strong>✂️ Cắt / đổi tỉ lệ</strong><span>Chuẩn bị ảnh cho nhiều nền tảng.</span></div>
-          <div class="capability-item"><strong>🏷 Thêm chữ / logo</strong><span>Tạo phiên bản truyền thông nhất quán.</span></div>
-          <div class="capability-item"><strong>🔎 Nâng chất lượng AI</strong><span>Hỗ trợ cải thiện độ rõ và kích thước ảnh.</span></div>
-          <div class="capability-item"><strong>📚 Ghi chú / PDF</strong><span>Tài liệu, chuyển đổi, gộp và xử lý PDF.</span></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="marketing" class="section soft">
-      <div class="container">
-        <div class="roadmap-shell">
-          <div class="section-label">Định hướng phát triển</div>
-          <h2>Marketing Automation Roadmap</h2>
-          <p class="section-copy">TOAN AAS hướng tới quy trình từ tạo video đến gợi ý nội dung đăng bài, caption, hashtag, lịch đăng, phân tích hiệu quả và tự động hóa chiến dịch sau khi khách kết nối tài khoản và xác nhận.</p>
-          <div class="roadmap-grid">
-            <div class="roadmap-item"><strong>Gợi ý trend</strong><span>Khám phá góc nội dung phù hợp.</span></div>
-            <div class="roadmap-item"><strong>Caption &amp; hashtag</strong><span>Chuẩn bị gói nội dung cho từng nền tảng.</span></div>
-            <div class="roadmap-item"><strong>Lịch đăng bài</strong><span>Lên kế hoạch nội dung có kiểm soát.</span></div>
-            <div class="roadmap-item"><strong>Kết nối social</strong><span>Đang chuẩn bị luồng kết nối tài khoản.</span></div>
-            <div class="roadmap-item"><strong>Duyệt trước khi đăng</strong><span>Khách kiểm tra và xác nhận trước hành động.</span></div>
-            <div class="roadmap-item"><strong>Ads assistant</strong><span>Định hướng giai đoạn sau, chưa tự chạy quảng cáo.</span></div>
-          </div>
-          <span class="status-pill">Đang phát triển — không tự đăng hoặc chạy quảng cáo khi chưa có kết nối và xác nhận</span>
-        </div>
-      </div>
-    </section>
-
-    <section id="pricing" class="section dark">
-      <div class="container pricing-shell">
-        <div>
-          <div class="section-label">Xu &amp; thanh toán</div>
-          <h2>Biết chi phí trước khi hệ thống xử lý</h2>
-          <p class="section-copy">Xu là đơn vị sử dụng trong bot TOAN AAS. 1 Xu = 100đ. Giá cuối cùng được hiển thị theo công cụ, gói, số cảnh và add-on khách chọn.</p>
-        </div>
-        <div class="pricing-card">
-          <h3>Nguyên tắc rõ ràng</h3>
-          <ul class="pricing-list">
-            <li>Bot luôn báo giá trước khi xử lý; chỉ trừ Xu sau khi khách xác nhận và có kết quả hợp lệ.</li>
-            <li>Giọng nói: audio từ voice 0.10 Xu/từ, tối thiểu 20 từ; voice riêng đầu tiên miễn phí, từ voice thứ 2 là 50 Xu.</li>
-            <li>Nhạc nền AI: 100 / 150 / 200 Xu. Bài hát có lời: 200 / 250 / 300 Xu.</li>
-            <li>Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu. Gói Trải nghiệm 200 Xu dùng để thử ý tưởng nhanh.</li>
-            <li>Phụ đề gốc tự động miễn phí; dịch phụ đề 0.1 Xu/ký tự; lồng tiếng giọng mặc định 0.10 Xu/ký tự; lồng tiếng voice riêng 0.20 Xu/ký tự.</li>
-            <li>Bảng giá tạo ảnh: 50, 150, 200, 300, 400, 500 và 600 Xu.</li>
-            <li>Chiết khấu theo số lượng/ký tự: trên 1.000 ký tự giảm 10%, trên 10.000 ký tự giảm 20%; chiết khấu thành viên áp dụng theo hạng hiện có nếu đang mở.</li>
-            <li>Ví dụ: dịch phụ đề 2.000 ký tự = 200 Xu, giảm 10%, còn 180 Xu; gói video Cơ bản 300 Xu làm 3 cảnh giảm 10% còn 810 Xu.</li>
-            <li>Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam; không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.</li>
-          </ul>
-          <div class="pricing-actions">
-            <a class="button light" href="https://t.me/toanaasbot" target="_blank" rel="noopener">💰 Nạp Xu trong bot</a>
-            <a class="button" href="/pricing">📊 Xem bảng giá</a>
-            <a class="button" href="/guide">📘 Xem hướng dẫn</a>
-            <a class="button subtle" href="/download/bang-gia-toan-aas.md">📥 Tải bảng giá</a>
-            <a class="button subtle" href="/download/huong-dan-su-dung-toan-aas.md">📘 Tải hướng dẫn</a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="trust" class="section white">
-      <div class="container trust-grid">
-        <div class="trust-badge">
-          <div class="trust-badge-icon">🛡</div>
-          <h2>Minh bạch ở từng bước</h2>
-          <p>Khách biết giá, được xem hoặc nghe thử ngắn và xác nhận trước khi xử lý bản đầy đủ.</p>
-        </div>
-        <div>
-          <div class="section-label">An toàn &amp; tin cậy</div>
-          <h2>AI có kiểm soát, vận hành có trách nhiệm</h2>
-          <ul class="trust-list">
-            <li>Báo giá trước khi xử lý.</li>
-            <li>Preview ngắn trước khi xuất bản đầy đủ.</li>
-            <li>Không tự đăng bài hoặc chạy quảng cáo nếu khách chưa kết nối và xác nhận.</li>
-            <li>Không hỗ trợ deepfake, gian mạo danh tính hoặc nội dung vi phạm.</li>
-            <li>Nội dung cần tuân thủ quyền sử dụng, bản quyền và chính sách nền tảng.</li>
-            <li>Khi dịch vụ chưa sẵn sàng, hệ thống báo rõ và không trừ Xu sai.</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <section id="contact" class="section mint">
-      <div class="container contact-shell">
-        <div>
-          <div class="section-label">Liên hệ &amp; tư vấn</div>
-          <h2>Bạn muốn bắt đầu từ đâu?</h2>
-          <p class="section-copy">Gửi nhu cầu để TOAN AAS tư vấn công cụ, gói hoặc workflow phù hợp. Không cần mô tả kỹ thuật.</p>
-          <div class="contact-links">
-            <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">→ Mở bot @toanaasbot</a>
-            <a href="https://t.me/toanaas" target="_blank" rel="noopener">→ Nhắn trực tiếp admin</a>
-          </div>
-        </div>
-
-        <form id="lead-form" class="lead-form">
-          <div class="form-row">
-            <div class="field">
-              <label for="lead-name">Tên</label>
-              <input id="lead-name" name="name" autocomplete="name" minlength="2" maxlength="120" required placeholder="Tên của bạn">
-            </div>
-            <div class="field">
-              <label for="lead-phone">Số điện thoại / Zalo</label>
-              <input id="lead-phone" name="phone" autocomplete="tel" minlength="6" maxlength="30" required placeholder="Số liên hệ">
+        <aside class="workflow-preview" aria-label="Quy trình minh họa" data-i18n-aria="preview.label">
+          <div class="preview-topbar"><i></i><i></i><i></i><strong data-i18n="preview.app">TOAN AAS / Workspace</strong></div>
+          <div class="preview-body">
+            <div class="preview-heading"><strong data-i18n="preview.title">Một dự án, một đường đi rõ ràng</strong><span data-i18n="preview.draft">Bản nháp</span></div>
+            <div class="preview-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="preview-stages" aria-label="Bốn giai đoạn quy trình" data-i18n-aria="preview.stagesLabel">
+              <div><b>1</b><span data-i18n="workflow.draft">Bản nháp</span></div>
+              <div><b>2</b><span data-i18n="workflow.estimate">Ước tính</span></div>
+              <div><b>3</b><span data-i18n="workflow.confirm">Xác nhận</span></div>
+              <div><b>4</b><span data-i18n="workflow.delivery">Bàn giao</span></div>
             </div>
           </div>
-          <div class="field">
-            <label for="lead-topic">Nền tảng / chủ đề quan tâm</label>
-            <select id="lead-topic" name="topic" required>
-              <option value="" selected disabled>Chọn một chủ đề</option>
-              <option>Video AI</option>
-              <option>Studio âm thanh</option>
-              <option>Hình ảnh AI</option>
-              <option>Tài liệu / PDF</option>
-              <option>Marketing automation</option>
-              <option>Nạp Xu / hỗ trợ tài khoản</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="lead-need">Nhu cầu</label>
-            <textarea id="lead-need" name="need" maxlength="1000" required placeholder="Ví dụ: cần làm video giới thiệu sản phẩm có voice và phụ đề..."></textarea>
-          </div>
-          <div class="form-actions">
-            <button id="lead-submit" class="button primary" type="submit">Gửi nhu cầu</button>
-            <p class="form-note">Thông tin chỉ dùng để TOAN AAS liên hệ tư vấn.</p>
-          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="how-it-works" class="section section--surface" aria-labelledby="workflow-title">
+      <div class="container">
+        <div class="section-heading section-heading--center"><h2 id="workflow-title" data-i18n="workflow.title">Từ yêu cầu đến bàn giao theo 4 bước</h2><p data-i18n="workflow.body">Mỗi bước giúp bạn biết mình đang ở đâu và cần làm gì tiếp theo.</p></div>
+        <div class="process-grid">
+          <article class="process-step"><span class="process-step-number">1</span><svg class="process-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l3 3v15H6z"/><path d="M15 3v4h4M9 12h6M9 16h6"/></svg><div><h3 data-i18n="workflow.draft">Bản nháp</h3><p data-i18n="workflow.draftBody">Nêu mục tiêu, bối cảnh và điều bạn muốn tạo.</p></div></article>
+          <article class="process-step"><span class="process-step-number">2</span><svg class="process-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h2M14 11h2M8 15h2M14 15h2M8 18h8"/></svg><div><h3 data-i18n="workflow.estimate">Ước tính</h3><p data-i18n="workflow.estimateBody">Xem phạm vi, điều kiện và chi phí được hệ thống trả về.</p></div></article>
+          <article class="process-step"><span class="process-step-number">3</span><svg class="process-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6v5c0 5.1 3.4 8.8 8 10 4.6-1.2 8-4.9 8-10V6l-8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg><div><h3 data-i18n="workflow.confirm">Xác nhận</h3><p data-i18n="workflow.confirmBody">Bạn kiểm tra và xác nhận trước khi một tác vụ được tiếp tục.</p></div></article>
+          <article class="process-step"><span class="process-step-number">4</span><svg class="process-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="m8 12 3 3 5-6"/></svg><div><h3 data-i18n="workflow.delivery">Bàn giao</h3><p data-i18n="workflow.deliveryBody">Chỉ khi dữ liệu hoặc tệp hợp lệ, trạng thái mới được hiển thị là hoàn tất.</p></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="companion-title">
+      <div class="container">
+        <div class="section-heading section-heading--center"><h2 id="companion-title" data-i18n="companion.title">Workspace cho công việc chuyên sâu. Telegram cho thao tác nhanh khi cần.</h2><p data-i18n="companion.body">Hai bề mặt bổ trợ nhau, nhưng mỗi bề mặt có vai trò rõ ràng.</p></div>
+        <div class="companion-grid">
+          <article class="companion-card companion-card--workspace"><span class="companion-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></span><h3 data-i18n="companion.workspaceTitle">Workspace</h3><p class="section-copy" data-i18n="companion.workspaceBody">Dành cho dự án, tài sản, lịch sử, phê duyệt và công việc cần theo dõi rõ ràng.</p><ul class="companion-list"><li data-i18n="companion.workspaceOne">Làm việc theo dự án và cấu trúc</li><li data-i18n="companion.workspaceTwo">Rà soát lịch sử và trạng thái</li><li data-i18n="companion.workspaceThree">Quản lý tài sản riêng tư</li></ul></article>
+          <article class="companion-card companion-card--telegram"><span class="companion-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21 3-7.5 18-3.6-7.4L3 10.5z"/><path d="m9.9 13.6 4.4-4.2"/></svg></span><h3 data-i18n="companion.telegramTitle">Telegram</h3><p class="section-copy" data-i18n="companion.telegramBody">Dành cho thao tác ngắn, thông báo và đường vào nhanh khi bạn đang di chuyển.</p><ul class="companion-list"><li data-i18n="companion.telegramOne">Bắt đầu nhanh từ cuộc trò chuyện</li><li data-i18n="companion.telegramTwo">Nhận thông báo khi phù hợp</li><li data-i18n="companion.telegramThree">Mở lại Workspace cho việc chi tiết</li></ul></article>
+        </div>
+        <p class="companion-bridge" data-i18n="companion.note">Telegram không giới hạn Workspace; Workspace cũng không giả định dữ liệu Telegram trước khi liên kết đã được xác minh.</p>
+      </div>
+    </section>
+
+    <section id="capabilities" class="section section--soft" aria-labelledby="capabilities-title">
+      <div class="container">
+        <div class="section-heading"><h2 id="capabilities-title" data-i18n="capabilities.title">Ba nhóm công việc, một cách làm rõ ràng</h2><p data-i18n="capabilities.body">Chọn công cụ theo mục tiêu; trạng thái sẵn sàng luôn do hệ thống hiển thị rõ.</p></div>
+        <div class="capability-grid">
+          <article class="capability"><span class="capability-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l3 3v15H6z"/><path d="M15 3v4h4M9 12h6M9 16h6"/></svg></span><h3 data-i18n="capabilities.contentTitle">Nội dung</h3><p data-i18n="capabilities.contentBody">Lên ý tưởng, phác thảo, biên tập, caption và gói nội dung cho công việc truyền thông.</p><ul class="capability-tags"><li data-i18n="tag.brief">Brief</li><li data-i18n="tag.caption">Caption</li><li data-i18n="tag.script">Kịch bản</li></ul></article>
+          <article class="capability"><span class="capability-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="15" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 17 5-5 3 3 3-4 5 6"/></svg></span><h3 data-i18n="capabilities.visualTitle">Hình ảnh &amp; video</h3><p data-i18n="capabilities.visualBody">Chuẩn bị hướng sáng tạo, hình tham chiếu, cảnh quay và tài sản cho từng dự án.</p><ul class="capability-tags"><li data-i18n="tag.image">Hình ảnh</li><li data-i18n="tag.storyboard">Storyboard</li><li data-i18n="tag.video">Video</li></ul></article>
+          <article class="capability"><span class="capability-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 18a4 4 0 0 0 4-4V7a4 4 0 0 0-8 0v7a4 4 0 0 0 4 4Z"/><path d="M5 12v2a7 7 0 0 0 14 0v-2M12 21v-3"/></svg></span><h3 data-i18n="capabilities.audioTitle">Giọng nói &amp; tài liệu</h3><p data-i18n="capabilities.audioBody">Chuẩn bị kịch bản, bản ghi, phụ đề và tài liệu theo ngôn ngữ cùng định dạng cần dùng.</p><ul class="capability-tags"><li data-i18n="tag.voice">Giọng nói</li><li data-i18n="tag.subtitle">Phụ đề</li><li data-i18n="tag.document">Tài liệu</li></ul></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--surface" aria-labelledby="trust-title">
+      <div class="container">
+        <div class="section-heading section-heading--center"><h2 id="trust-title" data-i18n="trust.title">Rõ ràng về trạng thái, an tâm khi làm việc</h2><p data-i18n="trust.body">TOAN AAS ưu tiên thông tin có thể kiểm tra thay vì làm cho màn hình trông có vẻ hoàn tất.</p></div>
+        <div class="trust-list">
+          <article><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6v5c0 5.1 3.4 8.8 8 10 4.6-1.2 8-4.9 8-10V6l-8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg><h3 data-i18n="trust.reviewTitle">Rà soát trước</h3><p data-i18n="trust.reviewBody">Bạn xác nhận khi một quy trình yêu cầu sự đồng ý rõ ràng.</p></article>
+          <article><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5m0 14h16M8 15l3-3 3 2 5-6"/></svg><h3 data-i18n="trust.statusTitle">Trạng thái rõ</h3><p data-i18n="trust.statusBody">Tính năng đang bảo vệ hoặc chưa sẵn sàng được nói rõ.</p></article>
+          <article><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg><h3 data-i18n="trust.historyTitle">Lịch sử có ngữ cảnh</h3><p data-i18n="trust.historyBody">Không thay dữ liệu hiện tại bằng bản ghi cũ hoặc kết quả suy đoán.</p></article>
+          <article><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><h3 data-i18n="trust.privacyTitle">Tôn trọng riêng tư</h3><p data-i18n="trust.privacyBody">Liên kết và quyền truy cập chỉ được mở theo điều kiện đã xác minh.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="support" class="section" aria-labelledby="lead-title">
+      <div class="container lead-layout">
+        <div class="lead-copy"><h2 id="lead-title" data-i18n="lead.title">Cần chọn đúng cách bắt đầu?</h2><p class="section-copy" data-i18n="lead.body">Gửi nhu cầu ngắn gọn để nhận hướng dẫn về công cụ hoặc quy trình phù hợp. Bạn không cần biết thuật ngữ kỹ thuật.</p><div class="lead-links"><a href="https://t.me/toanaasbot" target="_blank" rel="noopener" data-i18n="lead.telegram">Mở bot Telegram</a><a href="/guide" data-i18n="lead.guide">Xem hướng dẫn sử dụng</a><a href="/pricing" data-i18n="lead.pricing">Xem bảng giá hiện hành</a></div></div>
+        <form id="lead-form" class="lead-form" method="post">
+          <div class="form-row"><div class="field"><label for="lead-name" data-i18n="lead.name">Tên</label><input id="lead-name" name="name" autocomplete="name" minlength="2" maxlength="120" required placeholder="Tên của bạn" data-i18n-placeholder="lead.namePlaceholder"></div><div class="field"><label for="lead-phone" data-i18n="lead.phone">Số điện thoại / Zalo</label><input id="lead-phone" name="phone" autocomplete="tel" inputmode="tel" minlength="6" maxlength="30" required placeholder="Số liên hệ" data-i18n-placeholder="lead.phonePlaceholder"></div></div>
+          <div class="field"><label for="lead-topic" data-i18n="lead.topic">Chủ đề quan tâm</label><select id="lead-topic" name="topic" required><option value="" selected disabled data-i18n="lead.topicPlaceholder">Chọn một chủ đề</option><option value="Video AI" data-i18n="topic.videoAi">Video AI</option><option value="Studio âm thanh" data-i18n="topic.audioStudio">Studio âm thanh</option><option value="Hình ảnh AI" data-i18n="topic.imageAi">Hình ảnh AI</option><option value="Tài liệu / PDF" data-i18n="topic.documents">Tài liệu / PDF</option><option value="Marketing automation" data-i18n="topic.marketingAutomation">Marketing automation</option><option value="Nạp Xu / hỗ trợ tài khoản" data-i18n="topic.walletSupport">Nạp Xu / hỗ trợ tài khoản</option></select></div>
+          <div class="field"><label for="lead-need" data-i18n="lead.need">Nhu cầu</label><textarea id="lead-need" name="need" maxlength="1000" required placeholder="Ví dụ: tôi muốn chuẩn bị nội dung giới thiệu sản phẩm" data-i18n-placeholder="lead.needPlaceholder"></textarea></div>
+          <div class="form-actions"><button id="lead-submit" class="button button--primary" type="submit" data-i18n="lead.submit">Gửi nhu cầu</button><p class="form-note" data-i18n="lead.note">Thông tin chỉ được dùng để phản hồi nhu cầu tư vấn của bạn.</p></div>
           <p id="lead-status" class="form-status" role="status" aria-live="polite"></p>
         </form>
       </div>
     </section>
+
+    <section class="section section--surface"><div class="container"><div class="final-cta"><h2 data-i18n="final.title">Sẵn sàng bắt đầu theo một quy trình rõ ràng?</h2><p data-i18n="final.body">Mở Workspace để tổ chức công việc sâu hơn, hoặc dùng Telegram cho thao tác ngắn khi cần.</p><a class="button button--primary" href="https://app.toanaas.vn/login" data-i18n="final.action">Mở Workspace</a></div></div></section>
   </main>
 
-  <footer>
-    <div class="container footer-row">
-      <div>
-        <strong class="footer-title">TOAN AAS — Trợ lý AI cho nội dung và công việc</strong>
-        <p class="footer-copy">Hệ thống AI cho nội dung, video, âm thanh, hình ảnh, tài liệu và vận hành số — bắt đầu đơn giản từ Telegram.</p>
-      </div>
-      <div class="footer-links">
-        <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">Bot Telegram</a>
-        <a href="https://t.me/toanaas" target="_blank" rel="noopener">Admin</a>
-        <a href="/pricing">Bảng giá</a>
-        <a href="/guide">Hướng dẫn</a>
-        <a href="/download/bang-gia-toan-aas.md">Tải bảng giá</a>
-        <a href="/download/huong-dan-su-dung-toan-aas.md">Tải hướng dẫn</a>
-        <a href="/download/huong-dan-toan-aas.docx">Hướng dẫn V2 cập nhật</a>
-        <a href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener">Điều khoản</a>
-      </div>
-    </div>
-  </footer>
+  <footer><div class="container footer-row"><div class="footer-brand"><strong>TOAN AAS</strong><p data-i18n="footer.body">Không gian làm việc AI rõ ràng cho nội dung, tài sản và quy trình số.</p></div><nav class="footer-links" aria-label="Liên kết cuối trang" data-i18n-aria="footer.label"><p class="footer-links-title" data-i18n="footer.resources">Tài nguyên</p><div class="footer-resource-list"><a href="/guide" data-i18n="footer.guide">Hướng dẫn</a><a href="/pricing" data-i18n="footer.pricing">Bảng giá</a><a href="/download/bang-gia-toan-aas.md" target="_blank" rel="noopener" data-i18n="footer.downloadPricing">Bảng giá tải về</a><a href="/download/huong-dan-su-dung-toan-aas.md" target="_blank" rel="noopener" data-i18n="footer.downloadGuide">Hướng dẫn tải về</a><a href="/download/huong-dan-toan-aas.docx" target="_blank" rel="noopener" data-i18n="footer.downloadGuideDocx">Hướng dẫn DOCX</a><a href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener" data-i18n="footer.terms">Điều khoản</a><a href="https://t.me/toanaasbot" target="_blank" rel="noopener" data-i18n="footer.telegram">Telegram</a></div></nav></div></footer>
 
   <script>
     (function () {
-      const scrollToHash = function () {
-        const hash = window.location.hash;
-        if (!hash || hash.length < 2) return;
-        try {
-          const target = document.querySelector(hash);
-          if (target) target.scrollIntoView({ block: 'start' });
-        } catch (error) {
-          return;
-        }
+      "use strict";
+      const PUBLIC_COPY = Object.freeze({
+        vi: Object.freeze({
+          "meta.title": "TOAN AAS — Không gian làm việc AI có kiểm soát", "meta.description": "TOAN AAS giúp bạn tổ chức nội dung và công việc AI bằng quy trình rõ ràng, có kiểm soát.", "skip": "Bỏ qua điều hướng", "nav.label": "Điều hướng chính", "nav.workflow": "Quy trình", "nav.capabilities": "Năng lực", "nav.support": "Hỗ trợ", "nav.telegram": "Telegram", "nav.workspace": "Mở Workspace", "nav.menu": "Mở menu", "locale.label": "Ngôn ngữ giao diện",
+          "hero.title": "Biến ý tưởng thành nội dung và quy trình có kiểm soát.", "hero.body": "TOAN AAS giúp bạn tổ chức nội dung, tài sản và công việc AI theo từng bước rõ ràng để dễ bắt đầu, dễ rà soát và dễ bàn giao.", "hero.workspace": "Mở Workspace", "hero.telegram": "Dùng Telegram nhanh", "hero.note": "Bạn luôn nhìn thấy bước tiếp theo; trạng thái chưa sẵn sàng được nói rõ, không được thay bằng kết quả giả.", "preview.label": "Quy trình minh họa", "preview.app": "TOAN AAS / Workspace", "preview.title": "Một dự án, một đường đi rõ ràng", "preview.draft": "Bản nháp", "preview.stagesLabel": "Bốn giai đoạn quy trình",
+          "workflow.title": "Từ yêu cầu đến bàn giao theo 4 bước", "workflow.body": "Mỗi bước giúp bạn biết mình đang ở đâu và cần làm gì tiếp theo.", "workflow.draft": "Bản nháp", "workflow.draftBody": "Nêu mục tiêu, bối cảnh và điều bạn muốn tạo.", "workflow.estimate": "Ước tính", "workflow.estimateBody": "Xem phạm vi, điều kiện và chi phí được hệ thống trả về.", "workflow.confirm": "Xác nhận", "workflow.confirmBody": "Bạn kiểm tra và xác nhận trước khi một tác vụ được tiếp tục.", "workflow.delivery": "Bàn giao", "workflow.deliveryBody": "Chỉ khi dữ liệu hoặc tệp hợp lệ, trạng thái mới được hiển thị là hoàn tất.",
+          "companion.title": "Workspace cho công việc chuyên sâu. Telegram cho thao tác nhanh khi cần.", "companion.body": "Hai bề mặt bổ trợ nhau, nhưng mỗi bề mặt có vai trò rõ ràng.", "companion.workspaceTitle": "Workspace", "companion.workspaceBody": "Dành cho dự án, tài sản, lịch sử, phê duyệt và công việc cần theo dõi rõ ràng.", "companion.workspaceOne": "Làm việc theo dự án và cấu trúc", "companion.workspaceTwo": "Rà soát lịch sử và trạng thái", "companion.workspaceThree": "Quản lý tài sản riêng tư", "companion.telegramTitle": "Telegram", "companion.telegramBody": "Dành cho thao tác ngắn, thông báo và đường vào nhanh khi bạn đang di chuyển.", "companion.telegramOne": "Bắt đầu nhanh từ cuộc trò chuyện", "companion.telegramTwo": "Nhận thông báo khi phù hợp", "companion.telegramThree": "Mở lại Workspace cho việc chi tiết", "companion.note": "Telegram không giới hạn Workspace; Workspace cũng không giả định dữ liệu Telegram trước khi liên kết đã được xác minh.",
+          "capabilities.title": "Ba nhóm công việc, một cách làm rõ ràng", "capabilities.body": "Chọn công cụ theo mục tiêu; trạng thái sẵn sàng luôn do hệ thống hiển thị rõ.", "capabilities.contentTitle": "Nội dung", "capabilities.contentBody": "Lên ý tưởng, phác thảo, biên tập, caption và gói nội dung cho công việc truyền thông.", "capabilities.visualTitle": "Hình ảnh & video", "capabilities.visualBody": "Chuẩn bị hướng sáng tạo, hình tham chiếu, cảnh quay và tài sản cho từng dự án.", "capabilities.audioTitle": "Giọng nói & tài liệu", "capabilities.audioBody": "Chuẩn bị kịch bản, bản ghi, phụ đề và tài liệu theo ngôn ngữ cùng định dạng cần dùng.", "tag.brief": "Brief", "tag.caption": "Caption", "tag.script": "Kịch bản", "tag.image": "Hình ảnh", "tag.storyboard": "Storyboard", "tag.video": "Video", "tag.voice": "Giọng nói", "tag.subtitle": "Phụ đề", "tag.document": "Tài liệu",
+          "trust.title": "Rõ ràng về trạng thái, an tâm khi làm việc", "trust.body": "TOAN AAS ưu tiên thông tin có thể kiểm tra thay vì làm cho màn hình trông có vẻ hoàn tất.", "trust.reviewTitle": "Rà soát trước", "trust.reviewBody": "Bạn xác nhận khi một quy trình yêu cầu sự đồng ý rõ ràng.", "trust.statusTitle": "Trạng thái rõ", "trust.statusBody": "Tính năng đang bảo vệ hoặc chưa sẵn sàng được nói rõ.", "trust.historyTitle": "Lịch sử có ngữ cảnh", "trust.historyBody": "Không thay dữ liệu hiện tại bằng bản ghi cũ hoặc kết quả suy đoán.", "trust.privacyTitle": "Tôn trọng riêng tư", "trust.privacyBody": "Liên kết và quyền truy cập chỉ được mở theo điều kiện đã xác minh.",
+          "lead.title": "Cần chọn đúng cách bắt đầu?", "lead.body": "Gửi nhu cầu ngắn gọn để nhận hướng dẫn về công cụ hoặc quy trình phù hợp. Bạn không cần biết thuật ngữ kỹ thuật.", "lead.telegram": "Mở bot Telegram", "lead.guide": "Xem hướng dẫn sử dụng", "lead.pricing": "Xem bảng giá hiện hành", "lead.name": "Tên", "lead.namePlaceholder": "Tên của bạn", "lead.phone": "Số điện thoại / Zalo", "lead.phonePlaceholder": "Số liên hệ", "lead.topic": "Chủ đề quan tâm", "lead.topicPlaceholder": "Chọn một chủ đề", "lead.need": "Nhu cầu", "lead.needPlaceholder": "Ví dụ: tôi muốn chuẩn bị nội dung giới thiệu sản phẩm", "lead.submit": "Gửi nhu cầu", "lead.sending": "Đang gửi...", "lead.note": "Thông tin chỉ được dùng để phản hồi nhu cầu tư vấn của bạn.", "lead.success": "Đã gửi nhu cầu. TOAN AAS sẽ phản hồi khi có thể.", "lead.error": "Chưa gửi được biểu mẫu. Bạn có thể nhắn trực tiếp", "lead.errorLink": "@toanaasbot", "lead.errorAfter": "để được hỗ trợ.",
+          "topic.content": "Nội dung", "topic.visual": "Hình ảnh & video", "topic.audio": "Giọng nói & tài liệu", "topic.workspace": "Workspace", "topic.account": "Tài khoản / hỗ trợ", "final.title": "Sẵn sàng bắt đầu theo một quy trình rõ ràng?", "final.body": "Mở Workspace để tổ chức công việc sâu hơn, hoặc dùng Telegram cho thao tác ngắn khi cần.", "final.action": "Mở Workspace", "footer.label": "Liên kết cuối trang", "footer.body": "Không gian làm việc AI rõ ràng cho nội dung, tài sản và quy trình số.", "footer.guide": "Hướng dẫn", "footer.pricing": "Bảng giá", "footer.terms": "Điều khoản", "footer.telegram": "Telegram"
+        }),
+        en: Object.freeze({
+          "meta.title": "TOAN AAS — A controlled AI workspace", "meta.description": "TOAN AAS helps you organize AI content and work through a clear, controlled process.", "skip": "Skip to content", "nav.label": "Main navigation", "nav.workflow": "Workflow", "nav.capabilities": "Capabilities", "nav.support": "Support", "nav.telegram": "Telegram", "nav.workspace": "Open Workspace", "nav.menu": "Open menu", "locale.label": "Interface language",
+          "hero.title": "Turn ideas into content and controlled workflows.", "hero.body": "TOAN AAS helps you organize content, assets and AI work in clear steps that are easy to start, review and hand over.", "hero.workspace": "Open Workspace", "hero.telegram": "Use Telegram quickly", "hero.note": "You can see the next step. Unavailable states are stated clearly and never replaced with invented results.", "preview.label": "Workflow illustration", "preview.app": "TOAN AAS / Workspace", "preview.title": "One project, one clear path", "preview.draft": "Draft", "preview.stagesLabel": "Four workflow stages",
+          "workflow.title": "From request to delivery in four steps", "workflow.body": "Each step makes it clear where you are and what happens next.", "workflow.draft": "Draft", "workflow.draftBody": "Set the goal, context and the work you want to create.", "workflow.estimate": "Estimate", "workflow.estimateBody": "Review the scope, conditions and returned cost before continuing.", "workflow.confirm": "Confirm", "workflow.confirmBody": "Review and confirm before an operation continues.", "workflow.delivery": "Delivery", "workflow.deliveryBody": "A status becomes complete only after valid data or files are available.",
+          "companion.title": "Workspace for deep work. Telegram for quick actions when needed.", "companion.body": "The two surfaces complement each other, with a clear role for each.", "companion.workspaceTitle": "Workspace", "companion.workspaceBody": "For projects, assets, history, approvals and work that needs clear tracking.", "companion.workspaceOne": "Work through projects and structure", "companion.workspaceTwo": "Review history and status", "companion.workspaceThree": "Manage private assets", "companion.telegramTitle": "Telegram", "companion.telegramBody": "For short actions, notifications and quick entry while you are moving.", "companion.telegramOne": "Start quickly from a conversation", "companion.telegramTwo": "Receive relevant notifications", "companion.telegramThree": "Return to Workspace for detailed work", "companion.note": "Telegram does not limit Workspace. Workspace does not assume Telegram data before a verified link exists.",
+          "capabilities.title": "Three work areas, one clear way of working", "capabilities.body": "Choose tools by goal; the system always states its readiness explicitly.", "capabilities.contentTitle": "Content", "capabilities.contentBody": "Plan, draft, edit, caption and package content for communications work.", "capabilities.visualTitle": "Image & video", "capabilities.visualBody": "Prepare creative direction, references, scenes and assets for each project.", "capabilities.audioTitle": "Voice & documents", "capabilities.audioBody": "Prepare scripts, transcripts, subtitles and documents in the needed language and format.", "tag.brief": "Brief", "tag.caption": "Caption", "tag.script": "Script", "tag.image": "Images", "tag.storyboard": "Storyboard", "tag.video": "Video", "tag.voice": "Voice", "tag.subtitle": "Subtitles", "tag.document": "Documents",
+          "trust.title": "Clear status, confident work", "trust.body": "TOAN AAS prioritizes information you can verify instead of making a screen look finished.", "trust.reviewTitle": "Review first", "trust.reviewBody": "You confirm when a workflow requires explicit consent.", "trust.statusTitle": "Clear status", "trust.statusBody": "Protected or unavailable features are stated clearly.", "trust.historyTitle": "Contextual history", "trust.historyBody": "Current data is not replaced by stale records or inferred results.", "trust.privacyTitle": "Respect privacy", "trust.privacyBody": "Links and access open only under verified conditions.",
+          "lead.title": "Need help choosing where to start?", "lead.body": "Send a short request for guidance on the right tool or workflow. You do not need technical terms.", "lead.telegram": "Open Telegram bot", "lead.guide": "Read the user guide", "lead.pricing": "View current pricing", "lead.name": "Name", "lead.namePlaceholder": "Your name", "lead.phone": "Phone / Zalo", "lead.phonePlaceholder": "Contact number", "lead.topic": "Topic", "lead.topicPlaceholder": "Choose a topic", "lead.need": "What do you need?", "lead.needPlaceholder": "For example: I want to prepare product-introduction content", "lead.submit": "Send request", "lead.sending": "Sending...", "lead.note": "Your information is used only to respond to this consultation request.", "lead.success": "Your request was sent. TOAN AAS will respond when possible.", "lead.error": "The form could not be sent. You can message", "lead.errorLink": "@toanaasbot", "lead.errorAfter": "directly for help.",
+          "topic.content": "Content", "topic.visual": "Image & video", "topic.audio": "Voice & documents", "topic.workspace": "Workspace", "topic.account": "Account / support", "final.title": "Ready to start with a clear process?", "final.body": "Open Workspace for deeper work, or use Telegram for short actions when needed.", "final.action": "Open Workspace", "footer.label": "Footer links", "footer.body": "A clear AI workspace for content, assets and digital workflows.", "footer.guide": "Guide", "footer.pricing": "Pricing", "footer.terms": "Terms", "footer.telegram": "Telegram"
+        }),
+        zh: Object.freeze({
+          "meta.title": "TOAN AAS — 可控的 AI 工作空间", "meta.description": "TOAN AAS 通过清晰、可控的流程帮助你组织 AI 内容与工作。", "skip": "跳至内容", "nav.label": "主导航", "nav.workflow": "流程", "nav.capabilities": "能力", "nav.support": "支持", "nav.telegram": "Telegram", "nav.workspace": "打开工作空间", "nav.menu": "打开菜单", "locale.label": "界面语言",
+          "hero.title": "将想法转化为内容和可控的工作流程。", "hero.body": "TOAN AAS 帮助你按清晰步骤组织内容、资产和 AI 工作，便于开始、审阅和交付。", "hero.workspace": "打开工作空间", "hero.telegram": "快速使用 Telegram", "hero.note": "你可以看到下一步。未就绪状态会被明确说明，绝不会用虚构结果代替。", "preview.label": "流程示意", "preview.app": "TOAN AAS / 工作空间", "preview.title": "一个项目，一条清晰路径", "preview.draft": "草稿", "preview.stagesLabel": "四个流程阶段",
+          "workflow.title": "从需求到交付，分四步完成", "workflow.body": "每一步都清楚说明你的位置以及接下来要做什么。", "workflow.draft": "草稿", "workflow.draftBody": "说明目标、背景以及你要创建的工作。", "workflow.estimate": "估算", "workflow.estimateBody": "继续前查看系统返回的范围、条件和费用。", "workflow.confirm": "确认", "workflow.confirmBody": "操作继续前，请先审阅并确认。", "workflow.delivery": "交付", "workflow.deliveryBody": "只有在有效数据或文件可用时，状态才会显示为完成。",
+          "companion.title": "工作空间用于深入工作。需要时，Telegram 用于快速操作。", "companion.body": "两个界面相互补充，各自承担清晰的职责。", "companion.workspaceTitle": "工作空间", "companion.workspaceBody": "用于需要清晰追踪的项目、资产、历史、审批和工作。", "companion.workspaceOne": "按项目和结构开展工作", "companion.workspaceTwo": "审阅历史与状态", "companion.workspaceThree": "管理私有资产", "companion.telegramTitle": "Telegram", "companion.telegramBody": "用于简短操作、通知和移动时的快速入口。", "companion.telegramOne": "从对话中快速开始", "companion.telegramTwo": "接收相关通知", "companion.telegramThree": "返回工作空间处理详细工作", "companion.note": "Telegram 不限制工作空间。工作空间在验证关联前不会假定 Telegram 数据。",
+          "capabilities.title": "三个工作领域，一种清晰的工作方式", "capabilities.body": "按目标选择工具；系统始终明确显示就绪状态。", "capabilities.contentTitle": "内容", "capabilities.contentBody": "规划、起草、编辑、撰写说明并整理传播内容。", "capabilities.visualTitle": "图像与视频", "capabilities.visualBody": "为每个项目准备创意方向、参考、场景和资产。", "capabilities.audioTitle": "语音与文档", "capabilities.audioBody": "按所需语言和格式准备脚本、转录、字幕和文档。", "tag.brief": "简报", "tag.caption": "说明文字", "tag.script": "脚本", "tag.image": "图像", "tag.storyboard": "分镜", "tag.video": "视频", "tag.voice": "语音", "tag.subtitle": "字幕", "tag.document": "文档",
+          "trust.title": "状态清晰，工作安心", "trust.body": "TOAN AAS 优先提供可验证的信息，而不是让界面看起来已经完成。", "trust.reviewTitle": "先审阅", "trust.reviewBody": "当流程需要明确同意时，由你确认。", "trust.statusTitle": "状态明确", "trust.statusBody": "受保护或未就绪的功能会被清楚说明。", "trust.historyTitle": "有上下文的历史", "trust.historyBody": "不会用旧记录或推断结果替代当前数据。", "trust.privacyTitle": "尊重隐私", "trust.privacyBody": "关联和访问仅在已验证条件下开放。",
+          "lead.title": "需要帮助选择开始方式吗？", "lead.body": "发送简短需求，获得适合工具或流程的建议。无需了解技术术语。", "lead.telegram": "打开 Telegram 机器人", "lead.guide": "查看使用指南", "lead.pricing": "查看当前价格", "lead.name": "姓名", "lead.namePlaceholder": "你的姓名", "lead.phone": "电话 / Zalo", "lead.phonePlaceholder": "联系方式", "lead.topic": "关注主题", "lead.topicPlaceholder": "选择一个主题", "lead.need": "你的需求", "lead.needPlaceholder": "例如：我想准备产品介绍内容", "lead.submit": "发送需求", "lead.sending": "正在发送...", "lead.note": "你的信息仅用于回复本次咨询需求。", "lead.success": "需求已发送。TOAN AAS 会在可回复时联系你。", "lead.error": "表单未能发送。你可以直接联系", "lead.errorLink": "@toanaasbot", "lead.errorAfter": "获取帮助。",
+          "topic.content": "内容", "topic.visual": "图像与视频", "topic.audio": "语音与文档", "topic.workspace": "工作空间", "topic.account": "账户 / 支持", "final.title": "准备好按清晰流程开始了吗？", "final.body": "打开工作空间处理更深入的工作；需要时可使用 Telegram 完成简短操作。", "final.action": "打开工作空间", "footer.label": "页脚链接", "footer.body": "为内容、资产和数字流程打造的清晰 AI 工作空间。", "footer.guide": "指南", "footer.pricing": "价格", "footer.terms": "条款", "footer.telegram": "Telegram"
+        })
+      });
+
+      const ADDITIONAL_COPY = Object.freeze({
+        vi: Object.freeze({
+          "nav.menuOpen": "Mở menu", "nav.menuClose": "Đóng menu",
+          "topic.videoAi": "Video AI", "topic.audioStudio": "Studio âm thanh", "topic.imageAi": "Hình ảnh AI", "topic.documents": "Tài liệu / PDF", "topic.marketingAutomation": "Marketing automation", "topic.walletSupport": "Nạp Xu / hỗ trợ tài khoản",
+          "footer.resources": "Tài nguyên", "footer.downloadPricing": "Bảng giá tải về", "footer.downloadGuide": "Hướng dẫn tải về", "footer.downloadGuideDocx": "Hướng dẫn DOCX"
+        }),
+        en: Object.freeze({
+          "nav.menuOpen": "Open menu", "nav.menuClose": "Close menu",
+          "topic.videoAi": "AI video", "topic.audioStudio": "Audio studio", "topic.imageAi": "AI images", "topic.documents": "Documents / PDF", "topic.marketingAutomation": "Marketing automation", "topic.walletSupport": "Xu top-up / account support",
+          "footer.resources": "Resources", "footer.downloadPricing": "Download pricing", "footer.downloadGuide": "Download guide", "footer.downloadGuideDocx": "Download guide (DOCX)"
+        }),
+        zh: Object.freeze({
+          "nav.menuOpen": "打开菜单", "nav.menuClose": "关闭菜单",
+          "topic.videoAi": "AI 视频", "topic.audioStudio": "音频工作室", "topic.imageAi": "AI 图像", "topic.documents": "文档 / PDF", "topic.marketingAutomation": "营销自动化", "topic.walletSupport": "Xu 充值 / 账户支持",
+          "footer.resources": "资源", "footer.downloadPricing": "下载价格表", "footer.downloadGuide": "下载使用指南", "footer.downloadGuideDocx": "下载使用指南（DOCX）"
+        })
+      });
+      const supportedLocales = new Set(Object.keys(PUBLIC_COPY));
+      const localeFromUrl = new URLSearchParams(window.location.search).get("lang");
+      const locale = supportedLocales.has(localeFromUrl) ? localeFromUrl : "vi";
+      const copy = Object.freeze(Object.assign({}, PUBLIC_COPY[locale], ADDITIONAL_COPY[locale]));
+      const setText = function (selector, attribute) {
+        document.querySelectorAll(selector).forEach(function (element) {
+          const key = element.getAttribute(attribute);
+          if (key && Object.prototype.hasOwnProperty.call(copy, key)) element.textContent = copy[key];
+        });
       };
-      window.addEventListener('load', function () {
-        window.setTimeout(scrollToHash, 80);
+      document.documentElement.lang = locale === "zh" ? "zh-CN" : locale;
+      document.title = copy["meta.title"];
+      const description = document.querySelector('meta[name="description"]');
+      if (description) description.setAttribute("content", copy["meta.description"]);
+      setText("[data-i18n]", "data-i18n");
+      document.querySelectorAll("[data-i18n-placeholder]").forEach(function (element) {
+        const key = element.getAttribute("data-i18n-placeholder");
+        if (key && Object.prototype.hasOwnProperty.call(copy, key)) element.setAttribute("placeholder", copy[key]);
       });
-      window.addEventListener('hashchange', function () {
-        window.setTimeout(scrollToHash, 30);
+      document.querySelectorAll("[data-i18n-aria]").forEach(function (element) {
+        const key = element.getAttribute("data-i18n-aria");
+        if (key && Object.prototype.hasOwnProperty.call(copy, key)) element.setAttribute("aria-label", copy[key]);
+      });
+      document.querySelectorAll("[data-locale]").forEach(function (element) {
+        element.setAttribute("aria-current", String(element.getAttribute("data-locale") === locale));
       });
 
-      const form = document.getElementById('lead-form');
-      const status = document.getElementById('lead-status');
-      const submit = document.getElementById('lead-submit');
+      const header = document.querySelector(".site-header");
+      const menuToggle = document.querySelector(".menu-toggle");
+      const setMenuLabel = function (open) {
+        if (!menuToggle) return;
+        menuToggle.setAttribute("aria-label", copy[open ? "nav.menuClose" : "nav.menuOpen"]);
+      };
+      const closeMenu = function (options) {
+        if (!header || !menuToggle) return;
+        const wasOpen = header.getAttribute("data-menu-open") === "true";
+        const restoreFocus = Boolean(options && options.restoreFocus);
+        header.setAttribute("data-menu-open", "false");
+        menuToggle.setAttribute("aria-expanded", "false");
+        setMenuLabel(false);
+        if (restoreFocus && wasOpen) menuToggle.focus();
+      };
+      if (header && menuToggle) {
+        menuToggle.addEventListener("click", function () {
+          const open = header.getAttribute("data-menu-open") !== "true";
+          header.setAttribute("data-menu-open", String(open));
+          menuToggle.setAttribute("aria-expanded", String(open));
+          setMenuLabel(open);
+        });
+        document.addEventListener("keydown", function (event) {
+          if (event.key === "Escape" && header.getAttribute("data-menu-open") === "true") {
+            event.preventDefault();
+            closeMenu({ restoreFocus: true });
+          }
+        });
+        document.addEventListener("click", function (event) { if (!header.contains(event.target)) closeMenu(); });
+        document.querySelectorAll(".site-nav a").forEach(function (link) { link.addEventListener("click", closeMenu); });
+      }
+
+      const form = document.getElementById("lead-form");
+      const status = document.getElementById("lead-status");
+      const submit = document.getElementById("lead-submit");
       if (!form || !status || !submit) return;
-
-      form.addEventListener('submit', async function (event) {
+      form.addEventListener("submit", async function (event) {
         event.preventDefault();
         if (!form.reportValidity()) return;
-
         const data = new FormData(form);
         submit.disabled = true;
-        submit.textContent = 'Đang gửi...';
-        status.className = 'form-status';
-        status.textContent = '';
-
+        submit.textContent = copy["lead.sending"];
+        status.className = "form-status";
+        status.textContent = "";
         try {
           const response = await fetch('/lead', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: String(data.get('name') || '').trim(),
-              phone: String(data.get('phone') || '').trim(),
-              services: [String(data.get('topic') || '').trim()],
-              note: String(data.get('need') || '').trim(),
-              source: 'landing-clean-clear-v2'
+              name: String(data.get("name") || "").trim(),
+              phone: String(data.get("phone") || "").trim(),
+              services: [String(data.get("topic") || "").trim()],
+              note: String(data.get("need") || "").trim(),
+              source: "landing-clean-clear-v2"
             })
           });
-          if (!response.ok) throw new Error('request_failed');
+          if (!response.ok) throw new Error("request_failed");
           const result = await response.json();
-          if (!result || result.ok !== true) throw new Error('request_failed');
+          if (!result || result.ok !== true) throw new Error("request_failed");
           form.reset();
-          status.textContent = 'Đã gửi nhu cầu. TOAN AAS sẽ liên hệ với bạn sớm.';
+          status.textContent = copy["lead.success"];
         } catch (error) {
-          status.className = 'form-status error';
-          status.innerHTML = 'Chưa gửi được biểu mẫu. Quý khách vui lòng nhắn trực tiếp Telegram <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">@toanaasbot</a>.';
+          status.className = "form-status error";
+          status.replaceChildren(document.createTextNode(copy["lead.error"] + " "));
+          const telegram = document.createElement("a");
+          telegram.href = "https://t.me/toanaasbot";
+          telegram.target = "_blank";
+          telegram.rel = "noopener";
+          telegram.textContent = copy["lead.errorLink"];
+          status.append(telegram, document.createTextNode(" " + copy["lead.errorAfter"]));
         } finally {
           submit.disabled = false;
-          submit.textContent = 'Gửi nhu cầu';
+          submit.textContent = copy["lead.submit"];
         }
       });
     }());
