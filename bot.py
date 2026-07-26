@@ -53282,17 +53282,28 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
     try:
         async def _run_single_video_export():
             return await handle_shopaikey_public_callback(update, context, canonical_callback)
+        _single_export_params = {"runner": _run_single_video_export, "action": "export", "state": state}
+        _single_export_context = {
+            "user_id": uid,
+            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+            "confirm_paid": True,
+            "admin_interactive_confirm": True,
+            "is_paid_job": True,
+        }
+        # This handler owns the export decision: it has already resolved the
+        # confirmation token and rebuilt the order. It hands the engine a real
+        # decision object rather than a bare flag, so the engine can tell this
+        # apart from any future caller that merely claims to have checked.
+        _single_export_context["gate_precheck_result"] = engine_gate_precheck_allow(
+            "video_single",
+            _single_export_params,
+            _single_export_context,
+            reason="video export confirm handler owns this decision",
+        )
         engine_result = await execute_engine(
             "video_single",
-            {"runner": _run_single_video_export, "action": "export", "state": state},
-            {
-                "user_id": uid,
-                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
-                "confirm_paid": True,
-                "admin_interactive_confirm": True,
-                "is_paid_job": True,
-                "gate_prechecked": True,
-            },
+            _single_export_params,
+            _single_export_context,
         )
         if not engine_result.get("ok") and not engine_result.get("runner_result"):
             return await safe_edit_or_send(
@@ -127257,7 +127268,10 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
                 "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
                 "confirm_paid": True,
                 "is_paid_job": True,
-                "gate_prechecked": True,
+                # No precheck object on purpose. This wrapper is owner-only via
+                # the check at the top of the function, and every SubDub feature
+                # is excluded from the precheck path anyway, so the engine always
+                # evaluates its own gate here.
             },
         )
     except Exception as exc:
@@ -162179,23 +162193,73 @@ def engine_readiness_registry() -> dict:
         }
     return payload
 
+# Only this object proves a gate decision came from inside the process.
+# A caller cannot forge it by setting a key in a dict, which a bare
+# "gate_prechecked": True could be. See engine_gate_precheck below.
+_ENGINE_GATE_PRECHECK_TOKEN = object()
+
+
+def engine_gate_precheck(feature: str, params: dict | None = None, context: dict | None = None) -> dict:
+    """Run the product gate now and return a result execute_engine will accept.
+
+    A caller that has already decided access — because it ran its own product
+    export guard — uses this instead of asserting `gate_prechecked` and hoping
+    the engine believes it. The returned object carries a token that only this
+    module can produce, so the engine can tell a real decision from a claim.
+    """
+    decision = dict(evaluate_engine_gate(feature, params, context) or {})
+    decision["_precheck_token"] = _ENGINE_GATE_PRECHECK_TOKEN
+    return decision
+
+
+def engine_gate_precheck_allow(feature: str, params: dict | None = None, context: dict | None = None, *, reason: str = "") -> dict:
+    """Record an allow decision the caller has already made for itself.
+
+    Same tamper-proof token, but the caller states plainly that it owns the
+    decision. Kept separate from engine_gate_precheck so the two cases are
+    distinguishable in code review and in the returned status.
+    """
+    params = dict(params or {})
+    context = dict(context or {})
+    feature_key = normalize_engine_feature(feature)
+    return {
+        "allowed": True,
+        "status": "allowed_prechecked",
+        "reason": reason or "caller already passed product export guard",
+        "message": "",
+        "readiness": _product_engine_readiness(
+            engine_feature_product_area(feature_key),
+            engine_action_for_feature(feature_key, params),
+            dict(params.get("state") or {}),
+        ),
+        "engine_feature": feature_key,
+        "entry_source": str(context.get("entry_source") or ENGINE_ENTRY_SOURCE_PRODUCT),
+        "product_path_executor": ENGINE_PRODUCT_PATH_EXECUTOR,
+        "_precheck_token": _ENGINE_GATE_PRECHECK_TOKEN,
+    }
+
+
+def engine_gate_precheck_result(context: dict | None) -> dict | None:
+    """Return the caller's gate decision only when it carries the real token."""
+    candidate = (context or {}).get("gate_precheck_result")
+    if isinstance(candidate, dict) and candidate.get("_precheck_token") is _ENGINE_GATE_PRECHECK_TOKEN:
+        return candidate
+    return None
+
+
 async def execute_engine(feature: str, params: dict | None = None, context: dict | None = None) -> dict:
     feature_key = normalize_engine_feature(feature)
     params = dict(params or {})
     context = dict(context or {})
     uid = context.get("user_id", params.get("user_id", 0))
     subdub_features = {"subtitle_asr", "subtitle_auto", "subtitle_translate", "video_dub", "subtitle_plus_dub"}
-    if context.get("gate_prechecked") and feature_key not in subdub_features:
-        gate = {
-            "allowed": True,
-            "status": "allowed_prechecked",
-            "reason": "caller already passed product export guard",
-            "message": "",
-            "readiness": _product_engine_readiness(engine_feature_product_area(feature_key), engine_action_for_feature(feature_key, params), dict(params.get("state") or {})),
-            "engine_feature": feature_key,
-            "entry_source": str(context.get("entry_source") or ENGINE_ENTRY_SOURCE_PRODUCT),
-            "product_path_executor": ENGINE_PRODUCT_PATH_EXECUTOR,
-        }
+    prechecked = engine_gate_precheck_result(context)
+    if prechecked is not None and feature_key not in subdub_features:
+        # A real decision object from inside the process. A bare
+        # "gate_prechecked": True no longer skips the gate on its own: without
+        # this token the engine evaluates the gate itself, below.
+        gate = dict(prechecked)
+        gate.pop("_precheck_token", None)
     else:
         gate = evaluate_engine_gate(feature_key, params, context)
     if not gate.get("allowed"):
