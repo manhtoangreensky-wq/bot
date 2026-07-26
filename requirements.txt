@@ -10,6 +10,7 @@ pydantic==2.13.4
 python-multipart==0.0.29
 paramiko==3.5.1
 Pillow==12.2.0
+opencv-python-headless==4.13.0.92
 pypdf
 python-docx
 PyMuPDF
