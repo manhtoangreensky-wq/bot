@@ -12,6 +12,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from services import ffmpeg_text
+
 from services.video_local_validation import (
     FFMPEG_TIMEOUT_SECONDS,
     LocalVideoValidationError,
@@ -287,20 +289,13 @@ def _target_size(aspect: str, resolution: str, source_width: int, source_height:
 
 
 def _escape_filter_text(value: str) -> str:
-    return (
-        str(value or "")
-        .replace("\\", "\\\\")
-        .replace("'", "\\'")
-        .replace(":", "\\:")
-        .replace("%", "\\%")
-        .replace("[", "\\[")
-        .replace("]", "\\]")
-        .replace(",", "\\,")
-    )
+    # Single definition lives in services/ffmpeg_text: a quote cannot be
+    # escaped inside a quoted filtergraph value, so it has to be replaced.
+    return ffmpeg_text.escape_filter_text(value)
 
 
 def _escape_filter_path(path: str) -> str:
-    return str(Path(path).resolve(strict=False)).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    return ffmpeg_text.escape_filter_path(path)
 
 
 def resolve_vietnamese_font_path(explicit: str = "") -> str:

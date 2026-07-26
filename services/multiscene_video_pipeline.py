@@ -18,6 +18,8 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable
 
+from services import ffmpeg_text
+
 
 DEFAULT_TEMP_ROOT = os.path.join(tempfile.gettempdir(), "toanaas_multiscene_blackbox")
 
@@ -570,13 +572,10 @@ def _srt_time(seconds: float) -> str:
 
 
 def _drawtext_escape(text: str) -> str:
-    value = re.sub(r"\s+", " ", str(text or "").strip())[:120]
-    return (
-        value.replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
-        .replace("%", "\\%")
-    )
+    # Single definition lives in services/ffmpeg_text: a quote cannot be
+    # escaped inside a quoted filtergraph value, so it has to be replaced.
+    # `%` is handled by passing expansion=none to drawtext instead.
+    return ffmpeg_text.escape_filter_text(re.sub(r"\s+", " ", str(text or "").strip())[:120])
 
 
 def _drawtext_expr(position: str) -> tuple[str, str]:
@@ -709,7 +708,9 @@ def mux_final_multiscene_video(
         cmd += ["-i", ensure_video_output(logo_path)]
     video_map = "0:v:0"
     if subtitle_path and burn_subtitles:
-        sub = os.path.abspath(subtitle_path).replace("\\", "\\\\").replace(":", "\\:")
+        # Was the only site that escaped the backslash and colon but left the
+        # quote alone, so a path containing one could close the value.
+        sub = ffmpeg_text.escape_filter_path(subtitle_path)
         filters.append(f"[{video_map}]subtitles='{sub}'[vsub]")
         video_map = "vsub"
     clean_logo_text = _drawtext_escape(logo_text or "")
@@ -717,7 +718,7 @@ def mux_final_multiscene_video(
         x_expr, y_expr = _drawtext_expr(logo_position)
         input_label = f"[{video_map}]"
         filters.append(
-            f"{input_label}drawtext=text='{clean_logo_text}':fontcolor=white:"
+            f"{input_label}drawtext=text='{clean_logo_text}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:fontcolor=white:"
             f"fontsize=36:borderw=2:bordercolor=black@0.65:"
             f"box=1:boxcolor=black@0.25:boxborderw=10:x={x_expr}:y={y_expr}[vtxt]"
         )
