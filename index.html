@@ -18,6 +18,16 @@
   <title>TOAN AAS — Không gian làm việc AI có kiểm soát</title>
   <style>
     :root {
+      --teal-action: #0f766e;
+      --teal-brand: #14b8a6;
+      --sky-context: #0284c7;
+      --canvas: #f4fbfc;
+      --surface: #ffffff;
+      --ink: #083344;
+      --muted: #486b75;
+      --line: #d7ecef;
+
+      /* Retained aliases keep the existing static surface stable. */
       --teal-950: #062a36;
       --teal-900: #0b3440;
       --teal-800: #104352;
@@ -25,13 +35,8 @@
       --teal-500: #14b8a6;
       --teal-400: #2dd4bf;
       --sky-400: #38bdf8;
-      --canvas: #f4fbfc;
-      --surface: #ffffff;
       --surface-soft: #e8f5f6;
-      --line: #d7ecef;
       --line-strong: #9ccfd5;
-      --ink: #092b36;
-      --muted: #486b75;
       --success: #0f766e;
       --danger: #bd4750;
       --shadow-sm: 0 12px 28px rgba(9, 43, 54, .08);
@@ -63,7 +68,7 @@
     h1, h2, h3 { text-wrap: balance; }
     p { text-wrap: pretty; }
     svg { display: block; }
-    :focus-visible { outline: 3px solid var(--sky-400); outline-offset: 3px; }
+    :focus-visible { outline: 3px solid var(--sky-context); outline-offset: 3px; }
 
     .skip-link {
       position: fixed;
@@ -78,7 +83,7 @@
       transition: top var(--transition);
     }
     .skip-link:focus { top: 12px; }
-    .container { width: min(1260px, calc(100% - 48px)); margin-inline: auto; }
+    .container { width: min(1240px, calc(100% - 48px)); margin-inline: auto; }
 
     .site-header {
       position: sticky;
@@ -120,7 +125,7 @@
       place-items: center;
       border-radius: 11px;
       color: var(--teal-950);
-      background: var(--teal-500);
+      background: var(--teal-brand);
       font-size: 13px;
       font-weight: 900;
       letter-spacing: -.08em;
@@ -201,9 +206,9 @@
     }
     .button:hover:not(:disabled),
     .button:focus-visible { border-color: var(--teal-500); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
-    .button--primary { border-color: var(--teal-500); color: var(--teal-950); background: var(--teal-500); }
+    .button--primary { border-color: var(--teal-action); color: var(--surface); background: var(--teal-action); }
     .button--primary:hover:not(:disabled),
-    .button--primary:focus-visible { border-color: var(--teal-400); background: var(--teal-400); color: var(--teal-950); }
+    .button--primary:focus-visible { border-color: var(--teal-action); background: var(--teal-action); color: var(--surface); }
     .button--quiet { border-color: transparent; color: var(--teal-700); background: transparent; }
     .button--quiet:hover:not(:disabled),
     .button--quiet:focus-visible { border-color: var(--line); color: var(--teal-950); background: var(--surface); }
@@ -212,8 +217,8 @@
     .hero { padding: clamp(46px, 5vw, 72px) 0 clamp(54px, 6vw, 84px); }
     .hero-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.12fr) minmax(420px, .88fr);
-      gap: clamp(30px, 4vw, 56px);
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr);
+      gap: clamp(28px, 4vw, 56px);
       align-items: center;
     }
     .hero-copy { max-width: 650px; }
@@ -230,7 +235,7 @@
     .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
     .hero-actions .button { min-height: 52px; padding-inline: 20px; }
     .hero-note { display: flex; gap: 9px; align-items: flex-start; margin: 22px 0 0; color: var(--muted); font-size: 13px; }
-    .hero-note svg { width: 18px; height: 18px; flex: 0 0 18px; color: var(--teal-500); }
+    .hero-note svg { width: 18px; height: 18px; flex: 0 0 18px; color: var(--teal-brand); }
 
     .workflow-preview {
       overflow: hidden;
@@ -241,7 +246,7 @@
     }
     .preview-topbar { display: flex; gap: 7px; align-items: center; min-height: 48px; padding-inline: 18px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
     .preview-topbar i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
-    .preview-topbar i:first-child { background: var(--teal-500); }
+    .preview-topbar i:first-child { background: var(--teal-brand); }
     .preview-topbar strong { margin-left: 4px; color: var(--teal-700); font-size: 12px; }
     .preview-body { display: grid; gap: 22px; padding: clamp(22px, 4vw, 34px); }
     .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -316,7 +321,7 @@
     .field input, .field select, .field textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: var(--surface); outline: none; }
     .field input, .field select { min-height: 48px; padding: 0 13px; }
     .field textarea { min-height: 128px; padding: 12px 13px; resize: vertical; }
-    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--sky-400); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky-400) 24%, transparent); }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--sky-context); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sky-context) 24%, transparent); }
     .form-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
     .form-note { margin: 0; color: var(--muted); font-size: 12px; }
     .form-status { min-height: 24px; margin: 0; color: var(--success); font-size: 14px; font-weight: 700; }
@@ -633,7 +638,23 @@
           }
         });
         document.addEventListener("click", function (event) { if (!header.contains(event.target)) closeMenu(); });
-        document.querySelectorAll(".site-nav a").forEach(function (link) { link.addEventListener("click", closeMenu); });
+        const focusHashDestination = function (link) {
+          if (!link.hash || link.origin !== window.location.origin || link.pathname !== window.location.pathname) return;
+          window.setTimeout(function () {
+            const target = document.getElementById(link.hash.slice(1));
+            if (!target) return;
+            const destination = target.querySelector("h1, h2, h3, h4, h5, h6") || target;
+            destination.setAttribute("tabindex", "-1");
+            destination.focus({ preventScroll: true });
+          }, 0);
+        };
+        document.querySelectorAll(".site-nav a").forEach(function (link) {
+          link.addEventListener("click", function (event) {
+            closeMenu();
+            if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+            focusHashDestination(link);
+          });
+        });
       }
 
       const form = document.getElementById("lead-form");
