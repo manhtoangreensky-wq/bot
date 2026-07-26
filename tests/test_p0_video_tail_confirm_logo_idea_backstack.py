@@ -51,7 +51,7 @@ def _ready_content_state() -> dict:
     )
 
 
-def test_tail_requires_branding_audio_then_unified_summary_before_quality() -> None:
+def test_tail_requires_branding_then_unified_summary_before_quality() -> None:
     state = _ready_content_state()
     assert video_tail9.next_required_screen(state) == "logo"
     assert video_tail9.prepare_summary(state)["summary_status"] == "not_ready"
@@ -59,10 +59,6 @@ def test_tail_requires_branding_audio_then_unified_summary_before_quality() -> N
     state = video_tail9.mark_branding_complete(state)
     assert state["logo_status"] == "skipped"
     assert state["watermark_status"] == "skipped"
-    assert video_tail9.next_required_screen(state) == "audio"
-
-    state = video_tail9.mark_audio_complete(state)
-    assert state["audio_status"] == "skipped"
     assert video_tail9.next_required_screen(state) == "summary"
 
     state = video_tail9.prepare_summary(state)
@@ -187,8 +183,8 @@ def test_stale_audio_done_cannot_bypass_branding_and_summary() -> None:
 
     result = asyncio.run(handler(SimpleNamespace(callback_query=Query()), SimpleNamespace()))
 
-    assert result == "logo"
-    assert rendered == ["logo"]
+    assert result == "summary"
+    assert rendered == ["summary"]
 
 
 def test_confirm_recovery_returns_to_invoice_instead_of_quality_catalog() -> None:
@@ -220,7 +216,10 @@ def test_stale_quality_and_confirm_callbacks_cannot_skip_required_tail_screens()
     quality_stage_gate = quality.index('str(tail.get("status_stage") or "") != "quality"')
     quality_apply = quality.index("quality = max(200")
     assert quality_select < quality_stage_gate < quality_apply
-    assert 'if tail.get("final_confirmed"):' in confirm[:confirm_open]
+    assert (
+        'if tail.get("final_confirmed") or str(tail.get("job_id") or "").strip():'
+        in confirm[:confirm_open]
+    )
     assert 'str(tail.get("status_stage") or "") != "invoice"' in confirm[:confirm_open]
 
 

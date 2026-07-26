@@ -189,9 +189,6 @@ def test_last_green_scene_prompts_restore_the_shared_tail_sequence() -> None:
     assert video_tail9.next_required_screen(tail) == "logo"
 
     tail = video_tail9.mark_branding_skipped(tail)
-    assert video_tail9.next_required_screen(tail) == "audio"
-
-    tail = video_tail9.mark_audio_complete(tail, skipped=True)
     assert video_tail9.next_required_screen(tail) == "summary"
 
     tail = video_tail9.prepare_summary(tail)
@@ -216,16 +213,17 @@ def test_direct_summary_callback_keeps_summary_as_its_own_owner() -> None:
     assert "video_tail|review|summary" in BOT_SOURCE
 
 
-def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positions() -> None:
-    audio = _function_source("video_tail9_audio_keyboard")
+def test_canonical_tail_reuses_planning_audio_and_keeps_nine_brand_positions() -> None:
+    audio = _function_source("video_scene3_audio_plan_keyboard")
     logo = _function_source("video_tail9_logo_keyboard")
     positions = _function_source("video_tail9_position_keyboard")
     summary = _function_source("video_tail9_summary_keyboard")
     quality = _function_source("video_tail9_quality_keyboard")
 
-    assert '"video_tail|audio|done"' in audio
-    assert '"video_tail|audio|skip"' in audio
-    assert '"video_tail|audio|back"' in audio
+    assert '"vprofile|audio_done"' in audio
+    assert '"vprofile|audio_skip"' in audio
+    assert "*video_scene3_nav_rows()" in audio
+    assert '"vprofile|back"' in _function_source("video_scene3_nav_rows")
     assert '"video_tail|logo|done"' in logo
     assert '"video_tail|logo|skip"' in logo
     assert '"video_tail|review|prompts"' in logo
@@ -252,13 +250,12 @@ def test_legacy_review_audio_and_audio_exit_use_the_corrected_tail_order() -> No
     legacy_end = legacy_review.index('if action == "review_post":', legacy_start)
     legacy_audio = legacy_review[legacy_start:legacy_end]
 
-    assert audio.count('video_tail9_render(query, uid, context, "summary")') >= 2
+    assert audio.count('video_tail9_render(query, uid, context, "summary")') == 1
+    assert "video_tail9_open_planning_audio" in audio
     assert 'video_tail9_render(query, uid, context, "quality")' not in audio
-    assert 'video_tail9_render(query, uid, context, "logo")' in audio
-    assert 'if action == "skip":' in audio
-    assert 'if action == "done":' in audio
-    assert 'video_tail9_render(query, uid, context, "audio")' in legacy_audio
-    assert 'audio_plan' not in legacy_audio
+    assert 'action in {"back", "done", "skip"}' in audio
+    assert "video_tail9_open_planning_audio" in legacy_audio
+    assert 'video_tail9_render(query, uid, context, "audio")' not in legacy_audio
 
 
 def test_idea_handoff_preserves_parent_ratio_and_public_recovery_copy() -> None:

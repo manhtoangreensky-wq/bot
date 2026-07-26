@@ -145,7 +145,8 @@ def test_summary_back_and_direct_open_use_the_exact_owner_stack() -> None:
     assert 'return await video_tail9_render(query, uid, context, "summary")' in handler
     summary_handler = handler[handler.index('if section == "summary":'):handler.index('if section == "audio":')]
     assert 'if action == "back":' in summary_handler
-    assert 'video_tail9_render(query, uid, context, "audio")' in summary_handler
+    assert 'video_tail9_render(query, uid, context, "logo")' in summary_handler
+    assert 'video_tail9_render(query, uid, context, "audio")' not in summary_handler
 
 
 def test_source_audio_capability_does_not_override_missing_source_stream() -> None:
@@ -254,12 +255,11 @@ def test_tail_media_and_text_intakes_have_exact_owner_and_back_target() -> None:
     assert message_dispatch.count("handle_video_tail9_pending_text(update, context)") == 1
 
 
-def test_tail_keyboards_have_no_duplicate_volume_or_logo_skip_callbacks() -> None:
-    volume = _between(
-        "def video_tail9_volume_keyboard",
-        "def video_tail9_logo_text",
-    )
-    assert volume.count('f"video_tail|audio|custom|{key}"') == 1
+def test_removed_tail_audio_keyboard_cannot_reappear_beside_planning_audio() -> None:
+    assert "def video_tail9_audio_text" not in BOT_SOURCE
+    assert "def video_tail9_audio_keyboard" not in BOT_SOURCE
+    assert "def video_tail9_volume_keyboard" not in BOT_SOURCE
+    assert "def video_scene3_audio_plan_keyboard" in BOT_SOURCE
     logo = _between(
         "def video_tail9_logo_keyboard",
         "def video_tail9_position_keyboard",

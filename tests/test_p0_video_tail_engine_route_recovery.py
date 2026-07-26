@@ -99,20 +99,21 @@ def test_tail_audio_completion_routes_to_unified_summary_and_back_to_branding() 
     end = BOT_SOURCE.index("async def handle_video_tail9_pending_text", start)
     handler = BOT_SOURCE[start:end]
     audio = handler[handler.index('if section == "audio":'):handler.index('if section == "logo":')]
-    assert audio.count('video_tail9_render(query, uid, context, "summary")') >= 2
+    assert audio.count('video_tail9_render(query, uid, context, "summary")') == 1
+    assert "video_tail9_open_planning_audio" in audio
     assert 'video_tail9_render(query, uid, context, "quality")' not in audio
-    assert 'video_tail9_render(query, uid, context, "logo")' in audio
-    assert 'if action == "done":' in audio
-    assert 'if action == "skip":' in audio
+    assert 'video_tail9_render(query, uid, context, "logo")' not in audio
+    assert 'action in {"back", "done", "skip"}' in audio
 
 
-def test_legacy_scene3_audio_callbacks_redirect_to_the_canonical_audio_owner() -> None:
+def test_scene3_audio_callbacks_are_the_canonical_audio_owner() -> None:
     handler = _async_function_source("handle_video_profile_studio_callback")
-    redirect = handler.index('if action in {"audio_open", "audio_review", "audio_done", "audio_skip"}:')
-    next_action = handler.index('if action in {"image_ai_return", "asset_ai_return"}:', redirect)
-    audio = handler[redirect:next_action]
-    assert 'video_tail9_render(query, uid, context, "audio")' in audio
-    assert "video_profile_studio_step" not in audio
+    assert 'if action == "audio_open":' in handler
+    assert 'post_return_step="audio_plan"' in handler
+    assert 'if action == "audio_review":' in handler
+    assert 'if action in {"audio_done", "audio_skip"}:' in handler
+    assert 'return_step == "summary"' in handler
+    assert 'video_tail9_render(query, uid, context, "audio")' not in handler
 
 
 def test_legacy_review_and_logo_callbacks_do_not_skip_the_canonical_tail() -> None:
@@ -126,7 +127,8 @@ def test_legacy_review_and_logo_callbacks_do_not_skip_the_canonical_tail() -> No
     assert 'video_tail9_render(query, uid, context, "summary")' in post_done
 
     review_done = handler[handler.index('if action in {"review_done", "review_continue"}:'):handler.index('if action == "post_toggle":')]
-    assert 'video_tail9_render(query, uid, context, "audio")' in review_done
+    assert 'video_tail9_render(query, uid, context, "logo")' in review_done
+    assert 'video_tail9_render(query, uid, context, "audio")' not in review_done
 
 
 def test_logo_and_watermark_need_a_nine_position_confirmation_before_enable() -> None:
