@@ -86,43 +86,37 @@ def _idea_tail(scene_count: int = 2) -> dict:
     )
 
 
-def test_exact_idea_tail_order_is_branding_summary_review_audio_quality() -> None:
+def test_exact_idea_tail_order_is_branding_audio_unified_summary_quality() -> None:
     state = _idea_tail(2)
     assert video_tail9.next_required_screen(state) == "logo"
 
     state = video_tail9.mark_branding_skipped(state)
+    assert video_tail9.next_required_screen(state) == "audio"
+
+    state = video_tail9.mark_audio_complete(state, skipped=True)
     assert video_tail9.next_required_screen(state) == "summary"
 
     state = video_tail9.prepare_summary(state)
     assert state["summary_status"] == "ready"
-    assert video_tail9.next_required_screen(state) == "review"
-
-    state = video_tail9.mark_review_complete(state)
-    assert video_tail9.next_required_screen(state) == "audio"
-
-    state = video_tail9.mark_audio_complete(state, skipped=True)
+    assert state["review_status"] == "ready"
     assert video_tail9.next_required_screen(state) == ""
-    assert state["status_stage"] == "audio_addons"
+    assert state["status_stage"] == "summary"
 
 
-def test_branding_summary_review_and_audio_buttons_follow_the_exact_order() -> None:
+def test_branding_audio_and_unified_summary_buttons_follow_the_exact_order() -> None:
     logo_callbacks = _callbacks(_load_keyboard("video_tail9_logo_keyboard")(_idea_tail(2)))
     summary_callbacks = _callbacks(_load_keyboard("video_tail9_summary_keyboard")(_idea_tail(2)))
-    review_callbacks = _callbacks(_load_keyboard("video_tail9_review_keyboard")(_idea_tail(2)))
     audio_callbacks = _callbacks(_load_keyboard("video_tail9_audio_keyboard")(_idea_tail(2)))
 
     assert "video_tail|logo|done" in logo_callbacks
     assert "video_tail|logo|skip" in logo_callbacks
     assert "video_tail|summary|continue" in summary_callbacks
     assert "video_tail|summary|back" in summary_callbacks
+    assert "video_tail|summary|audio" in summary_callbacks
     assert "video_tail|quality|open" not in summary_callbacks
-    assert "video_tail|audio|open" not in summary_callbacks
-    assert "video_tail|review|audio" in review_callbacks
-    assert "video_tail|audio|open" not in review_callbacks
     assert "video_tail|audio|done" in audio_callbacks
     assert "video_tail|audio|skip" in audio_callbacks
-    assert "video_tail|review|open" in audio_callbacks
-    assert "video_tail|logo|open" not in audio_callbacks
+    assert "video_tail|audio|back" in audio_callbacks
     assert "video_tail|summary|open" not in audio_callbacks
 
 
@@ -137,9 +131,9 @@ def test_logo_back_uses_the_exact_owner_instead_of_looping_or_leaking() -> None:
         "branding_return_to": "summary",
     }))
 
-    assert "video_tail|review|edit_operation" in edit_callbacks
-    assert "video_tail|review|prompts" not in edit_callbacks
-    assert "video_tail|review|prompts" in standard_callbacks
+    assert "video_tail|summary|open" in edit_callbacks
+    assert "video_tail|review|edit_operation" not in edit_callbacks
+    assert "video_tail|summary|open" in standard_callbacks
 
 
 def test_tier_200_depends_on_actual_scene_count_and_supports_one_scene_inputs() -> None:
@@ -222,9 +216,8 @@ def test_content_prompt_and_owner_survive_every_preconfirm_transition() -> None:
 
     for transition in (
         video_tail9.mark_branding_skipped,
-        video_tail9.prepare_summary,
-        video_tail9.mark_review_complete,
         lambda value: video_tail9.mark_audio_complete(value, skipped=True),
+        video_tail9.prepare_summary,
     ):
         state = transition(state)
         assert {key: state[key] for key in expected} == expected
@@ -269,9 +262,9 @@ def test_all_shared_tail_entries_open_branding_without_touching_framevideo() -> 
 
     assert 'if action == "video_prompt_done":' in profile_handler
     assert 'video_tail9_render(query, uid, context, "logo")' in profile_handler
-    assert 'video_tail9_render(query, user_id, context, "logo")' in idea_parent
+    assert '"summary" if return_to_shared_summary else "logo"' in idea_parent
     assert 'video_tail9_render(query, uid, context, "logo")' in storyboard_handler
-    assert 'video_tail9_render(target, user_id, context, "logo")' in selfshot_result
+    assert '"summary" if return_to_summary else "logo"' in selfshot_result
     assert 'video_tail9_render(query, uid, context, "logo")' in edit_handler
     assert "framevideo" not in "\n".join((profile_handler, idea_parent, storyboard_handler, selfshot_result, edit_handler))
 

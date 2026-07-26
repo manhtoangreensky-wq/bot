@@ -124,6 +124,7 @@ def test_summary_requires_an_explicit_optional_tail_decision() -> None:
     assert pending["summary_status"] == "not_ready"
 
     summary = video_tail9.mark_branding_skipped(state)
+    summary = video_tail9.mark_audio_complete(summary, skipped=True)
     summary = video_tail9.prepare_summary(summary)
 
     assert summary["summary_status"] == "ready"
@@ -140,10 +141,11 @@ def test_summary_back_and_direct_open_use_the_exact_owner_stack() -> None:
     )
 
     assert '[("⬅️ Quay lại", "video_tail|summary|back"), ("🏠 Menu chính", "menu|main")]' in summary_keyboard
-    assert 'if action == "summary":' in handler
-    assert 'tail["summary_return_to"] = "review"' in handler
+    assert 'action in {"open", "summary", "review"}' in handler
     assert 'return await video_tail9_render(query, uid, context, "summary")' in handler
-    assert 'target = "review" if str(tail.get("summary_return_to") or "logo") == "review" else "logo"' in handler
+    summary_handler = handler[handler.index('if section == "summary":'):handler.index('if section == "audio":')]
+    assert 'if action == "back":' in summary_handler
+    assert 'video_tail9_render(query, uid, context, "audio")' in summary_handler
 
 
 def test_source_audio_capability_does_not_override_missing_source_stream() -> None:
@@ -273,10 +275,11 @@ def test_tail_confirmation_is_only_persisted_after_a_real_job_exists() -> None:
         "async def handle_video_tail9_pending_text",
     )
     delegated = handler.index("await handle_product_video_public_confirm_callback")
-    persisted = handler.index("video_tail9.confirm_once", delegated)
+    persisted = handler.index("video_tail9.recover_submission", delegated)
     assert delegated < persisted
     assert 'if job_id > 0:' in handler[delegated:persisted]
-    assert 'tail["job_id"] = str(job_id)' in handler[persisted:]
+    assert '"job_id": job_id' in handler[persisted:]
+    assert "video_tail9_render_confirmed_status" in handler[persisted:]
 
 
 def test_long_video_keeps_internal_engine_lock_but_opens_shared_commercial_preview() -> None:

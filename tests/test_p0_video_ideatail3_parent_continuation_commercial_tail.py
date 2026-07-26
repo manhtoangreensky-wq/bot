@@ -308,7 +308,8 @@ def test_exact_parent_renderer_keeps_distinct_product_continuations() -> None:
     assert 'product_id == "multi_scene_film"' in renderer
     assert '"duration_per_scene": 600' in renderer
     assert 'handoff["step"] = "full_review"' in renderer
-    assert 'video_tail9_render(query, user_id, context, "logo")' in renderer
+    assert 'return_to_shared_summary' in renderer
+    assert '"summary" if return_to_shared_summary else "logo"' in renderer
     assert "frame_video_local" not in renderer
 
 

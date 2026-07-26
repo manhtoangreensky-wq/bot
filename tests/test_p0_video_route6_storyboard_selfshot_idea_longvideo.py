@@ -190,7 +190,7 @@ def test_idea_approval_dispatches_to_each_real_parent_component():
     assert "product_id == video_selfshot3.PRODUCT_ID" in dispatcher
     assert 'target_screen = "timeline"' in dispatcher
     assert "video_selfshot3_render(query, user_id, target_screen" in dispatcher
-    assert 'video_tail9_render(query, user_id, context, "logo")' in dispatcher
+    assert '"summary" if return_to_shared_summary else "logo"' in dispatcher
 
 
 def test_idea_parent_next_step_contract_is_product_specific():

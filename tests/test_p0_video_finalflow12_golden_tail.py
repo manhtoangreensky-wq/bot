@@ -75,7 +75,7 @@ def test_idea_handoff_compiles_one_complete_tail_contract() -> None:
     assert compiled["parent_session_id"] == "parent-idea-session"
 
 
-def test_review_requires_summary_before_quality_for_all_tail_owners() -> None:
+def test_unified_summary_is_the_only_final_check_before_quality() -> None:
     scene_review = _function_source("video_scene3_full_review_keyboard")
     tail_review = _function_source("video_tail9_review_keyboard")
     summary = _function_source("video_tail9_summary_keyboard")
@@ -86,15 +86,14 @@ def test_review_requires_summary_before_quality_for_all_tail_owners() -> None:
     assert "video_tail|quality|open" not in summary
     assert '[("⭐ Hoàn thiện video", "video_tail|quality|open")]' not in summary
     assert "video_tail|quality|open" not in edit_review
-    assert "video_tail|review|audio" in tail_review
-    assert "video_tail|review|audio" in edit_review
+    assert "return video_tail9_summary_keyboard(tail)" in tail_review
     assert "video_tail|review|logo" in scene_review
-    assert "video_tail|review|logo" in tail_review
     assert "video_tail|review|logo" in edit_review
     assert "video_tail|review|summary" in scene_review
-    assert "video_tail|review|summary" in tail_review
     assert "video_tail|review|summary" in edit_review
     assert "video_tail|summary|logo" in summary
+    assert "video_tail|summary|audio" in summary
+    assert "video_tail|summary|continue" in summary
     assert '("⬅️ Quay lại", "video_tail|summary|back")' in summary
 
 
@@ -190,16 +189,14 @@ def test_last_green_scene_prompts_restore_the_shared_tail_sequence() -> None:
     assert video_tail9.next_required_screen(tail) == "logo"
 
     tail = video_tail9.mark_branding_skipped(tail)
+    assert video_tail9.next_required_screen(tail) == "audio"
+
+    tail = video_tail9.mark_audio_complete(tail, skipped=True)
     assert video_tail9.next_required_screen(tail) == "summary"
 
     tail = video_tail9.prepare_summary(tail)
     assert tail["summary_status"] == "ready"
-    assert video_tail9.next_required_screen(tail) == "review"
-
-    tail = video_tail9.mark_review_complete(tail)
-    assert video_tail9.next_required_screen(tail) == "audio"
-
-    tail = video_tail9.mark_audio_complete(tail, skipped=True)
+    assert tail["review_status"] == "ready"
     assert video_tail9.next_required_screen(tail) == ""
 
 
@@ -208,7 +205,7 @@ def test_direct_summary_callback_keeps_summary_as_its_own_owner() -> None:
     blocker = _function_source("video_tail9_public_blocker_keyboard")
     quality = _function_source("video_tail9_quality_keyboard")
 
-    assert 'if action == "summary":' in callback
+    assert 'action in {"open", "summary", "review"}' in callback
     assert 'video_tail9.prepare_summary(tail)' in callback
     assert 'if section == "summary":' in callback
     assert 'video_tail9_render(query, uid, context, "summary")' in callback
@@ -228,10 +225,10 @@ def test_canonical_tail_requires_audio_logo_summary_and_keeps_nine_brand_positio
 
     assert '"video_tail|audio|done"' in audio
     assert '"video_tail|audio|skip"' in audio
-    assert '"video_tail|review|open"' in audio
+    assert '"video_tail|audio|back"' in audio
     assert '"video_tail|logo|done"' in logo
     assert '"video_tail|logo|skip"' in logo
-    assert '"video_tail|review|open"' in logo
+    assert '"video_tail|review|prompts"' in logo
     for position in (
         "top_left", "top_center", "top_right",
         "center_left", "center", "center_right",
@@ -255,8 +252,9 @@ def test_legacy_review_audio_and_audio_exit_use_the_corrected_tail_order() -> No
     legacy_end = legacy_review.index('if action == "review_post":', legacy_start)
     legacy_audio = legacy_review[legacy_start:legacy_end]
 
-    assert audio.count('video_tail9_render(query, uid, context, "quality")') == 2
-    assert 'video_tail9_render(query, uid, context, "logo")' not in audio
+    assert audio.count('video_tail9_render(query, uid, context, "summary")') >= 2
+    assert 'video_tail9_render(query, uid, context, "quality")' not in audio
+    assert 'video_tail9_render(query, uid, context, "logo")' in audio
     assert 'if action == "skip":' in audio
     assert 'if action == "done":' in audio
     assert 'video_tail9_render(query, uid, context, "audio")' in legacy_audio

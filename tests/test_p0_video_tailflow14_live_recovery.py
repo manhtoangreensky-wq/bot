@@ -200,9 +200,8 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
         },
     )
     tail = video_tail9.mark_branding_skipped(tail)
-    tail = video_tail9.prepare_summary(tail)
-    tail = video_tail9.mark_review_complete(tail)
     tail = video_tail9.mark_audio_complete(tail, skipped=True)
+    tail = video_tail9.prepare_summary(tail)
     tail["status_stage"] = "quality"
     invoices: list[dict] = []
     invoice_keyboard = _load_function(
@@ -268,12 +267,12 @@ def test_selecting_tier_300_opens_exactly_one_invoice() -> None:
     assert _callbacks(invoices[0]["reply_markup"]).count("video_tail|confirm|open") == 1
 
 
-def test_quality_back_is_owned_by_quality_and_returns_to_audio() -> None:
+def test_quality_back_is_owned_by_quality_and_returns_to_unified_summary() -> None:
     handler = _function_source("handle_video_tail_callback")
     quality = handler[handler.index('if section == "quality":'):handler.index('if section == "confirm":')]
 
     assert 'if action == "back":' in quality
-    assert 'video_tail9_render(query, uid, context, "audio")' in quality
+    assert 'video_tail9_render(query, uid, context, "summary")' in quality
 
 
 def test_one_scene_ai_and_trend_keep_the_200_experience_tier() -> None:

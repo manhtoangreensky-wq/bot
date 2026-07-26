@@ -51,7 +51,7 @@ def _ready_content_state() -> dict:
     )
 
 
-def test_tail_requires_branding_summary_review_then_audio_before_quality() -> None:
+def test_tail_requires_branding_audio_then_unified_summary_before_quality() -> None:
     state = _ready_content_state()
     assert video_tail9.next_required_screen(state) == "logo"
     assert video_tail9.prepare_summary(state)["summary_status"] == "not_ready"
@@ -59,17 +59,15 @@ def test_tail_requires_branding_summary_review_then_audio_before_quality() -> No
     state = video_tail9.mark_branding_complete(state)
     assert state["logo_status"] == "skipped"
     assert state["watermark_status"] == "skipped"
-    assert video_tail9.next_required_screen(state) == "summary"
-
-    state = video_tail9.prepare_summary(state)
-    assert state["summary_status"] == "ready"
-    assert video_tail9.next_required_screen(state) == "review"
-
-    state = video_tail9.mark_review_complete(state)
     assert video_tail9.next_required_screen(state) == "audio"
 
     state = video_tail9.mark_audio_complete(state)
     assert state["audio_status"] == "skipped"
+    assert video_tail9.next_required_screen(state) == "summary"
+
+    state = video_tail9.prepare_summary(state)
+    assert state["summary_status"] == "ready"
+    assert state["review_status"] == "ready"
     assert video_tail9.next_required_screen(state) == ""
 
 
@@ -116,9 +114,8 @@ def test_invoice_opens_a_distinct_confirmation_screen_before_submit() -> None:
 
 def test_confirm_open_is_side_effect_free_and_renders_only_the_confirmation() -> None:
     tail = video_tail9.mark_branding_skipped(_ready_content_state())
-    tail = video_tail9.prepare_summary(tail)
-    tail = video_tail9.mark_review_complete(tail)
     tail = video_tail9.mark_audio_complete(tail, skipped=True)
+    tail = video_tail9.prepare_summary(tail)
     tail = video_tail9.select_package(
         tail,
         quality_tier_id="300",

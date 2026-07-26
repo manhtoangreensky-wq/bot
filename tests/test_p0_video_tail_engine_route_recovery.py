@@ -67,7 +67,9 @@ def test_logo_hub_starts_each_branding_flow_before_the_nine_position_grid() -> N
     assert "video_tail|logo|watermark" in keyboard
     assert "video_tail|logo|position|logo" not in keyboard
     assert "video_tail|logo|position|watermark" not in keyboard
-    assert "video_tail|review|open" in keyboard
+    assert "video_tail|review|prompts" in keyboard
+    assert "video_tail|summary|open" in keyboard
+    assert "video_tail|review|open" not in keyboard
 
 
 def test_local_editor_preserves_each_canonical_overlay_position() -> None:
@@ -92,24 +94,25 @@ def test_local_editor_preserves_each_canonical_overlay_position() -> None:
         assert "drawtext=" in complex_filter
 
 
-def test_tail_audio_completion_routes_to_quality_without_reopening_branding() -> None:
+def test_tail_audio_completion_routes_to_unified_summary_and_back_to_branding() -> None:
     start = BOT_SOURCE.index("async def handle_video_tail_callback")
     end = BOT_SOURCE.index("async def handle_video_tail9_pending_text", start)
     handler = BOT_SOURCE[start:end]
     audio = handler[handler.index('if section == "audio":'):handler.index('if section == "logo":')]
-    assert audio.count('video_tail9_render(query, uid, context, "quality")') == 2
-    assert 'video_tail9_render(query, uid, context, "logo")' not in audio
-    assert 'video_tail9_render(query, uid, context, "summary")' not in audio
+    assert audio.count('video_tail9_render(query, uid, context, "summary")') >= 2
+    assert 'video_tail9_render(query, uid, context, "quality")' not in audio
+    assert 'video_tail9_render(query, uid, context, "logo")' in audio
     assert 'if action == "done":' in audio
     assert 'if action == "skip":' in audio
 
 
-def test_legacy_review_audio_completion_enters_the_canonical_logo_tail() -> None:
+def test_legacy_scene3_audio_callbacks_redirect_to_the_canonical_audio_owner() -> None:
     handler = _async_function_source("handle_video_profile_studio_callback")
-    audio = handler[handler.index('if action in {"audio_done", "audio_skip"}:'):handler.index('if action == "content":')]
-    assert 'if return_step == "full_review":' in audio
-    assert 'video_tail9_render(query, uid, context, "logo")' in audio
-    assert 'target = "scene_plan"' in audio
+    redirect = handler.index('if action in {"audio_open", "audio_review", "audio_done", "audio_skip"}:')
+    next_action = handler.index('if action in {"image_ai_return", "asset_ai_return"}:', redirect)
+    audio = handler[redirect:next_action]
+    assert 'video_tail9_render(query, uid, context, "audio")' in audio
+    assert "video_profile_studio_step" not in audio
 
 
 def test_legacy_review_and_logo_callbacks_do_not_skip_the_canonical_tail() -> None:
