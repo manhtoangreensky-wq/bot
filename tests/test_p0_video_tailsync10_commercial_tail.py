@@ -189,8 +189,10 @@ def test_long_public_entry_and_final_confirm_have_exact_separate_owners() -> Non
     assert "handle_video_product_callback" not in handler
     assert "query.data =" not in handler
     assert "video_tail9_long_maintenance_text" in confirm
-    maintenance = confirm[confirm.index("if not contract.get(\"execution_enabled\")"):]
-    assert "handle_product_video_public_confirm_callback" not in maintenance.split("if tail.get(\"final_confirmed\")", 1)[0]
+    maintenance_start = confirm.index('if not contract.get("execution_enabled")')
+    maintenance_end = confirm.index('if owner == "video_edit":', maintenance_start)
+    maintenance = confirm[maintenance_start:maintenance_end]
+    assert "handle_product_video_public_confirm_callback" not in maintenance
 
 
 def test_shared_invoice_and_status_contract_preserve_delivery_before_charge() -> None:
