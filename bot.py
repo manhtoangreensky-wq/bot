@@ -111058,7 +111058,7 @@ async def handle_translation_callback(update: Update, context: ContextTypes.DEFA
     return await query.answer("Nguồn dịch chưa hỗ trợ.", show_alert=True)
 
 async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = customer_start_surface_audit_data()
     leaked = data.get("leaked_markers") or []
@@ -127096,6 +127096,11 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
         )
 
 async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
+    # Outermost authorisation gate. The paid branch below hands the engine
+    # gate_prechecked=True on the caller's behalf, so authorisation has to be
+    # settled here and not only inside the inner core runner.
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     smoke_no_charge_note = "No Xu deducted"
     if not has_admin_paid_confirmation(context):
         # no provider call: the core guard records NO_CONFIRM and returns before media/provider work.
@@ -182031,7 +182036,7 @@ async def cmd_fx_price_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text(
             "🔒 Lệnh này chỉ dành cho Admin.", parse_mode="HTML"
         )
@@ -182055,7 +182060,7 @@ async def cmd_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_mmo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text(
             "🔒 Lệnh này chỉ dành cho Admin.", parse_mode="HTML"
         )
@@ -185607,7 +185612,7 @@ async def cmd_campaign(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_campaign_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args)
     data = parse_key_value_args(raw)
@@ -185633,7 +185638,7 @@ async def cmd_campaign_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     rows = list_campaigns(update.effective_user.id)
     if not rows:
@@ -185644,7 +185649,7 @@ async def cmd_campaigns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_campaign_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     data = parse_key_value_args(raw)
@@ -185729,7 +185734,7 @@ async def cmd_campaign_preset(update: Update, context: ContextTypes.DEFAULT_TYPE
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     if not gemini_client and not openai_client:
         return await update.message.reply_text("❌ Chưa cấu hình AI Provider.")
@@ -185795,7 +185800,7 @@ async def cmd_video_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         job_id = int(context.args[0])
@@ -185817,7 +185822,7 @@ async def cmd_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_campaign_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     total_campaigns, job_counts, recent_jobs = campaign_stats(update.effective_user.id)
     lines = [
@@ -185832,7 +185837,7 @@ async def cmd_campaign_stats(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_channel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     platform = data.get("platform") or data.get("nen")
@@ -185865,7 +185870,7 @@ async def cmd_channel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     rows = list_social_channels(update.effective_user.id)
     if not rows:
@@ -185879,7 +185884,7 @@ async def cmd_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     platform = data.get("platform") or data.get("nen") or "tiktok"
@@ -185925,7 +185930,7 @@ async def cmd_channel_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_channel_publish_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -185954,7 +185959,7 @@ async def cmd_channel_publish_set(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def cmd_publish_readiness(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     rows = list_social_publish_readiness(update.effective_user.id)
     if not rows:
@@ -185977,7 +185982,7 @@ async def cmd_publish_readiness(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = publisher_status_data(update.effective_user.id)
     lines = [
@@ -186016,7 +186021,7 @@ async def cmd_publisher_status(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_capabilities(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     platform = data.get("platform") or data.get("nen") or ""
@@ -186054,7 +186059,7 @@ async def cmd_publisher_capabilities(update: Update, context: ContextTypes.DEFAU
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_platform_adapters(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     platform = data.get("platform") or data.get("nen") or ""
@@ -186088,7 +186093,7 @@ async def cmd_platform_adapters(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     platform = data.get("platform") or data.get("nen") or "tiktok"
@@ -186137,7 +186142,7 @@ async def cmd_publish_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     network = data.get("network") or data.get("san") or data.get("shop")
@@ -186178,7 +186183,7 @@ async def cmd_affiliate_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_affiliate_seed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     created, skipped = seed_default_affiliate_links(update.effective_user.id)
     lines = [
@@ -186203,7 +186208,7 @@ async def cmd_affiliate_seed(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     if not raw:
@@ -186254,7 +186259,7 @@ async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_admin_import_affiliate_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     if not raw:
@@ -186268,7 +186273,7 @@ async def cmd_admin_import_affiliate_inventory(update: Update, context: ContextT
     return await cmd_affiliate_import(update, context)
 
 async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     rows = list_affiliate_links(update.effective_user.id)
     if not rows:
@@ -186286,7 +186291,7 @@ async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -186342,7 +186347,7 @@ async def cmd_affiliate_profile(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 async def cmd_affiliate_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     niche = data.get("niche") or data.get("ngach") or data.get("topic") or "công nghệ AI"
@@ -186377,7 +186382,7 @@ async def cmd_affiliate_match(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -186454,7 +186459,7 @@ async def cmd_affiliate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 async def cmd_affiliate_related(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -186514,7 +186519,7 @@ async def cmd_affiliate_related(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_bundle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -186576,7 +186581,7 @@ async def cmd_affiliate_bundle(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_calendar_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -186694,7 +186699,7 @@ async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     topic = data.get("topic") or data.get("chude")
@@ -186787,7 +186792,7 @@ async def cmd_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or "công nghệ AI"
@@ -186933,7 +186938,7 @@ async def cmd_operator_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_autopilot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or "công nghệ AI"
@@ -187020,7 +187025,7 @@ async def cmd_autopilot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_make_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     data = parse_key_value_args(raw)
@@ -187434,7 +187439,7 @@ def build_video_order_contract(topic: str, platform: str, channel: str, result: 
     }
 
 async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     plan = parse_boss_video_launch_args(raw)
@@ -187543,7 +187548,7 @@ async def cmd_tao_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     data = parse_key_value_args(raw)
@@ -187685,7 +187690,7 @@ async def cmd_operator_launch(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
 async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     if not context.args:
         return await update.message.reply_text(
@@ -187752,7 +187757,7 @@ async def cmd_produce(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     if context.args:
         try:
@@ -187797,7 +187802,7 @@ async def cmd_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_pipeline_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -187829,7 +187834,7 @@ async def cmd_pipeline_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_operator_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -187887,7 +187892,7 @@ async def cmd_operator_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     active_channels, active_affiliates, calendar_counts, pipeline_counts, active_jobs, upcoming_slots = operator_dashboard_data(update.effective_user.id)
     lines = [
@@ -187926,7 +187931,7 @@ async def cmd_operator_dashboard(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -187981,7 +187986,7 @@ async def cmd_operator_daily(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188038,7 +188043,7 @@ async def cmd_operator_daily_pack(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     days = max(1, min(safe_int(data.get("days") or data.get("ngay") or 1, 1), 30))
@@ -188100,7 +188105,7 @@ async def cmd_operator_daily_run(update: Update, context: ContextTypes.DEFAULT_T
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_daily_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     days = max(1, min(safe_int(data.get("days") or data.get("ngay") or 1, 1), 30))
@@ -188162,7 +188167,7 @@ async def cmd_operator_daily_cycle(update: Update, context: ContextTypes.DEFAULT
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_status_data(update.effective_user.id)
     counts = data["counts"]
@@ -188200,7 +188205,7 @@ async def cmd_operator_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_bootstrap(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     include_channels = (data.get("channels") or data.get("kenh") or "1").lower() not in {"0", "false", "no", "off", "khong"}
@@ -188260,7 +188265,7 @@ async def cmd_operator_bootstrap(update: Update, context: ContextTypes.DEFAULT_T
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_audit_data(update.effective_user.id)
     lines = [
@@ -188295,7 +188300,7 @@ async def cmd_operator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_smoke_test_data(update.effective_user.id)
     lines = [
@@ -188324,7 +188329,7 @@ async def cmd_operator_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     text = (
         "📘 <b>OPERATOR PLAYBOOK — KIẾM TIỀN BẰNG VIDEO + AFFILIATE</b>\n\n"
@@ -188364,7 +188369,7 @@ async def cmd_operator_playbook(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_operator_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_today_data(update.effective_user.id)
     counts = data["status"]["counts"]
@@ -188395,7 +188400,7 @@ async def cmd_operator_today(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188439,7 +188444,7 @@ async def cmd_operator_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     if not raw:
@@ -188476,7 +188481,7 @@ async def cmd_mission_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     status = (data.get("status") or "").lower()
@@ -188500,7 +188505,7 @@ async def cmd_missions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     worker = data.get("worker") or data.get("ai") or "claude"
@@ -188518,7 +188523,7 @@ async def cmd_mission_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_mission_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     mission_id = safe_int(data.get("id") or data.get("mission") or (context.args[0] if context.args else ""), 0)
@@ -188532,7 +188537,7 @@ async def cmd_mission_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def cmd_mission_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     mission_id = safe_int(data.get("id") or data.get("mission") or (context.args[0] if context.args else ""), 0)
@@ -188580,7 +188585,7 @@ async def cmd_mission_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_workorders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     mission_id = safe_int(data.get("id") or data.get("mission") or (context.args[0] if context.args else ""), 0)
@@ -188623,7 +188628,7 @@ async def cmd_mission_workorders(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_mission_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     mission_id = safe_int(data.get("id") or data.get("mission"), 0)
@@ -188638,7 +188643,7 @@ async def cmd_mission_complete(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 async def cmd_operator_next_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188677,7 +188682,7 @@ async def cmd_operator_next_run(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 30), 180))
@@ -188721,7 +188726,7 @@ async def cmd_operator_dispatch(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 30), 180))
@@ -188769,7 +188774,7 @@ async def cmd_operator_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_mission(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188821,7 +188826,7 @@ async def cmd_operator_mission(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_commander_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188854,7 +188859,7 @@ async def cmd_operator_commander_pack(update: Update, context: ContextTypes.DEFA
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_operator_contract(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188899,7 +188904,7 @@ async def cmd_operator_contract(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -188946,7 +188951,7 @@ async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_head_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 30), 180))
@@ -189000,7 +189005,7 @@ async def cmd_head_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_head_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     days = max(1, min(safe_int(data.get("days") or data.get("ngay"), 1), 30))
@@ -189280,7 +189285,7 @@ def operator_category_title(category):
     return titles.get(category, "AI OPERATOR")
 
 async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return await reply_internal_customer_feature(update)
     text = (
         "🧠 <b>AI OPERATOR MENU</b>\n\n"
@@ -189295,7 +189300,7 @@ async def cmd_operator_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=operator_menu_keyboard())
 
 async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     base_url = (PUBLIC_BASE_URL or "").rstrip("/") or "https://<RAILWAY_DOMAIN>"
     bridge = check_operator_bridge_config()
@@ -189445,7 +189450,7 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_worker_spec(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     spec = operator_worker_spec_data()
     compact = {
@@ -189465,7 +189470,7 @@ async def cmd_operator_worker_spec(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_operator_toolchain(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_toolchain_data()
     lines = [
@@ -189493,7 +189498,7 @@ async def cmd_operator_toolchain(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_tool_readiness(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_tool_readiness_data()
     lines = [
@@ -189592,7 +189597,7 @@ async def cmd_api_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     if data.get("tool") or data.get("stage") or data.get("type") or data.get("message"):
@@ -189643,7 +189648,7 @@ async def cmd_operator_tool_events(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_n8n_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_n8n_template_data()
     compact = {
@@ -189666,7 +189671,7 @@ async def cmd_operator_n8n_template(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_operator_n8n_workflow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = operator_n8n_workflow_json_data()
     base_url = (PUBLIC_BASE_URL or "https://<RAILWAY_DOMAIN>").rstrip("/")
@@ -189683,7 +189688,7 @@ async def cmd_operator_n8n_workflow(update: Update, context: ContextTypes.DEFAUL
 async def handle_operator_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if str(query.from_user.id) != ADMIN_ID:
+    if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     action = query.data.split("|", 1)[1]
     if action == "root":
@@ -189840,7 +189845,7 @@ async def handle_operator_menu_callback(update: Update, context: ContextTypes.DE
     )
 
 async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw_text = " ".join(context.args).strip()
     if not raw_text:
@@ -189899,7 +189904,7 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await run_brain_plan(update, context, plan)
 
 async def cmd_operator_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -189957,7 +189962,7 @@ async def cmd_operator_build(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -189991,7 +189996,7 @@ async def cmd_creative_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_creative_variants(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         job_id = int(context.args[0])
@@ -190015,7 +190020,7 @@ async def cmd_creative_variants(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
 
 async def cmd_creative_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -190037,7 +190042,7 @@ async def cmd_creative_select(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 async def cmd_creative_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -190077,7 +190082,7 @@ async def cmd_creative_report(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     patterns = video_pattern_bank_data()
     lines = ["🎞 <b>VIDEO PATTERN BANK</b>\n"]
@@ -190094,7 +190099,7 @@ async def cmd_video_patterns(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = ai_film_series_blueprint_data()
     project = data.get("default_project_input") or {}
@@ -190124,7 +190129,7 @@ async def cmd_film_blueprint(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_project_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     topic = data.get("topic") or data.get("chu_de") or data.get("niche") or " ".join(
@@ -190173,7 +190178,7 @@ async def cmd_film_project_pack(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     topic = data.get("topic") or data.get("chu_de") or data.get("niche") or " ".join(context.args)
@@ -190255,7 +190260,7 @@ async def cmd_film_series(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 async def cmd_film_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0), 0)
@@ -190290,7 +190295,7 @@ async def cmd_film_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_film_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("id"), 0)
@@ -190339,7 +190344,7 @@ async def cmd_film_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_film_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0), 0)
@@ -190368,7 +190373,7 @@ async def cmd_storyboard_upload_help(update: Update, context: ContextTypes.DEFAU
     return await cmd_storyboard_crop(update, context)
 
 async def cmd_admin_import_reference_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     if context.args:
         return await cmd_reference_add(update, context)
@@ -190383,7 +190388,7 @@ async def cmd_admin_import_reference_video(update: Update, context: ContextTypes
     )
 
 async def cmd_reference_catalog_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     counts = reference_catalog_status_data()
     await update.message.reply_text(
@@ -190399,7 +190404,7 @@ async def cmd_reference_catalog_status(update: Update, context: ContextTypes.DEF
     )
 
 async def cmd_reference_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     ref_id = safe_int(data.get("ref") or data.get("id"), 0)
@@ -190425,7 +190430,7 @@ async def cmd_reference_analyze(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 async def cmd_reference_build(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     niche = data.get("niche") or data.get("topic") or data.get("chu_de") or " ".join(arg for arg in context.args if "=" not in arg)
@@ -190468,7 +190473,7 @@ async def cmd_reference_build(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     pack = reference_learning_pack_data()
     source = pack.get("source_summary") or {}
@@ -190492,7 +190497,7 @@ async def cmd_reference_pack(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -190534,7 +190539,7 @@ async def cmd_reference_videos(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     if not raw:
@@ -190574,7 +190579,7 @@ async def cmd_reference_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_viral_remix(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw = " ".join(context.args).strip()
     data = parse_key_value_args(raw)
@@ -190643,7 +190648,7 @@ async def cmd_viral_remix(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -190690,7 +190695,7 @@ async def cmd_reference_scan(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if str(query.from_user.id) != ADMIN_ID:
+    if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "select":
@@ -190714,7 +190719,7 @@ async def handle_creative_callback(update: Update, context: ContextTypes.DEFAULT
 async def handle_task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if str(query.from_user.id) != ADMIN_ID:
+    if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     parts = query.data.split("|")
     if len(parts) != 4:
@@ -191075,7 +191080,7 @@ async def cmd_growth_loop_manual(update: Update, context: ContextTypes.DEFAULT_T
 
 async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return await cmd_performance_add_manual(update, context, raw)
     data = parse_key_value_args(raw)
     if data.get("post_id") or data.get("post"):
@@ -191122,7 +191127,7 @@ async def cmd_performance_add(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191170,7 +191175,7 @@ async def cmd_mark_published(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_publish_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return await cmd_publish_done_manual(update, context, raw)
     data = parse_key_value_args(raw)
     try:
@@ -191222,7 +191227,7 @@ async def cmd_publish_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_post_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191242,7 +191247,7 @@ async def cmd_post_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(format_post_publish_handoff(handoff), parse_mode="HTML")
 
 async def cmd_distribution_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191298,7 +191303,7 @@ async def cmd_distribution_pack(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_comment_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("id") or (context.args[0] if context.args else 0), 0)
@@ -191337,7 +191342,7 @@ async def cmd_comment_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_pipeline_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("id"), 0)
@@ -191392,7 +191397,7 @@ async def cmd_pipeline_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191438,7 +191443,7 @@ async def cmd_queue_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191489,7 +191494,7 @@ async def cmd_approve_publish(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
 async def cmd_approve_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     limit = max(1, min(safe_int(data.get("limit") or data.get("max"), 3), 10))
@@ -191547,7 +191552,7 @@ async def cmd_approve_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
 async def cmd_asset_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191577,7 +191582,7 @@ async def cmd_asset_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         job_id = int(context.args[0])
@@ -191600,7 +191605,7 @@ async def cmd_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_asset_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     asset = None
@@ -191641,7 +191646,7 @@ async def cmd_asset_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def cmd_review_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191673,7 +191678,7 @@ async def cmd_review_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(format_video_review_summary(summary), parse_mode="HTML")
 
 async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191722,7 +191727,7 @@ async def cmd_manifest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_manifests(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         job_id = int(context.args[0])
@@ -191754,7 +191759,7 @@ async def cmd_manifests(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_manifest_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     target_tool = (data.get("tool") or data.get("ai") or "kling").lower()
@@ -191804,7 +191809,7 @@ async def cmd_manifest_handoff(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 async def cmd_task_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     manifest_row = None
@@ -191849,7 +191854,7 @@ async def cmd_task_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191875,7 +191880,7 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191927,7 +191932,7 @@ async def cmd_next_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_worker_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -191962,7 +191967,7 @@ async def cmd_worker_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_scene_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("job_id") or data.get("id"), 0)
@@ -191997,7 +192002,7 @@ async def cmd_scene_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw_args = " ".join(context.args)
     data = parse_key_value_args(raw_args)
@@ -192069,7 +192074,7 @@ async def cmd_worker_autorun(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
 
 async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("job_id"), 0)
@@ -192119,7 +192124,7 @@ async def cmd_worker_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192150,7 +192155,7 @@ async def cmd_task_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_task_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     task_id = safe_int(data.get("id") or data.get("task"), 0)
@@ -192183,7 +192188,7 @@ async def cmd_task_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("job_id"), 0)
@@ -192220,7 +192225,7 @@ async def cmd_worker_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("job_id"), 0)
@@ -192258,7 +192263,7 @@ async def cmd_video_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_video_work_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     raw_args = " ".join(context.args)
     data = parse_key_value_args(raw_args)
@@ -192324,7 +192329,7 @@ async def cmd_video_work_orders(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192370,7 +192375,7 @@ async def cmd_output_acceptance(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_storyboard_crop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     base_url = (PUBLIC_BASE_URL or "").rstrip("/") or "https://<RAILWAY_DOMAIN>"
     await update.message.reply_text(
@@ -192385,7 +192390,7 @@ async def cmd_storyboard_crop(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 async def cmd_compose_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     job_id = safe_int(data.get("job") or data.get("job_id") or data.get("id"), 0)
@@ -192419,7 +192424,7 @@ async def cmd_compose_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192485,7 +192490,7 @@ async def cmd_task_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         job_id = int(context.args[0])
@@ -192579,7 +192584,7 @@ async def cmd_job_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_job_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192622,7 +192627,7 @@ async def cmd_job_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_job_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192682,7 +192687,7 @@ async def cmd_job_ready(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     rows = list_publish_queue(update.effective_user.id)
     if not rows:
@@ -192705,7 +192710,7 @@ async def cmd_publish_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192763,7 +192768,7 @@ async def cmd_publisher_handoff(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     platform = (data.get("platform") or data.get("nen") or "").lower()
@@ -192798,7 +192803,7 @@ async def cmd_publisher_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_publisher_auto_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192829,7 +192834,7 @@ async def cmd_publisher_auto_check(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192861,7 +192866,7 @@ async def cmd_publisher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
 async def cmd_publish_queue_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192893,7 +192898,7 @@ async def cmd_publish_queue_set(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     event_totals, channel_totals, recent_events = performance_report_data(update.effective_user.id)
     lines = ["💰 <b>OPERATOR PERFORMANCE</b>", ""]
@@ -192926,7 +192931,7 @@ async def cmd_performance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_money_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -192987,7 +192992,7 @@ async def cmd_money_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_cockpit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193065,7 +193070,7 @@ async def cmd_affiliate_cockpit(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_revenue_destinations(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193118,7 +193123,7 @@ async def cmd_revenue_destinations(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193172,7 +193177,7 @@ async def cmd_tracking_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_postback_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     network = data.get("network") or data.get("net") or data.get("mang") or ""
@@ -193223,7 +193228,7 @@ async def cmd_postback_setup(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193264,7 +193269,7 @@ async def cmd_scale_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_scale_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193326,7 +193331,7 @@ async def cmd_scale_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_growth_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return await cmd_growth_loop_manual(update, context, raw)
     data = parse_key_value_args(raw)
     if truthy_value(data.get("manual") or data.get("posts") or data.get("post"), False):
@@ -193386,7 +193391,7 @@ async def cmd_growth_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193442,7 +193447,7 @@ async def cmd_affiliate_report(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_decisions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193498,7 +193503,7 @@ async def cmd_affiliate_decisions(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_director(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193550,7 +193555,7 @@ async def cmd_operator_director(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193594,7 +193599,7 @@ async def cmd_operator_execute(update: Update, context: ContextTypes.DEFAULT_TYP
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193729,7 +193734,7 @@ async def cmd_affiliate_scale(update: Update, context: ContextTypes.DEFAULT_TYPE
     await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193812,7 +193817,7 @@ async def cmd_growth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_operator_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193869,7 +193874,7 @@ async def cmd_operator_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193912,7 +193917,7 @@ async def cmd_publish_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193944,7 +193949,7 @@ async def cmd_handoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_review_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     try:
@@ -193990,7 +193995,7 @@ async def cmd_review_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     data = parse_key_value_args(" ".join(context.args))
     niche = data.get("niche") or data.get("ngach") or data.get("topic") or data.get("chude") or "công nghệ AI"
@@ -194076,7 +194081,7 @@ async def cmd_trend_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_html_lines(update, ["🧭 <b>GỢI Ý TREND → IMAGE → VIDEO</b>", *suggestion_lines], limit=3600)
 
 async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_user.id) != ADMIN_ID:
+    if not is_admin_user(update.effective_user.id):
         return
     try:
         limit = max(1, min(int(context.args[0]), 20)) if context.args else 10
@@ -194101,7 +194106,7 @@ async def cmd_trend_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if str(query.from_user.id) != ADMIN_ID:
+    if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     parts = query.data.split("|")
     if len(parts) != 3 or parts[1] != "video":
@@ -194187,7 +194192,7 @@ async def handle_trend_callback(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_pipeline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if str(query.from_user.id) != ADMIN_ID:
+    if not is_admin_user(query.from_user.id):
         return await query.answer("Chỉ Admin được dùng.", show_alert=True)
     parts = query.data.split("|")
     if len(parts) != 4:
