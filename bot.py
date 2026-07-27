@@ -2146,6 +2146,10 @@ else:
     ))
 SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS = max(30, env_int("SUBDUB_TELEGRAM_DOWNLOAD_TIMEOUT_SECONDS", 180))
 SUBDUB_TELEGRAM_DOWNLOAD_RETRIES = max(1, min(5, env_int("SUBDUB_TELEGRAM_DOWNLOAD_RETRIES", 3)))
+SUBDUB_TELEGRAM_DELIVERY_TIMEOUT_SECONDS = max(
+    60,
+    min(300, env_int("SUBDUB_TELEGRAM_DELIVERY_TIMEOUT_SECONDS", 180)),
+)
 SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS = max(1, min(15, env_int("SUBDUB_MEDIA_BINARY_PROBE_TIMEOUT_SECONDS", 5)))
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
@@ -209200,11 +209204,17 @@ async def send_generated_video_bytes_for_delivery(
         return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=limits["generated_bytes"], reason="empty_file"), "sent": False}
     if size > limits["generated_bytes"]:
         return {**generated_media_debug_payload(method="failed", file_size=size, limit_bytes=limits["generated_bytes"], reason="generated_media_too_large"), "sent": False}
+    delivery_timeout = float(SUBDUB_TELEGRAM_DELIVERY_TIMEOUT_SECONDS)
+    connection_timeout = min(30.0, delivery_timeout)
     if size <= limits["preview_bytes"] and callable(getattr(message, "reply_video", None)):
         sent_msg = await message.reply_video(
             video=video_dubbing_output_file(payload, filename),
             filename=filename,
             caption=caption,
+            read_timeout=delivery_timeout,
+            write_timeout=delivery_timeout,
+            connect_timeout=connection_timeout,
+            pool_timeout=connection_timeout,
         )
         message_id = telegram_delivery_message_id(sent_msg)
         if message_id:
@@ -209220,6 +209230,10 @@ async def send_generated_video_bytes_for_delivery(
             document=video_dubbing_output_file(payload, filename),
             filename=filename,
             caption=generated_video_document_caption(lang),
+            read_timeout=delivery_timeout,
+            write_timeout=delivery_timeout,
+            connect_timeout=connection_timeout,
+            pool_timeout=connection_timeout,
         )
         message_id = telegram_delivery_message_id(sent_msg)
         if message_id:
@@ -209252,6 +209266,10 @@ async def send_generated_video_path_for_delivery(
                 video=kwargs.get("video"),
                 caption=kwargs.get("caption"),
                 supports_streaming=True,
+                read_timeout=kwargs.get("read_timeout"),
+                write_timeout=kwargs.get("write_timeout"),
+                connect_timeout=kwargs.get("connect_timeout"),
+                pool_timeout=kwargs.get("pool_timeout"),
             )
 
         async def reply_document(self, **kwargs):
@@ -209260,6 +209278,10 @@ async def send_generated_video_path_for_delivery(
                 document=kwargs.get("document"),
                 filename=kwargs.get("filename"),
                 caption=kwargs.get("caption"),
+                read_timeout=kwargs.get("read_timeout"),
+                write_timeout=kwargs.get("write_timeout"),
+                connect_timeout=kwargs.get("connect_timeout"),
+                pool_timeout=kwargs.get("pool_timeout"),
             )
 
     with open(path, "rb") as handle:

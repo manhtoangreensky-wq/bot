@@ -291,3 +291,32 @@ def test_tts_failure_keeps_sanitized_provider_detail_for_admin_debug():
     source = inspect.getsource(bot.video_dubbing_tts_bytes)
     assert "sanitize_log_text(str(detail or status))" in source
     assert "errors.append(f\"{label}={status}:" in source
+
+
+def test_generated_video_delivery_waits_for_message_id_without_retry():
+    calls = []
+
+    class DeliveryMessage:
+        async def reply_video(self, **kwargs):
+            calls.append(dict(kwargs))
+            return SimpleNamespace(
+                message_id=55225,
+                video=SimpleNamespace(file_id="delivered-video-file"),
+            )
+
+    result = asyncio.run(
+        bot.send_generated_video_bytes_for_delivery(
+            DeliveryMessage(),
+            b"valid-video-bytes" * 128,
+            filename="subdub-live25.mp4",
+            caption="SubDub delivery",
+        )
+    )
+
+    assert result["sent"] is True
+    assert result["telegram_message_id"] == "55225"
+    assert len(calls) == 1
+    assert calls[0]["read_timeout"] >= 60
+    assert calls[0]["write_timeout"] >= 60
+    assert calls[0]["connect_timeout"] >= 20
+    assert calls[0]["pool_timeout"] >= 20
