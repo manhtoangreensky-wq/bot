@@ -94,7 +94,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import ai_chatbot_copilot, telegram_business_support
 from services import ffmpeg_text
 from services import voice_clone_pipeline
@@ -1050,6 +1050,8 @@ SHOPAIKEY_DUBBING_TTS_ENDPOINT = _env("SHOPAIKEY_DUBBING_TTS_ENDPOINT", "/audio/
 SHOPAIKEY_TTS_MODEL = _env("SHOPAIKEY_TTS_MODEL", "speech-2.6-turbo")
 SHOPAIKEY_TTS_DEFAULT_VOICE = _env("SHOPAIKEY_TTS_DEFAULT_VOICE", "Vietnamese_Cute_Girl_v1")
 SHOPAIKEY_TTS_VOICE = _env("SHOPAIKEY_TTS_VOICE", SHOPAIKEY_TTS_DEFAULT_VOICE)
+SHOPAIKEY_TTS_FEMALE_VOICE = _env("SHOPAIKEY_TTS_FEMALE_VOICE", SHOPAIKEY_TTS_DEFAULT_VOICE)
+SHOPAIKEY_TTS_MALE_VOICE = _env("SHOPAIKEY_TTS_MALE_VOICE", "Vietnamese_Male_Narrator_v1")
 SHOPAIKEY_OPENAI_TTS_MODEL = _env("SHOPAIKEY_OPENAI_TTS_MODEL", "tts-1")
 SHOPAIKEY_OPENAI_TTS_VOICE = _env("SHOPAIKEY_OPENAI_TTS_VOICE", "alloy")
 SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
@@ -60713,7 +60715,12 @@ def shopaikey_tts_public_smoke_ready() -> bool:
     return bool(status == "PASS")
 
 def shopaikey_minimax_tts_configured() -> bool:
-    return bool(SHOPAIKEY_API_KEY and MINIMAX_TTS_ENDPOINT and MINIMAX_TTS_MODEL)
+    return bool(
+        SHOPAIKEY_API_KEY
+        and SHOPAIKEY_TTS_BASE_URL
+        and SHOPAIKEY_TTS_ENDPOINT
+        and SHOPAIKEY_TTS_MODEL
+    )
 
 def key4u_minimax_tts_configured(require_public: bool = True) -> bool:
     return bool(
@@ -60750,10 +60757,10 @@ def get_tts_provider_readiness(public: bool = False) -> dict:
         },
         {
             "provider": "shopaikey_minimax",
-            "model": MINIMAX_TTS_MODEL or SHOPAIKEY_TTS_MODEL,
+            "model": SHOPAIKEY_TTS_MODEL,
             "configured": bool(shopaikey_minimax_tts_configured() and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED),
             "public_ready": bool(shopaikey_minimax_tts_public_ready()),
-            "reason": "SHOPAIKEY_API_KEY/MINIMAX_TTS_ENDPOINT/MINIMAX_TTS_MODEL missing",
+            "reason": "SHOPAIKEY_API_KEY/SHOPAIKEY_TTS_BASE_URL/SHOPAIKEY_TTS_ENDPOINT/SHOPAIKEY_TTS_MODEL missing",
         },
         {
             "provider": "minimax_direct",
@@ -61110,8 +61117,25 @@ def shopaikey_tts_uses_official_minimax(endpoint_path: str = "") -> bool:
     endpoint_path = str(endpoint_path or SHOPAIKEY_TTS_ENDPOINT or "").lower()
     return "/tts/minimax/" in endpoint_path or endpoint_path.rstrip("/").endswith("/t2a_v2")
 
+def shopaikey_minimax_voice_id(voice_id: str = "") -> str:
+    return subdub_provider_contract.resolve_shopaikey_minimax_voice_id(
+        requested_voice_id=voice_id,
+        configured_default_voice=SHOPAIKEY_TTS_VOICE,
+        configured_female_voice=SHOPAIKEY_TTS_FEMALE_VOICE,
+        configured_male_voice=SHOPAIKEY_TTS_MALE_VOICE,
+        generic_legacy_voice_ids={
+            MINIMAX_DEFAULT_VOICE_ID,
+            MINIMAX_DEFAULT_FEMALE_VOICE_ID,
+            MINIMAX_DEFAULT_MALE_VOICE_ID,
+            DEFAULT_TTS_FEMALE_VOICE,
+            DEFAULT_TTS_MALE_VOICE,
+            "default_female",
+            "default_male",
+        },
+    )
+
 def shopaikey_official_tts_payload(text: str, voice_id: str = "", speed: float | str = 1.0) -> dict:
-    selected_voice = str(voice_id or SHOPAIKEY_TTS_VOICE or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
+    selected_voice = shopaikey_minimax_voice_id(voice_id)
     parsed_speed = voice_tts_provider_speed(speed or VOICE_TTS_DEFAULT_SPEED)
     return {
         "model": SHOPAIKEY_TTS_MODEL or "speech-2.6-turbo",
@@ -61942,14 +61966,14 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
 
 async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
     if not shopaikey_minimax_tts_configured():
-        if direct_minimax_tts_configured():
-            return await call_direct_minimax_tts_bytes_with_speed(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)
-        return "MISSING", b"", "SHOPAIKEY_API_KEY/MINIMAX_TTS_ENDPOINT/MINIMAX_TTS_MODEL missing", 0
-    endpoint = shopaikey_tts_final_url(MINIMAX_TTS_ENDPOINT)
-    selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
+        return "MISSING", b"", "SHOPAIKEY_API_KEY/SHOPAIKEY_TTS_BASE_URL/SHOPAIKEY_TTS_ENDPOINT/SHOPAIKEY_TTS_MODEL missing", 0
+    endpoint = shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT)
+    selected_voice = shopaikey_minimax_voice_id(voice_id)
     text_value = str(text or "").strip()[:3500]
     if not text_value:
         return "FAIL_BAD_REQUEST", b"", "empty_text", 0
+    if not selected_voice:
+        return "FAIL_BAD_REQUEST", b"", "shopaikey_voice_not_configured", 0
     payload = shopaikey_official_tts_payload(text_value, voice_id=selected_voice, speed=voice_speed)
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
@@ -62268,7 +62292,7 @@ async def shopaikey_minimax_voice_clone(file_id: str, voice_id: str) -> tuple[st
         return "MISSING", {}, "SHOPAIKEY_API_KEY/MINIMAX_VOICE_CLONE_ENDPOINT missing", 0
     file_id_text = str(file_id or "").strip()
     raw_voice_id_text = str(voice_id or "").strip()
-    if re.search(r"[^A-Za-z0-9-]+", raw_voice_id_text):
+    if re.search(r"[^A-Za-z0-9_.-]+", raw_voice_id_text):
         return "FAIL_BAD_REQUEST", {}, "invalid_requested_voice_id", 0
     voice_id_text = minimax_voice_adapter.normalize_voice_id(raw_voice_id_text)
     if not file_id_text or not voice_id_text:
@@ -117050,7 +117074,7 @@ def voice_curl_audit_route_plan() -> dict:
         "shopaikey_models": join_shopaikey_url(SHOPAIKEY_BASE_URL, "/models"),
         "shopaikey_audio_speech": shopaikey_tts_final_url(SHOPAIKEY_DUBBING_TTS_ENDPOINT or "/audio/speech"),
         "shopaikey_minimax_voices": join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_LIST_ENDPOINT),
-        "shopaikey_minimax_tts": shopaikey_tts_final_url(MINIMAX_TTS_ENDPOINT),
+        "shopaikey_minimax_tts": shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT),
         "shopaikey_minimax_upload": join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_UPLOAD_ENDPOINT),
         "shopaikey_minimax_clone": join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_CLONE_ENDPOINT),
         "key4u_minimax_tts": key4u_minimax_final_url(KEY4U_TTS_ENDPOINT),
