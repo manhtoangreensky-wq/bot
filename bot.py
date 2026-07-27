@@ -39852,24 +39852,14 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
     if media:
         meta = {
             "file_id": str(getattr(media, "file_id", "") or ""),
+            "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
             "file_type": file_type,
             "mime_type": media_content_type(media, file_type),
             "file_name": str(getattr(media, "file_name", "") or ""),
             "file_size": int(getattr(media, "file_size", 0) or 0),
+            "duration": int(getattr(media, "duration", 0) or 0),
             "created_at": "",
         }
-        try:
-            file_obj = await media.get_file()
-        except Exception as e:
-            logger.warning(f"audio media get_file failed: {provider_error_summary(e)}")
-            meta.update({
-                "source": source,
-                "content_type": meta.get("mime_type") or "application/octet-stream",
-                "bytes": b"",
-                "error": "telegram_timeout" if is_audio_timeout_error(e) else "telegram_download_error",
-                "error_detail": provider_error_summary(e),
-            })
-            return meta
     else:
         cache = LAST_MEDIA_BY_USER.get(str(update.effective_user.id if update.effective_user else ""))
         if not cache:
@@ -39879,18 +39869,6 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
             return None
         source = "last_media"
         meta = dict(cache)
-        try:
-            file_obj = await context.bot.get_file(meta.get("file_id") or "")
-        except Exception as e:
-            logger.warning(f"cached audio get_file failed: {provider_error_summary(e)}")
-            meta.update({
-                "source": source,
-                "content_type": meta.get("mime_type") or "application/octet-stream",
-                "bytes": b"",
-                "error": "telegram_timeout" if is_audio_timeout_error(e) else "telegram_download_error",
-                "error_detail": provider_error_summary(e),
-            })
-            return meta
     meta.update({
         "source": source,
         "content_type": meta.get("mime_type") or "application/octet-stream",
@@ -39902,8 +39880,20 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
         meta["bytes"] = b""
         meta["error"] = "input_too_large"
         return meta
+    download_state = {
+        "source_file_id": str(meta.get("file_id") or ""),
+        "source_file_unique_id": str(meta.get("file_unique_id") or ""),
+        "source_file_name": str(meta.get("file_name") or "source.bin"),
+        "source_file_size": int(meta.get("file_size") or 0),
+        "source_mime_type": str(meta.get("mime_type") or "application/octet-stream"),
+        "source_media_type": str(meta.get("file_type") or "media"),
+        "source_duration": int(meta.get("duration") or 0),
+    }
     try:
-        file_bytes = bytes(await file_obj.download_as_bytearray())
+        file_bytes, resolved_content_type = await video_dubbing_download_source(
+            context,
+            download_state,
+        )
     except Exception as e:
         logger.warning(f"audio download failed: {provider_error_summary(e)}")
         meta["bytes"] = b""
@@ -39911,6 +39901,7 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
         meta["error_detail"] = provider_error_summary(e)
         return meta
     meta["bytes"] = file_bytes
+    meta["content_type"] = str(resolved_content_type or meta.get("content_type") or "application/octet-stream")
     return meta
 
 def ensure_user_modes(user_id) -> dict:
