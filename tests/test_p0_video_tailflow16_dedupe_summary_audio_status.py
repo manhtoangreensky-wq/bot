@@ -440,7 +440,7 @@ def test_submit_exception_recovers_accepted_job_instead_of_returning_to_invoice(
     assert rendered_screens == []
 
 
-def test_submit_exception_without_job_shows_blocker_instead_of_invoice() -> None:
+def test_submit_exception_without_job_returns_to_confirmation_instead_of_blocker() -> None:
     tail = _invoice_ready_tail()
     rendered_screens: list[str] = []
     blocker_calls: list[str] = []
@@ -480,9 +480,9 @@ def test_submit_exception_without_job_shows_blocker_instead_of_invoice() -> None
         guard(failing_handler)(SimpleNamespace(callback_query=Query()), SimpleNamespace())
     )
 
-    assert result == "submit-blocker"
-    assert blocker_calls == ["Không thể gửi tác vụ lúc này."]
-    assert rendered_screens == []
+    assert result == "confirm"
+    assert blocker_calls == []
+    assert rendered_screens == ["confirm"]
 
 
 def test_submit_source_has_no_silent_job_branch_and_marks_status_render() -> None:
@@ -492,7 +492,8 @@ def test_submit_source_has_no_silent_job_branch_and_marks_status_render() -> Non
 
     assert "video_tail9.mark_submitted" in confirm
     assert "video_tail9_render_confirmed_status" in confirm
-    assert "video_tail9_submit_blocker_text" in confirm
+    assert confirm.count('video_tail9_render(query, uid, context, "confirm")') >= 2
+    assert "video_tail9_submit_blocker_keyboard" not in confirm
     assert "_product_video_status_panel_rendered" in status_sender
 
 
