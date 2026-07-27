@@ -85185,7 +85185,12 @@ async def handle_video_prompt_library_callback(update: Update, context: ContextT
 @video_public_callback_failure_guard
 async def handle_product_video_public_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query or str(query.data or "") != video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK:
+    callback_data = str(
+        getattr(context, "_product_video_callback_data_override", "")
+        or getattr(query, "data", "")
+        or ""
+    )
+    if not query or callback_data != video_project_queue.PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK:
         return
     diagnostics = dict(PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS or {})
     if (
@@ -89515,12 +89520,14 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             return response
         video_tail9_apply_to_session(uid, context, tail, owner, host)
         setattr(context, "_product_video_status_panel_rendered", False)
-        original = str(query.data or "")
-        query.data = "vproduct|b14_confirm"
+        setattr(context, "_product_video_callback_data_override", "vproduct|b14_confirm")
         try:
             response = await handle_product_video_public_confirm_callback(update, context)
         finally:
-            query.data = original
+            try:
+                delattr(context, "_product_video_callback_data_override")
+            except Exception:
+                pass
         confirmed_session = get_video_session(uid)
         confirmed_draft = dict(confirmed_session.get("draft") or {})
         confirmed_job = dict(confirmed_draft.get("b14_queue_job") or {})
@@ -89648,7 +89655,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
-    parts = str(query.data or "").split("|")
+    callback_data = str(
+        getattr(context, "_product_video_callback_data_override", "")
+        or query.data
+        or ""
+    )
+    parts = callback_data.split("|")
     action = parts[1] if len(parts) > 1 else "open"
     value = parts[2] if len(parts) > 2 else ""
     if action == "b14_confirm" and not bool(getattr(context, "_product_video_authoritative_confirm", False)):
