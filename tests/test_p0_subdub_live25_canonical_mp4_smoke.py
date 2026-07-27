@@ -97,6 +97,46 @@ def test_admin_media_pending_window_handles_slow_telegram_uploads():
     assert bot.ADMIN_TOOL_TEST_PENDING_TTL_SECONDS >= 10 * 60
 
 
+def test_admin_smoke_media_uses_canonical_bounded_download(monkeypatch):
+    uid = 250024
+    captured = []
+    bot.LAST_MEDIA_BY_USER[str(uid)] = {
+        "file_id": "bounded-download-file",
+        "file_unique_id": "bounded-download-unique",
+        "file_type": "video",
+        "mime_type": "video/mp4",
+        "file_name": "bounded-download.mp4",
+        "file_size": 4096,
+        "duration": 8,
+        "created_at_ts": bot.time.time(),
+    }
+
+    async def canonical_download(_context, state):
+        captured.append(dict(state))
+        return b"canonical-video-bytes", "video/mp4"
+
+    class NoDirectDownloadBot:
+        async def get_file(self, *_args, **_kwargs):
+            raise AssertionError("resolve_stt_test_media must use the canonical downloader")
+
+    monkeypatch.setattr(bot, "video_dubbing_download_source", canonical_download)
+    try:
+        result = asyncio.run(
+            bot.resolve_stt_test_media(
+                command_update(uid),
+                SimpleNamespace(bot=NoDirectDownloadBot()),
+            )
+        )
+    finally:
+        bot.LAST_MEDIA_BY_USER.pop(str(uid), None)
+
+    assert result["bytes"] == b"canonical-video-bytes"
+    assert result["content_type"] == "video/mp4"
+    assert len(captured) == 1
+    assert captured[0]["source_file_id"] == "bounded-download-file"
+    assert captured[0]["source_file_size"] == 4096
+
+
 @pytest.mark.parametrize("mode", ALL_VIDEO_LANES)
 def test_admin_video_smoke_pending_preserves_exact_lane(monkeypatch, mode):
     uid = 250025
