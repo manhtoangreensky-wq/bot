@@ -9,10 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from services import subdub_provider_contract
+
 
 DEFAULT_MALE_VOICE_ID = os.getenv("MINIMAX_DEFAULT_MALE_VOICE_ID", "male-qn-qingse")
 DEFAULT_FEMALE_VOICE_ID = os.getenv("MINIMAX_DEFAULT_FEMALE_VOICE_ID", "female-shaonv")
-VOICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{1,127}$")
+VOICE_ID_PATTERN = subdub_provider_contract.MINIMAX_VOICE_ID_PATTERN
 PUBLIC_SAFE_VOICE_NOT_READY = "Voice này chưa sẵn sàng để dùng, anh/chị chọn voice khác hoặc tạo lại voice."
 PUBLIC_SAFE_TTS_ERROR = "TOAN AAS chưa tạo được giọng đọc lúc này. Anh/chị thử lại hoặc chọn giọng khác."
 
@@ -80,12 +82,7 @@ class CustomVoiceCreateResult:
 
 
 def normalize_voice_id(value: str | None) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    normalized = re.sub(r"\s+", "-", raw.replace("_", "-"))
-    normalized = re.sub(r"[^A-Za-z0-9.-]", "", normalized)
-    return normalized[:128]
+    return subdub_provider_contract.normalize_minimax_voice_id(value)
 
 
 def validate_provider_voice_id(value: str | None) -> bool:
@@ -95,7 +92,7 @@ def validate_provider_voice_id(value: str | None) -> bool:
     lowered = normalized.lower()
     if lowered in {"default", "none", "null", "saved", "uploaded", "voice-profile", "default-male", "default-female"}:
         return False
-    return bool(VOICE_ID_PATTERN.match(normalized))
+    return subdub_provider_contract.is_valid_minimax_voice_id(normalized)
 
 
 def _profile_id(profile: dict | None) -> int:
