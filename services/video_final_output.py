@@ -110,6 +110,7 @@ VIDEO_PRODUCT_ENGINE_ROUTES: dict[str, dict[str, Any]] = {
         "adapter": "storyboard_scene_image_video_engine",
         "input_requirements": ("storyboard_image_scenes", "final_video_scenes"),
         "engine_family": "storyboard",
+        "provider_capability": "image_to_video",
     },
     "prompt_vault_to_video": {
         "adapter": "prompt_vault_text_to_video",

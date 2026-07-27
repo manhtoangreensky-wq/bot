@@ -2524,7 +2524,11 @@ def product_video_logo_material(job: dict | None = None) -> dict:
     if not enabled:
         return {}
     position = str(material.get("logo_position") or "top_right").strip().lower()
-    if position not in {"top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"}:
+    if position not in {
+        "top_left", "top_center", "top_right",
+        "center_left", "center", "center_right",
+        "bottom_left", "bottom_center", "bottom_right",
+    }:
         position = "top_right"
     return {
         "logo_enabled": True,
@@ -2548,8 +2552,38 @@ def _product_type(job: dict | None = None) -> str:
     return video_final_output.normalize_video_product_type(product_type)
 
 
+def product_video_required_capability(job: dict | None = None) -> str:
+    """Resolve provider capability from the immutable product engine contract."""
+
+    product_type = _product_type(job)
+    contract = video_project_queue_service.product_video_engine_contract(product_type)
+    capability = str(contract.get("required_capability") or "").strip()
+    if capability:
+        return capability
+    route = video_final_output.route_for_product_type(product_type)
+    return str(route.get("provider_capability") or "text_to_video").strip()
+
+
 def _local_image_sequence_paths(job: dict | None = None) -> list[str]:
     return video_final_output.extract_local_image_paths(job or {})
+
+
+def storyboard_scene_image_paths(job: dict | None = None, scene_index: int = 1) -> list[str]:
+    """Return only the approved image inputs belonging to one storyboard scene."""
+
+    target_index = max(1, _safe_int(scene_index, 1))
+    cards = _scene_cards(job)
+    for fallback_index, card in enumerate(cards, start=1):
+        card_index = max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index))
+        if card_index != target_index:
+            continue
+        paths = video_final_output.extract_local_image_paths(card, limit=2)
+        if paths:
+            return paths
+    all_paths = _local_image_sequence_paths(job)
+    if target_index <= len(all_paths):
+        return [all_paths[target_index - 1]]
+    return []
 
 
 def _local_image_sequence_allowed(job: dict | None = None, paths: list[str] | None = None) -> bool:
@@ -3583,8 +3617,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     aspect_ratio = str(getattr(scene, "aspect_ratio", "") or "9:16")
     job = getattr(scene, "_toan_aas_job", {}) if hasattr(scene, "_toan_aas_job") else {}
     product_type = _product_type(job)
-    route = video_final_output.route_for_product_type(product_type)
-    required_capability = str(route.get("provider_capability") or "text_to_video")
+    required_capability = product_video_required_capability(job)
     scene_index = _safe_int(getattr(scene, "scene_id", 0), 0) or 1
     orchestration_mode = product_video_orchestration_mode(job)
     scene_duration_seconds = product_video_scene_duration_seconds(job)
@@ -3780,8 +3813,20 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         prompt=prompt,
         negative_prompt=str((job or {}).get("negative_prompt") or ""),
         scenes=[dict(getattr(scene, "__dict__", {}) or {})],
-        storyboard=_scene_cards(job),
-        image_paths=_local_image_sequence_paths(job),
+        storyboard=(
+            [
+                card
+                for fallback_index, card in enumerate(_scene_cards(job), start=1)
+                if max(1, _safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index)) == scene_index
+            ]
+            if product_type == "storyboard_prompt"
+            else _scene_cards(job)
+        ),
+        image_paths=(
+            storyboard_scene_image_paths(job, scene_index)
+            if product_type == "storyboard_prompt"
+            else _local_image_sequence_paths(job)
+        ),
         source_video_path=str((job or {}).get("source_video_path") or ""),
         ratio=aspect_ratio,
         duration_seconds=float(scene_duration_seconds if orchestration_mode == PRODUCT_VIDEO_ORCHESTRATION_MODE_PER_SCENE_8S else (getattr(scene, "target_duration_sec", 6.0) or 6.0)),
@@ -4689,16 +4734,22 @@ def product_video_logo_overlay_xy(position: str, margin_x_ratio: float = PRODUCT
     my = max(0.0, min(0.2, float(margin_y_ratio or PRODUCT_VIDEO_LOGO_MARGIN_Y_RATIO)))
     x_map = {
         "top_left": f"main_w*{mx}",
+        "center_left": f"main_w*{mx}",
         "bottom_left": f"main_w*{mx}",
         "top_center": "(main_w-overlay_w)/2",
+        "center": "(main_w-overlay_w)/2",
         "bottom_center": "(main_w-overlay_w)/2",
         "top_right": f"main_w-overlay_w-main_w*{mx}",
+        "center_right": f"main_w-overlay_w-main_w*{mx}",
         "bottom_right": f"main_w-overlay_w-main_w*{mx}",
     }
     y_map = {
         "top_left": f"main_h*{my}",
         "top_center": f"main_h*{my}",
         "top_right": f"main_h*{my}",
+        "center_left": "(main_h-overlay_h)/2",
+        "center": "(main_h-overlay_h)/2",
+        "center_right": "(main_h-overlay_h)/2",
         "bottom_left": f"main_h-overlay_h-main_h*{my}",
         "bottom_center": f"main_h-overlay_h-main_h*{my}",
         "bottom_right": f"main_h-overlay_h-main_h*{my}",
@@ -5094,7 +5145,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
     product_type = _product_type(job)
     product_route = video_final_output.route_for_product_type(product_type)
-    required_capability = str(product_route.get("provider_capability") or "text_to_video")
+    required_capability = product_video_required_capability(job)
     fallback_capability = str(product_route.get("fallback_capability") or "")
     render_mode = str(job.get("render_mode") or "").strip().lower().replace("-", "_")
     test_pattern = bool(job.get("test_pattern") or job.get("admin_video_delivery"))

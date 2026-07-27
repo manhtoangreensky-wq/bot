@@ -1203,6 +1203,14 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         safe_scene_count = max(1, min(20, safety["scene_count"] or scene_count))
         safe_scene_duration = 8
         safe_expected_duration = safe_scene_count * safe_scene_duration
+        engine_contract = video_project_queue.product_video_engine_contract(product_type)
+        required_capability = str(
+            engine_contract.get("required_capability")
+            or persisted_result.get("required_capability")
+            or asset_pack.get("required_capability")
+            or invoice.get("required_capability")
+            or "text_to_video_or_scene_video"
+        )
         eligibility_snapshot = (
             persisted_result.get("provider_eligibility_snapshot")
             or asset_pack.get("provider_eligibility_snapshot")
@@ -1290,6 +1298,13 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "provider_call": bool(safety["provider_call"]) and not claim_only,
                 "public_user": bool(safety["public_user"]),
                 "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
+                "public_product_type": str(engine_contract.get("public_product_type") or product_type),
+                "executor_product_type": str(engine_contract.get("executor_product_type") or product_type),
+                "engine_route": str(engine_contract.get("engine_route") or ""),
+                "engine_adapter": str(engine_contract.get("engine_adapter") or engine_adapter),
+                "required_capability": required_capability,
+                "input_type": str(engine_contract.get("input_type") or ""),
+                "worker_owner": str(engine_contract.get("worker_owner") or "product_video"),
                 "submit_source": str(
                     persisted_result.get("submit_source")
                     or asset_pack.get("submit_source")
@@ -1521,7 +1536,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 or "basic",
                 provider_chain=configured_chain,
                 scene_count=safe_scene_count,
-                required_capability="text_to_video_or_scene_video",
+                required_capability=required_capability,
                 requires_concat=product_video_per_scene_orchestration,
             )
             model_context.update(model_metadata_from_resolution(model_resolution))
@@ -2007,6 +2022,29 @@ def _product_video_runtime_eligibility(
 ) -> dict[str, Any]:
     """Re-evaluate enforced public admission without submitting a provider job."""
     project = dict(project or {})
+    asset_pack = _json_loads(project.get("asset_pack_json"), {})
+    invoice = _json_loads(project.get("invoice_json"), {})
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    if not isinstance(invoice, dict):
+        invoice = {}
+    requested_product_type = str(
+        result.get("public_product_type")
+        or result.get("video_product_type")
+        or result.get("product_type")
+        or asset_pack.get("public_product_type")
+        or asset_pack.get("video_product_type")
+        or asset_pack.get("product_type")
+        or invoice.get("product_type")
+        or project.get("profile_id")
+        or "video_ai_real"
+    )
+    engine_contract = video_project_queue.product_video_engine_contract(requested_product_type)
+    required_capability = str(
+        engine_contract.get("required_capability")
+        or result.get("required_capability")
+        or "text_to_video"
+    )
     persisted_candidates = [
         str(item or "").strip()
         for item in (
@@ -2213,7 +2251,7 @@ def _product_video_runtime_eligibility(
     evaluated = video_provider_router.product_video_provider_eligibility_snapshot(
         status=status,
         chain=runtime_chain,
-        required_capability=str(result.get("required_capability") or "text_to_video_or_scene_video"),
+        required_capability=required_capability,
         provider_health=refreshed_health,
         contract_valid_provider_chain=contract_chain,
         scene_count=max(1, _safe_int(result.get("scene_count") or result.get("scenes_total"), 1)),

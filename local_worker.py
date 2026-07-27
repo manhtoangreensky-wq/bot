@@ -35,6 +35,8 @@ from services.video_real_render_connector import (
     REAL_VIDEO_RENDER_UNAVAILABLE,
     build_real_scene_renderer,
     original_prompt_from_job,
+    product_video_logo_material,
+    product_video_scene_duration_seconds,
     real_video_llm_func_from_job,
 )
 from services.video_local_editing import (
@@ -58,7 +60,7 @@ from services.video_local_validation import (
     ALLOWED_SUBTITLE_EXTENSIONS,
 )
 from services.video_smart_splitter import SplitRange
-from services import frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
+from services import frame_video_commercial, frame_video_runtime, video_ai_edit_provider, video_ai_edit_status, video_ai_edit_validation, video_editengine1, video_local_validation
 
 
 def load_dotenv(path: str) -> None:
@@ -1368,8 +1370,19 @@ def run_video_render_job(job: dict) -> None:
         if not user_id:
             update_video_render_job(job_id, "failed", "video_render_missing_user")
             return
-        scene_count = max(1, min(5, int(project.get("scene_count") or len(job.get("scenes") or []) or 3)))
-        duration = 6.0
+        scene_count = max(
+            1,
+            min(
+                20,
+                int(
+                    job.get("scene_count")
+                    or project.get("scene_count")
+                    or len(job.get("scenes") or [])
+                    or 1
+                ),
+            ),
+        )
+        duration = float(product_video_scene_duration_seconds({**job, "project": project}))
         prompt = original_prompt_from_job(job)[:4000]
         addon_plan = video_project_addon_plan(job)
         mode = video_project_render_mode(job)
@@ -1392,6 +1405,31 @@ def run_video_render_job(job: dict) -> None:
             send_caption = "✅ Video đã dựng xong. TOAN AAS gửi file kết quả cuối."
             result_mode = RENDER_MODE_REAL
         workspace = create_multiscene_workspace(f"video-project-{job_id}")
+        logo_material = product_video_logo_material(job)
+        logo_path = str(logo_material.get("logo_path") or "").strip()
+        if logo_material.get("logo_enabled") and not logo_path and logo_material.get("logo_file_id"):
+            logo_path = os.path.join(workspace, "product_logo.png")
+            telegram_download_file(str(logo_material.get("logo_file_id") or ""), logo_path, max_bytes=10 * 1024 * 1024)
+        watermark = {}
+        asset_pack = project.get("asset_pack_json") or job.get("asset_pack") or "{}"
+        try:
+            parsed_asset_pack = json.loads(str(asset_pack or "{}"))
+            if isinstance(parsed_asset_pack, dict):
+                watermark = dict(parsed_asset_pack.get("watermark_config") or {})
+        except Exception:
+            watermark = {}
+        logo_text = str(
+            addon_plan.get("logo_text")
+            or watermark.get("text")
+            or ""
+        ).strip()[:240]
+        logo_position = str(
+            logo_material.get("logo_position")
+            or addon_plan.get("logo_position")
+            or watermark.get("position")
+            or "bottom_right"
+        )
+        logo_enabled = bool(logo_path or (addon_plan.get("logo_enabled") and logo_text) or watermark.get("enabled") and logo_text)
         result = process_multiscene_video_pipeline(
             user_id=user_id,
             job_id=str(job_id),
@@ -1404,21 +1442,43 @@ def run_video_render_job(job: dict) -> None:
             aspect_ratio=str(project.get("ratio") or "9:16"),
             enable_voice=False,
             enable_subtitle=bool(addon_plan.get("subtitle_enabled", True)),
-            enable_logo=bool(addon_plan.get("logo_enabled") and addon_plan.get("logo_text")),
-            logo_text=str(addon_plan.get("logo_text") or ""),
-            logo_position=str(addon_plan.get("logo_position") or "bottom_right"),
+            logo_path=logo_path or None,
+            enable_logo=logo_enabled,
+            logo_text=logo_text,
+            logo_position=logo_position,
         )
         final_path = str(result.get("final_video_path") or "")
         if not result.get("ok") or not final_path:
             raise RuntimeError(str(result.get("error") or result.get("status") or "video_render_failed"))
         result["render_mode"] = result_mode
         result["test_pattern"] = result_mode == RENDER_MODE_ADMIN_TEST_PATTERN
-        output_file_id = telegram_send_video(
+        delivery = telegram_send_video_receipt(
             user_id,
             final_path,
             send_caption,
+            filename=os.path.basename(final_path) or "toan_aas_video.mp4",
         )
-        update_video_render_job(job_id, "completed", "video project sent", final_video_path=final_path, final_video_file_id=output_file_id, result=result)
+        if not delivery.get("sent") or not delivery.get("message_id") or not delivery.get("file_id"):
+            raise RuntimeError("product_video_delivery_receipt_missing")
+        result.update(
+            {
+                "delivery_succeeded": True,
+                "delivery_message_id": str(delivery.get("message_id") or ""),
+                "telegram_delivery_message_id": str(delivery.get("message_id") or ""),
+                "delivery_file_id": str(delivery.get("file_id") or ""),
+                "telegram_file_id": str(delivery.get("file_id") or ""),
+                "final_video_file_id": str(delivery.get("file_id") or ""),
+                "charge_policy": "after_valid_mp4_delivery",
+            }
+        )
+        update_video_render_job(
+            job_id,
+            "completed",
+            "video project sent",
+            final_video_path=final_path,
+            final_video_file_id=str(delivery.get("file_id") or ""),
+            result=result,
+        )
     except subprocess.TimeoutExpired:
         update_video_render_job(job_id, "failed", "video_render_timeout")
     except Exception as exc:
@@ -1429,6 +1489,18 @@ def run_frame_video_render(job: dict) -> None:
     job_id = job.get("id")
     try:
         payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        if payload.get("frame_video_contract") is not None:
+            contract = {
+                "version": int(payload.get("frame_video_contract") or 0) == 1,
+                "worker_job_type": str(payload.get("worker_job_type") or "") == frame_video_commercial.WORKER_JOB_TYPE,
+                "engine_route": str(payload.get("engine_route") or "") == frame_video_commercial.ENGINE_ROUTE,
+                "worker_owner": str(payload.get("worker_owner") or "") == frame_video_commercial.WORKER_OWNER,
+                "worker_capability": str(payload.get("worker_capability") or "") == frame_video_commercial.WORKER_CAPABILITY,
+            }
+            failed_contract = next((key for key, ok in contract.items() if not ok), "")
+            if failed_contract:
+                update_job(job_id, "failed", f"frame_video_contract_{failed_contract}")
+                return
         photos = list(payload.get("photos") or [])
         if len(photos) < frame_video_runtime.FRAME_VIDEO_MIN_IMAGES:
             update_job(job_id, "failed", "not_enough_images")
@@ -1507,8 +1579,11 @@ def run_frame_video_render(job: dict) -> None:
             with open(output_path, "rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                     digest.update(chunk)
+            chat_id = str(payload.get("chat_id") or "").strip()
+            if not chat_id:
+                raise RuntimeError("frame_video_chat_id_missing")
             receipt = telegram_send_video_receipt(
-                str(payload.get("chat_id") or ""),
+                chat_id,
                 output_path,
                 str(payload.get("caption") or ""),
                 filename="toan_aas_frame_video.mp4",

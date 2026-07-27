@@ -33,6 +33,7 @@ KEY4U_COST_ROUTING_OVERRIDE_WARNING = "COST_ROUTING_OVERRIDE_KEY4U_PRIMARY"
 PUBLIC_LOW_TIER_KEY4U_WARNING = "PUBLIC_LOW_TIER_PRIMARY_PROVIDER_NOT_COST_OPTIMAL"
 
 _URL_PREFIXES = ("http://", "https://")
+_MEDIA_INPUT_FIELDS = ("storyboard", "image_paths", "source_video_path")
 _TIER_COST_ORDER = {
     "low": 1,
     "basic": 2,
@@ -165,6 +166,7 @@ def payload_contract_for_model(provider: str, model: str, catalog: dict[str, Any
             "supports_concat": bool(cfg.get("supports_concat")),
             "clip_seconds": int(cfg.get("clip_seconds") or 0),
             "payload_adapter": str(cfg.get("payload_adapter") or ""),
+            "capabilities": list(cfg.get("capabilities") or []),
         }
     )
     return contract
@@ -300,6 +302,7 @@ def capability_options(required_capability: str) -> list[str]:
         "text_to_video_or_scene_engine": ["multi_scene_video", "scene_video", "text_to_video"],
         "multi_scene_video": ["multi_scene_video", "scene_video", "text_to_video"],
         "scene_video": ["scene_video", "multi_scene_video", "text_to_video"],
+        "first_last_frame_video": ["first_last_frame_video", "image_to_video"],
         "delegates_to_selected_product": ["multi_scene_video", "scene_video", "text_to_video", "image_to_video", "video_to_video"],
     }
     return mapping.get(cap, [cap] if cap else ["text_to_video"])
@@ -635,16 +638,31 @@ def enforce_payload_contract(
     metadata = enrich_metadata_with_model_contract(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}, provider, model, env=env)
     if contract:
         allowed = set(str(item) for item in (contract.get("allowed_fields") or []) if str(item))
+        model_capabilities = set(normalize_capability_values(contract.get("capabilities") or []))
+        requested_options = capability_options(str(data.get("capability") or "text_to_video"))
+        matched_capabilities = [item for item in requested_options if item in model_capabilities]
+        fields_by_capability = contract.get("allowed_fields_by_capability")
+        fields_by_capability = fields_by_capability if isinstance(fields_by_capability, dict) else {}
+        allowed_media_fields: set[str] = set()
+        for capability in matched_capabilities:
+            allowed_media_fields.update(
+                str(item)
+                for item in (fields_by_capability.get(capability) or [])
+                if str(item) in _MEDIA_INPUT_FIELDS
+            )
+        allowed.update(allowed_media_fields)
         if allowed:
             for key in list(data.keys()):
                 if key not in allowed:
                     data.pop(key, None)
         if contract.get("scene_fields_allowed") is False:
             data.pop("scenes", None)
-            data.pop("storyboard", None)
-            data.pop("image_paths", None)
-            data.pop("source_video_path", None)
             metadata["unsupported_multiscene_fields_removed"] = True
+        for field_name in _MEDIA_INPUT_FIELDS:
+            if field_name not in allowed_media_fields:
+                data.pop(field_name, None)
+        metadata["provider_input_capability"] = matched_capabilities[0] if matched_capabilities else ""
+        metadata["media_input_fields_allowed"] = sorted(allowed_media_fields)
     else:
         metadata["contract_validation_status"] = CONTRACT_MISSING
     data["metadata"] = metadata
