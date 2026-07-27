@@ -88922,11 +88922,11 @@ def video_tail9_callback_guard(callback_handler):
                         callback_data,
                     )
                 try:
-                    return await safe_edit_or_send(
+                    return await video_tail9_render(
                         query,
-                        video_tail9_submit_blocker_text(),
-                        parse_mode="HTML",
-                        reply_markup=video_tail9_submit_blocker_keyboard(),
+                        int(query.from_user.id),
+                        context,
+                        "confirm",
                     )
                 except Exception:
                     return True
@@ -89492,12 +89492,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             save_video_tail9_state(uid, context, tail, owner, host)
             if not submit_preflight.get("allowed"):
                 await query.answer()
-                return await safe_edit_or_send(
-                    query,
-                    str(submit_preflight.get("public_message") or video_tail9_submit_blocker_text()),
-                    parse_mode="HTML",
-                    reply_markup=video_tail9_submit_preflight_keyboard(submit_preflight),
-                )
+                return await video_tail9_render(query, uid, context, "confirm")
         if owner == "video_edit":
             await query.answer()
             response = await submit_local_video_editor_job(update, context, host, tail=tail)
@@ -89516,12 +89511,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 save_video_tail9_state(uid, context, tail, owner, current)
                 return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, current)
             if response is None:
-                return await safe_edit_or_send(
-                    query,
-                    video_tail9_submit_blocker_text(),
-                    parse_mode="HTML",
-                    reply_markup=video_tail9_submit_blocker_keyboard(),
-                )
+                return await video_tail9_render(query, uid, context, "confirm")
             return response
         video_tail9_apply_to_session(uid, context, tail, owner, host)
         setattr(context, "_product_video_status_panel_rendered", False)
@@ -89584,12 +89574,7 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 return response
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
         if response is None:
-            return await safe_edit_or_send(
-                query,
-                video_tail9_submit_blocker_text(),
-                parse_mode="HTML",
-                reply_markup=video_tail9_submit_blocker_keyboard(),
-            )
+            return await video_tail9_render(query, uid, context, "confirm")
         return response
     if tail.get("final_confirmed"):
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
