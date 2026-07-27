@@ -75,6 +75,38 @@ def test_normalize_root_accepts_root_bot_and_file_bot_forms():
     assert bot.normalize_telegram_api_root("tg.example.com") == "https://tg.example.com"
 
 
+def test_normalize_root_rejects_remote_cleartext_before_credentials_are_used():
+    with pytest.raises(ValueError, match="HTTPS"):
+        bot.normalize_telegram_api_root("http://tg.example.com")
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "http://127.0.0.1:8081",
+        "http://[::1]:8081",
+        "http://localhost:8081",
+    ),
+)
+def test_normalize_root_allows_explicit_loopback_http(value):
+    assert bot.normalize_telegram_api_root(value) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "http://localhost.example.com",
+        "ftp://tg.example.com",
+        "https://user:pass@tg.example.com",
+        "https://tg.example.com?token=leak",
+        "https://tg.example.com#fragment",
+    ),
+)
+def test_normalize_root_rejects_ambiguous_or_unsafe_urls(value):
+    with pytest.raises(ValueError):
+        bot.normalize_telegram_api_root(value)
+
+
 def test_cloud_root_is_never_treated_as_local(monkeypatch):
     monkeypatch.setattr(bot, "TELEGRAM_API_ROOT", bot.TELEGRAM_CLOUD_API_ROOT)
     assert bot.telegram_local_api_enabled() is False
@@ -253,6 +285,36 @@ def test_business_raw_api_follows_bot_base_url(monkeypatch):
     assert tbs.raw_bot_api_headers("https://tg.example.com/bot1/sendMessage") == {
         "X-Toanaas-Proxy-Secret": "s3cr3t"
     }
+
+
+def test_business_raw_api_rejects_remote_http_before_request():
+    from types import SimpleNamespace
+
+    import services.telegram_business_support as tbs
+
+    local_bot = SimpleNamespace(base_url="http://tg.example.com/bot123456:AAH", token="123456:AAH")
+    with pytest.raises(ValueError, match="HTTPS"):
+        tbs.raw_bot_api_endpoint(local_bot, "sendMessage")
+
+
+def test_business_raw_api_custom_hook_cannot_bypass_transport_policy():
+    import asyncio
+
+    import services.telegram_business_support as tbs
+
+    class UnsafeBot:
+        base_url = "http://tg.example.com/bot123456:AAH"
+        token = "123456:AAH"
+        called = False
+
+        async def raw_bot_api_request(self, method, payload):
+            self.called = True
+            return {"ok": True}
+
+    unsafe = UnsafeBot()
+    with pytest.raises(ValueError, match="HTTPS"):
+        asyncio.run(tbs.raw_bot_api_request(unsafe, "sendMessage", {"text": "probe"}))
+    assert unsafe.called is False
 
 
 def test_no_provider_or_wallet_symbols_touched_by_this_change():

@@ -333,7 +333,7 @@ def _text_filter(config: dict[str, Any]) -> str:
     start = int(config.get("start_ms") or 0) / 1000
     end = int(config.get("end_ms") or 0) / 1000
     return (
-        f"drawtext={font}text='{_escape_filter_text(str(config.get('content') or ''))}':"
+        f"drawtext={font}text='{_escape_filter_text(str(config.get('content') or ''))}':{ffmpeg_text.DRAWTEXT_NO_EXPANSION}:"
         f"fontcolor=white:fontsize={int(config.get('font_size') or 42)}:"
         f"borderw={int(config.get('outline') or 2)}:bordercolor=black@0.9:"
         f"x={x}:y={y}:enable='between(t,{start:.3f},{end:.3f})'"

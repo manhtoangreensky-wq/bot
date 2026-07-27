@@ -107,6 +107,113 @@ def test_a_real_precheck_object_is_honoured_and_skips_re_evaluation(monkeypatch)
     assert result.get("ok") is True
 
 
+def _denying_gate(calls):
+    def _gate(feature, params=None, context=None):
+        calls.append(feature)
+        return {"allowed": False, "status": "blocked_test", "reason": "gate ran", "message": ""}
+
+    return _gate
+
+
+def test_a_precheck_ticket_cannot_be_reused_for_another_user(monkeypatch):
+    calls = []
+    ran = {"runner": False}
+    monkeypatch.setattr(bot, "evaluate_engine_gate", _denying_gate(calls))
+    monkeypatch.setattr(bot, "_product_engine_readiness", lambda *a, **k: {"ready": True})
+
+    async def _runner():
+        ran["runner"] = True
+        return {"ok": True}
+
+    decision = bot.engine_gate_precheck_allow("video_single", _params(), {"user_id": 7})
+    result = _run(
+        bot.execute_engine(
+            "video_single",
+            {"runner": _runner, "action": "export", "state": {}},
+            {"user_id": 999, "gate_precheck_result": decision},
+        )
+    )
+
+    assert calls == ["video_single"], "a ticket minted for another user must fall back to the real gate"
+    assert ran["runner"] is False
+    assert result.get("status") == "GATE_BLOCKED"
+
+
+def test_a_precheck_ticket_cannot_be_reused_for_another_feature(monkeypatch):
+    calls = []
+    ran = {"runner": False}
+    monkeypatch.setattr(bot, "evaluate_engine_gate", _denying_gate(calls))
+    monkeypatch.setattr(bot, "_product_engine_readiness", lambda *a, **k: {"ready": True})
+
+    async def _runner():
+        ran["runner"] = True
+        return {"ok": True}
+
+    decision = bot.engine_gate_precheck_allow("video_single", _params(), {"user_id": 7})
+    result = _run(
+        bot.execute_engine(
+            "voice_clone",
+            {"runner": _runner, "action": "export", "state": {}},
+            {"user_id": 7, "gate_precheck_result": decision},
+        )
+    )
+
+    assert calls == ["voice_clone"], "a ticket minted for another feature must fall back to the real gate"
+    assert ran["runner"] is False
+    assert result.get("status") == "GATE_BLOCKED"
+
+
+def test_a_precheck_ticket_cannot_be_reused_for_another_action(monkeypatch):
+    calls = []
+    ran = {"runner": False}
+    monkeypatch.setattr(bot, "evaluate_engine_gate", _denying_gate(calls))
+    monkeypatch.setattr(bot, "_product_engine_readiness", lambda *a, **k: {"ready": True})
+
+    async def _runner():
+        ran["runner"] = True
+        return {"ok": True}
+
+    decision = bot.engine_gate_precheck_allow("video_single", _params(), {"user_id": 7})
+    result = _run(
+        bot.execute_engine(
+            "video_single",
+            {"runner": _runner, "action": "preview", "state": {}},
+            {"user_id": 7, "gate_precheck_result": decision},
+        )
+    )
+
+    assert calls == ["video_single"], "a ticket minted for another action must fall back to the real gate"
+    assert ran["runner"] is False
+    assert result.get("status") == "GATE_BLOCKED"
+
+
+def test_an_expired_precheck_ticket_falls_back_to_the_real_gate(monkeypatch):
+    calls = []
+    ran = {"runner": False}
+    clock = {"now": 100.0}
+    monkeypatch.setattr(bot.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(bot, "evaluate_engine_gate", _denying_gate(calls))
+    monkeypatch.setattr(bot, "_product_engine_readiness", lambda *a, **k: {"ready": True})
+
+    async def _runner():
+        ran["runner"] = True
+        return {"ok": True}
+
+    decision = bot.engine_gate_precheck_allow("video_single", _params(), {"user_id": 7})
+    clock["now"] += 61.0
+    result = _run(
+        bot.execute_engine(
+            "video_single",
+            {"runner": _runner, "action": "export", "state": {}},
+            {"user_id": 7, "gate_precheck_result": decision},
+        )
+    )
+
+    assert calls == ["video_single"], "an expired ticket must fall back to the real gate"
+    assert ran["runner"] is False
+    assert result.get("status") == "GATE_BLOCKED"
+
+
 def test_the_token_never_leaks_into_the_returned_gate(monkeypatch):
     monkeypatch.setattr(bot, "_product_engine_readiness", lambda *a, **k: {"ready": True})
 

@@ -95,7 +95,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subdub_blackboxes, subdub_combo_blackbox, subdub_long_media, subdub_provider_contract, subdub_visual_subtitle, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
-from services import ai_chatbot_copilot, telegram_business_support
+from services import ai_chatbot_copilot, telegram_business_support, telegram_transport
 from services import ffmpeg_text
 from services import voice_clone_pipeline
 from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, storage_maintenance as storage_maintenance_service, storage_migration, video_final_output, video_provider_catalog, video_provider_router, worker_auth
@@ -504,18 +504,7 @@ TELEGRAM_LOCAL_API_MEDIA_PATH = "/" + (
 ).strip("/")
 
 def normalize_telegram_api_root(value: str = "") -> str:
-    root = str(value or "").strip().rstrip("/")
-    if not root:
-        return ""
-    for suffix in ("/file/bot", "/bot"):
-        if root.endswith(suffix):
-            root = root[: -len(suffix)].rstrip("/")
-            break
-    if not root:
-        return ""
-    if not root.startswith(("http://", "https://")):
-        root = "https://" + root
-    return root.rstrip("/")
+    return telegram_transport.normalize_api_root(value)
 
 TELEGRAM_API_ROOT = normalize_telegram_api_root(TELEGRAM_API_BASE_URL)
 
@@ -566,6 +555,7 @@ async def telegram_local_media_fetch(url: str, max_bytes: int, read_timeout: flo
     """
     if not url:
         raise RuntimeError("telegram_download_failed:api")
+    telegram_transport.validate_api_url(url)
     limit = max(1, int(max_bytes))
     buffer = bytearray()
     timeout = httpx.Timeout(float(read_timeout), connect=30.0)
@@ -162366,6 +162356,70 @@ def engine_readiness_registry() -> dict:
 # A caller cannot forge it by setting a key in a dict, which a bare
 # "gate_prechecked": True could be. See engine_gate_precheck below.
 _ENGINE_GATE_PRECHECK_TOKEN = object()
+_ENGINE_GATE_PRECHECK_TTL_SECONDS = 10.0
+# Keep the authoritative binding outside the caller-visible dict: the dict is
+# mutable, while this private ticket registry is what execute_engine checks.
+_ENGINE_GATE_PRECHECK_TICKETS: dict[object, tuple[str, str, str, float]] = {}
+
+
+def _engine_gate_precheck_binding(
+    feature: str,
+    params: dict | None = None,
+    context: dict | None = None,
+) -> tuple[str, str, str]:
+    params = dict(params or {})
+    context = dict(context or {})
+    feature_key = normalize_engine_feature(feature)
+    user_id = context.get("user_id", params.get("user_id", 0))
+    action = engine_action_for_feature(feature_key, params)
+    return (
+        feature_key,
+        str(user_id if user_id is not None else "").strip(),
+        str(action or "").strip().lower(),
+    )
+
+
+def _engine_gate_precheck_metadata(
+    feature: str,
+    params: dict | None = None,
+    context: dict | None = None,
+) -> dict:
+    feature_key, user_id, action = _engine_gate_precheck_binding(feature, params, context)
+    issued_at = time.monotonic()
+    for ticket, binding in list(_ENGINE_GATE_PRECHECK_TICKETS.items()):
+        ticket_age = issued_at - binding[3]
+        if ticket_age > _ENGINE_GATE_PRECHECK_TTL_SECONDS:
+            _ENGINE_GATE_PRECHECK_TICKETS.pop(ticket, None)
+    ticket = object()
+    _ENGINE_GATE_PRECHECK_TICKETS[ticket] = (feature_key, user_id, action, issued_at)
+    return {
+        "_precheck_token": _ENGINE_GATE_PRECHECK_TOKEN,
+        "_precheck_ticket": ticket,
+        "_precheck_feature": feature_key,
+        "_precheck_user_id": user_id,
+        "_precheck_action": action,
+        "_precheck_issued_at": issued_at,
+    }
+
+
+def _engine_gate_precheck_ticket(candidate: dict) -> tuple[str, str, str, float] | None:
+    if candidate.get("_precheck_token") is not _ENGINE_GATE_PRECHECK_TOKEN:
+        return None
+    try:
+        return _ENGINE_GATE_PRECHECK_TICKETS.get(candidate.get("_precheck_ticket"))
+    except TypeError:
+        return None
+
+
+def _engine_gate_precheck_is_live(issued_at: float) -> bool:
+    try:
+        issued_at = float(issued_at)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(issued_at):
+        return False
+    age = time.monotonic() - issued_at
+    return 0 <= age <= _ENGINE_GATE_PRECHECK_TTL_SECONDS
 
 
 def engine_gate_precheck(feature: str, params: dict | None = None, context: dict | None = None) -> dict:
@@ -162377,7 +162431,7 @@ def engine_gate_precheck(feature: str, params: dict | None = None, context: dict
     module can produce, so the engine can tell a real decision from a claim.
     """
     decision = dict(evaluate_engine_gate(feature, params, context) or {})
-    decision["_precheck_token"] = _ENGINE_GATE_PRECHECK_TOKEN
+    decision.update(_engine_gate_precheck_metadata(feature, params, context))
     return decision
 
 
@@ -162391,7 +162445,7 @@ def engine_gate_precheck_allow(feature: str, params: dict | None = None, context
     params = dict(params or {})
     context = dict(context or {})
     feature_key = normalize_engine_feature(feature)
-    return {
+    decision = {
         "allowed": True,
         "status": "allowed_prechecked",
         "reason": reason or "caller already passed product export guard",
@@ -162404,16 +162458,35 @@ def engine_gate_precheck_allow(feature: str, params: dict | None = None, context
         "engine_feature": feature_key,
         "entry_source": str(context.get("entry_source") or ENGINE_ENTRY_SOURCE_PRODUCT),
         "product_path_executor": ENGINE_PRODUCT_PATH_EXECUTOR,
-        "_precheck_token": _ENGINE_GATE_PRECHECK_TOKEN,
     }
+    decision.update(_engine_gate_precheck_metadata(feature_key, params, context))
+    return decision
 
 
-def engine_gate_precheck_result(context: dict | None) -> dict | None:
-    """Return the caller's gate decision only when it carries the real token."""
+def engine_gate_precheck_result(
+    context: dict | None,
+    feature: str | None = None,
+    params: dict | None = None,
+) -> dict | None:
+    """Return a live decision bound to the current engine invocation."""
     candidate = (context or {}).get("gate_precheck_result")
-    if isinstance(candidate, dict) and candidate.get("_precheck_token") is _ENGINE_GATE_PRECHECK_TOKEN:
+    if not isinstance(candidate, dict):
+        return None
+    binding = _engine_gate_precheck_ticket(candidate)
+    if binding is None or not _engine_gate_precheck_is_live(binding[3]):
+        return None
+    # Preserve the old inspection-only call shape, while the execution path
+    # below always supplies the invocation binding and therefore fails closed.
+    if feature is None:
         return candidate
-    return None
+    expected_feature, expected_user_id, expected_action = _engine_gate_precheck_binding(feature, params, context)
+    if (
+        binding[0] != expected_feature
+        or binding[1] != expected_user_id
+        or binding[2] != expected_action
+    ):
+        return None
+    return candidate
 
 
 async def execute_engine(feature: str, params: dict | None = None, context: dict | None = None) -> dict:
@@ -162422,13 +162495,12 @@ async def execute_engine(feature: str, params: dict | None = None, context: dict
     context = dict(context or {})
     uid = context.get("user_id", params.get("user_id", 0))
     subdub_features = {"subtitle_asr", "subtitle_auto", "subtitle_translate", "video_dub", "subtitle_plus_dub"}
-    prechecked = engine_gate_precheck_result(context)
+    prechecked = engine_gate_precheck_result(context, feature_key, params)
     if prechecked is not None and feature_key not in subdub_features:
         # A real decision object from inside the process. A bare
         # "gate_prechecked": True no longer skips the gate on its own: without
         # this token the engine evaluates the gate itself, below.
-        gate = dict(prechecked)
-        gate.pop("_precheck_token", None)
+        gate = {key: value for key, value in prechecked.items() if not str(key).startswith("_precheck_")}
     else:
         gate = evaluate_engine_gate(feature_key, params, context)
     if not gate.get("allowed"):
