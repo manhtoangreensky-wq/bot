@@ -177,7 +177,12 @@
     "key4u_kling_small_clip": {
       "family": "kling",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata", "storyboard", "image_paths", "source_video_path"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths"],
+        "first_last_frame_video": ["storyboard", "image_paths"],
+        "video_to_video": ["source_video_path"]
+      },
       "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",
@@ -186,7 +191,11 @@
     "key4u_hailuo_small_clip": {
       "family": "minimax_hailuo",
       "required_fields": ["model", "prompt", "duration", "ratio"],
-      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata"],
+      "allowed_fields": ["job_id", "source", "wallet_charge", "product_type", "capability", "model", "prompt", "negative_prompt", "ratio", "aspect_ratio", "aspectRatio", "duration", "duration_seconds", "quality", "style", "seed", "metadata", "storyboard", "image_paths"],
+      "allowed_fields_by_capability": {
+        "image_to_video": ["storyboard", "image_paths"],
+        "first_last_frame_video": ["storyboard", "image_paths"]
+      },
       "result_fields": ["data.status", "data.result_url", "status", "result_url", "task_id"],
       "poll_status_fields": ["data.status", "status"],
       "duration_support": "short_clip",

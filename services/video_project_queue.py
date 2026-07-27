@@ -4152,6 +4152,57 @@ def _is_product_video_project(project: dict[str, Any]) -> bool:
     )
 
 
+def product_video_engine_contract(product_type: Any) -> dict[str, Any]:
+    """Resolve one product's immutable commercial-to-engine adapter contract."""
+
+    from services import video_tail9
+
+    requested = str(product_type or "video_ai_real").strip() or "video_ai_real"
+    commercial = video_tail9.commercial_contract(requested)
+    executor_product_type = str(commercial.get("executor_product_type") or requested)
+    route = video_final_output.route_for_product_type(executor_product_type)
+    required_capability = str(
+        route.get("provider_capability")
+        or commercial.get("required_capability")
+        or "text_to_video"
+    )
+    if str(commercial.get("pricing_mode") or "") == "frame_video" or executor_product_type == "video_local_edit":
+        required_capability = str(commercial.get("required_capability") or required_capability)
+    return {
+        "public_product_type": requested,
+        "product_type": str(route.get("product_type") or executor_product_type),
+        "executor_product_type": executor_product_type,
+        "engine_route": str(commercial.get("engine_route") or route.get("engine_adapter") or ""),
+        "engine_adapter": str(route.get("engine_adapter") or commercial.get("engine_route") or ""),
+        "required_capability": required_capability,
+        "package_capability": str(commercial.get("required_capability") or required_capability),
+        "input_type": str(commercial.get("input_type") or ""),
+        "worker_owner": str(commercial.get("worker_owner") or "product_video"),
+        "execution_enabled": bool(commercial.get("execution_enabled", True)),
+        "execution_blocker": str(commercial.get("execution_blocker") or ""),
+    }
+
+
+def _product_video_requested_product_type(
+    project: dict[str, Any],
+    asset_pack: dict[str, Any],
+    invoice: dict[str, Any],
+) -> str:
+    for value in (
+        asset_pack.get("public_product_type"),
+        asset_pack.get("video_product_type"),
+        asset_pack.get("product_type"),
+        invoice.get("public_product_type"),
+        invoice.get("video_product_type"),
+        invoice.get("product_type"),
+        project.get("profile_id"),
+    ):
+        token = str(value or "").strip()
+        if token:
+            return token
+    return "video_ai_real"
+
+
 def canonical_product_video_route_contract(
     project: dict[str, Any] | None,
     result: dict[str, Any] | None = None,
@@ -4333,6 +4384,10 @@ def build_product_video_confirm_kickoff_payload(
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
     if not isinstance(asset_pack, dict):
         asset_pack = {}
+    requested_product_type = _product_video_requested_product_type(project, asset_pack, invoice)
+    engine_contract = product_video_engine_contract(requested_product_type)
+    execution_product_type = str(engine_contract.get("product_type") or requested_product_type)
+    required_capability = str(engine_contract.get("required_capability") or "text_to_video")
     eligibility_snapshot = (
         asset_pack.get("provider_eligibility_snapshot")
         or invoice.get("provider_eligibility_snapshot")
@@ -4389,7 +4444,7 @@ def build_product_video_confirm_kickoff_payload(
         or "basic",
         provider_chain=chain,
         scene_count=scene_count,
-        required_capability="text_to_video_or_scene_video",
+        required_capability=required_capability,
         requires_concat=per_scene_orchestration,
     )
     model_metadata = model_metadata_from_resolution(model_resolution)
@@ -4443,6 +4498,15 @@ def build_product_video_confirm_kickoff_payload(
     return {
         "source": "product_video",
         "product_video": True,
+        "public_product_type": requested_product_type,
+        "video_product_type": requested_product_type,
+        "product_type": execution_product_type,
+        "executor_product_type": str(engine_contract.get("executor_product_type") or execution_product_type),
+        "engine_route": str(engine_contract.get("engine_route") or ""),
+        "engine_adapter": str(engine_contract.get("engine_adapter") or ""),
+        "required_capability": required_capability,
+        "input_type": str(engine_contract.get("input_type") or ""),
+        "worker_owner": str(engine_contract.get("worker_owner") or "product_video"),
         "render_mode": "real",
         "provider_call": True,
         "submit_source": "public_user_final_confirm",
@@ -7182,7 +7246,7 @@ def complete_video_job(
         payload["final_video_file_id"] = final_video_file_id
     project = get_video_project(conn, int(job["project_id"]))
     asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
-    product_job = str(asset_pack.get("source") or "") == "product_video" and bool(asset_pack.get("real_renderer_required"))
+    product_job = _is_product_video_project(project)
     allow_admin_test = bool(asset_pack.get("admin_video_delivery") or asset_pack.get("test_pattern"))
     claim_only_diagnostic = bool(
         asset_pack.get("claim_only_diagnostic")

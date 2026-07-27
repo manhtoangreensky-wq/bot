@@ -705,8 +705,10 @@ def mux_final_multiscene_video(
     if bgm_audio_path:
         cmd += ["-i", ensure_video_output(bgm_audio_path)]
         audio_inputs.append("bgm")
+    logo_input_index = None
     if logo_path:
-        cmd += ["-i", ensure_video_output(logo_path)]
+        logo_input_index = 1 + len(audio_inputs)
+        cmd += ["-loop", "1", "-i", ensure_video_output(logo_path)]
     video_map = "0:v:0"
     if subtitle_path and burn_subtitles:
         sub = os.path.abspath(subtitle_path).replace("\\", "\\\\").replace(":", "\\:")
@@ -722,6 +724,26 @@ def mux_final_multiscene_video(
             f"box=1:boxcolor=black@0.25:boxborderw=10:x={x_expr}:y={y_expr}[vtxt]"
         )
         video_map = "vtxt"
+    if logo_input_index is not None:
+        position = str(logo_position or "bottom_right").strip().lower().replace("-", "_")
+        if position in {"top_left", "center_left", "bottom_left"}:
+            logo_x = "main_w*0.04"
+        elif position in {"top_center", "center", "bottom_center"}:
+            logo_x = "(main_w-overlay_w)/2"
+        else:
+            logo_x = "main_w-overlay_w-main_w*0.04"
+        if position in {"top_left", "top_center", "top_right"}:
+            logo_y = "main_h*0.035"
+        elif position in {"center_left", "center", "center_right"}:
+            logo_y = "(main_h-overlay_h)/2"
+        else:
+            logo_y = "main_h-overlay_h-main_h*0.035"
+        input_label = f"[{video_map}]"
+        filters.append(
+            f"[{logo_input_index}:v]{input_label}scale2ref=w='min(main_w*0.18,main_w*0.12)':h=-1[logo][base];"
+            f"[base][logo]overlay=x={logo_x}:y={logo_y}:format=auto:shortest=1[vlogo]"
+        )
+        video_map = "vlogo"
     if voice_audio_path and bgm_audio_path:
         filters.append("[1:a]volume=1.0[a1];[2:a]volume=0.10[a2];[a1][a2]amix=inputs=2:duration=first:dropout_transition=2[aout]")
         audio_map = "[aout]"
@@ -738,7 +760,7 @@ def mux_final_multiscene_video(
     if audio_map:
         cmd += ["-map", audio_map, "-shortest", "-c:a", "aac", "-ar", "44100", "-ac", "2"]
     else:
-        cmd += ["-an"]
+        cmd += (["-shortest"] if logo_input_index is not None else []) + ["-an"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output]
     result = safe_run_ffmpeg(cmd, timeout=300)
     if result.returncode != 0:

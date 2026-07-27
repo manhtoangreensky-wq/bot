@@ -66224,6 +66224,7 @@ def video_public_callback_failure_guard(callback_handler):
             return True
 
     guarded.__name__ = getattr(callback_handler, "__name__", "video_public_callback")
+    guarded.__wrapped__ = callback_handler
     return guarded
 
 
@@ -74044,7 +74045,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_en": "🎞 Storyboard",
         "label_zh": "🎬 分镜 + Prompt",
         "entry_callback": "vproduct|open|storyboard_prompt",
-        "handler": "handle_storyboard2_callback",
+        "handler": "handle_video_product_callback",
         "expected_children": (
             "vstory|ai",
             "vstory|upload",
@@ -74156,6 +74157,12 @@ def video_public_product_flow_access(product_id: str) -> dict:
             "product_id": product,
             "flow_access_allowed": False,
             "flow_block_reason": "unknown_video_product",
+        }
+    if product == "multi_scene_film":
+        return {
+            "product_id": product,
+            "flow_access_allowed": False,
+            "flow_block_reason": "long_form_video_in_development",
         }
     return {
         "product_id": product,
@@ -88660,7 +88667,16 @@ async def video_tail9_open_planning_audio(query, context, uid: int, tail: dict, 
 async def video_tail9_render(query, user_id: int, context, screen: str):
     tail, owner, host = video_tail9_context(user_id, context)
     if screen == "review":
-        screen = "summary"
+        if owner == "video_edit":
+            tail["status_stage"] = "review"
+            save_video_tail9_state(user_id, context, tail, owner, host)
+            return await safe_edit_or_send(
+                query,
+                video_tail9_video_edit_review_text(tail, host),
+                parse_mode="HTML",
+                reply_markup=video_tail9_video_edit_review_keyboard(),
+            )
+        return await safe_edit_or_send(query, video_tail9_review_text(tail), parse_mode="HTML", reply_markup=video_tail9_review_keyboard(tail))
     if screen == "audio":
         return await video_tail9_open_planning_audio(
             query,
@@ -88845,9 +88861,13 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
     if section == "review":
         if action in {"open", "summary", "review"}:
-            return await video_tail9_render(query, uid, context, "summary")
+            target_screen = "summary" if action == "summary" else "review"
+            return await video_tail9_render(query, uid, context, target_screen)
         if action == "back":
-            return await video_tail9_render(query, uid, context, "logo")
+            if owner == "video_edit":
+                action = "edit_operation"
+            else:
+                return await video_tail9_render(query, uid, context, "logo")
         if action == "logo":
             tail["branding_return_to"] = "summary"
             tail["branding_back_to"] = "summary"
@@ -96452,17 +96472,19 @@ def structured_video_plan(state: dict | None = None, flow: str = "promptvideo") 
 
 def video_render_feature_enabled(flow: str) -> bool:
     flow = str(flow or "").strip().lower()
-    if not VIDEO_AI_PUBLIC_ENABLED:
-        return False
-    if flow == "imagevideo":
-        return VIDEO_IMAGE_TO_VIDEO_ENABLED
-    if flow in {"videoref", "selfscene"}:
-        return VIDEO_VIDEO_TO_VIDEO_ENABLED
     if flow == "longvideo":
-        return VIDEO_LONG_RENDER_ENABLED
-    if flow == "trend":
-        return VIDEO_TREND_RENDER_ENABLED
-    return True
+        return False
+    if flow in {
+        "promptvideo",
+        "imagevideo",
+        "videoref",
+        "selfscene",
+        "trend",
+        "storypack",
+        "videoidea",
+    }:
+        return True
+    return bool(VIDEO_AI_PUBLIC_ENABLED)
 
 def developing_video_render_guard_text(flow: str, lang: str = "vi", source_ready: bool = True) -> str:
     flow = str(flow or "").strip().lower()
@@ -146905,6 +146927,11 @@ def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict,
         "frame_job_id": str(frame_job_id or ""),
         "user_id": str(user_id or ""),
         "chat_id": str(chat_id or ""),
+        "frame_video_contract": 1,
+        "worker_job_type": frame_video_commercial.WORKER_JOB_TYPE,
+        "engine_route": frame_video_commercial.ENGINE_ROUTE,
+        "worker_owner": frame_video_commercial.WORKER_OWNER,
+        "worker_capability": frame_video_commercial.WORKER_CAPABILITY,
         "charged_amount": 0,
         "charge_amount_planned_xu": int(charged_amount or 0),
         "charge_policy": "post_delivery",
@@ -171111,16 +171138,16 @@ FRAME_VIDEO_CANONICAL_ACTIONS = {
     "text_style_menu", "text_style_set", "quality_menu", "quality_set", "quality_info", "review",
     "continue", "status_back", "confirm", "done", "ai_stitch_generated",
 }
-FRAME_VIDEO_IMG2VID_ACTIONS = frozenset(
-    action
-    for action, route in frame_video_flow.FRAME_VIDEO_ROUTE_MATRIX.items()
-    if str(route.get("owner") or "") == "handle_img2vid_lock1_callback"
-)
 FRAME_VIDEO_LEGACY_REDIRECT_ACTIONS = {
     "planning_refresh", "planning_continue", "ratio", "duration", "effect", "music", "back",
     "img2vid_seconds_menu", "img2vid_seconds", "img2vid_seconds_custom", "img2vid_confirm",
     "preview", "preview_check", "mode_frame", "mode_audio", "mode_ai", "save", "text_delete_last",
 }
+FRAME_VIDEO_IMG2VID_ACTIONS = frozenset(
+    action
+    for action, route in frame_video_flow.FRAME_VIDEO_ROUTE_MATRIX.items()
+    if str(route.get("owner") or "") == "handle_img2vid_lock1_callback"
+)
 FRAME_VIDEO_CONFIRM_LOCKS: dict[str, asyncio.Lock] = {}
 FRAME_VIDEO_IMAGE_CONFIRM_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -219738,7 +219765,7 @@ async def handle_video_editor_pending_text(update: Update, context: ContextTypes
             state_revision=max(1, safe_int(state.get("state_revision"), 1)) + 1,
             revision=max(1, safe_int(state.get("revision"), 1)) + 1,
         )
-        await video_tail9_render(update.message, uid, context, "logo")
+        await video_tail9_render(update.message, uid, context, "review")
         return True
     if step == "await_audio_volume":
         audio_back = "videoedit|manual_audio" if str(state.get("last_section") or "") == "manual" else "videoedit|audio"
@@ -221972,7 +221999,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             return await video_profile_scene1_render(query, state, lang)
         state = video_profile_studio_step(context, state, "full_review", active_scene_index=1)
         state = save_video_profile_studio_state(context, state)
-        return await video_tail9_render(query, uid, context, "logo")
+        return await video_tail9_render(query, uid, context, "review")
     if action == "review_image_prompts":
         state = video_profile_studio_step(context, state, "image_prompts", active_scene_index=1, prompt_return_step="full_review")
         return await video_profile_scene1_render(query, state, lang)
@@ -223397,7 +223424,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             state_revision=max(1, safe_int(state.get("state_revision"), 1)) + 1,
             revision=max(1, safe_int(state.get("revision"), 1)) + 1,
         )
-        return await video_tail9_render(query, uid, context, "logo")
+        return await video_tail9_render(query, uid, context, "review")
     if action == "brightness_custom":
         update_video_editor_pending(uid, "await_brightness", selected_tool="manual", last_section="manual")
         return await safe_edit_or_send(
@@ -226737,15 +226764,47 @@ async def internal_video_worker_job_update(request: Request):
     status = str(payload.get("status") or "").strip().lower()
     if status not in {"completed", "failed"}:
         raise HTTPException(status_code=400, detail="status must be completed or failed")
-    result = update_video_project_job_result(
-        int(job_id),
-        status,
-        final_video_path=str(payload.get("final_video_path") or ""),
-        final_video_file_id=str(payload.get("final_video_file_id") or payload.get("output_file_id") or ""),
-        error=str(payload.get("error_short") or payload.get("last_error") or "")[:1000],
-        result=payload.get("result") if isinstance(payload.get("result"), dict) else {},
-    )
-    return {"ok": bool(result.get("ok")), "result": result}
+    result_payload = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    conn = db_connect()
+    try:
+        result = update_video_project_job_result(
+            int(job_id),
+            status,
+            final_video_path=str(payload.get("final_video_path") or ""),
+            final_video_file_id=str(payload.get("final_video_file_id") or payload.get("output_file_id") or ""),
+            error=str(payload.get("error_short") or payload.get("last_error") or "")[:1000],
+            result=result_payload,
+            conn=conn,
+        )
+        delivery_result = {}
+        charge_result = {}
+        delivery_message_id = str(
+            result_payload.get("delivery_message_id")
+            or result_payload.get("telegram_delivery_message_id")
+            or ""
+        ).strip()
+        if status == "completed" and result.get("ok") and delivery_message_id:
+            delivery_result = video_project_queue.note_video_delivery_result(
+                conn,
+                job_id=int(job_id),
+                sent=True,
+                delivery_message_id=delivery_message_id,
+                success_message_id=delivery_message_id,
+            )
+            if delivery_result.get("ok") and delivery_result.get("sent", True):
+                charge_result = product_video_charge_after_final_delivery(
+                    int(job_id),
+                    conn=conn,
+                    source="local_worker_delivery_receipt",
+                )
+        return {
+            "ok": bool(result.get("ok")),
+            "result": result,
+            "delivery": delivery_result,
+            "charge": charge_result,
+        }
+    finally:
+        conn.close()
 
 @fastapi_app.post("/internal/worker/upload_result")
 async def internal_worker_upload_result(request: Request, job_id: str = Form(default=""), file: UploadFile | None = File(default=None)):
@@ -227138,6 +227197,105 @@ async def api_worker_asset_download(asset_id: str, request: Request):
     if not candidate.startswith(os.path.abspath(asset_root)) or not os.path.exists(candidate) or not os.path.isfile(candidate):
         raise HTTPException(status_code=404, detail="asset_not_found")
     return FileResponse(candidate, filename=os.path.basename(candidate))
+
+
+@fastapi_app.get("/api/v1/worker/jobs/{job_id}/storyboard-image/{scene_index}/{slot}")
+async def api_worker_storyboard_scene_image(job_id: int, scene_index: int, slot: str, request: Request):
+    """Transfer one confirmed storyboard image to its authenticated worker."""
+
+    verify_remote_worker_api_access(request)
+    image_slot = str(slot or "start").strip().lower()
+    if image_slot not in {"start", "end"}:
+        raise HTTPException(status_code=400, detail="storyboard_image_slot_invalid")
+    wanted_scene = safe_int(scene_index, 0)
+    if wanted_scene <= 0:
+        raise HTTPException(status_code=400, detail="storyboard_scene_index_invalid")
+    conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, safe_int(job_id, 0))
+        hydrated = video_project_queue.hydrate_video_job_payload(conn, job)
+    finally:
+        conn.close()
+    if not hydrated:
+        raise HTTPException(status_code=404, detail="job_not_found")
+    if str(hydrated.get("status") or "").strip().lower() not in {"queued", "processing", "in_progress", "running", "claimed"}:
+        raise HTTPException(status_code=409, detail="storyboard_transfer_requires_active_job")
+    project = dict(hydrated.get("project") or {})
+    try:
+        asset_pack = json.loads(str(project.get("asset_pack_json") or "{}"))
+    except Exception:
+        asset_pack = {}
+    if not isinstance(asset_pack, dict):
+        asset_pack = {}
+    product_type = str(
+        asset_pack.get("product_type")
+        or asset_pack.get("video_product_type")
+        or project.get("profile_id")
+        or ""
+    ).strip()
+    if product_type != "storyboard_prompt":
+        raise HTTPException(status_code=404, detail="storyboard_image_not_found")
+    try:
+        scene_cards = json.loads(str(project.get("scene_cards_json") or "[]"))
+    except Exception:
+        scene_cards = []
+    if not isinstance(scene_cards, list):
+        scene_cards = []
+    if not scene_cards:
+        scene_cards = [dict(item) for item in hydrated.get("scenes") or [] if isinstance(item, dict)]
+    selected = next(
+        (
+            dict(card)
+            for fallback_index, card in enumerate(scene_cards, start=1)
+            if isinstance(card, dict)
+            and safe_int(card.get("scene_index") or card.get("scene_id"), fallback_index) == wanted_scene
+        ),
+        {},
+    )
+    slot_record = selected.get(f"{image_slot}_image")
+    if not isinstance(slot_record, dict):
+        slot_record = {}
+    start_image_file_id = selected.get("start_image_file_id") if image_slot == "start" else ""
+    end_image_file_id = selected.get("end_image_file_id") if image_slot == "end" else ""
+    file_id = str(
+        start_image_file_id
+        or end_image_file_id
+        or slot_record.get("file_id")
+        or (selected.get("image_file_id") if image_slot == "start" else "")
+        or ""
+    ).strip()
+    if not file_id:
+        raise HTTPException(status_code=404, detail=f"storyboard_{image_slot}_image_file_id_missing")
+    if tg_app is None or getattr(tg_app, "bot", None) is None:
+        raise HTTPException(status_code=503, detail="telegram_storyboard_transfer_unavailable")
+    max_bytes = max(1, safe_int(os.getenv("STORYBOARD_IMAGE_MAX_BYTES"), 10 * 1024 * 1024))
+    try:
+        telegram_file = await tg_app.bot.get_file(file_id)
+        declared_size = safe_int(getattr(telegram_file, "file_size", 0), 0)
+        if declared_size and declared_size > max_bytes:
+            raise HTTPException(status_code=413, detail="storyboard_image_too_large")
+        content = bytes(await telegram_file.download_as_bytearray())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "storyboard_image_transfer_failed | job_id=%s | scene=%s | slot=%s | error=%s",
+            job_id,
+            wanted_scene,
+            image_slot,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=502, detail="storyboard_image_download_failed") from exc
+    if not content:
+        raise HTTPException(status_code=502, detail="storyboard_image_empty")
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="storyboard_image_too_large")
+    filename = f"storyboard-scene-{wanted_scene}-{image_slot}.png"
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @fastapi_app.get("/api/v1/worker/jobs/{job_id}/source-video")

@@ -16,6 +16,9 @@ from services import frame_video_runtime
 PUBLIC_JOB_TYPE = "frame_video_local"
 WORKER_JOB_TYPE = "frame_video_render"
 EXECUTION_OWNER = "local_worker"
+ENGINE_ROUTE = "frame_video_render"
+WORKER_OWNER = "frame_video"
+WORKER_CAPABILITY = "frame_video_render"
 PRICING_SOURCE = "frame_video_fixed_quality_promo_v1"
 
 QUALITY_DETAILS = {

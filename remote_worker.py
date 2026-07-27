@@ -813,6 +813,91 @@ def _selfshot2_job(job: dict | None) -> bool:
     return _selfshot_job_type(job) == "self_shot_scene_change"
 
 
+def _storyboard_job(job: dict | None) -> bool:
+    return _selfshot_job_type(job) in {"storyboard_prompt", "storyboard_to_video"}
+
+
+def download_storyboard_scene_images(job: dict, work_dir: str) -> list[str]:
+    """Materialize the approved storyboard image(s) in scene order."""
+
+    if not _storyboard_job(job):
+        return []
+    job_id = str(job.get("job_id") or job.get("id") or "").strip()
+    if not job_id:
+        raise RuntimeError("storyboard_image_job_id_missing")
+    raw_cards = job.get("scene_cards") or []
+    if isinstance(raw_cards, str):
+        try:
+            raw_cards = json.loads(raw_cards)
+        except Exception:
+            raw_cards = []
+    cards = [dict(item) for item in raw_cards if isinstance(item, dict)]
+    cards.sort(key=lambda item: int(item.get("scene_index") or item.get("scene_id") or 0))
+    if not cards:
+        raise RuntimeError("storyboard_scene_images_missing")
+    max_bytes = max(1, int(os.getenv("STORYBOARD_IMAGE_MAX_BYTES", str(10 * 1024 * 1024))))
+    root = Path(work_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    image_paths: list[str] = []
+    for fallback_index, card in enumerate(cards, start=1):
+        scene_index = max(1, int(card.get("scene_index") or card.get("scene_id") or fallback_index))
+        slots = [("start", str(card.get("start_image_file_id") or card.get("image_file_id") or card.get("file_id") or "").strip())]
+        end_file_id = str(card.get("end_image_file_id") or "").strip()
+        if end_file_id:
+            slots.append(("end", end_file_id))
+        for slot, file_id in slots:
+            existing = str(card.get(f"{slot}_image_path") or (card.get("image_path") if slot == "start" else "") or "").strip()
+            if existing and Path(existing).is_file() and Path(existing).stat().st_size > 0:
+                target = Path(existing).resolve()
+                if root not in target.parents:
+                    raise RuntimeError("storyboard_image_path_unsafe")
+            else:
+                if not file_id:
+                    raise RuntimeError(f"storyboard_{slot}_image_missing_scene_{scene_index}")
+                target = (root / f"storyboard-scene-{scene_index}-{slot}.png").resolve()
+                if root not in target.parents:
+                    raise RuntimeError("storyboard_image_path_unsafe")
+                request = urllib.request.Request(
+                    endpoint(f"/api/v1/worker/jobs/{job_id}/storyboard-image/{scene_index}/{slot}"),
+                    headers=auth_headers(""),
+                    method="GET",
+                )
+                partial = target.with_suffix(target.suffix + ".partial")
+                received = 0
+                try:
+                    with urllib.request.urlopen(request, timeout=120) as response:
+                        with partial.open("wb") as handle:
+                            while True:
+                                chunk = response.read(min(1024 * 1024, max_bytes - received + 1))
+                                if not chunk:
+                                    break
+                                received += len(chunk)
+                                if received > max_bytes:
+                                    raise RuntimeError("storyboard_image_too_large")
+                                handle.write(chunk)
+                    if received <= 0:
+                        raise RuntimeError("storyboard_image_empty")
+                    partial.replace(target)
+                except Exception:
+                    try:
+                        partial.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    raise
+            card[f"{slot}_image_path"] = str(target)
+            if slot == "start":
+                card["image_path"] = str(target)
+                image_paths.append(str(target))
+            else:
+                card["end_image_path"] = str(target)
+                image_paths.append(str(target))
+    job["scene_cards"] = cards
+    job["storyboard_image_paths"] = list(image_paths)
+    job["image_paths"] = list(image_paths)
+    job["storyboard_assets_materialized"] = True
+    return image_paths
+
+
 def download_selfshot3_source_video(job: dict, work_dir: str) -> str:
     """Materialize the user source inside the disposable worker directory."""
 
@@ -966,6 +1051,9 @@ def process_claimed_job(job: dict) -> dict:
         elif _selfshot2_job(job):
             send_heartbeat(job_id, 12, "downloading self-shot scene source")
             download_selfshot2_source_video(job, work_dir)
+        elif _storyboard_job(job):
+            send_heartbeat(job_id, 12, "downloading storyboard scene images")
+            download_storyboard_scene_images(job, work_dir)
         send_heartbeat(job_id, 20, "preparing product video")
         print(
             "[remote_worker] provider submit start "

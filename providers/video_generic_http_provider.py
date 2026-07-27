@@ -498,6 +498,9 @@ def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | o
 
 def _shopaikey_uses_historical_small_clip_contract(request: VideoGenerationRequest) -> bool:
     metadata = dict(request.metadata or {})
+    required_capability = str(request.required_capability or "").strip().lower().replace("-", "_")
+    if required_capability in {"image_to_video", "first_last_frame_video", "video_to_video"}:
+        return False
     mode = str(metadata.get("orchestration_mode") or metadata.get("provider_orchestration_mode") or "").strip().lower()
     pipeline = str(metadata.get("render_pipeline_mode") or "").strip().lower()
     return bool(
