@@ -10,10 +10,10 @@ LANDING = (ROOT / "index.html").read_text(encoding="utf-8")
 
 def test_public_landing_uses_the_shared_teal_sky_system_and_real_entry_points() -> None:
     for token in (
-        "--teal-950: #062a36;",
+        "--teal-950: #063b47;",
         "--teal-500: #14b8a6;",
         "--sky-400: #38bdf8;",
-        "--canvas: #f4fbfc;",
+        "--canvas: #f3fbfc;",
     ):
         assert token in LANDING
 

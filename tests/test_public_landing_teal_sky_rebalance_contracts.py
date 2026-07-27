@@ -10,16 +10,46 @@ LANDING = (ROOT / "index.html").read_text(encoding="utf-8")
 
 def test_landing_defines_the_approved_semantic_teal_sky_roles() -> None:
     for token in (
+        "--teal-950: #063b47;",
         "--teal-action: #0f766e;",
-        "--teal-brand: #14b8a6;",
+        "--teal-brand: #0d9488;",
         "--sky-context: #0284c7;",
-        "--canvas: #f4fbfc;",
-        "--ink: #083344;",
-        "--muted: #486b75;",
+        "--canvas: #f3fbfc;",
+        "--ink: #073a45;",
+        "--muted: #456b77;",
         "--surface: #ffffff;",
         "--line: #d7ecef;",
     ):
         assert token in LANDING
+
+
+def test_landing_makes_the_public_website_a_distinct_companion_role() -> None:
+    """The public site explains entry; it is not a third signed workspace."""
+
+    assert 'class="companion-grid companion-grid--three"' in LANDING
+    assert 'class="companion-card companion-card--website"' in LANDING
+    assert 'data-i18n="companion.websiteTitle"' in LANDING
+    assert 'data-i18n="companion.websiteBody"' in LANDING
+
+    for key in (
+        "companion.mapTitle",
+        "companion.mapBody",
+        "companion.websiteTitle",
+        "companion.websiteBody",
+        "companion.workspaceTitle",
+        "companion.telegramTitle",
+    ):
+        assert LANDING.count(f'"{key}":') == 3
+
+
+def test_header_uses_the_real_logo_as_a_clear_public_brand_lockup() -> None:
+    """Do not replace the supplied mark with generated initials or a faux icon."""
+
+    assert 'class="brand-logo"' in LANDING
+    assert 'src="/logo.png?v=20260727"' in LANDING
+    assert "object-fit: cover;" in LANDING
+    assert "object-position: center 20%;" in LANDING
+    assert "brand-mark" not in LANDING
 
 
 def test_landing_keeps_light_sky_stage_markers_and_contextual_sky_focus() -> None:

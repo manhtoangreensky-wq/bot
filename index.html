@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#062a36">
+  <meta name="theme-color" content="#063b47">
   <meta name="description" content="TOAN AAS giúp bạn tổ chức nội dung và công việc AI bằng quy trình rõ ràng, có kiểm soát.">
   <meta property="og:title" content="TOAN AAS — Không gian làm việc AI có kiểm soát">
   <meta property="og:description" content="Workspace cho công việc chuyên sâu. Telegram cho thao tác nhanh khi cần.">
@@ -19,23 +19,23 @@
   <style>
     :root {
       --teal-action: #0f766e;
-      --teal-brand: #14b8a6;
+      --teal-brand: #0d9488;
       --sky-context: #0284c7;
-      --canvas: #f4fbfc;
+      --canvas: #f3fbfc;
       --surface: #ffffff;
-      --ink: #083344;
-      --muted: #486b75;
+      --ink: #073a45;
+      --muted: #456b77;
       --line: #d7ecef;
 
       /* Retained aliases keep the existing static surface stable. */
-      --teal-950: #062a36;
-      --teal-900: #0b3440;
-      --teal-800: #104352;
+      --teal-950: #063b47;
+      --teal-900: #0b4a57;
+      --teal-800: #145864;
       --teal-700: #146173;
       --teal-500: #14b8a6;
       --teal-400: #2dd4bf;
       --sky-400: #38bdf8;
-      --surface-soft: #e8f5f6;
+      --surface-soft: #e6f8f7;
       --line-strong: #9ccfd5;
       --success: #0f766e;
       --danger: #bd4750;
@@ -102,33 +102,27 @@
     }
     .brand {
       display: inline-flex;
-      gap: 10px;
+      gap: 12px;
       align-items: center;
       min-width: 0;
       color: var(--teal-950);
-      font-size: 18px;
-      font-weight: 850;
-      letter-spacing: -.035em;
+      font-size: 17px;
+      font-weight: 860;
+      letter-spacing: -.025em;
       white-space: nowrap;
     }
-    .brand img {
-      width: 38px;
-      height: 38px;
-      flex: 0 0 38px;
-      border-radius: 11px;
-      object-fit: contain;
+    .brand-logo {
+      width: 64px;
+      height: 40px;
+      flex: 0 0 64px;
+      border-radius: 8px;
+      object-fit: cover;
+      object-position: center 20%;
+      mix-blend-mode: multiply;
     }
-    .brand-mark {
-      display: none;
-      width: 38px;
-      height: 38px;
-      place-items: center;
-      border-radius: 11px;
-      color: var(--teal-950);
-      background: var(--teal-brand);
-      font-size: 13px;
-      font-weight: 900;
-      letter-spacing: -.08em;
+    .brand-wordmark {
+      display: inline-block;
+      padding-top: 1px;
     }
     .site-nav {
       display: flex;
@@ -247,18 +241,19 @@
     .preview-topbar { display: flex; gap: 7px; align-items: center; min-height: 48px; padding-inline: 18px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
     .preview-topbar i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
     .preview-topbar i:first-child { background: var(--teal-brand); }
-    .preview-topbar strong { margin-left: 4px; color: var(--teal-700); font-size: 12px; }
-    .preview-body { display: grid; gap: 22px; padding: clamp(22px, 4vw, 34px); }
+    .preview-topbar strong { margin-left: 4px; color: var(--teal-700); font-size: 12px; letter-spacing: .01em; }
+    .preview-body { display: grid; gap: 18px; padding: clamp(22px, 4vw, 34px); }
     .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .preview-heading strong { color: var(--ink); font-size: 18px; }
     .preview-heading span { padding: 5px 8px; border-radius: 7px; color: var(--teal-700); background: var(--surface-soft); font-size: 11px; font-weight: 800; }
-    .preview-lines { display: grid; gap: 9px; }
-    .preview-lines i { height: 11px; border-radius: 999px; background: var(--surface-soft); }
-    .preview-lines i:nth-child(1) { width: 92%; }
-    .preview-lines i:nth-child(2) { width: 72%; }
-    .preview-lines i:nth-child(3) { width: 82%; }
+    .preview-list { display: grid; gap: 0; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); list-style: none; }
+    .preview-list li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 48px; padding: 9px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 720; }
+    .preview-list li:last-child { border-bottom: 0; }
+    .preview-list b { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: var(--teal-950); background: var(--surface-soft); font-size: 10px; }
+    .preview-list li:nth-child(2) b { background: color-mix(in srgb, var(--sky-400) 72%, var(--surface)); }
+    .preview-list li:nth-child(3) b { background: color-mix(in srgb, var(--teal-500) 58%, var(--surface)); }
     .preview-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-    .preview-stages div { display: grid; gap: 5px; min-height: 92px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+    .preview-stages div { display: grid; gap: 5px; min-height: 86px; padding: 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
     .preview-stages b { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; color: var(--teal-950); background: var(--teal-500); font-size: 12px; }
     .preview-stages span { color: var(--muted); font-size: 11px; font-weight: 750; line-height: 1.3; }
     .preview-stages div:nth-child(2) b { background: var(--sky-400); }
@@ -284,9 +279,12 @@
     .process-step p { margin: 0; color: var(--muted); font-size: 14px; }
     .process-icon { width: 30px; height: 30px; color: var(--teal-700); }
 
-    .companion-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-    .companion-card { padding: clamp(24px, 4vw, 34px); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
-    .companion-card--workspace { border-color: color-mix(in srgb, var(--teal-500) 52%, var(--line)); }
+    .companion-grid { display: grid; gap: 16px; }
+    .companion-grid--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .companion-card { display: flex; min-height: 328px; flex-direction: column; padding: clamp(24px, 4vw, 34px); border: 1px solid var(--line); border-top: 4px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface); }
+    .companion-card--website { border-top-color: var(--sky-context); }
+    .companion-card--workspace { border-color: color-mix(in srgb, var(--teal-500) 52%, var(--line)); border-top-color: var(--teal-action); }
+    .companion-card--telegram { border-top-color: var(--sky-400); }
     .companion-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 24px; border-radius: 14px; color: var(--teal-700); background: var(--surface-soft); }
     .companion-icon svg { width: 25px; height: 25px; }
     .companion-list { display: grid; gap: 10px; margin: 20px 0 0; padding: 0; color: var(--muted); list-style: none; font-size: 14px; }
@@ -363,12 +361,16 @@
       .trust-list article:nth-child(2) { border-right: 0; }
       .trust-list article:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
     }
+    @media (max-width: 840px) {
+      .companion-grid--three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .companion-card--website { grid-column: 1 / -1; min-height: 0; }
+    }
     @media (max-width: 680px) {
       html { scroll-padding-top: 80px; }
       .container { width: min(100% - 32px, 1180px); }
       .header-row { min-height: 68px; gap: 12px; }
       .brand { font-size: 16px; }
-      .brand img { width: 34px; height: 34px; flex-basis: 34px; border-radius: 10px; }
+      .brand-logo { width: 56px; height: 36px; flex-basis: 56px; }
       .hero { padding: 50px 0 72px; }
       .hero h1 { max-width: 13ch; font-size: clamp(38px, 11vw, 52px); }
       .hero p { font-size: 17px; }
@@ -379,7 +381,7 @@
       .preview-stages div { min-height: 78px; padding: 9px; }
       .preview-stages span { font-size: 10px; }
       .section { padding: 72px 0; }
-      .companion-grid, .capability-grid { grid-template-columns: minmax(0, 1fr); }
+      .companion-grid, .companion-grid--three, .capability-grid { grid-template-columns: minmax(0, 1fr); }
       .companion-card, .capability { min-height: 0; }
       .form-row { grid-template-columns: minmax(0, 1fr); }
       .form-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -407,9 +409,8 @@
   <header class="site-header" data-menu-open="false">
     <div class="container header-row">
       <a class="brand" href="#top" aria-label="TOAN AAS">
-        <img src="/logo.png?v=20260727" alt="" width="38" height="38" onerror="this.hidden=true;this.nextElementSibling.style.display='grid'">
-        <span class="brand-mark" aria-hidden="true">TA</span>
-        <span>TOAN AAS</span>
+        <img class="brand-logo" src="/logo.png?v=20260727" alt="" width="64" height="40" onerror="this.remove()">
+        <span class="brand-wordmark">TOAN AAS</span>
       </a>
       <nav id="site-menu" class="site-nav" aria-label="Điều hướng chính" data-i18n-aria="nav.label">
         <a href="#how-it-works" data-i18n="nav.workflow">Quy trình</a>
@@ -449,11 +450,15 @@
           </div>
           <p class="hero-note"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v5c0 5.1 3.4 8.8 8 10 4.6-1.2 8-4.9 8-10V6l-8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg><span data-i18n="hero.note">Bạn luôn nhìn thấy bước tiếp theo; trạng thái chưa sẵn sàng được nói rõ, không được thay bằng kết quả giả.</span></p>
         </div>
-        <aside class="workflow-preview" aria-label="Quy trình minh họa" data-i18n-aria="preview.label">
+        <aside class="workflow-preview" aria-label="Minh hoạ cấu trúc Workspace" data-i18n-aria="preview.workspaceLabel">
           <div class="preview-topbar"><i></i><i></i><i></i><strong data-i18n="preview.app">TOAN AAS / Workspace</strong></div>
           <div class="preview-body">
-            <div class="preview-heading"><strong data-i18n="preview.title">Một dự án, một đường đi rõ ràng</strong><span data-i18n="preview.draft">Bản nháp</span></div>
-            <div class="preview-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="preview-heading"><strong data-i18n="preview.workspaceTitle">Không gian làm việc cho một dự án</strong><span data-i18n="preview.structure">Cấu trúc</span></div>
+            <ul class="preview-list">
+              <li><b>1</b><span data-i18n="preview.brief">Mục tiêu và brief dự án</span></li>
+              <li><b>2</b><span data-i18n="preview.assets">Tài sản cần theo dõi</span></li>
+              <li><b>3</b><span data-i18n="preview.review">Bước cần xác nhận</span></li>
+            </ul>
             <div class="preview-stages" aria-label="Bốn giai đoạn quy trình" data-i18n-aria="preview.stagesLabel">
               <div><b>1</b><span data-i18n="workflow.draft">Bản nháp</span></div>
               <div><b>2</b><span data-i18n="workflow.estimate">Ước tính</span></div>
@@ -479,12 +484,13 @@
 
     <section class="section" aria-labelledby="companion-title">
       <div class="container">
-        <div class="section-heading section-heading--center"><h2 id="companion-title" data-i18n="companion.title">Workspace cho công việc chuyên sâu. Telegram cho thao tác nhanh khi cần.</h2><p data-i18n="companion.body">Hai bề mặt bổ trợ nhau, nhưng mỗi bề mặt có vai trò rõ ràng.</p></div>
-        <div class="companion-grid">
+        <div class="section-heading section-heading--center"><h2 id="companion-title" data-i18n="companion.mapTitle">Website để hiểu và chọn điểm vào. Workspace để làm việc sâu. Telegram để thao tác nhanh.</h2><p data-i18n="companion.mapBody">Ba bề mặt cùng một thương hiệu, mỗi bề mặt có trách nhiệm rõ ràng.</p></div>
+        <div class="companion-grid companion-grid--three">
+          <article class="companion-card companion-card--website"><span class="companion-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.8 12h16.4M12 3.5c2.1 2.3 3.2 5.1 3.2 8.5S14.1 18.2 12 20.5M12 3.5C9.9 5.8 8.8 8.6 8.8 12s1.1 6.2 3.2 8.5"/></svg></span><h3 data-i18n="companion.websiteTitle">Website</h3><p class="section-copy" data-i18n="companion.websiteBody">Nơi công khai để hiểu TOAN AAS, xem tài nguyên và chọn cách bắt đầu phù hợp.</p><ul class="companion-list"><li data-i18n="companion.websiteOne">Giải thích sản phẩm theo ngôn ngữ rõ ràng</li><li data-i18n="companion.websiteTwo">Chỉ đường tới Workspace hoặc Telegram</li><li data-i18n="companion.websiteThree">Cung cấp hướng dẫn và kênh hỗ trợ</li></ul></article>
           <article class="companion-card companion-card--workspace"><span class="companion-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></span><h3 data-i18n="companion.workspaceTitle">Workspace</h3><p class="section-copy" data-i18n="companion.workspaceBody">Dành cho dự án, tài sản, lịch sử, phê duyệt và công việc cần theo dõi rõ ràng.</p><ul class="companion-list"><li data-i18n="companion.workspaceOne">Làm việc theo dự án và cấu trúc</li><li data-i18n="companion.workspaceTwo">Rà soát lịch sử và trạng thái</li><li data-i18n="companion.workspaceThree">Quản lý tài sản riêng tư</li></ul></article>
           <article class="companion-card companion-card--telegram"><span class="companion-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m21 3-7.5 18-3.6-7.4L3 10.5z"/><path d="m9.9 13.6 4.4-4.2"/></svg></span><h3 data-i18n="companion.telegramTitle">Telegram</h3><p class="section-copy" data-i18n="companion.telegramBody">Dành cho thao tác ngắn, thông báo và đường vào nhanh khi bạn đang di chuyển.</p><ul class="companion-list"><li data-i18n="companion.telegramOne">Bắt đầu nhanh từ cuộc trò chuyện</li><li data-i18n="companion.telegramTwo">Nhận thông báo khi phù hợp</li><li data-i18n="companion.telegramThree">Mở lại Workspace cho việc chi tiết</li></ul></article>
         </div>
-        <p class="companion-bridge" data-i18n="companion.note">Telegram không giới hạn Workspace; Workspace cũng không giả định dữ liệu Telegram trước khi liên kết đã được xác minh.</p>
+        <p class="companion-bridge" data-i18n="companion.mapNote">Website giới thiệu cách bắt đầu; Workspace và Telegram chỉ mở theo các điều kiện truy cập phù hợp.</p>
       </div>
     </section>
 
@@ -568,16 +574,22 @@
       const ADDITIONAL_COPY = Object.freeze({
         vi: Object.freeze({
           "nav.menuOpen": "Mở menu", "nav.menuClose": "Đóng menu",
+          "preview.workspaceLabel": "Minh hoạ cấu trúc Workspace", "preview.workspaceTitle": "Không gian làm việc cho một dự án", "preview.structure": "Cấu trúc", "preview.brief": "Mục tiêu và brief dự án", "preview.assets": "Tài sản cần theo dõi", "preview.review": "Bước cần xác nhận",
+          "companion.mapTitle": "Website để hiểu và chọn điểm vào. Workspace để làm việc sâu. Telegram để thao tác nhanh.", "companion.mapBody": "Ba bề mặt cùng một thương hiệu, mỗi bề mặt có trách nhiệm rõ ràng.", "companion.websiteTitle": "Website", "companion.websiteBody": "Nơi công khai để hiểu TOAN AAS, xem tài nguyên và chọn cách bắt đầu phù hợp.", "companion.websiteOne": "Giải thích sản phẩm theo ngôn ngữ rõ ràng", "companion.websiteTwo": "Chỉ đường tới Workspace hoặc Telegram", "companion.websiteThree": "Cung cấp hướng dẫn và kênh hỗ trợ", "companion.mapNote": "Website giới thiệu cách bắt đầu; Workspace và Telegram chỉ mở theo các điều kiện truy cập phù hợp.",
           "topic.videoAi": "Video AI", "topic.audioStudio": "Studio âm thanh", "topic.imageAi": "Hình ảnh AI", "topic.documents": "Tài liệu / PDF", "topic.marketingAutomation": "Marketing automation", "topic.walletSupport": "Nạp Xu / hỗ trợ tài khoản",
           "footer.resources": "Tài nguyên", "footer.downloadPricing": "Bảng giá tải về", "footer.downloadGuide": "Hướng dẫn tải về", "footer.downloadGuideDocx": "Hướng dẫn DOCX"
         }),
         en: Object.freeze({
           "nav.menuOpen": "Open menu", "nav.menuClose": "Close menu",
+          "preview.workspaceLabel": "Workspace structure preview", "preview.workspaceTitle": "A workspace for one project", "preview.structure": "Structure", "preview.brief": "Project goal and brief", "preview.assets": "Assets to track", "preview.review": "Step requiring confirmation",
+          "companion.mapTitle": "Website to understand and choose an entry point. Workspace for deep work. Telegram for quick actions.", "companion.mapBody": "Three surfaces, one brand, with a clear responsibility for each.", "companion.websiteTitle": "Website", "companion.websiteBody": "The public place to understand TOAN AAS, consult resources and choose an appropriate way to start.", "companion.websiteOne": "Explain the product in clear language", "companion.websiteTwo": "Point to Workspace or Telegram", "companion.websiteThree": "Provide guides and support channels", "companion.mapNote": "The Website explains how to begin; Workspace and Telegram open only under appropriate access conditions.",
           "topic.videoAi": "AI video", "topic.audioStudio": "Audio studio", "topic.imageAi": "AI images", "topic.documents": "Documents / PDF", "topic.marketingAutomation": "Marketing automation", "topic.walletSupport": "Xu top-up / account support",
           "footer.resources": "Resources", "footer.downloadPricing": "Download pricing", "footer.downloadGuide": "Download guide", "footer.downloadGuideDocx": "Download guide (DOCX)"
         }),
         zh: Object.freeze({
           "nav.menuOpen": "打开菜单", "nav.menuClose": "关闭菜单",
+          "preview.workspaceLabel": "工作空间结构示意", "preview.workspaceTitle": "一个项目的工作空间", "preview.structure": "结构", "preview.brief": "项目目标与简报", "preview.assets": "需要跟踪的资产", "preview.review": "需要确认的步骤",
+          "companion.mapTitle": "网站用于了解产品与选择入口；工作空间用于深入工作；Telegram 用于快速操作。", "companion.mapBody": "同一品牌的三个界面，各自承担清晰职责。", "companion.websiteTitle": "网站", "companion.websiteBody": "用于了解 TOAN AAS、查看资源并选择合适开始方式的公开入口。", "companion.websiteOne": "用清晰语言说明产品", "companion.websiteTwo": "引导至工作空间或 Telegram", "companion.websiteThree": "提供指南与支持渠道", "companion.mapNote": "网站说明如何开始；工作空间与 Telegram 仅在合适的访问条件下开放。",
           "topic.videoAi": "AI 视频", "topic.audioStudio": "音频工作室", "topic.imageAi": "AI 图像", "topic.documents": "文档 / PDF", "topic.marketingAutomation": "营销自动化", "topic.walletSupport": "Xu 充值 / 账户支持",
           "footer.resources": "资源", "footer.downloadPricing": "下载价格表", "footer.downloadGuide": "下载使用指南", "footer.downloadGuideDocx": "下载使用指南（DOCX）"
         })
