@@ -39642,7 +39642,7 @@ def get_last_user_file(user_id) -> dict:
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
 LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
-ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 120
+ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 15 * 60
 PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
 SUBTITLE_DUB_PIPELINE_JOBS: dict[str, dict] = {}
 SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
@@ -39651,6 +39651,11 @@ ADMIN_CAPTION_TOOL_TEST_COMMANDS = {
     "tool_test_auto_subtitle": "auto_subtitle",
     "tool_test_dub_audio": "dub_audio",
     "tool_test_full_dub_video": "full_dub_video",
+    "tool_test_video_subtitle": "video_pipeline",
+    "tool_test_subtitle_translate": "video_pipeline",
+    "tool_test_video_translate": "video_pipeline",
+    "tool_test_video_dub": "video_pipeline",
+    "tool_test_subtitle_plus_dub": "video_pipeline",
 }
 MEDIA_FACTORY_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_AUDIO: dict[int, dict] = {}
@@ -39773,7 +39778,7 @@ def remember_last_media(update: Update):
     except Exception as e:
         logger.warning(f"last media cache write failed: {e}")
 
-def set_pending_admin_tool_test(user_id, tool: str, command: str = "") -> dict:
+def set_pending_admin_tool_test(user_id, tool: str, command: str = "", *, mode: str = "") -> dict:
     uid = int(user_id or 0)
     state = {
         "tool": str(tool or "").strip().lower(),
@@ -39782,6 +39787,9 @@ def set_pending_admin_tool_test(user_id, tool: str, command: str = "") -> dict:
         "created_at": time.time(),
         "expires_at": time.time() + ADMIN_TOOL_TEST_PENDING_TTL_SECONDS,
     }
+    normalized_mode = normalize_video_translate_mode(mode) if str(mode or "").strip() else ""
+    if normalized_mode:
+        state["mode"] = normalized_mode
     if uid:
         PENDING_ADMIN_TOOL_TEST[uid] = state
     return state
@@ -127121,138 +127129,251 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
-    if not has_admin_paid_confirmation(context):
-        tool_name = {
-            VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
-            VIDEO_SUBTITLE_MODE_DUB: "video_dub",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
-        }.get(normalize_video_translate_mode(mode), "video_pipeline")
-        save_tool_test_result(tool_name, "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
-        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_video_dub"), parse_mode="HTML")
     mode = normalize_video_translate_mode(mode)
-    media_info = await resolve_stt_test_media(update, context)
-    text_input = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip()
-    if mode != VIDEO_SUBTITLE_MODE_DUB and not media_info:
-        set_pending_admin_tool_test(uid, "auto_subtitle", "/tool_test_auto_subtitle")
-        return await update.message.reply_text(
-            "Gửi hoặc reply voice/audio/video ngắn để test tạo phụ đề tự động."
+    tool_name = {
+        VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
+        VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
+        VIDEO_SUBTITLE_MODE_DUB: "video_dub",
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
+    }.get(mode, "video_pipeline")
+    command_label = {
+        VIDEO_SUBTITLE_MODE_CREATE: "/tool_test_video_subtitle",
+        VIDEO_SUBTITLE_MODE_TRANSLATE: "/tool_test_video_translate",
+        VIDEO_SUBTITLE_MODE_DUB: "/tool_test_video_dub",
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "/tool_test_subtitle_plus_dub",
+    }.get(mode, "/tool_test_video_dub")
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result(
+            tool_name,
+            "NO_CONFIRM",
+            f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call",
+            uid,
         )
-    if mode == VIDEO_SUBTITLE_MODE_DUB and not media_info and not text_input:
-        set_pending_admin_tool_test(uid, "dub_audio", "/tool_test_dub_audio")
         return await update.message.reply_text(
-            "Gửi hoặc reply voice/audio/video ngắn để test lồng tiếng."
-        )
-    clear_pending_admin_tool_test(uid)
-    await update.message.reply_text("⏳ TOAN AAS đang kiểm tra pipeline admin. Vui lòng chờ và không gửi lại lệnh.")
-    transcript = text_input
-    asr_status = "NOT_USED" if transcript else "NOT_TESTED"
-    asr_provider = "TEXT_INPUT" if transcript else ""
-    try:
-        if not transcript:
-            if not (key4u_asr_configured() or DEEPGRAM_API_KEY or (SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)):
-                save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY/SHOPAIKEY_API_KEY missing", uid)
-                return await update.message.reply_text("⚙️ ASR chưa cấu hình Deepgram hoặc ShopAIKey transcription. Không gọi API và không trừ Xu.")
-            file_size = int(media_info.get("file_size") or 0)
-            if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
-                return await update.message.reply_text(
-                    f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
-                )
-            content_type = media_info.get("content_type") or "application/octet-stream"
-            file_type = str(media_info.get("file_type") or "").lower()
-            media_kind = "video" if content_type.startswith("video/") or file_type == "video" else "audio"
-            asr_result = await transcribe_media_to_segments(
-                {
-                    **media_info,
-                    "media_kind": media_kind,
-                    "duration_seconds": int(media_info.get("duration") or 0),
-                },
-                context=context,
-                allow_admin=True,
-                updated_by=uid,
-            )
-            transcript = str(asr_result.get("transcript_text") or "").strip()
-            asr_provider = str(asr_result.get("provider") or "")
-            asr_detail = sanitize_log_text(str(asr_result.get("detail") or asr_result.get("status") or ""))[:240]
-            if not asr_result.get("output_valid") or not transcript:
-                save_tool_test_result("asr", "FAIL", f"status={asr_result.get('status') or 'invalid_output'}; {asr_detail}", uid)
-                raise RuntimeError("asr_empty_or_failed")
-            asr_status = "PASS"
-            save_tool_test_result("asr", "PASS", f"provider={asr_provider}; chars={len(transcript)}; {asr_detail}", uid)
-
-        output_text = transcript
-        translation_status = "NOT_USED"
-        if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-            translated = await translate_subtitle_text(transcript[:3500], "vi", allow_admin=True, updated_by=uid)
-            output_text = str(translated.get("text") or "").strip()
-            if not output_text:
-                raise RuntimeError("translation_empty")
-            translation_status = "PASS"
-            save_tool_test_result("translation", "PASS", f"provider={translated.get('provider') or '-'}; target=vi", uid)
-
-        srt_bytes = b""
-        if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            srt_text = video_dubbing_srt_from_text(output_text, 0)
-            if not srt_text:
-                raise RuntimeError("subtitle_empty")
-            srt_bytes = srt_text.encode("utf-8")
-            await update.message.reply_document(
-                document=video_dubbing_output_file(srt_bytes, f"toan_aas_{mode}_smoke.srt"),
-                filename=f"toan_aas_{mode}_smoke.srt",
-                caption="✅ Subtitle smoke output — admin-only / 0 Xu",
-            )
-
-        tts_provider = ""
-        audio_bytes = b""
-        if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(output_text, "", allow_admin=True)
-            await update.message.reply_audio(
-                audio=video_dubbing_output_file(audio_bytes, f"toan_aas_{mode}_smoke.mp3"),
-                filename=f"toan_aas_{mode}_smoke.mp3",
-                caption=f"✅ Dub smoke output — {tts_provider} / admin-only / 0 Xu",
-            )
-
-        tool_name = {
-            VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
-            VIDEO_SUBTITLE_MODE_DUB: "video_dub",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
-        }.get(mode, "video_pipeline")
-        mux_requested = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-        mux_status = video_pipeline_status_payload().get("ffmpeg_mux") if mux_requested else video_pipeline_status_payload().get("subtitle_burn_in")
-        detail = (
-            f"mode={mode}; asr={asr_status}; asr_provider={asr_provider or '-'}; translation={translation_status}; "
-            f"subtitle={'PASS' if srt_bytes else 'NOT_USED'}; tts={'PASS' if audio_bytes else 'NOT_USED'}; mux={mux_status}"
-        )
-        save_tool_test_result(tool_name, "PASS", detail, uid)
-        return await update.message.reply_text(
-            "✅ <b>Video Pipeline Smoke Test</b>\n\n"
-            f"• Mode: <code>{html.escape(mode)}</code>\n"
-            f"• ASR: <code>{html.escape(asr_status)}</code> <code>{html.escape(asr_provider or '-')}</code>\n"
-            f"• Translation: <code>{html.escape(translation_status)}</code>\n"
-            f"• Subtitle: <code>{'PASS' if srt_bytes else 'NOT_USED'}</code>\n"
-            f"• TTS: <code>{html.escape(tts_provider or 'NOT_USED')}</code>\n"
-            f"• Mux/burn-in: <code>{html.escape(str(mux_status or 'disabled'))}</code>\n"
-            "• No Xu deducted: <code>yes</code>\n\n"
-            "Nếu mux/burn-in chưa ready, bot gửi SRT/audio riêng thay vì giả báo video đã ghép.",
+            admin_paid_confirm_required_text(command_label),
             parse_mode="HTML",
+        )
+
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        set_pending_admin_tool_test(
+            uid,
+            "video_pipeline",
+            command_label,
+            mode=mode,
+        )
+        return await update.message.reply_text(
+            "Gửi hoặc reply video cần kiểm tra. Bot sẽ giữ đúng lane này trong 15 phút."
+        )
+    if media_info.get("error"):
+        detail = sanitize_log_text(
+            str(media_info.get("error_detail") or media_info.get("error") or "media_download_failed")
+        )[:180]
+        save_tool_test_result(tool_name, "FAIL", f"media_download_failed:{detail}", uid)
+        return await update.message.reply_text(
+            "⚙️ Không tải được video smoke. Không gọi provider và không trừ Xu."
+        )
+
+    source_bytes = bytes(media_info.get("bytes") or b"")
+    if not source_bytes:
+        save_tool_test_result(tool_name, "FAIL", "empty_media_bytes", uid)
+        return await update.message.reply_text(
+            "⚙️ Video smoke rỗng hoặc không hợp lệ. Không gọi provider và không trừ Xu."
+        )
+    file_size = int(media_info.get("file_size") or len(source_bytes))
+    if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
+        save_tool_test_result(tool_name, "FAIL", f"file_too_large={file_size}", uid)
+        return await update.message.reply_text(
+            f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi provider và không trừ Xu."
+        )
+
+    target_language = (
+        admin_full_dub_video_target_language(getattr(context, "args", None))
+        if mode != VIDEO_SUBTITLE_MODE_CREATE
+        else ""
+    )
+    active_flow = {
+        VIDEO_SUBTITLE_MODE_CREATE: "auto_subtitle",
+        VIDEO_SUBTITLE_MODE_TRANSLATE: "subtitle_translate",
+        VIDEO_SUBTITLE_MODE_DUB: "dub_audio",
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+    }.get(mode, mode)
+    output_type = {
+        VIDEO_SUBTITLE_MODE_CREATE: "burn",
+        VIDEO_SUBTITLE_MODE_TRANSLATE: "burn",
+        VIDEO_SUBTITLE_MODE_DUB: "video",
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "video_subtitle",
+    }.get(mode, "video")
+    translate_requested = "1" if mode in {
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    } else "0"
+    source_file_id = str(media_info.get("file_id") or f"admin-smoke-{uid}")
+    source_unique_id = (
+        f"{media_info.get('file_unique_id') or source_file_id}:admin-smoke:{time.time_ns()}"
+    )
+    content_type = str(
+        media_info.get("content_type")
+        or media_info.get("mime_type")
+        or "video/mp4"
+    )
+    voice_id = subdub_default_tts_voice_for_gender("female")
+    state = {
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "requested_mode": mode,
+        "active_flow": active_flow,
+        "origin": "admin_smoke",
+        "entry_route": "admin_smoke",
+        "source_media_type": "video",
+        "media_kind": "video",
+        "source_mime_type": content_type,
+        "source_content_type": content_type,
+        "source_file_id": source_file_id,
+        "video_file_id": source_file_id,
+        "source_file_unique_id": source_unique_id,
+        "video_file_unique_id": source_unique_id,
+        "source_file_name": str(media_info.get("file_name") or "source.mp4"),
+        "source_file_size": file_size,
+        "video_file_size": file_size,
+        "source_language": "auto",
+        "target_language": target_language,
+        "translate_requested": translate_requested,
+        "output_type": output_type,
+        "output_format": output_type,
+        "voice_style": "default_female",
+        "voice_kind": "default_female",
+        "voice_id": voice_id,
+        "selected_voice_id": "default_female",
+        "selected_tts_voice_id": voice_id,
+        "provider_voice_id": voice_id,
+        "selected_voice_gender": "female",
+        "requested_voice_gender": "female",
+        "voice_speed": "1.0",
+        "admin_real_test": True,
+        "admin_interactive_confirm": True,
+        "_pipeline_source_bytes_override": source_bytes,
+        "_pipeline_source_content_type_override": content_type,
+    }
+    clear_pending_admin_tool_test(uid)
+    await update.message.reply_text(
+        "⏳ TOAN AAS đang chạy đúng executor SubDub: ingest → ASR → dịch → TTS → mux → QC → delivery. Không trừ Xu."
+    )
+
+    smoke_query = SimpleNamespace(
+        from_user=update.effective_user,
+        message=update.message,
+        bot=getattr(context, "bot", None),
+        reply_text=update.message.reply_text,
+    )
+    try:
+        result = await execute_video_dubbing_pipeline(
+            smoke_query,
+            context,
+            state,
+            "vi",
+            admin_interactive_confirm=True,
         )
     except Exception as exc:
         error_class = type(exc).__name__
-        tool_name = {
-            VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
-            VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
-            VIDEO_SUBTITLE_MODE_DUB: "video_dub",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
-        }.get(mode, "video_pipeline")
-        save_tool_test_result(tool_name, "FAIL", f"error_class={error_class}", uid)
-        logger.warning("admin video pipeline smoke failed | mode=%s | error_class=%s", mode, error_class)
-        return await update.message.reply_text(
+        detail = sanitize_log_text(str(exc))[:180]
+        save_tool_test_result(
+            tool_name,
+            "FAIL",
+            f"error_class={error_class}; detail={detail}",
+            uid,
+        )
+        logger.warning(
+            "canonical admin video pipeline smoke failed | mode=%s | error_class=%s | detail=%s",
+            mode,
+            error_class,
+            detail,
+        )
+        await update.message.reply_text(
             "⚙️ Pipeline admin smoke chưa hoàn tất.\n"
-            f"Mã lỗi: <code>{html.escape(error_class)}</code>\n"
-            "Không trừ Xu và không hiển thị raw provider response.",
+            f"• Status: <code>FAIL</code>\n"
+            f"• Error class: <code>{html.escape(error_class)}</code>\n"
+            "• Final MP4 delivered: <code>NO</code>\n"
+            "• Provider calls không được tự retry và không trừ Xu.",
             parse_mode="HTML",
         )
+        return {
+            "ok": False,
+            "status": "SMOKE_EXCEPTION",
+            "detail": detail,
+            "final_mp4_delivered": False,
+        }
+
+    result = dict(result or {})
+    mp4_bytes = int(
+        result.get("canonical_final_artifact_bytes")
+        or result.get("final_mp4_bytes")
+        or 0
+    )
+    mp4_delivered = bool(
+        result.get("ok")
+        and result.get("final_mp4_delivered")
+        and result.get("final_mp4_validated")
+        and (mp4_bytes > 0 or result.get("final_mp4_exists"))
+    )
+    duration = float(
+        result.get("final_mp4_duration")
+        or result.get("final_mux_duration")
+        or result.get("source_duration")
+        or 0
+    )
+    route = dict(result.get("provider_route") or {})
+    route_summary = ",".join(
+        f"{key}={sanitize_log_text(str(route.get(key) or '-'))[:40]}"
+        for key in ("asr", "translation", "tts", "mux")
+    )
+    detail = (
+        f"mode={mode}; mp4_bytes={mp4_bytes}; duration={duration:.3f}; "
+        f"route={route_summary}; delivery_message_id_present="
+        f"{'yes' if result.get('telegram_message_id') or result.get('video_delivery_message_id') else 'no'}"
+    )
+    if not mp4_delivered:
+        failure = sanitize_log_text(
+            str(
+                result.get("detail")
+                or result.get("partial_reason")
+                or result.get("status")
+                or "final_mp4_not_delivered"
+            )
+        )[:180]
+        save_tool_test_result(
+            tool_name,
+            "FAIL",
+            f"{detail}; blocker={failure}",
+            uid,
+        )
+        await update.message.reply_text(
+            "⚙️ <b>Video Pipeline Smoke FAIL</b>\n\n"
+            f"• Mode: <code>{html.escape(mode)}</code>\n"
+            "• Final MP4 delivered: <code>NO</code>\n"
+            f"• Blocker: <code>{html.escape(failure)}</code>\n"
+            "• Provider calls không tự retry và không trừ Xu.",
+            parse_mode="HTML",
+        )
+        result["_smoke_status"] = "FAIL"
+        result["final_mp4_delivered"] = False
+        return result
+
+    save_tool_test_result(tool_name, "PASS", detail, uid)
+    await update.message.reply_text(
+        "✅ <b>Video Pipeline Smoke PASS</b>\n\n"
+        f"• Mode: <code>{html.escape(mode)}</code>\n"
+        "• Final MP4 delivered: <code>YES</code>\n"
+        f"• MP4 bytes: <code>{mp4_bytes}</code>\n"
+        f"• Duration: <code>{duration:.3f}s</code>\n"
+        "• Xu deducted: <code>0</code>\n"
+        "• Same canonical executor: <code>YES</code>",
+        parse_mode="HTML",
+    )
+    result["_smoke_status"] = "PASS"
+    return result
 
 async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
     # Outermost authorisation gate. The paid branch below hands the engine
@@ -127343,6 +127464,9 @@ async def cmd_tool_test_subtitle_generate(update: Update, context: ContextTypes.
 
 async def cmd_tool_test_subtitle_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_TRANSLATE)
+
+async def cmd_tool_test_video_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_tool_test_subtitle_translate(update, context)
 
 async def cmd_tool_test_video_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_DUB)
@@ -161946,7 +162070,7 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             admin_real_test
             and getattr(video_dubbing_capability, "__name__", "") == "video_dubbing_capability"
             and not video_dubbing_state_has_subtitle_or_transcript(state)
-            and not VIDEO_ASR_ENABLED
+            and not subdub_public_flag_with_override("VIDEO_ASR_ENABLED", VIDEO_ASR_ENABLED)
             and "asr_adapter_missing" not in technical_missing
         ):
             technical_missing.append("asr_adapter_missing")
@@ -201039,6 +201163,18 @@ async def handle_caption_admin_tool_test_media(update: Update, context: ContextT
     cache_recent_media_state(update)
     remember_last_media(update)
     caption_context = admin_tool_test_context_from_args(context, args)
+    if command == "tool_test_video_subtitle":
+        await cmd_tool_test_video_subtitle(update, caption_context)
+        return True
+    if command in {"tool_test_subtitle_translate", "tool_test_video_translate"}:
+        await cmd_tool_test_video_translate(update, caption_context)
+        return True
+    if command == "tool_test_video_dub":
+        await cmd_tool_test_video_dub(update, caption_context)
+        return True
+    if command == "tool_test_subtitle_plus_dub":
+        await cmd_tool_test_subtitle_plus_dub(update, caption_context)
+        return True
     if command == "tool_test_asr":
         await cmd_tool_test_asr(update, caption_context)
         return True
@@ -201070,6 +201206,15 @@ async def handle_pending_admin_tool_test_media(update: Update, context: ContextT
     clear_pending_admin_tool_test(uid)
     confirmed_context = admin_tool_test_context_with_confirm(context)
     tool = str(pending.get("tool") or "")
+    pending_mode = normalize_video_translate_mode(pending.get("mode") or "")
+    if tool == "video_pipeline" and pending_mode in {
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    }:
+        await run_admin_video_pipeline_smoke(update, confirmed_context, pending_mode)
+        return True
     if tool == "asr":
         await cmd_tool_test_asr(update, confirmed_context)
         return True
@@ -212533,7 +212678,8 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
         status, audio_bytes, detail, _http_status = await func(text[:3500])
         if status == "PASS" and audio_bytes:
             return label, audio_bytes, detail
-        errors.append(f"{label}={status}")
+        safe_detail = sanitize_log_text(str(detail or status))[:120]
+        errors.append(f"{label}={status}:{safe_detail}" if safe_detail else f"{label}={status}")
     raise RuntimeError("tts_unavailable:" + ",".join(errors))
 
 def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
@@ -225331,6 +225477,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_subtitle_auto", cmd_tool_test_subtitle_generate))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_generate", cmd_tool_test_subtitle_generate))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_translate", cmd_tool_test_subtitle_translate))
+    tg_app.add_handler(CommandHandler("tool_test_video_translate", cmd_tool_test_video_translate))
     tg_app.add_handler(CommandHandler("tool_test_video_dub", cmd_tool_test_video_dub))
     tg_app.add_handler(CommandHandler("tool_test_dub_audio", cmd_tool_test_video_dub))
     tg_app.add_handler(CommandHandler("tool_test_minimax_dub", cmd_tool_test_minimax_dub))
