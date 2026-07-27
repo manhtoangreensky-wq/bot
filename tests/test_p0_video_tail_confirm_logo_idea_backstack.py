@@ -104,8 +104,11 @@ def test_invoice_opens_a_distinct_confirmation_screen_before_submit() -> None:
     confirm = handler[handler.index('if section == "confirm":') :]
     open_at = confirm.index('if action == "open":')
     submit_at = confirm.index('if action == "submit":')
-    provider_bridge_at = confirm.index('query.data = "vproduct|b14_confirm"')
+    provider_bridge_at = confirm.index(
+        'setattr(context, "_product_video_callback_data_override", "vproduct|b14_confirm")'
+    )
     assert open_at < submit_at < provider_bridge_at
+    assert 'query.data = "vproduct|b14_confirm"' not in confirm
 
 
 def test_confirm_open_is_side_effect_free_and_renders_only_the_confirmation() -> None:

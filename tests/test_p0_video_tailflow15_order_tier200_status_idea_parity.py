@@ -295,7 +295,8 @@ def test_submit_handoff_keeps_confirmation_separate_and_returns_status_owner() -
     confirm = handler[handler.index('if section == "confirm":') :]
 
     assert confirm.index('if action == "open":') < confirm.index('if action == "submit":')
-    assert 'query.data = "vproduct|b14_confirm"' in confirm
+    assert 'setattr(context, "_product_video_callback_data_override", "vproduct|b14_confirm")' in confirm
+    assert 'query.data = "vproduct|b14_confirm"' not in confirm
     assert "handle_product_video_public_confirm_callback" in confirm
     assert "video_tail9_render_confirmed_status" in handler
     assert 'video_tail9_render(query, uid, context, "quality")' not in confirm

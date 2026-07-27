@@ -8,6 +8,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 BOT_SOURCE = (ROOT / "bot.py").read_bytes()
 _TARGET_FUNCTIONS = (
+    "handle_product_video_public_confirm_callback",
+    "handle_video_product_callback",
     "handle_video_tail_callback",
     "video_b14_send_or_edit_status_panel",
     "video_tail9_callback_guard",
@@ -120,11 +122,18 @@ def _safe_int(value, default: int = 0) -> int:
 
 class _Query:
     id = "statusrestore18-submit"
-    data = "video_tail|confirm|submit"
     from_user = SimpleNamespace(id=18001)
 
     def __init__(self):
         self.answers: list[tuple] = []
+
+    @property
+    def data(self) -> str:
+        return "video_tail|confirm|submit"
+
+    @data.setter
+    def data(self, _value: str) -> None:
+        raise AttributeError("CallbackQuery.data is read-only")
 
     async def answer(self, *args, **kwargs):
         self.answers.append((args, kwargs))
@@ -138,6 +147,59 @@ def test_old_canonical_renderer_remains_the_only_confirmed_status_authority() ->
     assert "video_b14_queue_status_text" in status
     assert "video_b14_queue_status_keyboard" in status
     assert _B14_REFRESH_FOUND is True
+
+
+def test_confirm_bridge_never_mutates_telegram_callback_data() -> None:
+    tail_handler = _function_source("handle_video_tail_callback")
+    public_confirm = _function_source("handle_product_video_public_confirm_callback")
+    product_handler = _function_source("handle_video_product_callback")
+
+    override = "_product_video_callback_data_override"
+    assert override in tail_handler
+    assert override in public_confirm
+    assert override in product_handler
+    assert 'query.data = "vproduct|b14_confirm"' not in tail_handler
+    assert "query.data =" not in public_confirm
+
+
+def test_public_confirm_wrapper_accepts_context_override_with_readonly_query() -> None:
+    delegated: list[tuple[str, bool]] = []
+
+    async def product_handler(_update, context):
+        delegated.append(
+            (
+                str(getattr(context, "_product_video_callback_data_override", "") or ""),
+                bool(getattr(context, "_product_video_authoritative_confirm", False)),
+            )
+        )
+        return "delegated"
+
+    handler = _load_function(
+        "handle_product_video_public_confirm_callback",
+        {
+            "video_project_queue": SimpleNamespace(
+                PRODUCT_VIDEO_PUBLIC_CONFIRM_CALLBACK="vproduct|b14_confirm"
+            ),
+            "PRODUCT_VIDEO_CONFIRM_HANDLER_DIAGNOSTICS": {
+                "product_video_confirm_handler_count": 1,
+                "duplicate_confirm_handler_detected": False,
+                "duplicate_callback_pattern_detected": False,
+            },
+            "handle_video_product_callback": product_handler,
+        },
+    )
+    context = SimpleNamespace(
+        _product_video_callback_data_override="vproduct|b14_confirm"
+    )
+
+    result = asyncio.run(
+        handler(SimpleNamespace(callback_query=_Query()), context)
+    )
+
+    assert result == "delegated"
+    assert delegated == [("vproduct|b14_confirm", True)]
+    assert not hasattr(context, "_product_video_authoritative_confirm")
+    assert context._product_video_callback_data_override == "vproduct|b14_confirm"
 
 
 def test_double_submit_reuses_same_job_and_public_code_without_bridge() -> None:
@@ -244,7 +306,9 @@ def _submit_handler_namespace(
         return "redundant-board"
 
     async def bridge(_update, _context):
-        bridge_calls.append("bridge")
+        bridge_calls.append(
+            str(getattr(_context, "_product_video_callback_data_override", "") or "")
+        )
         return bridge_result
 
     async def local_submit(_update, _context, _host, *, tail):
@@ -311,7 +375,7 @@ def test_confirm_bridge_without_persisted_job_returns_to_confirmation() -> None:
     assert result == "screen:confirm"
     assert rendered == ["confirm"]
     assert blocker_calls == []
-    assert bridge_calls == ["bridge"]
+    assert bridge_calls == ["vproduct|b14_confirm"]
 
 
 def test_video_edit_without_persisted_job_returns_to_confirmation() -> None:
