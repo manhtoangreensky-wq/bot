@@ -18,6 +18,7 @@ import re
 import pytest
 
 from services import ffmpeg_text
+from services import video_local_editing
 
 # Each entry is something a customer could type into the watermark box.
 HOSTILE_INPUTS = [
@@ -153,6 +154,20 @@ def test_drawtext_builders_disable_text_expansion():
         for fragment in re.findall(r"drawtext=text='\{[^']*?'", source):
             pass
         assert "DRAWTEXT_NO_EXPANSION" in source, f"{path} does not disable expansion"
+
+
+def test_manual_editor_drawtext_disables_text_expansion():
+    fragment = video_local_editing._text_filter(
+        {
+            "content": "%{n}",
+            "position": "bottom_center",
+            "font_size": 42,
+            "outline": 2,
+            "start_ms": 0,
+            "end_ms": 1000,
+        }
+    )
+    assert ffmpeg_text.DRAWTEXT_NO_EXPANSION in fragment
 
 
 def test_subtitle_path_site_that_had_no_quote_handling_is_fixed():

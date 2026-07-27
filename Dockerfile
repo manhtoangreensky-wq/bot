@@ -17,11 +17,11 @@ RUN apt-get update \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
-# Sao chép file cài đặt thư viện vào trước
-COPY requirements.txt .
+# Sao chép cả direct requirements và khóa resolve đúng runtime Linux/Python 3.11.
+COPY requirements.txt requirements.lock ./
 
-# Tiến hành cài đặt các thư viện bằng Python 3.11
-RUN pip install --no-cache-dir -r requirements.txt
+# Cài đúng toàn bộ graph đã khóa; hashes làm sai lệch dependency fail-closed.
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Sao chép toàn bộ code còn lại vào container
 COPY . .
