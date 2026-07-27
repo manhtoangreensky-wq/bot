@@ -196,23 +196,31 @@ def test_pricing_content_single_source_used_by_bot_and_download():
     assert bot.shared_pricing_markdown.__module__ == "services.pricing_guide_content"
 
 
-def test_website_pricing_content_exists_if_web_routes_in_repo():
+def test_website_pricing_route_and_landing_links_exist_if_web_routes_in_repo():
     routes = {route.path for route in bot.fastapi_app.routes}
     index = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
     assert "/pricing" in routes
     assert "/pricing" in index
-    assert "Giọng nói: audio từ voice 0.10 Xu/từ" in index
-    assert "Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu" in index
+    assert "/guide" in index
+    assert "https://app.toanaas.vn/login" in index
+    assert "https://t.me/toanaasbot" in index
     assert f"/download/{pricing_content.PRICING_DOWNLOAD_FILENAME}" in index
+    assert "/download/dieu-khoan-su-dung-toan-aas.pdf" in index
+    assert "Giọng nói: audio từ voice 0.10 Xu/từ" not in index
+    assert "Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu" not in index
 
 
-def test_website_guide_content_exists_if_web_routes_in_repo():
+def test_website_guide_route_and_landing_links_exist_if_web_routes_in_repo():
     routes = {route.path for route in bot.fastapi_app.routes}
     index = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
     assert "/guide" in routes
     assert "/help" in routes
     assert "/guide" in index
+    assert "/pricing" in index
+    assert "https://app.toanaas.vn/login" in index
+    assert "https://t.me/toanaasbot" in index
     assert f"/download/{pricing_content.GUIDE_DOWNLOAD_FILENAME}" in index
+    assert "/download/huong-dan-toan-aas.docx" in index
 
 
 def test_no_web_standalone_repo_touched_from_bot_repo():

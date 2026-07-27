@@ -254,9 +254,18 @@ def test_public_branding_and_scope_static_guard():
     assert bot.make_payos_description("50k") == "AAS50K"
     assert bot.manual_qr_url(123, 50000, 999).find("AAS+123+999") >= 0
     assert "https://t.me/toanaasbot" in index_html
-    assert "Quy trình tạo video TOAN AAS" in index_html
-    assert "Xu là đơn vị sử dụng trong bot TOAN AAS" in index_html
-    assert "/download/dieu-khoan-su-dung-toan-aas.pdf" in index_html
+    assert "https://app.toanaas.vn/login" in index_html
+    for public_link in (
+        "/guide",
+        "/pricing",
+        "/download/bang-gia-toan-aas.md",
+        "/download/huong-dan-su-dung-toan-aas.md",
+        "/download/huong-dan-toan-aas.docx",
+        "/download/dieu-khoan-su-dung-toan-aas.pdf",
+    ):
+        assert public_link in index_html
+    assert "Quy trình tạo video TOAN AAS" not in index_html
+    assert "Xu là đơn vị sử dụng trong bot TOAN AAS" not in index_html
     assert "https://t.me/Httdhtoan" not in public_surface
     assert "@Httdhtoan" not in public_surface
     assert "TOAN DAAS" not in public_surface
