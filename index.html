@@ -287,7 +287,7 @@
     .companion-card--telegram { border-top-color: var(--sky-400); }
     .companion-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 24px; border-radius: 14px; color: var(--teal-700); background: var(--surface-soft); }
     .companion-icon svg { width: 25px; height: 25px; }
-    .companion-list { display: grid; gap: 10px; margin: 20px 0 0; padding: 0; color: var(--muted); list-style: none; font-size: 14px; }
+    .companion-list { display: grid; gap: 10px; margin: auto 0 0; padding: 20px 0 0; color: var(--muted); list-style: none; font-size: 14px; }
     .companion-list li { position: relative; padding-left: 22px; }
     .companion-list li::before { content: ""; position: absolute; left: 0; top: .48em; width: 7px; height: 7px; border-radius: 50%; background: var(--teal-500); }
     .companion-card--telegram .companion-list li::before { background: var(--sky-400); }
@@ -362,8 +362,7 @@
       .trust-list article:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
     }
     @media (max-width: 840px) {
-      .companion-grid--three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .companion-card--website { grid-column: 1 / -1; min-height: 0; }
+      .companion-grid--three { grid-template-columns: minmax(0, 1fr); }
     }
     @media (max-width: 680px) {
       html { scroll-padding-top: 80px; }
