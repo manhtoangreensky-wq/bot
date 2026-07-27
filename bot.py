@@ -61927,22 +61927,6 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
     provider = key4u_provider_instance()
     selected_voice_id = str(voice_id or default_tts_voice_id("male"))
     selected_speed = voice_tts_provider_speed(voice_speed or VOICE_TTS_DEFAULT_SPEED)
-    fallback = await provider.voice_tts_fallback(
-        str(text or "")[:3500],
-        voice_id=selected_voice_id,
-        speed=selected_speed,
-        timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
-    )
-    fallback_status = str(fallback.get("status") or ("PASS" if fallback.get("ok") else "FAIL"))
-    fallback_http = int(fallback.get("http_status") or 0)
-    fallback_bytes = bytes(fallback.get("output_bytes") or b"")
-    if fallback.get("ok") and fallback_bytes:
-        return "PASS", fallback_bytes, f"http={fallback_http}; bytes={len(fallback_bytes)}; route=key4u_voice_fallback", fallback_http
-    fallback_url = str(fallback.get("output_url") or "").strip()
-    if fallback.get("ok") and fallback_url:
-        downloaded, detail, download_http = await _download_audio_url_bytes(fallback_url)
-        if downloaded:
-            return "PASS", downloaded, f"http={fallback_http}; {detail}; route=key4u_voice_fallback", int(download_http or fallback_http)
     result = await provider.tts(
         str(text or "")[:3500],
         model=KEY4U_TTS_MODEL,
@@ -61961,8 +61945,7 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
         if downloaded:
             return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
     detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
-    fallback_detail = sanitize_provider_error(fallback.get("error_message_safe") or fallback_status)[:160]
-    return status or "FAIL", b"", (detail + (" | voice_fallback=" + fallback_detail if fallback_detail else ""))[:240], http_status
+    return status or "FAIL", b"", detail, http_status
 
 async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
     if not shopaikey_minimax_tts_configured():
@@ -62475,6 +62458,7 @@ async def video_dubbing_transcribe_bytes(audio_bytes: bytes, context: ContextTyp
         content_type,
         language="auto",
         allow_admin=allow_admin,
+        allow_subdub_public=True,
         updated_by=updated_by,
         context=context,
     )
@@ -62489,6 +62473,7 @@ async def asr_transcribe_audio(
     response_format: str = "verbose_json",
     *,
     allow_admin: bool = False,
+    allow_subdub_public: bool = False,
     updated_by="",
     context: ContextTypes.DEFAULT_TYPE | None = None,
 ) -> dict:
@@ -62502,7 +62487,11 @@ async def asr_transcribe_audio(
         "deepgram": ["deepgram"],
     }.get(provider, [])
     for route in provider_order:
-        if route == "key4u" and key4u_asr_configured() and (allow_admin or KEY4U_PUBLIC_ENABLED):
+        if (
+            route == "key4u"
+            and key4u_asr_configured()
+            and (allow_admin or KEY4U_PUBLIC_ENABLED or (allow_subdub_public and subdub_public_force_override_active()))
+        ):
             result = await openai_compatible_asr_transcribe(
                 audio_bytes,
                 content_type,
@@ -116381,12 +116370,14 @@ async def cmd_subdub_status_debug(update: Update, context: ContextTypes.DEFAULT_
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("Lệnh này chỉ dành cho admin.")
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    public_state = subdub_public_state_debug_text()
     try:
         job = subtitle_dub_debug_lookup_job(arg)
-        text = subtitle_dub_debug_text(job) if job else "no recent SubDub job"
+        job_text = subtitle_dub_debug_text(job) if job else "no recent SubDub job"
+        text = f"{public_state}\n\n{job_text}"
     except Exception as exc:
         logger.warning("subdub status debug safe failure | %s", sanitize_log_text(str(exc))[:180])
-        text = f"subdub_status_debug failed safely: {type(exc).__name__}"
+        text = f"{public_state}\n\nsubdub_status_debug failed safely: {type(exc).__name__}"
     sent = None
     for chunk in subdub_admin_debug_chunks(text):
         sent = await update.message.reply_text(chunk)
@@ -181775,6 +181766,7 @@ SUBDUB_LANE_PUBLIC_ENV = {
     "dub": "VIDEO_DUB_PUBLIC_ENABLED",
     "subtitle_plus_dub": "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED",
 }
+SUBDUB_PUBLIC_FORCE_CONFIRM_FLAG = "--confirm-production"
 
 def subdub_provider_status_text() -> str:
     lines = ["SUBDUB PROVIDER STATUS", ""]
@@ -181865,6 +181857,69 @@ async def cmd_subdub_public_open_safe(update: Update, context: ContextTypes.DEFA
     for chunk in subdub_admin_debug_chunks("\n".join(lines)):
         await update.message.reply_text(chunk)
 
+async def cmd_subdub_public_open_force(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return
+    args = {
+        str(item or "").strip().lower()
+        for item in (getattr(context, "args", None) or [])
+        if str(item or "").strip()
+    }
+    if SUBDUB_PUBLIC_FORCE_CONFIRM_FLAG not in args:
+        return await update.message.reply_text(
+            "SUBDUB PUBLIC OPEN FORCE\n\n"
+            f"confirmation_required={SUBDUB_PUBLIC_FORCE_CONFIRM_FLAG}\n"
+            "provider_calls=0 | jobs_created=0 | wallet_mutation=0 | Xu_charged=0"
+        )
+    selectors = subdub_explicit_provider_selection()
+    if not selectors.get("all_explicit"):
+        missing = ",".join(selectors.get("invalid") or []) or "provider_selector"
+        return await update.message.reply_text(
+            "SUBDUB PUBLIC OPEN FORCE\n\n"
+            f"status=BLOCKED | blocker=explicit_provider_required:{missing}\n"
+            "provider_calls=0 | jobs_created=0 | wallet_mutation=0 | Xu_charged=0"
+        )
+    admin_id = update.effective_user.id
+    subdub_set_public_override("PUBLIC_FORCE", "true", admin_id)
+    subdub_set_public_override("PROVIDER_FREEZE", "false", admin_id)
+    subdub_set_public_override("VIDEO_ASR_ENABLED", "true", admin_id)
+    subdub_set_public_override("VIDEO_DUB_TTS_ENABLED", "true", admin_id)
+    for env_name in SUBDUB_LANE_PUBLIC_ENV.values():
+        subdub_set_public_override(env_name, "true", admin_id)
+    readiness_by_mode = {
+        mode: get_subdub_lane_readiness(mode, {}, public=True)
+        for mode in SUBDUB_LANE_PUBLIC_ENV
+    }
+    public_open = all(
+        item.get("public_flag_enabled") and item.get("effective_ready")
+        for item in readiness_by_mode.values()
+    )
+    lines = [
+        "SUBDUB PUBLIC OPEN FORCE",
+        "",
+        f"asr={selectors['asr']} | translation={selectors['translation']} | tts={selectors['tts']}",
+        f"SUBDUB PUBLIC OPEN = {'YES' if public_open else 'NO'}",
+        "provider_freeze=OFF_FOR_EXPLICIT_SUBDUB_JOBS",
+        "smoke_hard_lock=OFF",
+        "automatic_paid_fallback=OFF" if not PROVIDER_FALLBACK_ENABLED else "automatic_paid_fallback=ON",
+        "background_product_execution=OFF",
+        "",
+    ]
+    for mode, env_name in SUBDUB_LANE_PUBLIC_ENV.items():
+        readiness = readiness_by_mode[mode]
+        lines.append(
+            f"{env_name}={'ON' if readiness.get('public_flag_enabled') else 'OFF'}"
+            f" | ready={'YES' if readiness.get('effective_ready') else 'NO'}"
+            f" | blockers={','.join(readiness.get('blockers') or []) or '-'}"
+        )
+    lines.extend([
+        "",
+        "Runtime override persisted in system_settings and survives Railway restart.",
+        "provider_calls=0 | jobs_created=0 | wallet_mutation=0 | Xu_charged=0",
+    ])
+    for chunk in subdub_admin_debug_chunks("\n".join(lines)):
+        await update.message.reply_text(chunk)
+
 async def cmd_subdub_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del context
     if not update.effective_user or not is_admin_user(update.effective_user.id):
@@ -181875,6 +181930,7 @@ async def cmd_subdub_public_close(update: Update, context: ContextTypes.DEFAULT_
     subdub_set_public_override("VIDEO_ASR_ENABLED", "false", admin_id)
     subdub_set_public_override("VIDEO_DUB_TTS_ENABLED", "false", admin_id)
     subdub_set_public_override("PROVIDER_FREEZE", "", admin_id)
+    subdub_set_public_override("PUBLIC_FORCE", "false", admin_id)
     lines = ["SUBDUB PUBLIC CLOSE", ""]
     lines.extend(f"{env_name}=CLOSED" for env_name in SUBDUB_LANE_PUBLIC_ENV.values())
     lines.extend(
@@ -204764,6 +204820,63 @@ def subdub_public_freeze_override_active() -> bool:
     return subdub_public_override_value("PROVIDER_FREEZE") == "false"
 
 
+def subdub_public_force_override_active() -> bool:
+    return subdub_public_override_value("PUBLIC_FORCE") == "true"
+
+
+def subdub_explicit_provider_selection() -> dict:
+    raw_asr = str(ASR_PROVIDER or "").strip().lower()
+    raw_translation = str(TRANSLATE_PROVIDER or "").strip().lower()
+    raw_tts = str(TTS_PROVIDER or "").strip().lower()
+    asr = subdub_asr_provider_name()
+    translation = subdub_translation_provider_name()
+    tts = subdub_tts_provider_name()
+    invalid = []
+    if raw_asr in {"", "auto"} or asr not in {"deepgram", "key4u", "shopaikey"}:
+        invalid.append("ASR_PROVIDER")
+    if raw_translation in {"", "auto"} or translation not in {"deepl", "key4u", "shopaikey"}:
+        invalid.append("TRANSLATE_PROVIDER")
+    if raw_tts in {"", "auto"} or tts not in {"direct_minimax", "key4u_minimax", "shopaikey_minimax"}:
+        invalid.append("TTS_PROVIDER")
+    return {
+        "asr": asr,
+        "translation": translation,
+        "tts": tts,
+        "invalid": invalid,
+        "all_explicit": not invalid,
+    }
+
+
+def subdub_public_state_debug_text() -> str:
+    selectors = subdub_explicit_provider_selection()
+    labels = {
+        "subtitle_create": "subtitle",
+        "subtitle_translate": "translation",
+        "dub": "dubbing",
+        "subtitle_plus_dub": "combo",
+    }
+    lines = [
+        "SUBDUB PUBLIC STATE",
+        f"asr_provider={selectors['asr'] or '-'}",
+        f"translation_provider={selectors['translation'] or '-'}",
+        f"tts_provider={selectors['tts'] or '-'}",
+        f"provider_auto_executable={'NO' if selectors['all_explicit'] else 'YES'}",
+        f"provider_freeze={'OFF' if subdub_public_freeze_override_active() or not (PROVIDER_FREEZE or PROVIDER_FREEZE_ENABLED) else 'ON'}",
+        f"smoke_hard_lock={'OFF' if subdub_public_force_override_active() else 'ON'}",
+        f"automatic_paid_fallback={'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}",
+        "background_product_execution=OFF",
+    ]
+    for mode, label in labels.items():
+        readiness = get_subdub_lane_readiness(mode, {}, public=True)
+        lines.append(
+            f"{label}={'ON' if readiness.get('public_flag_enabled') else 'OFF'}"
+            f" | ready={'YES' if readiness.get('effective_ready') else 'NO'}"
+            f" | smoke={readiness.get('asr_smoke_status') or 'NOT_TESTED'}"
+            f" | blockers={','.join(readiness.get('blockers') or []) or '-'}"
+        )
+    return "\n".join(lines)
+
+
 def video_dubbing_public_flag(mode: str) -> bool:
     mode = normalize_video_translate_mode(mode)
     entry = {
@@ -204996,23 +205109,24 @@ def subdub_provider_configured(kind: str, provider: str) -> bool:
     }.get(provider, False)
 
 def subdub_provider_public_allowed(kind: str, provider: str) -> bool:
+    force_open = subdub_public_force_override_active()
     if kind == "asr":
         route_allowed = {
             "deepgram": True,
-            "key4u": bool(KEY4U_PUBLIC_ENABLED),
-            "shopaikey": not bool(SHOPAIKEY_ADMIN_ONLY),
+            "key4u": bool(KEY4U_PUBLIC_ENABLED or force_open),
+            "shopaikey": bool(not SHOPAIKEY_ADMIN_ONLY or force_open),
         }.get(provider, False)
         return bool(subdub_public_flag_with_override("VIDEO_ASR_ENABLED", VIDEO_ASR_ENABLED) and route_allowed)
     if kind == "translation":
         return {
             "deepl": True,
-            "key4u": bool(KEY4U_PUBLIC_ENABLED),
-            "shopaikey": not bool(SHOPAIKEY_ADMIN_ONLY),
+            "key4u": bool(KEY4U_PUBLIC_ENABLED or force_open),
+            "shopaikey": bool(not SHOPAIKEY_ADMIN_ONLY or force_open),
         }.get(provider, False)
     route_allowed = {
         "direct_minimax": True,
-        "key4u_minimax": bool(KEY4U_PUBLIC_ENABLED),
-        "shopaikey_minimax": not bool(SHOPAIKEY_ADMIN_ONLY),
+        "key4u_minimax": bool(KEY4U_PUBLIC_ENABLED or force_open),
+        "shopaikey_minimax": bool(not SHOPAIKEY_ADMIN_ONLY or force_open),
     }.get(provider, False)
     return bool(subdub_public_flag_with_override("VIDEO_DUB_TTS_ENABLED", VIDEO_DUB_TTS_ENABLED) and route_allowed)
 
@@ -205026,6 +205140,7 @@ def get_subdub_lane_readiness(
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
+    force_open = bool(public and subdub_public_force_override_active())
     admin_interactive_confirm = bool(admin_interactive_confirm and not public)
     if admin_interactive_confirm:
         admin_smoke = True
@@ -205092,7 +205207,7 @@ def get_subdub_lane_readiness(
             blockers.append("asr_not_configured")
         elif public and not asr_public_allowed:
             blockers.append("asr_public_not_allowed")
-        elif not admin_smoke and not provider_status_is_pass(asr_smoke_status):
+        elif not admin_smoke and not force_open and not provider_status_is_pass(asr_smoke_status):
             blockers.append("asr_smoke_not_pass")
     if translation_required:
         if translation_provider not in {"deepl", "key4u", "shopaikey"}:
@@ -205101,7 +205216,7 @@ def get_subdub_lane_readiness(
             blockers.append("translation_not_configured")
         elif public and not translation_public_allowed:
             blockers.append("translation_public_not_allowed")
-        elif not admin_smoke and not provider_status_is_pass(translation_smoke_status):
+        elif not admin_smoke and not force_open and not provider_status_is_pass(translation_smoke_status):
             blockers.append("translation_smoke_not_pass")
     if tts_required:
         if tts_provider not in {"direct_minimax", "key4u_minimax", "shopaikey_minimax"}:
@@ -205110,7 +205225,7 @@ def get_subdub_lane_readiness(
             blockers.append("tts_not_configured")
         elif public and not tts_public_allowed:
             blockers.append("tts_public_not_allowed")
-        elif not admin_smoke and not provider_status_is_pass(tts_smoke_status):
+        elif not admin_smoke and not force_open and not provider_status_is_pass(tts_smoke_status):
             blockers.append("tts_smoke_not_pass")
     blockers = list(dict.fromkeys(blockers))
     return {
@@ -205134,6 +205249,8 @@ def get_subdub_lane_readiness(
         "tts_provider": tts_provider,
         "tts_configured": tts_configured,
         "tts_smoke_status": tts_smoke_status,
+        "public_force_open": force_open,
+        "smoke_hard_lock": not force_open,
         "tts_public_allowed": tts_public_allowed,
         "effective_ready": not blockers,
         "blockers": blockers,
@@ -211644,6 +211761,7 @@ async def transcribe_media_to_segments(
                 chunk_content_type,
                 language=source_language,
                 allow_admin=allow_admin,
+                allow_subdub_public=True,
                 updated_by=updated_by,
                 context=context,
             )
@@ -211759,6 +211877,7 @@ async def transcribe_media_to_segments(
                 audio_content_type,
                 language=source_language,
                 allow_admin=allow_admin,
+                allow_subdub_public=True,
                 updated_by=updated_by,
                 context=context,
             )
@@ -212305,9 +212424,10 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     minimax_voice_requested = bool(str(voice_id or "").strip() and minimax_voice_adapter.validate_provider_voice_id(voice_id))
     language_code = str(tts_language_code or "auto").strip().lower()
     international_route = language_code not in {"", "auto", "vi", "vi-vn"}
+    force_open = subdub_public_force_override_active()
     key4u_ready = bool(
         key4u_minimax_tts_configured(require_public=False)
-        and (allow_admin or (VIDEO_DUB_TTS_ENABLED and KEY4U_PUBLIC_ENABLED))
+        and (allow_admin or force_open or (VIDEO_DUB_TTS_ENABLED and KEY4U_PUBLIC_ENABLED))
     )
     shopaikey_ready = bool(
         shopaikey_minimax_tts_configured()
@@ -212322,7 +212442,7 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
             "voice_id": voice_id,
             "voice_style": voice_style,
             "voice_speed": voice_speed,
-            "allow_admin": allow_admin,
+            "allow_admin": bool(allow_admin or force_open),
         }
         try:
             parameters = inspect.signature(candidate).parameters
@@ -212484,55 +212604,6 @@ async def synthesize_dub_segment_chunks(
                 str(speed),
             )
         duration = await video_dubbing_audio_duration_seconds(audio_bytes)
-        if duration and duration < slot_seconds * 0.85 and speed > 0.7:
-            target_duration = max(0.4, slot_seconds * 0.94)
-            retry_speed = max(0.7, min(speed - 0.01, speed * duration / target_duration))
-            if retry_speed < speed - 0.005:
-                try:
-                    retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
-                        text,
-                        voice_style,
-                        voice_id,
-                        f"{retry_speed:.3f}",
-                        allow_admin=allow_admin,
-                        tts_language_code=tts_language_code,
-                        tts_language_boost=tts_language_boost,
-                        edge_voice_id=edge_voice_id,
-                    )
-                except TypeError:
-                    retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
-                        text,
-                        voice_style,
-                        voice_id,
-                        f"{retry_speed:.3f}",
-                    )
-                retry_duration = await video_dubbing_audio_duration_seconds(retry_audio)
-                if retry_audio and retry_duration and retry_duration > duration:
-                    provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
-                    duration = retry_duration
-                    speed = retry_speed
-        if duration > slot_seconds * 1.05 and speed < safe_max_speed:
-            retry_speed = min(safe_max_speed, max(speed + 0.05, speed * duration / slot_seconds))
-            try:
-                retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
-                    text,
-                    voice_style,
-                    voice_id,
-                    f"{retry_speed:.3f}",
-                    allow_admin=allow_admin,
-                )
-            except TypeError:
-                retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
-                    text,
-                    voice_style,
-                    voice_id,
-                    f"{retry_speed:.3f}",
-                )
-            retry_duration = await video_dubbing_audio_duration_seconds(retry_audio)
-            if retry_audio and (not duration or (retry_duration and retry_duration < duration)):
-                provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
-                duration = retry_duration
-                speed = retry_speed
         if not audio_bytes:
             raise RuntimeError("tts_segment_empty")
         providers.append(provider)
@@ -225266,6 +225337,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_runtime_status", cmd_subdub_runtime_status))
     tg_app.add_handler(CommandHandler("subdub_provider_status", cmd_subdub_provider_status))
     tg_app.add_handler(CommandHandler("subdub_public_open_safe", cmd_subdub_public_open_safe))
+    tg_app.add_handler(CommandHandler("subdub_public_open_force", cmd_subdub_public_open_force))
     tg_app.add_handler(CommandHandler("subdub_public_close", cmd_subdub_public_close))
     tg_app.add_handler(CommandHandler("subdub_job_debug", cmd_subdub_job_debug))
     tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
