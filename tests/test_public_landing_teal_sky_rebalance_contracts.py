@@ -42,6 +42,16 @@ def test_landing_makes_the_public_website_a_distinct_companion_role() -> None:
         assert LANDING.count(f'"{key}":') == 3
 
 
+def test_companion_cards_stack_at_tablet_and_pin_their_lists() -> None:
+    assert re.search(
+        r"@media \(max-width: 840px\) \{\s*"
+        r"\.companion-grid--three \{ grid-template-columns: minmax\(0, 1fr\); \}",
+        LANDING,
+    )
+    assert ".companion-card--website { grid-column: 1 / -1; min-height: 0; }" not in LANDING
+    assert ".companion-list { display: grid; gap: 10px; margin: auto 0 0; padding: 20px 0 0;" in LANDING
+
+
 def test_header_uses_the_real_logo_as_a_clear_public_brand_lockup() -> None:
     """Do not replace the supplied mark with generated initials or a faux icon."""
 
