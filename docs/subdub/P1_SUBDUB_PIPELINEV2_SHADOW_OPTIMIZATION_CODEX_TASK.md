@@ -341,3 +341,48 @@ Blockers: owner approval of Phase 1 design
 
 Stop here. Do not implement, merge or deploy until the owner approves the
 design and explicitly opens Phase 2.
+
+## Approved Amendment A (2026-07-29)
+
+Owner approved Phase 2 with these mandatory additions. The authoritative
+details and invariants are in section 13 of the design document.
+
+- [x] Safe UTF-8 TTS transport chunking with ordered text hashes and per-fragment claims.
+- [x] Long-video resource budget: 500 MiB input/output, 3600 seconds, 12 parts,
+  sequential execution and bounded workspace/audio/cue resources.
+- [x] Explicit lineage across all seven schemas.
+- [x] Three-level idempotency: request, stage/artifact and side-effect/transport.
+- [x] First-class `ACCEPTANCE_UNKNOWN` with no replacement submit.
+- [x] Quantitative V1/V2 replay metrics and blocking thresholds.
+- [x] Privacy, retention and scope isolation rules.
+- [x] Default-off V2 flags and one-step V1 rollback.
+- [x] Exactly one final combo compose/mux boundary.
+
+The amendment must be committed as one design-only commit before Phase 2 code.
+
+## Phase 2 Execution Gate (Now Approved)
+
+Implement only disabled shadow/replay modules and offline legal fixtures. Keep
+the following side-effect counters at zero:
+
+```text
+provider_calls = 0
+wallet_mutations = 0
+customer_deliveries = 0
+production_traffic = 0
+```
+
+No production callback imports the V2 package. No module import may call a
+provider, Telegram, worker, wallet or database. The offline harness must use
+injected fixture adapters and deterministic bytes.
+
+Required Phase 2 report:
+
+```text
+SHADOW CONTRACT PASS=YES
+REPLAY PASS=YES
+provider calls=0
+wallet mutations=0
+V1 STILL AVAILABLE=YES
+V2 LIVE PASS=NO
+```

@@ -1206,3 +1206,281 @@ Owner approval is requested for these design choices:
 
 No implementation, deployment or production smoke is authorized by this
 document.
+
+## 13. Design Amendment A (2026-07-29)
+
+This amendment is a contract-only change requested after the first design gate.
+It is intentionally committed separately before any V2 runtime module is
+implemented.
+
+### 13.1 Safe TTS Transport Chunking
+
+Semantic cue boundaries and transport payload boundaries are different things.
+V2 may split one long `dub_script` utterance only to satisfy a transport limit;
+it may not create a new subtitle cue, change the source window or claim that a
+transport fragment is a separate semantic sentence.
+
+The transport chunk contract is:
+
+```json
+{
+  "segment_id": "seg_0001_<sha256>",
+  "transport_group_id": "ttsgrp_<sha256>",
+  "transport_sequence": 1,
+  "transport_total": 2,
+  "text_utf8_sha256": "<sha256>",
+  "text_start_codepoint": 0,
+  "text_end_codepoint": 3800,
+  "max_payload_bytes": 65536,
+  "provider_speed": 1.0,
+  "idempotency_key": "<sha256>"
+}
+```
+
+Rules:
+
+- Default transport limits are 4,000 Unicode code points and 64 KiB UTF-8
+  bytes per request; a provider-specific adapter may lower them, never raise
+  them without a versioned profile.
+- Split only at punctuation/word boundaries. A boundary that would cut a
+  grapheme, combining sequence, markup tag or word is invalid.
+- Every fragment carries the same `segment_id`, ordered sequence and complete
+  text hash. Reassembly must prove that the ordered text hash equals the source
+  dub-script text hash.
+- Transport fragments are synthesized sequentially. Their audio is concatenated
+  only after every fragment has a valid artifact and measured duration.
+- A fragment may not start a new source cue and may not extend the cue window.
+  If fragment timing cannot fit while preserving the complete utterance, the
+  segment is `WAITING_REVIEW` or `FAIL`; it is never clipped or overlapped.
+- Each fragment has its own stage idempotency claim. A timeout after a submit
+  remains `ACCEPTANCE_UNKNOWN`; it is not submitted again automatically.
+- Offline replay uses a fixture transport adapter that records calls and returns
+  deterministic audio bytes. It never reaches a provider.
+
+### 13.2 Long-Video Resource Budget
+
+The 500 MiB/3600-second product contract is also a resource contract. V2 uses
+bounded sequential work so one job cannot exhaust the bot host:
+
+| Resource | V2 limit | Failure |
+| --- | ---: | --- |
+| Input media | 500 MiB | `RESOURCE_LIMIT_EXCEEDED` |
+| Final Telegram MP4 | 500 MiB | `RESOURCE_LIMIT_EXCEEDED` |
+| Source duration | 3,600 seconds | `RESOURCE_LIMIT_EXCEEDED` |
+| Internal parts | 12 | `RESOURCE_LIMIT_EXCEEDED` |
+| Target part duration | 300 seconds | deterministic planner |
+| Concurrent parts | 1 | no parallel memory spikes |
+| In-flight decoded audio | 256 MiB | `RESOURCE_LIMIT_EXCEEDED` |
+| Workspace budget | `min(3 * input_bytes + 512 MiB, 4 GiB)` | `RESOURCE_LIMIT_EXCEEDED` |
+| Semantic cue count | 6,000 | `RESOURCE_LIMIT_EXCEEDED` |
+| Subtitle artifact | 8 MiB | `RESOURCE_LIMIT_EXCEEDED` |
+
+The budget is evaluated after ingest/probe and before a paid stage. Per-part
+artifacts are fingerprinted, QCed and released before the next part starts.
+Only the final concatenated MP4 is a customer output. Part files are never
+individually marked delivered or charged.
+
+### 13.3 Seven-Schema Lineage
+
+Every one of the seven contracts now carries explicit lineage fields:
+
+```text
+lineage_id
+parent_artifact_ids[]
+root_source_id
+source_segment_ids[]
+derived_meaning_ids[]
+upstream_fingerprints[]
+lineage_fingerprint
+```
+
+The permitted lineage graph is:
+
+```text
+source_semantic_master
+  -> translation_master
+       -> subtitle_copy
+       -> dub_script
+            -> voice_cast
+            -> stage_qc
+                 -> delivery_receipt
+```
+
+`source_semantic_master` may have no semantic parent but must have an ingest
+request fingerprint. `translation_master` must point to exactly one source
+master. `subtitle_copy` and `dub_script` must point to the same source master
+and, for translated lanes, the same translation master. `voice_cast` points to
+the dub script and its speaker set. `stage_qc` points to the artifact it checks.
+`delivery_receipt` points to the final MP4 and final QC artifact. A missing or
+cross-user parent makes the artifact invalid.
+
+Lineage is immutable after `PASS`. A new profile, source, target, voice policy
+or runtime SHA creates a new derived artifact rather than mutating an old one.
+
+### 13.4 Three-Level Idempotency
+
+V2 uses three independent idempotency levels; passing one level does not waive
+the others.
+
+| Level | Key | Protects |
+| --- | --- | --- |
+| Request/job | `scope + source_fingerprint + request_config_fingerprint` | duplicate confirmation/new job |
+| Stage/artifact | `job_id + stage + upstream_fingerprint + config_fingerprint + segment_or_global` | duplicate computation and artifact writes |
+| Side effect/transport | `provider_alias + transport_group_or_delivery + sequence + artifact_fingerprint` | provider submit, retrieval, Telegram delivery and charge claim |
+
+Each claim has an atomic state:
+
+```text
+UNCLAIMED -> CLAIMED -> COMPLETED
+                    \-> ACCEPTANCE_UNKNOWN
+                    \-> FAILED
+```
+
+`CLAIMED` has an owner, lease and timestamp. Lease expiry permits inspection
+or polling, not an automatic paid replacement submit. `COMPLETED` returns the
+existing artifact/receipt. A second confirmation at any level returns the
+existing job and cannot mutate wallet state twice.
+
+### 13.5 `ACCEPTANCE_UNKNOWN`
+
+`ACCEPTANCE_UNKNOWN` is a first-class state, not a generic failure. It is used
+when a side-effect request may have reached a provider or Telegram but the
+client lacks a definitive acceptance/result boundary.
+
+Required fields:
+
+```text
+acceptance_state = ACCEPTANCE_UNKNOWN
+side_effect_claim_id
+request_fingerprint
+provider_task_id_present = true|false
+last_safe_operation = poll|retrieve|inspect|none
+replacement_submit_allowed = false
+admin_review_required = true
+charge_eligible = false
+```
+
+Allowed actions are read-only inspection, polling a stored task ID, retrieving
+an already-created artifact and admin review. Public status remains honest and
+non-technical. No refresh, restart, recovery or health route may create a
+replacement provider task. A new paid submit requires a new explicit confirm
+and a new request fingerprint.
+
+### 13.6 Quantitative V1/V2 Replay Metrics
+
+The replay harness writes a machine-readable `replay_metrics.json` for each
+fixture and an aggregate report. The following metrics and thresholds are the
+acceptance contract:
+
+| Metric | Definition | Required threshold |
+| --- | --- | ---: |
+| `source_master_reuse_rate` | lanes using one valid source master / 4 | 1.0 |
+| `translation_master_reuse_rate` | lanes 2-4 using one valid translation master / 3 | 1.0 |
+| `duplicate_stage_submit_count` | repeated stage claims that created work | 0 |
+| `duplicate_side_effect_count` | repeated transport/delivery/charge effects | 0 |
+| `subtitle_timing_exact_rate` | translated cues with identical source bounds | 1.0 |
+| `translation_coverage_rate` | source segments with valid translated meaning | 1.0 |
+| `glossary_name_number_error_rate` | failed glossary/name/number checks / checked | 0.0 |
+| `dub_complete_utterance_rate` | complete measured utterances / expected | 1.0 |
+| `dub_overlap_count` | utterance overlaps on the absolute timeline | 0 |
+| `dub_truncation_count` | utterances clipped or dropped | 0 |
+| `dub_speed_deviation_max` | absolute deviation from profile speed 1.0 | 0.0 |
+| `combo_consistency_rate` | shared meaning/name/number/speaker checks passed | 1.0 |
+| `mp4_valid_rate` | final artifacts passing structural/full-decode QC | 1.0 |
+| `duration_delta_p95_ms` | p95 absolute source/final duration delta | <= 350 |
+| `provider_calls` | fixture run external provider calls | 0 |
+| `wallet_mutations` | fixture run credit mutations | 0 |
+| `customer_deliveries` | fixture run external deliveries | 0 |
+| `new_failures_introduced` | same-command V2 failures minus clean-base failures | 0 |
+
+V1 and V2 are compared on these measurements, not on byte equality or a green
+progress panel. A fixture fails replay if any blocking threshold is missed.
+
+### 13.7 Privacy, Retention And User Isolation
+
+All artifact keys and stage claims include an immutable `scope_id` derived from
+the authenticated owner and product context. Raw Telegram user/chat IDs are
+never used as public artifact names and are never shared across scopes.
+
+Isolation rules:
+
+- A source fingerprint may be reused only inside the same `scope_id`, or from a
+  repository legal fixture explicitly marked `fixture_scope`.
+- A matching media hash from another user never grants access to that user's
+  semantic, translation, voice or delivery artifact.
+- Every artifact read checks scope, product and lineage before returning bytes.
+- Admin diagnostics expose masked identifiers only; public responses expose no
+  provider/task/debug values.
+- Logs store event type, scope hash and safe reason, not raw media or full
+  customer text.
+
+Retention defaults are now enforceable contracts: raw media/audio/parts 24h,
+semantic/translation/copy artifacts 72h, admin provider metadata 30d, QC
+summaries 30d and delivery receipts 90d. Deletion is blocked while a valid
+retrieval/delivery claim is active, then removes bytes and leaves only the
+minimum non-sensitive audit tombstone.
+
+### 13.8 Default-Off Flags And V1 Rollback
+
+The V2 config contract is:
+
+```text
+SUBDUB_PIPELINE_V2_ENABLED=0
+SUBDUB_PIPELINE_V2_PUBLIC_ALLOWED=0
+SUBDUB_PIPELINE_V2_SHADOW_REPLAY=0
+SUBDUB_PIPELINE_V2_ADMIN_PREVIEW=0
+```
+
+Any missing, malformed or false flag selects V1/disabled behavior. No module
+import changes a flag, registers a callback or starts a background task.
+
+Rollback is a single operational action:
+
+```text
+SUBDUB_PIPELINE_V2_PUBLIC_ALLOWED=0
+```
+
+V1 remains available even if a V2 artifact, replay or admin preview fails. V2
+cannot remove, overwrite or migrate V1 jobs, artifacts or callback routes.
+
+### 13.9 One Final Combo Compose/Mux
+
+Combo has one and only one final compose boundary:
+
+```text
+source_video
+ + subtitle_copy (one selected SRT/ASS artifact)
+ + mixed_dub_audio (one timeline artifact)
+ + original_audio_policy
+ -> compose/mux exactly once
+ -> final_mp4
+ -> final_media_qc
+```
+
+The combo must not render a subtitle video and a dubbed video separately and
+then merge the two MP4s. It must not feed the subtitle copy back through
+translation or TTS. Subtitle and dub copies are assembled from the same
+translation master and passed to one compose stage. For long media, internal
+parts may be composed and QCed, then concatenated once in source order; the
+concatenated file is the only final MP4 and the only delivery candidate.
+
+The compose stage records both input artifact IDs, the original-audio policy,
+the output fingerprint and one `stage_qc` result. A structurally valid file
+without both requested combo layers is `FAIL`, never partial success.
+
+## 14. Amendment Acceptance Gate
+
+Before Phase 2 code is accepted, the branch must show:
+
+```text
+design amendment commit: present and separate
+safe TTS transport chunking: specified and fixture-tested
+long-video resource limits: specified and fixture-tested
+seven-schema lineage: specified and fixture-tested
+three-level idempotency: specified and fixture-tested
+ACCEPTANCE_UNKNOWN: specified and fixture-tested
+quantitative replay metrics: specified and fixture-tested
+privacy/retention/user isolation: specified and fixture-tested
+default-off flags/V1 rollback: specified and fixture-tested
+one final combo compose/mux: specified and fixture-tested
+```
