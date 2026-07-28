@@ -1,0 +1,803 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-transition-motion",
+  "group_id": "motion_design_principle",
+  "capability_count": 12,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "capabilities": [
+    {
+      "id": "timing_and_spacing",
+      "qualified_id": "motion_design_principle.timing_and_spacing",
+      "display_name_vi": "Thời gian và khoảng chuyển động",
+      "summary_vi": "Phân bổ frame và khoảng cách để người xem đọc được nguyên nhân, hành trình và điểm dừng.",
+      "purpose_vi": "Tạo nhịp chuyển động rõ thay vì chỉ tăng hoặc giảm tốc tùy ý.",
+      "application_rules": [
+        "Đánh dấu frame bắt đầu, điểm nhấn và frame dừng.",
+        "Đo khoảng dịch chuyển theo tỷ lệ khung đích."
+      ],
+      "restraint_rules": [
+        "Không kéo dài motion khi thông tin đã đọc xong.",
+        "Tránh dùng cùng timing cho mọi phần tử."
+      ],
+      "footage_limits": [
+        "Footage thiếu frame hoặc có shutter không phù hợp không thể retime tùy ý."
+      ],
+      "timing_guidance": {
+        "measurement": "frames_and_seconds",
+        "guidance_vi": "Quy đổi theo fps thật và kiểm tra ở tốc độ phát đích."
+      },
+      "accessibility": {
+        "guidance_vi": "Giữ đủ thời gian đọc; không dùng nhịp dồn dập liên tục."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ điểm đầu/cuối, rút hành trình hoặc chuyển sang trạng thái tĩnh."
+      },
+      "fallback": {
+        "principle_ref": null,
+        "guidance_vi": "Dùng thay đổi trạng thái tức thời khi timing không thể kiểm chứng."
+      },
+      "failure_conditions": [
+        "Phần tử dừng trước khi thông tin đọc được.",
+        "Retime tạo frame lặp hoặc giật."
+      ],
+      "validation_checks": [
+        "Đếm frame theo từng pha và xem lại ở fps đích.",
+        "Kiểm tra thời gian đọc trên mobile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có keyframe/motion; 26D bổ sung quy tắc đo timing."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "easing",
+      "qualified_id": "motion_design_principle.easing",
+      "display_name_vi": "Nhịp tăng giảm tốc",
+      "summary_vi": "Chọn đường vận tốc có động cơ để chuyển động khởi phát và dừng hợp lý.",
+      "purpose_vi": "Giữ cảm giác lực nhất quán và tránh chuyển động cơ học ngoài chủ đích.",
+      "application_rules": [
+        "Chọn curve theo hành động, không theo tên effect.",
+        "Giữ velocity liên tục ở điểm nối."
+      ],
+      "restraint_rules": [
+        "Không dùng bounce cho nội dung nghiêm túc nếu không có lý do.",
+        "Tránh nhiều easing khác nhau trong một hierarchy."
+      ],
+      "footage_limits": [
+        "Easing số không thay đổi quán tính thật đã quay trong footage."
+      ],
+      "timing_guidance": {
+        "measurement": "normalized_progress",
+        "guidance_vi": "So vị trí và vận tốc tại 25%, 50%, 75% hành trình."
+      },
+      "accessibility": {
+        "guidance_vi": "Giới hạn overshoot và dao động; cung cấp biến thể ít chuyển động."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Dùng linear ngắn, opacity hoặc trạng thái tĩnh không overshoot."
+      },
+      "fallback": {
+        "principle_ref": "timing_and_spacing",
+        "guidance_vi": "Ưu tiên timing rõ với curve đơn giản khi không xác định được lực."
+      },
+      "failure_conditions": [
+        "Vận tốc nhảy ở biên hoặc dừng rung.",
+        "Curve làm sai tính chất vật thể."
+      ],
+      "validation_checks": [
+        "Vẽ/đọc curve và kiểm tra velocity tại biên.",
+        "Xem không âm thanh để đánh giá lực hình."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "_motion_filter"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime có motion primitive nhưng không có principle registry; chỉ tham chiếu."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "anticipation",
+      "qualified_id": "motion_design_principle.anticipation",
+      "display_name_vi": "Chuẩn bị trước hành động",
+      "summary_vi": "Đặt một tín hiệu nhỏ trước hành động chính để người xem hiểu hướng và lực.",
+      "purpose_vi": "Tăng khả năng dự đoán mà không làm chậm nội dung hoặc bịa chuyển động nguồn.",
+      "application_rules": [
+        "Xác định hành động chính rồi mới chọn pose hoặc cue chuẩn bị.",
+        "Giữ cue cùng trục với hành động."
+      ],
+      "restraint_rules": [
+        "Không thêm anticipation vào footage người thật nếu cơ thể không có chuyển động phù hợp.",
+        "Tránh lặp cue trước mọi thao tác nhỏ."
+      ],
+      "footage_limits": [
+        "Footage đã cắt sát hành động có thể không còn frame chuẩn bị; phải quay bổ sung hoặc bỏ."
+      ],
+      "timing_guidance": {
+        "measurement": "frames_before_action",
+        "guidance_vi": "Cue chỉ dài đủ để nhận biết và phải nối trực tiếp vào hành động."
+      },
+      "accessibility": {
+        "guidance_vi": "Tín hiệu phải rõ cả khi tắt âm thanh và không dựa vào màu đơn độc."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Dùng cue tĩnh, highlight nhẹ hoặc bỏ pha lùi."
+      },
+      "fallback": {
+        "principle_ref": "staging",
+        "guidance_vi": "Làm rõ bố cục thay vì bịa chuyển động chuẩn bị."
+      },
+      "failure_conditions": [
+        "Cue ngược hướng hoặc không dẫn tới hành động.",
+        "Anticipation làm nhân vật/vật thể biến dạng giả tạo."
+      ],
+      "validation_checks": [
+        "Xem cue–action như một loop ngắn.",
+        "Kiểm tra cue vẫn hiểu được ở kích thước mobile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge nhắc keyframe nhưng chưa định nghĩa anticipation có restraint."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "follow_through",
+      "qualified_id": "motion_design_principle.follow_through",
+      "display_name_vi": "Đà tiếp sau hành động",
+      "summary_vi": "Cho phần phụ tiếp tục và lắng lại sau khi phần chính đã dừng.",
+      "purpose_vi": "Diễn tả quán tính và vật liệu mà không kéo dài hành động chính.",
+      "application_rules": [
+        "Tách phần chính và phần phụ có quán tính.",
+        "Cho phần phụ dừng muộn hơn theo vật liệu."
+      ],
+      "restraint_rules": [
+        "Không thêm đà cho vật thể cứng hoặc footage không có dữ liệu.",
+        "Tránh dao động quá nhiều sau điểm dừng."
+      ],
+      "footage_limits": [
+        "Không thể tạo follow-through thật cho tóc, vải hoặc cơ thể từ một ảnh phẳng mà không có rig/mask phù hợp."
+      ],
+      "timing_guidance": {
+        "measurement": "frames_after_stop",
+        "guidance_vi": "Độ trễ giảm dần và kết thúc trước beat thông tin kế tiếp."
+      },
+      "accessibility": {
+        "guidance_vi": "Giữ amplitude nhỏ và bỏ dao động liên tục trong reduced motion."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Dừng đồng thời hoặc dùng một pha settle rất ngắn."
+      },
+      "fallback": {
+        "principle_ref": "timing_and_spacing",
+        "guidance_vi": "Dùng điểm dừng sạch nếu không có layer/rig đáng tin."
+      },
+      "failure_conditions": [
+        "Phần phụ xuyên lớp hoặc tiếp tục vô hạn.",
+        "Độ trễ không phù hợp vật liệu."
+      ],
+      "validation_checks": [
+        "Xem thứ tự dừng của từng layer.",
+        "Kiểm tra không còn motion sau beat mới."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Rig/motion knowledge là tham chiếu; không có runtime follow-through được đăng ký."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "overlap",
+      "qualified_id": "motion_design_principle.overlap",
+      "display_name_vi": "Chồng pha chuyển động",
+      "summary_vi": "Cho các phần hoặc layer bắt đầu và kết thúc lệch nhau có kiểm soát.",
+      "purpose_vi": "Tạo nhịp tự nhiên và hierarchy thay vì mọi phần tử chạy đồng thời.",
+      "application_rules": [
+        "Xếp thứ tự layer theo nguyên nhân và độ ưu tiên.",
+        "Dùng offset đo bằng frame, không ngẫu nhiên."
+      ],
+      "restraint_rules": [
+        "Không chồng quá nhiều lớp khiến người xem mất điểm nhìn.",
+        "Tránh overlap khi các bước cần hiểu tuần tự."
+      ],
+      "footage_limits": [
+        "Layer phải tách được; footage phẳng không cho phép trì hoãn từng phần tử tùy ý."
+      ],
+      "timing_guidance": {
+        "measurement": "layer_frame_offset",
+        "guidance_vi": "Offset ngắn hơn duration chính và không vượt sang beat kế."
+      },
+      "accessibility": {
+        "guidance_vi": "Giữ một điểm chú ý chính; reduced motion gom layer về ít pha hơn."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Gộp layer thành một hoặc hai nhịp, bỏ cascade dài."
+      },
+      "fallback": {
+        "principle_ref": "motion_hierarchy",
+        "guidance_vi": "Ưu tiên một chuyển động chính khi layer không tách hoặc quá tải."
+      },
+      "failure_conditions": [
+        "Layer va nhau, che chữ hoặc đảo thứ tự nguyên nhân.",
+        "Offset tiếp tục sau khi nội dung mới bắt đầu."
+      ],
+      "validation_checks": [
+        "Ghi timeline từng layer và xem không âm thanh.",
+        "Kiểm tra điểm nhìn chính ở mọi frame."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có layer animation nhưng chưa có overlap contract."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "squash_and_stretch",
+      "qualified_id": "motion_design_principle.squash_and_stretch",
+      "display_name_vi": "Nén và giãn có bảo toàn khối",
+      "summary_vi": "Thay đổi tỷ lệ có giới hạn để diễn tả lực mà vẫn giữ cảm giác khối lượng.",
+      "purpose_vi": "Tăng biểu cảm cho đồ họa hoặc nhân vật đã rig, không bóp méo footage tùy tiện.",
+      "application_rules": [
+        "Giữ thể tích cảm nhận và điểm neo.",
+        "Liên kết mức nén/giãn với lực và vật liệu."
+      ],
+      "restraint_rules": [
+        "Không biến dạng mặt, cơ thể, logo hoặc sản phẩm nếu chưa được phép.",
+        "Tránh áp dụng cho footage người thật không có segmentation/rig."
+      ],
+      "footage_limits": [
+        "Footage raster phẳng dễ méo nền và nhận diện; cần layer hoặc rig riêng."
+      ],
+      "timing_guidance": {
+        "measurement": "scale_ratio_and_frames",
+        "guidance_vi": "Biến dạng ngắn, trở về tỷ lệ chuẩn trước khi đọc nội dung."
+      },
+      "accessibility": {
+        "guidance_vi": "Giới hạn amplitude và tránh pulse lặp; không làm chữ khó đọc."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ scale tĩnh hoặc dùng opacity/outline để nhấn."
+      },
+      "fallback": {
+        "principle_ref": "exaggeration",
+        "guidance_vi": "Nhấn bằng tương phản bố cục thay vì biến dạng hình."
+      },
+      "failure_conditions": [
+        "Méo nhận diện, logo hoặc tỷ lệ cơ thể.",
+        "Biến dạng không hồi về trạng thái chuẩn."
+      ],
+      "validation_checks": [
+        "So silhouette và thể tích trước/sau.",
+        "Kiểm tra brand/face integrity ở frame cực trị."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Chỉ dùng kiến thức animation tổng quát; không có biến dạng production được mở."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "arcs",
+      "qualified_id": "motion_design_principle.arcs",
+      "display_name_vi": "Quỹ đạo theo cung",
+      "summary_vi": "Dùng đường cong có chủ đích cho vật thể hoặc điểm nhìn khi chuyển động thẳng trông cơ học.",
+      "purpose_vi": "Giữ chuyển động dễ theo dõi và phù hợp cấu trúc khớp hoặc đường ném.",
+      "application_rules": [
+        "Đánh dấu điểm đầu, đỉnh cung và điểm cuối.",
+        "Giữ tangent liên tục giữa các đoạn."
+      ],
+      "restraint_rules": [
+        "Không ép mọi UI hoặc camera move thành cung.",
+        "Tránh cung làm vật thể xuyên nền hoặc sai vật lý."
+      ],
+      "footage_limits": [
+        "Footage thật có quỹ đạo đã quay; crop số chỉ mô phỏng được khi có dư ảnh."
+      ],
+      "timing_guidance": {
+        "measurement": "path_progress",
+        "guidance_vi": "Tốc độ dọc cung theo lực, không chỉ chia đều khoảng cách."
+      },
+      "accessibility": {
+        "guidance_vi": "Giữ cung ngắn, ít vòng và có biến thể thẳng/tĩnh."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Rút cung thành dịch chuyển ngắn hoặc trạng thái tĩnh."
+      },
+      "fallback": {
+        "principle_ref": "timing_and_spacing",
+        "guidance_vi": "Dùng đường thẳng ngắn với timing rõ khi cung không có căn cứ."
+      },
+      "failure_conditions": [
+        "Quỹ đạo xuyên vật thể hoặc mất điểm neo.",
+        "Cung đổi tangent đột ngột gây giật."
+      ],
+      "validation_checks": [
+        "Vẽ path trên frame và kiểm tra clearance.",
+        "Xem marker tại các điểm cực trị."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có motion/keyframe tổng quát; không phải arc runtime."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "staging",
+      "qualified_id": "motion_design_principle.staging",
+      "display_name_vi": "Dàn điểm nhìn",
+      "summary_vi": "Sắp xếp bố cục, thứ tự và chuyển động để một ý chính được đọc rõ tại mỗi beat.",
+      "purpose_vi": "Giữ sự chú ý đúng chỗ trước khi thêm motion phụ.",
+      "application_rules": [
+        "Xác định chủ thể chính của từng beat.",
+        "Giảm cạnh tranh từ nền, chữ và secondary motion."
+      ],
+      "restraint_rules": [
+        "Không thêm motion trang trí khi điểm nhìn đã rõ.",
+        "Tránh nhiều CTA hoặc title chạy đồng thời."
+      ],
+      "footage_limits": [
+        "Bố cục nguồn quá chật có thể cần crop hoặc quay lại; animation không tạo safe area mới."
+      ],
+      "timing_guidance": {
+        "measurement": "attention_beats",
+        "guidance_vi": "Mỗi beat có thời gian thiết lập, đọc và chuyển giao chú ý."
+      },
+      "accessibility": {
+        "guidance_vi": "Thứ tự đọc phải hiểu được khi tắt âm và giảm chuyển động."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ hierarchy bằng vị trí, scale tĩnh và contrast thay vì di chuyển."
+      },
+      "fallback": {
+        "principle_ref": "motion_hierarchy",
+        "guidance_vi": "Giữ một motion chính và tắt phần phụ khi bố cục quá tải."
+      },
+      "failure_conditions": [
+        "Không xác định được điểm nhìn chính.",
+        "Motion che chữ hoặc chủ thể quan trọng."
+      ],
+      "validation_checks": [
+        "Dừng ở frame đại diện và hỏi điểm nhìn đầu tiên.",
+        "Kiểm tra thứ tự đọc trên mobile và không âm thanh."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có visual hierarchy; 26D áp dụng riêng cho motion staging."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "secondary_action",
+      "qualified_id": "motion_design_principle.secondary_action",
+      "display_name_vi": "Hành động phụ",
+      "summary_vi": "Thêm chuyển động phụ để hỗ trợ ý chính mà không giành điểm nhìn.",
+      "purpose_vi": "Tăng ngữ cảnh hoặc cảm xúc sau khi hành động chính đã rõ.",
+      "application_rules": [
+        "Liên kết hành động phụ với beat chính và hierarchy.",
+        "Giảm biên độ/tương phản so với motion chính."
+      ],
+      "restraint_rules": [
+        "Không thêm particle, icon hoặc camera shake chỉ để lấp chỗ trống.",
+        "Tránh hành động phụ khi chữ hoặc CTA đang cần đọc."
+      ],
+      "footage_limits": [
+        "Footage không có layer riêng không cho phép tách hành động phụ mà không mask/track."
+      ],
+      "timing_guidance": {
+        "measurement": "relative_phase",
+        "guidance_vi": "Bắt đầu sau hoặc gần beat chính và kết thúc trước chuyển giao tiếp theo."
+      },
+      "accessibility": {
+        "guidance_vi": "Phần phụ không được nhấp nháy, che nội dung hoặc tăng chuyển động liên tục."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Tắt hành động phụ, giữ tín hiệu chính ở trạng thái tĩnh."
+      },
+      "fallback": {
+        "principle_ref": "staging",
+        "guidance_vi": "Bỏ secondary action và củng cố bố cục chính."
+      },
+      "failure_conditions": [
+        "Hành động phụ thu hút hơn ý chính.",
+        "Layer phụ lộ mask hoặc tiếp tục quá beat."
+      ],
+      "validation_checks": [
+        "So bản bật/tắt phần phụ và kiểm tra điểm nhìn.",
+        "Xem reduced-motion variant không mất nghĩa."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có layer animation; chưa có secondary-action contract cụ thể."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "exaggeration",
+      "qualified_id": "motion_design_principle.exaggeration",
+      "display_name_vi": "Cường điệu có kiểm soát",
+      "summary_vi": "Tăng một thuộc tính chuyển động để nhấn ý nhưng vẫn bảo toàn nhận diện và sự thật nội dung.",
+      "purpose_vi": "Làm rõ lực, hierarchy hoặc cảm xúc trong giới hạn brand và footage.",
+      "application_rules": [
+        "Chỉ chọn một thuộc tính chính như scale, timing hoặc path.",
+        "Ghi mức cường điệu và lý do."
+      ],
+      "restraint_rules": [
+        "Không cường điệu mặt, cơ thể, sản phẩm hoặc claim thành sai sự thật.",
+        "Tránh kết hợp đồng thời nhiều hiệu ứng mạnh."
+      ],
+      "footage_limits": [
+        "Footage raster có biên crop và độ phân giải; cường điệu không tạo thêm dữ liệu thật."
+      ],
+      "timing_guidance": {
+        "measurement": "relative_amplitude",
+        "guidance_vi": "Tăng đủ để đọc nhưng quay về baseline trước beat kế."
+      },
+      "accessibility": {
+        "guidance_vi": "Giới hạn scale/rotation/flash và không truyền nghĩa chỉ bằng motion."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Dùng weight, outline hoặc contrast tĩnh thay vì tăng biên độ."
+      },
+      "fallback": {
+        "principle_ref": "appeal",
+        "guidance_vi": "Tăng độ rõ bằng hình thức tĩnh thay vì motion mạnh."
+      },
+      "failure_conditions": [
+        "Nhận diện, tỷ lệ hoặc claim bị sai.",
+        "Motion quá mạnh gây mỏi mắt hoặc che nội dung."
+      ],
+      "validation_checks": [
+        "So bản gốc và bản nhấn tại frame cực trị.",
+        "Kiểm tra brand, mặt, sản phẩm và accessibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có expressive pose; 26D thêm giới hạn truth/brand."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "appeal",
+      "qualified_id": "motion_design_principle.appeal",
+      "display_name_vi": "Sức hấp dẫn thị giác",
+      "summary_vi": "Giữ hình, nhịp và chi tiết nhất quán để chuyển động dễ hiểu và phù hợp mục tiêu.",
+      "purpose_vi": "Tạo cảm giác hoàn thiện mà không đánh đổi readability, brand hoặc hiệu năng.",
+      "application_rules": [
+        "Giữ silhouette, spacing và visual language nhất quán.",
+        "Ưu tiên chi tiết phục vụ nội dung."
+      ],
+      "restraint_rules": [
+        "Không đồng nhất hấp dẫn với nhiều blur, glow hoặc bounce.",
+        "Tránh sao chép phong cách có quyền không rõ."
+      ],
+      "footage_limits": [
+        "Chất lượng nguồn thấp, font thiếu quyền hoặc brand asset không chuẩn phải được chặn thay vì trang trí che lỗi."
+      ],
+      "timing_guidance": {
+        "measurement": "cohesion_review",
+        "guidance_vi": "Đánh giá toàn sequence, không tối ưu từng effect tách rời."
+      },
+      "accessibility": {
+        "guidance_vi": "Giữ contrast, hierarchy, reduced motion và khả năng đọc trên mobile."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ appeal bằng bố cục, màu và typography tĩnh."
+      },
+      "fallback": {
+        "principle_ref": "staging",
+        "guidance_vi": "Quay về bố cục rõ, ít chi tiết khi phong cách chưa thống nhất."
+      },
+      "failure_conditions": [
+        "Trang trí lấn nội dung hoặc xung đột brand.",
+        "Font/asset không có quyền hoặc không đọc được."
+      ],
+      "validation_checks": [
+        "Review sequence bằng frame contact sheet.",
+        "Kiểm tra brand, font, contrast và reduced-motion variant."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có style/expressive pose; không thay thế review bản quyền và brand."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "motion_hierarchy",
+      "qualified_id": "motion_design_principle.motion_hierarchy",
+      "display_name_vi": "Phân cấp chuyển động",
+      "summary_vi": "Xếp thứ tự chuyển động chính, phụ và tĩnh để dẫn mắt qua từng beat.",
+      "purpose_vi": "Ngăn nhiều phần tử tranh nhau và đồng bộ motion với hierarchy thông tin.",
+      "application_rules": [
+        "Gán mỗi phần tử mức primary, secondary hoặc static.",
+        "Cho motion chính mở đường, phần phụ theo sau hoặc đứng yên."
+      ],
+      "restraint_rules": [
+        "Không cho mọi phần tử cùng biên độ và duration.",
+        "Tránh continuous motion khi nội dung cần đọc."
+      ],
+      "footage_limits": [
+        "Khi nguồn không tách layer, hierarchy phải dựa vào cut, bố cục hoặc contrast thay vì giả animation."
+      ],
+      "timing_guidance": {
+        "measurement": "priority_timeline",
+        "guidance_vi": "Chỉ một motion chính tại một thời điểm trừ khi plan chứng minh khác."
+      },
+      "accessibility": {
+        "guidance_vi": "Hierarchy vẫn hiểu khi motion giảm hoặc tắt; không dựa vào chuyển động đơn độc."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Chuyển hierarchy sang vị trí, weight, scale tĩnh và contrast."
+      },
+      "fallback": {
+        "principle_ref": "staging",
+        "guidance_vi": "Giữ một hành động chính và tắt mọi motion phụ."
+      },
+      "failure_conditions": [
+        "Nhiều motion chính đồng thời hoặc CTA bị cạnh tranh.",
+        "Tắt motion làm mất hoàn toàn thứ tự đọc."
+      ],
+      "validation_checks": [
+        "Lập bảng priority theo timeline.",
+        "So bản full motion với reduced-motion và frame tĩnh."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Visual hierarchy hiện hữu là nền tham chiếu; 26D thêm motion priority."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}

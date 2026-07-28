@@ -1,0 +1,678 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-transition-motion",
+  "technology_count": 7,
+  "capability_mapping_count": 42,
+  "technologies": [
+    {
+      "id": "remotion",
+      "display_name": "Remotion",
+      "inventory_status": "NOT_INSTALLED",
+      "relationship": "metadata_only",
+      "evidence_refs": [],
+      "notes_vi": "Không thấy package hoặc composition runtime Remotion trong repository; không cài trong 26D."
+    },
+    {
+      "id": "gsap",
+      "display_name": "GSAP",
+      "inventory_status": "NOT_INSTALLED",
+      "relationship": "metadata_only",
+      "evidence_refs": [],
+      "notes_vi": "Không thấy dependency hoặc loader GSAP trong repository; chỉ ghi target tham khảo."
+    },
+    {
+      "id": "hyperframes",
+      "display_name": "HyperFrames",
+      "inventory_status": "NOT_INSTALLED",
+      "relationship": "metadata_only",
+      "evidence_refs": [],
+      "notes_vi": "Không tìm thấy HyperFrames trong inventory; không gọi hoặc tải công cụ."
+    },
+    {
+      "id": "ffmpeg",
+      "display_name": "FFmpeg",
+      "inventory_status": "AVAILABLE_LOCAL",
+      "relationship": "metadata_only",
+      "evidence_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Inventory thấy primitive cục bộ; mapping không gọi và không sửa renderer."
+        }
+      ],
+      "notes_vi": "FFmpeg/ffprobe hiện diện ở workstation và được dùng làm bằng chứng inventory, không phải quyền chạy pack."
+    },
+    {
+      "id": "svg",
+      "display_name": "SVG",
+      "inventory_status": "SPECIFICATION_ONLY",
+      "relationship": "metadata_only",
+      "evidence_refs": [
+        {
+          "path": "index.html",
+          "symbols": [],
+          "support_layer": "tool_inventory",
+          "relationship": "metadata_only",
+          "notes_vi": "Có inline SVG trong giao diện hiện hữu; không lấy làm runtime video hoặc sửa UI."
+        }
+      ],
+      "notes_vi": "SVG chỉ là target mô tả cho hình học/mask; chưa có preset video 26D."
+    },
+    {
+      "id": "canvas",
+      "display_name": "Canvas",
+      "inventory_status": "SPECIFICATION_ONLY",
+      "relationship": "metadata_only",
+      "evidence_refs": [
+        {
+          "path": "b_o_c_o_ph_n_t_ch_ai_influencer_m_h_nh_kinh_doanh.html",
+          "symbols": [],
+          "support_layer": "tool_inventory",
+          "relationship": "metadata_only",
+          "notes_vi": "Có Canvas ở tài liệu HTML khác; không phải engine render của bot."
+        }
+      ],
+      "notes_vi": "Canvas chỉ mô tả khả năng vẽ cục bộ; không đăng ký pipeline hoặc tạo preview."
+    },
+    {
+      "id": "css_transforms",
+      "display_name": "CSS transforms",
+      "inventory_status": "SPECIFICATION_ONLY",
+      "relationship": "metadata_only",
+      "evidence_refs": [
+        {
+          "path": "index.html",
+          "symbols": [],
+          "support_layer": "tool_inventory",
+          "relationship": "metadata_only",
+          "notes_vi": "Chỉ xem primitive style tại UI như tham khảo; không thay đổi UI/UX production."
+        }
+      ],
+      "notes_vi": "CSS transforms là target nhẹ cho prototype tương lai, chưa được đăng ký trong bot."
+    }
+  ],
+  "mappings": [
+    {
+      "qualified_id": "transition.hard_cut",
+      "group_id": "transition",
+      "capability_id": "hard_cut",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "Có thể mô tả biên cắt bằng timeline local hiện hữu.",
+      "limitations_vi": "Không chứng minh output production và không gọi renderer trong 26D.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.cross_dissolve",
+      "group_id": "transition",
+      "capability_id": "cross_dissolve",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "Inventory có primitive dissolve để đối chiếu duration.",
+      "limitations_vi": "Không suy ra mask, audio mix hoặc QA đầy đủ.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.dip_to_black",
+      "group_id": "transition",
+      "capability_id": "dip_to_black",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "Có thể mô tả từ fade primitive với khoảng đen rõ.",
+      "limitations_vi": "Dip riêng chưa có contract runtime; chỉ planning.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.dip_to_white",
+      "group_id": "transition",
+      "capability_id": "dip_to_white",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "FFmpeg là target filter nếu một task runtime được duyệt.",
+      "limitations_vi": "Chưa có dip-to-white implementation và phải kiểm tra chớp sáng.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.slide",
+      "group_id": "transition",
+      "capability_id": "slide",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "Primitive slide hiện hữu giúp lập kế hoạch vector và duration.",
+      "limitations_vi": "Dư ảnh, crop và reduced motion vẫn phải QA riêng.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.push",
+      "group_id": "transition",
+      "capability_id": "push",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "ffmpeg"
+      ],
+      "realization_notes_vi": "CSS transform mô tả panel push trong prototype local tương lai.",
+      "limitations_vi": "CSS/2D không tạo phối cảnh push thật từ footage thiếu dư ảnh.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.whip_pan",
+      "group_id": "transition",
+      "capability_id": "whip_pan",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "Có vocabulary planner và có thể định nghĩa blur/vector bằng metadata.",
+      "limitations_vi": "Không có motion-vector/blur runtime được mở trong 26D.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.speed_ramp",
+      "group_id": "transition",
+      "capability_id": "speed_ramp",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "FFmpeg là target retime nếu timebase và audio được kiểm chứng.",
+      "limitations_vi": "Không tự tạo frame hoặc sửa pitch; cần runtime/QA riêng.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.match_motion",
+      "group_id": "transition",
+      "capability_id": "match_motion",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "ffmpeg"
+      ],
+      "realization_notes_vi": "Mapping tập trung vào vector ở biên nối, khác camera match_motion của 26C.",
+      "limitations_vi": "Không tracking tự động và không thay capability 26C.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.match_shape",
+      "group_id": "transition",
+      "capability_id": "match_shape",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "canvas"
+      ],
+      "realization_notes_vi": "SVG có thể mô tả silhouette/mask trong một prototype local.",
+      "limitations_vi": "Không có correspondences hoặc matte engine trong pack.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.match_color",
+      "group_id": "transition",
+      "capability_id": "match_color",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "FFmpeg chỉ là target cho blend/color metadata có kiểm soát.",
+      "limitations_vi": "Không thay color grading, skin protection hoặc rights QA.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.object_wipe",
+      "group_id": "transition",
+      "capability_id": "object_wipe",
+      "primary_technology": "canvas",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Canvas/SVG mô tả matte object trong preview tương lai.",
+      "limitations_vi": "Cần tracking/clean plate thật; không có trong 26D.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.foreground_occlusion",
+      "group_id": "transition",
+      "capability_id": "foreground_occlusion",
+      "primary_technology": "canvas",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Canvas có thể compositing layer theo contract nếu runtime được duyệt.",
+      "limitations_vi": "Roto, bóng và alpha edge là blocker chưa giải quyết.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.zoom",
+      "group_id": "transition",
+      "capability_id": "zoom",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "Runtime inventory có zoom và zoom motion để tham chiếu giới hạn crop.",
+      "limitations_vi": "Không biến crop số thành dolly thật và phải bảo vệ độ phân giải.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.light_flash",
+      "group_id": "transition",
+      "capability_id": "light_flash",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [],
+      "realization_notes_vi": "Có thể mô tả pulse sáng ngắn ở lớp filter nếu accessibility pass.",
+      "limitations_vi": "Không được xem là cho phép flash; phải có fallback luôn sẵn.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.blur",
+      "group_id": "transition",
+      "capability_id": "blur",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "canvas"
+      ],
+      "realization_notes_vi": "FFmpeg/Canvas là target cho blur có vùng bảo vệ.",
+      "limitations_vi": "Chưa có filter contract hay mask runtime được đăng ký.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.glitch",
+      "group_id": "transition",
+      "capability_id": "glitch",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "canvas"
+      ],
+      "realization_notes_vi": "CSS/Canvas mô tả displacement có seed trong prototype cục bộ.",
+      "limitations_vi": "Không dùng random không seed, không flash và không che lỗi nguồn.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.mask_reveal",
+      "group_id": "transition",
+      "capability_id": "mask_reveal",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "SVG mask mô tả reveal shot; namespace khác reveal chữ.",
+      "limitations_vi": "Cần matte/tracking và không được tự nhận đã render.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.split_screen",
+      "group_id": "transition",
+      "capability_id": "split_screen",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "CSS panel và SVG divider là target cho bố cục chia.",
+      "limitations_vi": "Audio mix, crop và safe area chưa có runtime contract.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "transition.parallax_transition",
+      "group_id": "transition",
+      "capability_id": "parallax_transition",
+      "primary_technology": "canvas",
+      "supporting_technologies": [
+        "css_transforms",
+        "svg"
+      ],
+      "realization_notes_vi": "Canvas/layer transform mô tả depth ordering trong plan.",
+      "limitations_vi": "Không có segmentation/depth estimation hoặc background fill.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.timing_and_spacing",
+      "group_id": "motion_design_principle",
+      "capability_id": "timing_and_spacing",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "ffmpeg"
+      ],
+      "realization_notes_vi": "Timeline và transform token có thể ghi trong plan tĩnh.",
+      "limitations_vi": "Không sửa timebase hoặc sinh frame.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.easing",
+      "group_id": "motion_design_principle",
+      "capability_id": "easing",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Curve được lưu như metadata, không gắn thư viện animation.",
+      "limitations_vi": "Không khẳng định easing áp được lên footage phẳng.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.anticipation",
+      "group_id": "motion_design_principle",
+      "capability_id": "anticipation",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "canvas"
+      ],
+      "realization_notes_vi": "Hình học/pose có thể được storyboard bằng SVG hoặc Canvas.",
+      "limitations_vi": "Không tạo frame chuẩn bị cho người thật từ nguồn thiếu coverage.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.follow_through",
+      "group_id": "motion_design_principle",
+      "capability_id": "follow_through",
+      "primary_technology": "canvas",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "Layer timing có thể mô tả cho prototype.",
+      "limitations_vi": "Cần layer/rig thật; không có compositing runtime.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.overlap",
+      "group_id": "motion_design_principle",
+      "capability_id": "overlap",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Offset theo frame được ghi trong contract.",
+      "limitations_vi": "Không tự tách layer từ footage.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.squash_and_stretch",
+      "group_id": "motion_design_principle",
+      "capability_id": "squash_and_stretch",
+      "primary_technology": "canvas",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Canvas/SVG phù hợp đồ họa có layer rõ trong prototype.",
+      "limitations_vi": "Không áp dụng tùy ý lên mặt, người hoặc sản phẩm thật.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.arcs",
+      "group_id": "motion_design_principle",
+      "capability_id": "arcs",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "SVG path có thể lưu cung và điểm kiểm tra.",
+      "limitations_vi": "Không thay quỹ đạo camera đã quay.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.staging",
+      "group_id": "motion_design_principle",
+      "capability_id": "staging",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "canvas"
+      ],
+      "realization_notes_vi": "Storyboard tĩnh là mapping an toàn nhất cho staging.",
+      "limitations_vi": "Không thay review người xem hoặc safe-area QA.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.secondary_action",
+      "group_id": "motion_design_principle",
+      "capability_id": "secondary_action",
+      "primary_technology": "canvas",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "Layer phụ có thể được ghi trong timeline metadata.",
+      "limitations_vi": "Không tạo layer phụ từ footage không tách được.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.exaggeration",
+      "group_id": "motion_design_principle",
+      "capability_id": "exaggeration",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Transform token giúp giới hạn amplitude trong plan.",
+      "limitations_vi": "Không được biến dạng claim, mặt, logo hoặc sản phẩm.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.appeal",
+      "group_id": "motion_design_principle",
+      "capability_id": "appeal",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "SVG/style metadata hỗ trợ review nhất quán.",
+      "limitations_vi": "Không suy ra quyền asset hoặc production quality từ mapping.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "motion_design_principle.motion_hierarchy",
+      "group_id": "motion_design_principle",
+      "capability_id": "motion_hierarchy",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Transform priority được ghi theo layer và beat.",
+      "limitations_vi": "Không đăng ký state machine hoặc UI transition.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.word_emphasis",
+      "group_id": "kinetic_typography",
+      "capability_id": "word_emphasis",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "SVG text/span metadata phù hợp nhấn từ ở plan.",
+      "limitations_vi": "Không tự căn word timing hoặc cấp quyền font.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.line_build",
+      "group_id": "kinetic_typography",
+      "capability_id": "line_build",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Text filter hiện hữu là bằng chứng primitive, còn line timing vẫn planning.",
+      "limitations_vi": "Không sửa renderer production hoặc tự chia câu.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.type_reveal",
+      "group_id": "kinetic_typography",
+      "capability_id": "type_reveal",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Text animation/typewriter được đối chiếu ở flow metadata.",
+      "limitations_vi": "Unicode, safe area và no-flash vẫn phải QA riêng.",
+      "readiness": "LOCAL_PLANNING_READY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.mask_reveal",
+      "group_id": "kinetic_typography",
+      "capability_id": "mask_reveal",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "SVG mask cho glyph/dòng chữ, khác transition.mask_reveal.",
+      "limitations_vi": "Không có glyph mask runtime hoặc font shaping contract trong 26D.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.tracking_animation",
+      "group_id": "kinetic_typography",
+      "capability_id": "tracking_animation",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "CSS/SVG là target mô tả letter spacing có giới hạn.",
+      "limitations_vi": "Inventory ghi tracking chưa khả dụng; không claim executable.",
+      "readiness": "NOT_SUPPORTED",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.scale_punch",
+      "group_id": "kinetic_typography",
+      "capability_id": "scale_punch",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "Transform scale có thể ghi point/anchor trong plan.",
+      "limitations_vi": "Không tạo độ phân giải mới và phải giữ safe area.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.rotation_accent",
+      "group_id": "kinetic_typography",
+      "capability_id": "rotation_accent",
+      "primary_technology": "css_transforms",
+      "supporting_technologies": [
+        "svg"
+      ],
+      "realization_notes_vi": "CSS/SVG mô tả rotation ngắn quanh anchor.",
+      "limitations_vi": "Không có typography runtime và phải kiểm tra bounding box sau xoay.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.highlight_box",
+      "group_id": "kinetic_typography",
+      "capability_id": "highlight_box",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "css_transforms"
+      ],
+      "realization_notes_vi": "SVG box/outline là target cho bảo vệ contrast.",
+      "limitations_vi": "Không chạm UI hiện hữu hoặc tự chọn brand color.",
+      "readiness": "CONTRACT_ONLY",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.subtitle_to_title_promotion",
+      "group_id": "kinetic_typography",
+      "capability_id": "subtitle_to_title_promotion",
+      "primary_technology": "svg",
+      "supporting_technologies": [
+        "canvas"
+      ],
+      "realization_notes_vi": "Layer chữ có thể mô tả theo word-aligned semantic master.",
+      "limitations_vi": "Cần transcript/alignment và rights; không tự sửa subtitle flow.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    },
+    {
+      "qualified_id": "kinetic_typography.beat_synced_type",
+      "group_id": "kinetic_typography",
+      "capability_id": "beat_synced_type",
+      "primary_technology": "ffmpeg",
+      "supporting_technologies": [
+        "svg",
+        "css_transforms"
+      ],
+      "realization_notes_vi": "Audio cue và text timing chỉ được ghi thành plan metadata.",
+      "limitations_vi": "Music/Suno vẫn khóa; không phân tích hoặc tải audio trong 26D.",
+      "readiness": "REQUIRES_RUNTIME",
+      "relationship": "metadata_only",
+      "production_renderer_changed": false
+    }
+  ]
+}

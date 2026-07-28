@@ -1,0 +1,893 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-transition-motion",
+  "group_id": "kinetic_typography",
+  "capability_count": 10,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "capabilities": [
+    {
+      "id": "word_emphasis",
+      "qualified_id": "kinetic_typography.word_emphasis",
+      "display_name_vi": "Nhấn một từ",
+      "summary_vi": "Làm nổi một từ khóa trong câu bằng weight, scale nhỏ hoặc màu có hỗ trợ tương phản.",
+      "purpose_vi": "Dẫn mắt tới ý chính mà vẫn giữ câu đọc liền mạch.",
+      "required_inputs": [
+        "Nội dung đã duyệt, từ cần nhấn, font có quyền và vùng chữ mục tiêu."
+      ],
+      "typography_behavior": {
+        "unit": "word",
+        "guidance_vi": "Chỉ một từ hoặc cụm rất ngắn được nhấn trong mỗi beat."
+      },
+      "timing_guidance": {
+        "measurement": "spoken_word_or_reading_beat",
+        "guidance_vi": "Đặt nhấn theo lời hoặc beat đọc; giữ trạng thái đủ để nhận diện."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Không làm các từ còn lại mờ đến mức mất ngữ cảnh."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Giữ toàn câu trong safe area của tỷ lệ đích, kể cả khi scale từ nhấn."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 32,
+        "max_lines": 2,
+        "guidance_vi": "Rút câu hoặc chia beat nếu vượt mật độ; không nén tracking để ép chữ."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra nền tại frame nhấn và thêm nền đỡ khi contrast không ổn định."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Từ nhấn và câu phải đọc được ở kích thước mobile thật."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Cấm nhấp nháy; nhấn bằng trạng thái đơn và ổn định."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ weight/màu tĩnh, bỏ scale punch hoặc chuyển động."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Nếu có lời, căn theo word timing; nếu không có audio, dùng beat đọc."
+      },
+      "fallback": {
+        "qualified_id": null,
+        "guidance_vi": "Dùng weight hoặc underline tĩnh khi motion không phù hợp."
+      },
+      "failure_conditions": [
+        "Nhấn sai từ, che dấu tiếng Việt hoặc làm câu nhảy dòng.",
+        "Màu nhấn không đủ contrast."
+      ],
+      "validation_checks": [
+        "Đọc câu không âm thanh và trên mobile.",
+        "Kiểm tra word timing, line wrap và safe area."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge có typography hierarchy; chưa có contract nhấn từng từ đầy đủ."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "line_build",
+      "qualified_id": "kinetic_typography.line_build",
+      "display_name_vi": "Dựng câu theo dòng",
+      "summary_vi": "Hiện các dòng theo thứ tự đọc để phân đoạn thông tin dài thành các beat rõ.",
+      "purpose_vi": "Giảm tải nhận thức và giữ quan hệ giữa tiêu đề, ý chính và chi tiết.",
+      "required_inputs": [
+        "Nội dung đã chia dòng thủ công, thứ tự đọc và thời gian giữ mỗi dòng."
+      ],
+      "typography_behavior": {
+        "unit": "line",
+        "guidance_vi": "Mỗi dòng vào một lần, giữ các dòng trước chỉ khi còn cần cho ngữ cảnh."
+      },
+      "timing_guidance": {
+        "measurement": "line_reading_time",
+        "guidance_vi": "Không thêm dòng mới trước khi dòng hiện tại đọc xong."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Khoảng dòng, căn lề và hierarchy phải ổn định khi dòng mới xuất hiện."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Tính safe area theo trạng thái nhiều dòng nhất, không chỉ frame đầu."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 32,
+        "max_lines": 3,
+        "guidance_vi": "Tối đa ba dòng ngắn; tách thành card khác khi vượt giới hạn."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra contrast cho từng dòng trên nền thay đổi."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Giữ cỡ chữ và line-height đọc được trên màn hình dọc."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Dòng không được chớp hoặc lặp pulse; chỉ vào một lần."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Hiện từng dòng bằng opacity ngắn hoặc card tĩnh."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Căn theo câu nói nếu có; không chạy trước nội dung được nghe."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.word_emphasis",
+        "guidance_vi": "Giữ toàn đoạn tĩnh và chỉ nhấn từ khóa khi line build quá tải."
+      },
+      "failure_conditions": [
+        "Dòng mới đẩy bố cục hoặc che phụ đề.",
+        "Thời gian giữ ngắn hơn thời gian đọc."
+      ],
+      "validation_checks": [
+        "Đo trạng thái có nhiều dòng nhất.",
+        "Đọc trên mobile ở tốc độ phát thật."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "AUTOMATIC_TEXT_ANIMATIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow có animation chữ cơ bản; không có line-build contract đầy đủ."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "type_reveal",
+      "qualified_id": "kinetic_typography.type_reveal",
+      "display_name_vi": "Hé lộ chữ theo ký tự",
+      "summary_vi": "Hiện chữ theo ký tự hoặc cụm ngắn với nhịp đọc được, không giả người dùng đang gõ dữ liệu nhạy cảm.",
+      "purpose_vi": "Tạo nhịp nhập liệu hoặc kể chuyện khi nội dung ngắn và đã được duyệt.",
+      "required_inputs": [
+        "Chuỗi chữ cuối cùng, tốc độ đọc, dấu câu và quy tắc con trỏ nếu có."
+      ],
+      "typography_behavior": {
+        "unit": "grapheme_cluster",
+        "guidance_vi": "Hé lộ theo cụm ký tự Unicode để không tách dấu tiếng Việt hoặc emoji."
+      },
+      "timing_guidance": {
+        "measurement": "graphemes_per_second",
+        "guidance_vi": "Tốc độ thay đổi theo dấu câu và độ dài; không dùng một tốc độ cho mọi câu."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Phần đã hiện phải ổn định; con trỏ không che ký tự."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Đo theo chuỗi đầy đủ cuối cùng để tránh tràn khi reveal hoàn tất."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 32,
+        "max_lines": 2,
+        "guidance_vi": "Tách đoạn dài thành nhiều card; không chạy typewriter cho paragraph."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Nền hoặc box phải giữ contrast suốt thời gian reveal."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Kiểm tra tốc độ và cỡ chữ trên mobile, không chỉ desktop."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Con trỏ nhấp nháy bị tắt; dùng con trỏ tĩnh hoặc không dùng."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Hiện toàn câu bằng opacity một lần hoặc giữ tĩnh."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Không chạy trước lời; với không lời, dùng nhịp đọc và dấu câu."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.line_build",
+        "guidance_vi": "Hiện theo dòng khi chuỗi dài hoặc grapheme handling không bảo đảm."
+      },
+      "failure_conditions": [
+        "Dấu tiếng Việt bị tách, chữ chạy quá nhanh hoặc line wrap thay đổi.",
+        "Con trỏ tạo nhấp nháy."
+      ],
+      "validation_checks": [
+        "Test chuỗi có dấu, emoji và xuống dòng.",
+        "Đo thời gian đọc bản hoàn chỉnh trên mobile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "AUTOMATIC_TEXT_ANIMATIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Typewriter hiện có ở metadata; 26D thêm Unicode và accessibility guard."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "mask_reveal",
+      "qualified_id": "kinetic_typography.mask_reveal",
+      "display_name_vi": "Hé lộ chữ bằng mask",
+      "summary_vi": "Một mask hình học hé lộ chữ hoặc dòng chữ, không nối hai shot video.",
+      "purpose_vi": "Giữ cạnh chữ sạch và tạo hướng đọc có chủ đích.",
+      "required_inputs": [
+        "Text layout cuối, mask path, hướng reveal, font có quyền và vùng safe area."
+      ],
+      "typography_behavior": {
+        "unit": "glyph_or_line_mask",
+        "guidance_vi": "Mask chỉ hé lộ chữ đã layout; không làm biến dạng glyph."
+      },
+      "timing_guidance": {
+        "measurement": "mask_path_progress",
+        "guidance_vi": "Biên mask theo thứ tự đọc và dừng khi toàn chữ đã hiện."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Không giữ chữ ở trạng thái nửa hiện quá lâu hoặc cắt dấu."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Mask và text box đều phải nằm trong safe area đích."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 32,
+        "max_lines": 2,
+        "guidance_vi": "Giảm chữ hoặc tách card nếu path reveal quá dài."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra contrast ở cả frame nửa hiện và hoàn chỉnh."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Mép mask không được làm chữ mảnh mất nét trên mobile."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Mask đi một hướng, không quét qua lại hoặc flash."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Hiện chữ hoàn chỉnh bằng opacity ngắn hoặc giữ tĩnh."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Có thể căn theo câu nói; không bắt buộc sound accent."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.line_build",
+        "guidance_vi": "Hiện theo dòng hoặc tĩnh nếu mask path không sạch."
+      },
+      "failure_conditions": [
+        "Mask cắt dấu/glyph, răng cưa hoặc đi ngược thứ tự đọc.",
+        "Chữ nửa hiện kéo dài gây khó hiểu."
+      ],
+      "validation_checks": [
+        "Kiểm tra glyph có dấu và matte ở 200%.",
+        "Xem đầy đủ ở mobile và reduced-motion variant."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "AUTOMATIC_TEXT_ANIMATIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow có text animations cơ bản; mask reveal chữ vẫn là contract riêng."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "tracking_animation",
+      "qualified_id": "kinetic_typography.tracking_animation",
+      "display_name_vi": "Hoạt ảnh khoảng cách chữ",
+      "summary_vi": "Thay đổi tracking của một cụm chữ ngắn trong giới hạn không phá kerning hoặc khả năng đọc.",
+      "purpose_vi": "Tạo cảm giác mở/khóa nhịp cho title ngắn, không ép paragraph thành hiệu ứng.",
+      "required_inputs": [
+        "Font có quyền, title ngắn, tracking đầu/cuối và cỡ chữ đích."
+      ],
+      "typography_behavior": {
+        "unit": "short_title",
+        "guidance_vi": "Chỉ áp dụng cho title ngắn; giữ kerning pair quan trọng có kiểm tra."
+      },
+      "timing_guidance": {
+        "measurement": "letter_spacing_over_time",
+        "guidance_vi": "Tracking thay đổi một lần, dừng trước khi title cần đọc ổn định."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Giới hạn tracking để không tách từ hoặc chồng glyph."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Đo chiều rộng lớn nhất của title trong safe area."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 24,
+        "max_lines": 1,
+        "guidance_vi": "Chỉ một dòng tối đa 24 ký tự; dài hơn phải dùng effect khác."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Giữ contrast trong cả trạng thái dàn và khóa chữ."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Khoảng cách không làm chữ rời rạc trên mobile."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Không pulse tracking liên tục hoặc đảo qua lại."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ tracking cuối ở trạng thái tĩnh."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Có thể khóa tracking vào beat đơn; không cần audio nếu không có quyền."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.word_emphasis",
+        "guidance_vi": "Dùng weight hoặc màu tĩnh khi tracking runtime không hỗ trợ."
+      },
+      "failure_conditions": [
+        "Glyph chồng, từ bị tách hoặc title tràn safe area.",
+        "Font fallback làm thay đổi chiều rộng."
+      ],
+      "validation_checks": [
+        "Đo bounding box ở tracking cực trị.",
+        "Test font fallback và mobile preview."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "AUTOMATIC_TEXT_TRACKING_AVAILABLE"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Repo ghi tracking animation chưa khả dụng; contract không nâng thành executable."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "NOT_SUPPORTED",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "scale_punch",
+      "qualified_id": "kinetic_typography.scale_punch",
+      "display_name_vi": "Nhấn scale chữ",
+      "summary_vi": "Tăng scale rất ngắn ở một title hoặc từ khóa rồi trở về mức đọc ổn định.",
+      "purpose_vi": "Đánh dấu impact hoặc từ khóa mà không làm chữ bật khỏi safe area.",
+      "required_inputs": [
+        "Text box cuối, điểm neo, scale giới hạn, font có quyền và frame nhấn."
+      ],
+      "typography_behavior": {
+        "unit": "word_or_short_title",
+        "guidance_vi": "Scale quanh điểm neo, không thay đổi line wrap sau khi bắt đầu."
+      },
+      "timing_guidance": {
+        "measurement": "frames_around_beat",
+        "guidance_vi": "Punch ngắn tại beat rồi giữ baseline để đọc."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Cỡ chữ sau punch phải ổn định và không bị cắt ký tự."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Tính biên lớn nhất khi scale để không vượt safe area."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 28,
+        "max_lines": 2,
+        "guidance_vi": "Rút câu nếu scale khiến line wrap hoặc vùng chữ quá dày."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra nền và box ở frame cực đại, không chỉ frame cuối."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Punch không được rung hoặc che UI safe zone trên mobile."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Không lặp scale pulse hoặc kết hợp flash."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Dùng weight, underline hoặc box tĩnh thay cho scale."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Có thể căn transient; không tự tạo impact audio."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.word_emphasis",
+        "guidance_vi": "Dùng nhấn weight/màu tĩnh nếu scale gây cắt hoặc chóng mặt."
+      },
+      "failure_conditions": [
+        "Scale làm title tràn safe area hoặc méo raster.",
+        "Punch lặp gây mỏi mắt hoặc mất hierarchy."
+      ],
+      "validation_checks": [
+        "Đo bounding box tại frame lớn nhất.",
+        "Xem loop ngắn và mobile preview."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "AUTOMATIC_TEXT_ANIMATIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow có zoom_soft/pop_soft; 26D thêm giới hạn readability và safe area."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "rotation_accent",
+      "qualified_id": "kinetic_typography.rotation_accent",
+      "display_name_vi": "Nhấn xoay nhẹ",
+      "summary_vi": "Xoay một title hoặc badge rất ít để tạo accent hình học có kiểm soát.",
+      "purpose_vi": "Tạo cá tính cho nhãn ngắn khi baseline và điểm neo vẫn đọc được.",
+      "required_inputs": [
+        "Nội dung ngắn, góc xoay giới hạn, điểm neo, font/brand asset có quyền."
+      ],
+      "typography_behavior": {
+        "unit": "badge_or_short_title",
+        "guidance_vi": "Xoay quanh tâm hoặc anchor đã xác định, không xoay cả đoạn dài."
+      },
+      "timing_guidance": {
+        "measurement": "degrees_over_frames",
+        "guidance_vi": "Vào và ra một lần; tránh dao động qua lại."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Góc xoay phải giữ baseline đủ đọc và không làm dấu bị khuất."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Tính bounding box sau xoay, không dùng box chưa xoay."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 20,
+        "max_lines": 1,
+        "guidance_vi": "Chỉ dùng title/badge một dòng ngắn."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra contrast ở góc xoay và nền chuyển động."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Đảm bảo chữ không quá nhỏ hoặc sát mép ở màn hình dọc."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Không kết hợp xoay với nhấp nháy hoặc rung lặp."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ badge tĩnh với góc cuối hoặc bỏ xoay."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Có thể khóa vào beat đơn; không tạo audio nếu chưa có quyền."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.highlight_box",
+        "guidance_vi": "Dùng box/weight tĩnh nếu góc xoay làm giảm readability."
+      },
+      "failure_conditions": [
+        "Góc xoay làm chữ, dấu hoặc logo khó nhận.",
+        "Bounding box vượt safe area hoặc cạnh rung."
+      ],
+      "validation_checks": [
+        "Xem frame cực trị ở mobile.",
+        "Kiểm tra brand/logo và line baseline."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "highlight_box",
+      "qualified_id": "kinetic_typography.highlight_box",
+      "display_name_vi": "Hộp nhấn chữ",
+      "summary_vi": "Đưa một box hoặc gạch nền vào sau chữ để bảo vệ contrast và dẫn mắt.",
+      "purpose_vi": "Giữ chữ đọc được trên footage phức tạp mà không che quá nhiều nội dung.",
+      "required_inputs": [
+        "Text box cuối, padding, màu box có quyền/brand và độ trong suốt giới hạn."
+      ],
+      "typography_behavior": {
+        "unit": "word_line_or_caption",
+        "guidance_vi": "Box bám layout chữ nhưng không nở giật theo từng ký tự."
+      },
+      "timing_guidance": {
+        "measurement": "box_and_text_beats",
+        "guidance_vi": "Box vào cùng hoặc ngay trước chữ, ra sau khi chữ đọc xong."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Padding và line-height giữ nguyên khi box xuất hiện."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Box không vượt safe area kể cả khi text dài nhất."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 32,
+        "max_lines": 2,
+        "guidance_vi": "Chia box khi câu dài; không dùng một box phủ cả màn hình."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Đo contrast chữ–box và box–nền ở nhiều frame."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Padding đủ lớn cho ngón tay/đọc mobile nhưng không che subject."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Box không pulse; opacity chuyển một lần có kiểm soát."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ box tĩnh và chỉ thay đổi opacity nhẹ nếu cần."
+      },
+      "audio_sync": {
+        "required": false,
+        "guidance_vi": "Có thể căn box theo câu nói; không cần accent âm thanh."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.word_emphasis",
+        "guidance_vi": "Dùng weight/outline nếu box che footage hoặc sai brand."
+      },
+      "failure_conditions": [
+        "Box che chủ thể, CTA hoặc safe area.",
+        "Opacity thấp làm contrast không đủ."
+      ],
+      "validation_checks": [
+        "Kiểm tra box ở frame text dài nhất.",
+        "Đọc trên nền chuyển động và mobile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "local_worker.py",
+          "symbols": [
+            "video_editor_text_filter"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Text filter hiện hữu là tham chiếu; không đăng ký box runtime."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "subtitle_to_title_promotion",
+      "qualified_id": "kinetic_typography.subtitle_to_title_promotion",
+      "display_name_vi": "Nâng phụ đề thành tiêu đề",
+      "summary_vi": "Chuyển một cụm phụ đề đã xác minh thành title nổi bật mà không làm sai transcript.",
+      "purpose_vi": "Tái sử dụng semantic master để nhấn ý, vẫn giữ timeline và nghĩa nguồn.",
+      "required_inputs": [
+        "Transcript/subtitle đã duyệt, word timing, target language, font và quyền hiển thị."
+      ],
+      "typography_behavior": {
+        "unit": "subtitle_segment",
+        "guidance_vi": "Giữ nguyên từ/nghĩa; chỉ đổi hierarchy, vị trí hoặc nhịp hiện."
+      },
+      "timing_guidance": {
+        "measurement": "word_aligned_segment",
+        "guidance_vi": "Không xuất hiện trước câu nguồn nếu không có chủ đích đã ghi."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Title mới không được làm mất phụ đề bắt buộc hoặc tạo hai luồng đọc cạnh tranh."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Tính safe area đồng thời cho subtitle và title ở mọi trạng thái."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 32,
+        "max_lines": 2,
+        "guidance_vi": "Tách title dài; không nén transcript để vừa card."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra title và subtitle trên nền cùng frame, không chỉ một lớp."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Giữ cỡ chữ, khoảng cách và thứ tự đọc trên mobile."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Không flash khi promotion; dùng chuyển hierarchy một lần."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ title ở vị trí tĩnh hoặc fade ngắn, không bay qua màn hình."
+      },
+      "audio_sync": {
+        "required": true,
+        "guidance_vi": "Bám word timing của transcript; nếu alignment thiếu thì dừng, không đoán."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.line_build",
+        "guidance_vi": "Giữ phụ đề bình thường nếu không có semantic alignment sạch."
+      },
+      "failure_conditions": [
+        "Title paraphrase sai nghĩa hoặc che subtitle.",
+        "Timing lệch lời, font thiếu quyền hoặc hai lớp khó đọc."
+      ],
+      "validation_checks": [
+        "Đối chiếu từng word timing với transcript.",
+        "Kiểm tra safe area/contrast khi hai lớp cùng hiện."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả hierarchy chữ; không cung cấp promotion semantic master."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "beat_synced_type",
+      "qualified_id": "kinetic_typography.beat_synced_type",
+      "display_name_vi": "Chữ đồng bộ beat",
+      "summary_vi": "Đưa/nhấn chữ theo beat audio đã phân tích mà vẫn ưu tiên lời và khả năng đọc.",
+      "purpose_vi": "Tạo nhịp social hoặc title card có nhạc khi beat map và quyền đã rõ.",
+      "required_inputs": [
+        "Audio có quyền, beat map hoặc cue thủ công, nội dung chữ, target fps và platform."
+      ],
+      "typography_behavior": {
+        "unit": "word_or_short_phrase",
+        "guidance_vi": "Mỗi beat có một thay đổi nhỏ; không biến toàn bộ chữ thành pulse."
+      },
+      "timing_guidance": {
+        "measurement": "audio_beats_and_reading_intervals",
+        "guidance_vi": "Nếu beat xung đột với lời, lời và readability được ưu tiên."
+      },
+      "readability": {
+        "required": true,
+        "guidance_vi": "Giữ trạng thái chữ đủ lâu; beat không được ép tốc độ đọc vượt khả năng."
+      },
+      "safe_area": {
+        "target_profile_required": true,
+        "guidance_vi": "Tính safe area cho trạng thái scale/position lớn nhất."
+      },
+      "maximum_character_density": {
+        "max_characters_per_line": 28,
+        "max_lines": 2,
+        "guidance_vi": "Giảm số chữ mỗi beat và tách câu dài thành nhiều đoạn."
+      },
+      "contrast": {
+        "frame_sampling_required": true,
+        "guidance_vi": "Kiểm tra contrast ở beat mạnh, không để waveform/flash che chữ."
+      },
+      "mobile_legibility": {
+        "mobile_preview_required": true,
+        "guidance_vi": "Xem bằng loa và màn hình mobile để kiểm tra cả nhịp lẫn chữ."
+      },
+      "no_flashing_accessibility": {
+        "flashing_allowed": false,
+        "guidance_vi": "Beat không được tạo flash hoặc đổi sáng lặp; dùng scale/weight nhẹ."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Giữ chữ tĩnh và chỉ đổi weight theo một số beat cần thiết."
+      },
+      "audio_sync": {
+        "required": true,
+        "guidance_vi": "Beat map phải có nguồn và quyền; không tự trích nhạc không được phép."
+      },
+      "fallback": {
+        "qualified_id": "kinetic_typography.word_emphasis",
+        "guidance_vi": "Dùng nhấn từ khóa theo câu khi beat map không đáng tin hoặc audio bị khóa."
+      },
+      "failure_conditions": [
+        "Beat lệch, chữ chạy quá dày hoặc lời bị lấn.",
+        "Nhạc/cover art/font không có quyền hoặc audio clipped."
+      ],
+      "validation_checks": [
+        "Đối chiếu beat marker với audio và word timing.",
+        "Kiểm tra loudness/peak, chữ và reduced-motion variant."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/shared/transitions.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Metadata có beat-cut vocabulary; không cấp quyền nhạc hoặc beat runtime."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
