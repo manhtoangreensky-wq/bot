@@ -2,6 +2,8 @@
 Description=Apply one verified TOAN AAS Local Bot API release
 After=docker.service network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=20
 
 [Service]
 Type=oneshot
