@@ -69113,12 +69113,12 @@ def video_profile_studio_pop_step(context, state: dict) -> dict:
     return save_video_profile_studio_state(context, {**state, "step": step, "history": history})
 
 
-def video_scene3_return_to_parent(context, state: dict, parent: str, **fields) -> dict:
+def video_scene3_return_to_parent(handler_context, state: dict, parent: str, **fields) -> dict:
     history = list(state.get("history") or [])
     if history and history[-1] == parent:
         history.pop()
     return save_video_profile_studio_state(
-        context,
+        handler_context,
         {**state, **fields, "step": str(parent), "history": history},
     )
 
