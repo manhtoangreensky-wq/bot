@@ -1,0 +1,12 @@
+{
+  "schema": "toanaas-localbotapi-policy/v1",
+  "service": "toanaas-telegram-bot-api.service",
+  "container_image": "aiogram/telegram-bot-api@sha256:2e93a720f71f82e41a42dc89e258efda09e6791f8d959e6801d15f88408e8eb1",
+  "upstream_host": "127.0.0.1",
+  "upstream_port": 8081,
+  "forbidden_public_ports": [8081, 8082],
+  "retention_minutes": 120,
+  "max_data_mib": 6144,
+  "minimum_free_mib": 3072,
+  "managed_units": []
+}
