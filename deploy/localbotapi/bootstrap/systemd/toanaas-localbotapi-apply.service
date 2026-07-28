@@ -7,6 +7,7 @@ StartLimitBurst=20
 
 [Service]
 Type=oneshot
+SupplementaryGroups=toanaas-deploy
 ExecStart=/usr/local/libexec/toanaas-localbotapi/current/apply-release apply-ready
 NoNewPrivileges=true
 PrivateTmp=true
