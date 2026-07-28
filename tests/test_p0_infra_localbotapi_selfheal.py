@@ -949,6 +949,8 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
             assert "ProtectHome=true" in text
             if name == "toanaas-localbotapi-apply.service":
                 assert "/usr/local/libexec/toanaas-localbotapi/current/apply-release" in text
+                assert "StartLimitIntervalSec=60" in text
+                assert "StartLimitBurst=20" in text
 
 
 def test_workflow_is_path_scoped_pinned_and_host_key_strict():
