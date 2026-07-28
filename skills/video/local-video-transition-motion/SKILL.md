@@ -19,6 +19,8 @@ phải bộ lọc FFmpeg, renderer, preset production hay bằng chứng video �
   chuyển động; luôn ghi giới hạn khi áp dụng lên footage thật.
 - [Kinetic typography](kinetic_typography.json): chữ nhấn, reveal và beat-sync;
   ưu tiên đọc được trên mobile, safe area và reduced motion.
+- [Âm thanh tại biên chuyển](transition_audio.json): tám cue âm thanh planning-only;
+  kiểm tra timing, gain, ducking và quyền, không chứa asset hoặc lệnh tải.
 - [Mapping kỹ thuật](local_implementation_mapping.json): metadata về công cụ
   cục bộ, không phải lệnh cài đặt hoặc lệnh chạy.
 

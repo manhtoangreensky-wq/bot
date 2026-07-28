@@ -93,7 +93,11 @@ CAPABILITY_FILES = {
         KINETIC_TYPOGRAPHY_IDS,
     ),
 }
-JSON_FILENAMES = (*CAPABILITY_FILES, "local_implementation_mapping.json")
+JSON_FILENAMES = (
+    *CAPABILITY_FILES,
+    "transition_audio.json",
+    "local_implementation_mapping.json",
+)
 APPROVED_FILENAMES = ("SKILL.md", *JSON_FILENAMES)
 
 CAPABILITY_ENVELOPE_FIELDS = (

@@ -1,0 +1,454 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-transition-motion",
+  "group_id": "transition_audio",
+  "capability_count": 8,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; pack chỉ lập kế hoạch cho asset đã được chủ sở hữu cấp quyền."
+  },
+  "capabilities": [
+    {
+      "id": "no_accent",
+      "display_name_vi": "Không thêm accent",
+      "purpose": "Giữ nguyên dialogue, ambience và room tone khi hình đã đủ rõ hoặc không cần nhấn âm.",
+      "timing_anchor": {
+        "anchor": "picture_cut_boundary",
+        "guidance_vi": "Không chèn âm mới; kiểm tra biên hình và âm nguồn vẫn nối tự nhiên."
+      },
+      "gain_guidance": {
+        "relative_to_program": "preserve_source_level",
+        "peak_guard": "Không nâng gain ngoài mức đã kiểm tra.",
+        "guidance_vi": "Giữ headroom của mix hiện hữu và ưu tiên intelligibility."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "dialogue",
+          "ambience"
+        ],
+        "reduction_guidance": "Không tự duck khi không có lớp accent.",
+        "release_guidance": "Giữ envelope nguồn, không tạo pumping.",
+        "guidance_vi": "Không thay đổi cân bằng audio chỉ vì transition không có âm nhấn."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Vẫn khai báo quyền của audio nguồn dù không thêm sound effect."
+      },
+      "avoid_when": [
+        "Không dùng để che clipping, silence bất thường hoặc lệch sync.",
+        "Không coi việc không thêm accent là bằng chứng mix đã đạt chuẩn."
+      ],
+      "failure_modes": [
+        "Audio nguồn bị cắt cụt tại biên hình.",
+        "Room tone thay đổi rõ dù không có accent."
+      ],
+      "validation_checks": [
+        "Nghe trước và sau biên cắt ở tai nghe và loa mobile.",
+        "Kiểm tra waveform không có peak hoặc silence bất ngờ."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "whoosh",
+      "display_name_vi": "Âm quét gió",
+      "purpose": "Gợi vector của slide, whip pan hoặc chuyển động quét mà không lấn nội dung chính.",
+      "timing_anchor": {
+        "anchor": "motion_vector_peak",
+        "guidance_vi": "Đặt transient gần vận tốc lớn nhất và kết thúc khi shot mới đã đọc được."
+      },
+      "gain_guidance": {
+        "relative_to_program": "below_dialogue_priority",
+        "peak_guard": "Giữ transient dưới đỉnh của dialogue và không clip.",
+        "guidance_vi": "Âm quét là lớp phụ; giảm gain nếu người nói hoặc ambience bị che."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed",
+          "ambience"
+        ],
+        "reduction_guidance": "Duck nhẹ các lớp nền trong cửa sổ transient nếu cần.",
+        "release_guidance": "Release ngắn và không pumping sau whoosh.",
+        "guidance_vi": "Dialogue được ưu tiên; không duck lời chỉ để whoosh nổi hơn."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Whoosh phải có license/nguồn hợp lệ; không tự nhận asset miễn phí nếu chưa xác minh."
+      },
+      "avoid_when": [
+        "Tránh khi chuyển cảnh tĩnh, documentary tự nhiên hoặc dialogue đang sát biên.",
+        "Tránh lặp whoosh ở mọi cut khiến nhịp bị công thức."
+      ],
+      "failure_modes": [
+        "Transient che phụ âm hoặc tạo tiếng click.",
+        "Hướng âm thanh ngược vector hình ảnh."
+      ],
+      "validation_checks": [
+        "So hướng whoosh với vector motion ở tốc độ thường.",
+        "Nghe mix với dialogue, music và reduced-motion variant."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "impact",
+      "display_name_vi": "Âm va chạm",
+      "purpose": "Đánh dấu điểm chạm, cut-on-action hoặc speed-ramp peak khi hình có nguyên nhân lực rõ.",
+      "timing_anchor": {
+        "anchor": "action_contact_frame",
+        "guidance_vi": "Đặt transient tại frame tiếp xúc hoặc điểm nhấn đã được marker xác nhận."
+      },
+      "gain_guidance": {
+        "relative_to_program": "short_transient_below_dialogue",
+        "peak_guard": "Kiểm soát true peak và tránh click do attack quá gắt.",
+        "guidance_vi": "Impact ngắn, có headroom và không được biến thành tiếng ồn liên tục."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed",
+          "ambience"
+        ],
+        "reduction_guidance": "Duck nền trong cửa sổ rất ngắn quanh contact frame.",
+        "release_guidance": "Trả nền theo đuôi tự nhiên của hành động.",
+        "guidance_vi": "Không duck dialogue đang mang thông tin bắt buộc."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Impact và nguồn Foley phải có license; quyền nhạc nền vẫn phải khai báo."
+      },
+      "avoid_when": [
+        "Tránh khi hình không có contact frame hoặc hành động chưa được xác minh.",
+        "Tránh với nội dung nhạy cảm nếu âm va chạm gây hiểu sai mức độ bạo lực."
+      ],
+      "failure_modes": [
+        "Impact lệch frame làm hành động giả hoặc gây giật.",
+        "Peak quá lớn gây clipping hoặc khó chịu trên tai nghe."
+      ],
+      "validation_checks": [
+        "Đối chiếu marker frame và transient bằng waveform.",
+        "Nghe ở mức âm lượng nhỏ và kiểm tra peak/loudness."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "riser",
+      "display_name_vi": "Âm dâng",
+      "purpose": "Tạo cảm giác chuẩn bị tăng lên trước reveal, title hoặc chuyển cảnh có điểm mở.",
+      "timing_anchor": {
+        "anchor": "anticipation_window",
+        "guidance_vi": "Bắt đầu sau setup và kết thúc trước hoặc đúng điểm reveal, không kéo qua lời quan trọng."
+      },
+      "gain_guidance": {
+        "relative_to_program": "gradual_below_dialogue",
+        "peak_guard": "Tăng có giới hạn và chừa headroom cho điểm kết.",
+        "guidance_vi": "Riser không được tự động lớn dần đến clipping hoặc che narration."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed",
+          "ambience"
+        ],
+        "reduction_guidance": "Duck nền vừa đủ khi riser có dải tần trùng lời.",
+        "release_guidance": "Release về nền sau reveal, không tạo pumping.",
+        "guidance_vi": "Giữ dialogue rõ trong toàn anticipation window."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Riser và music bed phải có nguồn/quyền được ghi trong rights contract."
+      },
+      "avoid_when": [
+        "Tránh khi không có reveal/payoff hoặc cảnh cần room tone tự nhiên.",
+        "Tránh dồn riser vào mọi title để không tạo cảm giác báo động liên tục."
+      ],
+      "failure_modes": [
+        "Riser kết thúc sau reveal khiến điểm nhấn bị trễ.",
+        "Dải tần dày làm lời và ambience khó hiểu."
+      ],
+      "validation_checks": [
+        "Đặt marker setup, peak và reveal rồi nghe loop.",
+        "Đo loudness/peak trước và sau ducking."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "downer",
+      "display_name_vi": "Âm hạ",
+      "purpose": "Hạ năng lượng sau impact, kết đoạn hoặc chuyển sang trạng thái tĩnh hơn.",
+      "timing_anchor": {
+        "anchor": "release_after_peak",
+        "guidance_vi": "Bắt đầu sau peak hoặc frame kết và kết thúc trước beat thông tin tiếp theo."
+      },
+      "gain_guidance": {
+        "relative_to_program": "descending_tail_below_dialogue",
+        "peak_guard": "Không để đuôi âm vượt peak của điểm trước.",
+        "guidance_vi": "Đuôi giảm đều, giữ headroom và không biến thành silence đột ngột ngoài chủ đích."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed",
+          "ambience"
+        ],
+        "reduction_guidance": "Có thể giảm nền đồng thời nhưng không làm mất room tone hoàn toàn.",
+        "release_guidance": "Trả nền theo tail tự nhiên hoặc silence window đã ghi.",
+        "guidance_vi": "Ducking phải được ghi trên timeline, không tự áp toàn sequence."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Downer là sound effect có quyền riêng; không suy diễn từ quyền video."
+      },
+      "avoid_when": [
+        "Tránh khi cut cần năng lượng nối ngay hoặc lời tiếp tục không nghỉ.",
+        "Tránh đuôi dài làm người xem tưởng file bị mất tiếng."
+      ],
+      "failure_modes": [
+        "Tail che câu tiếp theo hoặc tạo cảm giác rơi âm.",
+        "Release không khớp ambience của shot sau."
+      ],
+      "validation_checks": [
+        "Nghe tail riêng và cùng room tone shot sau.",
+        "Kiểm tra silence window có được ghi rõ hay không."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "reverse_swell",
+      "display_name_vi": "Âm dâng đảo",
+      "purpose": "Dùng cảm giác âm thanh chạy ngược để hút về điểm cắt hoặc reveal mà không giả tiếng thật.",
+      "timing_anchor": {
+        "anchor": "pre_cut_pull",
+        "guidance_vi": "Đuôi swell hút về frame cắt; không kéo sang sau khi shot mới đã bắt đầu đọc."
+      },
+      "gain_guidance": {
+        "relative_to_program": "subtle_pre_cut_layer",
+        "peak_guard": "Giữ peak thấp hơn dialogue và tránh dải trầm gây ù.",
+        "guidance_vi": "Swell đảo chỉ là cue tinh tế, không phải âm lượng tăng vô hạn."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed",
+          "ambience"
+        ],
+        "reduction_guidance": "Duck nền nhẹ trong pre-cut pull nếu cần tách cue.",
+        "release_guidance": "Release qua biên ngắn và trở lại ambience của shot sau.",
+        "guidance_vi": "Không duck lời đang kết câu trừ khi plan ghi rõ khoảng trống."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Nguồn swell đảo phải được license và ghi rõ xử lý; không dùng asset không rõ nguồn."
+      },
+      "avoid_when": [
+        "Tránh khi cut là documentary tự nhiên hoặc audio đã rất dày.",
+        "Tránh khi reverse cue khiến người xem tưởng âm bị phát ngược do lỗi."
+      ],
+      "failure_modes": [
+        "Swell kết thúc sai frame hoặc lộ loop.",
+        "Dải tần đảo làm giọng nói mất rõ."
+      ],
+      "validation_checks": [
+        "Nghe từ đầu pre-cut đến đầu shot sau theo loop.",
+        "Kiểm tra waveform, phase và intelligibility của lời."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "silence_cut",
+      "display_name_vi": "Cắt vào khoảng lặng",
+      "purpose": "Dùng silence window có chủ đích để làm biên cắt rõ mà không thêm sound effect.",
+      "timing_anchor": {
+        "anchor": "verified_silence_window",
+        "guidance_vi": "Đặt cut trong khoảng lặng đã đo, không tự xóa phụ âm hoặc room tone cần thiết."
+      },
+      "gain_guidance": {
+        "relative_to_program": "preserve_silence_floor",
+        "peak_guard": "Không nâng noise floor để lấp khoảng lặng.",
+        "guidance_vi": "Giữ silence có chủ đích và phân biệt với audio bị mất."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed",
+          "ambience",
+          "foley"
+        ],
+        "reduction_guidance": "Giảm các lớp nền chỉ trong silence window đã ghi.",
+        "release_guidance": "Trở lại đúng thời điểm có âm, tránh fade kéo dài.",
+        "guidance_vi": "Không duck dialogue hoặc xóa room tone nếu chưa có QA."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Quyền audio nguồn và nhạc nền vẫn phải xác minh dù transition dùng silence."
+      },
+      "avoid_when": [
+        "Tránh khi silence là lỗi capture, dropout hoặc mất kênh.",
+        "Tránh cắt giữa âm tiết, breath cần giữ hoặc nhịp nhạc bắt buộc."
+      ],
+      "failure_modes": [
+        "Khoảng lặng bị hiểu là lỗi phát.",
+        "Cut làm mất consonant hoặc tạo click ở biên."
+      ],
+      "validation_checks": [
+        "Đo waveform và nghe cả trước/sau silence window.",
+        "Kiểm tra cut không tách âm tiết hoặc room tone bất thường."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "music_duck",
+      "display_name_vi": "Hạ nhạc tại biên chuyển",
+      "purpose": "Tạm hạ music bed để dialogue, accent hoặc ambience quan trọng đi qua transition rõ ràng.",
+      "timing_anchor": {
+        "anchor": "dialogue_or_accent_window",
+        "guidance_vi": "Bắt đầu trước câu hoặc accent cần ưu tiên và trả nhạc sau khi thông tin đã đọc."
+      },
+      "gain_guidance": {
+        "relative_to_program": "configured_reduction_not_universal",
+        "peak_guard": "Kiểm tra loudness và true peak sau envelope, không dùng một mức cho mọi platform.",
+        "guidance_vi": "Mức hạ là tham số của plan, ưu tiên lời và không làm music biến mất đột ngột."
+      },
+      "ducking_policy": {
+        "applies_to": [
+          "music_bed"
+        ],
+        "reduction_guidance": "Chỉ hạ music bed trong cửa sổ được marker; không hạ dialogue hoặc sound effect mặc định.",
+        "release_guidance": "Release theo nhịp câu và ambience, tránh pumping hoặc bật nhạc đột ngột.",
+        "guidance_vi": "Ducking phải được khai báo theo scene/timeline và có thể kiểm tra bằng stem."
+      },
+      "rights_requirement": {
+        "contract_ref": "../local-video-filmmaking/rights_requirements.json",
+        "required_ids": [
+          "source_ownership",
+          "license",
+          "brand_restrictions",
+          "face_person_consent",
+          "music_rights",
+          "font_rights",
+          "stock_attribution",
+          "ai_generated_asset_disclosure_metadata"
+        ],
+        "music_rights_id": "music_rights",
+        "sound_effect_rights_id": "license",
+        "guidance_vi": "Music/Suno không được tạo hoặc tải; chỉ dùng music bed đã có quyền và ghi evidence."
+      },
+      "avoid_when": [
+        "Tránh khi không có music stem riêng hoặc rights của nhạc chưa rõ.",
+        "Tránh duck toàn bài hoặc dùng để che mix bị clipping."
+      ],
+      "failure_modes": [
+        "Music vẫn che lời hoặc bị tụt đột ngột.",
+        "Envelope tạo pumping, click hoặc sai loudness platform."
+      ],
+      "validation_checks": [
+        "Nghe dialogue/music stem và mix tổng ở mobile.",
+        "Đo loudness, true peak và kiểm tra automation tại marker."
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
