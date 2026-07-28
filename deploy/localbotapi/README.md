@@ -24,7 +24,8 @@ this deployment copies, syncs, reloads, or restarts Product Video,
 ## What updates automatically
 
 The workflow `.github/workflows/deploy-localbotapi-vps.yml` runs on `main` only
-when this infrastructure directory or the workflow changes. It builds a
+when the immutable `release/` payload, its deterministic builder, or the
+workflow changes. It builds a
 deterministic release, validates it locally, sends it through the dedicated
 forced-command key, and waits until the exact release ID is active after the
 health gate. A failed activation returns a failing workflow and leaves the
@@ -38,6 +39,9 @@ The root-owned files under `bootstrap/` are the fixed trust anchor. They are
 intentionally not writable by the automatic deploy key. A bootstrap change
 requires an admin-key review and explicit reinstall; allowing the release key
 to replace its own verifier would remove the security boundary.
+Bootstrap-only commits deliberately do not emit a misleading green VPS deploy.
+The workflow uses the `localbotapi-production` GitHub Environment, restricted
+to `main`, so its privileged SSH key is unavailable to pull-request code.
 
 ## First bootstrap
 
@@ -55,12 +59,13 @@ to replace its own verifier would remove the security boundary.
 
    The installer creates locked account `toanaas-deploy`, a single
    `restrict,command="/usr/local/libexec/toanaas-localbotapi/receive-release"`
-   authorized key, root-owned verifier/apply helpers, an initial root-only
-   bootstrap backup, and the apply path unit. It does not restart the Local Bot
-   API or any worker.
+   authorized key, root-owned verifier/apply helpers, an atomic versioned
+   root-only bootstrap snapshot (including original file modes), and the apply
+   path unit. It does not restart the Local Bot API or any worker.
 
-5. Store the private key and pinned known-hosts content as GitHub Actions
-   secrets using stdin, never as command arguments:
+5. Restrict the `localbotapi-production` GitHub Environment to `main`. Store
+   the private key and pinned known-hosts content as Environment secrets using
+   stdin, never as command arguments:
 
    - `LOCALBOT_VPS_SSH_KEY`
    - `LOCALBOT_VPS_KNOWN_HOSTS`
@@ -68,7 +73,7 @@ to replace its own verifier would remove the security boundary.
 6. Prove an interactive shell, forwarding, and an arbitrary command are
    rejected by the deployment key. Then dispatch the workflow once.
 
-GitHub Actions needs only `contents: read`. Repository Actions secrets must be
+GitHub Actions needs only `contents: read`. The Environment secrets must be
 configured before the first dispatch.
 
 ## Release and health behavior

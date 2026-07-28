@@ -62,6 +62,12 @@ class _FakeLinks:
         self.targets.pop(link, None)
 
 
+def _empty_bootstrap_snapshot(roots) -> None:
+    (roots.bootstrap_backup / "systemd").mkdir(parents=True)
+    (roots.bootstrap_backup / "drop-ins").mkdir()
+    (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
+
+
 def _archive(
     path: Path,
     *,
@@ -266,6 +272,7 @@ def test_apply_activates_atomically_and_restores_previous_on_failed_health(tmp_p
     commands: list[tuple[str, ...]] = []
     runner = lambda argv: commands.append(tuple(argv))
     links = _FakeLinks()
+    _empty_bootstrap_snapshot(roots)
 
     first_bundle = _valid_bundle(tmp_path, "1" * 40, "first.tgz")
     first = apply_module.apply_release(
@@ -302,6 +309,53 @@ def test_apply_activates_atomically_and_restores_previous_on_failed_health(tmp_p
     assert all("remote_worker" not in " ".join(command) for command in commands)
 
 
+def test_interrupted_candidate_resume_preserves_last_known_good(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "bootstrap",
+        lock_path=tmp_path / "apply.lock",
+    )
+    links = _FakeLinks()
+    _empty_bootstrap_snapshot(roots)
+    known_good_bundle = _valid_bundle(tmp_path, "8" * 40, "known-good-resume.tgz")
+    apply_module.apply_release(
+        roots,
+        known_good_bundle,
+        health=lambda: True,
+        command_runner=lambda _argv: None,
+        link_store=links,
+    )
+    known_good = links.resolve(roots.current)
+    candidate_bundle = _valid_bundle(tmp_path, "9" * 40, "interrupted.tgz")
+
+    with pytest.raises(KeyboardInterrupt):
+        apply_module.apply_release(
+            roots,
+            candidate_bundle,
+            health=lambda: True,
+            command_runner=lambda _argv: (_ for _ in ()).throw(KeyboardInterrupt()),
+            link_store=links,
+        )
+
+    interrupted_candidate = links.resolve(roots.current)
+    assert interrupted_candidate != known_good
+    assert links.resolve(roots.previous) == known_good
+
+    result = apply_module.apply_release(
+        roots,
+        candidate_bundle,
+        health=lambda: True,
+        command_runner=lambda _argv: None,
+        link_store=links,
+    )
+    assert result.status == "activated"
+    assert links.resolve(roots.current) == interrupted_candidate
+    assert links.resolve(roots.previous) == known_good
+
+
 def test_first_release_failure_restores_bootstrap_units_and_legacy_cleanup(tmp_path):
     apply_module = _load_module("apply_release")
     roots = apply_module.ReleaseRoots(
@@ -313,8 +367,10 @@ def test_first_release_failure_restores_bootstrap_units_and_legacy_cleanup(tmp_p
     )
     backup_units = roots.bootstrap_backup / "systemd"
     backup_units.mkdir(parents=True)
-    (roots.bootstrap_backup / ".complete").write_text("ok\n", encoding="ascii")
+    (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
+    (roots.bootstrap_backup / "drop-ins").mkdir()
     (backup_units / apply_module.SERVICE).write_text("legacy-unit\n", encoding="ascii")
+    (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"644\n")
     commands: list[tuple[str, ...]] = []
     health_results = iter((False, True))
     links = _FakeLinks()
@@ -338,6 +394,53 @@ def test_first_release_failure_restores_bootstrap_units_and_legacy_cleanup(tmp_p
     ) in commands
 
 
+def test_first_release_default_health_runs_before_candidate_pointer_is_removed(
+    tmp_path, monkeypatch
+):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "bootstrap",
+        lock_path=tmp_path / "apply.lock",
+    )
+    backup_units = roots.bootstrap_backup / "systemd"
+    backup_units.mkdir(parents=True)
+    (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
+    (roots.bootstrap_backup / "drop-ins").mkdir()
+    (backup_units / apply_module.SERVICE).write_text("legacy\n", encoding="ascii")
+    (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"644\n")
+    links = _FakeLinks()
+    return_codes = iter((1, 0, 0))
+    health_commands: list[str] = []
+
+    class Result:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    def fake_run(argv, *, check):
+        assert check is False
+        assert links.exists(roots.current)
+        health_commands.append(Path(argv[0]).name)
+        return Result(next(return_codes))
+
+    monkeypatch.setattr(apply_module.subprocess, "run", fake_run)
+    result = apply_module.apply_release(
+        roots,
+        _valid_bundle(tmp_path, "a" * 40, "default-health-failure.tgz"),
+        command_runner=lambda _argv: None,
+        link_store=links,
+    )
+    assert result.status == "rolled_back"
+    assert not links.exists(roots.current)
+    assert health_commands == [
+        "toanaas-localbotapi-health",
+        "toanaas-localbotapi-health",
+        "toanaas-localbotapi-cert-watch",
+    ]
+
+
 def test_apply_rolls_back_when_activation_command_fails(tmp_path):
     apply_module = _load_module("apply_release")
     roots = apply_module.ReleaseRoots(
@@ -348,6 +451,7 @@ def test_apply_rolls_back_when_activation_command_fails(tmp_path):
         lock_path=tmp_path / "apply.lock",
     )
     links = _FakeLinks()
+    _empty_bootstrap_snapshot(roots)
     apply_module.apply_release(
         roots,
         _valid_bundle(tmp_path, "6" * 40, "known-good.tgz"),
@@ -388,8 +492,22 @@ def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_pat
     )
     backup_units = roots.bootstrap_backup / "systemd"
     backup_units.mkdir(parents=True)
-    (roots.bootstrap_backup / ".complete").write_text("ok\n", encoding="ascii")
+    (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
     (backup_units / apply_module.SERVICE).write_text("legacy\n", encoding="ascii")
+    (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"600\n")
+    backup_dropins = roots.bootstrap_backup / "drop-ins"
+    backup_dropins.mkdir()
+    (backup_dropins / "10-security-hardening.conf").write_text(
+        "legacy-drop-in\n", encoding="ascii"
+    )
+    (backup_dropins / "10-security-hardening.conf.mode").write_bytes(b"640\n")
+    dropin = (
+        roots.systemd_dir
+        / f"{apply_module.SERVICE}.d"
+        / "10-security-hardening.conf"
+    )
+    dropin.parent.mkdir(parents=True)
+    dropin.write_text("legacy-drop-in\n", encoding="ascii")
     links = _FakeLinks()
     apply_module.apply_release(
         roots,
@@ -398,6 +516,7 @@ def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_pat
         command_runner=lambda _argv: None,
         link_store=links,
     )
+    assert not dropin.exists()
 
     with pytest.raises(apply_module.ApplyError, match="allowlist"):
         apply_module.restore_bootstrap(
@@ -419,6 +538,7 @@ def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_pat
     assert not links.exists(roots.current)
     assert not links.exists(roots.previous)
     assert (roots.systemd_dir / apply_module.SERVICE).read_text(encoding="ascii") == "legacy\n"
+    assert dropin.read_text(encoding="ascii") == "legacy-drop-in\n"
 
 
 def test_receiver_rejects_shell_commands_wrong_digest_and_oversize(tmp_path):
@@ -582,18 +702,31 @@ def test_apply_rejects_policy_or_file_set_outside_fixed_allowlist(tmp_path):
 
 def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
     installer = (BOOTSTRAP / "install_bootstrap.sh").read_text(encoding="utf-8")
+    for helper in BOOTSTRAP.glob("*.py"):
+        assert b"\r\n" not in helper.read_bytes(), f"bootstrap helper must use LF: {helper}"
     assert 'restrict,command="/usr/local/libexec/toanaas-localbotapi/receive-release"' in installer
     assert "/opt/toanaas-localbotapi/releases" in installer
     assert "toanaas-deploy" in installer
     assert "mapfile -t deploy_key_lines" in installer
     assert "${#deploy_key_lines[@]}" in installer
     assert 'ssh-keygen -l -f "$PUBLIC_KEY_FILE"' in installer
+    assert "10-security-hardening.conf" in installer
+    assert "BOOTSTRAP_SNAPSHOT_ROOT" in installer
+    assert "incomplete_bootstrap_snapshot" in installer
+    assert "snapshot_file" in installer
+    assert 'mv -T -- "$snapshot_tmp" "$BOOTSTRAP_SNAPSHOT_ROOT"' in installer
+    assert 'usermod --home "$DEPLOY_HOME" --gid "$DEPLOY_USER" --groups \'\'' in installer
+    assert 'install -o root -g "$DEPLOY_USER" -m 0640 "$authorized_tmp"' in installer
     assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"' in installer
     for guarded_path in (
         "$RELEASE_ROOT",
         "$RELEASES_ROOT",
         "$STATE_ROOT",
         "$STATE_ROOT/incoming",
+        "$BOOTSTRAP_BACKUP_ROOT",
+        "$BOOTSTRAP_SNAPSHOT_ROOT",
+        "$BOOTSTRAP_SNAPSHOT_ROOT/systemd",
+        "$BOOTSTRAP_SNAPSHOT_ROOT/drop-ins",
         "$DEPLOY_HOME",
         "$DEPLOY_HOME/.ssh",
         "$LIBEXEC_ROOT",
@@ -614,8 +747,11 @@ def test_workflow_is_path_scoped_pinned_and_host_key_strict():
     path = REPO / ".github" / "workflows" / "deploy-localbotapi-vps.yml"
     assert path.is_file(), f"missing Local Bot API deployment workflow: {path}"
     workflow = path.read_text(encoding="utf-8")
-    assert "deploy/localbotapi/**" in workflow
+    assert "deploy/localbotapi/**" not in workflow
+    assert "deploy/localbotapi/release/**" in workflow
+    assert "deploy/localbotapi/bootstrap/build_release.py" in workflow
     assert ".github/workflows/deploy-localbotapi-vps.yml" in workflow
+    assert "environment: localbotapi-production" in workflow
     assert "branches: [main]" in workflow
     assert "workflow_dispatch:" in workflow
     assert "permissions:\n  contents: read" in workflow

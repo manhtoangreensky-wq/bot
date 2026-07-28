@@ -19,6 +19,7 @@ import release_contract
 
 SERVICE = "toanaas-telegram-bot-api.service"
 LEGACY_CLEANUP_TIMER = "toanaas-tgbotapi-cleanup.timer"
+LEGACY_DROPIN_NAME = "10-security-hardening.conf"
 MANAGED_UNITS = (
     SERVICE,
     "toanaas-localbotapi-cleanup.service",
@@ -89,7 +90,7 @@ class ReleaseRoots:
             release_root=Path("/opt/toanaas-localbotapi"),
             systemd_dir=Path("/etc/systemd/system"),
             incoming_dir=state / "incoming",
-            bootstrap_backup=state / "bootstrap-backup",
+            bootstrap_backup=state / "bootstrap-backup" / "snapshot-v2",
             lock_path=Path("/run/lock/toanaas-localbotapi-reconcile.lock"),
         )
 
@@ -125,6 +126,8 @@ class AtomicSymlinkStore:
             raise ApplyError(f"managed pointer is broken: {link}") from exc
 
     def replace(self, link: Path, target: Path) -> None:
+        if link.exists() and not link.is_symlink():
+            raise ApplyError(f"refusing to replace non-symlink managed pointer: {link}")
         link.parent.mkdir(parents=True, exist_ok=True)
         target = target.resolve(strict=True)
         temporary = link.with_name(f".{link.name}.tmp-{os.getpid()}")
@@ -149,6 +152,14 @@ CommandRunner = Callable[[Sequence[str]], None]
 
 def _run(argv: Sequence[str]) -> None:
     subprocess.run(list(argv), check=True)
+
+
+def _release_health_gate(release: Path) -> bool:
+    bin_dir = release / "release" / "bin"
+    for name in ("toanaas-localbotapi-health", "toanaas-localbotapi-cert-watch"):
+        if subprocess.run([str(bin_dir / name)], check=False).returncode != 0:
+            return False
+    return True
 
 
 def _validate_policy_bytes(value: bytes) -> dict:
@@ -234,6 +245,65 @@ def _materialize(roots: ReleaseRoots, archive: Path) -> tuple[Path, dict]:
     return destination, validated.manifest
 
 
+def _remove_legacy_dropin(roots: ReleaseRoots) -> None:
+    destination = roots.systemd_dir / f"{SERVICE}.d" / LEGACY_DROPIN_NAME
+    if not destination.exists() and not destination.is_symlink():
+        return
+    backup = roots.bootstrap_backup / "drop-ins" / LEGACY_DROPIN_NAME
+    if (
+        destination.is_symlink()
+        or not destination.is_file()
+        or backup.is_symlink()
+        or not backup.is_file()
+    ):
+        raise ApplyError("legacy service drop-in is unsafe or was not backed up")
+    if hashlib.sha256(destination.read_bytes()).digest() != hashlib.sha256(
+        backup.read_bytes()
+    ).digest():
+        raise ApplyError("legacy service drop-in changed after bootstrap backup")
+    destination.unlink()
+    try:
+        destination.parent.rmdir()
+    except OSError:
+        pass
+
+
+def _snapshot_mode(source: Path) -> int:
+    mode_file = source.with_name(f"{source.name}.mode")
+    if mode_file.is_symlink() or not mode_file.is_file():
+        raise ApplyError(f"bootstrap snapshot mode is missing or unsafe: {source.name}")
+    try:
+        raw = mode_file.read_bytes()
+        if raw not in {b"600\n", b"640\n", b"644\n"}:
+            raise ValueError
+        return int(raw.strip(), 8)
+    except (OSError, ValueError) as exc:
+        raise ApplyError(f"bootstrap snapshot mode is invalid: {source.name}") from exc
+
+
+def _restore_legacy_dropin(roots: ReleaseRoots) -> None:
+    backup = roots.bootstrap_backup / "drop-ins" / LEGACY_DROPIN_NAME
+    mode_file = backup.with_name(f"{backup.name}.mode")
+    if not backup.exists() and not backup.is_symlink():
+        if mode_file.exists() or mode_file.is_symlink():
+            raise ApplyError("orphaned bootstrap service drop-in mode")
+        return
+    if backup.is_symlink() or not backup.is_file():
+        raise ApplyError("bootstrap service drop-in backup is unsafe")
+    destination = roots.systemd_dir / f"{SERVICE}.d" / LEGACY_DROPIN_NAME
+    if destination.exists() or destination.is_symlink():
+        if destination.is_symlink() or not destination.is_file():
+            raise ApplyError("existing bootstrap service drop-in is unsafe")
+        # Preserve an explicit admin change made after bootstrap instead of
+        # silently overwriting it during emergency recovery.
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.bootstrap-{os.getpid()}")
+    shutil.copyfile(backup, temporary)
+    os.chmod(temporary, _snapshot_mode(backup))
+    os.replace(temporary, destination)
+
+
 def _link_units(
     roots: ReleaseRoots,
     release: Path,
@@ -248,6 +318,7 @@ def _link_units(
         if not source.is_file() or source.is_symlink():
             raise ApplyError(f"managed unit is missing or unsafe: {unit}")
         link_store.replace(roots.systemd_dir / unit, source)
+    _remove_legacy_dropin(roots)
     command_runner(("systemctl", "daemon-reload"))
     command_runner(("systemctl", "enable", SERVICE))
     command_runner(("systemctl", "restart", SERVICE))
@@ -258,16 +329,56 @@ def _enable_timers(command_runner: CommandRunner) -> None:
     command_runner(("systemctl", "disable", "--now", LEGACY_CLEANUP_TIMER))
 
 
+def _validate_bootstrap_snapshot(roots: ReleaseRoots) -> Path:
+    snapshot = roots.bootstrap_backup
+    marker = snapshot / ".complete"
+    backup_units = snapshot / "systemd"
+    backup_dropins = snapshot / "drop-ins"
+    if snapshot.is_symlink() or not snapshot.is_dir():
+        raise ApplyError("bootstrap snapshot root is missing or unsafe")
+    if marker.is_symlink() or not marker.is_file() or marker.read_bytes() != b"snapshot-v2\n":
+        raise ApplyError("no complete bootstrap snapshot is available")
+    for directory in (backup_units, backup_dropins):
+        if directory.is_symlink() or not directory.is_dir():
+            raise ApplyError("bootstrap snapshot directory is missing or unsafe")
+
+    content_paths = {
+        Path("systemd") / unit for unit in MANAGED_UNITS
+    } | {Path("drop-ins") / LEGACY_DROPIN_NAME}
+    allowed_files = {Path(".complete")}
+    for content in content_paths:
+        allowed_files.add(content)
+        allowed_files.add(content.with_name(f"{content.name}.mode"))
+
+    actual_files: set[Path] = set()
+    actual_directories: set[Path] = set()
+    for path in snapshot.rglob("*"):
+        if path.is_symlink():
+            raise ApplyError("bootstrap snapshot contains a symlink")
+        if path.is_file():
+            actual_files.add(path.relative_to(snapshot))
+        elif path.is_dir():
+            actual_directories.add(path.relative_to(snapshot))
+        else:
+            raise ApplyError("bootstrap snapshot contains an unsafe entry")
+    if actual_directories != {Path("systemd"), Path("drop-ins")}:
+        raise ApplyError("bootstrap snapshot contains an unexpected directory")
+    if not actual_files.issubset(allowed_files):
+        raise ApplyError("bootstrap snapshot contains an unexpected file")
+    for content in content_paths:
+        mode = content.with_name(f"{content.name}.mode")
+        if (content in actual_files) != (mode in actual_files):
+            raise ApplyError("bootstrap snapshot content/mode pair is incomplete")
+    return backup_units
+
+
 def _restore_bootstrap(
     roots: ReleaseRoots,
     *,
     link_store: LinkStore,
     command_runner: CommandRunner,
 ) -> None:
-    marker = roots.bootstrap_backup / ".complete"
-    backup_units = roots.bootstrap_backup / "systemd"
-    if not marker.is_file() or not backup_units.is_dir():
-        raise ApplyError("no complete bootstrap backup is available")
+    backup_units = _validate_bootstrap_snapshot(roots)
     command_runner(("systemctl", "disable", "--now", *MANAGED_TIMERS))
     roots.systemd_dir.mkdir(parents=True, exist_ok=True)
     for unit in MANAGED_UNITS:
@@ -276,10 +387,14 @@ def _restore_bootstrap(
         if source.is_file() and not source.is_symlink():
             temporary = destination.with_name(f".{destination.name}.bootstrap-{os.getpid()}")
             shutil.copyfile(source, temporary)
-            os.chmod(temporary, 0o644)
+            os.chmod(temporary, _snapshot_mode(source))
             os.replace(temporary, destination)
         else:
+            mode_file = source.with_name(f"{source.name}.mode")
+            if source.exists() or source.is_symlink() or mode_file.exists() or mode_file.is_symlink():
+                raise ApplyError(f"bootstrap unit snapshot is unsafe: {unit}")
             link_store.remove(destination)
+    _restore_legacy_dropin(roots)
     command_runner(("systemctl", "daemon-reload"))
     command_runner(("systemctl", "restart", SERVICE))
     command_runner(("systemctl", "enable", "--now", LEGACY_CLEANUP_TIMER))
@@ -312,21 +427,32 @@ def apply_release(
     link_store: LinkStore | None = None,
 ) -> ApplyResult:
     links = link_store or AtomicSymlinkStore()
-    health_check = health or (
-        lambda: subprocess.run(
-            [str(roots.current / "release" / "bin" / "toanaas-localbotapi-health")],
-            check=False,
-        ).returncode
-        == 0
-    )
+    health_check = health or (lambda: _release_health_gate(roots.current))
     with _exclusive_lock(roots.lock_path):
         release, manifest = _materialize(roots, Path(archive))
-        old_current = links.resolve(roots.current) if links.exists(roots.current) else None
-        if old_current is not None:
-            old_current = _safe_release_target(roots, old_current)
-            validate_release_directory(roots, old_current)
+        current = links.resolve(roots.current) if links.exists(roots.current) else None
+        if current is not None:
+            current = _safe_release_target(roots, current)
+            validate_release_directory(roots, current)
+
+        # A killed apply service leaves the ready marker in place. If current
+        # already points at this candidate, resume it without promoting the
+        # half-activated candidate into previous and losing the last-known-good.
+        if current == release:
+            previous = links.resolve(roots.previous) if links.exists(roots.previous) else None
+            if previous is not None:
+                previous = _safe_release_target(roots, previous)
+                validate_release_directory(roots, previous)
+            old_current = previous if previous != release else None
+        else:
+            old_current = current
+
+        if old_current is None:
+            _validate_bootstrap_snapshot(roots)
+        if current != release and old_current is not None:
             links.replace(roots.previous, old_current)
-        links.replace(roots.current, release)
+        if current != release:
+            links.replace(roots.current, release)
         activation_ok = False
         try:
             _link_units(roots, release, link_store=links, command_runner=command_runner)
@@ -364,13 +490,14 @@ def apply_release(
 
         try:
             _restore_bootstrap(roots, link_store=links, command_runner=command_runner)
-            links.remove(roots.current)
             if not health_check():
                 raise ApplyError("bootstrap service failed health")
         except Exception as exc:
             raise ApplyError(
                 "first release failed and bootstrap service did not recover"
             ) from exc
+        finally:
+            links.remove(roots.current)
         return ApplyResult("rolled_back", manifest["commit"], None)
 
 
@@ -394,13 +521,7 @@ def rollback(
     if service != SERVICE:
         raise ApplyError("rollback service is outside the fixed allowlist")
     links = link_store or AtomicSymlinkStore()
-    health_check = health or (
-        lambda: subprocess.run(
-            [str(roots.current / "release" / "bin" / "toanaas-localbotapi-health")],
-            check=False,
-        ).returncode
-        == 0
-    )
+    health_check = health or (lambda: _release_health_gate(roots.current))
     with _exclusive_lock(roots.lock_path):
         if not links.exists(roots.previous):
             raise ApplyError("previous release pointer is missing")
@@ -424,15 +545,11 @@ def restore_bootstrap(
     if service != SERVICE:
         raise ApplyError("bootstrap restore service is outside the fixed allowlist")
     links = link_store or AtomicSymlinkStore()
-    health_script: Path | None = None
+    health_release: Path | None = None
     if links.exists(roots.current):
-        current = _safe_release_target(roots, links.resolve(roots.current))
-        health_script = current / "release" / "bin" / "toanaas-localbotapi-health"
+        health_release = _safe_release_target(roots, links.resolve(roots.current))
     health_check = health or (
-        lambda: bool(
-            health_script
-            and subprocess.run([str(health_script)], check=False).returncode == 0
-        )
+        lambda: bool(health_release and _release_health_gate(health_release))
     )
     with _exclusive_lock(roots.lock_path):
         _restore_bootstrap(roots, link_store=links, command_runner=command_runner)

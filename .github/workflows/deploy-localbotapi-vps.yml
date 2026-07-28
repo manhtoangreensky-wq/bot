@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "deploy/localbotapi/**"
+      - "deploy/localbotapi/release/**"
+      - "deploy/localbotapi/bootstrap/build_release.py"
       - ".github/workflows/deploy-localbotapi-vps.yml"
   workflow_dispatch:
 
@@ -17,6 +18,7 @@ concurrency:
 
 jobs:
   deploy:
+    environment: localbotapi-production
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
