@@ -1,0 +1,279 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-sound-design",
+  "contract_id": "sound_design_timeline",
+  "scene_declaration_fields": [
+    "dialogue",
+    "ambience",
+    "foley",
+    "impact",
+    "riser",
+    "whoosh",
+    "music_cue",
+    "ducking_envelope",
+    "silence_window"
+  ],
+  "field_contracts": [
+    {
+      "id": "dialogue",
+      "purpose_vi": "Lớp thoại theo scene.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "start",
+        "end",
+        "speaker_id",
+        "rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "ambience",
+      "purpose_vi": "Nền môi trường theo scene.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "start",
+        "end",
+        "level_db",
+        "rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "foley",
+      "purpose_vi": "Cue động tác theo hình.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "marker",
+        "level_db",
+        "rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "impact",
+      "purpose_vi": "Cue lực tại contact.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "contact_marker",
+        "level_db",
+        "rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "riser",
+      "purpose_vi": "Cue dâng trước reveal.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "start",
+        "end",
+        "peak_marker",
+        "rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "whoosh",
+      "purpose_vi": "Cue quét theo vector.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "start",
+        "peak_marker",
+        "direction",
+        "rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "music_cue",
+      "purpose_vi": "Cue nhạc nền có quyền.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "source_ref",
+        "start",
+        "end",
+        "profile_id",
+        "music_rights"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "ducking_envelope",
+      "purpose_vi": "Envelope nhường chỗ cho thoại.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "target_layer",
+        "start",
+        "end",
+        "reduction_db",
+        "attack_ms",
+        "release_ms"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "silence_window",
+      "purpose_vi": "Khoảng lặng có chủ đích.",
+      "required_keys": [
+        "scene_id",
+        "timebase",
+        "start",
+        "end",
+        "intentional",
+        "stream_presence_evidence"
+      ],
+      "validation_rules": [
+        "Mốc phải theo scene timebase.",
+        "Quyền VERIFIED hoặc NOT_APPLICABLE có lý do.",
+        "Dialogue ưu tiên khi lớp chồng nhau."
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    }
+  ],
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; chỉ lập kế hoạch cho âm thanh do chủ sở hữu cung cấp và đã xác minh quyền."
+  },
+  "planning_only": true,
+  "runtime_registered": false,
+  "provider_executable": false,
+  "public_ui": false
+}

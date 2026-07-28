@@ -1,0 +1,699 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-sound-design",
+  "group_id": "sound_layer",
+  "capability_count": 10,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; chỉ lập kế hoạch cho âm thanh do chủ sở hữu cung cấp và đã xác minh quyền."
+  },
+  "capabilities": [
+    {
+      "id": "dialogue_or_narration",
+      "qualified_id": "sound_layer.dialogue_or_narration",
+      "display_name_vi": "Lời thoại hoặc thuyết minh",
+      "purpose_vi": "Giữ câu nói là trục thông tin chính.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "speech_marker",
+        "guidance_vi": "Ghi mốc lời thoại hoặc thuyết minh bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/audio_postprocess.py",
+          "symbols": [
+            "AudioBoostResult",
+            "boost_voice_audio"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Voice boost/limiter hiện có nhưng chưa phải chuỗi thoại hoàn chỉnh."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "room_tone",
+      "qualified_id": "sound_layer.room_tone",
+      "display_name_vi": "Âm phòng",
+      "purpose_vi": "Nối tự nhiên giữa câu và cut.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc âm phòng bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "finalize_audio_planning"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Hook planning chưa định nghĩa room tone riêng."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "ambience",
+      "qualified_id": "sound_layer.ambience",
+      "display_name_vi": "Âm môi trường",
+      "purpose_vi": "Đặt không khí địa điểm cho scene.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc âm môi trường bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_edit_capabilities.py",
+          "symbols": [
+            "audio_source_truth"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Source metadata chưa có ambience per-scene đầy đủ."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "foley",
+      "qualified_id": "sound_layer.foley",
+      "display_name_vi": "Âm động tác",
+      "purpose_vi": "Làm rõ bước chân, tay và vật thể.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc âm động tác bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "AUDIO_POST_ADDONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Addon metadata chưa phải Foley runtime."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "impact",
+      "qualified_id": "sound_layer.impact",
+      "display_name_vi": "Âm va chạm",
+      "purpose_vi": "Nhấn contact đã thấy trên hình.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "contact_frame",
+        "guidance_vi": "Ghi mốc âm va chạm bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_audio.json",
+          "symbols": [
+            "transition_audio.impact"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Cue 26D là nguồn canonical, không sao chép semantics."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "riser",
+      "qualified_id": "sound_layer.riser",
+      "display_name_vi": "Âm dâng",
+      "purpose_vi": "Chuẩn bị tai cho reveal có chủ đích.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc âm dâng bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_audio.json",
+          "symbols": [
+            "transition_audio.riser"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Cue riser 26D chỉ được tham chiếu."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "whoosh",
+      "qualified_id": "sound_layer.whoosh",
+      "display_name_vi": "Âm quét gió",
+      "purpose_vi": "Gợi vector slide hoặc whip.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc âm quét gió bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_audio.json",
+          "symbols": [
+            "transition_audio.whoosh"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Cue whoosh 26D là contract canonical."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "transition_accent",
+      "qualified_id": "sound_layer.transition_accent",
+      "display_name_vi": "Accent tại biên chuyển",
+      "purpose_vi": "Gắn layer với cue 26D, không tạo bản trùng.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc accent tại biên chuyển bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_audio.json",
+          "symbols": [
+            "transition_audio.no_accent",
+            "transition_audio.impact",
+            "transition_audio.whoosh"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Layer tổng hợp trỏ tới cue 26D bằng qualified ID."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "music_bed",
+      "qualified_id": "sound_layer.music_bed",
+      "display_name_vi": "Nền nhạc",
+      "purpose_vi": "Tạo nền có quyền và nhường thoại.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc nền nhạc bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "configure_audio_volume",
+            "finalize_audio_planning"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Có planning volume, chưa có envelope per-scene."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "silence",
+      "qualified_id": "sound_layer.silence",
+      "display_name_vi": "Khoảng lặng có chủ đích",
+      "purpose_vi": "Tạo nhịp mà không nhầm audio bị mất.",
+      "required_inputs": [
+        "scene manifest có timebase/marker",
+        "nguồn audio và trạng thái quyền",
+        "profile loudness đích"
+      ],
+      "timing_guidance": {
+        "anchor": "scene_marker",
+        "guidance_vi": "Ghi mốc khoảng lặng có chủ đích bằng frame hoặc thời gian; không suy đoán khi thiếu dữ liệu."
+      },
+      "level_guidance": {
+        "priority": "dialogue_over_music",
+        "guidance_vi": "Chừa headroom, không clip và luôn giữ thoại rõ hơn lớp nền.",
+        "measurement_vi": "Đo loudness và true peak theo profile."
+      },
+      "interaction_rules": {
+        "dialogue_priority": true,
+        "compatible_layers": [
+          "dialogue_or_narration",
+          "room_tone"
+        ],
+        "guidance_vi": "Chỉ duck lớp nền trong cửa sổ khai báo; không tự áp toàn sequence."
+      },
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "avoid_when": [
+        "Không che clipping, mất stream hoặc sync sai.",
+        "Không suy diễn quyền UNKNOWN/RESTRICTED."
+      ],
+      "failure_modes": [
+        "Layer lệch marker làm continuity giả.",
+        "Mức layer che phụ âm hoặc vượt peak."
+      ],
+      "validation_checks": [
+        "Đối chiếu waveform với hình.",
+        "Nghe stereo, mono và mobile.",
+        "Kiểm tra quyền, silence ratio và intelligibility."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_audio.json",
+          "symbols": [
+            "transition_audio.silence_cut"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "silence_cut 26D phân biệt khoảng lặng chủ đích."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
