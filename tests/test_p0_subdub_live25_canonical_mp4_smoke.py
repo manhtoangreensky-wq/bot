@@ -16,6 +16,16 @@ ALL_VIDEO_LANES = (
 )
 
 
+class CaptureSentMessage:
+    def __init__(self, message_id):
+        self.message_id = message_id
+        self.edits = []
+
+    async def edit_text(self, text, **kwargs):
+        self.edits.append({"text": str(text), **kwargs})
+        return self
+
+
 class CaptureMessage:
     def __init__(self, media=None):
         self.chat_id = 250025
@@ -26,10 +36,13 @@ class CaptureMessage:
         self.voice = None
         self.document = None
         self.outputs = []
+        self.sent_messages = []
 
     async def reply_text(self, text, **kwargs):
         self.outputs.append({"text": str(text), **kwargs})
-        return SimpleNamespace(message_id=len(self.outputs))
+        sent = CaptureSentMessage(len(self.outputs))
+        self.sent_messages.append(sent)
+        return sent
 
 
 def command_update(user_id=250025):
@@ -240,6 +253,10 @@ def test_admin_video_smoke_uses_canonical_product_mp4_executor(monkeypatch, mode
 
     async def fake_executor(query, _context, state, _lang="vi", **kwargs):
         captured.append((query, dict(state), dict(kwargs)))
+        await query.edit_message_text(
+            "✅ <b>Hoàn tất</b>\n\nTiến độ: 100%",
+            parse_mode="HTML",
+        )
         return {
             "ok": True,
             "mode": mode,
@@ -280,6 +297,8 @@ def test_admin_video_smoke_uses_canonical_product_mp4_executor(monkeypatch, mode
     assert state["_pipeline_source_bytes_override"] == b"fixture-video-bytes"
     assert state["_pipeline_source_content_type_override"] == "video/mp4"
     assert kwargs["admin_interactive_confirm"] is True
+    assert len(update.message.sent_messages[0].edits) == 1
+    assert "Tiến độ: 100%" in update.message.sent_messages[0].edits[0]["text"]
     assert any(row[1] == "PASS" for row in saved)
     assert "Final MP4 delivered: <code>YES</code>" in update.message.outputs[-1]["text"]
 
