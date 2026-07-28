@@ -1,0 +1,972 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-sound-design",
+  "group_id": "audio_post_operation",
+  "capability_count": 14,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; chỉ lập kế hoạch cho âm thanh do chủ sở hữu cung cấp và đã xác minh quyền."
+  },
+  "capabilities": [
+    {
+      "id": "dialogue_cleanup",
+      "qualified_id": "audio_post_operation.dialogue_cleanup",
+      "display_name_vi": "Làm sạch thoại",
+      "purpose_vi": "Giảm tạp âm mà không xóa phụ âm.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/audio_postprocess.py",
+          "symbols": [
+            "boost_voice_audio"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Voice boost chưa đủ cleanup."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "noise_reduction",
+      "qualified_id": "audio_post_operation.noise_reduction",
+      "display_name_vi": "Giảm nhiễu",
+      "purpose_vi": "Giảm noise floor mà không tạo artefact.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe không phải noise detector."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "high_pass_filter",
+      "qualified_id": "audio_post_operation.high_pass_filter",
+      "display_name_vi": "Lọc rumble thấp",
+      "purpose_vi": "Giảm rung dưới vùng hữu ích của thoại.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Primitive frame chưa có audio high-pass."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "de_essing",
+      "qualified_id": "audio_post_operation.de_essing",
+      "display_name_vi": "Giảm âm xì",
+      "purpose_vi": "Kiểm soát sibilance và giữ rõ chữ.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/audio_postprocess.py",
+          "symbols": [
+            "boost_voice_audio"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Voice boost không thay de-essing."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "compression",
+      "qualified_id": "audio_post_operation.compression",
+      "display_name_vi": "Nén động học",
+      "purpose_vi": "Ổn định dải động thoại tự nhiên.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_postprocess_pipeline.py",
+          "symbols": [
+            "VideoPostprocessPlan"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Plan hiện chỉ là metadata."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "limiting",
+      "qualified_id": "audio_post_operation.limiting",
+      "display_name_vi": "Giới hạn đỉnh",
+      "purpose_vi": "Chặn peak cuối chuỗi theo profile.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/audio_postprocess.py",
+          "symbols": [
+            "AudioBoostResult",
+            "boost_voice_audio"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Limiter hiện hữu có phạm vi hẹp."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "normalization",
+      "qualified_id": "audio_post_operation.normalization",
+      "display_name_vi": "Chuẩn hóa loudness",
+      "purpose_vi": "Đưa mix về target profile, không dùng mức chung.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_postprocess_pipeline.py",
+          "symbols": [
+            "VideoPostprocessPlan",
+            "VideoPostprocessResult"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Target cũ chưa áp theo platform."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "music_ducking",
+      "qualified_id": "audio_post_operation.music_ducking",
+      "display_name_vi": "Hạ nhạc theo thoại",
+      "purpose_vi": "Tạo envelope nhường dialogue, không pumping.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "configure_audio_volume",
+            "finalize_audio_planning"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Có planning volume, chưa có envelope runtime."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "crossfade",
+      "qualified_id": "audio_post_operation.crossfade",
+      "display_name_vi": "Nối chéo âm thanh",
+      "purpose_vi": "Nối clip nền tương thích để tránh click.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_editing.py",
+          "symbols": [
+            "build_manual_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Edit helper chưa chứng minh audio crossfade."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "fade_in_out",
+      "qualified_id": "audio_post_operation.fade_in_out",
+      "display_name_vi": "Mờ vào và mờ ra",
+      "purpose_vi": "Điều khiển đầu/cuối audio có chủ đích.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "afade primitive chỉ là metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "stereo_balance",
+      "qualified_id": "audio_post_operation.stereo_balance",
+      "display_name_vi": "Cân bằng stereo",
+      "purpose_vi": "Giữ trọng tâm thoại giữa hai kênh.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe layout chưa cân bằng kênh."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "mono_compatibility",
+      "qualified_id": "audio_post_operation.mono_compatibility",
+      "display_name_vi": "Tương thích mono",
+      "purpose_vi": "Kiểm tra phase/downmix vẫn hiểu nội dung.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [
+            "VIDEO_PRODUCT_PROFILES"
+          ],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "Profile chưa có mono QA."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "loudness_measurement",
+      "qualified_id": "audio_post_operation.loudness_measurement",
+      "display_name_vi": "Đo loudness",
+      "purpose_vi": "Đo LUFS-I theo profile đã ghi.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "find_ffprobe",
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "ffprobe path có sẵn, phép đo còn thiếu."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "true_peak_check",
+      "qualified_id": "audio_post_operation.true_peak_check",
+      "display_name_vi": "Kiểm tra true peak",
+      "purpose_vi": "Phát hiện inter-sample peak sau encode.",
+      "required_inputs": [
+        "track/bus đã định danh",
+        "profile_id và marker timeline",
+        "rights evidence"
+      ],
+      "parameter_contract": {
+        "required_parameters": [
+          "profile_id",
+          "measurement_evidence"
+        ],
+        "guidance_vi": "Ghi tham số, đơn vị, giới hạn; không dùng default vô hạn.",
+        "no_unbounded_defaults": true
+      },
+      "order_constraints": {
+        "sequence_rule_vi": "Cleanup/lọc trước dynamics; cân bằng trước đo loudness/true peak.",
+        "dialogue_first": true,
+        "measurement_gate_vi": "Chỉ chuyển bước khi evidence trước hợp lệ."
+      },
+      "intelligibility_policy": {
+        "dialogue_priority": true,
+        "guidance_vi": "Dừng nếu thoại kém rõ hơn source; music/effect phải nhường lời."
+      },
+      "fallback": {
+        "action_vi": "Giữ source, trả PLANNING_ONLY và yêu cầu runtime/evidence còn thiếu.",
+        "execution_status": "PLANNING_ONLY"
+      },
+      "failure_modes": [
+        "Tham số sai làm méo hoặc mất chi tiết.",
+        "Thiếu evidence khiến kết quả bị hiểu nhầm là đạt."
+      ],
+      "validation_checks": [
+        "So A/B ở mức nhỏ và mono.",
+        "Kiểm tra clipping, loudness, true peak và timeline.",
+        "Ghi profile cùng rights evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "find_ffprobe",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation chưa đo true peak."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}

@@ -1,0 +1,366 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-sound-design",
+  "contract_id": "audio_qa_no_fake_success",
+  "qa_count": 10,
+  "success_policy": {
+    "silent_stream_success_allowed": false,
+    "clipped_stream_success_allowed": false,
+    "missing_evidence_action": "FAIL_CLOSED",
+    "zero_byte_or_missing_output_success_allowed": false,
+    "dialogue_priority_required": true
+  },
+  "checks": [
+    {
+      "id": "audio_stream_present",
+      "purpose_vi": "Xác nhận stream audio tồn tại khi promise yêu cầu.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Stream/container được tham chiếu read-only."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "decodable_duration",
+      "purpose_vi": "Xác nhận audio đọc được và duration lớn hơn zero.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "probe_mp4"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe duration chỉ là evidence metadata."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "silence_ratio",
+      "purpose_vi": "Phân biệt khoảng lặng chủ đích với stream im lặng.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Silence detector đầy đủ còn thiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "clipping",
+      "purpose_vi": "Phát hiện sample hoặc transient bị clip.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/audio_postprocess.py",
+          "symbols": [
+            "boost_voice_audio"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Limiter primitive chưa đủ clipping QA."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "loudness",
+      "purpose_vi": "Đo LUFS-I theo profile đã chọn.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_postprocess_pipeline.py",
+          "symbols": [
+            "VideoPostprocessPlan"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Target metadata chưa phải phép đo."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "true_peak",
+      "purpose_vi": "Kiểm tra dBTP sau encode đại diện.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "find_ffprobe"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Path ffprobe có sẵn, phép đo còn thiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "dialogue_intelligibility",
+      "purpose_vi": "Đảm bảo câu thoại vẫn hiểu trong full mix.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/audio_postprocess.py",
+          "symbols": [
+            "AudioBoostResult"
+          ],
+          "support_layer": "local_audio",
+          "relationship": "metadata_only",
+          "notes_vi": "Voice boost không thay intelligibility QA."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "channel_layout",
+      "purpose_vi": "Xác nhận số kênh đúng promise.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe layout được giữ read-only."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "mono_compatibility",
+      "purpose_vi": "Kiểm tra fold-down không triệt thoại.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [
+            "VIDEO_PRODUCT_PROFILES"
+          ],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "Profile chưa có mono QA đầy đủ."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    },
+    {
+      "id": "timeline_alignment",
+      "purpose_vi": "Đảm bảo cue/envelope khớp scene.",
+      "evidence_required": [
+        "ffprobe/waveform evidence",
+        "profile hoặc timeline marker",
+        "ghi chú nghe dialogue khi áp dụng"
+      ],
+      "pass_rule_vi": "Evidence đầy đủ, đúng profile; không có im lặng ngoài plan hoặc clipping.",
+      "failure_rule_vi": "Thiếu/mâu thuẫn evidence thì FAIL và giữ planning-only.",
+      "fail_closed": true,
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "finalize_audio_planning"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Hook planning chỉ là metadata evidence."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ]
+    }
+  ],
+  "ffmpeg_ffprobe_mapping": {
+    "allowed_tools": [
+      "ffmpeg",
+      "ffprobe"
+    ],
+    "relationship": "metadata_only",
+    "execution_in_26e_allowed": false,
+    "notes_vi": "Chỉ ghi mapping tới tooling cục bộ; 26E không chạy xử lý audio."
+  },
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; chỉ lập kế hoạch cho âm thanh do chủ sở hữu cung cấp và đã xác minh quyền."
+  },
+  "planning_only": true,
+  "runtime_registered": false,
+  "provider_executable": false,
+  "public_ui": false
+}

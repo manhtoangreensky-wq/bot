@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-sound-design",
+  "contract_id": "platform_loudness_profiles",
+  "universal_target_allowed": false,
+  "profile_count": 5,
+  "override_policy": {
+    "explicit_platform_override_allowed": true,
+    "required_reason_vi": "Override phải nêu platform, lý do và evidence.",
+    "no_silent_override": true
+  },
+  "profiles": [
+    {
+      "id": "short_form_social",
+      "display_name_vi": "Video ngắn mạng xã hội",
+      "platform_configuration_required": true,
+      "target_lufs_i": -14,
+      "tolerance_lufs": 1,
+      "max_true_peak_dbtp": -1,
+      "channel_layout": "stereo",
+      "measurement_window": "integrated và short-term theo timeline",
+      "notes_vi": "Ưu tiên thoại và mobile.",
+      "validation_checks": [
+        "Đo LUFS-I theo profile.",
+        "Đo true peak và channel layout."
+      ]
+    },
+    {
+      "id": "long_form_video",
+      "display_name_vi": "Video dài ngang",
+      "platform_configuration_required": true,
+      "target_lufs_i": -16,
+      "tolerance_lufs": 1,
+      "max_true_peak_dbtp": -1,
+      "channel_layout": "stereo",
+      "measurement_window": "integrated và short-term theo timeline",
+      "notes_vi": "Giữ nhịp nghe giữa các chương.",
+      "validation_checks": [
+        "Đo LUFS-I theo profile.",
+        "Đo true peak và channel layout."
+      ]
+    },
+    {
+      "id": "spoken_word_video",
+      "display_name_vi": "Video trọng thoại",
+      "platform_configuration_required": true,
+      "target_lufs_i": -18,
+      "tolerance_lufs": 1,
+      "max_true_peak_dbtp": -1.5,
+      "channel_layout": "stereo",
+      "measurement_window": "integrated và short-term theo timeline",
+      "notes_vi": "Đặt intelligibility trước music.",
+      "validation_checks": [
+        "Đo LUFS-I theo profile.",
+        "Đo true peak và channel layout."
+      ]
+    },
+    {
+      "id": "podcast_stereo",
+      "display_name_vi": "Podcast âm thanh nổi",
+      "platform_configuration_required": true,
+      "target_lufs_i": -16,
+      "tolerance_lufs": 1,
+      "max_true_peak_dbtp": -1,
+      "channel_layout": "stereo",
+      "measurement_window": "integrated và short-term theo timeline",
+      "notes_vi": "Giọng center và ambience cân bằng.",
+      "validation_checks": [
+        "Đo LUFS-I theo profile.",
+        "Đo true peak và channel layout."
+      ]
+    },
+    {
+      "id": "podcast_mono",
+      "display_name_vi": "Podcast một kênh",
+      "platform_configuration_required": true,
+      "target_lufs_i": -19,
+      "tolerance_lufs": 1,
+      "max_true_peak_dbtp": -1.5,
+      "channel_layout": "mono",
+      "measurement_window": "integrated và short-term theo timeline",
+      "notes_vi": "Fold-down là gate bắt buộc.",
+      "validation_checks": [
+        "Đo LUFS-I theo profile.",
+        "Đo true peak và channel layout."
+      ]
+    }
+  ],
+  "planning_only": true,
+  "runtime_registered": false,
+  "provider_executable": false,
+  "public_ui": false
+}
