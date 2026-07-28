@@ -346,6 +346,56 @@ def test_admin_video_smoke_never_passes_without_delivered_mp4(monkeypatch):
     assert "Final MP4 delivered: <code>NO</code>" in update.message.outputs[-1]["text"]
 
 
+def test_subdub_terminal_progress_wins_over_late_stage_update(monkeypatch):
+    job_key = "live25-terminal-progress"
+    calls = []
+    bot.SUBTITLE_DUB_PIPELINE_JOBS[job_key] = {
+        "job_key": job_key,
+        "job_id": "live25-job",
+        "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
+        "terminal_state": "delivered",
+    }
+
+    async def fake_safe_edit(_query, text, **_kwargs):
+        calls.append(str(text))
+        return SimpleNamespace(message_id="live25-panel")
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_safe_edit)
+    monkeypatch.setattr(
+        bot,
+        "update_subtitle_dub_pipeline_job",
+        lambda _key, **_fields: bot.SUBTITLE_DUB_PIPELINE_JOBS[job_key],
+    )
+    query = SimpleNamespace(
+        message=SimpleNamespace(chat_id=250029, message_id=29029),
+    )
+
+    async def run_updates():
+        await bot.subdub_send_progress_update(
+            query,
+            job_key,
+            "live25-job",
+            "delivered",
+            "vi",
+        )
+        await bot.subdub_send_progress_update(
+            query,
+            job_key,
+            "live25-job",
+            "delivering",
+            "vi",
+        )
+
+    try:
+        asyncio.run(run_updates())
+    finally:
+        bot.SUBTITLE_DUB_PIPELINE_JOBS.pop(job_key, None)
+        bot.SUBDUB_PROGRESS_EDIT_LOCKS.pop(job_key, None)
+
+    assert len(calls) == 1
+    assert "100%" in calls[0]
+
+
 def test_tts_failure_keeps_sanitized_provider_detail_for_admin_debug():
     source = inspect.getsource(bot.video_dubbing_tts_bytes)
     assert "sanitize_log_text(str(detail or status))" in source
