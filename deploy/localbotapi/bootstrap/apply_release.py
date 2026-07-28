@@ -462,9 +462,11 @@ def _enable_timers(command_runner: CommandRunner) -> None:
     # into a rollback.
     try:
         command_runner(("systemctl", "cat", LEGACY_CLEANUP_TIMER))
+        command_runner(("systemctl", "disable", "--now", LEGACY_CLEANUP_TIMER))
     except Exception:
-        return
-    command_runner(("systemctl", "disable", "--now", LEGACY_CLEANUP_TIMER))
+        # Compatibility cleanup must never invalidate an otherwise healthy
+        # Local Bot API activation on a host with a divergent systemd state.
+        pass
 
 
 def _validate_bootstrap_snapshot(roots: ReleaseRoots) -> Path:
