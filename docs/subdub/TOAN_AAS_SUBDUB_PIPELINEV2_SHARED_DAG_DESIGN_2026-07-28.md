@@ -6,6 +6,9 @@ Date: 2026-07-28
 
 Repository: `manhtoangreensky-wq/bot`
 
+Supporting research:
+`TOAN_AAS_SUBDUB_4LANE_OPTIMAL_PIPELINE_RESEARCH_2026-07-28.md`
+
 Design base SHA: `0cefd4be1e53b4dcfe098265300fe89a266fa120`
 
 Design branch: `hotfix/p0-subdub-real-product-gate-recovery`

@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:02,200
+Hello, this is a test.
+
+2
+00:00:02,200 --> 00:00:04,800
+The system reads each segment on its timeline.
+
+3
+00:00:04,800 --> 00:00:07,000
+It never reads over another line.

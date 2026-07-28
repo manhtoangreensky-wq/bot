@@ -1,5 +1,8 @@
 # P1.SUBDUB.PIPELINEV2 Shadow/Replay Optimization Task
 
+Supporting research:
+`TOAN_AAS_SUBDUB_4LANE_OPTIMAL_PIPELINE_RESEARCH_2026-07-28.md`
+
 > **For agentic workers:** Do not implement Phase 2 until the owner approves the
 > Phase 1 design in `TOAN_AAS_SUBDUB_PIPELINEV2_SHARED_DAG_DESIGN_2026-07-28.md`.
 
