@@ -1,0 +1,924 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-filmmaking",
+  "group_id": "camera_movement",
+  "capability_count": 14,
+  "capabilities": [
+    {
+      "id": "static",
+      "display_name_vi": "Máy quay tĩnh",
+      "summary_vi": "Giữ góc máy cố định để hành động, bố cục hoặc lời là chuyển động chính.",
+      "category": "camera_movement",
+      "purpose": "Tạo nền ổn định cho trình bày, đối thoại và so sánh trạng thái.",
+      "use_when": [
+        "Khi tripod hoặc mặt phẳng ổn định và khung đã chứa đủ hành động."
+      ],
+      "avoid_when": [
+        "Tránh gọi shot rung hoặc crop trôi là static."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần khung khóa, chân trời ổn định và chủ thể không rời vùng quan trọng."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ đủ lâu để hành động hoàn tất; không cắt chỉ vì khung ít chuyển động."
+      },
+      "continuity_rules": [
+        "Vị trí khung, chân trời và scale phải ổn định trong toàn shot."
+      ],
+      "aspect_ratio_notes": [
+        "Kiểm tra chủ thể không rời safe area khi đổi tỷ lệ."
+      ],
+      "failure_modes": [
+        "Micro-jitter, drift hoặc chủ thể ra khỏi khung."
+      ],
+      "fallbacks": [
+        "Chọn đoạn ổn định hơn hoặc giảm thời lượng; không hứa ổn định tự động."
+      ],
+      "validation_checks": [
+        "So tọa độ các điểm nền ở đầu, giữa, cuối shot."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/shared/camera_motion.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu ngôn ngữ locked-off, không gọi prompt."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "pan",
+      "display_name_vi": "Lia máy ngang",
+      "summary_vi": "Quay máy quanh trục đứng để theo chủ thể hoặc hé lộ không gian theo chiều ngang.",
+      "category": "camera_movement",
+      "purpose": "Dẫn mắt giữa hai điểm và giữ động lượng ngang thật.",
+      "use_when": [
+        "Khi đường lia, điểm đầu, điểm cuối và tốc độ đã lên kế hoạch khi quay."
+      ],
+      "avoid_when": [
+        "Tránh gọi digital crop trên footage chật là pan máy thật."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot quay lia có headroom, lead room và hướng màn hình ổn định."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Có khoảng ổn định trước, sau lia; tốc độ phù hợp khả năng đọc cảnh."
+      },
+      "continuity_rules": [
+        "Giữ hướng lia qua cut và không đảo vector ngoài chủ đích."
+      ],
+      "aspect_ratio_notes": [
+        "Crop dọc cần dư chiều ngang; không bảo đảm giữ đủ cảnh từ footage hẹp."
+      ],
+      "failure_modes": [
+        "Lia giật, dừng đột ngột hoặc chủ thể trôi khỏi khung."
+      ],
+      "fallbacks": [
+        "Dùng static hoặc mô phỏng crop nhẹ có ghi rõ giới hạn."
+      ],
+      "validation_checks": [
+        "Kiểm tra điểm đầu, cuối, vận tốc và motion blur ở tốc độ thường."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu hướng pan trái, phải hiện có, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "tilt",
+      "display_name_vi": "Lia máy dọc",
+      "summary_vi": "Quay máy quanh trục ngang để theo chiều cao hoặc tiết lộ trên–dưới.",
+      "category": "camera_movement",
+      "purpose": "Mô tả quy mô, quan hệ chiều cao hoặc chuyển chú ý dọc khung.",
+      "use_when": [
+        "Khi điểm đầu, cuối và động cơ tilt được xác định trước khi quay."
+      ],
+      "avoid_when": [
+        "Tránh giả tilt bằng crop nếu nguồn thiếu dư ảnh hoặc phối cảnh cần thay đổi."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot có chuyển động tilt thật, chân trời kiểm soát và khoảng dọc đủ."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ điểm đầu, cuối đọc được và tránh đổi tốc độ giữa hành trình."
+      },
+      "continuity_rules": [
+        "Hướng tilt và vị trí chủ thể phải nối hợp lý với shot trước, sau."
+      ],
+      "aspect_ratio_notes": [
+        "Khung ngang và dọc có dư ảnh khác nhau; phải kiểm tra crop đích."
+      ],
+      "failure_modes": [
+        "Chân trời rung, chủ thể mất headroom hoặc tilt dừng giữa ý."
+      ],
+      "fallbacks": [
+        "Dùng static ở điểm đầu hoặc cuối, hoặc mô phỏng giới hạn được công bố."
+      ],
+      "validation_checks": [
+        "Đánh dấu biên dọc, tốc độ và vùng chủ thể trên toàn shot."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "push_in",
+      "display_name_vi": "Tiến máy vào chủ thể",
+      "summary_vi": "Di chuyển máy gần hơn để tăng tập trung và thay đổi phối cảnh thật.",
+      "category": "camera_movement",
+      "purpose": "Nhấn thông tin hoặc cảm xúc bằng chuyển động tiến có động cơ.",
+      "use_when": [
+        "Khi đường máy, khoảng lấy nét và điểm dừng được chuẩn bị khi quay."
+      ],
+      "avoid_when": [
+        "Tránh mô tả phóng to số là push-in vật lý."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot tiến máy thật, nét và ổn định; chủ thể có khoảng dừng cuối."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Bắt đầu sau beat thiết lập và dừng tại điểm nhấn, không tiến vô tận."
+      },
+      "continuity_rules": [
+        "Giữ trục, eyeline và vận tốc khi nối sang shot gần hơn."
+      ],
+      "aspect_ratio_notes": [
+        "Crop số chỉ là fallback và có thể mất độ phân giải."
+      ],
+      "failure_modes": [
+        "Nét trượt, bước máy rung hoặc điểm dừng vượt quá chủ thể."
+      ],
+      "fallbacks": [
+        "Dùng digital scale nhẹ có nhãn mô phỏng hoặc cắt sang shot gần."
+      ],
+      "validation_checks": [
+        "Kiểm tra thay đổi phối cảnh, nét và độ ổn định thay vì chỉ scale."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu hướng push-in hiện có, không gọi mã."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "pull_out",
+      "display_name_vi": "Lùi máy khỏi chủ thể",
+      "summary_vi": "Di chuyển máy ra xa để mở rộng bối cảnh và thay đổi phối cảnh thật.",
+      "category": "camera_movement",
+      "purpose": "Tiết lộ môi trường, hậu quả hoặc tạo khoảng cách cảm xúc.",
+      "use_when": [
+        "Khi đường lùi an toàn, điểm đầu và khung kết đã lên kế hoạch."
+      ],
+      "avoid_when": [
+        "Tránh gọi thu nhỏ số là pull-out vật lý."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot lùi máy thật, nền được kiểm soát và không có vật cản."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Khung đầu đủ thiết lập chủ thể; khung cuối đủ lâu để đọc bối cảnh."
+      },
+      "continuity_rules": [
+        "Giữ trục và hướng rời xa nhất quán với beat."
+      ],
+      "aspect_ratio_notes": [
+        "Digital fallback có thể lộ thiếu vùng ngoài khung và giảm chất lượng."
+      ],
+      "failure_modes": [
+        "Máy va rung, nền lộ chi tiết không mong muốn hoặc nét mất."
+      ],
+      "fallbacks": [
+        "Cắt sang shot rộng hoặc dùng scale nhỏ có công bố mô phỏng."
+      ],
+      "validation_checks": [
+        "Xác nhận phối cảnh thay đổi thật, đường lùi ổn định và khung cuối sạch."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu slow pull-out hiện có, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "dolly",
+      "display_name_vi": "Dolly tiến hoặc lùi",
+      "summary_vi": "Di chuyển toàn bộ máy trên đường có kiểm soát để thay đổi vị trí và phối cảnh.",
+      "category": "camera_movement",
+      "purpose": "Tạo chuyển động không gian mượt với vận tốc và quỹ đạo đo được.",
+      "use_when": [
+        "Khi có thiết bị hoặc đường máy an toàn và rehearsal."
+      ],
+      "avoid_when": [
+        "Tránh dùng thuật ngữ dolly cho pan, zoom hoặc crop số."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot dolly thật, nền có điểm parallax và focus theo quãng đường."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Tăng, giảm tốc êm; giữ khoảng ổn định ở hai đầu."
+      },
+      "continuity_rules": [
+        "Quỹ đạo, tốc độ và hướng phải nối với chuyển động chủ thể."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không thay thế parallax thật; khung đích phải giữ điểm kết."
+      ],
+      "failure_modes": [
+        "Rung đường ray, focus hunting hoặc vận tốc không đều."
+      ],
+      "fallbacks": [
+        "Dùng static, cut gần/rộng hoặc mô phỏng giới hạn được ghi rõ."
+      ],
+      "validation_checks": [
+        "Quan sát parallax nền, độ mượt vận tốc và độ nét."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/shared/camera_motion.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu camera motion dolly trong cấu hình."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "truck",
+      "display_name_vi": "Truck máy ngang",
+      "summary_vi": "Di chuyển toàn bộ máy sang trái hoặc phải song song với chủ thể.",
+      "category": "camera_movement",
+      "purpose": "Theo chuyển động ngang hoặc làm lộ quan hệ lớp bằng parallax thật.",
+      "use_when": [
+        "Khi đường máy ngang và khoảng cách chủ thể được giữ ổn định."
+      ],
+      "avoid_when": [
+        "Tránh gọi pan tại chỗ hoặc crop ngang là truck vật lý."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot tracking ngang thật, đường di chuyển sạch và hướng màn hình rõ."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ vận tốc tương thích chủ thể và có điểm vào, ra ổn định."
+      },
+      "continuity_rules": [
+        "Không đổi hướng màn hình hoặc khoảng cách chủ thể đột ngột."
+      ],
+      "aspect_ratio_notes": [
+        "Khung dọc cần khoảng dẫn; crop không được cắt hướng chạy."
+      ],
+      "failure_modes": [
+        "Khoảng cách thay đổi, nền giật parallax hoặc máy vượt chủ thể."
+      ],
+      "fallbacks": [
+        "Dùng pan có kế hoạch, static hoặc mô phỏng crop nhẹ được công bố."
+      ],
+      "validation_checks": [
+        "Đo vị trí chủ thể trong khung và vận tốc nền qua timeline."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "data/prompt_vault/camera_moves.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu lateral tracking, không gọi prompt."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "orbit",
+      "display_name_vi": "Orbit quanh chủ thể",
+      "summary_vi": "Di chuyển máy theo cung quanh chủ thể để thay đổi nền và góc nhìn thật.",
+      "category": "camera_movement",
+      "purpose": "Bộc lộ hình khối, không gian hoặc quan hệ quanh một điểm trung tâm.",
+      "use_when": [
+        "Khi quỹ đạo, khoảng cách và hướng orbit được rehearsal."
+      ],
+      "avoid_when": [
+        "Tránh gọi xoay ảnh phẳng hoặc pan tại chỗ là orbit thật."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot orbit thật, khoảng cách chủ thể ổn định và nền không cản đường."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Có điểm đầu, cuối rõ; tốc độ cung đều và không vượt beat."
+      },
+      "continuity_rules": [
+        "Giữ hướng orbit, eyeline và trục khi nối sang góc tiếp theo."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không tạo parallax của orbit; khung đích phải giữ toàn chủ thể cần thiết."
+      ],
+      "failure_modes": [
+        "Khoảng cách thay đổi, nền xoáy khó chịu hoặc focus trượt."
+      ],
+      "fallbacks": [
+        "Dùng ba góc tĩnh khác nhau hoặc parallax mô phỏng có giới hạn."
+      ],
+      "validation_checks": [
+        "Kiểm tra bán kính hình ảnh, tốc độ nền và độ nét qua cung."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu hướng orbit trong prompt quality, không gọi mã."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "crane",
+      "display_name_vi": "Crane nâng hoặc hạ máy",
+      "summary_vi": "Di chuyển máy theo chiều cao và không gian bằng thiết bị nâng thật.",
+      "category": "camera_movement",
+      "purpose": "Tiết lộ quy mô, chuyển tầng hoặc tạo mở, kết cảnh có chiều sâu.",
+      "use_when": [
+        "Khi đường nâng an toàn, chủ thể và điểm kết được dàn dựng."
+      ],
+      "avoid_when": [
+        "Tránh mô tả crop dọc hoặc tilt tại chỗ là crane."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot crane thật, khoảng an toàn và kiểm soát chân trời."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Tăng tốc êm, giữ điểm đầu và cuối đủ đọc không gian."
+      },
+      "continuity_rules": [
+        "Giữ hướng chuyển động dọc và vị trí chủ thể khi đổi tầng."
+      ],
+      "aspect_ratio_notes": [
+        "Khung dọc có thể hợp nhưng vẫn cần dư ngang cho rung và safe area."
+      ],
+      "failure_modes": [
+        "Dao động, chân trời nghiêng hoặc chuyển động dừng trước khi tiết lộ hoàn tất."
+      ],
+      "fallbacks": [
+        "Dùng tilt có kế hoạch hoặc hai shot tĩnh rộng, cao."
+      ],
+      "validation_checks": [
+        "Kiểm tra đường máy, chân trời, khoảng an toàn và khung kết."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/architecture_scene_planner.py",
+          "symbols": [],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu crane up/down trong planner kiến trúc."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "handheld",
+      "display_name_vi": "Máy cầm tay có kiểm soát",
+      "summary_vi": "Dùng chuyển động cầm tay thật để tạo hiện diện và năng lượng mà vẫn đọc được.",
+      "category": "camera_movement",
+      "purpose": "Tạo cảm giác gần gũi hoặc khẩn trương có chủ đích.",
+      "use_when": [
+        "Khi operator, tiêu cự và mức rung được rehearsal theo cảm xúc cảnh."
+      ],
+      "avoid_when": [
+        "Tránh coi rung kỹ thuật, rolling shutter hoặc mất nét là phong cách."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần shot handheld thật với chủ thể còn theo dõi được."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ nhịp rung nhất quán; cho người xem khoảng ổn định để đọc thông tin."
+      },
+      "continuity_rules": [
+        "Mức rung, hướng theo và khoảng cách phải phù hợp qua các shot."
+      ],
+      "aspect_ratio_notes": [
+        "Crop và ổn định có thể mất nhiều biên; không hứa cứu mọi shot rung."
+      ],
+      "failure_modes": [
+        "Rung gây chóng mặt, mất chủ thể, rolling shutter hoặc focus hunting."
+      ],
+      "fallbacks": [
+        "Chọn đoạn ổn định, shot static hoặc giảm thời lượng."
+      ],
+      "validation_checks": [
+        "Xem trên màn hình lớn, kiểm tra horizon, nét và khả năng theo chủ thể."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/shared/camera_motion.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu handheld trong camera motion, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "PLANNED_SHOOT_REQUIRED",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "parallax",
+      "display_name_vi": "Parallax có giới hạn",
+      "summary_vi": "Tạo hoặc khai thác chuyển động tương đối giữa các lớp có độ sâu rõ.",
+      "category": "camera_movement",
+      "purpose": "Nhấn chiều sâu mà không tuyên bố ảnh phẳng luôn có dữ liệu không gian.",
+      "use_when": [
+        "Khi footage có chuyển động thật hoặc các lớp mask, occlusion đáng tin."
+      ],
+      "avoid_when": [
+        "Tránh tách lớp trên biên tóc, kính hoặc nền phức tạp khi chất lượng không đủ."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần lớp trước, sau, biên mask và khoảng crop cho chuyển động mô phỏng."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Chuyển động nhẹ, chậm và dừng trước khi biên hoặc crop lộ lỗi."
+      },
+      "continuity_rules": [
+        "Thứ tự occlusion và hướng lớp phải nhất quán."
+      ],
+      "aspect_ratio_notes": [
+        "Cần dư ảnh ở mép; không hứa parallax từ mọi footage."
+      ],
+      "failure_modes": [
+        "Biên rung, lớp trượt sai, lộ khoảng trống hoặc chiều sâu giả."
+      ],
+      "fallbacks": [
+        "Giữ khung static hoặc dùng push số nhẹ có công bố."
+      ],
+      "validation_checks": [
+        "Kiểm tra mask từng keyframe, occlusion và mép crop."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_edit_capabilities.py",
+          "symbols": [
+            "CAPABILITIES"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu capability parallax đã được gate, không gọi thực thi."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "SIMULATION_LIMITED",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "rack_focus_simulation",
+      "display_name_vi": "Mô phỏng chuyển nét",
+      "summary_vi": "Mô phỏng chuyển chú ý giữa hai vùng; không đại diện là thay đổi tiêu điểm quang học thật.",
+      "category": "camera_movement",
+      "purpose": "Lập kế hoạch cue thị giác có giới hạn khi không có rack focus vật lý.",
+      "use_when": [
+        "Khi hai vùng có mask hoặc depth cue rõ và footage đủ ổn định."
+      ],
+      "avoid_when": [
+        "Tránh dùng nếu biên vùng chồng nhau, chủ thể chuyển nhanh hoặc blur giả lộ rõ."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần vùng trước, sau tách được và bản nguồn có độ nét đủ."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Chuyển mức mờ êm tại beat; giữ hai trạng thái đủ lâu để nhận biết.",
+        "simulation_only": true,
+        "physical_optical_focus": false
+      },
+      "continuity_rules": [
+        "Mask và mức mờ phải bám chủ thể, không thay đổi identity hoặc chi tiết."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không được làm mất một trong hai vùng chú ý."
+      ],
+      "failure_modes": [
+        "Blur viền giả, depth sai hoặc người xem tưởng lỗi lấy nét."
+      ],
+      "fallbacks": [
+        "Dùng cắt giữa hai shot nét thật hoặc giữ một mặt phẳng nét."
+      ],
+      "validation_checks": [
+        "Ghi rõ đây là mô phỏng; kiểm tra biên và không gọi là focus quang học."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "SIMULATION_LIMITED",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "whip_motion",
+      "display_name_vi": "Whip motion chuyển nhanh",
+      "summary_vi": "Dùng chuyển động lia nhanh hoặc blur có chủ đích làm cầu nối giữa hai shot.",
+      "category": "camera_movement",
+      "purpose": "Tạo chuyển cảnh năng lượng cao khi hướng, tốc độ và biên blur tương thích.",
+      "use_when": [
+        "Khi hai shot có vector vào, ra cùng hướng hoặc mô phỏng an toàn."
+      ],
+      "avoid_when": [
+        "Tránh dùng với footage chậm, ít dư ảnh hoặc người xem nhạy chuyển động."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần đoạn tăng tốc, blur và điểm ra không che thông tin bắt buộc."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Whip ngắn, có frame ổn định trước và sau để người xem định hướng."
+      },
+      "continuity_rules": [
+        "Khớp hướng, tốc độ và vị trí điểm nhấn qua ranh giới."
+      ],
+      "aspect_ratio_notes": [
+        "Crop phải còn dư biên; không kéo giãn hình để lấp khoảng trống."
+      ],
+      "failure_modes": [
+        "Hướng lệch, blur nhấp nháy hoặc chuyển động gây khó chịu."
+      ],
+      "fallbacks": [
+        "Dùng hard cut theo hướng hoặc transition nhẹ hơn."
+      ],
+      "validation_checks": [
+        "So vector, frame blur cực đại và điểm ổn định hai phía."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu whip pan hẹp hơn, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "match_motion",
+      "display_name_vi": "Match motion tương thích",
+      "summary_vi": "Nối hai shot bằng hướng, pha và tốc độ chuyển động tương ứng.",
+      "category": "camera_movement",
+      "purpose": "Giữ động lượng qua thay đổi bối cảnh hoặc chủ thể mà không che mismatch.",
+      "use_when": [
+        "Khi hai shot có vector và pha chuyển động đo được."
+      ],
+      "avoid_when": [
+        "Tránh match chỉ dựa trên tên hành động khi hướng hoặc tốc độ khác."
+      ],
+      "required_inputs": [
+        "Footage nguồn, quỹ đạo máy, điểm đầu, điểm cuối, tỷ lệ đích và giới hạn thiết bị đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần điểm vào, ra, vector, pha và cỡ chủ thể của cả hai shot."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Chuyển động máy không tự đổi âm thanh; giữ lời, ambience và accent theo beat đã duyệt."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đặt cut tại pha tương ứng và cho chuyển động hoàn tất ở shot sau."
+      },
+      "continuity_rules": [
+        "Khớp hướng màn hình, quỹ đạo và vận tốc biểu kiến."
+      ],
+      "aspect_ratio_notes": [
+        "Đánh giá sau crop vì scale và vị trí ảnh hưởng cảm giác match."
+      ],
+      "failure_modes": [
+        "Chuyển động giật, đảo hướng hoặc lặp pha."
+      ],
+      "fallbacks": [
+        "Dùng cut on action, match cut tĩnh hoặc cắt tiêu chuẩn."
+      ],
+      "validation_checks": [
+        "Chồng vector hai khung biên và xem ranh giới ở tốc độ thường."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu alias motion match, không gọi planner."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}

@@ -1,0 +1,214 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-filmmaking",
+  "declaration_count": 8,
+  "required_plan_key": "rights",
+  "verification_values": [
+    "VERIFIED",
+    "NOT_APPLICABLE",
+    "RESTRICTED",
+    "UNKNOWN"
+  ],
+  "unknown_or_restricted_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+  "declarations": [
+    {
+      "id": "source_ownership",
+      "required": true,
+      "purpose": "Xác định ai sở hữu hoặc có thẩm quyền cung cấp từng footage và tài sản nguồn.",
+      "accepted_evidence": [
+        "Tuyên bố của chủ sở hữu kèm mã tài sản hoặc hồ sơ bàn giao.",
+        "Bằng chứng ủy quyền có phạm vi sử dụng rõ."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": [
+        {
+          "path": "services/knowledge_vault.py",
+          "symbols": [
+            "RIGHTS_STATUSES",
+            "PUBLIC_RIGHTS"
+          ],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu trạng thái quyền hiện có; không nhập hoặc thay đổi runtime."
+        }
+      ]
+    },
+    {
+      "id": "license",
+      "required": true,
+      "purpose": "Ghi giấy phép, phạm vi thương mại, nền tảng, thời hạn và giới hạn sửa đổi của tài sản.",
+      "accepted_evidence": [
+        "Văn bản giấy phép hoặc điều khoản áp dụng cho đúng phiên bản tài sản.",
+        "Biên nhận mua quyền có thông tin phạm vi sử dụng."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": [
+        {
+          "path": "services/knowledge_vault.py",
+          "symbols": [
+            "RIGHTS_STATUSES"
+          ],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu enum quyền hiện có để tránh suy diễn giấy phép."
+        }
+      ]
+    },
+    {
+      "id": "brand_restrictions",
+      "required": true,
+      "purpose": "Ghi các hạn chế về logo, màu, lời tuyên bố và cách trình bày thương hiệu.",
+      "accepted_evidence": [
+        "Brand guideline do chủ sở hữu cung cấp.",
+        "Phê duyệt bằng văn bản cho biến thể ngoài guideline."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": [
+        {
+          "path": "services/media_classifier.py",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu lớp nhận diện rủi ro thương hiệu, chỉ dùng metadata."
+        }
+      ]
+    },
+    {
+      "id": "face_person_consent",
+      "required": true,
+      "purpose": "Xác nhận đồng thuận của từng người nhận diện được đối với ghi hình, chỉnh sửa và phạm vi công bố.",
+      "accepted_evidence": [
+        "Biểu mẫu đồng thuận gắn với người và dự án cụ thể.",
+        "Xác nhận của người giám hộ khi pháp luật yêu cầu."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": [
+        {
+          "path": "services/video_prompt_pattern_library.py",
+          "symbols": [
+            "pattern_is_default_eligible"
+          ],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu kiểm tra consent hiện có, không gọi hàm."
+        }
+      ]
+    },
+    {
+      "id": "music_rights",
+      "required": true,
+      "purpose": "Xác nhận quyền dùng nhạc và âm thanh theo lãnh thổ, nền tảng, thời hạn và mục đích.",
+      "accepted_evidence": [
+        "Giấy phép của bản ghi và tác phẩm khi áp dụng.",
+        "Xác nhận nhạc do chủ sở hữu cung cấp với quyền thương mại phù hợp."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": [
+        {
+          "path": "docs/LEGAL_RISK_REGISTER.md",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu nghĩa vụ giấy phép âm nhạc; Music và Suno vẫn bị khóa."
+        }
+      ]
+    },
+    {
+      "id": "font_rights",
+      "required": true,
+      "purpose": "Xác nhận quyền nhúng, kết xuất và dùng thương mại cho từng font xuất hiện trong video.",
+      "accepted_evidence": [
+        "Giấy phép font nêu rõ quyền dùng trong video.",
+        "Bằng chứng font hệ thống, font mở hoặc font do chủ sở hữu cấp."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": []
+    },
+    {
+      "id": "stock_attribution",
+      "required": true,
+      "purpose": "Ghi nội dung attribution bắt buộc và vị trí hiển thị cho từng tài sản stock.",
+      "accepted_evidence": [
+        "Điều khoản của tài sản stock tại thời điểm tải.",
+        "Chuỗi attribution đã được chủ sở hữu kiểm tra."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": [
+        {
+          "path": "docs/LEGAL_RISK_REGISTER.md",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu nghĩa vụ attribution theo từng tài sản, không tự cấp quyền."
+        }
+      ]
+    },
+    {
+      "id": "ai_generated_asset_disclosure_metadata",
+      "required": true,
+      "purpose": "Ghi tài sản nào do AI tạo, mức chỉnh sửa và yêu cầu công bố của chủ sở hữu hoặc nền tảng.",
+      "accepted_evidence": [
+        "Manifest tài sản ghi nguồn tạo và thời điểm tạo.",
+        "Yêu cầu công bố được chủ sở hữu hoặc nền tảng xác nhận."
+      ],
+      "plan_fields": [
+        "declared_value",
+        "verification",
+        "evidence",
+        "restrictions",
+        "notes"
+      ],
+      "unknown_action": "KEEP_PLANNING_ONLY_AND_BLOCK_EXECUTION",
+      "existing_capability_refs": []
+    }
+  ]
+}

@@ -1,0 +1,741 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-filmmaking",
+  "group_id": "pacing_storytelling",
+  "capability_count": 11,
+  "capabilities": [
+    {
+      "id": "hook_first_three_seconds",
+      "display_name_vi": "Hook trong ba giây đầu",
+      "summary_vi": "Đặt tín hiệu giá trị hoặc câu hỏi rõ ở phần mở mà không bảo đảm giữ chân.",
+      "category": "pacing_storytelling",
+      "purpose": "Giúp người xem hiểu lý do tiếp tục xem ngay từ đầu.",
+      "use_when": [
+        "Khi nội dung có lợi ích, xung đột hoặc hình ảnh mở đầu được chứng minh."
+      ],
+      "avoid_when": [
+        "Tránh giật tít sai, tiết lộ quá mức hoặc ép mọi video phải cùng công thức."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần shot mở đọc nhanh và có quan hệ trực tiếp với nội dung sau."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá vùng không đến ba giây nhưng điều chỉnh theo nền tảng và nhịp lời.",
+        "retention_guaranteed": false
+      },
+      "continuity_rules": [
+        "Hook phải được nội dung sau giải đáp hoặc chứng minh."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Mở đầu gây hiểu sai, quá dày chữ hoặc không liên quan payoff."
+      ],
+      "fallbacks": [
+        "Dùng một câu thiết lập rõ và shot chủ thể dễ nhận biết."
+      ],
+      "validation_checks": [
+        "Tắt âm rồi xem hook có hiểu; nghe riêng để kiểm tra lời không quá tải."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "data/prompt_vault/prompts.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu record hook 0–3 giây, không gọi prompt."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "shot_duration_rhythm",
+      "display_name_vi": "Nhịp thời lượng shot",
+      "summary_vi": "Phân bố thời lượng shot theo lượng thông tin, chuyển động và cảm xúc.",
+      "category": "pacing_storytelling",
+      "purpose": "Tạo nhịp xem có biến đổi thay vì cắt đều máy móc.",
+      "use_when": [
+        "Khi timeline có nhiều loại shot và beat rõ."
+      ],
+      "avoid_when": [
+        "Tránh áp một số giây chung cho lời phức tạp, hành động nhanh và cảnh tĩnh."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần duration thật, vai trò shot và điểm đọc thông tin."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ shot tới khi thông tin được đọc rồi cắt tại beat có động cơ."
+      },
+      "continuity_rules": [
+        "Thay đổi nhịp phải theo arc, không làm mất hành động hoặc câu nói."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Shot quá ngắn để hiểu hoặc kéo dài sau khi hết thông tin."
+      ],
+      "fallbacks": [
+        "Dùng nhịp cơ sở vừa phải rồi điều chỉnh từng shot theo nội dung."
+      ],
+      "validation_checks": [
+        "Gắn duration và vai trò cho từng shot; xem lại không nhạc."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu chính sách thời lượng shot, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "information_density",
+      "display_name_vi": "Mật độ thông tin",
+      "summary_vi": "Giới hạn số ý, chữ và thay đổi thị giác trong mỗi khoảng thời gian.",
+      "category": "pacing_storytelling",
+      "purpose": "Giữ khả năng hiểu trên màn hình nhỏ và với người xem lần đầu.",
+      "use_when": [
+        "Khi cảnh có lời, chữ, sản phẩm và chuyển động đồng thời."
+      ],
+      "avoid_when": [
+        "Tránh nhồi nhiều bằng chứng hoặc CTA vào cùng một beat."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần transcript, lớp chữ và danh sách điểm nhìn trong shot."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Dành đủ thời gian đọc theo độ dài và độ phức tạp, không chỉ theo số giây."
+      },
+      "continuity_rules": [
+        "Một beat chính dùng một trọng tâm; thông tin phụ không tranh chấp."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Người xem phải dừng hình mới đọc hoặc bỏ lỡ hành động chính."
+      ],
+      "fallbacks": [
+        "Tách thành hai beat, giảm chữ hoặc chuyển chi tiết sang shot sau."
+      ],
+      "validation_checks": [
+        "Đếm ý chính, lớp chữ và mục chuyển động trong từng beat."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/profiles/educational.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu nguyên tắc một ý mỗi cảnh trong profile giáo dục."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "beat_mapping",
+      "display_name_vi": "Lập bản đồ beat",
+      "summary_vi": "Gắn mốc lời, hành động, âm thanh và chuyển cảnh vào cùng timeline.",
+      "category": "pacing_storytelling",
+      "purpose": "Làm các lớp hình, âm và câu chuyện đổi trạng thái tại điểm có lý do.",
+      "use_when": [
+        "Khi video có script, nhạc được cấp quyền hoặc hành động theo nhịp."
+      ],
+      "avoid_when": [
+        "Tránh tự suy beat từ nhạc chưa có quyền hoặc waveform không đáng tin."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần transcript, cue âm và mốc hành động có timecode."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đặt beat theo sự kiện nghe, nhìn được và cho phép khoảng thở giữa các mốc."
+      },
+      "continuity_rules": [
+        "Mỗi beat phải liên kết với setup, hành động hoặc payoff cụ thể."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Beat lệch lời, accent rơi sau hành động hoặc timeline quá dày."
+      ],
+      "fallbacks": [
+        "Dùng mốc lời và hành động chính thay vì mọi nhịp nhỏ."
+      ],
+      "validation_checks": [
+        "So timecode beat trên waveform và khung hình; phát ở tốc độ thường."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu khái niệm sound cue map, không sao chép nội dung."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "visual_escalation",
+      "display_name_vi": "Leo thang thị giác",
+      "summary_vi": "Tăng dần cường độ, quy mô hoặc hậu quả qua các beat có kiểm soát.",
+      "category": "pacing_storytelling",
+      "purpose": "Làm arc tiến triển và tránh cảnh sau lặp lại mức cảnh trước.",
+      "use_when": [
+        "Khi câu chuyện có setup, áp lực tăng và điểm đỉnh."
+      ],
+      "avoid_when": [
+        "Tránh chỉ tăng hiệu ứng, tốc độ hoặc âm lượng mà không tăng ý nghĩa."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần shot đại diện các mức trạng thái khác nhau."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Dành thời gian thiết lập trước khi tăng cường độ; đỉnh phải có payoff."
+      },
+      "continuity_rules": [
+        "Giữ chủ thể và motif để nhận ra sự thay đổi cùng một tuyến."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Mức tăng ngẫu nhiên, đỉnh đến quá sớm hoặc cảnh sau yếu hơn ngoài chủ đích."
+      ],
+      "fallbacks": [
+        "Giảm còn ba mức rõ: thiết lập, tăng áp lực, kết quả."
+      ],
+      "validation_checks": [
+        "Gắn mức cường độ cho từng beat và kiểm tra xu hướng tổng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_cinematic_continuity.py",
+          "symbols": [
+            "build_continuity_ledger"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu emotional arc và escalation, không gọi planner."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "pattern_interrupt",
+      "display_name_vi": "Ngắt mẫu có chủ đích",
+      "summary_vi": "Thay đổi nhịp, cỡ cảnh hoặc âm thanh để tái tập trung mà không gây giật giả.",
+      "category": "pacing_storytelling",
+      "purpose": "Phá thói quen thị giác tại một điểm nội dung quan trọng.",
+      "use_when": [
+        "Khi chuỗi lặp đã thiết lập và có thông tin mới cần nhấn."
+      ],
+      "avoid_when": [
+        "Tránh nhấp nháy, tiếng sốc, thay đổi vô nghĩa hoặc dùng quá thường."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần mẫu trước đó đủ rõ và shot ngắt có liên quan nội dung."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Chỉ ngắt sau khi mẫu được nhận biết; giữ đủ lâu để đọc thay đổi."
+      },
+      "continuity_rules": [
+        "Sau ngắt phải quay lại tuyến hoặc phát triển tuyến rõ."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Ngắt bị hiểu là lỗi, vi phạm an toàn nhấp nháy hoặc che nội dung."
+      ],
+      "fallbacks": [
+        "Dùng thay đổi cỡ cảnh nhẹ hoặc khoảng im lặng ngắn."
+      ],
+      "validation_checks": [
+        "Nêu mẫu nào bị ngắt và thông tin mới nào được nhấn."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu pattern interrupt hiện có, không gọi mã."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "setup_payoff",
+      "display_name_vi": "Thiết lập và đáp trả",
+      "summary_vi": "Đặt thông tin, kỳ vọng hoặc vấn đề rồi hoàn tất bằng kết quả tương xứng.",
+      "category": "pacing_storytelling",
+      "purpose": "Tạo quan hệ nguyên nhân–kết quả và cảm giác câu chuyện hoàn chỉnh.",
+      "use_when": [
+        "Khi chi tiết đầu video có thể được chứng minh hoặc giải quyết về sau."
+      ],
+      "avoid_when": [
+        "Tránh hứa payoff không có footage, bằng chứng hoặc quyền sử dụng."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần shot thiết lập, tiến triển và shot kết quả cùng một tuyến."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Cho setup đủ rõ trước khi trì hoãn; payoff xuất hiện khi khán giả còn nhớ chi tiết."
+      },
+      "continuity_rules": [
+        "Payoff phải trả đúng câu hỏi hoặc motif đã thiết lập."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Setup không được giải quyết hoặc payoff dùng thông tin mới chưa chuẩn bị."
+      ],
+      "fallbacks": [
+        "Giảm lời hứa của setup hoặc kết bằng tóm tắt trung thực."
+      ],
+      "validation_checks": [
+        "Lập cặp setup–payoff và kiểm tra mỗi cặp có bằng chứng hình."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/prompt_patterns/curated_defaults.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu vai trò setup và payoff trong mẫu hiện có."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "b_roll_motivation",
+      "display_name_vi": "B-roll có động cơ",
+      "summary_vi": "Chọn B-roll vì nó chứng minh, minh họa hoặc mở rộng đúng ý đang kể.",
+      "category": "pacing_storytelling",
+      "purpose": "Tránh hình lấp chỗ và giữ mối liên hệ giữa lời với bằng chứng.",
+      "use_when": [
+        "Khi lời, thao tác hoặc bối cảnh cần hình bổ sung."
+      ],
+      "avoid_when": [
+        "Tránh stock chung chung, sai địa điểm, sai sản phẩm hoặc sai thời gian."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần gắn mỗi B-roll với câu, beat hoặc bằng chứng cụ thể."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Vào B-roll sau khi ý được nêu và giữ đủ lâu để đọc chi tiết liên quan."
+      },
+      "continuity_rules": [
+        "Trạng thái sản phẩm, người, nơi và thời gian không mâu thuẫn shot chính."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "B-roll đẹp nhưng không liên quan hoặc làm sai tuyên bố."
+      ],
+      "fallbacks": [
+        "Giữ A-roll hoặc dùng chi tiết thật từ cùng nguồn."
+      ],
+      "validation_checks": [
+        "Nêu vai trò của từng B-roll và nguồn quyền sử dụng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu yêu cầu B-roll đúng ngữ cảnh."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "continuity",
+      "display_name_vi": "Tính liên tục cảnh",
+      "summary_vi": "Theo dõi chủ thể, vật thể, ánh sáng, thời gian và hướng qua toàn chuỗi shot.",
+      "category": "pacing_storytelling",
+      "purpose": "Ngăn thay đổi vô ý làm người xem mất niềm tin hoặc địa lý cảnh.",
+      "use_when": [
+        "Khi nhiều take, góc hoặc cảnh nối thành một diễn biến."
+      ],
+      "avoid_when": [
+        "Tránh sửa khác biệt có chủ đích thành giống nhau mà không hiểu arc."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần ledger trạng thái trước, sau cho từng shot."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Kiểm tra liên tục tại mọi ranh giới và tại các mốc thay đổi trong shot."
+      },
+      "continuity_rules": [
+        "Giữ identity, trang phục, đạo cụ, hướng, thời gian và ánh sáng hoặc ghi lý do thay đổi."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Đạo cụ đổi vị trí, tay nhảy, ánh sáng đổi hoặc thời gian đảo."
+      ],
+      "fallbacks": [
+        "Đổi thứ tự shot, dùng cutaway hoặc khai báo chuyển thời gian rõ."
+      ],
+      "validation_checks": [
+        "So ledger với frame đầu, cuối của từng shot."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_continuity.py",
+          "symbols": [
+            "build_continuity_contract"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu hợp đồng liên tục hiện có, không gọi hàm."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "emotional_arc",
+      "display_name_vi": "Đường cảm xúc",
+      "summary_vi": "Tổ chức trạng thái cảm xúc từ mở đầu qua chuyển biến tới kết thúc có căn cứ.",
+      "category": "pacing_storytelling",
+      "purpose": "Giữ cảm xúc tiến triển cùng sự kiện thay vì thay đổi ngẫu nhiên.",
+      "use_when": [
+        "Khi câu chuyện có chủ thể và các beat gây thay đổi cảm xúc."
+      ],
+      "avoid_when": [
+        "Tránh gán cảm xúc cho người thật nếu footage không thể hiện hoặc chưa đồng thuận."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần shot biểu hiện, hành động và bối cảnh tương ứng từng trạng thái."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Cho mỗi trạng thái đủ thời gian nhận biết và chuyển tại beat có nguyên nhân."
+      },
+      "continuity_rules": [
+        "Mỗi thay đổi cảm xúc phải có sự kiện, lời hoặc phản ứng làm căn cứ."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Arc nhảy trạng thái, lặp cảm xúc hoặc suy diễn quá mức."
+      ],
+      "fallbacks": [
+        "Dùng arc trung tính dựa trên hành động quan sát được."
+      ],
+      "validation_checks": [
+        "Gắn trạng thái và bằng chứng cho từng beat; loại mô tả không có căn cứ."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_cinematic_continuity.py",
+          "symbols": [
+            "ContinuityLedger"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu trường emotional arc, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "cta_end_card",
+      "display_name_vi": "Thẻ kết thúc kêu gọi hành động",
+      "summary_vi": "Dành đoạn cuối dễ đọc cho CTA đã duyệt mà không bịa giá hoặc cam kết.",
+      "category": "pacing_storytelling",
+      "purpose": "Kết video bằng một hành động rõ và đúng thương hiệu.",
+      "use_when": [
+        "Khi nội dung, URL, tuyên bố và tài sản CTA đã được chủ sở hữu xác nhận."
+      ],
+      "avoid_when": [
+        "Tránh CTA không liên quan, quá nhiều nút hoặc tuyên bố chưa kiểm chứng."
+      ],
+      "required_inputs": [
+        "Mục tiêu câu chuyện, script hoặc transcript, shot list và timecode nguồn đã được xác định."
+      ],
+      "shot_requirements": [
+        "Cần nền sạch, safe area, logo và nội dung CTA được cấp quyền."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Giữ lời dễ hiểu; mọi nhịp, cầu âm hoặc khoảng lặng phải có nguồn và quyền rõ."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ đủ thời gian để đọc trên thiết bị đích; không dùng một thời lượng cho mọi độ dài chữ."
+      },
+      "continuity_rules": [
+        "CTA phải phù hợp payoff và không đổi nhận diện thương hiệu."
+      ],
+      "aspect_ratio_notes": [
+        "Nhịp phải được xem lại ở tỷ lệ đích vì crop và mật độ chữ làm thay đổi thời gian đọc."
+      ],
+      "failure_modes": [
+        "Chữ quá nhỏ, bị giao diện che hoặc chứa giá, claim sai."
+      ],
+      "fallbacks": [
+        "Dùng end frame tên thương hiệu trung tính hoặc bỏ CTA."
+      ],
+      "validation_checks": [
+        "Kiểm tra copy, quyền, safe area và thời gian đọc ở kích thước thật."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "data/prompt_vault/cta_templates.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu mẫu CTA hiện có, không gọi prompt."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
