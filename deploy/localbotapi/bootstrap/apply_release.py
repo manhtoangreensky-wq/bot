@@ -8,7 +8,9 @@ import contextlib
 import hashlib
 import json
 import os
+import secrets
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +57,9 @@ class ApplyError(RuntimeError):
     """Raised when release materialization, activation, or rollback is unsafe."""
 
 
+_POSIX_SECURITY_AVAILABLE = os.name == "posix"
+
+
 class ReleaseRoots:
     def __init__(
         self,
@@ -64,12 +69,19 @@ class ReleaseRoots:
         incoming_dir: Path,
         bootstrap_backup: Path,
         lock_path: Path,
+        snapshot_owner_uid: int | None = None,
     ) -> None:
         self.release_root = Path(release_root)
         self.systemd_dir = Path(systemd_dir)
         self.incoming_dir = Path(incoming_dir)
         self.bootstrap_backup = Path(bootstrap_backup)
         self.lock_path = Path(lock_path)
+        geteuid = getattr(os, "geteuid", None)
+        self.snapshot_owner_uid = (
+            int(snapshot_owner_uid)
+            if snapshot_owner_uid is not None
+            else (int(geteuid()) if callable(geteuid) else None)
+        )
 
     @property
     def releases(self) -> Path:
@@ -92,6 +104,7 @@ class ReleaseRoots:
             incoming_dir=state / "incoming",
             bootstrap_backup=state / "bootstrap-backup" / "snapshot-v2",
             lock_path=Path("/run/lock/toanaas-localbotapi-reconcile.lock"),
+            snapshot_owner_uid=0,
         )
 
 
@@ -273,12 +286,128 @@ def _snapshot_mode(source: Path) -> int:
     if mode_file.is_symlink() or not mode_file.is_file():
         raise ApplyError(f"bootstrap snapshot mode is missing or unsafe: {source.name}")
     try:
-        raw = mode_file.read_bytes()
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(mode_file, flags)
+        with os.fdopen(fd, "rb") as handle:
+            raw = handle.read()
         if raw not in {b"600\n", b"640\n", b"644\n"}:
             raise ValueError
         return int(raw.strip(), 8)
     except (OSError, ValueError) as exc:
         raise ApplyError(f"bootstrap snapshot mode is invalid: {source.name}") from exc
+
+
+def _validate_snapshot_storage(
+    path: Path,
+    expected_mode: int,
+    *,
+    expected_type: str | None = None,
+    owner_uid: int | None = None,
+) -> None:
+    """Validate the filesystem trust anchor before using a snapshot entry.
+
+    The bootstrap verifier runs as root in production.  Requiring the
+    effective owner (root in production, the invoking test user elsewhere)
+    prevents an unprivileged account from supplying a recovery snapshot while
+    keeping the pure-Python test harness portable on Windows.
+    """
+
+    if not _POSIX_SECURITY_AVAILABLE:
+        return
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise ApplyError(f"bootstrap snapshot storage is unavailable: {path.name}") from exc
+    is_regular = stat.S_ISREG(info.st_mode)
+    is_directory = stat.S_ISDIR(info.st_mode)
+    if expected_type == "file" and not is_regular:
+        raise ApplyError(f"bootstrap snapshot storage type is unsafe: {path.name}")
+    if expected_type == "directory" and not is_directory:
+        raise ApplyError(f"bootstrap snapshot storage type is unsafe: {path.name}")
+    if expected_type is None and not (is_regular or is_directory):
+        raise ApplyError(f"bootstrap snapshot storage type is unsafe: {path.name}")
+    if stat.S_IMODE(info.st_mode) != expected_mode:
+        raise ApplyError(f"bootstrap snapshot storage mode is unsafe: {path.name}")
+    if is_regular and info.st_nlink != 1:
+        raise ApplyError(f"bootstrap snapshot storage hard link is unsafe: {path.name}")
+    if owner_uid is None:
+        geteuid = getattr(os, "geteuid", None)
+        owner_uid = int(geteuid()) if callable(geteuid) else None
+    if owner_uid is not None and info.st_uid != int(owner_uid):
+        raise ApplyError(f"bootstrap snapshot storage owner is unsafe: {path.name}")
+
+
+def _atomic_restore_file(
+    source: Path,
+    destination: Path,
+    mode: int,
+    *,
+    owner_uid: int | None = None,
+) -> None:
+    """Copy one trusted snapshot file without exposing a permissive temporary."""
+
+    parent_info = os.lstat(destination.parent)
+    if not stat.S_ISDIR(parent_info.st_mode):
+        raise ApplyError("bootstrap restore destination parent is unsafe")
+    if owner_uid is not None and parent_info.st_uid != int(owner_uid):
+        raise ApplyError("bootstrap restore destination parent owner is unsafe")
+    if _POSIX_SECURITY_AVAILABLE and stat.S_IMODE(parent_info.st_mode) & 0o022:
+        raise ApplyError("bootstrap restore destination parent is writable")
+    temporary = destination.with_name(
+        f".{destination.name}.bootstrap-{secrets.token_hex(12)}"
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd: int | None = None
+    try:
+        fd = os.open(temporary, flags, 0o600)
+        source_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            source_flags |= os.O_NOFOLLOW
+        source_fd = os.open(source, source_flags)
+        source_info = os.fstat(source_fd)
+        if not stat.S_ISREG(source_info.st_mode) or source_info.st_nlink != 1:
+            os.close(source_fd)
+            raise ApplyError(f"bootstrap snapshot source is unsafe: {source.name}")
+        if owner_uid is not None and source_info.st_uid != int(owner_uid):
+            os.close(source_fd)
+            raise ApplyError(f"bootstrap snapshot source owner is unsafe: {source.name}")
+        with os.fdopen(source_fd, "rb") as source_handle, os.fdopen(fd, "wb") as target_handle:
+            fd = None
+            shutil.copyfileobj(source_handle, target_handle)
+            target_handle.flush()
+            fchmod = getattr(os, "fchmod", None)
+            if callable(fchmod):
+                fchmod(target_handle.fileno(), mode)
+            else:
+                os.chmod(temporary, mode)
+            fchown = getattr(os, "fchown", None)
+            geteuid = getattr(os, "geteuid", None)
+            if callable(fchown) and callable(geteuid) and int(geteuid()) == 0:
+                fchown(target_handle.fileno(), 0, 0)
+            os.fsync(target_handle.fileno())
+        os.replace(temporary, destination)
+        if _POSIX_SECURITY_AVAILABLE:
+            directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+            if hasattr(os, "O_DIRECTORY"):
+                directory_flags |= os.O_DIRECTORY
+            if hasattr(os, "O_NOFOLLOW"):
+                directory_flags |= os.O_NOFOLLOW
+            directory_fd = os.open(destination.parent, directory_flags)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _restore_legacy_dropin(roots: ReleaseRoots) -> None:
@@ -298,10 +427,12 @@ def _restore_legacy_dropin(roots: ReleaseRoots) -> None:
         # silently overwriting it during emergency recovery.
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.bootstrap-{os.getpid()}")
-    shutil.copyfile(backup, temporary)
-    os.chmod(temporary, _snapshot_mode(backup))
-    os.replace(temporary, destination)
+    _atomic_restore_file(
+        backup,
+        destination,
+        _snapshot_mode(backup),
+        owner_uid=roots.snapshot_owner_uid,
+    )
 
 
 def _link_units(
@@ -336,11 +467,25 @@ def _validate_bootstrap_snapshot(roots: ReleaseRoots) -> Path:
     backup_dropins = snapshot / "drop-ins"
     if snapshot.is_symlink() or not snapshot.is_dir():
         raise ApplyError("bootstrap snapshot root is missing or unsafe")
-    if marker.is_symlink() or not marker.is_file() or marker.read_bytes() != b"snapshot-v2\n":
+    _validate_snapshot_storage(
+        snapshot, 0o700, expected_type="directory", owner_uid=roots.snapshot_owner_uid
+    )
+    if marker.is_symlink() or not marker.is_file():
+        raise ApplyError("no complete bootstrap snapshot is available")
+    _validate_snapshot_storage(
+        marker, 0o600, expected_type="file", owner_uid=roots.snapshot_owner_uid
+    )
+    if marker.read_bytes() != b"snapshot-v2\n":
         raise ApplyError("no complete bootstrap snapshot is available")
     for directory in (backup_units, backup_dropins):
         if directory.is_symlink() or not directory.is_dir():
             raise ApplyError("bootstrap snapshot directory is missing or unsafe")
+        _validate_snapshot_storage(
+            directory,
+            0o700,
+            expected_type="directory",
+            owner_uid=roots.snapshot_owner_uid,
+        )
 
     content_paths = {
         Path("systemd") / unit for unit in MANAGED_UNITS
@@ -365,10 +510,19 @@ def _validate_bootstrap_snapshot(roots: ReleaseRoots) -> Path:
         raise ApplyError("bootstrap snapshot contains an unexpected directory")
     if not actual_files.issubset(allowed_files):
         raise ApplyError("bootstrap snapshot contains an unexpected file")
+    for relative in actual_files:
+        _validate_snapshot_storage(
+            snapshot / relative,
+            0o600,
+            expected_type="file",
+            owner_uid=roots.snapshot_owner_uid,
+        )
     for content in content_paths:
         mode = content.with_name(f"{content.name}.mode")
         if (content in actual_files) != (mode in actual_files):
             raise ApplyError("bootstrap snapshot content/mode pair is incomplete")
+        if content in actual_files:
+            _snapshot_mode(snapshot / content)
     return backup_units
 
 
@@ -385,10 +539,12 @@ def _restore_bootstrap(
         destination = roots.systemd_dir / unit
         source = backup_units / unit
         if source.is_file() and not source.is_symlink():
-            temporary = destination.with_name(f".{destination.name}.bootstrap-{os.getpid()}")
-            shutil.copyfile(source, temporary)
-            os.chmod(temporary, _snapshot_mode(source))
-            os.replace(temporary, destination)
+            _atomic_restore_file(
+                source,
+                destination,
+                _snapshot_mode(source),
+                owner_uid=roots.snapshot_owner_uid,
+            )
         else:
             mode_file = source.with_name(f"{source.name}.mode")
             if source.exists() or source.is_symlink() or mode_file.exists() or mode_file.is_symlink():
@@ -402,8 +558,30 @@ def _restore_bootstrap(
 
 @contextlib.contextmanager
 def _exclusive_lock(path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+b")
+    parent = path.parent
+    if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+        raise ApplyError("apply lock parent is unsafe")
+    parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    if parent.is_symlink() or not parent.is_dir():
+        raise ApplyError("apply lock parent is unsafe")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise ApplyError("apply lock is unsafe") from exc
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        os.close(fd)
+        raise ApplyError("apply lock is unsafe")
+    if _POSIX_SECURITY_AVAILABLE:
+        geteuid = getattr(os, "geteuid", None)
+        if callable(geteuid) and info.st_uid != int(geteuid()):
+            os.close(fd)
+            raise ApplyError("apply lock owner is unsafe")
+        os.fchmod(fd, 0o600)
+    handle = os.fdopen(fd, "a+b")
     try:
         if os.name != "nt":
             import fcntl
@@ -609,6 +787,7 @@ def main() -> int:
     apply_parser.add_argument("--archive", type=Path, required=True)
     commands.add_parser("apply-ready")
     commands.add_parser("verify-current")
+    commands.add_parser("verify-bootstrap-snapshot")
     rollback_parser = commands.add_parser("rollback")
     rollback_parser.add_argument("--service", required=True)
     restore_parser = commands.add_parser("restore-bootstrap")
@@ -623,6 +802,10 @@ def main() -> int:
         elif args.command == "verify-current":
             manifest = verify_current(roots)
             print(f"verified commit={manifest['commit']}")
+            return 0
+        elif args.command == "verify-bootstrap-snapshot":
+            _validate_bootstrap_snapshot(roots)
+            print("bootstrap_snapshot status=verified schema=snapshot-v2")
             return 0
         elif args.command == "rollback":
             result = rollback(roots, args.service)

@@ -5,8 +5,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import stat
 import sys
 import tarfile
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -66,6 +68,17 @@ def _empty_bootstrap_snapshot(roots) -> None:
     (roots.bootstrap_backup / "systemd").mkdir(parents=True)
     (roots.bootstrap_backup / "drop-ins").mkdir()
     (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
+    _secure_bootstrap_snapshot_storage(roots)
+
+
+def _secure_bootstrap_snapshot_storage(roots) -> None:
+    """Mirror the root-only snapshot permissions used by the installer."""
+    snapshot = roots.bootstrap_backup
+    for directory in (snapshot, snapshot / "systemd", snapshot / "drop-ins"):
+        directory.chmod(0o700)
+    for path in snapshot.rglob("*"):
+        if path.is_file():
+            path.chmod(0o600)
 
 
 def _archive(
@@ -165,6 +178,8 @@ def test_cleanup_fails_closed_before_any_remove_when_fuser_is_missing():
     assert "RETENTION_MINUTES:-120" in text
     assert "MAX_DATA_MIB:-6144" in text
     assert "MINIMUM_FREE_MIB:-3072" in text
+    assert 'exec 9<>"$LOCK_FILE"' in text
+    assert "O_NOFOLLOW" in text
 
 
 def test_reconcile_is_locked_and_rolls_back_only_the_localbot_service():
@@ -172,12 +187,14 @@ def test_reconcile_is_locked_and_rolls_back_only_the_localbot_service():
     assert "flock -n" in text
     assert "verify-current" in text
     assert 'CURRENT="/opt/toanaas-localbotapi/current"' in text
-    assert 'RELEASE_HELPER="/usr/local/libexec/toanaas-localbotapi/apply-release"' in text
+    assert 'RELEASE_HELPER="/usr/local/libexec/toanaas-localbotapi/current/apply-release"' in text
     assert "/opt/toanaas/localbotapi" not in text
     assert "toanaas-telegram-bot-api.service" in text
     assert "restart \"$SERVICE\"" in text
     assert " rollback " in text
     assert "flock -u 9" in text
+    assert 'exec 9<>"$LOCK_FILE"' in text
+    assert "O_NOFOLLOW" in text
     assert text.index("flock -u 9") < text.index('"$RELEASE_HELPER" rollback')
     assert "readlink -f" in text
     assert "mv -Tf" in text
@@ -371,6 +388,7 @@ def test_first_release_failure_restores_bootstrap_units_and_legacy_cleanup(tmp_p
     (roots.bootstrap_backup / "drop-ins").mkdir()
     (backup_units / apply_module.SERVICE).write_text("legacy-unit\n", encoding="ascii")
     (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"644\n")
+    _secure_bootstrap_snapshot_storage(roots)
     commands: list[tuple[str, ...]] = []
     health_results = iter((False, True))
     links = _FakeLinks()
@@ -411,6 +429,7 @@ def test_first_release_default_health_runs_before_candidate_pointer_is_removed(
     (roots.bootstrap_backup / "drop-ins").mkdir()
     (backup_units / apply_module.SERVICE).write_text("legacy\n", encoding="ascii")
     (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"644\n")
+    _secure_bootstrap_snapshot_storage(roots)
     links = _FakeLinks()
     return_codes = iter((1, 0, 0))
     health_commands: list[str] = []
@@ -481,7 +500,9 @@ def test_apply_rolls_back_when_activation_command_fails(tmp_path):
     assert links.resolve(roots.current) == known_good
 
 
-def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_path):
+def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(
+    tmp_path, monkeypatch
+):
     apply_module = _load_module("apply_release")
     roots = apply_module.ReleaseRoots(
         release_root=tmp_path / "release-root",
@@ -501,6 +522,7 @@ def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_pat
         "legacy-drop-in\n", encoding="ascii"
     )
     (backup_dropins / "10-security-hardening.conf.mode").write_bytes(b"640\n")
+    _secure_bootstrap_snapshot_storage(roots)
     dropin = (
         roots.systemd_dir
         / f"{apply_module.SERVICE}.d"
@@ -527,6 +549,14 @@ def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_pat
             link_store=links,
         )
 
+    chmod_calls: list[tuple[str, int]] = []
+    real_chmod = apply_module.os.chmod
+
+    def recording_chmod(path, mode):
+        chmod_calls.append((Path(path).name, mode))
+        real_chmod(path, mode)
+
+    monkeypatch.setattr(apply_module.os, "chmod", recording_chmod)
     result = apply_module.restore_bootstrap(
         roots,
         apply_module.SERVICE,
@@ -539,6 +569,79 @@ def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_pat
     assert not links.exists(roots.previous)
     assert (roots.systemd_dir / apply_module.SERVICE).read_text(encoding="ascii") == "legacy\n"
     assert dropin.read_text(encoding="ascii") == "legacy-drop-in\n"
+    assert any(name.startswith(f".{apply_module.SERVICE}.bootstrap-") and mode == 0o600 for name, mode in chmod_calls)
+    assert any(name.startswith(".10-security-hardening.conf.bootstrap-") and mode == 0o640 for name, mode in chmod_calls)
+
+
+def test_invalid_snapshot_mode_is_rejected_before_restore_mutation(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "bootstrap",
+        lock_path=tmp_path / "lock",
+    )
+    backup_units = roots.bootstrap_backup / "systemd"
+    backup_units.mkdir(parents=True)
+    (roots.bootstrap_backup / "drop-ins").mkdir()
+    (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
+    (backup_units / apply_module.SERVICE).write_text("snapshot\n", encoding="ascii")
+    (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"777\n")
+    _secure_bootstrap_snapshot_storage(roots)
+    roots.systemd_dir.mkdir(parents=True)
+    destination = roots.systemd_dir / apply_module.SERVICE
+    destination.write_text("live\n", encoding="ascii")
+    commands: list[tuple[str, ...]] = []
+
+    with pytest.raises(apply_module.ApplyError, match="mode is invalid"):
+        apply_module._restore_bootstrap(
+            roots,
+            link_store=_FakeLinks(),
+            command_runner=lambda argv: commands.append(tuple(argv)),
+        )
+    assert destination.read_text(encoding="ascii") == "live\n"
+    assert commands == []
+
+
+def test_snapshot_storage_rejects_wrong_mode_and_owner(monkeypatch, tmp_path):
+    apply_module = _load_module("apply_release")
+    snapshot_file = tmp_path / "snapshot"
+    snapshot_file.write_bytes(b"trusted\n")
+    monkeypatch.setattr(apply_module, "_POSIX_SECURITY_AVAILABLE", True)
+    monkeypatch.setattr(apply_module.os, "geteuid", lambda: 0, raising=False)
+
+    monkeypatch.setattr(
+        apply_module.os,
+        "lstat",
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=0, st_nlink=1),
+    )
+    with pytest.raises(apply_module.ApplyError, match="storage mode"):
+        apply_module._validate_snapshot_storage(snapshot_file, 0o600)
+
+    monkeypatch.setattr(
+        apply_module.os,
+        "lstat",
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1000, st_nlink=1),
+    )
+    with pytest.raises(apply_module.ApplyError, match="owner"):
+        apply_module._validate_snapshot_storage(snapshot_file, 0o600)
+
+    monkeypatch.setattr(
+        apply_module.os,
+        "lstat",
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_uid=0, st_nlink=1),
+    )
+    with pytest.raises(apply_module.ApplyError, match="type"):
+        apply_module._validate_snapshot_storage(snapshot_file, 0o600)
+
+    monkeypatch.setattr(
+        apply_module.os,
+        "lstat",
+        lambda _path: SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_nlink=2),
+    )
+    with pytest.raises(apply_module.ApplyError, match="hard link"):
+        apply_module._validate_snapshot_storage(snapshot_file, 0o600)
 
 
 def test_receiver_rejects_shell_commands_wrong_digest_and_oversize(tmp_path):
@@ -704,7 +807,7 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
     installer = (BOOTSTRAP / "install_bootstrap.sh").read_text(encoding="utf-8")
     for helper in BOOTSTRAP.glob("*.py"):
         assert b"\r\n" not in helper.read_bytes(), f"bootstrap helper must use LF: {helper}"
-    assert 'restrict,command="/usr/local/libexec/toanaas-localbotapi/receive-release"' in installer
+    assert 'restrict,command="/usr/local/libexec/toanaas-localbotapi/current/receive-release"' in installer
     assert "/opt/toanaas-localbotapi/releases" in installer
     assert "toanaas-deploy" in installer
     assert "mapfile -t deploy_key_lines" in installer
@@ -715,8 +818,37 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
     assert "incomplete_bootstrap_snapshot" in installer
     assert "snapshot_file" in installer
     assert 'mv -T -- "$snapshot_tmp" "$BOOTSTRAP_SNAPSHOT_ROOT"' in installer
+    assert 'flock -w 30 9' in installer
+    snapshot_verify = installer.index(
+        'python3 "$SCRIPT_ROOT/apply_release.py" verify-bootstrap-snapshot'
+    )
+    helper_install = installer.index(
+        'install -o root -g root -m 0644 "$SCRIPT_ROOT/release_contract.py"'
+    )
+    key_install = installer.index(
+        'mv -Tf -- "$authorized_tmp" "$DEPLOY_HOME/.ssh/authorized_keys"'
+    )
+    systemd_enable = installer.index("systemctl enable --now toanaas-localbotapi-apply.path")
+    assert snapshot_verify < helper_install < systemd_enable < key_install
+    assert 'mktemp "$DEPLOY_HOME/.ssh/.authorized_keys.install.XXXXXXXX"' in installer
+    assert (
+        'mv -Tf -- "$authorized_tmp" "$DEPLOY_HOME/.ssh/authorized_keys"'
+        in installer
+    )
     assert 'usermod --home "$DEPLOY_HOME" --gid "$DEPLOY_USER" --groups \'\'' in installer
-    assert 'install -o root -g "$DEPLOY_USER" -m 0640 "$authorized_tmp"' in installer
+    assert 'chown root:"$DEPLOY_USER" "$authorized_tmp"' in installer
+    assert 'chmod 0640 "$authorized_tmp"' in installer
+    assert 'exec 9<>"$LOCK_FILE"' in installer
+    assert "O_NOFOLLOW" in installer
+    assert "HELPER_GENERATIONS_ROOT" in installer
+    assert 'mv -Tf -- "$current_stage/current" "$HELPER_CURRENT"' in installer
+    apply_source = (BOOTSTRAP / "apply_release.py").read_text(encoding="utf-8")
+    assert "O_EXCL" in apply_source
+    assert "O_NOFOLLOW" in apply_source
+    assert "fchmod" in apply_source
+    assert "fsync" in apply_source
+    assert "bootstrap-{os.getpid()}" not in apply_source
+    assert "snapshot_owner_uid=0" in apply_source
     assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"' in installer
     for guarded_path in (
         "$RELEASE_ROOT",
@@ -732,6 +864,8 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
         "$LIBEXEC_ROOT",
     ):
         assert f'require_real_directory "{guarded_path}"' in installer
+    assert 'require_secure_directory_if_present "$HELPER_GENERATIONS_ROOT" 755' in installer
+    assert 'install -d -o root -g root -m 0755 "$HELPER_GENERATIONS_ROOT"' in installer
     assert "product-video" not in installer
     assert "remote_worker" not in installer
     for name in ("toanaas-localbotapi-apply.path", "toanaas-localbotapi-apply.service"):
@@ -741,6 +875,8 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
             assert "NoNewPrivileges=true" in text
             assert "ProtectSystem=strict" in text
             assert "ProtectHome=true" in text
+            if name == "toanaas-localbotapi-apply.service":
+                assert "/usr/local/libexec/toanaas-localbotapi/current/apply-release" in text
 
 
 def test_workflow_is_path_scoped_pinned_and_host_key_strict():

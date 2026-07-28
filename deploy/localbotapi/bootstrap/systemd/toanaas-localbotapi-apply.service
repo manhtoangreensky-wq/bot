@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/toanaas-localbotapi/apply-release apply-ready
+ExecStart=/usr/local/libexec/toanaas-localbotapi/current/apply-release apply-ready
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

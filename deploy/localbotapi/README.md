@@ -58,7 +58,7 @@ to `main`, so its privileged SSH key is unavailable to pull-request code.
    ```
 
    The installer creates locked account `toanaas-deploy`, a single
-   `restrict,command="/usr/local/libexec/toanaas-localbotapi/receive-release"`
+   `restrict,command="/usr/local/libexec/toanaas-localbotapi/current/receive-release"`
    authorized key, root-owned verifier/apply helpers, an atomic versioned
    root-only bootstrap snapshot (including original file modes), and the apply
    path unit. It does not restart the Local Bot API or any worker.
@@ -141,14 +141,14 @@ limit.
 Normal last-known-good rollback:
 
 ```bash
-sudo /usr/local/libexec/toanaas-localbotapi/apply-release rollback \
+sudo /usr/local/libexec/toanaas-localbotapi/current/apply-release rollback \
   --service toanaas-telegram-bot-api.service
 ```
 
 Emergency return to the root-only pre-bootstrap units:
 
 ```bash
-sudo /usr/local/libexec/toanaas-localbotapi/apply-release restore-bootstrap \
+sudo /usr/local/libexec/toanaas-localbotapi/current/apply-release restore-bootstrap \
   --service toanaas-telegram-bot-api.service
 ```
 

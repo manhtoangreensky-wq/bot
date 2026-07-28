@@ -7,7 +7,10 @@ readonly STATE_ROOT="/var/lib/toanaas-localbotapi"
 readonly RELEASE_ROOT="/opt/toanaas-localbotapi"
 readonly RELEASES_ROOT="/opt/toanaas-localbotapi/releases"
 readonly LIBEXEC_ROOT="/usr/local/libexec/toanaas-localbotapi"
+readonly HELPER_GENERATIONS_ROOT="$LIBEXEC_ROOT/generations"
+readonly HELPER_CURRENT="$LIBEXEC_ROOT/current"
 readonly SYSTEMD_ROOT="/etc/systemd/system"
+readonly LOCK_FILE="/run/lock/toanaas-localbotapi-reconcile.lock"
 readonly BOOTSTRAP_BACKUP_ROOT="$STATE_ROOT/bootstrap-backup"
 readonly BOOTSTRAP_SNAPSHOT_ROOT="$BOOTSTRAP_BACKUP_ROOT/snapshot-v2"
 readonly BOOTSTRAP_BACKUP_MARKER="$BOOTSTRAP_SNAPSHOT_ROOT/.complete"
@@ -37,6 +40,43 @@ require_real_directory() {
     fi
 }
 
+require_root_directory() {
+    local path="$1"
+    local mode="$2"
+    require_real_directory "$path"
+    [[ "$(stat -c '%U:%G' -- "$path")" == "root:root" ]] || fail "unsafe_root_directory_owner"
+    [[ "$(stat -c '%a' -- "$path")" == "$mode" ]] || fail "unsafe_root_directory_mode"
+}
+
+require_root_file() {
+    local path="$1"
+    local mode="$2"
+    [[ -f "$path" && ! -L "$path" ]] || fail "unsafe_root_helper_file"
+    [[ "$(stat -c '%U:%G' -- "$path")" == "root:root" ]] || fail "unsafe_root_helper_owner"
+    [[ "$(stat -c '%a' -- "$path")" == "$mode" ]] || fail "unsafe_root_helper_mode"
+    [[ "$(stat -c '%h' -- "$path")" == "1" ]] || fail "unsafe_root_helper_links"
+}
+
+require_secure_directory_if_present() {
+    local path="$1"
+    local mode="$2"
+    if [[ -e "$path" || -L "$path" ]]; then
+        require_root_directory "$path" "$mode"
+    fi
+}
+
+require_owned_directory_if_present() {
+    local path="$1"
+    local directory_mode
+    if [[ -e "$path" || -L "$path" ]]; then
+        require_real_directory "$path"
+        [[ "$(stat -c '%U:%G' -- "$path")" == "root:root" ]] || fail "unsafe_directory_owner"
+        directory_mode="$(stat -c '%a' -- "$path")"
+        [[ "${directory_mode:1:1}" != [2367] && "${directory_mode:2:1}" != [2367] ]] ||
+            fail "unsafe_directory_mode"
+    fi
+}
+
 snapshot_file() {
     local source_path="$1"
     local destination_path="$2"
@@ -48,6 +88,7 @@ snapshot_file() {
     [[ -f "$source_path" ]] || return 0
     source_owner="$(stat -c '%U:%G' -- "$source_path")"
     [[ "$source_owner" == "root:root" ]] || fail "unsafe_bootstrap_snapshot_owner"
+    [[ "$(stat -c '%h' -- "$source_path")" == "1" ]] || fail "unsafe_bootstrap_snapshot_links"
     source_mode="$(stat -c '%a' -- "$source_path")"
     case "$source_mode" in
         600|640|644) ;;
@@ -70,10 +111,25 @@ readonly deploy_key="${deploy_key_lines[0]}"
 [[ "$deploy_key" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+([[:space:]].*)?$ ]] ||
     fail "invalid_ed25519_public_key"
 
-for tool in install groupadd useradd usermod getent id systemctl cp chmod chown mktemp mv rm ssh-keygen stat; do
+for tool in install groupadd useradd usermod getent id systemctl cp chmod chown flock mktemp mv rm rmdir ln readlink cmp ssh-keygen stat python3; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing_tool_${tool}"
 done
 ssh-keygen -l -f "$PUBLIC_KEY_FILE" >/dev/null 2>&1 || fail "invalid_ed25519_public_key"
+for source_path in release_contract.py apply_release.py receive_release.py; do
+    [[ -f "$SCRIPT_ROOT/$source_path" && ! -L "$SCRIPT_ROOT/$source_path" ]] ||
+        fail "unsafe_bootstrap_helper_source"
+done
+python3 -c \
+    'import ast,pathlib,sys; [ast.parse(pathlib.Path(p).read_text(encoding="utf-8")) for p in sys.argv[1:]]' \
+    "$SCRIPT_ROOT/release_contract.py" \
+    "$SCRIPT_ROOT/apply_release.py" \
+    "$SCRIPT_ROOT/receive_release.py"
+
+python3 -c \
+    'import os,stat,sys; p=sys.argv[1]; flags=os.O_RDWR|os.O_CREAT|getattr(os,"O_NOFOLLOW",0); fd=os.open(p,flags,0o600); s=os.fstat(fd); ok=stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1; (os.close(fd) or sys.exit(1)) if not ok else os.fchmod(fd,0o600); os.close(fd)' \
+    "$LOCK_FILE" || fail "unsafe_reconcile_lock"
+exec 9<>"$LOCK_FILE"
+flock -w 30 9 || fail "bootstrap_lock_timeout"
 
 if ! getent group "$DEPLOY_USER" >/dev/null 2>&1; then
     groupadd --system "$DEPLOY_USER"
@@ -104,30 +160,46 @@ require_real_directory "$BOOTSTRAP_SNAPSHOT_ROOT/drop-ins"
 require_real_directory "$DEPLOY_HOME"
 require_real_directory "$DEPLOY_HOME/.ssh"
 require_real_directory "$LIBEXEC_ROOT"
+require_secure_directory_if_present "$BOOTSTRAP_BACKUP_ROOT" 700
+require_secure_directory_if_present "$BOOTSTRAP_SNAPSHOT_ROOT" 700
+require_secure_directory_if_present "$BOOTSTRAP_SNAPSHOT_ROOT/systemd" 700
+require_secure_directory_if_present "$BOOTSTRAP_SNAPSHOT_ROOT/drop-ins" 700
+require_owned_directory_if_present "$DEPLOY_HOME/.ssh"
+require_secure_directory_if_present "$HELPER_GENERATIONS_ROOT" 755
 
 install -d -o root -g root -m 0755 "$RELEASE_ROOT" "$RELEASES_ROOT"
 install -d -o root -g root -m 0755 "$LIBEXEC_ROOT"
+install -d -o root -g root -m 0755 "$HELPER_GENERATIONS_ROOT"
 install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"
 install -d -o root -g root -m 0700 "$BOOTSTRAP_BACKUP_ROOT"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT/incoming"
-install -d -o root -g root -m 0755 "$DEPLOY_HOME" "$DEPLOY_HOME/.ssh"
+install -d -o root -g root -m 0755 "$DEPLOY_HOME"
+install -d -o root -g root -m 0700 "$DEPLOY_HOME/.ssh"
 
-install -o root -g root -m 0644 "$SCRIPT_ROOT/release_contract.py" "$LIBEXEC_ROOT/release_contract.py"
-install -o root -g root -m 0755 "$SCRIPT_ROOT/apply_release.py" "$LIBEXEC_ROOT/apply-release"
-install -o root -g root -m 0755 "$SCRIPT_ROOT/receive_release.py" "$LIBEXEC_ROOT/receive-release"
-
-authorized_tmp="$(mktemp)"
+authorized_tmp=""
 snapshot_tmp=""
+contract_tmp=""
+apply_tmp=""
+receiver_tmp=""
+generation_tmp=""
+current_stage=""
 cleanup() {
-    rm -f -- "$authorized_tmp"
+    for temporary in "$authorized_tmp" "$contract_tmp" "$apply_tmp" "$receiver_tmp"; do
+        if [[ -n "$temporary" ]]; then
+            rm -f -- "$temporary"
+        fi
+    done
     if [[ -n "$snapshot_tmp" && -d "$snapshot_tmp" ]]; then
         rm -rf -- "$snapshot_tmp"
     fi
+    if [[ -n "$generation_tmp" && -d "$generation_tmp" ]]; then
+        rm -rf -- "$generation_tmp"
+    fi
+    if [[ -n "$current_stage" && -d "$current_stage" ]]; then
+        rm -rf -- "$current_stage"
+    fi
 }
 trap cleanup EXIT
-printf 'restrict,command="/usr/local/libexec/toanaas-localbotapi/receive-release" %s\n' \
-    "$deploy_key" >"$authorized_tmp"
-install -o root -g "$DEPLOY_USER" -m 0640 "$authorized_tmp" "$DEPLOY_HOME/.ssh/authorized_keys"
 
 if [[ -L "$BOOTSTRAP_BACKUP_MARKER" ]] || \
     [[ -e "$BOOTSTRAP_BACKUP_MARKER" && ! -f "$BOOTSTRAP_BACKUP_MARKER" ]]; then
@@ -151,6 +223,63 @@ if [[ ! -d "$BOOTSTRAP_SNAPSHOT_ROOT" ]]; then
     snapshot_tmp=""
 fi
 
+python3 "$SCRIPT_ROOT/apply_release.py" verify-bootstrap-snapshot
+
+generation_id="$(python3 -c 'import hashlib,pathlib,sys; modes={"release_contract.py":"644","apply_release.py":"755","receive_release.py":"755"}; h=hashlib.sha256(); [h.update(pathlib.Path(p).name.encode()+b"\\0"+modes[pathlib.Path(p).name].encode()+b"\\0"+pathlib.Path(p).read_bytes()) for p in sys.argv[1:]]; print(h.hexdigest())' \
+    "$SCRIPT_ROOT/release_contract.py" "$SCRIPT_ROOT/apply_release.py" "$SCRIPT_ROOT/receive_release.py")"
+[[ "$generation_id" =~ ^[0-9a-f]{64}$ ]] || fail "invalid_helper_generation"
+generation_path="$HELPER_GENERATIONS_ROOT/$generation_id"
+if [[ -L "$generation_path" || ( -e "$generation_path" && ! -d "$generation_path" ) ]]; then
+    fail "unsafe_helper_generation"
+fi
+if [[ ! -d "$generation_path" ]]; then
+    generation_tmp="$(mktemp -d "$HELPER_GENERATIONS_ROOT/.generation.XXXXXXXX")"
+    chmod 0700 "$generation_tmp"
+    install -o root -g root -m 0644 "$SCRIPT_ROOT/release_contract.py" "$generation_tmp/release_contract.py"
+    install -o root -g root -m 0755 "$SCRIPT_ROOT/apply_release.py" "$generation_tmp/apply-release"
+    install -o root -g root -m 0755 "$SCRIPT_ROOT/receive_release.py" "$generation_tmp/receive-release"
+    PYTHONDONTWRITEBYTECODE=1 python3 -B -c \
+        'import runpy,sys; sys.path.insert(0,sys.argv[1]); runpy.run_path(sys.argv[1]+"/apply-release",run_name="bootstrap_smoke"); runpy.run_path(sys.argv[1]+"/receive-release",run_name="bootstrap_smoke")' \
+        "$generation_tmp" || fail "helper_generation_smoke_failed"
+    chmod 0755 "$generation_tmp"
+    mv -T -- "$generation_tmp" "$generation_path"
+    generation_tmp=""
+fi
+require_root_directory "$generation_path" 755
+for helper_entry in "$generation_path"/* "$generation_path"/.[!.]*; do
+    [[ -e "$helper_entry" || -L "$helper_entry" ]] || continue
+    case "$(basename -- "$helper_entry")" in
+        release_contract.py|apply-release|receive-release) ;;
+        *) fail "unsafe_helper_generation_entry" ;;
+    esac
+done
+require_root_file "$generation_path/release_contract.py" 644
+require_root_file "$generation_path/apply-release" 755
+require_root_file "$generation_path/receive-release" 755
+cmp -s "$SCRIPT_ROOT/release_contract.py" "$generation_path/release_contract.py" || fail "helper_generation_mismatch"
+cmp -s "$SCRIPT_ROOT/apply_release.py" "$generation_path/apply-release" || fail "helper_generation_mismatch"
+cmp -s "$SCRIPT_ROOT/receive_release.py" "$generation_path/receive-release" || fail "helper_generation_mismatch"
+if [[ -e "$HELPER_CURRENT" && ! -L "$HELPER_CURRENT" ]]; then
+    fail "unsafe_helper_current_pointer"
+fi
+if [[ -L "$HELPER_CURRENT" ]]; then
+    current_target="$(readlink -f -- "$HELPER_CURRENT" 2>/dev/null || true)"
+    [[ "$current_target" == "$HELPER_GENERATIONS_ROOT"/* && -d "$current_target" ]] ||
+        fail "unsafe_helper_current_pointer"
+fi
+current_stage="$(mktemp -d "$LIBEXEC_ROOT/.current-link.XXXXXXXX")"
+chmod 0700 "$current_stage"
+ln -s "generations/$generation_id" "$current_stage/current"
+mv -Tf -- "$current_stage/current" "$HELPER_CURRENT"
+rmdir -- "$current_stage"
+current_stage=""
+
+authorized_tmp="$(mktemp "$DEPLOY_HOME/.ssh/.authorized_keys.install.XXXXXXXX")"
+printf 'restrict,command="/usr/local/libexec/toanaas-localbotapi/current/receive-release" %s\n' \
+    "$deploy_key" >"$authorized_tmp"
+chown root:"$DEPLOY_USER" "$authorized_tmp"
+chmod 0640 "$authorized_tmp"
+
 install -o root -g root -m 0644 \
     "$SCRIPT_ROOT/systemd/toanaas-localbotapi-apply.path" \
     "$SYSTEMD_ROOT/toanaas-localbotapi-apply.path"
@@ -160,4 +289,6 @@ install -o root -g root -m 0644 \
 
 systemctl daemon-reload
 systemctl enable --now toanaas-localbotapi-apply.path
+mv -Tf -- "$authorized_tmp" "$DEPLOY_HOME/.ssh/authorized_keys"
+authorized_tmp=""
 printf 'localbotapi_bootstrap status=installed\n'
