@@ -3687,7 +3687,32 @@ def run_provider_generation(
         )
     ):
         runtime_worker_compatible = True
-    runtime_probation_lock_clear = bool(metadata.get("probation_lock_clear"))
+    runtime_current_job_id = _int_metadata(
+        metadata.get("current_job_id")
+        or metadata.get("current_probation_job_id"),
+        0,
+    )
+    runtime_probation_lock_owner_job_id = _int_metadata(
+        metadata.get("probation_lock_owner_job")
+        or metadata.get("active_probation_job_id")
+        or metadata.get("probation_job_id"),
+        0,
+    )
+    runtime_current_job_matches_lock = bool(
+        metadata.get("current_job_matches_lock")
+        or metadata.get("same_job_lock_reentry_allowed")
+        or (
+            runtime_current_job_id > 0
+            and runtime_probation_lock_owner_job_id > 0
+            and runtime_current_job_id == runtime_probation_lock_owner_job_id
+        )
+    )
+    runtime_probation_lock_clear = bool(
+        metadata.get("probation_lock_clear_for_current_job")
+        or metadata.get("probation_lock_clear_at_candidate_resolver")
+        or metadata.get("probation_lock_clear")
+        or runtime_current_job_matches_lock
+    )
     persisted_freeze_truth = metadata.get("product_video_freeze_truth")
     if not isinstance(persisted_freeze_truth, dict):
         persisted_freeze_truth = {}
@@ -3745,6 +3770,8 @@ def run_provider_generation(
             public_submit_enabled=submit_enabled,
             worker_compatible=runtime_worker_compatible,
             probation_lock_clear=runtime_probation_lock_clear,
+            probation_lock_owner_job_id=runtime_probation_lock_owner_job_id,
+            current_job_id=runtime_current_job_id,
             global_hard_block_reason=str(runtime_freeze_truth.get("blocker_code") or ""),
             environ=env,
             persisted_snapshot_id=str(persisted_eligibility_snapshot.get("provider_eligibility_snapshot_id") or ""),

@@ -1389,6 +1389,41 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                     or invoice.get("provider_health_at_submit")
                     or {}
                 ),
+                "admission_enforced": _safe_bool(persisted_result.get("admission_enforced")),
+                "admission_mode": str(persisted_result.get("admission_mode") or ""),
+                "worker_compatible": _safe_bool(
+                    persisted_result.get("worker_compatible")
+                    or persisted_result.get("admission_worker_version_compatible")
+                    or persisted_result.get("worker_connected")
+                ),
+                "worker_connected": _safe_bool(persisted_result.get("worker_connected")),
+                "probation_lock_clear": _safe_bool(persisted_result.get("probation_lock_clear")),
+                "probation_lock_clear_for_current_job": _safe_bool(
+                    persisted_result.get("probation_lock_clear_for_current_job")
+                    or persisted_result.get("probation_lock_clear_at_candidate_resolver")
+                    or persisted_result.get("current_job_matches_lock")
+                    or persisted_result.get("same_job_lock_reentry_allowed")
+                ),
+                "probation_lock_owner_job": _safe_int(
+                    persisted_result.get("probation_lock_owner_job")
+                    or persisted_result.get("active_probation_job_id"),
+                    0,
+                ),
+                "current_probation_job_id": _safe_int(
+                    persisted_result.get("current_probation_job_id")
+                    or hydrated_job.get("id"),
+                    0,
+                ),
+                "probation_job_id": _safe_int(persisted_result.get("probation_job_id"), 0),
+                "current_job_matches_lock": _safe_bool(
+                    persisted_result.get("current_job_matches_lock")
+                ),
+                "same_job_lock_reentry_allowed": _safe_bool(
+                    persisted_result.get("same_job_lock_reentry_allowed")
+                ),
+                "probation_lock_owned_by_other_job": _safe_bool(
+                    persisted_result.get("probation_lock_owned_by_other_job")
+                ),
                 "scene_dispatch_lease_by_index": dict(
                     persisted_result.get("scene_dispatch_lease_by_index") or {}
                 ),
