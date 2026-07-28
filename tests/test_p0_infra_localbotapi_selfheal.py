@@ -412,7 +412,7 @@ def test_first_release_failure_restores_bootstrap_units_and_legacy_cleanup(tmp_p
     ) in commands
 
 
-def test_first_release_default_health_runs_before_candidate_pointer_is_removed(
+def test_first_release_default_health_retries_docker_start_before_success(
     tmp_path, monkeypatch
 ):
     apply_module = _load_module("apply_release")
@@ -445,14 +445,15 @@ def test_first_release_default_health_runs_before_candidate_pointer_is_removed(
         return Result(next(return_codes))
 
     monkeypatch.setattr(apply_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(apply_module.time, "sleep", lambda _seconds: None)
     result = apply_module.apply_release(
         roots,
         _valid_bundle(tmp_path, "a" * 40, "default-health-failure.tgz"),
         command_runner=lambda _argv: None,
         link_store=links,
     )
-    assert result.status == "rolled_back"
-    assert not links.exists(roots.current)
+    assert result.status == "activated"
+    assert links.exists(roots.current)
     assert health_commands == [
         "toanaas-localbotapi-health",
         "toanaas-localbotapi-health",
