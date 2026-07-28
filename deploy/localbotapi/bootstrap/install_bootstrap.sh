@@ -68,9 +68,12 @@ require_secure_directory_if_present() {
 require_owned_directory_if_present() {
     local path="$1"
     local directory_mode
+    local directory_owner
     if [[ -e "$path" || -L "$path" ]]; then
         require_real_directory "$path"
-        [[ "$(stat -c '%U:%G' -- "$path")" == "root:root" ]] || fail "unsafe_directory_owner"
+        directory_owner="$(stat -c '%U:%G' -- "$path")"
+        [[ "$directory_owner" == "root:root" || "$directory_owner" == "root:$DEPLOY_USER" ]] ||
+            fail "unsafe_directory_owner"
         directory_mode="$(stat -c '%a' -- "$path")"
         [[ "${directory_mode:1:1}" != [2367] && "${directory_mode:2:1}" != [2367] ]] ||
             fail "unsafe_directory_mode"
@@ -174,7 +177,7 @@ install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"
 install -d -o root -g root -m 0700 "$BOOTSTRAP_BACKUP_ROOT"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT/incoming"
 install -d -o root -g root -m 0755 "$DEPLOY_HOME"
-install -d -o root -g root -m 0700 "$DEPLOY_HOME/.ssh"
+install -d -o root -g "$DEPLOY_USER" -m 0750 "$DEPLOY_HOME/.ssh"
 
 authorized_tmp=""
 snapshot_tmp=""

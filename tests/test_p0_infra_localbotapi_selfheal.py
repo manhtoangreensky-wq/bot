@@ -850,6 +850,7 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
     assert "bootstrap-{os.getpid()}" not in apply_source
     assert "snapshot_owner_uid=0" in apply_source
     assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"' in installer
+    assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$DEPLOY_HOME/.ssh"' in installer
     for guarded_path in (
         "$RELEASE_ROOT",
         "$RELEASES_ROOT",
