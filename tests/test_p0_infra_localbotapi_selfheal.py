@@ -141,6 +141,9 @@ def test_reconcile_is_locked_and_rolls_back_only_the_localbot_service():
     text = _release_text("bin/toanaas-localbotapi-reconcile")
     assert "flock -n" in text
     assert "verify-current" in text
+    assert 'CURRENT="/opt/toanaas-localbotapi/current"' in text
+    assert 'RELEASE_HELPER="/usr/local/libexec/toanaas-localbotapi/apply-release"' in text
+    assert "/opt/toanaas/localbotapi" not in text
     assert "toanaas-telegram-bot-api.service" in text
     assert "restart \"$SERVICE\"" in text
     assert " rollback " in text
@@ -155,6 +158,7 @@ def test_health_checks_real_upstream_external_gate_and_loopback_bind():
     assert "dummy_http" in text and '"401"' in text
     assert "missing_secret_status" in text and '"403"' in text
     assert "0.0.0.0:8081" in text and "[::]:8081" in text
+    assert "--location" not in text
     assert "TELEGRAM_TOKEN" not in text
     assert "TELEGRAM_API_HASH" not in text
 
@@ -195,7 +199,25 @@ def test_release_units_are_sandboxed_and_scoped_to_localbot():
                 assert control in text, f"{unit} lacks {control}"
     service = _release_text("systemd/toanaas-telegram-bot-api.service")
     assert "--publish 127.0.0.1:8081:8081" in service
+    assert "--env TELEGRAM_API_ID_FILE=/run/secrets/api_id" in service
+    assert "--env TELEGRAM_API_HASH_FILE=/run/secrets/api_hash" in service
+    assert "target=/tmp/telegram-bot-api" in service
     assert "--read-only" in service
     assert "--cap-drop ALL" in service
     assert "@sha256:2e93a720f71f82e41a42dc89e258efda09e6791f8d959e6801d15f88408e8eb1" in service
     assert ":latest" not in service
+    assert "Restart=always" in service
+    for preserved_control in (
+        "PrivateDevices=true",
+        "ProtectHostname=true",
+        "ProtectClock=true",
+        "ProtectKernelTunables=true",
+        "ProtectKernelModules=true",
+        "ProtectKernelLogs=true",
+        "ProtectControlGroups=true",
+        "RestrictNamespaces=true",
+        "RestrictRealtime=true",
+        "SystemCallArchitectures=native",
+        "UMask=0077",
+    ):
+        assert preserved_control in service

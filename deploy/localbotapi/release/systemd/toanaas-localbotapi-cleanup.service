@@ -3,7 +3,7 @@ Description=TOAN AAS Local Bot API bounded storage cleanup
 
 [Service]
 Type=oneshot
-ExecStart=/opt/toanaas/localbotapi/current/release/bin/toanaas-localbotapi-cleanup
+ExecStart=/opt/toanaas-localbotapi/current/release/bin/toanaas-localbotapi-cleanup
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

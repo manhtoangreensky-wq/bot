@@ -2,9 +2,9 @@
 set -euo pipefail
 
 readonly LOCK_FILE="/run/lock/toanaas-localbotapi-reconcile.lock"
-readonly CURRENT="/opt/toanaas/localbotapi/current"
+readonly CURRENT="/opt/toanaas-localbotapi/current"
 readonly SYSTEMD_DIR="/etc/systemd/system"
-readonly RELEASE_HELPER="/usr/local/sbin/toanaas-localbotapi-release"
+readonly RELEASE_HELPER="/usr/local/libexec/toanaas-localbotapi/apply-release"
 readonly HEALTH="${CURRENT}/release/bin/toanaas-localbotapi-health"
 readonly SERVICE="toanaas-telegram-bot-api.service"
 readonly -a MANAGED_UNITS=(

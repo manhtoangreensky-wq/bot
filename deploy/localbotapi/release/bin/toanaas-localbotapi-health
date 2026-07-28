@@ -24,7 +24,7 @@ if [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null |
 fi
 
 http_status() {
-    curl --silent --show-error --location \
+    curl --silent --show-error \
         --connect-timeout 3 --max-time 8 \
         --output /dev/null --write-out '%{http_code}' "$1"
 }
