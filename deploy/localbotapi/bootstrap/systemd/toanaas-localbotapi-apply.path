@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for verified TOAN AAS Local Bot API releases
+
+[Path]
+PathExistsGlob=/var/lib/toanaas-localbotapi/incoming/*.ready
+Unit=toanaas-localbotapi-apply.service
+
+[Install]
+WantedBy=multi-user.target

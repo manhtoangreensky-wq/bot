@@ -1,0 +1,38 @@
+[Unit]
+Description=TOAN AAS Local Telegram Bot API
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f toanaas-telegram-bot-api
+ExecStart=/usr/bin/docker run --name toanaas-telegram-bot-api --rm --read-only --tmpfs /run:rw,noexec,nosuid,nodev,size=16m --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add DAC_READ_SEARCH --security-opt no-new-privileges --publish 127.0.0.1:8081:8081 --mount type=bind,source=/opt/toanaas-telegram-bot-api/data,target=/var/lib/telegram-bot-api --mount type=bind,source=/opt/toanaas-telegram-bot-api/temp,target=/tmp/telegram-bot-api --mount type=bind,source=/etc/toanaas-telegram-bot-api/api_id,target=/run/secrets/api_id,readonly --mount type=bind,source=/etc/toanaas-telegram-bot-api/api_hash,target=/run/secrets/api_hash,readonly --env-file /etc/toanaas-telegram-bot-api/env --env TELEGRAM_API_ID_FILE=/run/secrets/api_id --env TELEGRAM_API_HASH_FILE=/run/secrets/api_hash --memory 1500m --memory-swap 1500m --cpus 2 --pids-limit 512 --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 aiogram/telegram-bot-api@sha256:2e93a720f71f82e41a42dc89e258efda09e6791f8d959e6801d15f88408e8eb1
+ExecStop=/usr/bin/docker stop --time 30 toanaas-telegram-bot-api
+Restart=always
+RestartSec=10s
+TimeoutStartSec=90s
+TimeoutStopSec=40s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+UMask=0077
+ReadWritePaths=/run/docker.sock
+
+[Install]
+WantedBy=multi-user.target

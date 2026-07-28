@@ -1,0 +1,29 @@
+[Unit]
+Description=Apply one verified TOAN AAS Local Bot API release
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/toanaas-localbotapi/current/apply-release apply-ready
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+UMask=0077
+ReadWritePaths=/opt/toanaas-localbotapi /var/lib/toanaas-localbotapi /etc/systemd/system /run/lock /run/systemd /run/docker.sock
+TimeoutStartSec=180

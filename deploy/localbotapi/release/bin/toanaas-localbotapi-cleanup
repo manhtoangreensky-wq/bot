@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly DATA_DIR="/opt/toanaas-telegram-bot-api/data"
+readonly LOCK_FILE="/run/lock/toanaas-localbotapi-cleanup.lock"
+readonly RETENTION_MINUTES="${RETENTION_MINUTES:-120}"
+readonly MAX_DATA_MIB="${MAX_DATA_MIB:-6144}"
+readonly MINIMUM_FREE_MIB="${MINIMUM_FREE_MIB:-3072}"
+
+require_tool() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'localbotapi_cleanup missing_tool=%s\n' "$1" >&2
+        exit 1
+    }
+}
+
+# Validate the complete toolchain before locking, enumerating, or removing data.
+require_tool flock
+require_tool fuser
+require_tool find
+require_tool stat
+require_tool du
+require_tool df
+require_tool sort
+require_tool cut
+require_tool awk
+require_tool mktemp
+require_tool rm
+require_tool python3
+
+safe_remove() {
+    local path="$1"
+    local fuser_status
+    case "$path" in
+        "$DATA_DIR"/*) ;;
+        *)
+            printf 'localbotapi_cleanup unsafe_path=true\n' >&2
+            return 1
+            ;;
+    esac
+    [[ -f "$path" && ! -L "$path" ]] || return 0
+    [[ "$(stat -c '%d' -- "$path")" == "$data_device" ]] || {
+        printf 'localbotapi_cleanup cross_device=true\n' >&2
+        return 1
+    }
+
+    if fuser -- "$path" >/dev/null 2>&1; then
+        return 0
+    else
+        fuser_status=$?
+    fi
+    case "$fuser_status" in
+        1) rm -f -- "$path" ;;
+        *)
+            printf 'localbotapi_cleanup unexpected_fuser_status=%s\n' "$fuser_status" >&2
+            return 1
+            ;;
+    esac
+}
+
+for value in "$RETENTION_MINUTES" "$MAX_DATA_MIB" "$MINIMUM_FREE_MIB"; do
+    [[ "$value" =~ ^[0-9]+$ ]] || {
+        printf 'localbotapi_cleanup invalid_numeric_policy=true\n' >&2
+        exit 1
+    }
+done
+[[ -d "$DATA_DIR" && ! -L "$DATA_DIR" ]] || {
+    printf 'localbotapi_cleanup unsafe_data_dir=true\n' >&2
+    exit 1
+}
+
+python3 -c \
+    'import os,stat,sys; p=sys.argv[1]; flags=os.O_RDWR|os.O_CREAT|getattr(os,"O_NOFOLLOW",0); fd=os.open(p,flags,0o600); s=os.fstat(fd); ok=stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1; (os.close(fd) or sys.exit(1)) if not ok else os.fchmod(fd,0o600); os.close(fd)' \
+    "$LOCK_FILE" || {
+    printf 'localbotapi_cleanup unsafe_lock=true\n' >&2
+    exit 1
+}
+exec 9<>"$LOCK_FILE"
+if ! flock -n 9; then
+    printf 'localbotapi_cleanup status=already_running\n'
+    exit 0
+fi
+
+data_device="$(stat -c '%d' -- "$DATA_DIR")"
+candidate_file="$(mktemp)"
+trap 'rm -f -- "$candidate_file"' EXIT
+
+enumerate_oldest() {
+    local age_filter="$1"
+    if [[ -n "$age_filter" ]]; then
+        find "$DATA_DIR" -xdev -type f -mmin "+$age_filter" -printf '%T@ %p\0' |
+            sort -z -n >"$candidate_file"
+    else
+        find "$DATA_DIR" -xdev -type f -printf '%T@ %p\0' |
+            sort -z -n >"$candidate_file"
+    fi
+}
+
+usage_mib() {
+    du -sm -- "$DATA_DIR" | cut -f1
+}
+
+free_mib() {
+    df -Pm -- "$DATA_DIR" | awk 'NR == 2 { print $4 }'
+}
+
+# Expired artifacts are always eligible; active/open files are skipped.
+enumerate_oldest "$RETENTION_MINUTES"
+while IFS= read -r -d '' candidate; do
+    safe_remove "${candidate#* }"
+done <"$candidate_file"
+
+# Under storage pressure, remove oldest closed artifacts until both limits hold.
+enumerate_oldest ""
+while IFS= read -r -d '' candidate; do
+    current_usage="$(usage_mib)"
+    current_free="$(free_mib)"
+    [[ "$current_usage" =~ ^[0-9]+$ && "$current_free" =~ ^[0-9]+$ ]] || {
+        printf 'localbotapi_cleanup invalid_storage_metrics=true\n' >&2
+        exit 1
+    }
+    if (( current_usage <= MAX_DATA_MIB && current_free >= MINIMUM_FREE_MIB )); then
+        break
+    fi
+    safe_remove "${candidate#* }"
+done <"$candidate_file"
+
+final_usage="$(usage_mib)"
+final_free="$(free_mib)"
+[[ "$final_usage" =~ ^[0-9]+$ && "$final_free" =~ ^[0-9]+$ ]] || {
+    printf 'localbotapi_cleanup invalid_storage_metrics=true\n' >&2
+    exit 1
+}
+if (( final_usage > MAX_DATA_MIB || final_free < MINIMUM_FREE_MIB )); then
+    printf 'localbotapi_cleanup storage_limits_unsatisfied=true usage_mib=%s free_mib=%s\n' \
+        "$final_usage" "$final_free" >&2
+    exit 1
+fi
+
+printf 'localbotapi_cleanup status=ok usage_mib=%s free_mib=%s\n' "$final_usage" "$final_free"

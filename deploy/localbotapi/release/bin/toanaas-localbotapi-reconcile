@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly LOCK_FILE="/run/lock/toanaas-localbotapi-reconcile.lock"
+readonly CURRENT="/opt/toanaas-localbotapi/current"
+readonly SYSTEMD_DIR="/etc/systemd/system"
+readonly RELEASE_HELPER="/usr/local/libexec/toanaas-localbotapi/current/apply-release"
+readonly HEALTH="${CURRENT}/release/bin/toanaas-localbotapi-health"
+readonly SERVICE="toanaas-telegram-bot-api.service"
+readonly -a MANAGED_UNITS=(
+    toanaas-telegram-bot-api.service
+    toanaas-localbotapi-cleanup.service
+    toanaas-localbotapi-cleanup.timer
+    toanaas-localbotapi-health.service
+    toanaas-localbotapi-health.timer
+    toanaas-localbotapi-reconcile.service
+    toanaas-localbotapi-reconcile.timer
+    toanaas-localbotapi-cert-watch.service
+    toanaas-localbotapi-cert-watch.timer
+)
+
+require_tool() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'localbotapi_reconcile missing_tool=%s\n' "$1" >&2
+        exit 1
+    }
+}
+
+require_tool flock
+require_tool ln
+require_tool readlink
+require_tool mv
+require_tool rm
+require_tool systemctl
+require_tool python3
+
+python3 -c \
+    'import os,stat,sys; p=sys.argv[1]; parent=os.path.dirname(p); os.makedirs(parent,mode=0o755,exist_ok=True); flags=os.O_RDWR|os.O_CREAT|getattr(os,"O_NOFOLLOW",0); fd=os.open(p,flags,0o600); s=os.fstat(fd); ok=stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1; (os.close(fd) or sys.exit(1)) if not ok else os.fchmod(fd,0o600); os.close(fd)' \
+    "$LOCK_FILE" || {
+    printf 'localbotapi_reconcile unsafe_lock=true\n' >&2
+    exit 1
+}
+exec 9<>"$LOCK_FILE"
+if ! flock -n 9; then
+    printf 'localbotapi_reconcile status=already_running\n'
+    exit 0
+fi
+
+if [[ ! -x "$RELEASE_HELPER" || ! -x "$HEALTH" ]]; then
+    printf 'localbotapi_reconcile fixed_helper_missing=true\n' >&2
+    exit 1
+fi
+
+"$RELEASE_HELPER" verify-current
+
+links_changed=0
+pending_link=""
+cleanup_pending_link() {
+    if [[ -n "$pending_link" && -L "$pending_link" ]]; then
+        rm -f -- "$pending_link"
+    fi
+}
+trap cleanup_pending_link EXIT
+for unit in "${MANAGED_UNITS[@]}"; do
+    source_path="${CURRENT}/release/systemd/${unit}"
+    destination_path="${SYSTEMD_DIR}/${unit}"
+    if [[ ! -f "$source_path" ]]; then
+        printf 'localbotapi_reconcile missing_unit=%s\n' "$unit" >&2
+        exit 1
+    fi
+    source_target="$(readlink -f -- "$source_path")"
+    destination_target="$(readlink -f -- "$destination_path" 2>/dev/null || true)"
+    if [[ ! -L "$destination_path" || "$destination_target" != "$source_target" ]]; then
+        pending_link="${destination_path}.tmp-${BASHPID}"
+        ln -s -- "$source_path" "$pending_link"
+        mv -Tf -- "$pending_link" "$destination_path"
+        pending_link=""
+        links_changed=1
+    fi
+done
+
+if (( links_changed )); then
+    systemctl daemon-reload
+fi
+
+if "$HEALTH"; then
+    exit 0
+fi
+
+# Exactly one service restart is permitted before invoking the fixed rollback path.
+systemctl restart "$SERVICE"
+if "$HEALTH"; then
+    exit 0
+fi
+
+printf 'localbotapi_reconcile health_failed_after_restart=true\n' >&2
+# Hand the shared lock to the fixed rollback helper instead of deadlocking on
+# a second flock of the same file in the child process.
+flock -u 9
+"$RELEASE_HELPER" rollback --service "$SERVICE"

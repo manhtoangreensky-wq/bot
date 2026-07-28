@@ -1,0 +1,92 @@
+name: Deploy Local Bot API VPS infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/localbotapi/release/**"
+      - "deploy/localbotapi/bootstrap/build_release.py"
+      - ".github/workflows/deploy-localbotapi-vps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: localbotapi-vps-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment: localbotapi-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact main revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build and verify deterministic infrastructure bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="${RUNNER_TEMP}/toanaas-localbotapi-${GITHUB_SHA}.tgz"
+          python3 deploy/localbotapi/bootstrap/build_release.py build \
+            --repo-root "${GITHUB_WORKSPACE}" \
+            --commit "${GITHUB_SHA}" \
+            --output "${bundle}"
+          python3 deploy/localbotapi/bootstrap/build_release.py verify \
+            --archive "${bundle}"
+          bundle_sha256="$(sha256sum "${bundle}" | cut -d ' ' -f 1)"
+          printf 'LOCALBOT_BUNDLE=%s\n' "${bundle}" >>"${GITHUB_ENV}"
+          printf 'LOCALBOT_BUNDLE_SHA256=%s\n' "${bundle_sha256}" >>"${GITHUB_ENV}"
+
+      - name: Prepare ephemeral pinned SSH identity
+        shell: bash
+        env:
+          LOCALBOT_VPS_SSH_KEY: ${{ secrets.LOCALBOT_VPS_SSH_KEY }}
+          LOCALBOT_VPS_KNOWN_HOSTS: ${{ secrets.LOCALBOT_VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${LOCALBOT_VPS_SSH_KEY:?missing LOCALBOT_VPS_SSH_KEY}"
+          : "${LOCALBOT_VPS_KNOWN_HOSTS:?missing LOCALBOT_VPS_KNOWN_HOSTS}"
+          umask 077
+          key_file="${RUNNER_TEMP}/localbot-vps-key"
+          known_hosts_file="${RUNNER_TEMP}/localbot-vps-known-hosts"
+          printf '%s\n' "${LOCALBOT_VPS_SSH_KEY}" >"${key_file}"
+          printf '%s\n' "${LOCALBOT_VPS_KNOWN_HOSTS}" >"${known_hosts_file}"
+          chmod 0600 "${key_file}" "${known_hosts_file}"
+          ssh-keygen -y -f "${key_file}" >/dev/null
+          ssh-keygen -F tg.toanaas.vn -f "${known_hosts_file}" >/dev/null
+
+      - name: Upload and wait for health-gated activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="${RUNNER_TEMP}/localbot-vps-key"
+          known_hosts_file="${RUNNER_TEMP}/localbot-vps-known-hosts"
+          ssh -T \
+            -i "${key_file}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${known_hosts_file}" \
+            -o ClearAllForwardings=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            toanaas-deploy@tg.toanaas.vn \
+            "upload ${GITHUB_SHA} ${LOCALBOT_BUNDLE_SHA256}" \
+            <"${LOCALBOT_BUNDLE}"
+
+      - name: Remove ephemeral deployment material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- \
+            "${RUNNER_TEMP}/localbot-vps-key" \
+            "${RUNNER_TEMP}/localbot-vps-known-hosts" \
+            "${LOCALBOT_BUNDLE:-}"

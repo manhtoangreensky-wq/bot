@@ -1,0 +1,16 @@
+[Unit]
+Description=TOAN AAS Local Bot API health contract
+After=toanaas-telegram-bot-api.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/toanaas-localbotapi/current/release/bin/toanaas-localbotapi-health
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/run/docker.sock

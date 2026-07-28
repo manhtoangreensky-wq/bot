@@ -1,0 +1,11 @@
+[Unit]
+Description=Run TOAN AAS Local Bot API self-heal reconcile
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Unit=toanaas-localbotapi-reconcile.service
+
+[Install]
+WantedBy=timers.target
