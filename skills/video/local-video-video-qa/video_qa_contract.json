@@ -1,0 +1,1467 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-video-qa",
+  "group_id": "video_qa",
+  "contract_id": "video_qa_no_fake_success",
+  "qa_count": 19,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "audio_contract_refs": [
+    "../local-video-sound-design/audio_qa_contract.json",
+    "../local-video-sound-design/platform_loudness_profiles.json"
+  ],
+  "delivery_contract_refs": [
+    "../local-video-local-capabilities/platform_delivery_profiles.json"
+  ],
+  "typography_contract_ref": "../local-video-transition-motion/kinetic_typography.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; 26H chỉ kiểm tra artifact âm thanh do chủ sở hữu cung cấp và có quyền."
+  },
+  "success_policy": {
+    "missing_evidence_action": "FAIL_CLOSED",
+    "all_blocking_checks_required": true,
+    "warning_checks_require_review": true,
+    "http_200_alone_success_allowed": false,
+    "task_id_alone_success_allowed": false,
+    "empty_output_path_success_allowed": false,
+    "zero_byte_success_allowed": false,
+    "srt_only_when_mp4_promised_success_allowed": false,
+    "audio_only_when_mp4_promised_success_allowed": false,
+    "broken_mp4_success_allowed": false,
+    "placeholder_or_draft_success_allowed": false,
+    "silent_stream_success_allowed": false,
+    "clipped_stream_success_allowed": false
+  },
+  "no_fake_success": [
+    "http_200_alone",
+    "task_id_alone",
+    "empty_output_path",
+    "zero_byte_file",
+    "srt_only_when_mp4_promised",
+    "audio_only_when_mp4_promised",
+    "broken_mp4"
+  ],
+  "checks": [
+    {
+      "id": "file_exists",
+      "qualified_id": "video_qa.file_exists",
+      "display_name_vi": "File đầu ra tồn tại",
+      "purpose_vi": "Xác nhận artifact được hứa là một file thật tại đường dẫn hợp lệ, không chỉ là metadata.",
+      "evidence_required": [
+        "Đường dẫn artifact đã chuẩn hóa và stat file tại thời điểm QA.",
+        "Bằng chứng file còn tồn tại trong workspace được phép."
+      ],
+      "pass_rule_vi": "PASS chỉ khi đường dẫn không rỗng, resolve hợp lệ và file tồn tại.",
+      "failure_rule_vi": "Đường dẫn rỗng, file biến mất hoặc path nằm ngoài workspace phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "filesystem_metadata"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Dùng primitive kiểm tra path/file đã có; 26H chỉ mô tả evidence, không gọi runtime."
+      },
+      "failure_modes": [
+        "Output path rỗng hoặc chỉ có task ID.",
+        "File bị xóa sau khi job báo hoàn tất."
+      ],
+      "validation_checks": [
+        "Đối chiếu path với render promise.",
+        "Kiểm tra file thật ngay trước khi claim success."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Helper hiện hữu đã từ chối output path rỗng hoặc file không tồn tại."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "file_size_minimum",
+      "qualified_id": "video_qa.file_size_minimum",
+      "display_name_vi": "Kích thước file tối thiểu",
+      "purpose_vi": "Loại file zero byte hoặc artifact quá nhỏ so với ngưỡng hợp lệ.",
+      "evidence_required": [
+        "Số byte thực tế từ filesystem.",
+        "Minimum-byte policy hiện hành hoặc override đã ghi trong promise."
+      ],
+      "pass_rule_vi": "PASS khi byte size lớn hơn hoặc bằng ngưỡng policy đã chọn.",
+      "failure_rule_vi": "Zero byte, thiếu stat hoặc nhỏ hơn minimum phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "filesystem_metadata"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Tham chiếu MIN_OUTPUT_BYTES và validator hiện hữu dưới dạng metadata-only."
+      },
+      "failure_modes": [
+        "File zero byte.",
+        "Ngưỡng bị bỏ qua hoặc đo trước khi ghi file hoàn tất."
+      ],
+      "validation_checks": [
+        "Đo byte sau khi close file.",
+        "Ghi threshold và observed bytes trong evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "MIN_OUTPUT_BYTES",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validator đã có minimum-byte gate; 26H không thay đổi threshold production."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "container_valid",
+      "qualified_id": "video_qa.container_valid",
+      "display_name_vi": "Container video hợp lệ",
+      "purpose_vi": "Xác nhận container được probe và phù hợp loại artifact đã promise.",
+      "evidence_required": [
+        "ffprobe format name và probe return status.",
+        "Expected container từ render promise."
+      ],
+      "pass_rule_vi": "PASS khi ffprobe đọc được container và format thuộc allowlist của promise.",
+      "failure_rule_vi": "Probe lỗi, format rỗng hoặc container sai loại phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Dùng probe_video_file/validate_mp4_output làm source metadata; không import helper trong pack."
+      },
+      "failure_modes": [
+        "Đuôi MP4 nhưng bytes không phải container video.",
+        "Container bị truncated hoặc probe không đọc được."
+      ],
+      "validation_checks": [
+        "So observed format với expected container.",
+        "Không suy luận container chỉ từ extension."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe/validator hiện hữu cung cấp format evidence và fail khi container không hợp lệ."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "video_stream_exists",
+      "qualified_id": "video_qa.video_stream_exists",
+      "display_name_vi": "Có video stream",
+      "purpose_vi": "Ngăn audio-only hoặc subtitle-only artifact được nhận nhầm là MP4 video hoàn chỉnh.",
+      "evidence_required": [
+        "Danh sách stream từ ffprobe.",
+        "Ít nhất một stream codec_type=video phù hợp promise."
+      ],
+      "pass_rule_vi": "PASS khi có video stream đọc được và promise yêu cầu video.",
+      "failure_rule_vi": "Không có video stream hoặc chỉ có audio/subtitle phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Dùng metadata stream của probe hiện hữu; không gọi production validator."
+      },
+      "failure_modes": [
+        "Audio-only file mang đuôi MP4.",
+        "SRT-only output được trả cho promise MP4."
+      ],
+      "validation_checks": [
+        "Kiểm tra codec_type thay vì chỉ extension.",
+        "Ghi số video streams trong evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validator hiện hữu đã yêu cầu video stream."
+        },
+        {
+          "path": "services/video_final_output.py",
+          "symbols": [
+            "validate_final_video_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Final-output gate hiện hữu từ chối artifact không có video stream."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "duration_positive",
+      "qualified_id": "video_qa.duration_positive",
+      "display_name_vi": "Duration lớn hơn zero",
+      "purpose_vi": "Xác nhận artifact có timeline giải mã được và duration dương.",
+      "evidence_required": [
+        "Duration giây từ ffprobe format/stream.",
+        "Expected duration hoặc tolerance từ render promise khi có."
+      ],
+      "pass_rule_vi": "PASS khi observed duration lớn hơn zero và không mâu thuẫn promise.",
+      "failure_rule_vi": "Duration zero, âm, NaN hoặc thiếu evidence phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Dùng probe hiện hữu làm metadata source; không coi file size là duration evidence."
+      },
+      "failure_modes": [
+        "Container tồn tại nhưng duration bằng zero.",
+        "Probe trả duration không hữu hạn."
+      ],
+      "validation_checks": [
+        "Chuẩn hóa duration về số hữu hạn.",
+        "So với expected duration khi promise có giá trị."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe/validator hiện hữu đã gate duration dương."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "probe_mp4"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Frame-video probe có expected-duration evidence để tham chiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "dimensions_valid",
+      "qualified_id": "video_qa.dimensions_valid",
+      "display_name_vi": "Kích thước khung hình hợp lệ",
+      "purpose_vi": "Xác nhận width/height dương, trong ceiling và phù hợp render promise.",
+      "evidence_required": [
+        "Observed width và height của video stream.",
+        "Expected dimensions hoặc profile target."
+      ],
+      "pass_rule_vi": "PASS khi width/height đều dương, không vượt policy và khớp promise trong tolerance.",
+      "failure_rule_vi": "Dimension thiếu, bằng zero, vượt ceiling hoặc sai promise phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Tham chiếu dimension gates hiện hữu và delivery profile; không sửa production constants."
+      },
+      "failure_modes": [
+        "Width/height bằng zero.",
+        "Artifact vượt maximum dimensions hoặc bị xoay sai metadata."
+      ],
+      "validation_checks": [
+        "Kiểm tra cả coded dimensions và rotation khi có.",
+        "Ghi expected/observed dimensions."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "MAX_OUTPUT_WIDTH",
+            "MAX_OUTPUT_HEIGHT",
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validator hiện hữu đã có dimension ceiling."
+        },
+        {
+          "path": "skills/video/local-video-local-capabilities/platform_delivery_profiles.json",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "Delivery profile là source metadata cho target dimensions/aspect."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "frame_rate_valid",
+      "qualified_id": "video_qa.frame_rate_valid",
+      "display_name_vi": "Frame rate hợp lệ",
+      "purpose_vi": "Xác nhận FPS dương, hữu hạn và phù hợp profile hoặc render promise.",
+      "evidence_required": [
+        "avg_frame_rate/r_frame_rate đã chuẩn hóa từ ffprobe.",
+        "Expected FPS hoặc range từ promise."
+      ],
+      "pass_rule_vi": "PASS khi FPS dương, hữu hạn và nằm trong tolerance đã khai báo.",
+      "failure_rule_vi": "FPS zero, không parse được, thiếu evidence hoặc sai promise phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "probe_video_file đã thu FPS nhưng production chưa gate; 26H chỉ đặc tả gate còn thiếu."
+      },
+      "failure_modes": [
+        "avg_frame_rate trả 0/0.",
+        "Variable FPS bị so như constant mà không ghi policy."
+      ],
+      "validation_checks": [
+        "Chuẩn hóa rational FPS an toàn.",
+        "Ghi expected/range và observed FPS."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe hiện hữu thu FPS nhưng chưa có pass/fail gate đầy đủ."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "audio_stream_when_promised",
+      "qualified_id": "video_qa.audio_stream_when_promised",
+      "display_name_vi": "Có audio stream khi đã hứa",
+      "purpose_vi": "Xác nhận video có audio stream khi render promise hoặc product profile yêu cầu.",
+      "evidence_required": [
+        "Danh sách audio streams từ ffprobe.",
+        "Boolean expects_audio và channel/layout promise."
+      ],
+      "pass_rule_vi": "PASS khi audio được promise và có stream audio đọc được; không promise thì ghi NOT_REQUIRED evidence.",
+      "failure_rule_vi": "Đã promise audio nhưng stream thiếu hoặc không đọc được phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Tham chiếu validate_mp4_output(require_audio=True) và audio QA 26E."
+      },
+      "failure_modes": [
+        "Video silent do mất stream dù UI đã hứa audio.",
+        "Chỉ kiểm tra extension mà không probe stream."
+      ],
+      "validation_checks": [
+        "Đối chiếu expects_audio với observed streams.",
+        "Chuyển audio QA 26E khi stream tồn tại."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validator hiện hữu hỗ trợ require_audio khi promise yêu cầu."
+        },
+        {
+          "path": "skills/video/local-video-sound-design/audio_qa_contract.json",
+          "symbols": [],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Audio QA 26E là source of truth cho stream và evidence âm thanh."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "audio_loudness_valid",
+      "qualified_id": "video_qa.audio_loudness_valid",
+      "display_name_vi": "Loudness audio hợp lệ",
+      "purpose_vi": "Đối chiếu LUFS-I đo được với platform loudness profile đã chọn.",
+      "evidence_required": [
+        "Integrated loudness evidence từ phép đo local.",
+        "Platform profile và target/tolerance 26E."
+      ],
+      "pass_rule_vi": "PASS khi LUFS-I có evidence và nằm trong tolerance của profile explicit.",
+      "failure_rule_vi": "Không có phép đo, dùng một target universal hoặc ngoài tolerance phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Delegation canonical tới audio_qa_contract#loudness và platform_loudness_profiles; 26H không sao chép target."
+      },
+      "failure_modes": [
+        "Có audio stream nhưng toàn bộ stream im lặng.",
+        "Target -16 bị áp cho mọi platform không có profile."
+      ],
+      "validation_checks": [
+        "Ghi profile ID, target, tolerance và observed LUFS-I.",
+        "Không suy luận loudness từ volume metadata."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-sound-design/audio_qa_contract.json",
+          "symbols": [],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Check loudness canonical của 26E; 26H chỉ nối vào video QA."
+        },
+        {
+          "path": "skills/video/local-video-sound-design/platform_loudness_profiles.json",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "Target/tolerance phải lấy từ profile 26E, không tạo universal target mới."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "true_peak_valid",
+      "qualified_id": "video_qa.true_peak_valid",
+      "display_name_vi": "True peak hợp lệ",
+      "purpose_vi": "Đối chiếu dBTP sau encode với giới hạn của platform loudness profile.",
+      "evidence_required": [
+        "True-peak dBTP evidence từ phép đo local.",
+        "Profile max_true_peak_dbtp 26E."
+      ],
+      "pass_rule_vi": "PASS khi observed true peak không vượt profile limit và phép đo có provenance.",
+      "failure_rule_vi": "Thiếu phép đo, clipped stream hoặc vượt dBTP limit phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Delegation canonical tới audio_qa_contract#true_peak và profile 26E."
+      },
+      "failure_modes": [
+        "Stream tồn tại nhưng clip sau encode.",
+        "Dùng sample peak thay cho true peak mà không ghi phương pháp."
+      ],
+      "validation_checks": [
+        "Ghi observed dBTP và profile limit.",
+        "Đo trên artifact cuối, không chỉ source audio."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-sound-design/audio_qa_contract.json",
+          "symbols": [],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Check true_peak canonical của 26E; 26H không định nghĩa lại semantics."
+        },
+        {
+          "path": "skills/video/local-video-sound-design/platform_loudness_profiles.json",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "Giới hạn dBTP thuộc profile 26E."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "black_frame_detection",
+      "qualified_id": "video_qa.black_frame_detection",
+      "display_name_vi": "Phát hiện black frame",
+      "purpose_vi": "Phát hiện đoạn đen ngoài chủ đích và phân biệt với fade/black card đã plan.",
+      "evidence_required": [
+        "blackdetect intervals cùng threshold/duration.",
+        "Timeline markers cho fade hoặc black card chủ đích."
+      ],
+      "pass_rule_vi": "PASS khi không có đoạn đen ngoài plan vượt threshold/duration.",
+      "failure_rule_vi": "Thiếu detector evidence hoặc có black interval không giải thích được phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Mapping local tới FFmpeg blackdetect; chưa có executor dùng chung trong repo."
+      },
+      "failure_modes": [
+        "Black video vẫn có container/video stream.",
+        "Fade hợp lệ bị gắn lỗi do thiếu timeline context."
+      ],
+      "validation_checks": [
+        "Ghi threshold, duration và intervals.",
+        "Đối chiếu intervals với planned transitions."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "find_ffmpeg",
+            "find_ffprobe"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Repo có đường dẫn FFmpeg/ffprobe; blackdetect executor còn thiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "frozen_frame_detection",
+      "qualified_id": "video_qa.frozen_frame_detection",
+      "display_name_vi": "Phát hiện frozen frame",
+      "purpose_vi": "Phát hiện hình đóng băng ngoài chủ đích và phân biệt với hold-frame đã plan.",
+      "evidence_required": [
+        "freezedetect intervals cùng noise/duration threshold.",
+        "Timeline markers cho intentional hold-frame."
+      ],
+      "pass_rule_vi": "PASS khi không có freeze ngoài plan vượt threshold/duration.",
+      "failure_rule_vi": "Thiếu detector evidence hoặc freeze không giải thích được phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Mapping local tới FFmpeg freezedetect; chưa có executor dùng chung trong repo."
+      },
+      "failure_modes": [
+        "Video có duration nhưng một đoạn dài đóng băng.",
+        "Intentional hold bị gắn lỗi do thiếu edit context."
+      ],
+      "validation_checks": [
+        "Ghi threshold, intervals và frame timestamps.",
+        "Đối chiếu với hold/transition markers."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "find_ffmpeg",
+            "find_ffprobe"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Tool paths hiện hữu; freezedetect executor còn thiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "duplicated_scene_warning",
+      "qualified_id": "video_qa.duplicated_scene_warning",
+      "display_name_vi": "Cảnh báo scene hình ảnh bị lặp",
+      "purpose_vi": "Cảnh báo visual scene lặp ngoài chủ đích mà không nhầm với job/result dedupe.",
+      "evidence_required": [
+        "Frame fingerprints hoặc scene signatures theo window.",
+        "Timeline markers cho intentional repeat/hold/recap."
+      ],
+      "pass_rule_vi": "Evidence đầy đủ và không có duplicate ngoài plan; finding hợp lệ tạo WARN_AND_REVIEW.",
+      "failure_rule_vi": "Thiếu evidence detector phải FAIL_CLOSED cho trạng thái QA-complete, nhưng finding chỉ là warning review.",
+      "fail_closed": true,
+      "severity": "WARNING",
+      "outcome_policy": "WARN_AND_REVIEW",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Đặc tả visual duplicate detector độc lập; không dùng duplicate_scene_result_prevented của provider."
+      },
+      "failure_modes": [
+        "Hai scene giống nhau do lỗi concat.",
+        "Intentional recap bị kết luận fail tự động."
+      ],
+      "validation_checks": [
+        "Ghi similarity threshold và timestamp pairs.",
+        "Yêu cầu human review trước quyết định cuối."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "probe_mp4"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe cung cấp timeline metadata; visual duplicate detector còn thiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "subtitle_safe_area",
+      "qualified_id": "video_qa.subtitle_safe_area",
+      "display_name_vi": "Phụ đề nằm trong safe area",
+      "purpose_vi": "Xác nhận bounding box phụ đề không bị cắt, che UI zone hoặc vượt delivery safe area.",
+      "evidence_required": [
+        "Rendered subtitle bounding boxes tại representative frames.",
+        "Target delivery profile và safe-area rules."
+      ],
+      "pass_rule_vi": "PASS khi mọi box nằm trong safe area ở các trạng thái dài/cực trị.",
+      "failure_rule_vi": "Chỉ có metadata text, thiếu rendered-frame evidence hoặc box vượt vùng phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Delegation tới delivery profiles 26G và safe-area semantics 26D; production planner chỉ là metadata."
+      },
+      "failure_modes": [
+        "Phụ đề bị cắt trên video dọc.",
+        "Box che CTA hoặc UI safe zone."
+      ],
+      "validation_checks": [
+        "Lấy mẫu frame có dòng dài nhất.",
+        "Kiểm tra theo từng aspect profile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-local-capabilities/platform_delivery_profiles.json",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "26G delivery/accessibility profile là source of truth cho safe area."
+        },
+        {
+          "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+          "symbols": [],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "26D kinetic typography cung cấp safe-area/readability semantics."
+        },
+        {
+          "path": "services/video_addon_planner.py",
+          "symbols": [
+            "normalize_addon_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện hữu chỉ ghi metadata vị trí; không phải rendered-pixel QA."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "subtitle_readability",
+      "qualified_id": "video_qa.subtitle_readability",
+      "display_name_vi": "Phụ đề đọc được",
+      "purpose_vi": "Xác nhận contrast, density, timing và mobile legibility của phụ đề trên artifact cuối.",
+      "evidence_required": [
+        "Representative rendered frames và subtitle timing.",
+        "Font/contrast/density/mobile rules từ 26D/26G."
+      ],
+      "pass_rule_vi": "PASS khi chữ có contrast, không quá dày, đủ thời gian đọc và legible trên mobile.",
+      "failure_rule_vi": "Thiếu rendered evidence, contrast thấp, overflow hoặc timing không đọc được phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffmpeg",
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Delegation tới kinetic typography 26D và accessibility/delivery 26G."
+      },
+      "failure_modes": [
+        "Text trắng trên nền sáng.",
+        "Dòng quá dài, quá nhanh hoặc font thiếu glyph tiếng Việt."
+      ],
+      "validation_checks": [
+        "Lấy mẫu nền sáng/tối và line dài nhất.",
+        "Kiểm tra mobile preview, timing và glyph coverage."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+          "symbols": [],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "26D là source of truth cho contrast, density, safe area và mobile legibility."
+        },
+        {
+          "path": "skills/video/local-video-local-capabilities/platform_delivery_profiles.json",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "26G cung cấp accessibility/reduced-motion/delivery context."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "aspect_ratio",
+      "qualified_id": "video_qa.aspect_ratio",
+      "display_name_vi": "Aspect ratio đúng promise",
+      "purpose_vi": "Đối chiếu observed width/height và sample aspect ratio với delivery promise.",
+      "evidence_required": [
+        "Observed width, height, SAR/DAR từ ffprobe.",
+        "Expected aspect profile từ render promise."
+      ],
+      "pass_rule_vi": "PASS khi display aspect khớp profile trong tolerance và orientation đúng.",
+      "failure_rule_vi": "Aspect thiếu, sai profile, méo pixel hoặc orientation sai phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Dùng observed dimensions và profile 26G; không suy luận chỉ từ filename."
+      },
+      "failure_modes": [
+        "Promise 9:16 nhưng artifact là 16:9.",
+        "SAR làm hình bị kéo dù width/height có vẻ đúng."
+      ],
+      "validation_checks": [
+        "Tính DAR từ dimensions/SAR.",
+        "So với exact selected delivery profile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Probe hiện hữu cung cấp width/height để tính observed aspect."
+        },
+        {
+          "path": "skills/video/local-video-local-capabilities/platform_delivery_profiles.json",
+          "symbols": [],
+          "support_layer": "policy",
+          "relationship": "metadata_only",
+          "notes_vi": "26G là source of truth cho 9:16, 16:9, 1:1 và 4:5 profiles."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "delivery_filename",
+      "qualified_id": "video_qa.delivery_filename",
+      "display_name_vi": "Tên file giao đúng policy",
+      "purpose_vi": "Xác nhận tên file an toàn, đúng extension, không lộ path nội bộ và phù hợp promise.",
+      "evidence_required": [
+        "Basename thực tế của artifact.",
+        "Expected suffix/naming rule từ render promise."
+      ],
+      "pass_rule_vi": "PASS khi basename an toàn, extension đúng và không chứa path/secret metadata.",
+      "failure_rule_vi": "Tên rỗng, extension sai, traversal hoặc lộ internal path phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "filesystem_metadata"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Tham chiếu safe_display_filename và safe_output_name; 26H không đổi naming production."
+      },
+      "failure_modes": [
+        "SRT được đặt tên như MP4.",
+        "Tên chứa path traversal hoặc path workstation."
+      ],
+      "validation_checks": [
+        "So basename/suffix với promise.",
+        "Xác nhận public label không chứa internal path."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "safe_display_filename",
+            "delivery_file_allowed"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Helper hiện hữu chuẩn hóa tên và kiểm tra delivery path."
+        },
+        {
+          "path": "services/video_ai_edit_validation.py",
+          "symbols": [
+            "safe_output_name",
+            "artifact_delivery_allowed"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "AI-edit validator có primitive naming/path an toàn."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "output_size",
+      "qualified_id": "video_qa.output_size",
+      "display_name_vi": "Output size đúng policy",
+      "purpose_vi": "Đối chiếu byte size với minimum, maximum và delivery promise đã khai báo.",
+      "evidence_required": [
+        "Observed bytes sau khi artifact đóng file.",
+        "Minimum/maximum hoặc expected-size policy."
+      ],
+      "pass_rule_vi": "PASS khi bytes nằm trong range policy và không có dấu hiệu file chưa ghi xong.",
+      "failure_rule_vi": "Thiếu stat, zero byte, dưới minimum hoặc vượt maximum promise phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "filesystem_metadata"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Dùng minimum-byte primitive và promise-specific maximum metadata; không thay storage policy."
+      },
+      "failure_modes": [
+        "File chưa flush nhưng job báo xong.",
+        "Artifact quá lớn so với delivery limit."
+      ],
+      "validation_checks": [
+        "Đo sau finalization.",
+        "Ghi observed/min/max bytes vào evidence."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "MIN_OUTPUT_BYTES",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Minimum bytes đã có; complete promised-size policy còn thiếu."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "render_promise_verification",
+      "qualified_id": "video_qa.render_promise_verification",
+      "display_name_vi": "Xác minh toàn bộ render promise",
+      "purpose_vi": "Tổng hợp expected artifact và observed evidence; không cho success nếu một blocking promise sai.",
+      "evidence_required": [
+        "Render promise có loại file, stream, duration, dimensions, FPS, audio, aspect, tên và size.",
+        "Observed evidence của toàn bộ blocking checks."
+      ],
+      "pass_rule_vi": "PASS chỉ khi tất cả blocking checks có evidence và khớp promise; warnings đã được review.",
+      "failure_rule_vi": "HTTP 200, task ID, path hoặc partial artifact không đủ; thiếu/mâu thuẫn evidence phải FAIL_CLOSED.",
+      "fail_closed": true,
+      "severity": "BLOCKING",
+      "outcome_policy": "FAIL_CLOSED",
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "tools": [
+          "ffprobe",
+          "filesystem_metadata"
+        ],
+        "execution_in_26h_allowed": false,
+        "notes_vi": "Compose semantics từ validator/final-output helpers read-only; không gọi hoặc thay production finalizer."
+      },
+      "failure_modes": [
+        "Provider báo completed nhưng artifact không tồn tại.",
+        "Một phần output đúng nhưng loại artifact khác promise."
+      ],
+      "validation_checks": [
+        "So từng promised field với observed evidence.",
+        "Yêu cầu artifact identity/hash ổn định trước success."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_final_output.py",
+          "symbols": [
+            "probe_video",
+            "is_placeholder_or_draft",
+            "validate_final_video_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Final-output gate hiện hữu từ chối placeholder/broken/no-video artifact."
+        },
+        {
+          "path": "services/video_ai_edit_validation.py",
+          "symbols": [
+            "sha256_file",
+            "validate_final_edited_mp4"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "AI-edit validator có hash/final-MP4 primitives để tham chiếu."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "expected_duration_seconds",
+            "probe_mp4"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Frame-video runtime có expected-duration và probe evidence."
+        }
+      ],
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ],
+  "fixture_policy": {
+    "asset_policy": "EPHEMERAL_LOCAL_ONLY",
+    "customer_media_allowed": false,
+    "committed_binary_assets_allowed": false,
+    "generation_tool": "local_ffmpeg_lavfi",
+    "probe_tool": "local_ffprobe",
+    "fixtures": [
+      {
+        "id": "valid_mp4_with_audio",
+        "purpose_vi": "Tạo video testsrc2 ngắn kèm sine audio để kiểm tra happy-path evidence.",
+        "generator": "ffmpeg_lavfi_testsrc2_and_sine",
+        "expected_outcome": "PASS_ONLY_WITH_COMPLETE_EVIDENCE",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "zero_byte_file",
+        "purpose_vi": "Tạo file rỗng trong temp directory để chứng minh zero byte bị từ chối.",
+        "generator": "filesystem_empty_file",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "broken_mp4",
+        "purpose_vi": "Tạo bytes không hợp lệ mang đuôi MP4 để chứng minh extension không đủ.",
+        "generator": "filesystem_invalid_bytes",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "srt_only_output",
+        "purpose_vi": "Tạo SRT hợp lệ nhưng không có video để từ chối khi promise yêu cầu MP4.",
+        "generator": "local_text_srt",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "audio_only_output",
+        "purpose_vi": "Tạo sine audio không có video stream để từ chối khi promise yêu cầu MP4.",
+        "generator": "ffmpeg_lavfi_sine_only",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "empty_output_path",
+        "purpose_vi": "Không tạo artifact và giữ output path rỗng để kiểm tra fail-closed.",
+        "generator": "metadata_without_artifact",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "task_id_only",
+        "purpose_vi": "Chỉ cung cấp task ID, không artifact, để chứng minh metadata không phải success.",
+        "generator": "metadata_without_artifact",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      },
+      {
+        "id": "http_200_without_artifact",
+        "purpose_vi": "Chỉ cung cấp trạng thái HTTP 200, không artifact, để chứng minh response không phải success.",
+        "generator": "metadata_without_artifact",
+        "expected_outcome": "FAIL_CLOSED",
+        "ephemeral_only": true,
+        "commit_allowed": false
+      }
+    ]
+  },
+  "ffmpeg_ffprobe_mapping": {
+    "allowed_tools": [
+      "ffmpeg",
+      "ffprobe"
+    ],
+    "relationship": "metadata_only",
+    "execution_in_26h_allowed": false,
+    "operations": {
+      "container_stream_duration": [
+        "ffprobe show_format",
+        "ffprobe show_streams"
+      ],
+      "audio_loudness_valid": [
+        "ffmpeg ebur128 integrated loudness"
+      ],
+      "true_peak_valid": [
+        "ffmpeg ebur128 true peak"
+      ],
+      "black_frame_detection": [
+        "ffmpeg blackdetect"
+      ],
+      "frozen_frame_detection": [
+        "ffmpeg freezedetect"
+      ],
+      "duplicated_scene_warning": [
+        "ffmpeg frame sampling",
+        "ffprobe timestamps"
+      ],
+      "subtitle_visual_checks": [
+        "ffmpeg representative frame sampling"
+      ]
+    },
+    "notes_vi": "Mapping chỉ mô tả evidence local; 26H không chạy command hoặc đăng ký executor."
+  },
+  "existing_capability_refs": [
+    {
+      "path": "services/video_local_validation.py",
+      "symbols": [
+        "MIN_OUTPUT_BYTES",
+        "MAX_OUTPUT_WIDTH",
+        "MAX_OUTPUT_HEIGHT",
+        "find_ffmpeg",
+        "find_ffprobe",
+        "safe_display_filename",
+        "probe_video_file",
+        "validate_mp4_output"
+      ],
+      "support_layer": "validation",
+      "relationship": "metadata_only",
+      "notes_vi": "Nguồn primitive canonical cho path, byte, container, stream, duration, dimensions và audio promise."
+    },
+    {
+      "path": "services/video_final_output.py",
+      "symbols": [
+        "probe_video",
+        "is_placeholder_or_draft",
+        "validate_final_video_output"
+      ],
+      "support_layer": "validation",
+      "relationship": "metadata_only",
+      "notes_vi": "Nguồn read-only cho final artifact, placeholder và no-fake-success gate."
+    },
+    {
+      "path": "services/video_ai_edit_validation.py",
+      "symbols": [
+        "safe_output_name",
+        "artifact_delivery_allowed",
+        "sha256_file",
+        "validate_final_edited_mp4"
+      ],
+      "support_layer": "validation",
+      "relationship": "metadata_only",
+      "notes_vi": "Nguồn read-only cho naming, path, hash và final MP4 validation."
+    },
+    {
+      "path": "services/frame_video_runtime.py",
+      "symbols": [
+        "expected_duration_seconds",
+        "probe_mp4"
+      ],
+      "support_layer": "validation",
+      "relationship": "metadata_only",
+      "notes_vi": "Nguồn metadata cho expected duration và frame-video probe."
+    },
+    {
+      "path": "skills/video/local-video-sound-design/audio_qa_contract.json",
+      "symbols": [],
+      "support_layer": "capability_catalog",
+      "relationship": "metadata_only",
+      "notes_vi": "26E là source canonical cho loudness, true peak và audio no-fake-success."
+    },
+    {
+      "path": "skills/video/local-video-sound-design/platform_loudness_profiles.json",
+      "symbols": [],
+      "support_layer": "policy",
+      "relationship": "metadata_only",
+      "notes_vi": "26E là source canonical cho target LUFS-I và maximum dBTP theo profile."
+    },
+    {
+      "path": "skills/video/local-video-local-capabilities/platform_delivery_profiles.json",
+      "symbols": [],
+      "support_layer": "policy",
+      "relationship": "metadata_only",
+      "notes_vi": "26G là source canonical cho aspect, delivery và accessibility profiles."
+    },
+    {
+      "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+      "symbols": [],
+      "support_layer": "capability_catalog",
+      "relationship": "metadata_only",
+      "notes_vi": "26D là source canonical cho subtitle safe-area, contrast, density và mobile legibility."
+    },
+    {
+      "path": "services/video_addon_planner.py",
+      "symbols": [
+        "normalize_addon_plan"
+      ],
+      "support_layer": "planner",
+      "relationship": "metadata_only",
+      "notes_vi": "Planner hiện hữu chỉ là metadata vị trí add-on, không phải rendered QA."
+    }
+  ],
+  "planning_only": true,
+  "runtime_registered": false,
+  "provider_executable": false,
+  "public_ui": false
+}
