@@ -92,6 +92,40 @@ def _first_profile_id():
     return str(bot.profile_router.STUDIO_PROFILE_OPTIONS[0]["selection_id"])
 
 
+def test_manual_content_text_returns_to_character_with_prompt_context_preserved():
+    user_id = 280099
+    context = _context()
+    bot.clear_video_session(user_id)
+    state = bot.video_scene3_flow.default_state(
+        product_type="video_ai_real",
+        subject="",
+        aspect_ratio="9:16",
+    )
+    state.update(
+        {
+            "step": "await_suggestion",
+            "scene_count": 1,
+            "content_source": "manual",
+            "source_product_id": "video_ai_real",
+            "provider_called": False,
+            "job_created": False,
+            "outbox_created": False,
+            "xu_charged": 0,
+        }
+    )
+    bot.save_video_profile_studio_state(context, state)
+
+    prompt = "Mot ly ca phe Viet Nam ben cua so buoi sang"
+    reply, saved = _send_profile_text(user_id, context, prompt)
+
+    assert saved["step"] == "character"
+    assert saved["subject"] == prompt
+    assert saved["context"] == prompt
+    assert saved["profile_context"] == prompt
+    assert "Chon cach mo ta nhan vat" in reply["text"] or "nhan vat" in reply["text"].lower()
+    _assert_planning_has_no_side_effect(user_id, context)
+
+
 def test_scene2_actual_product_video_handler_subject_then_scene_then_profile():
     user_id = 280001
     context = _context()
