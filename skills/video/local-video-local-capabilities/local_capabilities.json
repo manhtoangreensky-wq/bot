@@ -1,0 +1,2321 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-local-capabilities",
+  "group_id": "local_capability",
+  "capability_count": 30,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "capabilities": [
+    {
+      "id": "reference_video_analysis",
+      "qualified_id": "local_capability.reference_video_analysis",
+      "display_name_vi": "Khả năng local reference video analysis",
+      "purpose_vi": "Bổ sung contract local cho reference_video_analysis; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "shot_list_generation",
+      "qualified_id": "local_capability.shot_list_generation",
+      "display_name_vi": "Khả năng local shot list generation",
+      "purpose_vi": "Bổ sung contract local cho shot_list_generation; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "storyboard_generation",
+      "qualified_id": "local_capability.storyboard_generation",
+      "display_name_vi": "Khả năng local storyboard generation",
+      "purpose_vi": "Bổ sung contract local cho storyboard_generation; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "production_plan",
+      "qualified_id": "local_capability.production_plan",
+      "display_name_vi": "Khả năng local production plan",
+      "purpose_vi": "Bổ sung contract local cho production_plan; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "cost_and_resource_estimate",
+      "qualified_id": "local_capability.cost_and_resource_estimate",
+      "display_name_vi": "Khả năng local cost and resource estimate",
+      "purpose_vi": "Bổ sung contract local cho cost_and_resource_estimate; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "delivery_promise",
+      "qualified_id": "local_capability.delivery_promise",
+      "display_name_vi": "Khả năng local delivery promise",
+      "purpose_vi": "Bổ sung contract local cho delivery_promise; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "reference_differentiation",
+      "qualified_id": "local_capability.reference_differentiation",
+      "display_name_vi": "Khả năng local reference differentiation",
+      "purpose_vi": "Bổ sung contract local cho reference_differentiation; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "style_playbook_selection",
+      "qualified_id": "local_capability.style_playbook_selection",
+      "display_name_vi": "Khả năng local style playbook selection",
+      "purpose_vi": "Bổ sung contract local cho style_playbook_selection; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "clip_ranking",
+      "qualified_id": "local_capability.clip_ranking",
+      "display_name_vi": "Khả năng local clip ranking",
+      "purpose_vi": "Bổ sung contract local cho clip_ranking; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "clip_factory",
+      "qualified_id": "local_capability.clip_factory",
+      "display_name_vi": "Khả năng local clip factory",
+      "purpose_vi": "Bổ sung contract local cho clip_factory; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "transcript_based_editing",
+      "qualified_id": "local_capability.transcript_based_editing",
+      "display_name_vi": "Khả năng local transcript based editing",
+      "purpose_vi": "Bổ sung contract local cho transcript_based_editing; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "silence_detection",
+      "qualified_id": "local_capability.silence_detection",
+      "display_name_vi": "Khả năng local silence detection",
+      "purpose_vi": "Bổ sung contract local cho silence_detection; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "scene_detection",
+      "qualified_id": "local_capability.scene_detection",
+      "display_name_vi": "Khả năng local scene detection",
+      "purpose_vi": "Bổ sung contract local cho scene_detection; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "frame_sampling",
+      "qualified_id": "local_capability.frame_sampling",
+      "display_name_vi": "Khả năng local frame sampling",
+      "purpose_vi": "Bổ sung contract local cho frame_sampling; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "documentary_montage",
+      "qualified_id": "local_capability.documentary_montage",
+      "display_name_vi": "Khả năng local documentary montage",
+      "purpose_vi": "Bổ sung contract local cho documentary_montage; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "open_archive_search",
+      "qualified_id": "local_capability.open_archive_search",
+      "display_name_vi": "Khả năng local open archive search",
+      "purpose_vi": "Bổ sung contract local cho open_archive_search; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "stock_footage_corpus",
+      "qualified_id": "local_capability.stock_footage_corpus",
+      "display_name_vi": "Khả năng local stock footage corpus",
+      "purpose_vi": "Bổ sung contract local cho stock_footage_corpus; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "b_roll_ranking",
+      "qualified_id": "local_capability.b_roll_ranking",
+      "display_name_vi": "Khả năng local b roll ranking",
+      "purpose_vi": "Bổ sung contract local cho b_roll_ranking; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "screen_demo",
+      "qualified_id": "local_capability.screen_demo",
+      "display_name_vi": "Khả năng local screen demo",
+      "purpose_vi": "Bổ sung contract local cho screen_demo; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "synthetic_terminal_demo",
+      "qualified_id": "local_capability.synthetic_terminal_demo",
+      "display_name_vi": "Khả năng local synthetic terminal demo",
+      "purpose_vi": "Bổ sung contract local cho synthetic_terminal_demo; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "ui_demo_planning",
+      "qualified_id": "local_capability.ui_demo_planning",
+      "display_name_vi": "Khả năng local ui demo planning",
+      "purpose_vi": "Bổ sung contract local cho ui_demo_planning; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "talking_head_cleanup",
+      "qualified_id": "local_capability.talking_head_cleanup",
+      "display_name_vi": "Khả năng local talking head cleanup",
+      "purpose_vi": "Bổ sung contract local cho talking_head_cleanup; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "subtitle_generation",
+      "qualified_id": "local_capability.subtitle_generation",
+      "display_name_vi": "Khả năng local subtitle generation",
+      "purpose_vi": "Bổ sung contract local cho subtitle_generation; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "word_level_caption_planning",
+      "qualified_id": "local_capability.word_level_caption_planning",
+      "display_name_vi": "Khả năng local word level caption planning",
+      "purpose_vi": "Bổ sung contract local cho word_level_caption_planning; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "reframing",
+      "qualified_id": "local_capability.reframing",
+      "display_name_vi": "Khả năng local reframing",
+      "purpose_vi": "Bổ sung contract local cho reframing; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "animated_explainer",
+      "qualified_id": "local_capability.animated_explainer",
+      "display_name_vi": "Khả năng local animated explainer",
+      "purpose_vi": "Bổ sung contract local cho animated_explainer; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "animated_diagram",
+      "qualified_id": "local_capability.animated_diagram",
+      "display_name_vi": "Khả năng local animated diagram",
+      "purpose_vi": "Bổ sung contract local cho animated_diagram; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "chart_animation",
+      "qualified_id": "local_capability.chart_animation",
+      "display_name_vi": "Khả năng local chart animation",
+      "purpose_vi": "Bổ sung contract local cho chart_animation; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "logo_animation",
+      "qualified_id": "local_capability.logo_animation",
+      "display_name_vi": "Khả năng local logo animation",
+      "purpose_vi": "Bổ sung contract local cho logo_animation; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "end_card",
+      "qualified_id": "local_capability.end_card",
+      "display_name_vi": "Khả năng local end card",
+      "purpose_vi": "Bổ sung contract local cho end_card; chỉ lập kế hoạch có evidence và không tự nhận đã chạy.",
+      "required_inputs": [
+        "manifest nguồn có ownership/license",
+        "timebase hoặc metadata phù hợp",
+        "mục tiêu nền tảng và validation evidence"
+      ],
+      "local_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG",
+          "Canvas"
+        ],
+        "steps": [
+          "Định nghĩa input/output và marker.",
+          "Map sang primitive local nếu inventory xác nhận.",
+          "Giữ fallback khi runtime hoặc evidence thiếu."
+        ],
+        "limitations_vi": "Không có runtime registry hoặc preset production được đăng ký trong 26G.",
+        "execution_in_26g_allowed": false
+      },
+      "failure_modes": [
+        "Nguồn thiếu quyền hoặc metadata làm kế hoạch không an toàn.",
+        "Thiếu runtime/evidence bị báo nhầm thành success."
+      ],
+      "validation_checks": [
+        "Kiểm tra source, rights và schema.",
+        "Kiểm tra duration/aspect/timeline khi áp dụng.",
+        "Fail closed nếu thiếu bằng chứng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation container/stream hiện có chỉ được tham chiếu metadata."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command",
+            "probe_mp4"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "FFmpeg primitive cục bộ không được gọi trong 26G."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ],
+  "inventory_snapshot": {
+    "reframing": {
+      "status": "EXISTING_BUT_INCOMPLETE",
+      "path": "skills/video/local-video-filmmaking/framing_composition.json",
+      "duplicate_action": "KEEP_EXISTING",
+      "notes_vi": "Framing có platform reframing metadata nhưng chưa là gap contract hoàn chỉnh."
+    },
+    "subtitle_safe_area": {
+      "status": "EXISTING_BUT_INCOMPLETE",
+      "path": "services/video_addon_planner.py",
+      "duplicate_action": "KEEP_EXISTING",
+      "notes_vi": "Planner có safe-area metadata; không tạo bản trùng."
+    },
+    "mobile_legibility": {
+      "status": "EXISTING_BUT_INCOMPLETE",
+      "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+      "duplicate_action": "KEEP_EXISTING",
+      "notes_vi": "Kinetic typography đã có guard mobile; chỉ ghi gap còn lại."
+    },
+    "kinetic_typography": {
+      "status": "EXISTING_AND_VALID",
+      "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+      "duplicate_action": "KEEP_EXISTING",
+      "notes_vi": "Contract 26D là nguồn canonical, không duplicate ở 26G."
+    }
+  },
+  "local_tool_policy": {
+    "ffmpeg": {
+      "status": "AVAILABLE_LOCAL",
+      "version_evidence": "ffmpeg 8.1.1",
+      "execution_allowed": "METADATA_ONLY",
+      "notes_vi": "Có binary cục bộ; 26G không chạy processing."
+    },
+    "ffprobe": {
+      "status": "AVAILABLE_LOCAL",
+      "version_evidence": "ffprobe 8.1.1",
+      "execution_allowed": "METADATA_ONLY",
+      "notes_vi": "Dùng cho mapping/QA contract, không gọi trong pack."
+    },
+    "piper": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa tìm thấy command",
+      "execution_allowed": "NO",
+      "notes_vi": "Không tự cài trong task."
+    },
+    "pyscenedetect": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa tìm thấy command",
+      "execution_allowed": "NO",
+      "notes_vi": "Không tự cài trong task."
+    },
+    "whisper": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa tìm thấy command",
+      "execution_allowed": "NO",
+      "notes_vi": "Không tự cài trong task."
+    },
+    "whisperx": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa tìm thấy command",
+      "execution_allowed": "NO",
+      "notes_vi": "Không tự cài trong task."
+    },
+    "remotion": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa thấy dependency trong repo",
+      "execution_allowed": "NO",
+      "notes_vi": "Không thêm loader hoặc npm dependency."
+    },
+    "gsap": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa thấy dependency trong repo",
+      "execution_allowed": "NO",
+      "notes_vi": "Chỉ giữ mapping tham khảo."
+    },
+    "playwright": {
+      "status": "NOT_INSTALLED",
+      "version_evidence": "Chưa tìm thấy command",
+      "execution_allowed": "NO",
+      "notes_vi": "Owner-controlled capture cần task riêng."
+    },
+    "svg_canvas": {
+      "status": "SPECIFICATION_ONLY",
+      "version_evidence": "Primitive mô tả trong contracts",
+      "execution_allowed": "METADATA_ONLY",
+      "notes_vi": "Không có asset hoặc runtime bundle."
+    }
+  },
+  "planning_only": true,
+  "runtime_registered": false,
+  "provider_executable": false,
+  "public_ui": false
+}
