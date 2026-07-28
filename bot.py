@@ -81102,6 +81102,16 @@ def video_b14_status_steps_text(
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
+    tail_state = dict(draft.get(VIDEO_TAIL9_STATE_KEY) or {})
+    submit_preflight = dict(
+        draft.get("b14_submit_preflight_snapshot")
+        or tail_state.get("submit_preflight_snapshot")
+        or {}
+    )
+    submit_attempted = bool(
+        draft.get("b14_submit_attempted")
+        or tail_state.get("submit_attempted")
+    )
     addon_plan = dict(draft.get("b14_addon_plan") or {})
     result = dict(result or {})
     draft_job = dict(draft.get("b14_queue_job") or {})
@@ -81112,6 +81122,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     duration = safe_int(invoice.get("duration_seconds"), scene_count * TASK3D_SCENE_SECONDS)
     eta = video_b14_eta_seconds(scene_count)
     job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
+    submit_blocked = bool(
+        submit_attempted
+        and job_id <= 0
+        and submit_preflight
+        and not submit_preflight.get("allowed")
+    )
     try:
         video_b14_fail_stale_product_job_for_status(job_id)
     except Exception:
@@ -81212,7 +81228,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or ""
     ).strip().lower()
     failed_no_charge_terminal = bool(
-        terminal_state == "failed_no_charge"
+        submit_blocked
+        or terminal_state == "failed_no_charge"
         or (
             str(job.get("status") or "").strip().lower() == "failed"
             and str(job_result.get("final_decision") or "").strip().lower() == "failed_no_charge"
@@ -81379,10 +81396,17 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         or job_result.get("public_processing_code")
         or (f"#{job_id or project_id}" if (job_id or project_id) else "-")
     )
+    confirmation_line = (
+        "⚠️ <b>Đã nhận xác nhận, chưa thể bắt đầu tạo video</b>"
+        if submit_blocked
+        else "✅ <b>Đã xác nhận tạo video</b>"
+        if job_id
+        else "ℹ️ <b>Video chưa xác nhận</b>"
+    )
     lines = [
         "🎬 <b>TOAN AAS đang xử lý video</b>",
         "",
-        "✅ <b>Đã xác nhận tạo video</b>" if job_id else "ℹ️ <b>Video chưa xác nhận</b>",
+        confirmation_line,
         "",
         f"Mã xử lý: <b>{html.escape(public_processing_code)}</b>",
         f"Gói: <b>{html.escape(package_label)}</b>",
@@ -81415,7 +81439,16 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if scene_board_text and scene_count > 1:
         lines.extend([scene_board_text, ""])
 
-    if failed_no_charge_terminal:
+    if submit_blocked:
+        lines.extend([
+            str(
+                submit_preflight.get("public_message")
+                or "TOAN AAS chưa thể bắt đầu tạo video lúc này."
+            ),
+            "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên.",
+            "Tài khoản chưa bị trừ Xu.",
+        ])
+    elif failed_no_charge_terminal:
         lines.extend(PRODUCT_VIDEO_FAILED_NO_CHARGE_PUBLIC_MESSAGE.splitlines())
     elif visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
         lines.extend(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE.splitlines())
@@ -81443,16 +81476,31 @@ def video_b14_queue_status_keyboard(lang: str = "vi", *, session: dict | None = 
     draft = dict((session or {}).get("draft") or {})
     job = dict((result or {}).get("job") or draft.get("b14_queue_job") or {})
     jid = safe_int(job_id or job.get("id") or draft.get("b14_queue_job_id"), 0)
+    has_shared_tail = bool(draft.get(VIDEO_TAIL9_STATE_KEY))
+    submit_attempted = bool(
+        draft.get("b14_submit_attempted")
+        or (draft.get(VIDEO_TAIL9_STATE_KEY) or {}).get("submit_attempted")
+    )
+    refresh_callback = (
+        "video_tail|confirm|submit"
+        if jid <= 0 and has_shared_tail and submit_attempted
+        else "vproduct|b14_job_status"
+    )
+    back_callback = (
+        "video_tail|confirm|back"
+        if jid <= 0 and has_shared_tail
+        else "vproduct|b14_invoice_screen"
+    )
     rows = []
     if jid and video_b14_delivered_video_artifact(jid).get("ok"):
         rows.append([InlineKeyboardButton("📥 Tải video", callback_data=f"vproduct|b14_download_video|{jid}"), InlineKeyboardButton("📖 Xem hướng dẫn", callback_data="menu|guide_video_ai")])
     rows.extend([
         [
-            InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data="vproduct|b14_job_status"),
+            InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data=refresh_callback),
             InlineKeyboardButton("📤 Gửi video khác", callback_data="menu|main_video"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại hóa đơn" if normalize_user_language(lang) == "vi" else "⬅️ Back to invoice", callback_data="vproduct|b14_invoice_screen"),
+            InlineKeyboardButton("⬅️ Quay lại hóa đơn" if normalize_user_language(lang) == "vi" else "⬅️ Back to invoice", callback_data=back_callback),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -82136,7 +82184,18 @@ async def video_b14_send_or_edit_status_panel(query, context, session: dict, res
     )
     setattr(context, "_product_video_status_panel_rendered", True)
     message = sent or getattr(query, "message", None)
-    video_b14_auto_refresh_register_message(message, context, session=session, result=result, user_id=user_id, lang=lang, start_task=True)
+    draft = dict((session or {}).get("draft") or {})
+    job = dict((result or {}).get("job") or draft.get("b14_queue_job") or {})
+    job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
+    video_b14_auto_refresh_register_message(
+        message,
+        context,
+        session=session,
+        result=result,
+        user_id=user_id,
+        lang=lang,
+        start_task=job_id > 0,
+    )
     return sent
 
 
@@ -88060,6 +88119,52 @@ def video_tail9_apply_to_session(user_id: int, context, tail: dict, owner: str, 
     return get_video_session(uid)
 
 
+def video_tail9_prepare_submit_status(
+    user_id: int,
+    context,
+    tail: dict,
+    owner: str,
+    host: dict,
+    snapshot: dict | None = None,
+) -> dict:
+    """Persist a truthful no-job submit attempt for the canonical status panel."""
+
+    uid = int(user_id or 0)
+    clean = video_tail9.normalize_state(tail)
+    preflight = dict(snapshot or {})
+    preflight.setdefault("allowed", False)
+    preflight.setdefault("blocker_code", "submit_not_started")
+    preflight["public_message"] = (
+        "TOAN AAS chưa thể bắt đầu tạo video lúc này. Anh/chị vui lòng kiểm tra lại sau."
+    )
+    clean.update(
+        {
+            "submit_attempted": True,
+            "submit_preflight_snapshot": preflight,
+            "status_stage": "invoice",
+        }
+    )
+    clean = save_video_tail9_state(uid, context, clean, owner, host)
+    if owner != "video_edit":
+        session = video_tail9_apply_to_session(uid, context, clean, owner, host)
+        draft = dict(session.get("draft") or {})
+        draft.update(
+            {
+                VIDEO_TAIL9_STATE_KEY: video_tail9.normalize_state(clean),
+                "b14_submit_attempted": True,
+                "b14_submit_preflight_snapshot": preflight,
+                "provider_called": False,
+                "job_created": False,
+                "outbox_created": False,
+                "xu_charged": 0,
+            }
+        )
+        session["draft"] = draft
+        session["current_step"] = "b14_queue_status"
+        save_video_session(uid, session)
+    return clean
+
+
 def video_tail9_preflight(user_id: int, context, tail: dict, owner: str, host: dict, quality: int = 300) -> dict:
     product = str(tail.get("video_product_type") or "")
     if product in {video_editengine1.PRODUCT_TYPE, video_editengine1.WORKER_JOB_TYPE}:
@@ -88734,6 +88839,23 @@ def video_tail9_status_recovery_text(tail: dict) -> str:
         tail.get("public_processing_code")
         or (f"#{tail.get('job_id')}" if tail.get("job_id") else "-")
     )
+    submit_preflight = dict(tail.get("submit_preflight_snapshot") or {})
+    submit_blocked = bool(
+        tail.get("submit_attempted")
+        and not str(tail.get("job_id") or "").strip()
+        and submit_preflight
+        and not submit_preflight.get("allowed")
+    )
+    if submit_blocked:
+        return (
+            "🎬 <b>Trạng thái tạo video</b>\n\n"
+            "⚠️ <b>Đã nhận xác nhận, chưa thể bắt đầu tạo video</b>\n\n"
+            f"• Mã xử lý: <code>{html.escape(public_code)}</code>\n"
+            f"• Mã hóa đơn: <code>{html.escape(str(tail.get('invoice_id') or '-'))}</code>\n"
+            "• Tiến độ: <b>0%</b>\n"
+            "• Trạng thái: <b>Chưa thể bắt đầu tạo video</b>\n\n"
+            "Hóa đơn và toàn bộ cấu hình vẫn được giữ nguyên. Tài khoản chưa bị trừ Xu."
+        )
     return (
         "🎬 <b>TOAN AAS đang xử lý video</b>\n\n"
         "✅ Hệ thống đã nhận xác nhận tạo video.\n"
@@ -88744,9 +88866,15 @@ def video_tail9_status_recovery_text(tail: dict) -> str:
     )
 
 
-def video_tail9_status_recovery_keyboard() -> InlineKeyboardMarkup:
+def video_tail9_status_recovery_keyboard(tail: dict | None = None) -> InlineKeyboardMarkup:
+    current = dict(tail or {})
+    retry_callback = (
+        "video_tail|confirm|submit"
+        if current.get("submit_attempted") and not str(current.get("job_id") or "").strip()
+        else "video_tail|confirm|status"
+    )
     return video_scene3_keyboard([
-        [("🔄 Kiểm tra trạng thái", "video_tail|confirm|status"), ("🎬 Gửi video khác", "menu|main_video")],
+        [("🔄 Kiểm tra trạng thái", retry_callback), ("🎬 Gửi video khác", "menu|main_video")],
         [("🧾 Xem lại hóa đơn", "video_tail|confirm|back"), ("🏠 Menu chính", "menu|main")],
     ])
 
@@ -88766,7 +88894,7 @@ async def video_tail9_render_confirmed_status(query, context, uid: int, tail: di
             query,
             video_tail9_status_recovery_text(tail),
             parse_mode="HTML",
-            reply_markup=video_tail9_status_recovery_keyboard(),
+            reply_markup=video_tail9_status_recovery_keyboard(tail),
         )
     session = get_video_session(uid)
     persisted_job_id = safe_int(tail.get("job_id"), 0)
@@ -88961,11 +89089,28 @@ def video_tail9_callback_guard(callback_handler):
                         callback_data,
                     )
                 try:
-                    return await video_tail9_render(
-                        query,
+                    tail, owner, host = video_tail9_context(
+                        int(query.from_user.id), context
+                    )
+                    tail = video_tail9_prepare_submit_status(
                         int(query.from_user.id),
                         context,
-                        "confirm",
+                        tail,
+                        owner,
+                        host,
+                        snapshot={
+                            "allowed": False,
+                            "blocker_code": "submit_callback_failed",
+                            "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.",
+                        },
+                    )
+                    return await video_tail9_render_confirmed_status(
+                        query,
+                        context,
+                        int(query.from_user.id),
+                        tail,
+                        owner,
+                        host,
                     )
                 except Exception:
                     return True
@@ -89533,7 +89678,12 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             save_video_tail9_state(uid, context, tail, owner, host)
             if not submit_preflight.get("allowed"):
                 await query.answer()
-                return await video_tail9_render(query, uid, context, "confirm")
+                tail = video_tail9_prepare_submit_status(
+                    uid, context, tail, owner, host, snapshot=submit_preflight
+                )
+                return await video_tail9_render_confirmed_status(
+                    query, context, uid, tail, owner, host
+                )
         if owner == "video_edit":
             await query.answer()
             response = await submit_local_video_editor_job(update, context, host, tail=tail)
@@ -89552,7 +89702,21 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 save_video_tail9_state(uid, context, tail, owner, current)
                 return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, current)
             if response is None:
-                return await video_tail9_render(query, uid, context, "confirm")
+                tail = video_tail9_prepare_submit_status(
+                    uid,
+                    context,
+                    tail,
+                    owner,
+                    current,
+                    snapshot={
+                        "allowed": False,
+                        "blocker_code": "local_job_not_created",
+                        "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.",
+                    },
+                )
+                return await video_tail9_render_confirmed_status(
+                    query, context, uid, tail, owner, current
+                )
             return response
         video_tail9_apply_to_session(uid, context, tail, owner, host)
         setattr(context, "_product_video_status_panel_rendered", False)
@@ -89616,8 +89780,29 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
             if bool(getattr(context, "_product_video_status_panel_rendered", False)) and response is not None:
                 return response
             return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)
-        if response is None:
-            return await video_tail9_render(query, uid, context, "confirm")
+        bridge_preflight_blocked = bool(
+            confirmed_draft.get("b14_preflight_ui_context")
+        )
+        if response is None or bridge_preflight_blocked:
+            tail = video_tail9_prepare_submit_status(
+                uid,
+                context,
+                tail,
+                owner,
+                host,
+                snapshot={
+                    "allowed": False,
+                    "blocker_code": (
+                        "bridge_preflight_blocked"
+                        if bridge_preflight_blocked
+                        else "job_not_created"
+                    ),
+                    "public_message": "TOAN AAS chưa thể bắt đầu tạo video lúc này.",
+                },
+            )
+            return await video_tail9_render_confirmed_status(
+                query, context, uid, tail, owner, host
+            )
         return response
     if tail.get("final_confirmed"):
         return await video_tail9_render_confirmed_status(query, context, uid, tail, owner, host)

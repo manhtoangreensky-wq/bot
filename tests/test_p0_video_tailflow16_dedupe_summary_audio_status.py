@@ -465,10 +465,11 @@ def test_submit_exception_recovers_accepted_job_instead_of_returning_to_invoice(
     assert rendered_screens == []
 
 
-def test_submit_exception_without_job_returns_to_confirmation_instead_of_blocker() -> None:
+def test_submit_exception_without_job_opens_canonical_status_instead_of_blocker() -> None:
     tail = _invoice_ready_tail()
     rendered_screens: list[str] = []
     blocker_calls: list[str] = []
+    status_calls: list[dict] = []
 
     async def failing_handler(_update, _context):
         raise RuntimeError("submit interrupted before acceptance")
@@ -481,6 +482,10 @@ def test_submit_exception_without_job_returns_to_confirmation_instead_of_blocker
         blocker_calls.append(str(text))
         return "submit-blocker"
 
+    async def render_status(_query, _context, _uid, current, _owner, _host):
+        status_calls.append(dict(current))
+        return "status-panel"
+
     guard = _load_function(
         "video_tail9_callback_guard",
         {
@@ -488,6 +493,12 @@ def test_submit_exception_without_job_returns_to_confirmation_instead_of_blocker
             "logger": SimpleNamespace(exception=lambda *_args, **_kwargs: None),
             "video_tail9_context": lambda _uid, _context: (dict(tail), "scene3", {}),
             "video_tail9_render": legacy_render,
+            "video_tail9_prepare_submit_status": lambda _uid, _context, current, _owner, _host, snapshot: {
+                **current,
+                "submit_attempted": True,
+                "submit_preflight_snapshot": dict(snapshot),
+            },
+            "video_tail9_render_confirmed_status": render_status,
             "video_tail9_submit_blocker_text": lambda: "Không thể gửi tác vụ lúc này.",
             "video_tail9_submit_blocker_keyboard": lambda: "submit-blocker-keyboard",
             "safe_edit_or_send": safe_send,
@@ -505,9 +516,10 @@ def test_submit_exception_without_job_returns_to_confirmation_instead_of_blocker
         guard(failing_handler)(SimpleNamespace(callback_query=Query()), SimpleNamespace())
     )
 
-    assert result == "confirm"
+    assert result == "status-panel"
     assert blocker_calls == []
-    assert rendered_screens == ["confirm"]
+    assert rendered_screens == []
+    assert len(status_calls) == 1
 
 
 def test_submit_source_has_no_silent_job_branch_and_marks_status_render() -> None:
@@ -517,7 +529,8 @@ def test_submit_source_has_no_silent_job_branch_and_marks_status_render() -> Non
 
     assert "video_tail9.mark_submitted" in confirm
     assert "video_tail9_render_confirmed_status" in confirm
-    assert confirm.count('video_tail9_render(query, uid, context, "confirm")') >= 2
+    assert "video_tail9_prepare_submit_status" in confirm
+    assert 'if response is None or bridge_preflight_blocked:' in confirm
     assert "video_tail9_submit_blocker_keyboard" not in confirm
     assert "_product_video_status_panel_rendered" in status_sender
 
