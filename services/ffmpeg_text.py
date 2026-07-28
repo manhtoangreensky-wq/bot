@@ -16,6 +16,11 @@ value is ever quoted. That is what `escape_filter_text` does, and it is why
 `sanitize_overlay_text` runs at the point the text is captured as well: two
 independent layers, either of which is sufficient on its own.
 
+There is one more parser boundary: `:` separates filter options, and FFmpeg's
+CLI accepts `/text=<path>` as "load this option value from a file".  Quoting
+alone does not protect that boundary.  Every colon inside an option value must
+therefore be escaped after user-provided backslashes have been removed.
+
 `%` and `{}` are handled differently again: drawtext expands them at render
 time, so callers pass `expansion=none` (see `DRAWTEXT_NO_EXPANSION`) rather
 than trying to escape them.
@@ -47,8 +52,8 @@ def sanitize_overlay_text(value: str, limit: int = OVERLAY_TEXT_MAX_CHARS) -> st
 
     Collapses whitespace, drops control characters, and replaces the quote and
     backslash forms that could later break out of a quoted filter value. Normal
-    punctuation is kept: `:` `,` `%` `(` `)` are literal inside quotes and must
-    survive so captions still read naturally.
+    punctuation is kept at capture time so captions remain readable. The
+    filter builder later escapes `:` for FFmpeg's option parser.
     """
     text = _CONTROL.sub(" ", str(value or ""))
     text = text.replace("'", _SAFE_APOSTROPHE).replace('"', "")
@@ -67,7 +72,10 @@ def escape_filter_text(value: str) -> str:
     text = text.replace("'", _SAFE_APOSTROPHE)
     for char in _FILTER_BREAKOUT:
         text = text.replace(char, "")
-    return text
+    # A bare colon ends the current filter option before the CLI's slash-option
+    # loader is interpreted.  Escape it only after deleting attacker-supplied
+    # backslashes, so every emitted escape is owned by this helper.
+    return text.replace(":", r"\:")
 
 
 def quote_filter_value(value: str) -> str:
@@ -90,9 +98,9 @@ def escape_filter_path(path: str, *, resolve: bool = True) -> str:
             pass
     cleaned = _CONTROL.sub("", raw).replace("\\", "/")
     cleaned = cleaned.replace("'", "").replace('"', "")
-    if re.match(r"^[A-Za-z]:", cleaned):
-        cleaned = cleaned[0] + "\\:" + cleaned[2:]
-    return cleaned
+    # Escape every colon, not only a Windows drive separator. A later colon in
+    # an otherwise valid path can also start another filter option.
+    return cleaned.replace(":", r"\:")
 
 
 def quote_filter_path(path: str, *, resolve: bool = True) -> str:
@@ -106,4 +114,26 @@ def drawtext_is_safe(fragment: str) -> bool:
     every quote in the fragment must open or close a value, never appear
     inside one.
     """
-    return fragment.count("'") % 2 == 0 and "\\'" not in fragment
+    if fragment.count("'") % 2 != 0 or "\\'" in fragment:
+        return False
+
+    # Colons outside quotes are the builder's legitimate option separators.
+    # Inside a quoted value, an unescaped colon is a parser escape and can make
+    # `/text=<path>` become FFmpeg's file-value loader.
+    in_quote = False
+    preceding_backslashes = 0
+    for char in fragment:
+        if char == "'":
+            in_quote = not in_quote
+            preceding_backslashes = 0
+            continue
+        if not in_quote:
+            preceding_backslashes = 0
+            continue
+        if char == "\\":
+            preceding_backslashes += 1
+            continue
+        if char == ":" and preceding_backslashes % 2 == 0:
+            return False
+        preceding_backslashes = 0
+    return True

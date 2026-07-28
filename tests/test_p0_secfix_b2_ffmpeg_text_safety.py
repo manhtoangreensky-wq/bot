@@ -40,6 +40,8 @@ HOSTILE_INPUTS = [
     "'; rm -rf /; '",
     "semi;colon",
     "equals=sign",
+    "x:/text=/proc/self/environ",
+    "x:/text=services/ffmpeg_text.py",
     "'''",
     "\\'",
 ]
@@ -49,7 +51,9 @@ HOSTILE_INPUTS = [
 def test_escaped_text_can_never_carry_a_quote_or_backslash(raw):
     escaped = ffmpeg_text.escape_filter_text(raw)
     assert "'" not in escaped, "a quote would close the filter value"
-    assert "\\" not in escaped, "a backslash is not an escape inside quotes"
+    # The helper may introduce a backslash only to escape FFmpeg's `:` option
+    # separator. User-provided backslashes themselves must never survive.
+    assert not re.search(r"\\(?!:)", escaped)
     assert '"' not in escaped
     assert not re.search(r"[\x00-\x1f\x7f]", escaped), "a newline ends the value"
 
@@ -83,6 +87,33 @@ def test_the_known_breakout_payloads_lose_their_teeth():
         assert ffmpeg_text.drawtext_is_safe(fragment)
 
 
+def test_ffmpeg_slash_option_file_loader_cannot_escape_text_value():
+    """A colon must not let `/text=<path>` become a new FFmpeg option.
+
+    FFmpeg's CLI treats `/text=PATH` as "load the text option from PATH".
+    That syntax becomes reachable when a customer-controlled bare colon ends
+    the original text value, even though quote balancing and expansion=none
+    both look correct.
+    """
+    for payload in (
+        "x:/text=/proc/self/environ",
+        "x:/text=services/ffmpeg_text.py",
+        "Liên hệ: /text=không phải đường dẫn",
+    ):
+        escaped = ffmpeg_text.escape_filter_text(payload)
+        assert re.search(r"(?<!\\):/text=", escaped) is None
+        assert r"\:" in escaped
+        if ":/text=" in payload:
+            assert r"\:/text=" in escaped
+        fragment = f"drawtext=text={ffmpeg_text.quote_filter_value(payload)}:expansion=none"
+        assert ffmpeg_text.drawtext_is_safe(fragment), fragment
+
+
+def test_safety_oracle_rejects_unescaped_slash_option_loader():
+    vulnerable = "drawtext=text='x:/text=/proc/self/environ':expansion=none"
+    assert ffmpeg_text.drawtext_is_safe(vulnerable) is False
+
+
 def test_ordinary_vietnamese_captions_survive_intact():
     # The whole point is to keep captions readable, so normal punctuation and
     # diacritics must not be collateral damage.
@@ -113,6 +144,11 @@ def test_paths_lose_quotes_and_keep_a_windows_drive_usable():
     windows = ffmpeg_text.escape_filter_path("C:/tmp/sub.srt", resolve=False)
     assert windows.startswith("C\\:"), "the option parser splits on a bare colon"
     assert "\\\\" not in windows
+    injected = ffmpeg_text.escape_filter_path(
+        "/tmp/sub.srt:filename=/proc/self/environ", resolve=False
+    )
+    assert re.search(r"(?<!\\):filename=", injected) is None
+    assert r"\:filename=" in injected
 
 
 def _source(relative):
