@@ -500,6 +500,21 @@ def test_apply_rolls_back_when_activation_command_fails(tmp_path):
     assert links.resolve(roots.current) == known_good
 
 
+def test_missing_legacy_cleanup_timer_does_not_rollback_activation():
+    apply_module = _load_module("apply_release")
+    commands: list[tuple[str, ...]] = []
+
+    def runner(argv):
+        command = tuple(argv)
+        commands.append(command)
+        if command == ("systemctl", "cat", apply_module.LEGACY_CLEANUP_TIMER):
+            raise RuntimeError("unit not found")
+
+    apply_module._enable_timers(runner)
+    assert ("systemctl", "enable", "--now", *apply_module.MANAGED_TIMERS) in commands
+    assert ("systemctl", "disable", "--now", apply_module.LEGACY_CLEANUP_TIMER) not in commands
+
+
 def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(
     tmp_path, monkeypatch
 ):

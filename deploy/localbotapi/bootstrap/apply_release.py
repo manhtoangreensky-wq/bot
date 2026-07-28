@@ -457,6 +457,13 @@ def _link_units(
 
 def _enable_timers(command_runner: CommandRunner) -> None:
     command_runner(("systemctl", "enable", "--now", *MANAGED_TIMERS))
+    # Older hosts may never have installed the legacy cleanup timer.  Probe
+    # first so a missing compatibility unit cannot turn a healthy activation
+    # into a rollback.
+    try:
+        command_runner(("systemctl", "cat", LEGACY_CLEANUP_TIMER))
+    except Exception:
+        return
     command_runner(("systemctl", "disable", "--now", LEGACY_CLEANUP_TIMER))
 
 
