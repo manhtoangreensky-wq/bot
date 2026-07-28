@@ -5,7 +5,9 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import stat
+import subprocess
 import sys
 import tarfile
 from types import SimpleNamespace
@@ -951,6 +953,32 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
                 assert "/usr/local/libexec/toanaas-localbotapi/current/apply-release" in text
                 assert "StartLimitIntervalSec=60" in text
                 assert "StartLimitBurst=20" in text
+
+
+def test_installed_helpers_do_not_create_bytecode_cache(tmp_path):
+    for helper_name in ("apply_release.py", "receive_release.py"):
+        helper_root = tmp_path / Path(helper_name).stem
+        helper_root.mkdir()
+        (helper_root / helper_name).write_bytes((BOOTSTRAP / helper_name).read_bytes())
+        (helper_root / "release_contract.py").write_bytes(
+            (BOOTSTRAP / "release_contract.py").read_bytes()
+        )
+        environment = dict(os.environ)
+        environment.pop("PYTHONDONTWRITEBYTECODE", None)
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import runpy; "
+                    f"runpy.run_path({helper_name!r}, run_name='bootstrap_smoke')"
+                ),
+            ],
+            cwd=helper_root,
+            env=environment,
+            check=True,
+        )
+        assert not (helper_root / "__pycache__").exists(), helper_name
 
 
 def test_workflow_is_path_scoped_pinned_and_host_key_strict():
