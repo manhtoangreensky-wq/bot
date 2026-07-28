@@ -923,6 +923,10 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
     assert "bootstrap-{os.getpid()}" not in apply_source
     assert "snapshot_owner_uid=0" in apply_source
     assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"' in installer
+    assert (
+        'install -d -o root -g "$DEPLOY_USER" -m 0770 "$STATE_ROOT/incoming"'
+        in installer
+    )
     assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$DEPLOY_HOME/.ssh"' in installer
     for guarded_path in (
         "$RELEASE_ROOT",
@@ -951,6 +955,7 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
             assert "ProtectHome=true" in text
             if name == "toanaas-localbotapi-apply.service":
                 assert "/usr/local/libexec/toanaas-localbotapi/current/apply-release" in text
+                assert "SupplementaryGroups=toanaas-deploy" in text
                 assert "StartLimitIntervalSec=60" in text
                 assert "StartLimitBurst=20" in text
 

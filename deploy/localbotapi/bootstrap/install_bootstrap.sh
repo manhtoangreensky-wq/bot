@@ -175,7 +175,7 @@ install -d -o root -g root -m 0755 "$LIBEXEC_ROOT"
 install -d -o root -g root -m 0755 "$HELPER_GENERATIONS_ROOT"
 install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"
 install -d -o root -g root -m 0700 "$BOOTSTRAP_BACKUP_ROOT"
-install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT/incoming"
+install -d -o root -g "$DEPLOY_USER" -m 0770 "$STATE_ROOT/incoming"
 install -d -o root -g root -m 0755 "$DEPLOY_HOME"
 install -d -o root -g "$DEPLOY_USER" -m 0750 "$DEPLOY_HOME/.ssh"
 
