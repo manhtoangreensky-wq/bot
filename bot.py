@@ -127255,15 +127255,19 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
         "_pipeline_source_content_type_override": content_type,
     }
     clear_pending_admin_tool_test(uid)
-    await update.message.reply_text(
+    status_message = await update.message.reply_text(
         "⏳ TOAN AAS đang chạy đúng executor SubDub: ingest → ASR → dịch → TTS → mux → QC → delivery. Không trừ Xu."
     )
+
+    async def _edit_status_message(text, **kwargs):
+        return await status_message.edit_text(text, **kwargs)
 
     smoke_query = SimpleNamespace(
         from_user=update.effective_user,
         message=update.message,
         bot=getattr(context, "bot", None),
         reply_text=update.message.reply_text,
+        edit_message_text=_edit_status_message,
     )
     try:
         result = await execute_video_dubbing_pipeline(
