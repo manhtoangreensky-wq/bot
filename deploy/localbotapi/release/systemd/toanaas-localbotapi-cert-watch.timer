@@ -1,0 +1,12 @@
+[Unit]
+Description=Run TOAN AAS Local Bot API certificate expiry checks
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=12h
+RandomizedDelaySec=15min
+Persistent=true
+Unit=toanaas-localbotapi-cert-watch.service
+
+[Install]
+WantedBy=timers.target

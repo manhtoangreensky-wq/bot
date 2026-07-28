@@ -34,6 +34,12 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _release_text(relative: str) -> str:
+    path = RELEASE / relative
+    assert path.is_file(), f"missing release file: {path}"
+    return path.read_text(encoding="utf-8")
+
+
 def _archive(
     path: Path,
     *,
@@ -117,3 +123,79 @@ def test_manifest_rejects_traversal_symlink_and_digest_mismatch(tmp_path):
         contract.validate_archive(
             _archive(tmp_path / "digest.tgz", files=files, digest_override="0" * 64)
         )
+
+
+def test_cleanup_fails_closed_before_any_remove_when_fuser_is_missing():
+    text = _release_text("bin/toanaas-localbotapi-cleanup")
+    assert "set -euo pipefail" in text
+    assert "require_tool fuser" in text
+    assert text.index("require_tool fuser") < text.index("safe_remove()")
+    assert "command -v fuser >/dev/null 2>&1 && fuser" not in text
+    assert "unexpected_fuser_status" in text
+    assert "RETENTION_MINUTES:-120" in text
+    assert "MAX_DATA_MIB:-6144" in text
+    assert "MINIMUM_FREE_MIB:-3072" in text
+
+
+def test_reconcile_is_locked_and_rolls_back_only_the_localbot_service():
+    text = _release_text("bin/toanaas-localbotapi-reconcile")
+    assert "flock -n" in text
+    assert "verify-current" in text
+    assert "toanaas-telegram-bot-api.service" in text
+    assert "restart \"$SERVICE\"" in text
+    assert " rollback " in text
+    for forbidden in ("product-video", "remote_worker", "local_worker", "git pull", ":latest"):
+        assert forbidden not in text
+
+
+def test_health_checks_real_upstream_external_gate_and_loopback_bind():
+    text = _release_text("bin/toanaas-localbotapi-health")
+    assert "127.0.0.1:8081" in text
+    assert "root_http" in text and '"404"' in text
+    assert "dummy_http" in text and '"401"' in text
+    assert "missing_secret_status" in text and '"403"' in text
+    assert "0.0.0.0:8081" in text and "[::]:8081" in text
+    assert "TELEGRAM_TOKEN" not in text
+    assert "TELEGRAM_API_HASH" not in text
+
+
+def test_certificate_watcher_checks_expiry_without_changing_time():
+    text = _release_text("bin/toanaas-localbotapi-cert-watch")
+    assert "x509 -checkend 1209600" in text
+    assert "tg.toanaas.vn:443" in text
+    for forbidden in ("date -s", "timedatectl set-time", "hwclock --set"):
+        assert forbidden not in text
+
+
+def test_release_units_are_sandboxed_and_scoped_to_localbot():
+    policy = json.loads(_release_text("policy.json"))
+    expected_units = {
+        "toanaas-telegram-bot-api.service",
+        "toanaas-localbotapi-cleanup.service",
+        "toanaas-localbotapi-cleanup.timer",
+        "toanaas-localbotapi-health.service",
+        "toanaas-localbotapi-health.timer",
+        "toanaas-localbotapi-reconcile.service",
+        "toanaas-localbotapi-reconcile.timer",
+        "toanaas-localbotapi-cert-watch.service",
+        "toanaas-localbotapi-cert-watch.timer",
+    }
+    assert set(policy["managed_units"]) == expected_units
+    for unit in expected_units:
+        text = _release_text(f"systemd/{unit}")
+        assert "product-video" not in text
+        if unit.endswith(".service"):
+            for control in (
+                "NoNewPrivileges=true",
+                "ProtectSystem=strict",
+                "ProtectHome=true",
+                "RestrictSUIDSGID=true",
+                "LockPersonality=true",
+            ):
+                assert control in text, f"{unit} lacks {control}"
+    service = _release_text("systemd/toanaas-telegram-bot-api.service")
+    assert "--publish 127.0.0.1:8081:8081" in service
+    assert "--read-only" in service
+    assert "--cap-drop ALL" in service
+    assert "@sha256:2e93a720f71f82e41a42dc89e258efda09e6791f8d959e6801d15f88408e8eb1" in service
+    assert ":latest" not in service

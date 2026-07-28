@@ -5,8 +5,20 @@
   "upstream_host": "127.0.0.1",
   "upstream_port": 8081,
   "forbidden_public_ports": [8081, 8082],
+  "data_dir": "/opt/toanaas-telegram-bot-api/data",
+  "temp_dir": "/opt/toanaas-telegram-bot-api/temp",
   "retention_minutes": 120,
   "max_data_mib": 6144,
   "minimum_free_mib": 3072,
-  "managed_units": []
+  "managed_units": [
+    "toanaas-telegram-bot-api.service",
+    "toanaas-localbotapi-cleanup.service",
+    "toanaas-localbotapi-cleanup.timer",
+    "toanaas-localbotapi-health.service",
+    "toanaas-localbotapi-health.timer",
+    "toanaas-localbotapi-reconcile.service",
+    "toanaas-localbotapi-reconcile.timer",
+    "toanaas-localbotapi-cert-watch.service",
+    "toanaas-localbotapi-cert-watch.timer"
+  ]
 }

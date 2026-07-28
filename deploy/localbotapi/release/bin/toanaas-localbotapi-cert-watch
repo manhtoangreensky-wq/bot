@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly CERT_HOST="tg.toanaas.vn"
+readonly CERT_ENDPOINT="tg.toanaas.vn:443"
+
+require_tool() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'localbotapi_cert_watch missing_tool=%s\n' "$1" >&2
+        exit 1
+    }
+}
+
+require_tool openssl
+require_tool timeout
+
+if ! timeout 15 openssl s_client \
+    -connect "$CERT_ENDPOINT" -servername "$CERT_HOST" </dev/null 2>/dev/null |
+    openssl x509 -checkend 1209600 -noout; then
+    printf 'localbotapi_cert_watch valid_for_14_days=false endpoint=%s\n' "$CERT_ENDPOINT" >&2
+    exit 1
+fi
+
+printf 'localbotapi_cert_watch status=ok endpoint=%s\n' "$CERT_ENDPOINT"

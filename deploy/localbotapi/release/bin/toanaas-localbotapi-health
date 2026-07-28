@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly CONTAINER="toanaas-telegram-bot-api"
+readonly LOCAL_ORIGIN="http://127.0.0.1:8081"
+readonly PUBLIC_ORIGIN="https://tg.toanaas.vn"
+readonly DUMMY_PATH="/bot000000000:local-health-check/getMe"
+
+require_tool() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'localbotapi_health missing_tool=%s\n' "$1" >&2
+        exit 1
+    }
+}
+
+require_tool docker
+require_tool curl
+require_tool ss
+require_tool awk
+
+if [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" != "true" ]]; then
+    printf 'localbotapi_health docker_running=false\n' >&2
+    exit 1
+fi
+
+http_status() {
+    curl --silent --show-error --location \
+        --connect-timeout 3 --max-time 8 \
+        --output /dev/null --write-out '%{http_code}' "$1"
+}
+
+root_http="$(http_status "$LOCAL_ORIGIN/")"
+if [[ "$root_http" != "404" ]]; then
+    printf 'localbotapi_health root_http=%s expected=404\n' "$root_http" >&2
+    exit 1
+fi
+
+dummy_http="$(http_status "$LOCAL_ORIGIN$DUMMY_PATH")"
+if [[ "$dummy_http" != "401" ]]; then
+    printf 'localbotapi_health dummy_http=%s expected=401\n' "$dummy_http" >&2
+    exit 1
+fi
+
+missing_secret_status="$(http_status "$PUBLIC_ORIGIN$DUMMY_PATH")"
+if [[ "$missing_secret_status" != "403" ]]; then
+    printf 'localbotapi_health missing_secret_status=%s expected=403\n' "$missing_secret_status" >&2
+    exit 1
+fi
+
+listeners="$(ss -H -ltn)"
+if [[ "$listeners" == *"0.0.0.0:8081"* || "$listeners" == *"[::]:8081"* ||
+      "$listeners" == *"0.0.0.0:8082"* || "$listeners" == *"[::]:8082"* ]]; then
+    printf 'localbotapi_health public_listener=true\n' >&2
+    exit 1
+fi
+
+if ! awk '
+    $4 ~ /:8082$/ { exit 1 }
+    $4 ~ /:8081$/ {
+        if ($4 != "127.0.0.1:8081") exit 1
+        found = 1
+    }
+    END { if (!found) exit 1 }
+' <<<"$listeners"; then
+    printf 'localbotapi_health loopback_listener=false\n' >&2
+    exit 1
+fi
+
+printf 'localbotapi_health status=ok\n'

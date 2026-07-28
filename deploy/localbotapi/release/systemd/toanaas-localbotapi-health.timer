@@ -1,0 +1,11 @@
+[Unit]
+Description=Run TOAN AAS Local Bot API health checks
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+Unit=toanaas-localbotapi-health.service
+
+[Install]
+WantedBy=timers.target

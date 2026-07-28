@@ -1,0 +1,15 @@
+[Unit]
+Description=TOAN AAS Local Bot API bounded storage cleanup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/toanaas/localbotapi/current/release/bin/toanaas-localbotapi-cleanup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+AmbientCapabilities=
+ReadWritePaths=/opt/toanaas-telegram-bot-api/data /run/lock
