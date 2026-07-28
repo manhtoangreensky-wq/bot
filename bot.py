@@ -39639,6 +39639,9 @@ LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
 ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 15 * 60
 PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
 SUBTITLE_DUB_PIPELINE_JOBS: dict[str, dict] = {}
+# Progress edits share one Telegram message; serialize them so a late stage
+# cannot overwrite the terminal 100% panel.
+SUBDUB_PROGRESS_EDIT_LOCKS: dict[str, asyncio.Lock] = {}
 SUBDUB_PUBLIC_FINAL_BACKGROUND_TASKS: dict[str, asyncio.Task] = {}
 ADMIN_CAPTION_TOOL_TEST_COMMANDS = {
     "tool_test_asr": "asr",
@@ -207153,36 +207156,42 @@ async def subdub_send_progress_update(
 ) -> None:
     canonical_stage = subdub_canonical_lifecycle_state(stage)
     lifecycle_debug = subdub_lifecycle_debug_fields(canonical_stage)
-    update_subtitle_dub_pipeline_job(
-        job_key,
-        lifecycle_state=canonical_stage,
-        current_stage=canonical_stage,
-        progress_stage=canonical_stage,
-        progress_percent=subdub_progress_percent_for_lifecycle(canonical_stage),
-        completed_steps=subdub_completed_steps_for_lifecycle(canonical_stage),
-        registry_job_id=str(job_id or ""),
-        registry_chat_id_present=bool(getattr(getattr(query, "message", None), "chat_id", "")),
-        **lifecycle_debug,
-    )
-    try:
-        rendered = await safe_edit_or_send(
-            query,
-            rendered_text or subdub_progress_text(canonical_stage, job_id, lang),
-            parse_mode="HTML",
-            reply_markup=subdub_progress_keyboard(job_id, lang),
-        )
-        message_id = str(getattr(rendered, "message_id", "") or getattr(getattr(query, "message", None), "message_id", "") or "")
-        if message_id:
-            update_subtitle_dub_pipeline_job(job_key, status_panel_message_id=message_id)
-    except Exception as exc:
+    lock = SUBDUB_PROGRESS_EDIT_LOCKS.setdefault(str(job_key or ""), asyncio.Lock())
+    async with lock:
+        current_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
+        current_terminal = str(current_job.get("terminal_state") or "").strip().lower()
+        if current_terminal in SUBDUB_TERMINAL_STATES and current_terminal != canonical_stage:
+            return
         update_subtitle_dub_pipeline_job(
             job_key,
-            status_panel_edit_failed=True,
-            public_panel_update_failed_nonterminal=True,
-            status_panel_edit_failed_count=int((SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}).get("status_panel_edit_failed_count") or 0) + 1,
-            last_runtime_error_reason=sanitize_log_text(type(exc).__name__)[:120],
+            lifecycle_state=canonical_stage,
+            current_stage=canonical_stage,
+            progress_stage=canonical_stage,
+            progress_percent=subdub_progress_percent_for_lifecycle(canonical_stage),
+            completed_steps=subdub_completed_steps_for_lifecycle(canonical_stage),
+            registry_job_id=str(job_id or ""),
+            registry_chat_id_present=bool(getattr(getattr(query, "message", None), "chat_id", "")),
+            **lifecycle_debug,
         )
-        logger.warning("subtitle/dub progress update skipped | %s", sanitize_log_text(str(exc))[:120])
+        try:
+            rendered = await safe_edit_or_send(
+                query,
+                rendered_text or subdub_progress_text(canonical_stage, job_id, lang),
+                parse_mode="HTML",
+                reply_markup=subdub_progress_keyboard(job_id, lang),
+            )
+            message_id = str(getattr(rendered, "message_id", "") or getattr(getattr(query, "message", None), "message_id", "") or "")
+            if message_id:
+                update_subtitle_dub_pipeline_job(job_key, status_panel_message_id=message_id)
+        except Exception as exc:
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                status_panel_edit_failed=True,
+                public_panel_update_failed_nonterminal=True,
+                status_panel_edit_failed_count=int((SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {}).get("status_panel_edit_failed_count") or 0) + 1,
+                last_runtime_error_reason=sanitize_log_text(type(exc).__name__)[:120],
+            )
+            logger.warning("subtitle/dub progress update skipped | %s", sanitize_log_text(str(exc))[:120])
 
 
 def subdub_mark_delivered_terminal(job_key: str, result: dict | None = None) -> dict:
@@ -214992,6 +215001,17 @@ async def execute_video_dubbing_pipeline(
                     })
                 except Exception as exc:
                     logger.warning("subtitle/dub failure debug save failed | %s", sanitize_log_text(str(exc))[:180])
+        if result.get("ok") and result_terminal_state == "delivered":
+            # Re-emit the terminal panel after persisted terminal state wins.
+            # This is the authoritative last edit when earlier stage updates
+            # were in flight while Telegram delivery completed.
+            await subdub_send_progress_update(
+                query,
+                job_key,
+                str(job.get("job_id") or result.get("job_id") or ""),
+                "delivered",
+                lang,
+            )
         return result
     except Exception as exc:
         current_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
