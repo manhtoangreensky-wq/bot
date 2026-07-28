@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Callable, NamedTuple, Protocol, Sequence
 
@@ -167,12 +168,25 @@ def _run(argv: Sequence[str]) -> None:
     subprocess.run(list(argv), check=True)
 
 
-def _release_health_gate(release: Path) -> bool:
+def _release_health_gate(
+    release: Path,
+    *,
+    attempts: int = 15,
+    retry_seconds: float = 2.0,
+    sleep: Callable[[float], None] | None = None,
+) -> bool:
     bin_dir = release / "release" / "bin"
-    for name in ("toanaas-localbotapi-health", "toanaas-localbotapi-cert-watch"):
-        if subprocess.run([str(bin_dir / name)], check=False).returncode != 0:
-            return False
-    return True
+    sleeper = sleep or time.sleep
+    health = bin_dir / "toanaas-localbotapi-health"
+    for attempt in range(max(1, int(attempts))):
+        if subprocess.run([str(health)], check=False).returncode == 0:
+            break
+        if attempt + 1 < max(1, int(attempts)):
+            sleeper(max(0.0, float(retry_seconds)))
+    else:
+        return False
+    cert_watch = bin_dir / "toanaas-localbotapi-cert-watch"
+    return subprocess.run([str(cert_watch)], check=False).returncode == 0
 
 
 def _validate_policy_bytes(value: bytes) -> dict:
