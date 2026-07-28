@@ -205546,6 +205546,7 @@ def video_dubbing_configured_readiness(
     state: dict | None = None,
     public: bool = True,
     asr_readiness: dict | None = None,
+    admin_interactive_confirm: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
@@ -205555,6 +205556,7 @@ def video_dubbing_configured_readiness(
         state,
         public=public,
         admin_smoke=bool(state.get("admin_real_test") or state.get("admin_smoke")),
+        admin_interactive_confirm=admin_interactive_confirm,
     )
     blockers = list(readiness.get("blockers") or [])
     missing: list[str] = []
@@ -206920,10 +206922,7 @@ async def send_subdub_fail_once(
         fallback_user_id = _safe_int(user_from_key, 0)
         if fallback_user_id:
             fallback_job = subtitle_dub_find_latest_dub_job_for_user_mode(fallback_user_id, safe_mode)
-            if fallback_job and (
-                not job
-                or not subdub_should_suppress_generic_fail_for_active_job(job, {"detail": reason})
-            ):
+            if fallback_job and not job:
                 job = dict(fallback_job)
                 key = str(job.get("job_key") or key)
     if not terminalize_active and subdub_should_suppress_dub_generic_public_fail(safe_mode, reason, job):
@@ -208754,11 +208753,13 @@ def video_dubbing_product_gate_matrix(
         )
     except TypeError:
         asr_readiness = get_asr_adapter_readiness(public=False)
+    product_is_admin = bool(is_admin_user(user_id))
     configured = video_dubbing_configured_readiness(
         mode,
         state,
-        public=False,
+        public=not product_is_admin,
         asr_readiness=asr_readiness,
+        admin_interactive_confirm=bool(product_is_admin and access.get("allowed")),
     )
     readiness = dict(
         access.get("readiness")
@@ -208828,6 +208829,7 @@ def video_dubbing_product_gate_matrix(
         "ffprobe": "ffprobe_missing",
         "mode": "unsupported_input",
         "maintenance": "product_route_not_allowed",
+        "lane_closed": "product_route_not_allowed",
     }
     gate_blockers = list(dict.fromkeys(
         blocker_names.get(item, "provider_key_missing") for item in technical_missing
@@ -213575,11 +213577,35 @@ async def _execute_video_dubbing_pipeline_core(
         }
     if not video_dubbing_product_gate_allows_pipeline(access, gate_matrix):
         detail = sanitize_log_text(str(access.get("reason") or access.get("status") or "gate_blocked"))[:180]
+        blocker = video_dubbing_pipeline_blocker(
+            input_save=input_save,
+            gate_matrix=gate_matrix,
+            detail=detail,
+            pipeline_attempted=False,
+        )
+        terminal_state_update = {
+            **state,
+            "_subdub_terminal_state": "failed_no_charge",
+            "status": "failed_no_charge",
+            "terminal_state": "failed_no_charge",
+            "lifecycle_state": "gate",
+            "current_stage": "gate",
+            "progress_stage": "gate",
+            "progress_percent": subdub_progress_percent_for_lifecycle("gate", "failed_no_charge"),
+            "completed_steps": subdub_completed_steps_for_lifecycle("gate", "failed_no_charge"),
+            "last_error_stage": "gate",
+            "last_error_safe": public_failure,
+            "pipeline_blocker": blocker,
+            "no_charge_reason": blocker,
+            "charge_status": "not_charged",
+            "status_panel_terminalized": True,
+            "refresh_stopped_after_terminal": True,
+        }
         debug_job = subtitle_dub_debug_job_payload(
             user_id=uid,
             chat_id=chat_id,
             mode=mode,
-            state=state,
+            state=terminal_state_update,
             status="GATE_BLOCKED_AFTER_INPUT_SAVE",
             stage="gate",
             input_save=input_save,
@@ -213589,6 +213615,25 @@ async def _execute_video_dubbing_pipeline_core(
             pipeline_attempted=False,
             public_safe_error=public_failure,
         )
+        if str(state.get("_pipeline_job_key") or ""):
+            update_subtitle_dub_pipeline_job(
+                str(state.get("_pipeline_job_key") or ""),
+                status="failed_no_charge",
+                terminal_state="failed_no_charge",
+                lifecycle_state="gate",
+                current_stage="gate",
+                progress_stage="gate",
+                progress_percent=subdub_progress_percent_for_lifecycle("gate", "failed_no_charge"),
+                completed_steps=subdub_completed_steps_for_lifecycle("gate", "failed_no_charge"),
+                last_error_stage="gate",
+                last_error_safe=public_failure,
+                pipeline_blocker=blocker,
+                no_charge_reason=blocker,
+                charge_status="not_charged",
+                status_panel_terminalized=True,
+                refresh_stopped_after_terminal=True,
+                debug_job=debug_job,
+            )
         return {
             "ok": False,
             "guard": True,
@@ -213599,6 +213644,10 @@ async def _execute_video_dubbing_pipeline_core(
             "input_save": input_save,
             "gate_matrix": gate_matrix,
             "debug_job": debug_job,
+            "terminal_state": "failed_no_charge",
+            "charge_status": "not_charged",
+            "state": terminal_state_update,
+            "pipeline_attempted": False,
         }
     pricing = calculate_video_translate_price(
         mode,
@@ -215028,7 +215077,14 @@ async def execute_video_dubbing_pipeline(
                         "internal_job_id": failure_job_id,
                         "provider": "subtitle_dub_product_pipeline",
                         "provider_task_id": f"debug:{failure_job_id}",
-                        "status": "failed",
+                        "status": "failed_no_charge",
+                        "terminal_state": "failed_no_charge",
+                        "lifecycle_state": str(update_fields.get("lifecycle_state") or "failed_no_charge"),
+                        "current_stage": str(update_fields.get("current_stage") or "failed_no_charge"),
+                        "progress_stage": str(update_fields.get("progress_stage") or "failed_no_charge"),
+                        "progress_percent": int(update_fields.get("progress_percent") or 5),
+                        "status_panel_terminalized": True,
+                        "refresh_stopped_after_terminal": True,
                         "output_bytes": 0,
                         "progress_text": str(debug_job.get("stage") or "failed"),
                         "last_provider_status": str(debug_job.get("pipeline_blocker") or debug_job.get("last_technical_error") or "failed"),
@@ -218477,6 +218533,7 @@ async def handle_video_dubbing_callback(
             if (
                 mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
                 and not str(delivered_video_job.get("video_delivery_message_id") or "").strip()
+                and not delivered_video_job
             ):
                 fallback_video_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
                 if fallback_video_job:
@@ -218537,12 +218594,9 @@ async def handle_video_dubbing_callback(
                 or ""
             )
             latest_failure_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(pipeline_job_key) or {})
-            if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+            if not latest_failure_job and mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
                 fallback_failure_job = subtitle_dub_find_latest_dub_job_for_user_mode(uid, mode, state)
-                if fallback_failure_job and (
-                    not latest_failure_job
-                    or not subdub_should_suppress_generic_fail_for_active_job(latest_failure_job, result)
-                ):
+                if fallback_failure_job:
                     latest_failure_job = fallback_failure_job
             if latest_failure_job and (
                 subdub_result_has_delivered_video({**latest_failure_job, **result})
