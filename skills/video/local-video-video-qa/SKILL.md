@@ -29,13 +29,16 @@ registry, production validator hoặc public UI.
 2. Thu evidence file/container/stream bằng helper và FFmpeg/ffprobe đã có; không
    xem HTTP 200, task ID hoặc output path là thành công.
 3. Chạy logic theo thứ tự 19 check; thiếu evidence của blocking check thì
-   FAIL_CLOSED.
+   FAIL_CLOSED. `file_size_minimum` dùng `observed_bytes > minimum`; loudness
+   và true peak chỉ chạy khi audio được promise, nếu không ghi
+   `PASS_NOT_APPLICABLE`.
 4. Đối chiếu loudness/true peak với 26E, subtitle/delivery với 26D/26G và rights
    với 26C; không sao chép semantics.
 5. Duplicated-scene chỉ tạo warning yêu cầu review để không loại intentional
    hold/repeat; thiếu evidence vẫn không được claim QA hoàn tất.
-6. Fixture chỉ tạo trong temp directory từ nguồn local hợp pháp; không commit
-   binary hoặc customer media.
+6. Fixture chỉ tạo trong temp directory từ nguồn local hợp pháp; focused tests
+   có thể gọi FFmpeg/ffprobe chỉ cho fixture này, không đăng ký QA/runtime và
+   không commit binary hoặc customer media.
 
 Music/Suno luôn LOCKED_DISABLED. Không gọi provider, model, ví/Xu, Telegram,
 renderer, worker hoặc deployment. Không thêm UI, nút hoặc route vào sản phẩm cũ.

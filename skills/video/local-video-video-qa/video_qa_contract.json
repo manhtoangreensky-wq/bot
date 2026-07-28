@@ -22,6 +22,7 @@
   "success_policy": {
     "missing_evidence_action": "FAIL_CLOSED",
     "all_blocking_checks_required": true,
+    "applicable_checks_only": true,
     "warning_checks_require_review": true,
     "http_200_alone_success_allowed": false,
     "task_id_alone_success_allowed": false,
@@ -29,10 +30,31 @@
     "zero_byte_success_allowed": false,
     "srt_only_when_mp4_promised_success_allowed": false,
     "audio_only_when_mp4_promised_success_allowed": false,
-    "broken_mp4_success_allowed": false,
-    "placeholder_or_draft_success_allowed": false,
+    "broken_mp4_success_allowed": false
+  },
+  "delegated_audio_policy": {
+    "contract_ref": "../local-video-sound-design/audio_qa_contract.json",
     "silent_stream_success_allowed": false,
-    "clipped_stream_success_allowed": false
+    "clipped_stream_success_allowed": false,
+    "guidance_vi": "Khi audio được promise, silent hoặc clipped stream vẫn FAIL_CLOSED theo 26E."
+  },
+  "additional_safety_policy": {
+    "placeholder_or_draft_success_allowed": false,
+    "guidance_vi": "Placeholder hoặc draft không phải artifact cuối; final-output evidence vẫn bắt buộc."
+  },
+  "applicability_policy": {
+    "audio_loudness_valid": {
+      "mode": "WHEN_AUDIO_PROMISED",
+      "depends_on": "audio_stream_when_promised",
+      "not_applicable_outcome": "PASS_NOT_APPLICABLE",
+      "guidance_vi": "Nếu render promise không yêu cầu audio, ghi PASS_NOT_APPLICABLE; không tạo lỗi thiếu loudness."
+    },
+    "true_peak_valid": {
+      "mode": "WHEN_AUDIO_PROMISED",
+      "depends_on": "audio_stream_when_promised",
+      "not_applicable_outcome": "PASS_NOT_APPLICABLE",
+      "guidance_vi": "Nếu render promise không yêu cầu audio, ghi PASS_NOT_APPLICABLE; không tạo lỗi thiếu true peak."
+    }
   },
   "no_fake_success": [
     "http_200_alone",
@@ -106,13 +128,13 @@
       "id": "file_size_minimum",
       "qualified_id": "video_qa.file_size_minimum",
       "display_name_vi": "Kích thước file tối thiểu",
-      "purpose_vi": "Loại file zero byte hoặc artifact quá nhỏ so với ngưỡng hợp lệ.",
+      "purpose_vi": "Loại file có byte size không vượt qua ngưỡng minimum đã chọn.",
       "evidence_required": [
         "Số byte thực tế từ filesystem.",
         "Minimum-byte policy hiện hành hoặc override đã ghi trong promise."
       ],
-      "pass_rule_vi": "PASS khi byte size lớn hơn hoặc bằng ngưỡng policy đã chọn.",
-      "failure_rule_vi": "Zero byte, thiếu stat hoặc nhỏ hơn minimum phải FAIL_CLOSED.",
+      "pass_rule_vi": "PASS khi byte size lớn hơn strict minimum policy đã chọn.",
+      "failure_rule_vi": "Zero byte, thiếu stat hoặc byte size nhỏ hơn hoặc bằng strict minimum phải FAIL_CLOSED.",
       "fail_closed": true,
       "severity": "BLOCKING",
       "outcome_policy": "FAIL_CLOSED",
@@ -121,6 +143,7 @@
         "tools": [
           "filesystem_metadata"
         ],
+        "comparison_operator": ">",
         "execution_in_26h_allowed": false,
         "notes_vi": "Tham chiếu MIN_OUTPUT_BYTES và validator hiện hữu dưới dạng metadata-only."
       },
@@ -130,7 +153,7 @@
       ],
       "validation_checks": [
         "Đo byte sau khi close file.",
-        "Ghi threshold và observed bytes trong evidence."
+        "Ghi threshold strict và observed bytes trong evidence."
       ],
       "existing_capability_refs": [
         {
@@ -491,8 +514,8 @@
         "Danh sách audio streams từ ffprobe.",
         "Boolean expects_audio và channel/layout promise."
       ],
-      "pass_rule_vi": "PASS khi audio được promise và có stream audio đọc được; không promise thì ghi NOT_REQUIRED evidence.",
-      "failure_rule_vi": "Đã promise audio nhưng stream thiếu hoặc không đọc được phải FAIL_CLOSED.",
+      "pass_rule_vi": "PASS khi audio được promise và có stream audio đọc được; nếu promise không có audio thì ghi PASS_NOT_APPLICABLE.",
+      "failure_rule_vi": "Đã promise audio nhưng stream thiếu hoặc không đọc được phải FAIL_CLOSED; không áp dụng khi promise không có audio.",
       "fail_closed": true,
       "severity": "BLOCKING",
       "outcome_policy": "FAIL_CLOSED",
@@ -557,8 +580,8 @@
         "Integrated loudness evidence từ phép đo local.",
         "Platform profile và target/tolerance 26E."
       ],
-      "pass_rule_vi": "PASS khi LUFS-I có evidence và nằm trong tolerance của profile explicit.",
-      "failure_rule_vi": "Không có phép đo, dùng một target universal hoặc ngoài tolerance phải FAIL_CLOSED.",
+      "pass_rule_vi": "PASS khi audio được promise, LUFS-I có evidence và nằm trong tolerance; nếu không promise audio thì PASS_NOT_APPLICABLE.",
+      "failure_rule_vi": "Khi audio được promise, không có phép đo, dùng target universal hoặc ngoài tolerance phải FAIL_CLOSED; không áp dụng khi không promise audio.",
       "fail_closed": true,
       "severity": "BLOCKING",
       "outcome_policy": "FAIL_CLOSED",
@@ -575,7 +598,8 @@
         "Target -16 bị áp cho mọi platform không có profile."
       ],
       "validation_checks": [
-        "Ghi profile ID, target, tolerance và observed LUFS-I.",
+        "Nếu audio promise: ghi profile ID, target, tolerance và observed LUFS-I.",
+        "Nếu không audio promise: ghi PASS_NOT_APPLICABLE, không tự tạo lỗi thiếu audio.",
         "Không suy luận loudness từ volume metadata."
       ],
       "existing_capability_refs": [
@@ -620,8 +644,8 @@
         "True-peak dBTP evidence từ phép đo local.",
         "Profile max_true_peak_dbtp 26E."
       ],
-      "pass_rule_vi": "PASS khi observed true peak không vượt profile limit và phép đo có provenance.",
-      "failure_rule_vi": "Thiếu phép đo, clipped stream hoặc vượt dBTP limit phải FAIL_CLOSED.",
+      "pass_rule_vi": "PASS khi audio được promise, observed true peak không vượt profile limit; nếu không promise audio thì PASS_NOT_APPLICABLE.",
+      "failure_rule_vi": "Khi audio được promise, thiếu phép đo, clipped stream hoặc vượt dBTP limit phải FAIL_CLOSED; không áp dụng khi không promise audio.",
       "fail_closed": true,
       "severity": "BLOCKING",
       "outcome_policy": "FAIL_CLOSED",
@@ -638,7 +662,8 @@
         "Dùng sample peak thay cho true peak mà không ghi phương pháp."
       ],
       "validation_checks": [
-        "Ghi observed dBTP và profile limit.",
+        "Nếu audio promise: ghi observed dBTP và profile limit.",
+        "Nếu không audio promise: ghi PASS_NOT_APPLICABLE, không tự tạo lỗi thiếu audio.",
         "Đo trên artifact cuối, không chỉ source audio."
       ],
       "existing_capability_refs": [
@@ -1128,13 +1153,13 @@
       "id": "output_size",
       "qualified_id": "video_qa.output_size",
       "display_name_vi": "Output size đúng policy",
-      "purpose_vi": "Đối chiếu byte size với minimum, maximum và delivery promise đã khai báo.",
+      "purpose_vi": "Đối chiếu byte size với maximum và expected-size policy của delivery promise; minimum đã được file_size_minimum kiểm tra.",
       "evidence_required": [
         "Observed bytes sau khi artifact đóng file.",
-        "Minimum/maximum hoặc expected-size policy."
+        "Maximum hoặc expected-size policy; strict minimum thuộc check file_size_minimum."
       ],
-      "pass_rule_vi": "PASS khi bytes nằm trong range policy và không có dấu hiệu file chưa ghi xong.",
-      "failure_rule_vi": "Thiếu stat, zero byte, dưới minimum hoặc vượt maximum promise phải FAIL_CLOSED.",
+      "pass_rule_vi": "PASS khi bytes không vượt maximum và nằm trong expected-size tolerance của delivery promise.",
+      "failure_rule_vi": "Thiếu stat, vượt maximum hoặc lệch expected-size promise phải FAIL_CLOSED; strict minimum thuộc check file_size_minimum.",
       "fail_closed": true,
       "severity": "BLOCKING",
       "outcome_policy": "FAIL_CLOSED",
@@ -1144,7 +1169,7 @@
           "filesystem_metadata"
         ],
         "execution_in_26h_allowed": false,
-        "notes_vi": "Dùng minimum-byte primitive và promise-specific maximum metadata; không thay storage policy."
+        "notes_vi": "Dùng byte-measurement primitive và promise-specific maximum/expected metadata; không lặp minimum-byte gate."
       },
       "failure_modes": [
         "File chưa flush nhưng job báo xong.",
@@ -1152,18 +1177,17 @@
       ],
       "validation_checks": [
         "Đo sau finalization.",
-        "Ghi observed/min/max bytes vào evidence."
+        "Ghi observed/max/expected bytes và không lặp minimum-byte gate."
       ],
       "existing_capability_refs": [
         {
           "path": "services/video_local_validation.py",
           "symbols": [
-            "MIN_OUTPUT_BYTES",
-            "validate_mp4_output"
+            "workspace_size_bytes"
           ],
           "support_layer": "validation",
           "relationship": "metadata_only",
-          "notes_vi": "Minimum bytes đã có; complete promised-size policy còn thiếu."
+          "notes_vi": "Repo có primitive đo bytes; maximum/expected delivery policy đầy đủ còn thiếu."
         }
       ],
       "rights_requirement_ids": [
@@ -1190,9 +1214,9 @@
       "purpose_vi": "Tổng hợp expected artifact và observed evidence; không cho success nếu một blocking promise sai.",
       "evidence_required": [
         "Render promise có loại file, stream, duration, dimensions, FPS, audio, aspect, tên và size.",
-        "Observed evidence của toàn bộ blocking checks."
+        "Observed evidence của toàn bộ applicable blocking checks."
       ],
-      "pass_rule_vi": "PASS chỉ khi tất cả blocking checks có evidence và khớp promise; warnings đã được review.",
+      "pass_rule_vi": "PASS chỉ khi tất cả applicable blocking checks có evidence và khớp promise; warnings đã được review.",
       "failure_rule_vi": "HTTP 200, task ID, path hoặc partial artifact không đủ; thiếu/mâu thuẫn evidence phải FAIL_CLOSED.",
       "fail_closed": true,
       "severity": "BLOCKING",
@@ -1269,6 +1293,9 @@
     "asset_policy": "EPHEMERAL_LOCAL_ONLY",
     "customer_media_allowed": false,
     "committed_binary_assets_allowed": false,
+    "fixture_execution_allowed": true,
+    "runtime_execution_allowed": false,
+    "exception_scope_vi": "Chỉ test fixture ephemeral được phép gọi FFmpeg/ffprobe trong temp; QA/runtime executor vẫn bị khóa trong 26H.",
     "generation_tool": "local_ffmpeg_lavfi",
     "probe_tool": "local_ffprobe",
     "fixtures": [
@@ -1345,6 +1372,7 @@
     ],
     "relationship": "metadata_only",
     "execution_in_26h_allowed": false,
+    "fixture_execution_exception": true,
     "operations": {
       "container_stream_duration": [
         "ffprobe show_format",
@@ -1370,7 +1398,7 @@
         "ffmpeg representative frame sampling"
       ]
     },
-    "notes_vi": "Mapping chỉ mô tả evidence local; 26H không chạy command hoặc đăng ký executor."
+    "notes_vi": "QA/runtime mapping chỉ là metadata và không chạy trong 26H; focused tests được phép tạo/probe fixture lavfi cục bộ trong temp."
   },
   "existing_capability_refs": [
     {

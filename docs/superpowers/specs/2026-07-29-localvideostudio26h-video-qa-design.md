@@ -76,6 +76,11 @@ output_size
 render_promise_verification
 ```
 
+Minimum-byte check dùng so sánh strict `observed_bytes > minimum`; check
+`output_size` chỉ xử lý maximum/expected delivery policy, không lặp minimum.
+Loudness/true-peak chỉ applicable khi render promise yêu cầu audio; promise
+không có audio ghi `PASS_NOT_APPLICABLE`.
+
 Mọi blocking check và mọi evidence bắt buộc đều fail-closed. Visual duplicated
 scene là warning yêu cầu human review vì intentional hold/repeat có thể hợp lệ;
 thiếu evidence để chạy check này vẫn không được claim QA hoàn tất.
@@ -91,7 +96,8 @@ có sau khi toàn bộ blocking checks có evidence phù hợp render promise.
 
 FFmpeg/ffprobe chỉ được ghi mapping metadata cho container/stream, LUFS/true
 peak, blackdetect, freezedetect và frame sampling. `execution_in_26h_allowed`
-luôn false vì 26H không đăng ký runtime. Fixture matrix chỉ dùng nguồn lavfi
+luôn false cho QA/runtime vì 26H không đăng ký executor; focused test fixture
+được phép gọi local tools trong temp theo exception ghi trong contract. Fixture matrix chỉ dùng nguồn lavfi
 hoặc metadata/file giả lập trong temp directory khi focused test cần; không
 commit binary và không dùng customer media.
 
