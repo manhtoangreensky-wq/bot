@@ -29,6 +29,8 @@ require_tool() {
 require_tool flock
 require_tool ln
 require_tool readlink
+require_tool mv
+require_tool rm
 require_tool systemctl
 
 exec 9>"$LOCK_FILE"
@@ -45,6 +47,13 @@ fi
 "$RELEASE_HELPER" verify-current
 
 links_changed=0
+pending_link=""
+cleanup_pending_link() {
+    if [[ -n "$pending_link" && -L "$pending_link" ]]; then
+        rm -f -- "$pending_link"
+    fi
+}
+trap cleanup_pending_link EXIT
 for unit in "${MANAGED_UNITS[@]}"; do
     source_path="${CURRENT}/release/systemd/${unit}"
     destination_path="${SYSTEMD_DIR}/${unit}"
@@ -52,8 +61,13 @@ for unit in "${MANAGED_UNITS[@]}"; do
         printf 'localbotapi_reconcile missing_unit=%s\n' "$unit" >&2
         exit 1
     fi
-    if [[ ! -L "$destination_path" || "$(readlink -- "$destination_path")" != "$source_path" ]]; then
-        ln -sfn -- "$source_path" "$destination_path"
+    source_target="$(readlink -f -- "$source_path")"
+    destination_target="$(readlink -f -- "$destination_path" 2>/dev/null || true)"
+    if [[ ! -L "$destination_path" || "$destination_target" != "$source_target" ]]; then
+        pending_link="${destination_path}.tmp-${BASHPID}"
+        ln -s -- "$source_path" "$pending_link"
+        mv -Tf -- "$pending_link" "$destination_path"
+        pending_link=""
         links_changed=1
     fi
 done
@@ -73,4 +87,7 @@ if "$HEALTH"; then
 fi
 
 printf 'localbotapi_reconcile health_failed_after_restart=true\n' >&2
+# Hand the shared lock to the fixed rollback helper instead of deadlocking on
+# a second flock of the same file in the child process.
+flock -u 9
 "$RELEASE_HELPER" rollback --service "$SERVICE"

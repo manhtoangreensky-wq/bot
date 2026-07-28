@@ -15,7 +15,8 @@ require_tool openssl
 require_tool timeout
 
 if ! timeout 15 openssl s_client \
-    -connect "$CERT_ENDPOINT" -servername "$CERT_HOST" </dev/null 2>/dev/null |
+    -connect "$CERT_ENDPOINT" -servername "$CERT_HOST" \
+    -verify_hostname "$CERT_HOST" -verify_return_error </dev/null 2>/dev/null |
     openssl x509 -checkend 1209600 -noout; then
     printf 'localbotapi_cert_watch valid_for_14_days=false endpoint=%s\n' "$CERT_ENDPOINT" >&2
     exit 1

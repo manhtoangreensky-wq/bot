@@ -3,3 +3,5 @@ deploy/systemd/*.service.example text eol=lf
 deploy/env/*.env.example text eol=lf
 deploy/localbotapi/release/bin/* text eol=lf
 deploy/localbotapi/release/systemd/* text eol=lf
+deploy/localbotapi/bootstrap/*.sh text eol=lf
+deploy/localbotapi/bootstrap/systemd/* text eol=lf

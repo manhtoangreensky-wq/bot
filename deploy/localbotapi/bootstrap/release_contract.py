@@ -17,6 +17,22 @@ MAX_EXPANDED_BYTES = 4 * 1024 * 1024
 MAX_MANIFEST_BYTES = 128 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+EXPECTED_RELEASE_FILES = (
+    "release/policy.json",
+    "release/bin/toanaas-localbotapi-health",
+    "release/bin/toanaas-localbotapi-reconcile",
+    "release/bin/toanaas-localbotapi-cleanup",
+    "release/bin/toanaas-localbotapi-cert-watch",
+    "release/systemd/toanaas-telegram-bot-api.service",
+    "release/systemd/toanaas-localbotapi-cleanup.service",
+    "release/systemd/toanaas-localbotapi-cleanup.timer",
+    "release/systemd/toanaas-localbotapi-health.service",
+    "release/systemd/toanaas-localbotapi-health.timer",
+    "release/systemd/toanaas-localbotapi-reconcile.service",
+    "release/systemd/toanaas-localbotapi-reconcile.timer",
+    "release/systemd/toanaas-localbotapi-cert-watch.service",
+    "release/systemd/toanaas-localbotapi-cert-watch.timer",
+)
 
 
 class ReleaseContractError(ValueError):
@@ -85,6 +101,12 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         if not isinstance(raw_digest, str) or not SHA256_RE.fullmatch(raw_digest):
             raise ReleaseContractError(f"invalid sha256 digest for {path}")
         normalized[path] = raw_digest
+    if set(normalized) != set(EXPECTED_RELEASE_FILES):
+        missing = sorted(set(EXPECTED_RELEASE_FILES) - set(normalized))
+        unexpected = sorted(set(normalized) - set(EXPECTED_RELEASE_FILES))
+        raise ReleaseContractError(
+            f"release file allowlist mismatch; missing={missing}, unexpected={unexpected}"
+        )
     if "release/policy.json" not in normalized:
         raise ReleaseContractError("manifest must include release/policy.json")
     policy_sha256 = manifest.get("policy_sha256")

@@ -40,6 +40,28 @@ def _release_text(relative: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _valid_bundle(tmp_path: Path, commit: str, name: str) -> Path:
+    builder = _load_module("build_release")
+    return builder.build_release(REPO, commit, tmp_path / name)
+
+
+class _FakeLinks:
+    def __init__(self):
+        self.targets: dict[Path, Path] = {}
+
+    def exists(self, link: Path) -> bool:
+        return link in self.targets
+
+    def resolve(self, link: Path) -> Path:
+        return self.targets[link]
+
+    def replace(self, link: Path, target: Path) -> None:
+        self.targets[link] = target.resolve()
+
+    def remove(self, link: Path) -> None:
+        self.targets.pop(link, None)
+
+
 def _archive(
     path: Path,
     *,
@@ -99,8 +121,10 @@ def test_release_builder_is_deterministic_and_infra_only(tmp_path):
 
 def test_manifest_rejects_traversal_symlink_and_digest_mismatch(tmp_path):
     contract = _load_module("release_contract")
-    policy = b'{"schema":"toanaas-localbotapi-policy/v1"}\n'
-    files = {"release/policy.json": policy}
+    files = {
+        name: (REPO / "deploy" / "localbotapi" / name).read_bytes()
+        for name in contract.EXPECTED_RELEASE_FILES
+    }
 
     traversal = tarfile.TarInfo("../outside")
     traversal.size = 1
@@ -147,6 +171,10 @@ def test_reconcile_is_locked_and_rolls_back_only_the_localbot_service():
     assert "toanaas-telegram-bot-api.service" in text
     assert "restart \"$SERVICE\"" in text
     assert " rollback " in text
+    assert "flock -u 9" in text
+    assert text.index("flock -u 9") < text.index('"$RELEASE_HELPER" rollback')
+    assert "readlink -f" in text
+    assert "mv -Tf" in text
     for forbidden in ("product-video", "remote_worker", "local_worker", "git pull", ":latest"):
         assert forbidden not in text
 
@@ -157,6 +185,7 @@ def test_health_checks_real_upstream_external_gate_and_loopback_bind():
     assert "root_http" in text and '"404"' in text
     assert "dummy_http" in text and '"401"' in text
     assert "missing_secret_status" in text and '"403"' in text
+    assert "wrong_secret_status" in text and '"403"' in text
     assert "0.0.0.0:8081" in text and "[::]:8081" in text
     assert "--location" not in text
     assert "TELEGRAM_TOKEN" not in text
@@ -167,6 +196,8 @@ def test_certificate_watcher_checks_expiry_without_changing_time():
     text = _release_text("bin/toanaas-localbotapi-cert-watch")
     assert "x509 -checkend 1209600" in text
     assert "tg.toanaas.vn:443" in text
+    assert "-verify_return_error" in text
+    assert '-verify_hostname "$CERT_HOST"' in text
     for forbidden in ("date -s", "timedatectl set-time", "hwclock --set"):
         assert forbidden not in text
 
@@ -221,3 +252,236 @@ def test_release_units_are_sandboxed_and_scoped_to_localbot():
         "UMask=0077",
     ):
         assert preserved_control in service
+
+
+def test_apply_activates_atomically_and_restores_previous_on_failed_health(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "opt" / "toanaas-localbotapi",
+        systemd_dir=tmp_path / "etc" / "systemd" / "system",
+        incoming_dir=tmp_path / "var" / "lib" / "toanaas-localbotapi" / "incoming",
+        bootstrap_backup=tmp_path / "var" / "lib" / "toanaas-localbotapi" / "bootstrap-backup",
+        lock_path=tmp_path / "run" / "lock" / "toanaas-localbotapi-apply.lock",
+    )
+    commands: list[tuple[str, ...]] = []
+    runner = lambda argv: commands.append(tuple(argv))
+    links = _FakeLinks()
+
+    first_bundle = _valid_bundle(tmp_path, "1" * 40, "first.tgz")
+    first = apply_module.apply_release(
+        roots,
+        first_bundle,
+        health=lambda: True,
+        command_runner=runner,
+        link_store=links,
+    )
+    first_target = links.resolve(roots.current)
+    assert first.status == "activated"
+    assert first_target.is_dir()
+    assert (
+        "systemctl",
+        "disable",
+        "--now",
+        "toanaas-tgbotapi-cleanup.timer",
+    ) in commands
+
+    health_results = iter((False, True))
+    second_bundle = _valid_bundle(tmp_path, "2" * 40, "second.tgz")
+    second = apply_module.apply_release(
+        roots,
+        second_bundle,
+        health=lambda: next(health_results),
+        command_runner=runner,
+        link_store=links,
+    )
+
+    assert second.status == "rolled_back"
+    assert links.resolve(roots.current) == first_target
+    assert links.resolve(roots.previous) == first_target
+    assert all("product-video" not in " ".join(command) for command in commands)
+    assert all("remote_worker" not in " ".join(command) for command in commands)
+
+
+def test_first_release_failure_restores_bootstrap_units_and_legacy_cleanup(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "opt" / "toanaas-localbotapi",
+        systemd_dir=tmp_path / "etc" / "systemd" / "system",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "bootstrap-backup",
+        lock_path=tmp_path / "apply.lock",
+    )
+    backup_units = roots.bootstrap_backup / "systemd"
+    backup_units.mkdir(parents=True)
+    (roots.bootstrap_backup / ".complete").write_text("ok\n", encoding="ascii")
+    (backup_units / apply_module.SERVICE).write_text("legacy-unit\n", encoding="ascii")
+    commands: list[tuple[str, ...]] = []
+    health_results = iter((False, True))
+    links = _FakeLinks()
+
+    result = apply_module.apply_release(
+        roots,
+        _valid_bundle(tmp_path, "5" * 40, "first-fails.tgz"),
+        health=lambda: next(health_results),
+        command_runner=lambda argv: commands.append(tuple(argv)),
+        link_store=links,
+    )
+
+    assert result.status == "rolled_back"
+    assert not links.exists(roots.current)
+    assert (roots.systemd_dir / apply_module.SERVICE).read_text(encoding="ascii") == "legacy-unit\n"
+    assert (
+        "systemctl",
+        "enable",
+        "--now",
+        "toanaas-tgbotapi-cleanup.timer",
+    ) in commands
+
+
+def test_apply_rolls_back_when_activation_command_fails(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "releases-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "backup",
+        lock_path=tmp_path / "apply.lock",
+    )
+    links = _FakeLinks()
+    apply_module.apply_release(
+        roots,
+        _valid_bundle(tmp_path, "6" * 40, "known-good.tgz"),
+        health=lambda: True,
+        command_runner=lambda _argv: None,
+        link_store=links,
+    )
+    known_good = links.resolve(roots.current)
+    failed_once = False
+
+    def fail_new_restart_once(argv):
+        nonlocal failed_once
+        if tuple(argv) == ("systemctl", "restart", apply_module.SERVICE) and not failed_once:
+            failed_once = True
+            raise RuntimeError("synthetic activation failure")
+
+    result = apply_module.apply_release(
+        roots,
+        _valid_bundle(tmp_path, "7" * 40, "bad-activation.tgz"),
+        health=lambda: True,
+        command_runner=fail_new_restart_once,
+        link_store=links,
+    )
+
+    assert failed_once
+    assert result.status == "rolled_back"
+    assert links.resolve(roots.current) == known_good
+
+
+def test_receiver_rejects_shell_commands_wrong_digest_and_oversize(tmp_path):
+    receiver = _load_module("receive_release")
+    bundle = _valid_bundle(tmp_path, "3" * 40, "valid.tgz")
+    payload = bundle.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    incoming = tmp_path / "incoming"
+
+    with pytest.raises(receiver.ReceiveError, match="command"):
+        receiver.receive("bash -i", payload, incoming)
+    with pytest.raises(receiver.ReceiveError, match="digest"):
+        receiver.receive(f"upload {'3' * 40} {'0' * 64}", payload, incoming)
+    with pytest.raises(receiver.ReceiveError, match="2 MiB"):
+        receiver.receive(
+            f"upload {'3' * 40} {digest}",
+            b"x" * (2 * 1024 * 1024 + 1),
+            incoming,
+        )
+
+    receipt = receiver.receive(f"upload {'3' * 40} {digest}", payload, incoming)
+    assert receipt.archive == incoming / f"{digest}.tgz"
+    assert receipt.ready == incoming / f"{digest}.ready"
+    assert receipt.archive.read_bytes() == payload
+    assert receipt.ready.read_text(encoding="ascii") == f"{digest}\n"
+
+
+def test_apply_ready_marker_must_match_archive_filename_content_and_digest(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "backup",
+        lock_path=tmp_path / "lock",
+    )
+    roots.incoming_dir.mkdir()
+    bundle = _valid_bundle(tmp_path, "8" * 40, "ready-source.tgz")
+    payload = bundle.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    archive = roots.incoming_dir / f"{digest}.tgz"
+    archive.write_bytes(payload)
+    ready = roots.incoming_dir / f"{digest}.ready"
+    ready.write_bytes(f"{'0' * 64}\n".encode("ascii"))
+
+    with pytest.raises(apply_module.ApplyError, match="ready marker"):
+        apply_module.validate_ready_marker(roots, ready)
+
+    ready.write_bytes(f"{digest}\n".encode("ascii"))
+    assert apply_module.validate_ready_marker(roots, ready) == archive
+    archive.write_bytes(payload + b"tampered")
+    with pytest.raises(apply_module.ApplyError, match="digest"):
+        apply_module.validate_ready_marker(roots, ready)
+
+
+def test_apply_rejects_policy_or_file_set_outside_fixed_allowlist(tmp_path):
+    contract = _load_module("release_contract")
+    expected = {
+        "release/policy.json",
+        "release/bin/toanaas-localbotapi-health",
+        "release/bin/toanaas-localbotapi-reconcile",
+        "release/bin/toanaas-localbotapi-cleanup",
+        "release/bin/toanaas-localbotapi-cert-watch",
+        "release/systemd/toanaas-telegram-bot-api.service",
+        "release/systemd/toanaas-localbotapi-cleanup.service",
+        "release/systemd/toanaas-localbotapi-cleanup.timer",
+        "release/systemd/toanaas-localbotapi-health.service",
+        "release/systemd/toanaas-localbotapi-health.timer",
+        "release/systemd/toanaas-localbotapi-reconcile.service",
+        "release/systemd/toanaas-localbotapi-reconcile.timer",
+        "release/systemd/toanaas-localbotapi-cert-watch.service",
+        "release/systemd/toanaas-localbotapi-cert-watch.timer",
+    }
+    assert set(contract.EXPECTED_RELEASE_FILES) == expected
+    manifest = {
+        "schema": contract.SCHEMA,
+        "commit": "4" * 40,
+        "files": {name: "0" * 64 for name in expected | {"release/bin/evil"}},
+        "policy_sha256": "0" * 64,
+    }
+    with pytest.raises(contract.ReleaseContractError, match="allowlist"):
+        contract.validate_manifest(manifest)
+
+
+def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
+    installer = (BOOTSTRAP / "install_bootstrap.sh").read_text(encoding="utf-8")
+    assert 'restrict,command="/usr/local/libexec/toanaas-localbotapi/receive-release"' in installer
+    assert "/opt/toanaas-localbotapi/releases" in installer
+    assert "toanaas-deploy" in installer
+    assert "mapfile -t deploy_key_lines" in installer
+    assert "${#deploy_key_lines[@]}" in installer
+    for guarded_path in (
+        "$RELEASE_ROOT",
+        "$RELEASES_ROOT",
+        "$STATE_ROOT",
+        "$STATE_ROOT/incoming",
+        "$DEPLOY_HOME",
+        "$DEPLOY_HOME/.ssh",
+        "$LIBEXEC_ROOT",
+    ):
+        assert f'require_real_directory "{guarded_path}"' in installer
+    assert "product-video" not in installer
+    assert "remote_worker" not in installer
+    for name in ("toanaas-localbotapi-apply.path", "toanaas-localbotapi-apply.service"):
+        text = (BOOTSTRAP / "systemd" / name).read_text(encoding="utf-8")
+        assert "product-video" not in text
+        if name.endswith(".service"):
+            assert "NoNewPrivileges=true" in text
+            assert "ProtectSystem=strict" in text
+            assert "ProtectHome=true" in text

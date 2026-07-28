@@ -47,6 +47,19 @@ if [[ "$missing_secret_status" != "403" ]]; then
     exit 1
 fi
 
+wrong_secret_status="$(
+    curl --silent --show-error \
+        --connect-timeout 3 --max-time 8 \
+        --header 'X-Toanaas-Proxy-Secret: invalid-local-health-check' \
+        --output /dev/null --write-out '%{http_code}' \
+        "$PUBLIC_ORIGIN$DUMMY_PATH"
+)"
+if [[ "$wrong_secret_status" != "403" ]]; then
+    printf 'localbotapi_health wrong_secret_status=%s expected=403\n' \
+        "$wrong_secret_status" >&2
+    exit 1
+fi
+
 listeners="$(ss -H -ltn)"
 if [[ "$listeners" == *"0.0.0.0:8081"* || "$listeners" == *"[::]:8081"* ||
       "$listeners" == *"0.0.0.0:8082"* || "$listeners" == *"[::]:8082"* ]]; then
