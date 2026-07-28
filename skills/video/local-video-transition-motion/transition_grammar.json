@@ -1,0 +1,2380 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-transition-motion",
+  "group_id": "transition",
+  "capability_count": 20,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "capabilities": [
+    {
+      "id": "hard_cut",
+      "qualified_id": "transition.hard_cut",
+      "display_name_vi": "Cắt thẳng",
+      "summary_vi": "Nối hai shot tại một ranh giới tức thời, không tạo thời gian chuyển tiếp.",
+      "purpose_vi": "Giữ nhịp rõ và tôn trọng điểm cắt do hành động hoặc câu nói quyết định.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot bất kỳ có frame kết thúc hợp lệ",
+          "shot có điểm cắt rõ"
+        ],
+        "target_types": [
+          "shot kế tiếp cùng timeline",
+          "shot có frame bắt đầu hợp lệ"
+        ],
+        "requirements_vi": "Cần hai frame biên rõ, không cần overlap; tiếng và hình phải có điểm đồng bộ được duyệt."
+      },
+      "direction_continuity": {
+        "mode": "HARD_BOUNDARY",
+        "guidance_vi": "Có thể đổi hướng nếu staging đã báo trước; không giả vờ continuity khi trục bị đảo.",
+        "continuity_check_vi": "Xem ba frame quanh biên để xác nhận hành động không bị giật do cắt sai nhịp."
+      },
+      "duration_range_seconds": {
+        "min": 0,
+        "max": 0,
+        "decision_rule_vi": "Đặt bằng không giây; chọn đúng frame theo nhịp hoặc điểm hoàn tất hành động."
+      },
+      "easing": {
+        "preset_id": "none",
+        "curve": "none",
+        "guidance_vi": "Không áp easing vì không có chuyển động trung gian."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không thêm blur nhân tạo vào ranh giới."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "NONE",
+        "guidance_vi": "Không cần mask hoặc tracking; kiểm tra chủ thể ở hai frame biên.",
+        "fallback_vi": "Nếu biên khó đọc, dời frame hoặc chuyển sang dissolve được kiểm tra."
+      },
+      "audio_accent": {
+        "accent_type": "cut_accent_optional",
+        "guidance_vi": "Có thể đặt accent rất ngắn đúng frame cắt nếu nhạc và quyền đã rõ.",
+        "mix_rule_vi": "Accent không lớn hơn lời; tắt accent khi gây giật hoặc che thoại."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi hai frame lệch sáng nhẹ nhưng vẫn có overlap hợp lệ.",
+        "action_vi": "Lập kế hoạch dissolve ngắn; không tự render hay bù footage."
+      },
+      "failure_conditions": [
+        "Cắt giữa âm tiết làm mất nghĩa.",
+        "Hành động bị nhảy vì thiếu frame biên."
+      ],
+      "validation_checks": [
+        "Xem từng frame quanh điểm cắt.",
+        "Nghe thoại và ambience qua ranh giới."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        },
+        {
+          "path": "services/video_local_editing.py",
+          "symbols": [
+            "SPEED_PRESETS",
+            "normalize_manual_edit_plan",
+            "build_manual_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Bộ dựng cục bộ giữ preset và lệnh FFmpeg đã có, chưa tạo transition mới."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Giữ nguyên cắt thẳng; bỏ mọi accent âm thanh nếu người xem nhạy cảm.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận thứ tự shot và câu nói vẫn rõ khi không có accent."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "cross_dissolve",
+      "qualified_id": "transition.cross_dissolve",
+      "display_name_vi": "Hòa tan chéo",
+      "summary_vi": "Cho shot sau hòa vào shot trước trong một overlap ngắn và có chủ đích.",
+      "purpose_vi": "Diễn đạt thời gian trôi, liên tưởng hoặc chuyển cảnh mềm khi continuity đủ ổn.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có đoạn cuối ổn định",
+          "ảnh hoặc video có overlap"
+        ],
+        "target_types": [
+          "shot có đoạn đầu ổn định",
+          "cảnh liên tưởng hoặc tiếp diễn"
+        ],
+        "requirements_vi": "Hai nguồn phải có đủ frame chồng và không chứa chữ quan trọng ở vị trí xung đột."
+      },
+      "direction_continuity": {
+        "mode": "SOFT_OVERLAP",
+        "guidance_vi": "Giữ hướng nhìn và mức sáng tương đối; dissolve không che lỗi trục.",
+        "continuity_check_vi": "So eyeline, silhouette và vùng sáng ở đầu/cuối overlap."
+      },
+      "duration_range_seconds": {
+        "min": 0.2,
+        "max": 1.2,
+        "decision_rule_vi": "Dùng overlap ngắn cho nhịp nhanh, dài hơn chỉ khi thời gian trôi là mục tiêu."
+      },
+      "easing": {
+        "preset_id": "crossfade_smooth",
+        "curve": "smoothstep",
+        "guidance_vi": "Tăng giảm đều, tránh đuôi quá dài làm hình bị đục."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không cần blur; độ mềm đến từ opacity chồng."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Chỉ tracking nếu chủ thể cần giữ vị trí qua overlap; không ép khi nền phức tạp.",
+        "fallback_vi": "Nếu tracking không ổn, dùng toàn khung dissolve hoặc cắt thẳng."
+      },
+      "audio_accent": {
+        "accent_type": "ambience_crossfade",
+        "guidance_vi": "Nối ambience và nhạc theo cùng khoảng overlap; giữ lời dễ nghe.",
+        "mix_rule_vi": "Crossfade âm không làm mất phụ âm cuối hoặc đầu câu."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi hai shot không đủ overlap hoặc lớp chữ chồng gây khó đọc.",
+        "action_vi": "Đổi sang hard cut tại điểm hành động sạch."
+      },
+      "failure_conditions": [
+        "Hai hình cùng có mặt người ở vị trí xung đột.",
+        "Dissolve kéo dài làm nhịp rơi."
+      ],
+      "validation_checks": [
+        "Kiểm tra frame giữa overlap không bị đục.",
+        "Nghe đường nối âm bằng tai nghe."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        },
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [
+            "VIDEO_MENU_PROFILE_MAP",
+            "get_video_profile"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Profile sản phẩm cung cấp ngôn ngữ crossfade và nhịp dựng đã tồn tại."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Giảm overlap và dùng opacity ngắn, hoặc hard cut nếu cần giảm kích thích.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo nội dung chuyển cảnh vẫn hiểu khi overlap ngắn hơn."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "dip_to_black",
+      "qualified_id": "transition.dip_to_black",
+      "display_name_vi": "Hạ qua đen",
+      "summary_vi": "Hạ hình về đen rồi mở shot mới để đánh dấu nghỉ hoặc đổi chương.",
+      "purpose_vi": "Tạo điểm dừng rõ trong câu chuyện khi khoảng tối có ý nghĩa.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot kết thúc có khoảng thở",
+          "shot có thể fade out"
+        ],
+        "target_types": [
+          "shot mở đầu rõ",
+          "cảnh hoặc chương mới"
+        ],
+        "requirements_vi": "Cần khoảng tối không che thông tin và mức đen đích được thống nhất trong profile."
+      },
+      "direction_continuity": {
+        "mode": "DIP_DARK",
+        "guidance_vi": "Hướng chuyển động không nối trực tiếp; nhịp nghỉ phải được chủ ý và không che lỗi continuity.",
+        "continuity_check_vi": "Đo thời điểm mất chi tiết và thời điểm hình mới đọc được."
+      },
+      "duration_range_seconds": {
+        "min": 0.3,
+        "max": 1.3,
+        "decision_rule_vi": "Ngắn cho đổi cảnh, dài hơn chỉ khi câu chuyện cần nghỉ hoặc chuyển thời gian."
+      },
+      "easing": {
+        "preset_id": "dip_s_curve",
+        "curve": "ease-in-out",
+        "guidance_vi": "Hạ và nâng opacity mềm, không tạo nhấp sáng ở điểm đen."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không dùng blur; màu đen là lớp chuyển được kiểm soát."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "NONE",
+        "guidance_vi": "Không cần mask; kiểm tra logo hoặc chữ không bị cắt giữa fade.",
+        "fallback_vi": "Nếu fade qua đen làm mất CTA, dùng hard cut sau khi CTA kết thúc."
+      },
+      "audio_accent": {
+        "accent_type": "low_riser_or_silence",
+        "guidance_vi": "Có thể giảm ambience hoặc để một nhịp im lặng có chủ đích.",
+        "mix_rule_vi": "Không tăng bass hoặc âm lượng để bù khoảng tối."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi profile không cho phép khung đen hoặc người xem cần continuity mềm.",
+        "action_vi": "Dùng dissolve ngắn giữa hai shot có overlap."
+      },
+      "failure_conditions": [
+        "Hạ quá nhanh làm giống lỗi tín hiệu.",
+        "Đen che nội dung bắt buộc hoặc phụ đề."
+      ],
+      "validation_checks": [
+        "Kiểm tra histogram ở đoạn đen.",
+        "Đọc phụ đề và logo qua hai đầu fade."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [
+            "VIDEO_MENU_PROFILE_MAP",
+            "get_video_profile"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Profile sản phẩm cung cấp ngôn ngữ crossfade và nhịp dựng đã tồn tại."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Rút ngắn fade và giữ độ sáng ổn định hơn; dùng cut đơn giản khi cần.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận không có nhấp sáng và điểm đổi chương vẫn rõ."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "dip_to_white",
+      "qualified_id": "transition.dip_to_white",
+      "display_name_vi": "Hạ qua trắng",
+      "summary_vi": "Hạ hình qua trắng để gợi ký ức, chuyển sang ngày mới hoặc một nhịp lóe có kiểm soát.",
+      "purpose_vi": "Tạo chuyển cảnh sáng khi nội dung và độ sáng nguồn cho phép.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có vùng sáng không cháy",
+          "shot kết thúc ổn định"
+        ],
+        "target_types": [
+          "shot mở đầu có chi tiết trung tâm",
+          "cảnh mới đã cân trắng"
+        ],
+        "requirements_vi": "Cần kiểm soát highlight, đuôi mắt và chữ; không dùng khi nguồn đã cháy sáng."
+      },
+      "direction_continuity": {
+        "mode": "DIP_LIGHT",
+        "guidance_vi": "Không dùng màu trắng để che sai hướng; nhịp sáng phải phục vụ ý nghĩa cảnh.",
+        "continuity_check_vi": "So mức sáng, chi tiết da và phụ đề trước khi hạ qua trắng."
+      },
+      "duration_range_seconds": {
+        "min": 0.25,
+        "max": 1,
+        "decision_rule_vi": "Giữ ngắn và đo được; dừng nếu highlight vượt giới hạn đọc."
+      },
+      "easing": {
+        "preset_id": "dip_white_controlled",
+        "curve": "ease-in-out",
+        "guidance_vi": "Tăng giảm opacity mềm, không tạo flash lặp."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Chỉ blur nhẹ khi đã kiểm tra chữ và chi tiết sáng."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "NONE",
+        "guidance_vi": "Không có mask trong hợp đồng cục bộ; cần kiểm tra toàn khung.",
+        "fallback_vi": "Đổi sang cross_dissolve hoặc hard_cut khi chưa có lớp trắng kiểm chứng."
+      },
+      "audio_accent": {
+        "accent_type": "soft_bell_optional",
+        "guidance_vi": "Accent sáng chỉ là ý tưởng; dùng ambience sạch nếu chưa có quyền âm.",
+        "mix_rule_vi": "Giữ accent dưới lời và tránh đỉnh âm đột ngột."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi runtime không có lớp trắng hoặc footage cháy sáng.",
+        "action_vi": "Cắt thẳng tại frame sạch và ghi blocker vào kế hoạch."
+      },
+      "failure_conditions": [
+        "Màn trắng làm mất phụ đề.",
+        "Highlight nhấp như flash gây khó chịu."
+      ],
+      "validation_checks": [
+        "Lấy mẫu frame sáng nhất để kiểm tra contrast.",
+        "Thử trên mobile với giảm chuyển động."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Bỏ lớp trắng và dùng hard cut hoặc dissolve rất ngắn.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Kiểm tra vẫn phân biệt được hai shot khi không có lóe sáng."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "slide",
+      "qualified_id": "transition.slide",
+      "display_name_vi": "Trượt",
+      "summary_vi": "Đưa shot mới trượt theo một cạnh để thay shot cũ với hướng rõ.",
+      "purpose_vi": "Tạo nhịp chuyển ngang hoặc dọc có thể dự đoán trong nội dung social.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có mép khung sạch",
+          "ảnh/video có nền đủ đơn giản"
+        ],
+        "target_types": [
+          "shot có không gian cho hướng trượt",
+          "khung cùng tỷ lệ đích"
+        ],
+        "requirements_vi": "Hai shot cần cùng kích thước và có hướng trượt được chỉ định trước."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_VECTOR",
+        "guidance_vi": "Shot mới đi cùng vector đã chọn; tránh đổi hướng liên tục giữa các cut.",
+        "continuity_check_vi": "Kiểm tra cạnh vào, tốc độ và đường chân trời trong suốt overlap."
+      },
+      "duration_range_seconds": {
+        "min": 0.2,
+        "max": 0.8,
+        "decision_rule_vi": "Dùng nhanh cho social; chậm hơn chỉ khi cần đọc bố cục mới."
+      },
+      "easing": {
+        "preset_id": "slide_ease_out",
+        "curve": "cubic-bezier(0.2,0.8,0.2,1)",
+        "guidance_vi": "Ra nhẹ ở cuối để shot mới dừng ổn định."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Blur ngang là tùy chọn và phải tắt khi chữ nhỏ hoặc cảnh tối."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "NONE",
+        "guidance_vi": "Không cần mask; giữ mép và crop trong vùng an toàn.",
+        "fallback_vi": "Nếu crop không đủ, đổi sang dissolve hoặc hard cut."
+      },
+      "audio_accent": {
+        "accent_type": "whoosh_short",
+        "guidance_vi": "Whoosh ngắn có thể nhấn vector nhưng không thay cho nhịp dựng.",
+        "mix_rule_vi": "Âm lượng accent thấp hơn thoại và cắt đuôi sạch."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi một shot thiếu không gian cho chuyển động cạnh.",
+        "action_vi": "Dissolve ở điểm ít thông tin hơn."
+      },
+      "failure_conditions": [
+        "Méo tỷ lệ do kích thước nguồn khác nhau.",
+        "Mép trượt che chữ hoặc logo."
+      ],
+      "validation_checks": [
+        "Kiểm tra crop ở 9:16 và 16:9.",
+        "Xem vector không đảo giữa hai shot kề nhau."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        },
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Giảm quãng trượt, tắt blur và dùng opacity nhẹ nếu cần.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo shot mới vẫn vào đúng thứ tự và safe area."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "push",
+      "qualified_id": "transition.push",
+      "display_name_vi": "Đẩy vào",
+      "summary_vi": "Shot sau đẩy shot trước ra theo cùng hướng, tạo cảm giác tiếp tục không gian.",
+      "purpose_vi": "Tạo chuyển tiếp năng lượng vừa phải khi hai shot có vector chung.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có chuyển động ngang/dọc rõ",
+          "khung có khoảng trống theo vector"
+        ],
+        "target_types": [
+          "shot cùng trục hoặc có chủ thể nối",
+          "khung đã cân tỷ lệ"
+        ],
+        "requirements_vi": "Cần overlap, vector và kích thước thống nhất; push-in của camera không tự là transition."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_VECTOR",
+        "guidance_vi": "Giữ vector chung hoặc ghi rõ điểm reset; không dùng alias push-in như bằng chứng compositor.",
+        "continuity_check_vi": "So vector nền và vị trí chủ thể ở 10% đầu và 90% cuối."
+      },
+      "duration_range_seconds": {
+        "min": 0.25,
+        "max": 0.9,
+        "decision_rule_vi": "Chọn thời lượng đủ để đọc shot mới nhưng không kéo dài quãng đẩy."
+      },
+      "easing": {
+        "preset_id": "push_accel_decel",
+        "curve": "ease-in-out",
+        "guidance_vi": "Gia tốc ngắn rồi hãm trước khi shot mới đứng."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Blur tùy chọn; chỉ bật khi hướng và tốc độ nguồn đồng nhất."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Tracking chỉ hỗ trợ đo vector; chưa có compositor push cục bộ.",
+        "fallback_vi": "Dùng slide hoặc hard cut nếu không có clean overlap."
+      },
+      "audio_accent": {
+        "accent_type": "low_whoosh",
+        "guidance_vi": "Whoosh nhẹ theo gia tốc, không lấn lời.",
+        "mix_rule_vi": "Giảm đuôi accent nếu nhịp thoại đang tiếp tục."
+      },
+      "fallback": {
+        "qualified_id": "transition.slide",
+        "when_vi": "Khi push không có vector hoặc overlap đáng tin.",
+        "action_vi": "Dùng slide cùng hướng với quãng ngắn hơn."
+      },
+      "failure_conditions": [
+        "Push-in camera bị hiểu nhầm là nối hai shot.",
+        "Vector ngược gây giật."
+      ],
+      "validation_checks": [
+        "Đánh dấu vector trên frame đại diện.",
+        "Kiểm tra shot mới không mất vùng an toàn."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Đổi sang slide ngắn, tắt blur và giảm quãng dịch chuyển.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận hướng vẫn đọc được mà không cần gia tốc mạnh."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "whip_pan",
+      "qualified_id": "transition.whip_pan",
+      "display_name_vi": "Quét vụt",
+      "summary_vi": "Dùng quét nhanh cùng hướng để che ranh giới giữa hai shot.",
+      "purpose_vi": "Nối hành động năng lượng cao khi motion blur và vector thật đã có.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có whip pan hoặc quét nhanh thật",
+          "frame cuối có blur tự nhiên"
+        ],
+        "target_types": [
+          "shot bắt đầu cùng hướng quét",
+          "khung có điểm dừng đọc được"
+        ],
+        "requirements_vi": "Cần tốc độ và hướng quét tương thích; không tạo whip từ ảnh tĩnh thiếu chi tiết."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_VECTOR",
+        "guidance_vi": "Hai shot phải quét cùng vector; điểm dừng của shot sau cần trả mắt về chủ thể.",
+        "continuity_check_vi": "Đo hướng chuyển động ở frame mờ và kiểm tra không đảo trục."
+      },
+      "duration_range_seconds": {
+        "min": 0.15,
+        "max": 0.6,
+        "decision_rule_vi": "Giữ rất ngắn quanh đỉnh quét; kéo dài sẽ lộ lớp chuyển giả."
+      },
+      "easing": {
+        "preset_id": "whip_fast_out",
+        "curve": "ease-in-out",
+        "guidance_vi": "Tăng tốc nhanh và hãm rõ ở shot sau."
+      },
+      "motion_blur_requirement": {
+        "level": "REQUIRED",
+        "shutter_angle_degrees": 180,
+        "guidance_vi": "Cần blur từ footage hoặc lớp kiểm soát; không làm mờ chữ đang đọc."
+      },
+      "mask_tracking_requirement": {
+        "mask": "OPTIONAL",
+        "tracking": "REQUIRED",
+        "guidance_vi": "Tracking vector để xác nhận đường quét, không thay clean plate.",
+        "fallback_vi": "Nếu vector không khớp, dùng hard cut hoặc dissolve ngắn."
+      },
+      "audio_accent": {
+        "accent_type": "whip_whoosh",
+        "guidance_vi": "Accent quét ngắn theo đỉnh vận tốc, ưu tiên âm thanh đã cấp quyền.",
+        "mix_rule_vi": "Cắt đuôi whoosh trước phụ âm quan trọng."
+      },
+      "fallback": {
+        "qualified_id": "transition.slide",
+        "when_vi": "Khi footage không có đỉnh quét đủ rõ hoặc tracking thất bại.",
+        "action_vi": "Dùng slide cùng hướng với blur tùy chọn."
+      },
+      "failure_conditions": [
+        "Quét ngược hướng làm mất continuity.",
+        "Blur che mặt hoặc chữ."
+      ],
+      "validation_checks": [
+        "Xem ở tốc độ thường và 50%.",
+        "Kiểm tra vector bằng overlay phân tích, không render."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        },
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Thay bằng slide ngắn, bỏ blur và whoosh.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Kiểm tra mắt vẫn theo kịp điểm dừng của shot sau."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "speed_ramp",
+      "qualified_id": "transition.speed_ramp",
+      "display_name_vi": "Dốc tốc",
+      "summary_vi": "Thay đổi nhịp tốc độ quanh điểm nối để liên kết hành động hoặc beat.",
+      "purpose_vi": "Nhấn một khoảnh khắc khi nguồn có frame rate và hành động đủ dư.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "video có chuyển động liên tục",
+          "shot có headroom trước và sau điểm nối"
+        ],
+        "target_types": [
+          "video cùng nhịp hành động",
+          "shot có tốc độ đích được ghi"
+        ],
+        "requirements_vi": "Cần tốc độ nguồn, fps và điểm beat; preset tốc độ cố định không phải ramp tự do."
+      },
+      "direction_continuity": {
+        "mode": "SPEED_CONTINUITY",
+        "guidance_vi": "Giữ hướng hành động qua vùng tăng giảm; không đổi tốc độ để che sai continuity.",
+        "continuity_check_vi": "Đặt marker ở beat trước, giữa và sau ramp; so hướng và vị trí chủ thể."
+      },
+      "duration_range_seconds": {
+        "min": 0.4,
+        "max": 1.5,
+        "decision_rule_vi": "Ramp chỉ chiếm vùng hành động cần nhấn; phần còn lại giữ nhịp tự nhiên."
+      },
+      "easing": {
+        "preset_id": "speed_ramp_s_curve",
+        "curve": "smoothstep",
+        "guidance_vi": "Tăng giảm tốc liên tục, tránh gãy gia tốc ở ranh giới shot."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 120,
+        "guidance_vi": "Blur chỉ là hậu quả cần kiểm soát; không bù cho fps thiếu."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Tracking dùng để kiểm tra hành động; chưa có ramp compositor local tổng quát.",
+        "fallback_vi": "Dùng hard cut với tốc độ cố định đã hỗ trợ."
+      },
+      "audio_accent": {
+        "accent_type": "beat_hit_or_whoosh",
+        "guidance_vi": "Đặt accent tại beat đã duyệt, giữ cao độ thoại nếu có.",
+        "mix_rule_vi": "Không kéo giãn lời hoặc làm accent át tiếng hiện trường."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi nguồn không có headroom, fps hoặc beat đáng tin.",
+        "action_vi": "Giữ tốc độ gốc và cắt tại marker sạch."
+      },
+      "failure_conditions": [
+        "Rách chuyển động do fps thấp.",
+        "Âm thanh lệch cao độ hoặc mất đồng bộ."
+      ],
+      "validation_checks": [
+        "Kiểm tra frame pacing và môi.",
+        "So thời lượng thực với kế hoạch beat."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "services/video_ai_edit_router.py",
+          "symbols": [
+            "AI_EDIT_PROFILES",
+            "effect_stack_for",
+            "local_preprocess_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Router chỉ mô tả profile và fallback; lane provider vẫn bị khóa."
+        },
+        {
+          "path": "services/video_local_editing.py",
+          "symbols": [
+            "SPEED_PRESETS",
+            "normalize_manual_edit_plan",
+            "build_manual_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Bộ dựng cục bộ giữ preset và lệnh FFmpeg đã có, chưa tạo transition mới."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Bỏ ramp, giữ tốc độ gốc và dùng cut/dissolve đơn giản.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo nhịp kể không phụ thuộc vào thay đổi tốc độ."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "match_motion",
+      "qualified_id": "transition.match_motion",
+      "display_name_vi": "Khớp chuyển động",
+      "summary_vi": "Nối hai shot bằng hướng và nhịp chuyển động tương đồng tại ranh giới.",
+      "purpose_vi": "Giữ động lượng khi đổi góc hoặc đổi cảnh mà không cần hiệu ứng phô trương.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có vector chủ thể rõ",
+          "shot có điểm kết thúc hành động"
+        ],
+        "target_types": [
+          "shot có vector tiếp nối",
+          "shot bắt đầu cùng động lượng"
+        ],
+        "requirements_vi": "Cần mô tả vector, tốc độ, trục và frame marker của cả hai shot."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_VECTOR",
+        "guidance_vi": "Vector cuối shot trước và đầu shot sau phải cùng hướng hoặc có lý do reset được ghi.",
+        "continuity_check_vi": "So vector, tốc độ tương đối và vị trí chủ thể tại marker nối."
+      },
+      "duration_range_seconds": {
+        "min": 0.2,
+        "max": 0.8,
+        "decision_rule_vi": "Ưu tiên hard cut tại điểm tương ứng; chỉ overlap khi continuity chưa đủ tự nhiên."
+      },
+      "easing": {
+        "preset_id": "motion_match_soft",
+        "curve": "ease-out",
+        "guidance_vi": "Giữ động lượng thật, không thêm đường cong nếu chỉ là hard cut."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Chỉ giữ blur vốn có; không tạo blur để giả khớp chuyển động."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "REQUIRED",
+        "guidance_vi": "Tracking marker là bắt buộc để chứng minh vector; không phải mask compositing.",
+        "fallback_vi": "Nếu marker không bám, quay về hard cut và ghi continuity bị thiếu."
+      },
+      "audio_accent": {
+        "accent_type": "cut_on_motion",
+        "guidance_vi": "Đồng bộ accent với điểm hành động, hoặc giữ âm liên tục nếu lời đang chạy.",
+        "mix_rule_vi": "Ưu tiên thoại và ambience; accent có thể bỏ trong reduced motion."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi vector hoặc tốc độ hai shot không khớp.",
+        "action_vi": "Cắt tại điểm hành động rõ và không tuyên bố match."
+      },
+      "failure_conditions": [
+        "Đảo trục khiến mắt bị kéo ngược.",
+        "Tracking sai làm kết luận khớp giả."
+      ],
+      "validation_checks": [
+        "Vẽ vector trên frame đầu/cuối.",
+        "Xem ranh giới không âm thanh rồi mới nghe mix."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        },
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Dùng hard cut tại marker rõ, bỏ blur và mọi overlap.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Kiểm tra hành động vẫn liền mạch khi chỉ còn điểm cắt."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "match_shape",
+      "qualified_id": "transition.match_shape",
+      "display_name_vi": "Khớp hình",
+      "summary_vi": "Dùng hình dạng hoặc silhouette tương tự để nối hai shot qua một cut có chủ đích.",
+      "purpose_vi": "Tạo liên tưởng thị giác mà không cần hiệu ứng nặng.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có silhouette đọc rõ",
+          "chủ thể hoặc vật thể có biên sạch"
+        ],
+        "target_types": [
+          "shot có hình tương đồng",
+          "khung cho phép đối chiếu tỷ lệ"
+        ],
+        "requirements_vi": "Cần hai hình tương ứng, tỷ lệ gần nhau và điểm đặt được ghi trước."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_SHAPE",
+        "guidance_vi": "Khớp contour và vị trí tương đối; không dùng màu hoặc zoom để che hình không tương ứng.",
+        "continuity_check_vi": "Đối chiếu contour, tâm hình và hướng nhìn trên frame đại diện."
+      },
+      "duration_range_seconds": {
+        "min": 0.25,
+        "max": 1,
+        "decision_rule_vi": "Thường là cut; overlap chỉ dùng khi contour vẫn đọc rõ."
+      },
+      "easing": {
+        "preset_id": "shape_cut",
+        "curve": "linear",
+        "guidance_vi": "Không uốn hình; giữ cut hoặc dissolve tối thiểu để contour sạch."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không thêm blur vì sẽ làm mất biên hình cần so."
+      },
+      "mask_tracking_requirement": {
+        "mask": "OPTIONAL",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Mask chỉ để kiểm tra vùng hình, chưa có shape-match compositor local.",
+        "fallback_vi": "Dùng hard cut nếu contour không đủ sạch."
+      },
+      "audio_accent": {
+        "accent_type": "shape_click_optional",
+        "guidance_vi": "Accent nhỏ có thể đánh dấu liên tưởng, không bắt buộc.",
+        "mix_rule_vi": "Không để accent lấn tiếng nói hoặc nhạc có beat."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi hình tương đồng chỉ là suy đoán hoặc biên bị che.",
+        "action_vi": "Cắt thẳng ở điểm hình rõ và ghi match shape chưa xác nhận."
+      },
+      "failure_conditions": [
+        "Contour lệch khiến cut giống lỗi.",
+        "Crop khác tỷ lệ làm mất điểm tương ứng."
+      ],
+      "validation_checks": [
+        "Đặt hai frame cạnh nhau.",
+        "Kiểm tra silhouette ở kích thước mobile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        },
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Bỏ overlap và dùng hard cut không blur.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận liên tưởng vẫn đọc được bằng hình tĩnh."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "match_color",
+      "qualified_id": "transition.match_color",
+      "display_name_vi": "Khớp màu",
+      "summary_vi": "Nối shot qua vùng màu hoặc ánh sáng tương đồng để giữ cảm giác liên tục.",
+      "purpose_vi": "Dùng cầu màu khi hành động không đủ để làm match motion.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có vùng màu chủ đạo ổn định",
+          "khung đã cân trắng"
+        ],
+        "target_types": [
+          "shot có màu cầu tương ứng",
+          "shot không cháy highlight"
+        ],
+        "requirements_vi": "Cần đo màu đại diện và phân biệt màu kể chuyện với màu do lỗi phơi sáng."
+      },
+      "direction_continuity": {
+        "mode": "COLOR_BRIDGE",
+        "guidance_vi": "Màu chỉ hỗ trợ continuity; vẫn phải kiểm tra trục, eyeline và nội dung.",
+        "continuity_check_vi": "Lấy mẫu vùng màu ở cuối shot trước và đầu shot sau, kèm kiểm tra da người."
+      },
+      "duration_range_seconds": {
+        "min": 0.2,
+        "max": 0.9,
+        "decision_rule_vi": "Giữ ngắn nếu chỉ là cầu màu; kéo dài khi có đổi thời gian được ghi."
+      },
+      "easing": {
+        "preset_id": "color_bridge_soft",
+        "curve": "ease-in-out",
+        "guidance_vi": "Chuyển mềm, không nhấp độ sáng hoặc bão hòa."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không blur; giữ chi tiết để đánh giá màu và chữ."
+      },
+      "mask_tracking_requirement": {
+        "mask": "OPTIONAL",
+        "tracking": "NONE",
+        "guidance_vi": "Không cần tracking nếu màu nền ổn định; không dùng mask để tô màu giả.",
+        "fallback_vi": "Dùng cross_dissolve với grade trung tính."
+      },
+      "audio_accent": {
+        "accent_type": "ambience_continuity",
+        "guidance_vi": "Giữ ambience xuyên ranh giới; accent màu không thay cho audio kể chuyện.",
+        "mix_rule_vi": "Không đổi âm lượng chỉ vì màu sáng hơn."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi màu hai shot lệch do ánh sáng hoặc profile chưa khóa.",
+        "action_vi": "Dissolve trung tính và ghi yêu cầu color grade riêng."
+      },
+      "failure_conditions": [
+        "Màu da bị lệch.",
+        "Cầu màu che khác biệt nội dung hoặc logo."
+      ],
+      "validation_checks": [
+        "Kiểm tra waveform/vectorscope nếu có.",
+        "Xem frame đại diện trên màn hình khác nhau."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [
+            "VIDEO_MENU_PROFILE_MAP",
+            "get_video_profile"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Profile sản phẩm cung cấp ngôn ngữ crossfade và nhịp dựng đã tồn tại."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Dùng cut hoặc dissolve trung tính, không nhấn flash màu.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo màu không phải tín hiệu duy nhất để hiểu chuyển cảnh."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "object_wipe",
+      "qualified_id": "transition.object_wipe",
+      "display_name_vi": "Vật thể quét",
+      "summary_vi": "Một vật thể đi qua khung che ranh giới rồi mở shot sau.",
+      "purpose_vi": "Tạo wipe có động cơ từ hành động thật của vật thể hoặc người.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có vật thể phủ đủ chiều cao hoặc chiều rộng",
+          "đường đi liên tục"
+        ],
+        "target_types": [
+          "shot có clean plate hoặc nền tương thích",
+          "vật thể nối được hướng"
+        ],
+        "requirements_vi": "Cần mask vật thể, tracking đường biên và overlap đủ để che toàn ranh giới."
+      },
+      "direction_continuity": {
+        "mode": "OBJECT_PATH",
+        "guidance_vi": "Vật thể phải đi cùng hướng và tốc độ hợp lý; điểm che kín là marker nối.",
+        "continuity_check_vi": "Theo dõi biên vật thể từ frame vào đến frame che kín."
+      },
+      "duration_range_seconds": {
+        "min": 0.3,
+        "max": 1.2,
+        "decision_rule_vi": "Tính theo thời gian vật thể che kín khung; không kéo dài ngoài hành động thật."
+      },
+      "easing": {
+        "preset_id": "object_path",
+        "curve": "footage_driven",
+        "guidance_vi": "Theo chuyển động thật của vật thể, không áp easing nhân tạo lên mask."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Giữ blur tự nhiên ở biên; tắt nếu mask làm mất chi tiết."
+      },
+      "mask_tracking_requirement": {
+        "mask": "REQUIRED",
+        "tracking": "REQUIRED",
+        "guidance_vi": "Cần mask và tracking thật; vùng che kín phải vượt qua toàn bộ đường cắt.",
+        "fallback_vi": "Nếu thiếu clean plate, dùng slide hoặc hard cut; không lấp bằng nền giả."
+      },
+      "audio_accent": {
+        "accent_type": "object_pass_whoosh",
+        "guidance_vi": "Accent đi theo lúc vật thể quét qua, ưu tiên âm hiện trường sạch.",
+        "mix_rule_vi": "Giữ tiếng vật thể và lời chính; không dùng whoosh để che lỗi mask."
+      },
+      "fallback": {
+        "qualified_id": "transition.slide",
+        "when_vi": "Khi biên mask rách hoặc vật thể không che đủ khung.",
+        "action_vi": "Chọn slide cùng vector với vật thể."
+      },
+      "failure_conditions": [
+        "Mask hở làm lộ ranh giới.",
+        "Tracking trượt trên vật thể phản sáng."
+      ],
+      "validation_checks": [
+        "Xem matte ở nền tương phản.",
+        "Kiểm tra biên ở 100% và mobile."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS",
+            "PROFILE_TRANSITIONS",
+            "plan_transitions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Planner hiện có alias chuyển cảnh và chỉ được tham khảo khi lập kế hoạch."
+        },
+        {
+          "path": "services/video_scene3_flow.py",
+          "symbols": [
+            "TRANSITIONS",
+            "transition_suggestions"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Flow lưu nhãn và gợi ý chuyển cảnh; không đăng ký runtime cho pack này."
+        },
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Dùng hard cut hoặc slide ngắn, bỏ blur và tracking hiển thị.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận shot sau xuất hiện rõ mà không phụ thuộc vào wipe."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "foreground_occlusion",
+      "qualified_id": "transition.foreground_occlusion",
+      "display_name_vi": "Che tiền cảnh",
+      "summary_vi": "Tiền cảnh đi sát ống kính che một phần hoặc toàn khung để nối shot.",
+      "purpose_vi": "Khai thác depth thật và giữ cảm giác máy quay đang đi qua không gian.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có tiền cảnh gần ống kính",
+          "độ sâu và parallax đọc được"
+        ],
+        "target_types": [
+          "shot có lớp tiền cảnh tương thích",
+          "điểm mở ra không bị che chủ thể"
+        ],
+        "requirements_vi": "Cần clean plate hoặc mask đáng tin, cùng hướng đi và khoảng che đủ."
+      },
+      "direction_continuity": {
+        "mode": "DEPTH_OCCLUSION",
+        "guidance_vi": "Giữ logic gần-xa và hướng đi; không giả depth khi hai shot phẳng.",
+        "continuity_check_vi": "Đối chiếu đường biên tiền cảnh và điểm chủ thể lộ ra."
+      },
+      "duration_range_seconds": {
+        "min": 0.3,
+        "max": 1.1,
+        "decision_rule_vi": "Theo thời gian che thật; dừng ngay khi chủ thể mới đọc được."
+      },
+      "easing": {
+        "preset_id": "occlusion_footage",
+        "curve": "footage_driven",
+        "guidance_vi": "Không thêm easing ngoài quỹ đạo tiền cảnh thực."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 120,
+        "guidance_vi": "Blur tiền cảnh có thể tự nhiên; không làm nhòe chủ thể sau."
+      },
+      "mask_tracking_requirement": {
+        "mask": "REQUIRED",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Mask tiền cảnh bắt buộc; tracking tùy độ ổn định của máy.",
+        "fallback_vi": "Dùng hard cut tại điểm che tối đa nếu không có matte sạch."
+      },
+      "audio_accent": {
+        "accent_type": "foreground_pass",
+        "guidance_vi": "Giữ ambience không gian; accent chỉ hỗ trợ hướng đi.",
+        "mix_rule_vi": "Không nén mạnh làm mất tiếng thoại khi tiền cảnh đi qua."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi không xác định được biên gần-xa hoặc thiếu clean plate.",
+        "action_vi": "Cắt tại frame ít thông tin, ghi rõ occlusion chưa thực hiện."
+      },
+      "failure_conditions": [
+        "Biên tiền cảnh rung hoặc halo.",
+        "Chủ thể sau bị che quá lâu."
+      ],
+      "validation_checks": [
+        "Kiểm tra matte trên nền sáng và tối.",
+        "Xem điểm mở shot mới theo safe area."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        },
+        {
+          "path": "services/video_ai_edit_router.py",
+          "symbols": [
+            "AI_EDIT_PROFILES",
+            "effect_stack_for",
+            "local_preprocess_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Router chỉ mô tả profile và fallback; lane provider vẫn bị khóa."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Dùng hard cut và bỏ lớp che/blur để giảm kích thích.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo câu chuyện không yêu cầu người xem theo dõi matte."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "zoom",
+      "qualified_id": "transition.zoom",
+      "display_name_vi": "Phóng thu",
+      "summary_vi": "Dùng scale hoặc zoom có kiểm soát để đưa shot mới vào hoặc rút shot cũ ra.",
+      "purpose_vi": "Nhấn chủ thể và nối cảnh có cùng tâm hoặc điểm nhìn.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có headroom crop",
+          "ảnh/video đủ độ phân giải"
+        ],
+        "target_types": [
+          "shot có tâm nối hoặc điểm neo",
+          "khung không đặt chữ sát mép"
+        ],
+        "requirements_vi": "Cần độ phân giải, tâm zoom và tỷ lệ đích; không phóng khi chi tiết đã thiếu."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_ANCHOR",
+        "guidance_vi": "Giữ điểm neo và hướng scale; không đảo phóng/thu đột ngột.",
+        "continuity_check_vi": "Đo tâm neo ở đầu/cuối và kiểm tra crop không cắt chủ thể."
+      },
+      "duration_range_seconds": {
+        "min": 0.2,
+        "max": 1,
+        "decision_rule_vi": "Tăng tốc độ cho nhấn ngắn; dùng chậm khi cần dẫn mắt qua bố cục."
+      },
+      "easing": {
+        "preset_id": "zoom_ease_out",
+        "curve": "ease-out",
+        "guidance_vi": "Hãm nhẹ trước điểm neo để shot mới đọc ổn định."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Blur nhẹ tùy chọn; ưu tiên chi tiết và chữ rõ."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Tracking tâm neo chỉ để lập kế hoạch crop; không thay chủ thể tracking.",
+        "fallback_vi": "Giảm quãng zoom hoặc dùng cross_dissolve nếu crop không đủ."
+      },
+      "audio_accent": {
+        "accent_type": "zoom_whoosh_optional",
+        "guidance_vi": "Whoosh nhỏ theo scale, có thể bỏ khi lời đang chạy.",
+        "mix_rule_vi": "Giữ âm thanh liên tục và không tăng accent để tạo cảm giác giả."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi ảnh thiếu độ phân giải hoặc tâm zoom không ổn định.",
+        "action_vi": "Dissolve không scale và ghi giới hạn crop."
+      },
+      "failure_conditions": [
+        "Pixel hóa hoặc rung crop.",
+        "Zoom cắt safe area của chữ."
+      ],
+      "validation_checks": [
+        "Kiểm tra độ phân giải sau crop.",
+        "Xem tâm neo trên nhiều tỷ lệ."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        },
+        {
+          "path": "services/video_local_editing.py",
+          "symbols": [
+            "SPEED_PRESETS",
+            "normalize_manual_edit_plan",
+            "build_manual_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Bộ dựng cục bộ giữ preset và lệnh FFmpeg đã có, chưa tạo transition mới."
+        },
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Giảm quãng scale, tắt blur và dùng dissolve nếu cần.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận điểm nhìn vẫn rõ ở quãng zoom tối thiểu."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "light_flash",
+      "qualified_id": "transition.light_flash",
+      "display_name_vi": "Lóe sáng",
+      "summary_vi": "Một nhịp sáng rất ngắn đánh dấu cut hoặc beat khi không gây nhấp khó chịu.",
+      "purpose_vi": "Nhấn khoảnh khắc biểu diễn hoặc thay đổi năng lượng có chủ đích.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có điểm beat rõ",
+          "độ sáng còn headroom"
+        ],
+        "target_types": [
+          "shot bắt đầu ở frame sạch",
+          "nội dung không phụ thuộc chi tiết trong nhịp lóe"
+        ],
+        "requirements_vi": "Cần đo luminance, thời lượng và cảnh báo nhạy sáng; không dùng flash mặc định."
+      },
+      "direction_continuity": {
+        "mode": "BEAT_ACCENT",
+        "guidance_vi": "Flash không thay continuity; điểm cut và hướng hành động vẫn phải đúng.",
+        "continuity_check_vi": "Đặt marker flash so với frame cut và kiểm tra không lặp."
+      },
+      "duration_range_seconds": {
+        "min": 0.08,
+        "max": 0.35,
+        "decision_rule_vi": "Giữ dưới một nhịp ngắn và dừng nếu frame sáng không đọc được."
+      },
+      "easing": {
+        "preset_id": "flash_single_pulse",
+        "curve": "single_pulse",
+        "guidance_vi": "Một xung duy nhất, không lặp hoặc rung độ sáng."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không thêm blur; kiểm soát độ sáng và thời lượng thay thế."
+      },
+      "mask_tracking_requirement": {
+        "mask": "NONE",
+        "tracking": "NONE",
+        "guidance_vi": "Không dùng mask; flash toàn khung phải được ghi rõ trong kế hoạch.",
+        "fallback_vi": "Bỏ flash và giữ hard cut hoặc dissolve."
+      },
+      "audio_accent": {
+        "accent_type": "impact_optional",
+        "guidance_vi": "Impact chỉ là tùy chọn và phải có quyền; im lặng vẫn là fallback hợp lệ.",
+        "mix_rule_vi": "Tắt accent khi người xem nhạy sáng hoặc thoại cần ưu tiên."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi profile cấm flash hoặc chưa kiểm tra nhạy sáng.",
+        "action_vi": "Cắt thẳng tại beat và ghi no-flash."
+      },
+      "failure_conditions": [
+        "Nhấp sáng lặp hoặc quá dài.",
+        "Flash che phụ đề và da người."
+      ],
+      "validation_checks": [
+        "Đếm xung trong toàn video.",
+        "Kiểm tra cảnh báo flashing và frame sample."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "services/video_ai_edit_router.py",
+          "symbols": [
+            "AI_EDIT_PROFILES",
+            "effect_stack_for",
+            "local_preprocess_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Router chỉ mô tả profile và fallback; lane provider vẫn bị khóa."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Luôn bỏ flash; dùng cut không lóe và accent âm rất nhẹ nếu được phép.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo không còn thay đổi sáng đột ngột."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "blur",
+      "qualified_id": "transition.blur",
+      "display_name_vi": "Mờ chuyển",
+      "summary_vi": "Dùng mờ có kiểm soát như cầu ngắn giữa hai shot khi chi tiết không phải trọng tâm.",
+      "purpose_vi": "Làm mềm một ranh giới khó nối mà không che thông tin thiết yếu.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có chi tiết dư",
+          "khung không đặt chữ nhỏ ở vùng mờ"
+        ],
+        "target_types": [
+          "shot có frame mở rõ",
+          "tỷ lệ và tiêu điểm tương thích"
+        ],
+        "requirements_vi": "Cần xác định loại blur, vùng ảnh và giới hạn đọc chữ trước khi lập kế hoạch."
+      },
+      "direction_continuity": {
+        "mode": "SOFT_FOCUS_BRIDGE",
+        "guidance_vi": "Blur không sửa hướng; continuity hình và âm phải được kiểm tra riêng.",
+        "continuity_check_vi": "So frame trước/sau blur và xác nhận chủ thể vẫn đúng vị trí."
+      },
+      "duration_range_seconds": {
+        "min": 0.2,
+        "max": 0.8,
+        "decision_rule_vi": "Giữ ngắn hơn thời lượng đọc chữ; dùng ít nhất để che sai khác nhỏ."
+      },
+      "easing": {
+        "preset_id": "blur_in_out",
+        "curve": "ease-in-out",
+        "guidance_vi": "Mờ vào và ra đều, không kéo đuôi mờ."
+      },
+      "motion_blur_requirement": {
+        "level": "REQUIRED",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Cần chọn boxblur hoặc gblur phù hợp; độ mạnh phải được xem trên frame đại diện."
+      },
+      "mask_tracking_requirement": {
+        "mask": "OPTIONAL",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Vùng mờ có thể giới hạn bằng mask nhưng chưa có transition mask cục bộ.",
+        "fallback_vi": "Dùng cross_dissolve không blur khi chữ hoặc mặt bị ảnh hưởng."
+      },
+      "audio_accent": {
+        "accent_type": "soft_whoosh_optional",
+        "guidance_vi": "Accent mờ rất nhẹ hoặc giữ ambience liên tục.",
+        "mix_rule_vi": "Không dùng âm lớn để che hình bị mờ."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi blur làm giảm contrast hoặc nguồn đã thiếu chi tiết.",
+        "action_vi": "Dissolve trung tính và đánh dấu cần kiểm tra lại."
+      },
+      "failure_conditions": [
+        "Mặt và phụ đề bị mờ quá mức.",
+        "Blur kéo dài tạo cảm giác lỗi tín hiệu."
+      ],
+      "validation_checks": [
+        "Đo contrast vùng chữ trước và giữa blur.",
+        "Xem trên mobile và màn hình lớn."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "TRANSITIONS",
+            "XFADE_TRANSITIONS",
+            "_motion_filter",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Runtime khung ảnh có primitive cục bộ giới hạn; tham chiếu không phải lệnh chạy."
+        },
+        {
+          "path": "services/video_local_editing.py",
+          "symbols": [
+            "SPEED_PRESETS",
+            "normalize_manual_edit_plan",
+            "build_manual_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Bộ dựng cục bộ giữ preset và lệnh FFmpeg đã có, chưa tạo transition mới."
+        },
+        {
+          "path": "services/video_edit_capabilities.py",
+          "symbols": [
+            "CAPABILITIES"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Catalog cho biết phạm vi local/provider hiện có, không mở capability."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Tắt blur và dùng opacity hoặc hard cut đơn giản.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Kiểm tra ranh giới không gây nhấp và chữ luôn đọc được."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "glitch",
+      "qualified_id": "transition.glitch",
+      "display_name_vi": "Nhiễu glitch",
+      "summary_vi": "Một biến dạng kỹ thuật ngắn mô phỏng lỗi tín hiệu để nhấn nhịp hoặc đổi trạng thái.",
+      "purpose_vi": "Chỉ dùng khi phong cách cho phép và người xem không cần đọc trong nhịp nhiễu.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "video có frame sạch trước glitch",
+          "nhịp cắt hoặc beat rõ"
+        ],
+        "target_types": [
+          "video có frame mở ổn định",
+          "nội dung không nhạy với méo màu"
+        ],
+        "requirements_vi": "Cần giới hạn thời lượng, màu và tần suất; không suy diễn effect từ tên profile."
+      },
+      "direction_continuity": {
+        "mode": "DISCRETE_GLITCH",
+        "guidance_vi": "Glitch là accent, không thay continuity hay sửa footage lỗi.",
+        "continuity_check_vi": "Xác nhận chỉ có một burst tại marker và shot sau định hướng rõ."
+      },
+      "duration_range_seconds": {
+        "min": 0.1,
+        "max": 0.5,
+        "decision_rule_vi": "Một burst ngắn; tránh lặp nhiều lần trong cùng đoạn."
+      },
+      "easing": {
+        "preset_id": "glitch_burst",
+        "curve": "stepped",
+        "guidance_vi": "Biến dạng theo burst rời, không rung liên tục."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không cần blur; giữ burst ngắn để giảm khó chịu."
+      },
+      "mask_tracking_requirement": {
+        "mask": "OPTIONAL",
+        "tracking": "NONE",
+        "guidance_vi": "Mask vùng glitch chỉ là ý tưởng; runtime local chưa có lớp nhiễu chuyển cảnh.",
+        "fallback_vi": "Bỏ glitch và dùng hard cut."
+      },
+      "audio_accent": {
+        "accent_type": "digital_click_optional",
+        "guidance_vi": "Âm click kỹ thuật tùy chọn, phải có quyền và không che lời.",
+        "mix_rule_vi": "Giới hạn peak accent và không nén làm méo thoại."
+      },
+      "fallback": {
+        "qualified_id": "transition.hard_cut",
+        "when_vi": "Khi phong cách hoặc accessibility không cho phép biến dạng.",
+        "action_vi": "Cắt sạch tại cùng marker."
+      },
+      "failure_conditions": [
+        "Burst lặp gây nhấp và mất đọc.",
+        "Méo màu làm sai nhận diện thương hiệu."
+      ],
+      "validation_checks": [
+        "Đếm số burst theo phút.",
+        "Kiểm tra chữ và logo trong frame nhiễu."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_ai_edit_router.py",
+          "symbols": [
+            "AI_EDIT_PROFILES",
+            "effect_stack_for",
+            "local_preprocess_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Router chỉ mô tả profile và fallback; lane provider vẫn bị khóa."
+        },
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Tắt biến dạng, dùng cut sạch và giữ âm thanh ổn định.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo không còn burst hoặc đổi màu đột ngột."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "mask_reveal",
+      "qualified_id": "transition.mask_reveal",
+      "display_name_vi": "Mở bằng mặt nạ",
+      "summary_vi": "Một mask chuyển từ shot trước sang shot sau để nối hai shot bằng vùng lộ có chủ đích.",
+      "purpose_vi": "Tạo reveal theo biên hoặc hình động khi clean plate và tracking có thật.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "shot có biên hoặc clean plate",
+          "vùng che đủ rộng"
+        ],
+        "target_types": [
+          "shot có nền hoặc chủ thể sau mask",
+          "điểm mở đã xác định"
+        ],
+        "requirements_vi": "Cần matte, hướng reveal, tracking và kiểm tra quyền với mọi lớp lộ ra."
+      },
+      "direction_continuity": {
+        "mode": "MASK_BOUNDARY",
+        "guidance_vi": "Biên mask phải đi theo động lực cảnh; không dùng mask để bỏ qua continuity.",
+        "continuity_check_vi": "Xem matte ở frame đầu, giữa và cuối; xác nhận không có lỗ hoặc halo."
+      },
+      "duration_range_seconds": {
+        "min": 0.3,
+        "max": 1.4,
+        "decision_rule_vi": "Theo tốc độ biên mask và thời gian đọc shot sau; không che chữ lâu."
+      },
+      "easing": {
+        "preset_id": "mask_ease_out",
+        "curve": "ease-out",
+        "guidance_vi": "Biên vào mềm vừa đủ, không rung hoặc overshoot."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Blur biên tùy chọn; tắt khi chữ hoặc silhouette cần sắc."
+      },
+      "mask_tracking_requirement": {
+        "mask": "REQUIRED",
+        "tracking": "REQUIRED",
+        "guidance_vi": "Mask và tracking đều bắt buộc cho transition; vùng reveal phải có matte kiểm tra.",
+        "fallback_vi": "Thiếu matte thì dùng dissolve hoặc hard cut, không tạo nền thay thế."
+      },
+      "audio_accent": {
+        "accent_type": "reveal_riser_optional",
+        "guidance_vi": "Riser ngắn có thể theo biên reveal; ưu tiên ambience và lời.",
+        "mix_rule_vi": "Accent không được che thời điểm shot sau bắt đầu đọc."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi mask không ổn định, thiếu clean plate hoặc rights chưa rõ.",
+        "action_vi": "Dissolve toàn khung và ghi blocker mask."
+      },
+      "failure_conditions": [
+        "Halo quanh biên.",
+        "Tracking trượt làm lộ ranh giới hoặc lớp không được phép."
+      ],
+      "validation_checks": [
+        "Xem matte nền trắng và nền đen.",
+        "Kiểm tra frame reveal với phụ đề và logo."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        },
+        {
+          "path": "services/video_ai_edit_router.py",
+          "symbols": [
+            "AI_EDIT_PROFILES",
+            "effect_stack_for",
+            "local_preprocess_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Router chỉ mô tả profile và fallback; lane provider vẫn bị khóa."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Dùng dissolve ngắn hoặc cut; bỏ blur và quỹ đạo mask.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Xác nhận shot sau vẫn rõ mà không cần theo dõi biên."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "split_screen",
+      "qualified_id": "transition.split_screen",
+      "display_name_vi": "Chia màn",
+      "summary_vi": "Tách khung thành hai vùng để hai shot cùng hiện trong một chuyển tiếp có cấu trúc.",
+      "purpose_vi": "So sánh trước/sau hoặc giữ hai hành động đồng thời.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "hai shot có bố cục tương thích",
+          "đường chia không cắt thông tin chính"
+        ],
+        "target_types": [
+          "shot thứ hai cùng tỷ lệ",
+          "safe area đã tính cho từng nửa"
+        ],
+        "requirements_vi": "Cần layout, hướng đường chia, crop và thứ tự đọc rõ trên mobile."
+      },
+      "direction_continuity": {
+        "mode": "SPLIT_LAYOUT",
+        "guidance_vi": "Đường chia đi theo trục được chọn; không đảo bên nếu không có chỉ dẫn.",
+        "continuity_check_vi": "Kiểm tra chủ thể, chữ và eyeline trong từng vùng sau crop."
+      },
+      "duration_range_seconds": {
+        "min": 0.3,
+        "max": 1,
+        "decision_rule_vi": "Giữ đủ để so sánh nhưng không làm hai vùng quá nhỏ."
+      },
+      "easing": {
+        "preset_id": "split_slide",
+        "curve": "ease-out",
+        "guidance_vi": "Đường chia vào một lần, dừng rõ trước khi đọc nội dung."
+      },
+      "motion_blur_requirement": {
+        "level": "NONE",
+        "shutter_angle_degrees": 0,
+        "guidance_vi": "Không blur vì mỗi vùng cần chi tiết và chữ rõ."
+      },
+      "mask_tracking_requirement": {
+        "mask": "REQUIRED",
+        "tracking": "OPTIONAL",
+        "guidance_vi": "Mask đường chia cần compositor; tracking chỉ cần khi bố cục di động.",
+        "fallback_vi": "Dùng hard cut hoặc dissolve nếu không có split compositor."
+      },
+      "audio_accent": {
+        "accent_type": "split_tick_optional",
+        "guidance_vi": "Một tick nhẹ có thể đánh dấu đường chia, không bắt buộc.",
+        "mix_rule_vi": "Giữ thoại chính một bên rõ; tránh hai nguồn lời chồng."
+      },
+      "fallback": {
+        "qualified_id": "transition.cross_dissolve",
+        "when_vi": "Khi crop làm mất nội dung hoặc layout không đọc trên mobile.",
+        "action_vi": "Dissolve tuần tự giữa hai shot thay vì đồng thời."
+      },
+      "failure_conditions": [
+        "Hai vùng quá hẹp cho chữ.",
+        "Đường chia che chủ thể hoặc logo."
+      ],
+      "validation_checks": [
+        "Xem ở 9:16 trên màn hình nhỏ.",
+        "Kiểm tra thứ tự đọc bằng frame tĩnh."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge mô tả continuity và VFX ở mức ý tưởng, không gọi công cụ."
+        },
+        {
+          "path": "services/video_edit_capabilities.py",
+          "symbols": [
+            "CAPABILITIES"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes_vi": "Catalog cho biết phạm vi local/provider hiện có, không mở capability."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Hiện lần lượt từng shot bằng dissolve, không chia màn động.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo so sánh vẫn hiểu khi chỉ có một vùng hình."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "parallax_transition",
+      "qualified_id": "transition.parallax_transition",
+      "display_name_vi": "Chuyển parallax",
+      "summary_vi": "Nối hai shot bằng dịch chuyển lớp và độ sâu tương đối được chuẩn bị trước.",
+      "purpose_vi": "Tạo cảm giác không gian khi nguồn có lớp tách và chuyển động máy phù hợp.",
+      "input_shot_compatibility": {
+        "source_types": [
+          "ảnh/video có lớp tiền-trung-hậu cảnh",
+          "clean plate và điểm neo"
+        ],
+        "target_types": [
+          "shot có lớp tiếp nối hoặc điểm nhìn tương đồng",
+          "độ phân giải đủ crop"
+        ],
+        "requirements_vi": "Cần layer map, chiều sâu, camera move và quyền dùng mọi lớp; footage phẳng không đủ."
+      },
+      "direction_continuity": {
+        "mode": "MATCH_VECTOR",
+        "guidance_vi": "Giữ hướng camera và quan hệ gần-xa; không dựng parallax từ một ảnh thiếu dữ liệu.",
+        "continuity_check_vi": "So đường đi điểm neo và khoảng cách lớp ở các marker."
+      },
+      "duration_range_seconds": {
+        "min": 0.4,
+        "max": 1.4,
+        "decision_rule_vi": "Chọn theo quãng dịch chuyển lớp; dừng trước khi lộ mép hoặc hình giả."
+      },
+      "easing": {
+        "preset_id": "parallax_gentle",
+        "curve": "ease-in-out",
+        "guidance_vi": "Chuyển động lớp mềm, ưu tiên camera thật và không overshoot."
+      },
+      "motion_blur_requirement": {
+        "level": "OPTIONAL",
+        "shutter_angle_degrees": 90,
+        "guidance_vi": "Blur nhẹ có thể theo camera nhưng không che seam giữa lớp."
+      },
+      "mask_tracking_requirement": {
+        "mask": "REQUIRED",
+        "tracking": "REQUIRED",
+        "guidance_vi": "Layer mask và tracking phải có bằng chứng; chưa có renderer parallax local.",
+        "fallback_vi": "Dùng zoom hoặc cross_dissolve với crop an toàn."
+      },
+      "audio_accent": {
+        "accent_type": "depth_whoosh_optional",
+        "guidance_vi": "Whoosh rất nhẹ theo camera; giữ ambience liên tục.",
+        "mix_rule_vi": "Không tăng accent để che seam hoặc mép lớp."
+      },
+      "fallback": {
+        "qualified_id": "transition.zoom",
+        "when_vi": "Khi thiếu layer map, clean plate hoặc độ phân giải.",
+        "action_vi": "Dùng zoompan đơn giản trong giới hạn crop đã kiểm tra."
+      },
+      "failure_conditions": [
+        "Lộ mép layer hoặc méo phối cảnh.",
+        "Tracking sai làm camera trôi."
+      ],
+      "validation_checks": [
+        "Kiểm tra seam trên nền tương phản.",
+        "Xem crop ở mọi tỷ lệ đích."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [
+            "CAMERA_MOTION_RULES",
+            "TRANSITION_RULES",
+            "STYLE_PACK_ROWS",
+            "ACTION_PACK_ROWS",
+            "normalize_video_motion"
+          ],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes_vi": "Prompt catalog ghi ngôn ngữ motion và continuity, không chứng minh render."
+        },
+        {
+          "path": "services/video_ai_edit_router.py",
+          "symbols": [
+            "AI_EDIT_PROFILES",
+            "effect_stack_for",
+            "local_preprocess_plan"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Router chỉ mô tả profile và fallback; lane provider vẫn bị khóa."
+        },
+        {
+          "path": "knowledge/video/animation_motion_3d.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes_vi": "Knowledge ghi staging và chuyển động 2D/3D như prompt concept."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "readiness": "REQUIRES_RUNTIME",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "reduced_motion": {
+        "variant_required": true,
+        "behavior_vi": "Giữ ảnh tĩnh hoặc zoom rất ngắn, bỏ dịch lớp và blur.",
+        "trigger_vi": "Khi người xem bật giảm chuyển động hoặc thiết bị yếu, dùng biến thể này.",
+        "validation_vi": "Đảm bảo chiều sâu không phải điều kiện để hiểu câu chuyện."
+      },
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
