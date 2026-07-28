@@ -1,0 +1,542 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-local-capabilities",
+  "contract_id": "platform_delivery_profiles",
+  "profile_count": 11,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "profiles": [
+    {
+      "id": "platform_delivery_profiles",
+      "display_name_vi": "Bộ profile giao nền tảng",
+      "purpose_vi": "Đặc tả bộ profile giao nền tảng cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "9_16_short_form",
+      "display_name_vi": "Khung dọc 9:16",
+      "purpose_vi": "Đặc tả khung dọc 9:16 cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "9:16",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "16_9_long_form",
+      "display_name_vi": "Khung hình ngang 16:9",
+      "purpose_vi": "Đặc tả khung ngang 16:9 cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "16:9",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "1_1_social",
+      "display_name_vi": "Khung vuông 1:1",
+      "purpose_vi": "Đặc tả khung vuông 1:1 cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "1:1",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "4_5_feed",
+      "display_name_vi": "Khung dọc feed 4:5",
+      "purpose_vi": "Đặc tả khung feed 4:5 cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "4:5",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "thumbnail_keyframe_selection",
+      "display_name_vi": "Chọn thumbnail và keyframe",
+      "purpose_vi": "Đặc tả chọn thumbnail và keyframe cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "hook_scoring",
+      "display_name_vi": "Chấm điểm hook",
+      "purpose_vi": "Đặc tả chấm điểm hook cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "retention_checkpoints",
+      "display_name_vi": "Mốc retention",
+      "purpose_vi": "Đặc tả mốc retention cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "brand_consistency",
+      "display_name_vi": "Nhất quán thương hiệu",
+      "purpose_vi": "Đặc tả nhất quán thương hiệu cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "accessibility",
+      "display_name_vi": "Khả năng tiếp cận",
+      "purpose_vi": "Đặc tả khả năng tiếp cận cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "flash_flicker_safety",
+      "display_name_vi": "An toàn flash và flicker",
+      "purpose_vi": "Đặc tả an toàn flash và flicker cho flow local, không thay UI sản phẩm cũ.",
+      "delivery_rules": {
+        "aspect_ratio": "theo profile đích",
+        "safe_area": "ghi safe area và crop evidence",
+        "filename_rule": "ghi tên file và version trong manifest"
+      },
+      "accessibility": {
+        "contrast_required": true,
+        "mobile_check_required": true,
+        "vi": "Không truyền nghĩa chỉ bằng màu; giữ text đọc được."
+      },
+      "reduced_motion": {
+        "variant_required": true,
+        "guidance_vi": "Có biến thể tĩnh hoặc opacity nhẹ khi giảm chuyển động."
+      },
+      "fallback": {
+        "action_vi": "Dùng profile an toàn hơn hoặc trả planning-only khi crop/contrast fail.",
+        "trigger_vi": "Thiếu aspect, safe-area, rights hoặc evidence."
+      },
+      "validation": {
+        "checks": [
+          "Kiểm tra aspect/crop.",
+          "Kiểm tra mobile readability.",
+          "Kiểm tra brand/accessibility khi áp dụng."
+        ],
+        "fail_closed": true
+      },
+      "inventory_status": "MISSING",
+      "readiness": "CONTRACT_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ],
+  "inventory_snapshot": {
+    "subtitle_safe_area": {
+      "status": "EXISTING_BUT_INCOMPLETE",
+      "duplicate_action": "KEEP_EXISTING",
+      "notes_vi": "Có metadata planner; không duplicate."
+    },
+    "mobile_legibility": {
+      "status": "EXISTING_BUT_INCOMPLETE",
+      "duplicate_action": "KEEP_EXISTING",
+      "notes_vi": "Có guard 26D; bổ sung chỉ khi gap được chứng minh."
+    }
+  },
+  "planning_only": true,
+  "runtime_registered": false,
+  "provider_executable": false,
+  "public_ui": false
+}
