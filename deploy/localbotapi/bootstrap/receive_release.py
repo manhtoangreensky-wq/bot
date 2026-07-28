@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+sys.dont_write_bytecode = True
 import release_contract
 
 

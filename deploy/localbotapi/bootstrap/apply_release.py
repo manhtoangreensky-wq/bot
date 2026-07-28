@@ -17,6 +17,9 @@ import time
 from pathlib import Path
 from typing import Callable, NamedTuple, Protocol, Sequence
 
+# The helper directory is a root-owned immutable trust anchor.  Never leave
+# interpreter-generated files beside the verified helper set.
+sys.dont_write_bytecode = True
 import release_contract
 
 
