@@ -1,0 +1,927 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-filmmaking",
+  "group_id": "editing_grammar",
+  "capability_count": 13,
+  "capabilities": [
+    {
+      "id": "standard_cut",
+      "display_name_vi": "Cắt tiêu chuẩn",
+      "summary_vi": "Nối hai shot bằng ranh giới hình ảnh rõ và có động cơ kể chuyện.",
+      "category": "editing_grammar",
+      "purpose": "Chuyển sang ý hoặc góc nhìn kế tiếp mà không phô trương thủ pháp.",
+      "use_when": [
+        "Khi hành động, câu nói hoặc ý đã đạt điểm chuyển tự nhiên."
+      ],
+      "avoid_when": [
+        "Tránh cắt giữa âm tiết, chuyển động khó đọc hoặc hai trạng thái lệch vô ý."
+      ],
+      "required_inputs": [
+        "Hai shot đã xác định thứ tự, điểm vào và điểm ra."
+      ],
+      "shot_requirements": [
+        "Nội dung hai shot phải kế tiếp hợp lý và không đảo thời gian ngoài chủ đích."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Đổi hình đúng tại điểm dựng đã duyệt.",
+        "audio_boundary_vi": "Giữ âm đồng bộ; chỉ nối âm khi có chủ đích và nguồn sạch.",
+        "sync_rule_vi": "Kiểm tra môi, hành động và âm nền quanh ranh giới.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Chọn điểm cắt theo ý nghĩa hoặc hành động, không áp một thời lượng chung.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Giữ hướng chuyển động, vị trí chủ thể và mức sáng đủ nhất quán."
+      ],
+      "aspect_ratio_notes": [
+        "Đánh giá crop cuối để không làm mất thông tin chính."
+      ],
+      "failure_modes": [
+        "Lệch trục hoặc tiếng bật khiến cú cắt giống lỗi."
+      ],
+      "fallbacks": [
+        "Dời tới khoảng nghỉ gần nhất hoặc dùng shot trung gian hợp lệ."
+      ],
+      "validation_checks": [
+        "Xem ranh giới ở tốc độ thường và từng khung; nghe bằng tai nghe."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_edit_capabilities.py",
+          "symbols": [
+            "CAPABILITIES"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu khả năng cắt, ghép cục bộ; không gọi thực thi."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "jump_cut",
+      "display_name_vi": "Jump cut có chủ đích",
+      "summary_vi": "Rút gọn thời gian trong cùng thiết lập bằng cú nhảy hình nhận biết rõ.",
+      "category": "editing_grammar",
+      "purpose": "Loại khoảng thừa và tăng nhịp mà vẫn giữ nguyên nghĩa nội dung.",
+      "use_when": [
+        "Khi cùng chủ thể và bối cảnh cho phép hiểu phần thời gian bị lược."
+      ],
+      "avoid_when": [
+        "Tránh khi cú nhảy làm sai hành động, đạo cụ hoặc đồng bộ lời."
+      ],
+      "required_inputs": [
+        "Một shot dài hoặc nhiều take cùng thiết lập."
+      ],
+      "shot_requirements": [
+        "Khung và trục đủ ổn định; thay đổi tư thế phải đọc được."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Bỏ đoạn giữa và nối trực tiếp hai trạng thái có chủ đích.",
+        "audio_boundary_vi": "Cắt lời tại khoảng nghỉ; dựng room tone khi nền thay đổi.",
+        "sync_rule_vi": "Không ghép hai nửa của các âm tiết khác nhau.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ đủ đầu và đuôi câu để lời vẫn dễ hiểu.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Cho phép nhảy tư thế có chủ đích nhưng không để nền hoặc đạo cụ đổi vô lý."
+      ],
+      "aspect_ratio_notes": [
+        "Khung dọc phải giữ đầu và tay trong vùng an toàn."
+      ],
+      "failure_modes": [
+        "Miệng, tay nhảy khó chịu hoặc âm nền đổi mức rõ."
+      ],
+      "fallbacks": [
+        "Che bằng B-roll có động cơ hoặc giữ khoảng nghỉ ngắn hơn."
+      ],
+      "validation_checks": [
+        "Đọc lại nguyên câu và xác nhận cú nhảy trông có chủ đích."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/manual_editing.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu mẫu jump cut cho talking-head, không sao chép nội dung."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "j_cut",
+      "display_name_vi": "J-cut dẫn âm sớm",
+      "summary_vi": "Cho âm thanh shot kế tiếp xuất hiện trước khi hình ảnh chuyển sang shot đó.",
+      "category": "editing_grammar",
+      "purpose": "Dẫn người xem sang cảnh mới và tạo kỳ vọng trước khi thay hình.",
+      "use_when": [
+        "Khi lời hoặc ambience cảnh sau có thể mở ngữ cảnh cho hình hiện tại."
+      ],
+      "avoid_when": [
+        "Tránh khi âm sớm gây nhầm người nói hoặc không có track sạch."
+      ],
+      "required_inputs": [
+        "Hai shot liên tiếp và âm cảnh sau định vị độc lập được."
+      ],
+      "shot_requirements": [
+        "Shot trước còn hình ảnh hữu ích trong khoảng dẫn âm."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Hình cảnh trước tiếp tục tới ranh giới cắt hình.",
+        "audio_boundary_vi": "Âm cảnh sau bắt đầu trước ranh giới hình; âm cũ hạ có kiểm soát.",
+        "sync_rule_vi": "Giữ lời cảnh sau đúng khớp môi khi người nói xuất hiện.",
+        "starts_before_picture_cut": true,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Bắt đầu dẫn âm tại một ý nghe được, không giữa âm tiết.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Âm sớm phải thuộc đúng không gian hoặc là cầu nối được khai báo."
+      ],
+      "aspect_ratio_notes": [
+        "Shot trước vẫn phải có thông tin đáng xem sau crop."
+      ],
+      "failure_modes": [
+        "Người xem tưởng sai người nói hoặc hai ambience chồng dày."
+      ],
+      "fallbacks": [
+        "Dùng cắt tiêu chuẩn với crossfade âm ngắn."
+      ],
+      "validation_checks": [
+        "Nghe không nhìn hình và xác nhận âm mới bắt đầu trước ranh giới hình."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu cầu nối âm thanh; hợp đồng J-cut vẫn độc lập."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "l_cut",
+      "display_name_vi": "L-cut giữ âm sau",
+      "summary_vi": "Giữ âm thanh shot trước tiếp tục sau khi hình đã chuyển sang shot kế tiếp.",
+      "category": "editing_grammar",
+      "purpose": "Duy trì lời hoặc cảm xúc trong khi hình mới bổ sung phản ứng và bối cảnh.",
+      "use_when": [
+        "Khi âm cảnh trước còn cần nghe trên hình cảnh sau."
+      ],
+      "avoid_when": [
+        "Tránh khi âm kéo dài làm sai không gian hoặc che lời mới."
+      ],
+      "required_inputs": [
+        "Hai shot liên tiếp và đuôi âm cảnh trước dùng độc lập được."
+      ],
+      "shot_requirements": [
+        "Shot sau phải minh họa, phản ứng hoặc tiếp nối hợp lý với âm đang giữ."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Hình chuyển sang cảnh sau trước khi âm cũ kết thúc.",
+        "audio_boundary_vi": "Âm cảnh trước tiếp tục sau ranh giới hình rồi kết thúc có kiểm soát.",
+        "sync_rule_vi": "Nếu quay lại người nói, lời phải giữ đúng khớp môi.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": true
+      },
+      "timing_guidance": {
+        "guidance_vi": "Kết thúc đuôi âm tại điểm hoàn tất ý hoặc trước lời mới.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Hình mới phải liên hệ rõ với âm đang tiếp tục và không sai nguồn."
+      ],
+      "aspect_ratio_notes": [
+        "Giữ chủ thể phản ứng trong vùng nhìn an toàn."
+      ],
+      "failure_modes": [
+        "Hai lời chồng ngoài chủ đích hoặc âm cũ kéo quá lâu."
+      ],
+      "fallbacks": [
+        "Dùng cắt tiêu chuẩn hoặc rút đuôi âm tới khoảng nghỉ."
+      ],
+      "validation_checks": [
+        "Xác nhận âm cũ còn sau ranh giới hình và toàn câu không bị cắt."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_cinematic_continuity.py",
+          "symbols": [
+            "build_continuity_ledger"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu cầu nối âm trong sổ liên tục, không gọi planner."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "cut_on_action",
+      "display_name_vi": "Cắt theo hành động",
+      "summary_vi": "Đặt ranh giới cắt trong một hành động liên tục để đổi góc mà giữ động lượng.",
+      "category": "editing_grammar",
+      "purpose": "Che ranh giới dựng bằng pha chuyển động tương thích giữa hai shot.",
+      "use_when": [
+        "Khi hai góc ghi cùng hành động với pha và hướng tương thích."
+      ],
+      "avoid_when": [
+        "Tránh khi tư thế, đạo cụ, tốc độ hoặc hướng không khớp."
+      ],
+      "required_inputs": [
+        "Hai góc của cùng hành động và mốc pha có thể đối chiếu."
+      ],
+      "shot_requirements": [
+        "Hành động phải có điểm bắt đầu, giữa và kết thúc rõ ở cả hai shot."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Cắt sau khi hành động bắt đầu và hoàn tất ở shot kế.",
+        "audio_boundary_vi": "Giữ tiếng động tác liên tục hoặc chọn một bản âm để tránh nhân đôi.",
+        "sync_rule_vi": "Đồng bộ điểm tiếp xúc, bước chân hoặc chuyển vị với âm tương ứng.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Chọn cùng pha vận tốc và tinh chỉnh theo khung hình.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Giữ hướng màn hình, quỹ đạo, đạo cụ và vị trí cơ thể."
+      ],
+      "aspect_ratio_notes": [
+        "Không crop mất bộ phận đang tạo hành động."
+      ],
+      "failure_modes": [
+        "Hành động lặp, mất pha hoặc đảo hướng ngoài chủ đích."
+      ],
+      "fallbacks": [
+        "Cắt trước hoặc sau toàn bộ hành động, hoặc dùng cutaway hợp lệ."
+      ],
+      "validation_checks": [
+        "So pha từng khung và nghe impact để tránh nhân đôi."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu cut on action hiện có, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "cross_cut",
+      "display_name_vi": "Cắt chéo hai tuyến",
+      "summary_vi": "Luân phiên giữa hai tuyến hành động để biểu đạt đồng thời hoặc đối chiếu.",
+      "category": "editing_grammar",
+      "purpose": "Xây căng thẳng và giúp theo dõi hai diễn biến có quan hệ.",
+      "use_when": [
+        "Khi hai tuyến có mốc thời gian hoặc quan hệ kể chuyện rõ."
+      ],
+      "avoid_when": [
+        "Tránh khi chưa thiết lập địa điểm, nhân vật hoặc quan hệ giữa hai tuyến."
+      ],
+      "required_inputs": [
+        "Hai nhóm shot đã gắn tuyến, thời gian và điểm tiến triển."
+      ],
+      "shot_requirements": [
+        "Mỗi tuyến cần shot thiết lập và các beat có thể so sánh."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Luân phiên tại beat tương ứng hoặc điểm tăng áp lực.",
+        "audio_boundary_vi": "Dùng cầu âm có kiểm soát; không trộn lời gây nhầm nguồn.",
+        "sync_rule_vi": "Giữ thứ tự sự kiện và nhịp nội tại của từng tuyến.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Rút ngắn shot khi hai tuyến gần hội tụ, không tăng nhịp máy móc.",
+        "frame_accurate": false
+      },
+      "continuity_rules": [
+        "Duy trì phân biệt không gian, thời gian, trang phục và ánh sáng từng tuyến."
+      ],
+      "aspect_ratio_notes": [
+        "Giữ dấu hiệu nhận diện từng tuyến sau crop."
+      ],
+      "failure_modes": [
+        "Hai tuyến bị hiểu thành cùng nơi hoặc thứ tự nhân quả bị đảo."
+      ],
+      "fallbacks": [
+        "Trình bày từng tuyến theo khối rồi nối bằng mốc rõ."
+      ],
+      "validation_checks": [
+        "Lập bảng beat hai tuyến và kiểm tra mỗi lần chuyển có thông tin mới."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "PLANNED_SHOOT_RECOMMENDED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "cutaway",
+      "display_name_vi": "Cutaway chuyển sang chi tiết",
+      "summary_vi": "Tạm rời hành động chính để cho thấy chi tiết, bối cảnh hoặc bằng chứng liên quan.",
+      "category": "editing_grammar",
+      "purpose": "Bổ sung thông tin, che rút gọn thời gian hoặc làm rõ lời đang nói.",
+      "use_when": [
+        "Khi shot phụ liên hệ trực tiếp với lời, hành động hoặc môi trường chính."
+      ],
+      "avoid_when": [
+        "Tránh B-roll chung chung, sai thời điểm hoặc che mất hành động quan trọng."
+      ],
+      "required_inputs": [
+        "Shot chính và shot phụ có nhãn nội dung, thời gian, động cơ."
+      ],
+      "shot_requirements": [
+        "Cutaway đủ dài để nhận biết và không mâu thuẫn trạng thái cảnh chính."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Rời shot chính sau khi ý được thiết lập và trở lại ở trạng thái hợp lý.",
+        "audio_boundary_vi": "Thường giữ lời hoặc ambience chính dưới cutaway.",
+        "sync_rule_vi": "Không để âm khẳng định sự kiện không xuất hiện trong hình.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": true
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ vừa đủ đọc thông tin, theo nhịp lời và độ phức tạp hình.",
+        "frame_accurate": false
+      },
+      "continuity_rules": [
+        "Khi quay lại, trạng thái tay, đạo cụ và hành động phải hợp lý."
+      ],
+      "aspect_ratio_notes": [
+        "Chi tiết còn đọc được ở tỷ lệ đích và không ngoài vùng crop."
+      ],
+      "failure_modes": [
+        "Shot phụ không liên quan hoặc điểm trở lại bị nhảy trạng thái."
+      ],
+      "fallbacks": [
+        "Giữ shot chính hoặc dùng insert shot có bằng chứng rõ."
+      ],
+      "validation_checks": [
+        "Nêu được lý do xuất hiện và kiểm tra điểm ra, trở lại."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/profiles/product_review.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu mẫu shot phụ trong profile, không dùng để thực thi."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "montage",
+      "display_name_vi": "Montage cô đọng tiến trình",
+      "summary_vi": "Sắp nhiều shot ngắn để cô đọng thời gian, quá trình hoặc chủ đề.",
+      "category": "editing_grammar",
+      "purpose": "Truyền tải tiến triển dài bằng chuỗi hình có nhịp và logic chọn lọc.",
+      "use_when": [
+        "Khi có đủ shot đa dạng cùng phục vụ một tiến trình hoặc luận điểm."
+      ],
+      "avoid_when": [
+        "Tránh ghép clip ngẫu nhiên không có trật tự, thay đổi hoặc mục tiêu."
+      ],
+      "required_inputs": [
+        "Danh sách shot đã gắn vai trò, thứ tự, chất lượng và quyền."
+      ],
+      "shot_requirements": [
+        "Cần shot mở, các bước tiến triển và shot kết hoặc payoff."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Sắp shot theo tiến trình, tương phản hoặc chủ đề, không theo tên file.",
+        "audio_boundary_vi": "Dùng lời, ambience hoặc nhịp được cấp quyền làm trục và giữ lời rõ.",
+        "sync_rule_vi": "Điểm nhấn hình phải tương ứng beat hoặc mốc lời đã xác định.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Thời lượng thay đổi theo lượng thông tin; chuỗi phải có mở, phát triển, kết.",
+        "frame_accurate": false
+      },
+      "continuity_rules": [
+        "Cho phép đổi thời gian có chủ đích nhưng giữ tiến trình dễ hiểu."
+      ],
+      "aspect_ratio_notes": [
+        "Chuẩn hóa crop mà không mất hành động hoặc nhãn quan trọng."
+      ],
+      "failure_modes": [
+        "Chuỗi lặp hình, không tiến triển hoặc nhanh hơn khả năng đọc."
+      ],
+      "fallbacks": [
+        "Giảm số shot và chuyển thành chuỗi ba bước chính."
+      ],
+      "validation_checks": [
+        "Mỗi shot có vai trò riêng; xem không âm để kiểm tra câu chuyện hình."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_edit_capabilities.py",
+          "symbols": [
+            "CAPABILITIES"
+          ],
+          "support_layer": "capability_catalog",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu ghép, đổi thứ tự cục bộ; montage là hợp đồng kể chuyện riêng."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "match_cut",
+      "display_name_vi": "Match cut tương đồng",
+      "summary_vi": "Nối hai shot bằng tương đồng về hình dạng, vị trí, hành động hoặc ý nghĩa.",
+      "category": "editing_grammar",
+      "purpose": "Tạo chuyển ý rõ nhưng mượt nhờ yếu tố thị giác hoặc khái niệm chung.",
+      "use_when": [
+        "Khi hai shot có yếu tố tương đồng đo được tại ranh giới."
+      ],
+      "avoid_when": [
+        "Tránh ép match khi tỷ lệ, góc, hướng hoặc ý nghĩa không tương thích."
+      ],
+      "required_inputs": [
+        "Hai shot và yếu tố match được chỉ định."
+      ],
+      "shot_requirements": [
+        "Yếu tố match nhìn đủ rõ và có vị trí hoặc chuyển động so sánh được."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Cắt tại khung hai hình có tương quan mạnh nhất.",
+        "audio_boundary_vi": "Có thể giữ cầu âm; không dùng âm để che match hình thất bại.",
+        "sync_rule_vi": "Nếu dựa trên hành động, đồng bộ pha và tốc độ trước, sau cut.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Ưu tiên khung tương đồng nhất hơn mốc giây cố định.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Match có chủ đích; yếu tố khác không được gây nhầm tuyến."
+      ],
+      "aspect_ratio_notes": [
+        "Đánh giá match sau crop cuối vì vị trí có thể thay đổi."
+      ],
+      "failure_modes": [
+        "Chủ thể nhảy kích thước hoặc người xem không nhận ra yếu tố match."
+      ],
+      "fallbacks": [
+        "Dùng cắt tiêu chuẩn hoặc dissolve ngắn nếu match yếu."
+      ],
+      "validation_checks": [
+        "Đặt hai khung biên cạnh nhau để so vị trí, hình dạng và hướng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_transition_planner.py",
+          "symbols": [
+            "SUPPORTED_TRANSITIONS"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu match cut ở planner, không đăng ký thêm."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "smash_cut",
+      "display_name_vi": "Smash cut tương phản mạnh",
+      "summary_vi": "Chuyển đột ngột giữa hai trạng thái tương phản để tạo nhấn cảm xúc.",
+      "category": "editing_grammar",
+      "purpose": "Tạo điểm gãy có chủ đích bằng tương phản hình, âm hoặc cường độ.",
+      "use_when": [
+        "Khi câu chuyện đã thiết lập đủ để cú chuyển mạnh có ý nghĩa."
+      ],
+      "avoid_when": [
+        "Tránh dùng lặp lại hoặc làm mức âm thanh gây khó chịu."
+      ],
+      "required_inputs": [
+        "Hai shot có trạng thái trước và sau tương phản được mô tả."
+      ],
+      "shot_requirements": [
+        "Shot trước đủ thiết lập kỳ vọng; shot sau phải đọc ngay."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Cắt trực tiếp tại điểm tương phản mạnh nhất.",
+        "audio_boundary_vi": "Kiểm soát chênh mức và đỉnh âm; im lặng hoặc impact có chủ đích.",
+        "sync_rule_vi": "Accent âm đặt đúng ranh giới và không che lời quan trọng.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ nhịp thiết lập trước cut, không chọn khung ngẫu nhiên.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Có thể phá liên tục bề mặt nhưng không làm sai logic câu chuyện."
+      ],
+      "aspect_ratio_notes": [
+        "Shot sau phải nhận biết ngay trên màn hình nhỏ."
+      ],
+      "failure_modes": [
+        "Chênh âm nguy hiểm hoặc cú cắt trông như lỗi file."
+      ],
+      "fallbacks": [
+        "Dùng cắt tiêu chuẩn với khoảng im lặng ngắn."
+      ],
+      "validation_checks": [
+        "Đo mức âm hai phía và xác nhận tương phản phục vụ beat cụ thể."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu từ vựng hard cut; semantics smash cut được đặc tả mới."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "insert_shot",
+      "display_name_vi": "Insert shot cận chi tiết",
+      "summary_vi": "Chèn cận cảnh vật thể, thao tác hoặc thông tin nằm trong cảnh chính.",
+      "category": "editing_grammar",
+      "purpose": "Làm rõ chi tiết quan trọng mà shot rộng không truyền đạt đủ.",
+      "use_when": [
+        "Khi chi tiết có giá trị chứng minh, hướng dẫn hoặc kể chuyện."
+      ],
+      "avoid_when": [
+        "Tránh insert sai vật thể, sai trạng thái hoặc làm đứt hành động."
+      ],
+      "required_inputs": [
+        "Shot chính và shot cận đúng vật thể hoặc thao tác."
+      ],
+      "shot_requirements": [
+        "Vị trí tay, hướng vật thể và trạng thái phải khớp cảnh chính."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Vào insert sau khi chi tiết được giới thiệu và trở lại trước khi mất mạch.",
+        "audio_boundary_vi": "Giữ lời hoặc ambience chính; dùng âm thao tác đúng nguồn nếu có.",
+        "sync_rule_vi": "Điểm chạm trong insert phải khớp âm và hành động tổng.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": true
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ đủ lâu để đọc chi tiết, chữ hoặc thao tác.",
+        "frame_accurate": true
+      },
+      "continuity_rules": [
+        "Khớp tay, đạo cụ và trạng thái trước, trong, sau insert."
+      ],
+      "aspect_ratio_notes": [
+        "Không crop mất nhãn hoặc điểm thao tác; chữ nhỏ phải đọc được."
+      ],
+      "failure_modes": [
+        "Insert sai phiên bản hoặc quá ngắn, mờ để đọc."
+      ],
+      "fallbacks": [
+        "Giữ shot chính hoặc bỏ insert nếu không có chi tiết hợp lệ."
+      ],
+      "validation_checks": [
+        "So vật thể ở ba điểm và kiểm tra khả năng đọc trên khung nhỏ."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "data/prompt_vault/camera_moves.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu từ vựng detail insert, không gọi prompt runtime."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "reaction_cut",
+      "display_name_vi": "Cắt sang phản ứng",
+      "summary_vi": "Chuyển sang phản ứng để bộc lộ tác động của sự kiện.",
+      "category": "editing_grammar",
+      "purpose": "Cho thấy ý nghĩa cảm xúc hoặc xã hội thay vì chỉ sự kiện chính.",
+      "use_when": [
+        "Khi phản ứng xảy ra đúng thời điểm và bổ sung thông tin mới."
+      ],
+      "avoid_when": [
+        "Tránh phản ứng sai ngữ cảnh, không đồng thuận hoặc lệch thời gian."
+      ],
+      "required_inputs": [
+        "Shot sự kiện và phản ứng có mốc thời gian, nhân vật rõ."
+      ],
+      "shot_requirements": [
+        "Ánh nhìn, hướng màn hình và thời điểm phản ứng liên hệ với sự kiện."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Cắt sau tín hiệu gây phản ứng hoặc sớm một nhịp có chủ đích.",
+        "audio_boundary_vi": "Có thể giữ lời hoặc âm sự kiện dưới shot phản ứng.",
+        "sync_rule_vi": "Khớp phản ứng với sự kiện, không dùng âm take khác gây hiểu sai.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": true
+      },
+      "timing_guidance": {
+        "guidance_vi": "Giữ đủ đọc nét mặt nhưng không kéo quá điểm cảm xúc.",
+        "frame_accurate": false
+      },
+      "continuity_rules": [
+        "Giữ eyeline, vị trí nhân vật và quan hệ không gian."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không cắt nét biểu cảm hoặc vi phạm vùng an toàn."
+      ],
+      "failure_modes": [
+        "Phản ứng xảy ra trước nguyên nhân hoặc làm sai đại diện cảm xúc."
+      ],
+      "fallbacks": [
+        "Giữ sự kiện chính hoặc dùng cutaway không suy diễn cảm xúc."
+      ],
+      "validation_checks": [
+        "Kiểm tra timeline nguyên nhân–phản ứng và consent người xuất hiện."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/profiles/ugc_affiliate.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu reaction shot trong profile, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "parallel_editing",
+      "display_name_vi": "Dựng song song có hội tụ",
+      "summary_vi": "Xen kẽ nhiều tuyến độc lập để cho thấy liên hệ và điểm hội tụ.",
+      "category": "editing_grammar",
+      "purpose": "So sánh tiến trình hoặc dẫn nhiều tuyến tới cùng kết quả mà vẫn rõ thời gian.",
+      "use_when": [
+        "Khi mỗi tuyến có arc riêng và điểm liên hệ xác định."
+      ],
+      "avoid_when": [
+        "Tránh khi thiếu shot thiết lập, mốc thời gian hoặc quan hệ thật."
+      ],
+      "required_inputs": [
+        "Nhiều tuyến đã có beat map, nhãn thời gian và quan hệ kể chuyện."
+      ],
+      "shot_requirements": [
+        "Mỗi tuyến cần shot thiết lập, tiến triển và trạng thái ra."
+      ],
+      "audio_behavior": {
+        "picture_boundary_vi": "Chuyển tuyến theo beat tương ứng; tăng tần suất khi gần hội tụ.",
+        "audio_boundary_vi": "Tách rõ lời từng tuyến; cầu âm không được gây nhầm nguồn.",
+        "sync_rule_vi": "Bảo toàn thứ tự nội bộ từng tuyến và mốc hội tụ chung.",
+        "starts_before_picture_cut": false,
+        "continues_after_picture_cut": false
+      },
+      "timing_guidance": {
+        "guidance_vi": "Nhịp xen kẽ theo tiến triển, không luân phiên máy móc.",
+        "frame_accurate": false
+      },
+      "continuity_rules": [
+        "Theo dõi thời gian, nơi, nhân vật và đạo cụ riêng từng tuyến."
+      ],
+      "aspect_ratio_notes": [
+        "Giữ dấu hiệu phân biệt tuyến trong mọi tỷ lệ."
+      ],
+      "failure_modes": [
+        "Người xem nhầm tuyến hoặc một tuyến lặp ý không tiến triển."
+      ],
+      "fallbacks": [
+        "Dựng tuần tự từng tuyến rồi nối tại điểm hội tụ."
+      ],
+      "validation_checks": [
+        "Lập timeline riêng và kiểm tra mỗi lần chuyển có lý do."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "PLANNED_SHOOT_RECOMMENDED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}

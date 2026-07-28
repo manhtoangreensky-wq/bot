@@ -1,0 +1,1280 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-filmmaking",
+  "group_id": "framing_composition",
+  "capability_count": 20,
+  "capabilities": [
+    {
+      "id": "rule_of_thirds",
+      "display_name_vi": "Quy tắc một phần ba",
+      "summary_vi": "Dùng các đường một phần ba như gợi ý đặt chủ thể, không phải luật bắt buộc.",
+      "category": "framing_composition",
+      "purpose": "Tạo điểm nhấn và khoảng nhìn cân bằng khi nội dung phù hợp.",
+      "use_when": [
+        "Khi chủ thể lệch tâm giúp hướng mắt hoặc dành chỗ cho chữ."
+      ],
+      "avoid_when": [
+        "Tránh ép bố cục khi đối xứng, trung tâm hoặc mất cân bằng có chủ đích phù hợp hơn."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Chủ thể và điểm nhìn phải có đủ khoảng để đặt gần giao điểm sau crop."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": {
+        "guidance_vi": "Xem đây là gợi ý; liên tục vị trí quan trọng hơn việc bám lưới máy móc.",
+        "mandatory": false,
+        "guidance_only": true
+      },
+      "aspect_ratio_notes": [
+        "Kiểm tra lại giao điểm ở từng tỷ lệ vì crop làm thay đổi vị trí tương đối."
+      ],
+      "failure_modes": [
+        "Đặt chủ thể theo lưới nhưng làm mất eyeline, lead room hoặc thông tin chính."
+      ],
+      "fallbacks": [
+        "Chuyển sang bố cục trung tâm hoặc negative space có chủ đích."
+      ],
+      "validation_checks": [
+        "Bật lưới ở khung đích và xác nhận điểm nhấn vẫn đọc tự nhiên."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "central_composition",
+      "display_name_vi": "Bố cục trung tâm",
+      "summary_vi": "Đặt trọng tâm thị giác gần trung tâm để tạo trực diện, ổn định hoặc trang trọng.",
+      "category": "framing_composition",
+      "purpose": "Làm chủ thể nhận biết nhanh và thích ứng tốt với nhiều crop đối xứng.",
+      "use_when": [
+        "Khi chủ thể đơn, hướng nhìn trực diện hoặc hình học trung tâm là ý chính."
+      ],
+      "avoid_when": [
+        "Tránh khi cần lead room mạnh hoặc trung tâm làm khung thiếu động lực."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Chủ thể phải còn khoảng thở quanh mép và không bị nền cạnh tranh."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ tâm thị giác ổn định qua các shot liên tiếp trừ khi có chuyển dịch có chủ đích."
+      ],
+      "aspect_ratio_notes": [
+        "Khung dọc và vuông thường giữ tâm tốt nhưng vẫn phải kiểm tra headroom."
+      ],
+      "failure_modes": [
+        "Chủ thể bị dính nền, thiếu khoảng thở hoặc mọi shot đều đơn điệu."
+      ],
+      "fallbacks": [
+        "Dịch chủ thể sang một phần ba hoặc dùng bất cân bằng có chủ đích."
+      ],
+      "validation_checks": [
+        "Thu nhỏ khung để kiểm tra chủ thể vẫn là điểm nhìn đầu tiên."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "config/video_prompt_vault/profiles/educational.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu bố cục trung tâm trong profile giáo dục, không gọi prompt."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "symmetry",
+      "display_name_vi": "Bố cục đối xứng",
+      "summary_vi": "Cân hai phía quanh một trục để tạo trật tự, nghi thức hoặc cảm giác kiến trúc.",
+      "category": "framing_composition",
+      "purpose": "Nhấn hình học và sự ổn định khi cảnh thực sự có trục đối xứng.",
+      "use_when": [
+        "Khi đường trục, chủ thể và nền có quan hệ cân rõ."
+      ],
+      "avoid_when": [
+        "Tránh chỉnh ép khi cảnh lệch tự nhiên hoặc crop phá trục."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Máy và chủ thể phải gần trục; đường chân trời và phối cảnh cần kiểm soát."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ cùng trục và mức nghiêng giữa các shot nếu đối xứng là motif."
+      ],
+      "aspect_ratio_notes": [
+        "Crop hai bên phải tương đương; tỷ lệ đích không được cắt mất cặp yếu tố cân."
+      ],
+      "failure_modes": [
+        "Sai tâm nhỏ trở nên nổi bật hoặc nền hai phía khác nhau ngoài chủ đích."
+      ],
+      "fallbacks": [
+        "Dùng central composition không tuyên bố đối xứng hoàn hảo."
+      ],
+      "validation_checks": [
+        "So khoảng cách hai mép và kiểm tra trục dọc, ngang ở khung cuối."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/architecture_prompt_builder.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu từ vựng đối xứng kiến trúc, không dùng làm runtime."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "intentional_imbalance",
+      "display_name_vi": "Mất cân bằng có chủ đích",
+      "summary_vi": "Phân bố trọng lượng thị giác không đều để tạo căng thẳng hoặc hướng nhìn.",
+      "category": "framing_composition",
+      "purpose": "Dùng khoảng trống, màu hoặc khối lệch như một quyết định kể chuyện.",
+      "use_when": [
+        "Khi lệch khung hỗ trợ trạng thái tâm lý, chuyển động hoặc thông tin sắp xuất hiện."
+      ],
+      "avoid_when": [
+        "Tránh khi bố cục chỉ vô tình nghiêng, nặng một phía hoặc thiếu điểm đối trọng."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần xác định chủ thể chính, đối trọng và hướng mắt mong muốn."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ logic lệch khung nhất quán trong beat; thay đổi phải có động cơ."
+      ],
+      "aspect_ratio_notes": [
+        "Crop có thể xóa đối trọng và biến chủ đích thành lỗi, nên kiểm tra từng tỷ lệ."
+      ],
+      "failure_modes": [
+        "Người xem tưởng máy đặt sai hoặc khoảng trống không phục vụ thông tin."
+      ],
+      "fallbacks": [
+        "Cân lại bằng central composition hoặc negative space rõ chức năng."
+      ],
+      "validation_checks": [
+        "Nêu được vai trò của phía nặng và đối trọng trong một câu."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/architecture_prompt_builder.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu ngôn ngữ bất đối xứng, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "headroom",
+      "display_name_vi": "Khoảng trống trên đầu",
+      "summary_vi": "Giữ khoảng giữa đỉnh đầu và mép khung phù hợp với cỡ cảnh và ý đồ.",
+      "category": "framing_composition",
+      "purpose": "Tránh cảm giác đầu bị cắt hoặc chủ thể chìm thấp trong khung.",
+      "use_when": [
+        "Khi đóng khung người hoặc nhân vật có vùng đầu rõ."
+      ],
+      "avoid_when": [
+        "Tránh áp một tỷ lệ cứng cho mọi cỡ cảnh hoặc cố giữ tóc khi cận cảnh có chủ đích."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần biết cỡ cảnh, hướng mắt và crop cuối trước khi đánh giá."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Duy trì headroom tương đương giữa các góc cùng cỡ cảnh."
+      ],
+      "aspect_ratio_notes": [
+        "Khung dọc dễ thừa headroom; crop ngang dễ cắt đầu nên phải xem bản đích."
+      ],
+      "failure_modes": [
+        "Khoảng đầu thay đổi gây nhảy bố cục hoặc che mất nét mặt."
+      ],
+      "fallbacks": [
+        "Reframe nhẹ nếu còn độ phân giải; nếu không, chọn shot khác."
+      ],
+      "validation_checks": [
+        "Kiểm tra mép đầu ở mọi keyframe có chuyển động chủ thể."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "lead_room",
+      "display_name_vi": "Khoảng nhìn và khoảng chạy",
+      "summary_vi": "Để không gian phía trước hướng nhìn hoặc hướng chuyển động của chủ thể.",
+      "category": "framing_composition",
+      "purpose": "Cho người xem cảm nhận nơi chủ thể đang nhìn hoặc đang đi tới.",
+      "use_when": [
+        "Khi eyeline hoặc chuyển động ngang là thông tin quan trọng."
+      ],
+      "avoid_when": [
+        "Tránh để khoảng trống phía trước làm mất chi tiết quan trọng ở phía sau."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Hướng nhìn hoặc hướng chạy phải xác định được và không đảo ngẫu nhiên."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ hướng màn hình và lead room qua các shot nối tiếp."
+      ],
+      "aspect_ratio_notes": [
+        "Crop dọc có thể xóa lead room; không hứa crop an toàn nếu thiếu khoảng nguồn."
+      ],
+      "failure_modes": [
+        "Chủ thể nhìn sát mép hoặc chuyển động có cảm giác đâm vào khung."
+      ],
+      "fallbacks": [
+        "Chọn shot rộng hơn hoặc bố cục trung tâm nếu không có khoảng nguồn."
+      ],
+      "validation_checks": [
+        "Vẽ vector nhìn hoặc chạy và xác nhận có không gian phía trước."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "negative_space",
+      "display_name_vi": "Khoảng trống âm",
+      "summary_vi": "Dành vùng ít chi tiết để nhấn chủ thể, cảm xúc hoặc chỗ đặt thông tin.",
+      "category": "framing_composition",
+      "purpose": "Giảm nhiễu thị giác và tạo thứ bậc rõ trong khung.",
+      "use_when": [
+        "Khi cần cảm giác cô lập, hướng nhìn hoặc vùng chữ được duyệt."
+      ],
+      "avoid_when": [
+        "Tránh coi nền bừa bộn hoặc vùng cháy sáng là negative space hợp lệ."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Vùng trống phải đủ đồng nhất và không có chi tiết cạnh tranh khi chuyển động."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ vai trò vùng trống nhất quán nếu dùng làm motif hoặc vùng chữ."
+      ],
+      "aspect_ratio_notes": [
+        "Vùng trống có thể biến mất sau crop; kiểm tra với safe area từng nền tảng."
+      ],
+      "failure_modes": [
+        "Chữ che chủ thể hoặc khoảng trống làm bố cục mất cân vô ý."
+      ],
+      "fallbacks": [
+        "Dùng nền đơn giản hơn hoặc giảm chữ thay vì ép crop."
+      ],
+      "validation_checks": [
+        "Kiểm tra khung thu nhỏ và vùng chữ thực tế."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu quy tắc negative space hiện có, không gọi mã."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "foreground_midground_background",
+      "display_name_vi": "Ba lớp tiền, trung và hậu cảnh",
+      "summary_vi": "Tổ chức ba lớp độ sâu để chủ thể có bối cảnh và phân tách rõ.",
+      "category": "framing_composition",
+      "purpose": "Tạo cảm giác không gian và đường dẫn mắt mà không cần hiệu ứng giả.",
+      "use_when": [
+        "Khi cảnh có vật tiền cảnh, chủ thể trung cảnh và nền hỗ trợ."
+      ],
+      "avoid_when": [
+        "Tránh thêm lớp che chủ thể hoặc dùng nền không liên quan chỉ để tạo chiều sâu."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Mỗi lớp phải nhận biết được và không giao nhau gây rối silhouette."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ quan hệ lớp khi đổi góc; vật che phải vào, ra khung hợp lý."
+      ],
+      "aspect_ratio_notes": [
+        "Crop hẹp có thể loại một lớp, nên không khẳng định luôn giữ đủ ba lớp."
+      ],
+      "failure_modes": [
+        "Tiền cảnh che mặt, nền nhập chủ thể hoặc lớp thiếu chênh lệch."
+      ],
+      "fallbacks": [
+        "Dùng hai lớp rõ ràng và ưu tiên subject separation."
+      ],
+      "validation_checks": [
+        "Gắn nhãn từng lớp trên khung đích và kiểm tra silhouette."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "frame_within_frame",
+      "display_name_vi": "Khung lồng trong khung",
+      "summary_vi": "Dùng cửa, kiến trúc hoặc vật thể để bao quanh chủ thể trong khung chính.",
+      "category": "framing_composition",
+      "purpose": "Tập trung ánh nhìn và biểu đạt quan sát, giới hạn hoặc chiều sâu.",
+      "use_when": [
+        "Khi yếu tố bao khung có quan hệ thật và không che chủ thể."
+      ],
+      "avoid_when": [
+        "Tránh dùng vật ngẫu nhiên làm mép khung rối hoặc mất an toàn."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Yếu tố bao phải đủ rõ, ổn định và có khoảng mở chứa chủ thể."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ hướng và vị trí khung phụ khi nối shot để không nhảy không gian."
+      ],
+      "aspect_ratio_notes": [
+        "Crop có thể cắt mất mép bao và phá ý nghĩa khung trong khung."
+      ],
+      "failure_modes": [
+        "Yếu tố bao bị hiểu là vật cản hoặc ép chủ thể quá chật."
+      ],
+      "fallbacks": [
+        "Dùng foreground layer nhẹ hoặc central composition."
+      ],
+      "validation_checks": [
+        "Xác nhận khung phụ và chủ thể đọc được ở kích thước nhỏ."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "depth_layers",
+      "display_name_vi": "Các lớp chiều sâu",
+      "summary_vi": "Phân tách chủ thể và môi trường theo khoảng cách, tương phản hoặc chuyển động.",
+      "category": "framing_composition",
+      "purpose": "Tạo không gian có cấu trúc và hỗ trợ parallax khi nguồn phù hợp.",
+      "use_when": [
+        "Khi cảnh có dấu hiệu độ sâu thật hoặc mask lớp đáng tin cậy."
+      ],
+      "avoid_when": [
+        "Tránh tuyên bố chiều sâu từ ảnh phẳng không có biên tách rõ."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần nhận biết biên lớp, occlusion và thứ tự trước, sau."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Occlusion và thứ tự lớp phải nhất quán khi máy hoặc chủ thể di chuyển."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không làm mất lớp tham chiếu hoặc lộ biên mask."
+      ],
+      "failure_modes": [
+        "Lớp dính, biên rung hoặc thứ tự che khuất sai."
+      ],
+      "fallbacks": [
+        "Giữ khung tĩnh và dùng subject separation không mô phỏng chiều sâu."
+      ],
+      "validation_checks": [
+        "Kiểm tra biên ở từng keyframe và thứ tự occlusion."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu từ vựng chiều sâu và parallax, không thực thi."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "subject_separation",
+      "display_name_vi": "Tách chủ thể khỏi nền",
+      "summary_vi": "Làm chủ thể nổi rõ bằng ánh sáng, màu, độ nét hoặc khoảng cách thật.",
+      "category": "framing_composition",
+      "purpose": "Giữ silhouette dễ đọc mà không bịa thêm chi tiết hay nền.",
+      "use_when": [
+        "Khi nền cạnh tranh với chủ thể hoặc màn hình đích nhỏ."
+      ],
+      "avoid_when": [
+        "Tránh viền giả, blur quá mức hoặc đổi màu da chỉ để tách nền."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần biên chủ thể rõ và ánh sáng đủ khác nền."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ mức tách nhất quán trong cùng cảnh và không làm silhouette rung."
+      ],
+      "aspect_ratio_notes": [
+        "Crop gần có thể tăng lỗi biên; kiểm tra ở đúng độ phân giải giao."
+      ],
+      "failure_modes": [
+        "Viền halo, tóc mất chi tiết hoặc chủ thể trông bị cắt dán."
+      ],
+      "fallbacks": [
+        "Chọn shot có nền sạch hơn hoặc điều chỉnh sáng, tương phản nhẹ."
+      ],
+      "validation_checks": [
+        "Xem biên tóc, tay và vật mảnh trên nền sáng lẫn tối."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "data/prompt_vault/video_styles.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu hướng dẫn chủ thể rõ và nền sạch, chỉ dùng metadata."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "eyeline",
+      "display_name_vi": "Đường nhìn nhân vật",
+      "summary_vi": "Giữ hướng và cao độ nhìn phù hợp giữa người, vật và góc đối thoại.",
+      "category": "framing_composition",
+      "purpose": "Làm quan hệ không gian và điểm chú ý của nhân vật dễ hiểu.",
+      "use_when": [
+        "Khi hai người nhìn nhau hoặc nhân vật nhìn vật ngoài khung."
+      ],
+      "avoid_when": [
+        "Tránh suy diễn điểm nhìn nếu shot không cho biết đối tượng thật."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần xác định vector nhìn, độ cao máy và vị trí đối tượng."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Shot đối ứng phải khớp hướng nhìn và cao độ tương đối."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không được xóa khoảng nhìn hoặc đẩy mắt sát mép."
+      ],
+      "failure_modes": [
+        "Hai nhân vật trông cùng nhìn một hướng hoặc nhìn lệch độ cao."
+      ],
+      "fallbacks": [
+        "Dùng shot rộng thiết lập quan hệ trước khi quay lại cận cảnh."
+      ],
+      "validation_checks": [
+        "Vẽ vector eyeline trên từng shot và so giao điểm tưởng tượng."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "knowledge/video/ai_edit_vfx.json",
+          "symbols": [],
+          "support_layer": "knowledge",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu yêu cầu giữ hướng nhìn trong tri thức hiện có."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "screen_direction",
+      "display_name_vi": "Hướng chuyển động trên màn hình",
+      "summary_vi": "Giữ hướng trái–phải hoặc phải–trái nhất quán để người xem hiểu hành trình.",
+      "category": "framing_composition",
+      "purpose": "Bảo toàn địa lý cảnh và động lượng qua các cú cắt.",
+      "use_when": [
+        "Khi người, xe hoặc vật thể đi qua nhiều shot."
+      ],
+      "avoid_when": [
+        "Tránh đảo hướng nếu chưa có shot trung tính hoặc tái lập trục."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần ghi hướng vào, hướng ra và vị trí trục cho từng shot."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "180_degree_rule",
+        "Giữ cùng phía trục hoặc dùng shot tái lập trước khi đổi phía."
+      ],
+      "aspect_ratio_notes": [
+        "Lật hình để sửa hướng có thể làm sai chữ, logo và tính chân thực."
+      ],
+      "failure_modes": [
+        "Chủ thể có vẻ quay đầu hoặc trở lại nơi cũ ngoài ý đồ."
+      ],
+      "fallbacks": [
+        "Chèn shot trung tính, shot trục hoặc cắt tới bố cục không có vector ngang."
+      ],
+      "validation_checks": [
+        "Gắn mũi tên hướng cho mọi shot và kiểm tra chuỗi từ đầu tới cuối."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_scene_continuity.py",
+          "symbols": [
+            "build_continuity_contract"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu validation hướng chuyển động, không gọi planner."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "180_degree_rule",
+      "display_name_vi": "Quy tắc trục 180 độ",
+      "summary_vi": "Giữ máy cùng một phía trục hành động để duy trì hướng nhìn và màn hình.",
+      "category": "framing_composition",
+      "purpose": "Bảo toàn quan hệ không gian trong đối thoại hoặc hành động liên tục.",
+      "use_when": [
+        "Khi cảnh có hai chủ thể hoặc một hướng hành động rõ."
+      ],
+      "avoid_when": [
+        "Tránh coi là cấm tuyệt đối; có thể vượt trục khi có động cơ và shot tái lập."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần sơ đồ vị trí chủ thể, trục hành động và phía máy cho từng góc."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Không vượt trục giữa hai shot liên tiếp nếu thiếu shot trung tính hoặc chuyển động giải thích."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không sửa được lỗi trục; không hứa reframe phục hồi địa lý cảnh."
+      ],
+      "failure_modes": [
+        "Eyeline và screen direction đảo khiến vị trí nhân vật bị hiểu sai."
+      ],
+      "fallbacks": [
+        "Dùng shot trên trục, shot rộng tái lập hoặc sắp lại thứ tự góc."
+      ],
+      "validation_checks": [
+        "Vẽ sơ đồ trục và đánh dấu phía máy của toàn cảnh."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "PLANNED_SHOOT_RECOMMENDED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "30_degree_rule",
+      "display_name_vi": "Quy tắc thay góc 30 độ",
+      "summary_vi": "Đổi góc đủ rõ giữa hai shot cùng chủ thể để tránh cú nhảy bố cục vô ý.",
+      "category": "framing_composition",
+      "purpose": "Làm người xem nhận biết đây là góc mới thay vì lỗi cắt.",
+      "use_when": [
+        "Khi nối hai cỡ hoặc góc của cùng chủ thể, cùng thời điểm."
+      ],
+      "avoid_when": [
+        "Tránh áp máy móc nếu jump cut có chủ đích hoặc vị trí máy không đo được."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần chênh góc, cỡ cảnh hoặc hành động đủ nhận biết."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ trục 180 độ đồng thời tạo thay đổi góc hoặc cỡ có ý nghĩa."
+      ],
+      "aspect_ratio_notes": [
+        "Crop số không thay thế góc máy thật nếu phối cảnh gần như giống nhau."
+      ],
+      "failure_modes": [
+        "Chủ thể nhảy nhẹ trong nền gần như không đổi."
+      ],
+      "fallbacks": [
+        "Chọn shot có chênh cỡ lớn hơn, insert hoặc cutaway hợp lệ."
+      ],
+      "validation_checks": [
+        "So phối cảnh nền và silhouette để xác nhận thay đổi nhìn thấy được."
+      ],
+      "existing_capability_refs": [],
+      "inventory_status": "MISSING",
+      "source_dependency": "PLANNED_SHOOT_RECOMMENDED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "shot_size_progression",
+      "display_name_vi": "Tiến triển cỡ cảnh",
+      "summary_vi": "Sắp cỡ rộng, trung và cận theo lượng thông tin và cảm xúc cần bộc lộ.",
+      "category": "framing_composition",
+      "purpose": "Dẫn từ bối cảnh tới chi tiết mà không nhảy mức vô cớ.",
+      "use_when": [
+        "Khi cảnh cần thiết lập nơi chốn rồi tăng tập trung vào hành động hoặc cảm xúc."
+      ],
+      "avoid_when": [
+        "Tránh lặp một cỡ cảnh hoặc đổi rộng–cận liên tục không có beat."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần phân loại cỡ cảnh và mục tiêu thông tin của từng shot."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Mỗi đổi cỡ phải giữ eyeline, screen direction và trạng thái hành động."
+      ],
+      "aspect_ratio_notes": [
+        "Cỡ cảnh sau crop phải đánh giá lại; crop không tạo phối cảnh của cận cảnh thật."
+      ],
+      "failure_modes": [
+        "Thiếu shot thiết lập hoặc cỡ cảnh nhảy làm mất vị trí."
+      ],
+      "fallbacks": [
+        "Giữ tiến triển đơn giản rộng–trung–cận theo beat chính."
+      ],
+      "validation_checks": [
+        "Gắn nhãn cỡ cho timeline và nêu lý do mỗi thay đổi."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_idea_catalog.py",
+          "symbols": [],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu chuỗi rộng, trung, cận trong catalog ý tưởng."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "camera_height",
+      "display_name_vi": "Độ cao máy quay",
+      "summary_vi": "Chọn cao độ máy theo quan hệ quyền lực, tự nhiên và hình học chủ thể.",
+      "category": "framing_composition",
+      "purpose": "Kiểm soát cảm giác nhìn xuống, ngang mắt hoặc nhìn lên mà không phóng đại.",
+      "use_when": [
+        "Khi độ cao góp phần kể quan hệ hoặc giữ phối cảnh tự nhiên."
+      ],
+      "avoid_when": [
+        "Tránh góc quá thấp, cao chỉ để gây kịch tính hoặc làm méo sản phẩm."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần biết cao độ chủ thể, đường chân trời và khoảng cách ống kính."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ cao độ tương thích giữa các góc đối thoại trừ khi thay đổi có beat."
+      ],
+      "aspect_ratio_notes": [
+        "Crop không đổi phối cảnh do độ cao máy; không gọi crop là sửa góc thật."
+      ],
+      "failure_modes": [
+        "Đường chân trời và phối cảnh làm chủ thể méo hoặc sai quan hệ."
+      ],
+      "fallbacks": [
+        "Chọn góc ngang mắt an toàn từ footage hiện có."
+      ],
+      "validation_checks": [
+        "Kiểm tra đường chân trời, tỷ lệ đầu–thân và đường dọc nền."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_product_profiles.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu eye-level và low-angle, không gọi runtime."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "lens_perspective_awareness",
+      "display_name_vi": "Nhận thức phối cảnh ống kính",
+      "summary_vi": "Đánh giá ảnh hưởng của tiêu cự và khoảng cách tới tỷ lệ, nền và chuyển động.",
+      "category": "framing_composition",
+      "purpose": "Tránh ghép góc có phối cảnh xung đột hoặc mô tả crop như thay ống kính thật.",
+      "use_when": [
+        "Khi nối cận cảnh, sản phẩm, kiến trúc hoặc khuôn mặt từ nguồn khác nhau."
+      ],
+      "avoid_when": [
+        "Tránh suy ra tiêu cự chính xác nếu metadata và hình không đủ."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần quan sát méo đường, nén nền, kích thước tương đối và khoảng máy."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ ngôn ngữ phối cảnh nhất quán trong cùng beat hoặc khai báo tương phản."
+      ],
+      "aspect_ratio_notes": [
+        "Digital crop đổi cỡ khung nhưng không đổi phối cảnh vật lý."
+      ],
+      "failure_modes": [
+        "Khuôn mặt, sản phẩm hoặc không gian đổi tỷ lệ đột ngột."
+      ],
+      "fallbacks": [
+        "Chọn shot có phối cảnh gần hơn hoặc dùng cutaway tách beat."
+      ],
+      "validation_checks": [
+        "So đường dọc, tỷ lệ tiền–hậu cảnh và kích thước chủ thể."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "video_prompt_quality.py",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu hướng dẫn lensing và phối cảnh tự nhiên."
+        }
+      ],
+      "inventory_status": "EXISTING_BUT_INCOMPLETE",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "safe_area",
+      "display_name_vi": "Vùng an toàn nội dung",
+      "summary_vi": "Giữ chữ, logo, mặt và hành động quan trọng tránh mép hoặc lớp giao diện nền tảng.",
+      "category": "framing_composition",
+      "purpose": "Bảo đảm thông tin chính còn nhìn, đọc được trên thiết bị đích.",
+      "use_when": [
+        "Khi video có chữ, phụ đề, logo, CTA hoặc crop đa nền tảng."
+      ],
+      "avoid_when": [
+        "Tránh coi một safe area là đúng cho mọi nền tảng và mọi phiên bản giao diện."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần profile nền tảng, tỷ lệ, vị trí overlay và preview kích thước thật."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ vùng nội dung chính ổn định giữa các shot cùng layout."
+      ],
+      "aspect_ratio_notes": [
+        "Xác minh riêng 9:16, 16:9, 1:1 và 4:5; không dùng một biên chung."
+      ],
+      "failure_modes": [
+        "Chữ, mặt hoặc CTA bị che, cắt hoặc quá sát mép."
+      ],
+      "fallbacks": [
+        "Dịch nội dung vào trong hoặc giảm mật độ thay vì thu nhỏ quá mức."
+      ],
+      "validation_checks": [
+        "Chồng overlay safe area đúng nền tảng lên bản preview."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "data/prompt_vault/platform_rules.json",
+          "symbols": [],
+          "support_layer": "prompt",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu quy tắc safe zone theo nền tảng."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "platform_reframing",
+      "display_name_vi": "Tái đóng khung theo nền tảng",
+      "summary_vi": "Lập kế hoạch crop hoặc fit theo tỷ lệ đích mà không hứa giữ an toàn mọi footage.",
+      "category": "framing_composition",
+      "purpose": "Chuyển tỷ lệ có kiểm soát và nói rõ phần hình có thể mất.",
+      "use_when": [
+        "Khi metadata nguồn, tỷ lệ giao và vùng chủ thể đã biết."
+      ],
+      "avoid_when": [
+        "Tránh hứa crop luôn an toàn, theo dõi chủ thể hoặc mở rộng nền khi chưa có năng lực thật."
+      ],
+      "required_inputs": [
+        "Footage nguồn, tỷ lệ khung đích, vùng chủ thể và mục tiêu thị giác đã được mô tả."
+      ],
+      "shot_requirements": [
+        "Cần kích thước nguồn, vùng quan trọng, chuyển động và safe area đích."
+      ],
+      "audio_behavior": {
+        "guidance_vi": "Bố cục không tự thay đổi âm thanh; giữ lời, ambience và điểm đồng bộ theo kế hoạch cảnh."
+      },
+      "timing_guidance": {
+        "guidance_vi": "Đánh giá bố cục trên toàn thời lượng shot, không chỉ một khung đại diện."
+      },
+      "continuity_rules": [
+        "Giữ vị trí chủ thể mượt qua thời gian; không để crop nhảy giữa frame."
+      ],
+      "aspect_ratio_notes": {
+        "guidance_vi": "Crop, fit và viền là lựa chọn hình học; phải preview từng tỷ lệ.",
+        "universal_safe_crop": false
+      },
+      "failure_modes": [
+        "Crop cắt chủ thể, chữ, hành động hoặc đổi bố cục ngoài chủ đích."
+      ],
+      "fallbacks": [
+        "Dùng fit có viền, chọn shot khác hoặc yêu cầu quay rộng hơn."
+      ],
+      "validation_checks": [
+        "Preview toàn timeline ở tỷ lệ đích và đánh dấu frame vi phạm safe area."
+      ],
+      "existing_capability_refs": [
+        {
+          "path": "services/video_local_editing.py",
+          "symbols": [
+            "normalize_manual_edit_plan"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes": "Tham chiếu primitive crop và fit cục bộ, không gọi thực thi."
+        }
+      ],
+      "inventory_status": "EXISTING_AND_VALID",
+      "source_dependency": "COMPATIBLE_FOOTAGE_REQUIRED",
+      "readiness": "LOCAL_PLANNING_READY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
