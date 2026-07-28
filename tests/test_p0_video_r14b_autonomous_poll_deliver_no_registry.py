@@ -87,6 +87,24 @@ def test_auto_refresh_and_manual_status_poll_existing_task_then_materialize_deli
     assert "source=\"manual_status_refresh\"" in callback
 
 
+def test_autonomous_recovery_finalizes_provider_artifact_before_complete_and_delivery():
+    materialize = _between(
+        BOT_SOURCE,
+        "async def video_b14_autonomous_materialize_and_deliver",
+        "def video_provider_recover_existing_task",
+    )
+    finalize_call = "finalize_recovered_product_video_artifact"
+    complete_call = "video_project_queue.complete_video_job"
+
+    assert finalize_call in materialize
+    assert materialize.index(finalize_call) < materialize.index(complete_call)
+    assert "recovery_finalization" in materialize
+
+    recover = _between(BOT_SOURCE, "def video_provider_recover_existing_task", "def video_provider_recover_text")
+    assert '"postprocess_not_required_for_recovery": True' not in recover
+    assert '"postprocess_required_for_recovery": True' in recover
+
+
 def test_result_url_download_button_resends_without_submit_or_extra_charge():
     resend = _between(
         BOT_SOURCE,
