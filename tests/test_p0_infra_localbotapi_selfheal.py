@@ -500,6 +500,46 @@ def test_apply_rolls_back_when_activation_command_fails(tmp_path):
     assert links.resolve(roots.current) == known_good
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="requires real POSIX symlinks")
+def test_first_activation_atomically_replaces_unchanged_snapshotted_unit(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "bootstrap",
+        lock_path=tmp_path / "lock",
+    )
+    backup_units = roots.bootstrap_backup / "systemd"
+    backup_units.mkdir(parents=True)
+    (roots.bootstrap_backup / "drop-ins").mkdir()
+    (roots.bootstrap_backup / ".complete").write_bytes(b"snapshot-v2\n")
+    legacy = b"[Service]\nExecStart=/legacy\n"
+    (backup_units / apply_module.SERVICE).write_bytes(legacy)
+    (backup_units / f"{apply_module.SERVICE}.mode").write_bytes(b"644\n")
+    _secure_bootstrap_snapshot_storage(roots)
+    roots.systemd_dir.mkdir(parents=True)
+    destination = roots.systemd_dir / apply_module.SERVICE
+    destination.write_bytes(legacy)
+    destination.chmod(0o644)
+    release, _manifest = apply_module._materialize(
+        roots, _valid_bundle(tmp_path, "c" * 40, "first-activation.tgz")
+    )
+
+    apply_module._link_units(
+        roots,
+        release,
+        link_store=apply_module.AtomicSymlinkStore(),
+        command_runner=lambda _argv: None,
+        replace_bootstrap_units=True,
+    )
+
+    assert destination.is_symlink()
+    assert destination.resolve() == (
+        release / "release" / "systemd" / apply_module.SERVICE
+    ).resolve()
+
+
 def test_missing_legacy_cleanup_timer_does_not_rollback_activation():
     apply_module = _load_module("apply_release")
     commands: list[tuple[str, ...]] = []

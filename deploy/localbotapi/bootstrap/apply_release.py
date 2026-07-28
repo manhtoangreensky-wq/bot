@@ -435,12 +435,51 @@ def _restore_legacy_dropin(roots: ReleaseRoots) -> None:
     )
 
 
+def _replace_bootstrap_unit_if_unchanged(
+    roots: ReleaseRoots, unit: str, source: Path
+) -> bool:
+    """Atomically replace one verified legacy unit on first activation only."""
+
+    destination = roots.systemd_dir / unit
+    if destination.is_symlink() or not destination.exists():
+        return False
+    if not destination.is_file():
+        raise ApplyError(f"existing bootstrap unit is unsafe: {unit}")
+    backup = roots.bootstrap_backup / "systemd" / unit
+    if backup.is_symlink() or not backup.is_file():
+        raise ApplyError(f"existing bootstrap unit was not snapshotted: {unit}")
+    info = os.lstat(destination)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ApplyError(f"existing bootstrap unit storage is unsafe: {unit}")
+    if roots.snapshot_owner_uid is not None and info.st_uid != roots.snapshot_owner_uid:
+        raise ApplyError(f"existing bootstrap unit owner is unsafe: {unit}")
+    if _POSIX_SECURITY_AVAILABLE and stat.S_IMODE(info.st_mode) != _snapshot_mode(backup):
+        raise ApplyError(f"existing bootstrap unit mode changed after snapshot: {unit}")
+    if hashlib.sha256(destination.read_bytes()).digest() != hashlib.sha256(
+        backup.read_bytes()
+    ).digest():
+        raise ApplyError(f"existing bootstrap unit changed after snapshot: {unit}")
+
+    target = source.resolve(strict=True)
+    temporary = destination.with_name(
+        f".{destination.name}.bootstrap-link-{secrets.token_hex(12)}"
+    )
+    try:
+        os.symlink(target, temporary, target_is_directory=False)
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+    return True
+
+
 def _link_units(
     roots: ReleaseRoots,
     release: Path,
     *,
     link_store: LinkStore,
     command_runner: CommandRunner,
+    replace_bootstrap_units: bool = False,
 ) -> None:
     validate_release_directory(roots, release)
     roots.systemd_dir.mkdir(parents=True, exist_ok=True)
@@ -448,6 +487,10 @@ def _link_units(
         source = release / "release" / "systemd" / unit
         if not source.is_file() or source.is_symlink():
             raise ApplyError(f"managed unit is missing or unsafe: {unit}")
+        if replace_bootstrap_units and _replace_bootstrap_unit_if_unchanged(
+            roots, unit, source
+        ):
+            continue
         link_store.replace(roots.systemd_dir / unit, source)
     _remove_legacy_dropin(roots)
     command_runner(("systemctl", "daemon-reload"))
@@ -642,7 +685,13 @@ def apply_release(
             links.replace(roots.current, release)
         activation_ok = False
         try:
-            _link_units(roots, release, link_store=links, command_runner=command_runner)
+            _link_units(
+                roots,
+                release,
+                link_store=links,
+                command_runner=command_runner,
+                replace_bootstrap_units=old_current is None,
+            )
             if not health_check():
                 raise ApplyError("new release failed its health gate")
             _enable_timers(command_runner)
