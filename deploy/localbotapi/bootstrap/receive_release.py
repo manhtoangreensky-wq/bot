@@ -119,14 +119,11 @@ def active_production_release() -> tuple[str, str] | None:
     try:
         target = current.resolve(strict=True)
         releases_resolved = releases.resolve(strict=True)
-    except OSError:
-        return None
-    if target.parent != releases_resolved or not release_contract.SHA256_RE.fullmatch(target.name):
-        return None
-    manifest_path = target / "manifest.json"
-    if not manifest_path.is_file() or manifest_path.is_symlink():
-        return None
-    try:
+        if target.parent != releases_resolved or not release_contract.SHA256_RE.fullmatch(target.name):
+            return None
+        manifest_path = target / "manifest.json"
+        if not manifest_path.is_file() or manifest_path.is_symlink():
+            return None
         raw = manifest_path.read_bytes()
         manifest = release_contract.validate_manifest(json.loads(raw.decode("utf-8")))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, release_contract.ReleaseContractError):

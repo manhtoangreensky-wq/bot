@@ -243,6 +243,17 @@ def validate_release_directory(roots: ReleaseRoots, directory: Path) -> dict:
     return manifest
 
 
+def _normalize_release_directory_modes(directory: Path) -> None:
+    directories = [directory]
+    for path in directory.rglob("*"):
+        if path.is_symlink():
+            raise ApplyError(f"release contains a symlink: {path}")
+        if path.is_dir():
+            directories.append(path)
+    for path in directories:
+        os.chmod(path, 0o755)
+
+
 def _materialize(roots: ReleaseRoots, archive: Path) -> tuple[Path, dict]:
     validated = release_contract.validate_archive(archive)
     _validate_policy_bytes(validated.files["release/policy.json"])
@@ -252,6 +263,7 @@ def _materialize(roots: ReleaseRoots, archive: Path) -> tuple[Path, dict]:
         manifest = validate_release_directory(roots, destination)
         if manifest["commit"] != validated.manifest["commit"]:
             raise ApplyError("existing release commit differs from incoming release")
+        _normalize_release_directory_modes(destination)
         return destination, manifest
 
     staging = roots.releases / f".staging-{validated.release_id}-{os.getpid()}"
@@ -267,6 +279,7 @@ def _materialize(roots: ReleaseRoots, archive: Path) -> tuple[Path, dict]:
             path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
             path.write_bytes(value)
             os.chmod(path, 0o755 if relative.startswith("release/bin/") else 0o644)
+        _normalize_release_directory_modes(staging)
         staging.rename(destination)
     finally:
         if staging.exists():

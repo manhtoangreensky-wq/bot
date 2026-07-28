@@ -543,6 +543,36 @@ def test_first_activation_atomically_replaces_unchanged_snapshotted_unit(tmp_pat
     ).resolve()
 
 
+def test_materialize_normalizes_release_directory_modes(monkeypatch, tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "bootstrap",
+        lock_path=tmp_path / "lock",
+    )
+    directory_suffixes: set[tuple[str, ...]] = set()
+    real_chmod = apply_module.os.chmod
+
+    def recording_chmod(path, mode):
+        candidate = Path(path)
+        if candidate.is_dir() and mode == 0o755:
+            parts = candidate.relative_to(roots.releases).parts
+            directory_suffixes.add(tuple(parts[1:]))
+        real_chmod(path, mode)
+
+    monkeypatch.setattr(apply_module.os, "chmod", recording_chmod)
+    apply_module._materialize(
+        roots, _valid_bundle(tmp_path, "d" * 40, "directory-modes.tgz")
+    )
+
+    assert () in directory_suffixes
+    assert ("release",) in directory_suffixes
+    assert ("release", "bin") in directory_suffixes
+    assert ("release", "systemd") in directory_suffixes
+
+
 def test_missing_legacy_cleanup_timer_does_not_rollback_activation():
     apply_module = _load_module("apply_release")
     commands: list[tuple[str, ...]] = []
@@ -786,6 +816,50 @@ def test_receiver_waits_for_exact_release_and_detects_rollback_marker(tmp_path):
         sleep=finish_apply,
     ) == (receipt.commit, receipt.release_id)
     assert sleeps == 1
+
+
+def test_receiver_active_release_retries_transient_permission_error(monkeypatch):
+    receiver = _load_module("receive_release")
+
+    class DeniedManifest:
+        def is_file(self):
+            raise PermissionError("activation is still normalizing release modes")
+
+        def is_symlink(self):
+            return False
+
+    class ReleaseTarget:
+        name = "a" * 64
+
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __truediv__(self, _name):
+            return DeniedManifest()
+
+    class ReleasesPath:
+        def resolve(self, strict=True):
+            return self
+
+    class CurrentPath:
+        def __init__(self, target):
+            self.target = target
+
+        def is_symlink(self):
+            return True
+
+        def resolve(self, strict=True):
+            return self.target
+
+    releases = ReleasesPath()
+    current = CurrentPath(ReleaseTarget(releases))
+    monkeypatch.setattr(
+        receiver,
+        "Path",
+        lambda value: current if str(value).endswith("/current") else releases,
+    )
+
+    assert receiver.active_production_release() is None
 
 
 def test_apply_ready_marker_must_match_archive_filename_content_and_digest(tmp_path):
