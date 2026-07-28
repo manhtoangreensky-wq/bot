@@ -413,6 +413,36 @@ def rollback(
         return ApplyResult("rolled_back", manifest["commit"], target)
 
 
+def restore_bootstrap(
+    roots: ReleaseRoots,
+    service: str,
+    *,
+    health: Callable[[], bool] | None = None,
+    command_runner: CommandRunner = _run,
+    link_store: LinkStore | None = None,
+) -> ApplyResult:
+    if service != SERVICE:
+        raise ApplyError("bootstrap restore service is outside the fixed allowlist")
+    links = link_store or AtomicSymlinkStore()
+    health_script: Path | None = None
+    if links.exists(roots.current):
+        current = _safe_release_target(roots, links.resolve(roots.current))
+        health_script = current / "release" / "bin" / "toanaas-localbotapi-health"
+    health_check = health or (
+        lambda: bool(
+            health_script
+            and subprocess.run([str(health_script)], check=False).returncode == 0
+        )
+    )
+    with _exclusive_lock(roots.lock_path):
+        _restore_bootstrap(roots, link_store=links, command_runner=command_runner)
+        links.remove(roots.current)
+        links.remove(roots.previous)
+        if not health_check():
+            raise ApplyError("bootstrap restore completed but service health failed")
+        return ApplyResult("bootstrap_restored", "bootstrap", None)
+
+
 def validate_ready_marker(roots: ReleaseRoots, ready: Path) -> Path:
     incoming = roots.incoming_dir.resolve(strict=True)
     ready = Path(ready)
@@ -447,6 +477,9 @@ def apply_ready(roots: ReleaseRoots) -> ApplyResult | None:
     except Exception:
         ready.replace(ready.with_suffix(".failed"))
         raise
+    if result.status != "activated":
+        ready.replace(ready.with_suffix(".rolled-back"))
+        return result
     ready.unlink(missing_ok=True)
     archive.unlink(missing_ok=True)
     return result
@@ -461,6 +494,8 @@ def main() -> int:
     commands.add_parser("verify-current")
     rollback_parser = commands.add_parser("rollback")
     rollback_parser.add_argument("--service", required=True)
+    restore_parser = commands.add_parser("restore-bootstrap")
+    restore_parser.add_argument("--service", required=True)
     args = parser.parse_args()
     roots = ReleaseRoots.production()
     try:
@@ -472,8 +507,10 @@ def main() -> int:
             manifest = verify_current(roots)
             print(f"verified commit={manifest['commit']}")
             return 0
-        else:
+        elif args.command == "rollback":
             result = rollback(roots, args.service)
+        else:
+            result = restore_bootstrap(roots, args.service)
     except (ApplyError, OSError, subprocess.SubprocessError, release_contract.ReleaseContractError) as exc:
         print(f"localbotapi_apply status=failed reason={type(exc).__name__}", file=sys.stderr)
         return 1
@@ -481,6 +518,8 @@ def main() -> int:
         print("localbotapi_apply status=idle")
     else:
         print(f"localbotapi_apply status={result.status} commit={result.commit}")
+    if args.command in {"apply", "apply-ready"} and result is not None:
+        return 0 if result.status == "activated" else 1
     return 0
 
 

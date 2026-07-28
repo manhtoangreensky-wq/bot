@@ -44,9 +44,10 @@ readonly deploy_key="${deploy_key_lines[0]}"
 [[ "$deploy_key" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+([[:space:]].*)?$ ]] ||
     fail "invalid_ed25519_public_key"
 
-for tool in install useradd usermod id systemctl cp chmod chown mktemp; do
+for tool in install useradd usermod id systemctl cp chmod chown mktemp ssh-keygen; do
     command -v "$tool" >/dev/null 2>&1 || fail "missing_tool_${tool}"
 done
+ssh-keygen -l -f "$PUBLIC_KEY_FILE" >/dev/null 2>&1 || fail "invalid_ed25519_public_key"
 
 if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
     useradd --system --user-group --home-dir "$DEPLOY_HOME" --create-home --shell /bin/bash "$DEPLOY_USER"
@@ -63,7 +64,8 @@ require_real_directory "$LIBEXEC_ROOT"
 
 install -d -o root -g root -m 0755 "$RELEASE_ROOT" "$RELEASES_ROOT"
 install -d -o root -g root -m 0755 "$LIBEXEC_ROOT"
-install -d -o root -g root -m 0700 "$STATE_ROOT" "$STATE_ROOT/bootstrap-backup"
+install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"
+install -d -o root -g root -m 0700 "$STATE_ROOT/bootstrap-backup"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT/incoming"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0700 "$DEPLOY_HOME/.ssh"
 

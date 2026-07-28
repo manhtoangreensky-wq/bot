@@ -377,6 +377,50 @@ def test_apply_rolls_back_when_activation_command_fails(tmp_path):
     assert links.resolve(roots.current) == known_good
 
 
+def test_manual_bootstrap_restore_is_scoped_and_removes_release_pointers(tmp_path):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "backup",
+        lock_path=tmp_path / "lock",
+    )
+    backup_units = roots.bootstrap_backup / "systemd"
+    backup_units.mkdir(parents=True)
+    (roots.bootstrap_backup / ".complete").write_text("ok\n", encoding="ascii")
+    (backup_units / apply_module.SERVICE).write_text("legacy\n", encoding="ascii")
+    links = _FakeLinks()
+    apply_module.apply_release(
+        roots,
+        _valid_bundle(tmp_path, "b" * 40, "active-before-bootstrap.tgz"),
+        health=lambda: True,
+        command_runner=lambda _argv: None,
+        link_store=links,
+    )
+
+    with pytest.raises(apply_module.ApplyError, match="allowlist"):
+        apply_module.restore_bootstrap(
+            roots,
+            "product-video.service",
+            health=lambda: True,
+            command_runner=lambda _argv: None,
+            link_store=links,
+        )
+
+    result = apply_module.restore_bootstrap(
+        roots,
+        apply_module.SERVICE,
+        health=lambda: True,
+        command_runner=lambda _argv: None,
+        link_store=links,
+    )
+    assert result.status == "bootstrap_restored"
+    assert not links.exists(roots.current)
+    assert not links.exists(roots.previous)
+    assert (roots.systemd_dir / apply_module.SERVICE).read_text(encoding="ascii") == "legacy\n"
+
+
 def test_receiver_rejects_shell_commands_wrong_digest_and_oversize(tmp_path):
     receiver = _load_module("receive_release")
     bundle = _valid_bundle(tmp_path, "3" * 40, "valid.tgz")
@@ -400,6 +444,52 @@ def test_receiver_rejects_shell_commands_wrong_digest_and_oversize(tmp_path):
     assert receipt.ready == incoming / f"{digest}.ready"
     assert receipt.archive.read_bytes() == payload
     assert receipt.ready.read_text(encoding="ascii") == f"{digest}\n"
+    assert receipt.release_id == _load_module("release_contract").validate_archive(bundle).release_id
+
+
+def test_receiver_waits_for_exact_release_and_detects_rollback_marker(tmp_path):
+    receiver = _load_module("receive_release")
+    release_id = "a" * 64
+    receipt = receiver.ReceiveReceipt(
+        archive=tmp_path / "bundle.tgz",
+        ready=tmp_path / "bundle.ready",
+        commit="9" * 40,
+        digest="b" * 64,
+        release_id=release_id,
+    )
+    states = iter((None, ("9" * 40, release_id)))
+    assert receiver.wait_for_activation(
+        receipt,
+        active_release=lambda: next(states),
+        attempts=2,
+        sleep=lambda _seconds: None,
+    ) == ("9" * 40, release_id)
+
+    receipt.ready.with_suffix(".rolled-back").write_text("failed\n", encoding="ascii")
+    with pytest.raises(receiver.ReceiveError, match="rolled back"):
+        receiver.wait_for_activation(
+            receipt,
+            active_release=lambda: None,
+            attempts=1,
+            sleep=lambda _seconds: None,
+        )
+
+    receipt.ready.with_suffix(".rolled-back").unlink()
+    receipt.ready.write_bytes(f"{receipt.digest}\n".encode("ascii"))
+    sleeps = 0
+
+    def finish_apply(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        receipt.ready.unlink()
+
+    assert receiver.wait_for_activation(
+        receipt,
+        active_release=lambda: (receipt.commit, receipt.release_id),
+        attempts=2,
+        sleep=finish_apply,
+    ) == (receipt.commit, receipt.release_id)
+    assert sleeps == 1
 
 
 def test_apply_ready_marker_must_match_archive_filename_content_and_digest(tmp_path):
@@ -428,6 +518,37 @@ def test_apply_ready_marker_must_match_archive_filename_content_and_digest(tmp_p
     archive.write_bytes(payload + b"tampered")
     with pytest.raises(apply_module.ApplyError, match="digest"):
         apply_module.validate_ready_marker(roots, ready)
+
+
+def test_apply_ready_keeps_forensics_and_marks_rolled_back(tmp_path, monkeypatch):
+    apply_module = _load_module("apply_release")
+    roots = apply_module.ReleaseRoots(
+        release_root=tmp_path / "release-root",
+        systemd_dir=tmp_path / "systemd",
+        incoming_dir=tmp_path / "incoming",
+        bootstrap_backup=tmp_path / "backup",
+        lock_path=tmp_path / "lock",
+    )
+    roots.incoming_dir.mkdir()
+    bundle = _valid_bundle(tmp_path, "a" * 40, "rolled-back-source.tgz")
+    payload = bundle.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    archive = roots.incoming_dir / f"{digest}.tgz"
+    ready = roots.incoming_dir / f"{digest}.ready"
+    archive.write_bytes(payload)
+    ready.write_bytes(f"{digest}\n".encode("ascii"))
+    monkeypatch.setattr(
+        apply_module,
+        "apply_release",
+        lambda _roots, _archive: apply_module.ApplyResult("rolled_back", "a" * 40, None),
+    )
+
+    result = apply_module.apply_ready(roots)
+
+    assert result and result.status == "rolled_back"
+    assert archive.is_file()
+    assert not ready.exists()
+    assert ready.with_suffix(".rolled-back").is_file()
 
 
 def test_apply_rejects_policy_or_file_set_outside_fixed_allowlist(tmp_path):
@@ -466,6 +587,8 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
     assert "toanaas-deploy" in installer
     assert "mapfile -t deploy_key_lines" in installer
     assert "${#deploy_key_lines[@]}" in installer
+    assert 'ssh-keygen -l -f "$PUBLIC_KEY_FILE"' in installer
+    assert 'install -d -o root -g "$DEPLOY_USER" -m 0750 "$STATE_ROOT"' in installer
     for guarded_path in (
         "$RELEASE_ROOT",
         "$RELEASES_ROOT",
@@ -485,3 +608,56 @@ def test_bootstrap_installs_forced_command_and_sandboxed_apply_units():
             assert "NoNewPrivileges=true" in text
             assert "ProtectSystem=strict" in text
             assert "ProtectHome=true" in text
+
+
+def test_workflow_is_path_scoped_pinned_and_host_key_strict():
+    path = REPO / ".github" / "workflows" / "deploy-localbotapi-vps.yml"
+    assert path.is_file(), f"missing Local Bot API deployment workflow: {path}"
+    workflow = path.read_text(encoding="utf-8")
+    assert "deploy/localbotapi/**" in workflow
+    assert ".github/workflows/deploy-localbotapi-vps.yml" in workflow
+    assert "branches: [main]" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "permissions:\n  contents: read" in workflow
+    assert "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5" in workflow
+    assert "StrictHostKeyChecking=yes" in workflow
+    assert "UserKnownHostsFile=" in workflow
+    assert "StrictHostKeyChecking=no" not in workflow
+    assert "LOCALBOT_VPS_SSH_KEY" in workflow
+    assert "LOCALBOT_VPS_KNOWN_HOSTS" in workflow
+    assert "toanaas-deploy@tg.toanaas.vn" in workflow
+    assert "build_release.py build" in workflow
+    assert "build_release.py verify" in workflow
+    assert "upload ${GITHUB_SHA}" in workflow
+    assert "if: always()" in workflow
+    for forbidden in (
+        "git pull",
+        ":latest",
+        "set -x",
+        "bot.py",
+        "product-video",
+        "remote_worker",
+        "local_worker",
+    ):
+        assert forbidden not in workflow
+
+
+def test_runbook_documents_trust_anchor_limits_rollback_and_scope():
+    path = REPO / "deploy" / "localbotapi" / "README.md"
+    assert path.is_file(), f"missing Local Bot API runbook: {path}"
+    runbook = path.read_text(encoding="utf-8")
+    for required in (
+        "500",
+        "3600",
+        "last-known-good",
+        "restore-bootstrap",
+        "LOCALBOT_VPS_SSH_KEY",
+        "LOCALBOT_VPS_KNOWN_HOSTS",
+        "SHA256:xiXs/BXPp12IL8IFBSPQuRE5Jf03Dp6fLAoH+7jSz3o",
+        "dual-generation",
+        "Product Video",
+        "SUBDUB MP4 LIVE PASS = NO",
+    ):
+        assert required in runbook
+    assert "git pull" not in runbook
+    assert ":latest" not in runbook

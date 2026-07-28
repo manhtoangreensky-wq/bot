@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -26,6 +28,7 @@ class ReceiveReceipt(NamedTuple):
     ready: Path
     commit: str
     digest: str
+    release_id: str
 
 
 def _safe_incoming(directory: str | Path) -> Path:
@@ -97,7 +100,7 @@ def receive(command: str, payload: bytes, incoming_dir: str | Path) -> ReceiveRe
                 raise ReceiveError("existing ready path is unsafe or inconsistent")
         else:
             _atomic_ready(ready, actual_digest)
-        return ReceiveReceipt(archive, ready, commit, actual_digest)
+        return ReceiveReceipt(archive, ready, commit, actual_digest, validated.release_id)
     except release_contract.ReleaseContractError as exc:
         raise ReceiveError(f"release archive failed validation: {exc}") from exc
     finally:
@@ -105,6 +108,52 @@ def receive(command: str, payload: bytes, incoming_dir: str | Path) -> ReceiveRe
             temporary = Path(temporary_name)
             if temporary.exists() and not temporary.is_symlink():
                 temporary.unlink()
+
+
+def active_production_release() -> tuple[str, str] | None:
+    releases = Path("/opt/toanaas-localbotapi/releases")
+    current = Path("/opt/toanaas-localbotapi/current")
+    if not current.is_symlink():
+        return None
+    try:
+        target = current.resolve(strict=True)
+        releases_resolved = releases.resolve(strict=True)
+    except OSError:
+        return None
+    if target.parent != releases_resolved or not release_contract.SHA256_RE.fullmatch(target.name):
+        return None
+    manifest_path = target / "manifest.json"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        return None
+    try:
+        raw = manifest_path.read_bytes()
+        manifest = release_contract.validate_manifest(json.loads(raw.decode("utf-8")))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, release_contract.ReleaseContractError):
+        return None
+    canonical = release_contract.canonical_manifest_bytes(manifest)
+    if raw != canonical or hashlib.sha256(canonical).hexdigest() != target.name:
+        return None
+    return manifest["commit"], target.name
+
+
+def wait_for_activation(
+    receipt: ReceiveReceipt,
+    *,
+    active_release=active_production_release,
+    attempts: int = 120,
+    sleep=time.sleep,
+) -> tuple[str, str]:
+    expected = (receipt.commit, receipt.release_id)
+    for _attempt in range(max(1, int(attempts))):
+        if receipt.ready.with_suffix(".rolled-back").exists():
+            raise ReceiveError("release activation rolled back")
+        if receipt.ready.with_suffix(".failed").exists():
+            raise ReceiveError("release activation failed")
+        active = active_release()
+        if active == expected and not receipt.ready.exists():
+            return active
+        sleep(2)
+    raise ReceiveError("release activation timed out")
 
 
 def main() -> int:
@@ -116,10 +165,14 @@ def main() -> int:
             payload,
             Path("/var/lib/toanaas-localbotapi/incoming"),
         )
+        wait_for_activation(receipt)
     except (OSError, ReceiveError) as exc:
         print(f"localbotapi_receive status=rejected reason={type(exc).__name__}", file=sys.stderr)
         return 1
-    print(f"localbotapi_receive status=accepted digest={receipt.digest}")
+    print(
+        "localbotapi_receive status=deployed "
+        f"digest={receipt.digest} release_id={receipt.release_id}"
+    )
     return 0
 
 
