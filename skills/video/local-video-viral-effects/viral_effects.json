@@ -1,0 +1,1582 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "local-video-viral-effects",
+  "group_id": "viral_effect",
+  "capability_count": 10,
+  "rights_contract_ref": "../local-video-filmmaking/rights_requirements.json",
+  "music_suno_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "Music/Suno vẫn khóa; effect chỉ tham chiếu audio do chủ sở hữu cung cấp và đã xác minh quyền."
+  },
+  "ai_assist_policy": {
+    "status": "LOCKED_DISABLED",
+    "generation_allowed": false,
+    "asset_acquisition_allowed": false,
+    "guidance_vi": "AI-assisted method chỉ là mô tả bị khóa; 26F không gọi hoặc tạo AI asset."
+  },
+  "capabilities": [
+    {
+      "id": "phone_magic",
+      "qualified_id": "viral_effect.phone_magic",
+      "display_name_vi": "Phép màu với điện thoại",
+      "creative_intent_vi": "Biến phone hoặc màn hình thành điểm kể chuyện bằng replacement có kiểm soát.",
+      "required_source_shot_setup": [
+        "Quay phone đủ sáng, có marker tương phản.",
+        "Giữ khoảng trống cho corner pin và clean take."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho phép màu với điện thoại phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Tay, hướng phone và phản xạ phải khớp giữa các frame.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 2,
+        "max": 8,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "phone_reveal",
+        "screen_swap",
+        "reaction"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG"
+        ],
+        "steps": [
+          "Lập track bốn góc, kiểm tra solve.",
+          "Đặt layer replacement và mask tay.",
+          "So frame đại diện trước khi preview."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Match cut sang phone close-up khi solve hoặc occlusion fail.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_phone_magic_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "screen_tracking": "Theo dõi bốn góc màn hình hoặc pose phone ổn định.",
+        "screen_replacement": "Thay nội dung bằng layer SVG/ảnh đã cấp quyền.",
+        "perspective_corner_pin": "Neo bốn góc theo mặt phẳng phone.",
+        "glow_reflection": "Giữ glow/reflection tách khỏi nội dung thay thế.",
+        "hand_occlusion": "Mask tay theo thứ tự foreground để không xuyên màn hình."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Primitive frame/FFmpeg là mapping cục bộ, chưa phải preset effect."
+        },
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation stream/container hiện có chỉ làm evidence."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "status": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "colour_fill",
+      "qualified_id": "viral_effect.colour_fill",
+      "display_name_vi": "Tô màu chủ thể",
+      "creative_intent_vi": "Cho màu lan qua chủ thể hoặc vật thể theo nhịp reveal, vẫn giữ biên sạch.",
+      "required_source_shot_setup": [
+        "Ánh sáng và nền ổn định, màu chủ thể không trùng background.",
+        "Có frame reference trước/sau fill."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho tô màu chủ thể phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Biên tóc, tay và vật thể không nhảy khi fill chạy.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 1,
+        "max": 6,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "fill_start",
+        "mid_reveal",
+        "fill_hold"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "SVG",
+          "FFmpeg"
+        ],
+        "steps": [
+          "Tạo segmentation mask planning.",
+          "Animate matte/fill bằng SVG hoặc layer cục bộ.",
+          "Kiểm tra spill và contrast."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Dùng highlight box tĩnh hoặc hard cut nếu mask không ổn.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_colour_fill_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "subject_object_segmentation": "Tách chủ thể/vật thể theo mask có evidence.",
+        "animated_fill_reveal": "Animate fill theo beat marker và hướng lan.",
+        "edge_feathering": "Feather biên để tránh viền cứng.",
+        "spill_prevention": "Giới hạn màu spill vào nền hoặc da.",
+        "color_accessibility": "Không truyền ý nghĩa chỉ bằng màu và kiểm tra contrast."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Primitive frame/FFmpeg là mapping cục bộ, chưa phải preset effect."
+        },
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation stream/container hiện có chỉ làm evidence."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_MASK_TRACK",
+      "status": "REQUIRES_MASK_TRACK",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "clone_throw",
+      "qualified_id": "viral_effect.clone_throw",
+      "display_name_vi": "Ném bản sao",
+      "creative_intent_vi": "Compositing nhiều pass để một chủ thể ném bản sao theo trajectory rõ.",
+      "required_source_shot_setup": [
+        "Khóa camera, quay clean plate rồi quay từng pass.",
+        "Giữ khoảng cách và ánh sáng không đổi."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho ném bản sao phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Pose, tay, vật thể và bóng khớp điểm ném/nhận.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 2,
+        "max": 10,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "windup",
+        "release",
+        "catch"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG"
+        ],
+        "steps": [
+          "Canh plate và pass theo slate.",
+          "Mask từng pass theo trajectory.",
+          "Đối chiếu occlusion/shadow trước preview."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Dùng hard cut hoặc match cut giữa hai pass khi composite fail.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_clone_throw_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "camera_solution": "Camera khóa hoặc có solve được kiểm chứng.",
+        "clean_plate": "Clean plate cùng ánh sáng và bóng nền.",
+        "multiple_subject_passes": "Nhiều pass có slate và timing tách.",
+        "throw_trajectory": "Trajectory có marker và không xuyên vật thể.",
+        "occlusion_ordering": "Layer order theo chiều sâu đã ghi.",
+        "shadow_consistency": "Bóng và hướng sáng nhất quán."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_grammar.json",
+          "symbols": [
+            "transition.match_motion",
+            "transition.mask_reveal"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Contract 26D là nguồn tham khảo, không sao chép hành vi."
+        },
+        {
+          "path": "services/multiscene_video_pipeline.py",
+          "symbols": [
+            "SceneSpec",
+            "MultisceneManifest"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Manifest scene hiện có chỉ tham khảo shot organization."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "status": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "outfit_morph",
+      "qualified_id": "viral_effect.outfit_morph",
+      "display_name_vi": "Biến đổi trang phục",
+      "creative_intent_vi": "Nối hai trạng thái trang phục qua pose/framing tương thích, không hứa morph bất kỳ.",
+      "required_source_shot_setup": [
+        "Quay hai take với pose hold và framing giống nhau.",
+        "Giữ background ổn định và ghi frame bridge."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho biến đổi trang phục phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Pose, tóc, tay, cloth edge và ánh sáng liên tục.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 1,
+        "max": 5,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "pose_hold_a",
+        "morph_window",
+        "pose_hold_b"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "SVG",
+          "FFmpeg"
+        ],
+        "steps": [
+          "Align frame bridge và segmentation.",
+          "Lập transition matte planning.",
+          "Đánh giá edge continuity ở mobile."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Match cut đúng beat, không báo morph thành công.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_outfit_morph_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "matched_pose": "Pose đầu/cuối có điểm neo tương ứng.",
+        "matched_framing": "Framing và camera height tương đương.",
+        "segmentation": "Tách người và cloth edge.",
+        "transition_mask": "Mask chuyển theo vùng vải, không che mặt sai.",
+        "body_cloth_edge_continuity": "Kiểm tra mép cơ thể/vải không tan bất thường.",
+        "match_cut_fallback": "Fallback match cut khi morph quality fail."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_grammar.json",
+          "symbols": [
+            "transition.match_motion",
+            "transition.mask_reveal"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Contract 26D là nguồn tham khảo, không sao chép hành vi."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Primitive frame/FFmpeg là mapping cục bộ, chưa phải preset effect."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_MASK_TRACK",
+      "status": "REQUIRES_MASK_TRACK",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "clone_thief",
+      "qualified_id": "viral_effect.clone_thief",
+      "display_name_vi": "Kẻ trộm bản sao",
+      "creative_intent_vi": "Cho nhiều pass trao vật thể giữa các bản sao với layer order rõ.",
+      "required_source_shot_setup": [
+        "Khóa camera, quay plate và pass giao vật thể.",
+        "Giữ timing handoff có slate marker."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho kẻ trộm bản sao phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Tay, vật thể, bóng và occlusion khớp handoff.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 2,
+        "max": 9,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "approach",
+        "handoff",
+        "reveal"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG"
+        ],
+        "steps": [
+          "Sắp pass theo depth order.",
+          "Track object và mask hand overlap.",
+          "QA shadow/occlusion trước preview."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Cắt tại handoff hoặc dùng foreground occlusion transition.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_clone_thief_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "multi_pass_compositing": "Tách pass từng nhân vật và clean plate.",
+        "object_handoff_continuity": "Vật thể có điểm giao tay rõ.",
+        "clean_plate": "Plate sạch cùng camera/light.",
+        "layer_ordering": "Foreground/background order được ghi.",
+        "object_mask_tracking": "Mask và track vật thể qua bàn tay."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "services/multiscene_video_pipeline.py",
+          "symbols": [
+            "SceneSpec",
+            "MultisceneManifest"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Manifest scene hiện có chỉ tham khảo shot organization."
+        },
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation stream/container hiện có chỉ làm evidence."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "status": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "disappear",
+      "qualified_id": "viral_effect.disappear",
+      "display_name_vi": "Biến mất",
+      "creative_intent_vi": "Xóa chủ thể khỏi plate bằng mask và continuity nền, không coi particle là bắt buộc.",
+      "required_source_shot_setup": [
+        "Quay plate trước/sau với camera và ánh sáng ổn định.",
+        "Ghi điểm rời frame và vùng bóng."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho biến mất phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Tóc, tay, bóng và nền không để lại ghost.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 1,
+        "max": 6,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "look",
+        "exit",
+        "empty_hold"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG"
+        ],
+        "steps": [
+          "Align clean plate và subject mask.",
+          "Kiểm tra shadow/background continuity.",
+          "Preview reduced-motion bằng cut tĩnh."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Dissolve hoặc hard cut tại điểm rời nếu mask fail.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_disappear_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "clean_plate": "Clean plate đủ nền sau khi chủ thể rời.",
+        "subject_mask": "Mask biên chủ thể và bóng.",
+        "optional_particles_smoke_light": "Particle/smoke/light chỉ optional, phải có quyền.",
+        "shadow_removal": "Xử lý bóng theo evidence ánh sáng.",
+        "background_continuity": "Nền sau xóa không đổi hình học."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_grammar.json",
+          "symbols": [
+            "transition.match_motion",
+            "transition.mask_reveal"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Contract 26D là nguồn tham khảo, không sao chép hành vi."
+        },
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation stream/container hiện có chỉ làm evidence."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_MASK_TRACK",
+      "status": "REQUIRES_MASK_TRACK",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "text_message",
+      "qualified_id": "viral_effect.text_message",
+      "display_name_vi": "Tin nhắn trên màn hình",
+      "creative_intent_vi": "Kể thông tin bằng message UI trung lập, tôn trọng privacy và quyền brand.",
+      "required_source_shot_setup": [
+        "Quay phone/hand framing có vùng đặt message.",
+        "Cung cấp nội dung đã redacted và font có quyền."
+      ],
+      "camera_lock_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Camera requirement cho tin nhắn trên màn hình phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Phone orientation, privacy redaction và timing không nhảy.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 2,
+        "max": 12,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "notification",
+        "typing",
+        "read"
+      ],
+      "local_deterministic_method": {
+        "mode": "LOCAL_PRIMITIVE_MAPPING",
+        "technology_refs": [
+          "SVG",
+          "CSS"
+        ],
+        "steps": [
+          "Tạo message card SVG trung lập.",
+          "Đặt reveal theo marker và safe area.",
+          "Kiểm tra privacy/contrast/mobile."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Caption box tĩnh hoặc text card không brand.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_text_message_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "message_ui_recreation": "Vẽ UI trung lập bằng SVG, không sao chép brand chưa cấp quyền.",
+        "privacy_redaction": "Redact tên, số và nội dung nhạy cảm trước preview.",
+        "typing_reveal_timing": "Typing/reveal theo beat và đọc được trên mobile.",
+        "notification_sound_policy": "Notification sound chỉ dùng khi rights đã VERIFIED.",
+        "platform_neutral_brand_gate": "Brand asset cần license và safe-area evidence."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+          "symbols": [
+            "kinetic_typography.mask_reveal"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Typography contract chỉ dùng làm mapping, không thêm UI."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Primitive frame/FFmpeg là mapping cục bộ, chưa phải preset effect."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "PROTOTYPE_ONLY",
+      "status": "PROTOTYPE_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "music_scroll",
+      "qualified_id": "viral_effect.music_scroll",
+      "display_name_vi": "Cuộn theo nhạc",
+      "creative_intent_vi": "Hiển thị waveform/beat map và cover art có quyền, không hiển thị lyric thiếu quyền.",
+      "required_source_shot_setup": [
+        "Có audio owner-supplied và beat markers.",
+        "Có cover art/attribution evidence nếu dùng."
+      ],
+      "camera_lock_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Camera requirement cho cuộn theo nhạc phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Waveform, beat và visual scroll không lệch timeline.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 3,
+        "max": 30,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "beat_in",
+        "beat_peak",
+        "beat_out"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "SVG",
+          "CSS"
+        ],
+        "steps": [
+          "Lập waveform metadata và scroll plan.",
+          "Kiểm tra rights trước mọi preview.",
+          "Dùng card waveform không lyric khi thiếu rights."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Waveform trừu tượng không gắn bài hát hoặc silence card.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_music_scroll_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "waveform_beat_map": "Waveform/beat map chỉ từ audio có quyền.",
+        "scroll_direction": "Chọn cuộn dọc/ngang và ghi profile.",
+        "cover_art_rights": "Cover art phải có license và attribution.",
+        "lyric_rights_gate": "Lyric display bị block khi rights chưa VERIFIED.",
+        "unlicensed_song_extraction_block": "Không thu nạp hoặc tách bài hát chưa cấp quyền."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-sound-design/sound_timeline_contract.json",
+          "symbols": [
+            "sound_design_timeline"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Timeline âm thanh 26E chỉ là metadata reference."
+        },
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation stream/container hiện có chỉ làm evidence."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "BLOCKED",
+      "status": "BLOCKED",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "product_popup",
+      "qualified_id": "viral_effect.product_popup",
+      "display_name_vi": "Sản phẩm bật lên",
+      "creative_intent_vi": "Đưa cutout sản phẩm, bóng và callout vào frame theo CTA có kiểm chứng.",
+      "required_source_shot_setup": [
+        "Cung cấp product image/cutout có quyền.",
+        "Ghi claim, giá và safe-area evidence."
+      ],
+      "camera_lock_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Camera requirement cho sản phẩm bật lên phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Scale, shadow, label và CTA giữ cùng perspective.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 2,
+        "max": 10,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "product_enter",
+        "claim",
+        "cta"
+      ],
+      "local_deterministic_method": {
+        "mode": "LOCAL_PRIMITIVE_MAPPING",
+        "technology_refs": [
+          "SVG",
+          "CSS"
+        ],
+        "steps": [
+          "Đặt cutout SVG và shadow metadata.",
+          "Kiểm tra pricing/claim và safe area.",
+          "Preview với motion giảm."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "End card tĩnh chỉ dùng claim đã xác minh.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_product_popup_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "product_cutout": "Cutout sản phẩm có nguồn và biên rõ.",
+        "shadow": "Bóng theo hướng sáng, không giả claim.",
+        "pricing_claim_validation": "Giá/claim phải khớp dữ liệu được duyệt.",
+        "callout_labels": "Nhãn ngắn, không che thông tin.",
+        "brand_safe_area": "Logo/màu theo brand guideline có quyền.",
+        "cta_timing": "CTA có marker và không ép người xem."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/kinetic_typography.json",
+          "symbols": [
+            "kinetic_typography.mask_reveal"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Typography contract chỉ dùng làm mapping, không thêm UI."
+        },
+        {
+          "path": "services/video_local_validation.py",
+          "symbols": [
+            "probe_video_file",
+            "validate_mp4_output"
+          ],
+          "support_layer": "validation",
+          "relationship": "metadata_only",
+          "notes_vi": "Validation stream/container hiện có chỉ làm evidence."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "PROTOTYPE_ONLY",
+      "status": "PROTOTYPE_ONLY",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    },
+    {
+      "id": "phone_drop",
+      "qualified_id": "viral_effect.phone_drop",
+      "display_name_vi": "Thả điện thoại",
+      "creative_intent_vi": "Mô phỏng phone rơi và impact rồi nối sang screen transition an toàn.",
+      "required_source_shot_setup": [
+        "Quay drop có safety take và impact marker.",
+        "Giữ phone orientation, nền và tay có continuity."
+      ],
+      "camera_lock_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Camera requirement cho thả điện thoại phải được ghi trong shot plan.",
+        "evidence_vi": "Fixture phải có camera/solve evidence hoặc lý do optional."
+      },
+      "clean_plate_requirement": {
+        "required": "OPTIONAL",
+        "guidance_vi": "Clean plate phải cùng bối cảnh và ánh sáng khi effect cần nền thay thế.",
+        "evidence_vi": "Fixture ghi plate ref hoặc blocked reason."
+      },
+      "mask_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Mask status và biên cần được xác nhận trước mọi composite.",
+        "evidence_vi": "Fixture ghi mask/tracking evidence."
+      },
+      "tracking_requirement": {
+        "required": "REQUIRED",
+        "guidance_vi": "Tracking chỉ được coi là hợp lệ khi marker/solve đạt ngưỡng.",
+        "evidence_vi": "Fixture ghi track report hoặc fallback."
+      },
+      "pose_hand_object_continuity": {
+        "guidance_vi": "Phone, tay, impact, shadow và screen plane không nhảy.",
+        "required_checks": [
+          "pose",
+          "hand",
+          "object",
+          "shadow",
+          "occlusion"
+        ]
+      },
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9",
+        "1:1",
+        "4:5"
+      ],
+      "duration_range_seconds": {
+        "min": 1,
+        "max": 7,
+        "decision_rule_vi": "Chọn duration theo shot setup, beat marker và khả năng đọc trên mobile."
+      },
+      "beat_markers": [
+        "release",
+        "impact",
+        "screen_switch"
+      ],
+      "local_deterministic_method": {
+        "mode": "SPECIFICATION_ONLY",
+        "technology_refs": [
+          "FFmpeg",
+          "SVG"
+        ],
+        "steps": [
+          "Track motion và marker impact.",
+          "Lập screen plane/mask nếu đủ evidence.",
+          "Kiểm tra shake/reduced-motion."
+        ],
+        "limitations_vi": "Chỉ là mapping/đặc tả; không có preset runtime được đăng ký.",
+        "execution_in_26f_allowed": false
+      },
+      "optional_ai_assisted_method": {
+        "enabled": false,
+        "status": "LOCKED_DISABLED",
+        "method_vi": "AI-assisted path bị khóa; không gọi model, không tiêu credit và không tạo asset."
+      },
+      "fallback": {
+        "status": "PLANNING_FALLBACK",
+        "method_vi": "Hard cut tại impact, không fake screen solve.",
+        "trigger_vi": "Kích hoạt khi source, plate, mask, tracking, rights hoặc validation không đạt."
+      },
+      "known_failure_conditions": [
+        "Camera/plate/mask/tracking thiếu hoặc không ổn định.",
+        "Rights, privacy, claim hoặc fixture evidence chưa xác minh.",
+        "Output chỉ có tên effect mà không có bằng chứng QA."
+      ],
+      "validation": {
+        "checks": [
+          "Kiểm tra source-shot setup và marker.",
+          "Kiểm tra camera/plate/mask/tracking theo record.",
+          "Kiểm tra continuity, aspect ratio, duration và beat.",
+          "Kiểm tra rights/accessibility/reduced-motion."
+        ],
+        "fail_closed": true,
+        "rights_gate": "BLOCK_ON_UNKNOWN_OR_RESTRICTED",
+        "no_fake_success_vi": "JSON, task ID hoặc output path không chứng minh effect đã chạy."
+      },
+      "example_test_fixture_specification": {
+        "fixture_id": "fixture_phone_drop_planned",
+        "inputs": [
+          "tiny legal synthetic frames",
+          "shot manifest có marker",
+          "rights manifest"
+        ],
+        "expected_assertions": [
+          "status không vượt readiness.",
+          "fallback chạy khi evidence thiếu.",
+          "không gọi runtime hoặc asset acquisition."
+        ],
+        "legal_asset_policy": "Chỉ dùng fixture tổng hợp hoặc asset có quyền, không customer media."
+      },
+      "effect_specific_requirements": {
+        "motion_tracking": "Track phone và camera motion.",
+        "impact_point": "Marker điểm chạm và khoảng đệm.",
+        "screen_transition": "Screen transition chỉ khi phone plane solve được.",
+        "object_continuity": "Kích thước, hướng và tay giữ nhất quán.",
+        "optional_camera_shake": "Camera shake optional, có reduced-motion variant.",
+        "hard_cut_fallback": "Hard cut là fallback an toàn khi tracking fail."
+      },
+      "existing_capability_refs": [
+        {
+          "path": "skills/video/local-video-transition-motion/transition_grammar.json",
+          "symbols": [
+            "transition.match_motion",
+            "transition.mask_reveal"
+          ],
+          "support_layer": "planner",
+          "relationship": "metadata_only",
+          "notes_vi": "Contract 26D là nguồn tham khảo, không sao chép hành vi."
+        },
+        {
+          "path": "services/frame_video_runtime.py",
+          "symbols": [
+            "FrameVideoCommand",
+            "build_ffmpeg_command"
+          ],
+          "support_layer": "local_edit",
+          "relationship": "metadata_only",
+          "notes_vi": "Primitive frame/FFmpeg là mapping cục bộ, chưa phải preset effect."
+        }
+      ],
+      "inventory_status": "MISSING",
+      "readiness": "REQUIRES_PLANNED_SHOOT",
+      "status": "REQUIRES_PLANNED_SHOOT",
+      "rights_requirement_ids": [
+        "source_ownership",
+        "license",
+        "brand_restrictions",
+        "face_person_consent",
+        "music_rights",
+        "font_rights",
+        "stock_attribution",
+        "ai_generated_asset_disclosure_metadata"
+      ],
+      "planning_only": true,
+      "runtime_registered": false,
+      "provider_executable": false,
+      "public_ui": false
+    }
+  ]
+}
