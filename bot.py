@@ -724,6 +724,7 @@ KEY4U_USAGE_AUTH_MODE = _env("KEY4U_USAGE_AUTH_MODE", "")
 KEY4U_BASE_URL = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
 KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", join_shopaikey_url(KEY4U_BASE_URL, "/v1"))
 KEY4U_MINIMAX_BASE_URL = _env("KEY4U_MINIMAX_BASE", join_provider_url(KEY4U_BASE_URL, "/minimax"))
+KEY4U_MINIMAX_TTS_BASE_URL = _env("KEY4U_MINIMAX_TTS_BASE", "https://api.key4u.vn/minimax")
 KEY4U_VOICE_BASE_URL = _env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1")
 KEY4U_SUNO_BASE_URL = _env("KEY4U_SUNO_BASE", join_provider_url(KEY4U_BASE_URL, "/suno"))
 KEY4U_SMART_ROUTING = env_flag("KEY4U_SMART_ROUTING", "true")
@@ -44665,6 +44666,7 @@ def key4u_provider_instance():
         base_url=KEY4U_BASE_URL,
         openai_base_url=KEY4U_OPENAI_BASE_URL,
         minimax_base_url=KEY4U_MINIMAX_BASE_URL,
+        minimax_tts_base_url=KEY4U_MINIMAX_TTS_BASE_URL,
         voice_base_url=KEY4U_VOICE_BASE_URL,
         suno_base_url=KEY4U_SUNO_BASE_URL,
         smart_routing=bool(KEY4U_SMART_ROUTING),
