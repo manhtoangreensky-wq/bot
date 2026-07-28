@@ -89215,6 +89215,8 @@ async def handle_video_tail_callback(update: Update, context: ContextTypes.DEFAU
                 query, context, uid, tail, owner, host
             )
         if action == "back":
+            tail["branding_back_to"] = "prompt"
+            save_video_tail9_state(uid, context, tail, owner, host)
             return await video_tail9_render(query, uid, context, "logo")
     if section == "audio":
         # Old messages may still contain the removed tail-audio callbacks.
@@ -222552,7 +222554,7 @@ async def handle_video_profile_studio_callback(update: Update, context: ContextT
             return await video_profile_scene1_render(query, state, lang)
         state = video_profile_studio_step(context, state, "full_review", active_scene_index=1)
         state = save_video_profile_studio_state(context, state)
-        return await video_tail9_render(query, uid, context, "review")
+        return await video_tail9_render(query, uid, context, "summary")
     if action == "review_image_prompts":
         state = video_profile_studio_step(context, state, "image_prompts", active_scene_index=1, prompt_return_step="full_review")
         return await video_profile_scene1_render(query, state, lang)
