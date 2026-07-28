@@ -397,6 +397,7 @@ class Key4UConfig:
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
     minimax_base_url: str = "https://api.key4u.shop/minimax"
+    minimax_tts_base_url: str = ""
     voice_base_url: str = "https://voice.key4u.shop/api/v1"
     suno_base_url: str = "https://api.key4u.shop/suno"
     smart_routing: bool = True
@@ -458,6 +459,7 @@ def config_from_env() -> Key4UConfig:
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
+        minimax_tts_base_url=_env("KEY4U_MINIMAX_TTS_BASE", "https://api.key4u.vn/minimax"),
         voice_base_url=_env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1"),
         suno_base_url=_env("KEY4U_SUNO_BASE", safe_join_url(api_base, "/suno")),
         smart_routing=_flag("KEY4U_SMART_ROUTING", "true"),
@@ -533,9 +535,10 @@ class Key4UProvider:
             "base_url": self.config.base_url,
             "openai_base_url": self.config.openai_base_url,
             "minimax_base_url": self.config.minimax_base_url,
+            "minimax_tts_base_url": self.config.minimax_tts_base_url or self.config.minimax_base_url,
             "voice_base_url": self.config.voice_base_url,
             "suno_base_url": self.config.suno_base_url,
-            "minimax_tts_final_url": self._minimax_url(self.config.tts_endpoint) if self.config.tts_endpoint else "",
+            "minimax_tts_final_url": self._tts_url(self.config.tts_endpoint) if self.config.tts_endpoint else "",
             "minimax_clone_upload_final_url": self._minimax_url(self.config.minimax_upload_endpoint) if self.config.minimax_upload_endpoint else "",
             "minimax_clone_final_url": self._minimax_url(self.config.minimax_clone_endpoint) if self.config.minimax_clone_endpoint else "",
             "suno_submit_final_url": self._suno_url(self.config.suno_create_endpoint) if self.config.suno_create_endpoint else "",
@@ -954,6 +957,10 @@ class Key4UProvider:
 
     def _minimax_url(self, endpoint: str) -> str:
         return scoped_join_url(self.config.base_url, self.config.minimax_base_url, endpoint, "/minimax/v1")
+
+    def _tts_url(self, endpoint: str) -> str:
+        base_url = self.config.minimax_tts_base_url or self.config.minimax_base_url
+        return scoped_join_url(self.config.base_url, base_url, endpoint, "/minimax/v1")
 
     def _voice_url(self, endpoint: str) -> str:
         return scoped_join_url(self.config.base_url, self.config.voice_base_url, endpoint, "/api/v1")
@@ -1432,7 +1439,7 @@ class Key4UProvider:
             return self._missing_result("tts", selected_model)
         if not self.config.tts_endpoint or not selected_model:
             return self._needs_docs_result("tts", selected_model, "KEY4U_TTS_ENDPOINT/KEY4U_DEFAULT_TTS_MODEL")
-        endpoint = self._minimax_url(self.config.tts_endpoint)
+        endpoint = self._tts_url(self.config.tts_endpoint)
         payload = {
             "model": selected_model,
             "text": str(text or "")[:3500],
