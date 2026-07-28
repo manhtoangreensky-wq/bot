@@ -28,6 +28,7 @@ from services.multiscene_video_pipeline import (
     finalize_multiscene_scene_clips,
     load_multiscene_manifest,
     multiscene_manifest_scene_tasks,
+    normalize_scene_duration,
     process_multiscene_video_pipeline,
     safe_run_ffmpeg,
     sync_multiscene_manifest,
@@ -2531,6 +2532,94 @@ def product_video_duration_contract(job: dict | None, duration_seconds: float | 
         "actual_duration_seconds": actual,
         "duration_tolerance_seconds": PRODUCT_VIDEO_DURATION_TOLERANCE_SECONDS,
         "reason": "" if ok else "final_duration_short_scene_coverage_missing",
+    }
+
+
+def finalize_recovered_product_video_artifact(
+    job: dict | None,
+    project: dict | None,
+    artifact_path: str,
+    *,
+    workspace: str = "",
+) -> dict[str, Any]:
+    """Validate and normalize a recovered one-scene provider MP4 before delivery."""
+    job_context = dict(job or {})
+    project_context = dict(project or {})
+    if project_context:
+        job_context["project"] = project_context
+        job_context.setdefault("scene_count", project_context.get("scene_count"))
+        job_context.setdefault("invoice_json", project_context.get("invoice_json"))
+    scene_count = _scene_count(job_context)
+    expected = product_video_expected_duration_seconds(job_context)
+    raw_path = str(artifact_path or "").strip()
+    raw_probe = video_final_output.probe_video(raw_path)
+    base = {
+        "ok": False,
+        "delivery_allowed": False,
+        "raw_provider_video_path": raw_path,
+        "raw_duration_seconds": float(raw_probe.get("duration") or 0),
+        "raw_output_bytes": int(raw_probe.get("bytes") or 0),
+        "expected_duration_seconds": int(expected),
+        "scene_count": int(scene_count),
+        "recovery_duration_normalized": False,
+    }
+    if scene_count != 1:
+        return {**base, "reason": "multiscene_recovery_requires_scene_orchestrator"}
+    if not raw_probe.get("ok"):
+        return {**base, "reason": str(raw_probe.get("reason") or "recovered_artifact_invalid")}
+
+    raw_contract = product_video_duration_contract(job_context, raw_probe.get("duration"))
+    if raw_contract.get("ok"):
+        return {
+            **base,
+            "ok": True,
+            "delivery_allowed": True,
+            "reason": "",
+            "final_video_path": raw_path,
+            "output_bytes": int(raw_probe.get("bytes") or 0),
+            "final_duration_seconds": float(raw_probe.get("duration") or 0),
+            "has_video": bool(raw_probe.get("has_video")),
+            "has_audio": bool(raw_probe.get("has_audio")),
+            "final_duration_contract": raw_contract,
+        }
+    if raw_probe.get("has_audio"):
+        return {**base, "reason": "recovered_audio_duration_normalization_requires_worker"}
+
+    output_dir = os.path.abspath(workspace or os.path.dirname(raw_path) or ".")
+    os.makedirs(output_dir, exist_ok=True)
+    stem = Path(raw_path).stem or "recovered_provider"
+    finalized_path = os.path.join(output_dir, f"{stem}.finalized.mp4")
+    try:
+        normalize_scene_duration(raw_path, finalized_path, float(expected))
+    except Exception as exc:
+        return {
+            **base,
+            "reason": str(exc)[:160] or "recovered_duration_normalization_failed",
+            "normalization_exception": type(exc).__name__,
+        }
+
+    final_probe = video_final_output.probe_video(finalized_path)
+    final_contract = product_video_duration_contract(job_context, final_probe.get("duration"))
+    if not final_probe.get("ok") or not final_contract.get("ok"):
+        return {
+            **base,
+            "reason": str(final_probe.get("reason") or final_contract.get("reason") or "recovered_final_artifact_invalid"),
+            "final_video_path": finalized_path,
+            "final_duration_seconds": float(final_probe.get("duration") or 0),
+            "final_duration_contract": final_contract,
+        }
+    return {
+        **base,
+        "ok": True,
+        "delivery_allowed": True,
+        "reason": "",
+        "final_video_path": finalized_path,
+        "output_bytes": int(final_probe.get("bytes") or 0),
+        "final_duration_seconds": float(final_probe.get("duration") or 0),
+        "has_video": bool(final_probe.get("has_video")),
+        "has_audio": bool(final_probe.get("has_audio")),
+        "recovery_duration_normalized": True,
+        "final_duration_contract": final_contract,
     }
 
 

@@ -51962,6 +51962,39 @@ async def video_b14_autonomous_materialize_and_deliver(
         }
     conn = db_connect()
     try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0)) if job else {}
+        from services.video_real_render_connector import finalize_recovered_product_video_artifact
+
+        recovery_finalization = finalize_recovered_product_video_artifact(
+            job,
+            project,
+            artifact_path,
+            workspace=str(Path(artifact_path).parent),
+        )
+        if not recovery_finalization.get("ok"):
+            _video_provider_update_job_result(
+                conn,
+                jid,
+                {
+                    "recovery_finalization": recovery_finalization,
+                    "autonomous_finalizer_invoked": True,
+                    "autonomous_finalizer_ok": False,
+                    "autonomous_finalizer_reason": str(recovery_finalization.get("reason") or "finalizer_failed"),
+                    "download_button_visible": False,
+                    "no_charge": True,
+                    "charge": 0,
+                },
+            )
+            return {
+                "ok": False,
+                "sent": False,
+                "reason": str(recovery_finalization.get("reason") or "finalizer_failed"),
+                "recovery": recovery,
+                "recovery_finalization": recovery_finalization,
+                "charge": 0,
+            }
+        artifact_path = str(recovery_finalization.get("final_video_path") or artifact_path)
         result_payload = {
             **dict(recovery.get("debug") or {}),
             "ok": True,
@@ -51969,9 +52002,12 @@ async def video_b14_autonomous_materialize_and_deliver(
             "autonomous_db_poller_enabled": True,
             "autonomous_materialize_source": source,
             "final_video_path": artifact_path,
-            "bytes": safe_int(getattr(artifact, "bytes", 0), 0),
-            "output_bytes": safe_int(getattr(artifact, "bytes", 0), 0),
-            "output_duration": float(getattr(artifact, "duration", 0.0) or 0.0),
+            "bytes": safe_int(recovery_finalization.get("output_bytes"), safe_int(getattr(artifact, "bytes", 0), 0)),
+            "output_bytes": safe_int(recovery_finalization.get("output_bytes"), safe_int(getattr(artifact, "bytes", 0), 0)),
+            "output_duration": float(recovery_finalization.get("final_duration_seconds") or getattr(artifact, "duration", 0.0) or 0.0),
+            "recovery_finalization": recovery_finalization,
+            "autonomous_finalizer_invoked": True,
+            "autonomous_finalizer_ok": True,
             "download_button_visible": False,
             "no_new_paid_submit": True,
             "paid_fallback_not_used": True,
@@ -52162,8 +52198,8 @@ def video_provider_recover_existing_task(job_id: int, *, download: bool = False,
             "no_new_paid_submit": True,
             "paid_fallback_not_used": True,
             "recovery_charge_xu": 0,
-            "postprocess_not_required_for_recovery": True,
-            "delivery_type": "raw_provider_video",
+            "postprocess_required_for_recovery": True,
+            "delivery_type": "raw_provider_video_pending_finalization",
             **poll_debug,
             **result_url_validation,
         }
