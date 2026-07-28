@@ -138,7 +138,7 @@ def _pending_payload(scene_index: int) -> dict:
     }
 
 
-@pytest.mark.parametrize("scene_count", [2, 4, 8])
+@pytest.mark.parametrize("scene_count", [1, 2, 4, 8])
 def test_local_smoke_and_mocked_provider_e2e_produce_ordered_8s_scene_final(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

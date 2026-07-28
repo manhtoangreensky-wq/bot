@@ -2359,6 +2359,8 @@ def product_video_scene_execution_audit(
     scene_rows: list[dict[str, Any]] = []
     stalled_count = 0
     missing_task_count = 0
+    missing_task_after_attempt_count = 0
+    dispatch_pending_count = 0
     fallback_allowed_count = 0
     fallback_evaluated_count = 0
     result_count = 0
@@ -2385,8 +2387,35 @@ def product_video_scene_execution_audit(
         stalled = bool(policy.get("provider_scene_stalled"))
         fallback_allowed = bool(policy.get("fallback_allowed"))
         fallback_evaluated = bool(policy.get("fallback_evaluated"))
+        dispatch_attempted = bool(
+            item.get("dispatch_attempted")
+            or item.get("scene_dispatch_attempted")
+            or item.get("provider_submit_called")
+            or _safe_int(item.get("submit_invoked_count"), 0) > 0
+            or _safe_int(item.get("submit_attempt_count"), 0) > 0
+        )
+        dispatch_state = str(
+            item.get("dispatch_state")
+            or item.get("scene_dispatch_state")
+            or item.get("status")
+            or ""
+        ).strip().lower()
+        dispatch_pending = bool(
+            not task_id
+            and not dispatch_attempted
+            and dispatch_state
+            in {
+                "queued",
+                "pending",
+                "queued_waiting_for_dispatch",
+                "queued_waiting_for_slot",
+                "submit_in_progress",
+            }
+        )
         stalled_count += int(stalled)
         missing_task_count += int(not bool(task_id))
+        missing_task_after_attempt_count += int(not bool(task_id) and not dispatch_pending)
+        dispatch_pending_count += int(dispatch_pending)
         fallback_allowed_count += int(fallback_allowed)
         fallback_evaluated_count += int(fallback_evaluated)
         result_count += int(result_available)
@@ -2425,7 +2454,7 @@ def product_video_scene_execution_audit(
     scene_count = max(_scene_count(job), len(tasks))
     unresolved_count = max(0, scene_count - result_count)
     all_unresolved_stalled = bool(unresolved_count > 0 and stalled_count >= unresolved_count)
-    if missing_task_count > 0 and fallback_allowed_count == 0:
+    if missing_task_after_attempt_count > 0 and fallback_allowed_count == 0:
         terminal_reason = "scene_submit_missing_no_charge"
     elif all_unresolved_stalled and fallback_allowed_count == 0:
         terminal_reason = "all_scene_providers_exhausted_no_charge"
@@ -2438,8 +2467,10 @@ def product_video_scene_execution_audit(
         root_cause = "provider_in_progress_stall"
     elif any(item.get("provider_stalled_not_start") for item in scene_rows):
         root_cause = "provider_not_start_stall"
-    elif missing_task_count:
+    elif missing_task_after_attempt_count:
         root_cause = "scene_submit_missing"
+    elif dispatch_pending_count:
+        root_cause = "scene_dispatch_pending"
     continue_polling = bool(not terminal_reason or terminal_reason == "fallback_available_for_stalled_scenes")
     return {
         "job_id": _safe_int(job.get("job_id") or job.get("id"), 0),
@@ -2449,6 +2480,8 @@ def product_video_scene_execution_audit(
         "fallback_evaluated_count": fallback_evaluated_count,
         "fallback_allowed_count": fallback_allowed_count,
         "missing_task_count": missing_task_count,
+        "missing_task_after_attempt_count": missing_task_after_attempt_count,
+        "dispatch_pending_count": dispatch_pending_count,
         "result_available_count": result_count,
         "terminal_reason": terminal_reason,
         "continue_polling": continue_polling,
@@ -3726,6 +3759,55 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         or public_user_confirmed
     )
     charge_policy = str(_meta_value("charge_policy") or "after_valid_mp4_delivery").strip()
+    current_job_id = _safe_int(
+        _meta_value("current_probation_job_id", "current_job_id")
+        or (job or {}).get("job_id")
+        or (job or {}).get("id"),
+        0,
+    )
+    probation_lock_owner_job = _safe_int(
+        _meta_value("probation_lock_owner_job", "active_probation_job_id", "probation_job_id"),
+        0,
+    )
+    current_job_matches_lock = bool(
+        _meta_value("current_job_matches_lock", "same_job_lock_reentry_allowed")
+        or (
+            current_job_id > 0
+            and probation_lock_owner_job > 0
+            and current_job_id == probation_lock_owner_job
+        )
+    )
+    probation_lock_clear_for_current_job = bool(
+        _meta_value(
+            "probation_lock_clear_for_current_job",
+            "probation_lock_clear_at_candidate_resolver",
+            "probation_lock_clear",
+        )
+        or current_job_matches_lock
+    )
+    admission_context = {
+        "admission_enforced": bool(_meta_value("admission_enforced")),
+        "admission_mode": str(_meta_value("admission_mode") or ""),
+        "worker_compatible": bool(
+            _meta_value(
+                "worker_compatible",
+                "admission_worker_version_compatible",
+                "worker_connected",
+            )
+        ),
+        "probation_lock_clear": bool(_meta_value("probation_lock_clear")),
+        "probation_lock_clear_for_current_job": probation_lock_clear_for_current_job,
+        "probation_lock_owner_job": probation_lock_owner_job,
+        "current_job_id": current_job_id,
+        "current_probation_job_id": current_job_id,
+        "current_job_matches_lock": current_job_matches_lock,
+        "same_job_lock_reentry_allowed": bool(
+            _meta_value("same_job_lock_reentry_allowed") or current_job_matches_lock
+        ),
+        "probation_lock_owned_by_other_job": bool(
+            _meta_value("probation_lock_owned_by_other_job")
+        ),
+    }
     model_context: dict[str, Any] = {}
     for source in (pending_scene_task, job or {}, asset_pack, invoice):
         if not isinstance(source, dict):
@@ -3906,6 +3988,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             "provider_started_at_epoch": (job or {}).get("provider_started_at_epoch") if pending_matches_request else "",
             "provider_wait_started_at": str((job or {}).get("provider_started_at") or (job or {}).get("provider_wait_started_at") or "") if pending_matches_request else "",
             "provider_wait_started_epoch": (job or {}).get("provider_started_at_epoch") or (job or {}).get("provider_wait_started_epoch") if pending_matches_request else "",
+            **admission_context,
             **model_context,
         },
         required_capability=required_capability,
