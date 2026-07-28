@@ -154,6 +154,31 @@ def test_legacy_review_and_summary_callbacks_cannot_form_a_loop() -> None:
     assert 'if action == "back":' in summary
 
 
+def test_scene_prompt_completion_enters_required_tail_gate_before_summary() -> None:
+    profile_handler = _function_source("handle_video_profile_studio_callback")
+    block = profile_handler[
+        profile_handler.index('if action == "video_prompt_done":') :
+        profile_handler.index('if action == "review_image_prompts":')
+    ]
+    normal_completion = block[block.index('if video_flow7_kind(state) == "storyboard":') :]
+
+    assert 'video_profile_studio_step(context, state, "full_review"' in normal_completion
+    assert 'video_tail9_render(query, uid, context, "summary")' in normal_completion
+    assert 'video_tail9_render(query, uid, context, "review")' not in normal_completion
+
+
+def test_summary_back_resets_logo_back_target_before_opening_logo() -> None:
+    handler = _function_source("handle_video_tail_callback")
+    summary = handler[handler.index('if section == "summary":') : handler.index('if section == "audio":')]
+    back = summary[summary.index('if action == "back":') :]
+
+    assert 'tail["branding_back_to"] = "prompt"' in back
+    assert 'save_video_tail9_state(uid, context, tail, owner, host)' in back
+    assert back.index('tail["branding_back_to"] = "prompt"') < back.index(
+        'video_tail9_render(query, uid, context, "logo")'
+    )
+
+
 def test_content_and_prompt_edits_return_to_unified_summary() -> None:
     profile_handler = _function_source("handle_video_profile_studio_callback")
     tail_handler = _function_source("handle_video_tail_callback")
