@@ -29,7 +29,7 @@ FFmpeg/ffprobe metadata references.
 
 ## Task 3: Legal local fixtures and no-fake-success
 
-- [x] Khóa tám fixture recipes là ephemeral-only, không commit binary/customer media.
+- [x] Khóa tám fixture recipes là ephemeral-only, không commit binary/customer media; chỉ fixture temp được phép gọi local tools.
 - [x] Khóa bảy no-fake-success trường hợp và render-promise evidence.
 - [x] Giữ Music/Suno, provider, runtime và public UI disabled.
 

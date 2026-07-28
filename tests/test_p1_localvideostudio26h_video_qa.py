@@ -57,6 +57,9 @@ TOP_LEVEL_FIELDS = (
     "typography_contract_ref",
     "music_suno_policy",
     "success_policy",
+    "delegated_audio_policy",
+    "additional_safety_policy",
+    "applicability_policy",
     "no_fake_success",
     "checks",
     "fixture_policy",
@@ -89,6 +92,19 @@ CHECK_FIELDS = (
     "runtime_registered",
     "provider_executable",
     "public_ui",
+)
+SUCCESS_POLICY_FIELDS = (
+    "missing_evidence_action",
+    "all_blocking_checks_required",
+    "applicable_checks_only",
+    "warning_checks_require_review",
+    "http_200_alone_success_allowed",
+    "task_id_alone_success_allowed",
+    "empty_output_path_success_allowed",
+    "zero_byte_success_allowed",
+    "srt_only_when_mp4_promised_success_allowed",
+    "audio_only_when_mp4_promised_success_allowed",
+    "broken_mp4_success_allowed",
 )
 LOCKS = {
     "planning_only": True,
@@ -316,8 +332,10 @@ def test_success_policy_and_no_fake_success_cases_are_exact_and_fail_closed() ->
     )
     assert tuple(payload["no_fake_success"]) == expected
     policy = payload["success_policy"]
+    assert tuple(policy) == SUCCESS_POLICY_FIELDS
     assert policy["missing_evidence_action"] == "FAIL_CLOSED"
     assert policy["all_blocking_checks_required"] is True
+    assert policy["applicable_checks_only"] is True
     assert policy["warning_checks_require_review"] is True
     for key in (
         "http_200_alone_success_allowed",
@@ -329,6 +347,23 @@ def test_success_policy_and_no_fake_success_cases_are_exact_and_fail_closed() ->
         "broken_mp4_success_allowed",
     ):
         assert policy[key] is False
+    assert payload["delegated_audio_policy"]["silent_stream_success_allowed"] is False
+    assert payload["delegated_audio_policy"]["clipped_stream_success_allowed"] is False
+    assert payload["additional_safety_policy"]["placeholder_or_draft_success_allowed"] is False
+
+
+def test_minimum_size_is_strict_and_output_size_has_no_duplicate_minimum_gate() -> None:
+    payload = _read_contract()
+    checks = {item["id"]: item for item in payload["checks"]}
+    minimum = checks["file_size_minimum"]
+    output = checks["output_size"]
+    assert minimum["local_method"]["comparison_operator"] == ">"
+    assert "lớn hơn strict minimum" in minimum["pass_rule_vi"]
+    assert "nhỏ hơn hoặc bằng strict minimum" in minimum["failure_rule_vi"]
+    assert "strict minimum thuộc check file_size_minimum" in output["failure_rule_vi"]
+    assert "observed/max/expected" in " ".join(output["validation_checks"])
+    assert "observed/min/max" not in " ".join(output["validation_checks"])
+    assert all("MIN_OUTPUT_BYTES" not in reference["symbols"] for reference in output["existing_capability_refs"])
 
 
 def test_specialized_checks_delegate_to_their_canonical_contracts() -> None:
@@ -372,8 +407,14 @@ def test_audio_delivery_typography_rights_and_tool_contracts_are_linked() -> Non
     assert set(mapping["allowed_tools"]) == {"ffmpeg", "ffprobe"}
     assert mapping["relationship"] == "metadata_only"
     assert mapping["execution_in_26h_allowed"] is False
+    assert mapping["fixture_execution_exception"] is True
     assert "audio_loudness_valid" in mapping["operations"]
     assert "true_peak_valid" in mapping["operations"]
+    applicability = payload["applicability_policy"]
+    for check_id in ("audio_loudness_valid", "true_peak_valid"):
+        assert applicability[check_id]["mode"] == "WHEN_AUDIO_PROMISED"
+        assert applicability[check_id]["depends_on"] == "audio_stream_when_promised"
+        assert applicability[check_id]["not_applicable_outcome"] == "PASS_NOT_APPLICABLE"
     rights = payload["music_suno_policy"]
     assert rights["status"] == "LOCKED_DISABLED"
     assert rights["generation_allowed"] is False
@@ -386,6 +427,8 @@ def test_fixture_policy_is_ephemeral_and_covers_no_fake_success_cases() -> None:
     assert fixture["asset_policy"] == "EPHEMERAL_LOCAL_ONLY"
     assert fixture["customer_media_allowed"] is False
     assert fixture["committed_binary_assets_allowed"] is False
+    assert fixture["fixture_execution_allowed"] is True
+    assert fixture["runtime_execution_allowed"] is False
     assert fixture["generation_tool"] == "local_ffmpeg_lavfi"
     assert fixture["probe_tool"] == "local_ffprobe"
     assert tuple(item["id"] for item in fixture["fixtures"]) == FIXTURE_IDS
