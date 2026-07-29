@@ -73166,7 +73166,11 @@ def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         (ui_text(lang, "common.back"), "menu|main_video"),
         (ui_text(lang, "common.main_menu"), "menu|main"),
     ])
-    return video_scene3_keyboard(rows)
+    normalized = video_scene3_flow.validate_adaptive_rows(rows)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
+        for row in normalized
+    ])
 
 
 def video_edit_info_text(kind: str, lang: str = "vi") -> str:

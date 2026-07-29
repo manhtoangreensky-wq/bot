@@ -139,26 +139,40 @@ def test_video_edit_hub_runtime_shape_is_exact_when_off_and_additive_when_on():
     end = source.index('\ndef video_edit_info_text(', start)
     function_source = source[start:end]
     enabled = {'value': False}
+
+    class FakeButton:
+        def __init__(self, text, callback_data):
+            self.text = text
+            self.callback_data = callback_data
+
+    class FakeMarkup:
+        def __init__(self, rows):
+            self.inline_keyboard = rows
+
     namespace = {
-        'InlineKeyboardMarkup': object,
+        'InlineKeyboardButton': FakeButton,
+        'InlineKeyboardMarkup': FakeMarkup,
         'normalize_user_language': lambda _lang: 'vi',
-        'video_scene3_keyboard': lambda rows: rows,
+        'video_scene3_flow': importlib.import_module('services.video_scene3_flow'),
         'ui_text': lambda _lang, key: {'common.back': '⬅️ Quay lại', 'common.main_menu': '🏠 Menu chính'}[key],
         'local_video_studio_public_enabled': lambda: enabled['value'],
     }
     exec(compile(function_source, '<video_edit_hub_keyboard>', 'exec'), namespace)
     keyboard = namespace['video_edit_hub_keyboard']
-    off_rows = keyboard('vi')
-    assert [[callback for _label, callback in row] for row in off_rows] == [
+    off_rows = keyboard('vi').inline_keyboard
+    assert [[button.callback_data for button in row] for row in off_rows] == [
         ['videoedit|ai', 'videoedit|manual'],
         ['videoedit|restore', 'videoedit|guide'],
         ['menu|main_video', 'menu|main'],
     ]
     enabled['value'] = True
-    on_rows = keyboard('vi')
-    assert on_rows[:2] == off_rows[:2]
-    assert on_rows[2] == [(ENTRY_LABEL, ENTRY_CALLBACK)]
-    assert on_rows[3] == off_rows[2]
+    on_rows = keyboard('vi').inline_keyboard
+    assert [[button.callback_data for button in row] for row in on_rows[:2]] == [
+        ['videoedit|ai', 'videoedit|manual'],
+        ['videoedit|restore', 'videoedit|guide'],
+    ]
+    assert [(button.text, button.callback_data) for button in on_rows[2]] == [(ENTRY_LABEL, ENTRY_CALLBACK)]
+    assert [button.callback_data for button in on_rows[3]] == ['menu|main_video', 'menu|main']
 
 def test_canonical_index_is_reused_without_public_capability_data_copy():
     svc = service()
