@@ -50,6 +50,21 @@ _SCREEN_PARENTS = {
     "confirmation": "videoedit|review",
 }
 
+_SCREEN_CALLBACKS = {
+    "workspace": "videoedit|workspace",
+    "cut": "videoedit|cut",
+    "split": "videoedit|split",
+    "join": "videoedit|join",
+    "frame": "videoedit|frame",
+    "transform": "videoedit|transform",
+    "audio": "videoedit|audio",
+    "color": "videoedit|color",
+    "overlay": "videoedit|overlay",
+    "effects": "videoedit|effects",
+    "source_info": "videoedit|source_info",
+    "review": "videoedit|review",
+}
+
 _COMPATIBILITY_ACTIONS = {
     "manual_info": "manual",
     "split_info": "split_from_manual",
@@ -62,6 +77,7 @@ _COMPATIBILITY_ACTIONS = {
     "split": "split_from_manual",
     "reset_manual": "manual",
     "cut": "manual_cut",
+    "join": "manual_join",
     "resize": "aspect",
     "crop": "aspect",
     "ratio": "aspect",
@@ -69,7 +85,6 @@ _COMPATIBILITY_ACTIONS = {
     "vertical": "aspect",
     "compress": "resolution",
     "subtitle": "srt",
-    "color": "color_preset",
     "preset": "color_preset",
     "text": "text_overlay",
     "sharpen": "restore",
@@ -106,6 +121,7 @@ _REQUESTED_GROUPS = {
     "logo": "overlay",
     "sharpen": "quality",
     "manual_cut": "cut",
+    "join": "join",
     "manual_join": "join",
     "manual_audio": "audio",
     "manual_effects": "effects",
@@ -146,6 +162,12 @@ def parent_matrix() -> dict[str, str]:
     """Return a caller-owned copy so navigation constants cannot be mutated."""
 
     return dict(_SCREEN_PARENTS)
+
+
+def screen_callback(screen: Any) -> str:
+    """Return the canonical callback that re-renders an existing screen."""
+
+    return _SCREEN_CALLBACKS.get(str(screen or "").strip().lower(), "videoedit|workspace")
 
 
 def canonical_compatibility_action(value: Any) -> str:

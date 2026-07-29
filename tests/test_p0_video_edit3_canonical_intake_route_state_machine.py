@@ -246,12 +246,13 @@ def test_edit3_single_registered_video_media_gateway_and_read_only_legacy_callba
     assert BOT_SOURCE.count("async def handle_video_editor_pending_upload(") == 1
 
     callback = _function_source("handle_video_editor_callback")
-    legacy_start = callback.index('if raw_action in {"audio", "audio_upload"')
-    legacy_end = callback.index("action = video_editor_normalize_action(raw_action)")
-    legacy = callback[legacy_start:legacy_end]
-    assert "set_video_editor_pending" not in legacy
-    assert "update_video_editor_pending" not in legacy
-    assert "clear_video_editor_pending" not in legacy
+    compatibility_start = callback.index("requested_group = video_edit_state_machine.requested_group(raw_action)")
+    compatibility_end = callback.index("if action == \"guide\"")
+    compatibility = callback[compatibility_start:compatibility_end]
+    assert "canonical_compatibility_action(raw_action)" in compatibility
+    assert "set_video_editor_pending" not in compatibility
+    assert "update_video_editor_pending" not in compatibility
+    assert "clear_video_editor_pending" not in compatibility
 
 
 def test_edit3_probe_contract_exposes_required_local_metadata_without_side_effects() -> None:

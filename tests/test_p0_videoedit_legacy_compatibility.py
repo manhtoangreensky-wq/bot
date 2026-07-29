@@ -54,7 +54,7 @@ def test_videoedit_brightness_keyboard_builds_with_unique_two_column_rows() -> N
     rows = keyboard("vi")
     callbacks = _callbacks(rows)
     assert "videoedit|review" in callbacks
-    assert "videoedit|options|manual" in callbacks
+    assert "videoedit|color" in callbacks
     assert len(callbacks) == len(set(callbacks))
 
 

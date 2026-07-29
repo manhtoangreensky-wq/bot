@@ -53,7 +53,7 @@ def test_manual_editor_options_have_unique_callbacks_and_both_summary_routes_are
 
     handler = _function_source("handle_video_editor_callback")
     assert 'if action in {"source_summary", "source_info"}:' in handler
-    assert 'reply_markup=video_local_source_summary_keyboard(tool, lang, state)' in handler
+    assert 'reply_markup=video_local_source_summary_keyboard(tool, lang, current)' in handler
 
 
 def test_scene3_renderer_evaluates_only_the_active_screen():

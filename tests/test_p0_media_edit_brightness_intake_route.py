@@ -112,9 +112,11 @@ def test_image_brightness_changes_pixels_locally() -> None:
 
 def test_video_brightness_is_visible_and_reaches_ffmpeg() -> None:
     menu = _function_source("video_local_manual_options_keyboard")
+    color_menu = _function_source("video_local_color_keyboard")
     callback = _function_source("handle_video_editor_callback")
     pending = _function_source("handle_video_editor_pending_text")
-    assert '"videoedit|brightness"' in menu
+    assert '"videoedit|color"' in menu
+    assert '"videoedit|brightness"' in color_menu
     assert 'if action == "brightness_set"' in callback
     assert 'if step == "await_brightness"' in pending
 

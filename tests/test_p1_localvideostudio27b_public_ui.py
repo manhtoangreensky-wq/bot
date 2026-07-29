@@ -81,6 +81,7 @@ def compile_public_adapter(svc, enabled):
         'local_video_studio_public_enabled': lambda: enabled['value'],
         'video_edit_hub_text': lambda _lang: 'VIDEO EDIT HUB',
         'video_edit_hub_keyboard': lambda _lang: FakeMarkup([]),
+        'get_user_language': lambda _user_id: 'vi',
         'normalize_user_language': lambda _lang: 'vi',
         'time': __import__('time'),
     }
@@ -589,6 +590,7 @@ def test_fake_public_adapter_transactions_sessions_duplicate_and_root_back(monke
         'local_video_studio_public_enabled': lambda: True,
         'video_edit_hub_text': lambda _lang: 'VIDEO EDIT HUB',
         'video_edit_hub_keyboard': lambda _lang: FakeMarkup([]),
+        'get_user_language': lambda _user_id: 'vi',
         'normalize_user_language': lambda _lang: 'vi',
         'time': __import__('time'),
     }

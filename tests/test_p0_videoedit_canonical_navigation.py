@@ -72,7 +72,7 @@ def test_videoedit_legacy_actions_map_to_live_canonical_actions() -> None:
         "vertical": ("aspect", "frame"),
         "compress": ("resolution", "resolution"),
         "subtitle": ("srt", "overlay"),
-        "color": ("color_preset", "color"),
+        "color": ("color", "color"),
         "preset": ("color_preset", "color"),
         "text": ("text_overlay", "overlay"),
         "sharpen": ("restore", "quality"),

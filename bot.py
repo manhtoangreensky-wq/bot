@@ -68381,7 +68381,7 @@ VIDEO_EDITOR_TEXT_FIELDS = {
     "source_video_id", "source_video_hash", "audio_policy", "status",
     "delivery_message_id", "receipt_state", "charge_state",
     "quality_tier_id", "package_id", "source_origin",
-    "requested_group",
+    "requested_group", "parent_callback", "screen_id", "entry_parent_callback",
 }
 VIDEO_EDITOR_NUMBER_FIELDS = {
     "source_file_size", "source_duration", "source_duration_ms", "job_id",
@@ -68435,6 +68435,28 @@ def update_video_editor_pending(user_id, step: str = "", **fields) -> dict:
     current.pop("created_at_ts", None)
     current.update(fields)
     return set_video_editor_pending(user_id, step or str((get_video_editor_pending(user_id) or {}).get("step") or "menu"), **current)
+
+
+def update_video_editor_screen(
+    user_id,
+    screen_id: str,
+    *,
+    parent_callback: str,
+    state_step: str = "",
+    **fields,
+) -> dict:
+    """Persist one allow-listed Video Edit screen and its exact parent."""
+
+    screen = str(screen_id or "workspace").strip().lower()
+    parent = video_edit_state_machine.safe_parent_callback(parent_callback)
+    return update_video_editor_pending(
+        user_id,
+        str(state_step or screen),
+        screen_id=screen,
+        current_screen=screen,
+        parent_callback=parent,
+        **fields,
+    )
 
 
 def get_video_editor_pending(user_id) -> dict:
@@ -73413,8 +73435,8 @@ def video_edit_audio_text(state: dict | None = None, lang: str = "vi") -> str:
 
 def video_edit_audio_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     current = dict(state or {})
-    manual_flow = str(current.get("last_section") or "") == "manual"
-    back_target = "videoedit|options|manual" if manual_flow else "videoedit|hub"
+    default_back = "videoedit|workspace" if str(current.get("last_section") or "") == "manual" else "videoedit|hub"
+    back_target = video_edit_state_machine.safe_parent_callback(current.get("parent_callback") or default_back)
     if not current.get("source_file_id"):
         return video_scene3_keyboard([
             [("📎 Gửi video", "videoedit|audio_upload"), ("❓ Hướng dẫn công cụ này", "videoedit|guide")],
@@ -74149,7 +74171,10 @@ def video_local_source_summary_keyboard(tool: str, lang: str = "vi", state: dict
     entry_context = str((state or {}).get("entry_context") or "")
     upload_target = "timeline" if entry_context == "timeline" else tool
     previous_step = str((state or {}).get("step") or "")
-    if entry_context == "timeline":
+    explicit_parent = video_edit_state_machine.safe_parent_callback((state or {}).get("parent_callback"))
+    if (state or {}).get("parent_callback"):
+        back_target = explicit_parent
+    elif entry_context == "timeline":
         back_target = "videoedit|manual_join"
     elif previous_step == "manual_cut":
         back_target = "videoedit|manual_cut"
@@ -74165,7 +74190,7 @@ def video_local_manual_options_text(state: dict, lang: str = "vi") -> str:
     plan = dict((state or {}).get("manual_edit_plan") or {})
     selected = video_local_editing.public_plan_summary(plan)
     return (
-        "✂️ <b>Chọn thao tác chỉnh sửa</b>\n\n"
+        "🛠️ <b>Không gian chỉnh sửa video</b>\n\n"
         + "\n".join(f"• {html.escape(item)}" for item in selected)
         + "\n\nChọn đúng nhóm cần làm. Có thể chọn nhiều thao tác; khi xong, bấm <b>Xem lại</b>."
     )
@@ -74173,12 +74198,74 @@ def video_local_manual_options_text(state: dict, lang: str = "vi") -> str:
 
 def video_local_manual_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
-        [("✂️ Cắt & chia đoạn", "videoedit|manual_cut"), ("➕ Ghép & sắp xếp", "videoedit|manual_join")],
-        [("🎚️ Chỉnh âm thanh", "videoedit|manual_audio"), ("🎥 Hiệu ứng & chuyển động", "videoedit|manual_effects")],
+        [("✂️ Cắt & chia đoạn", "videoedit|cut"), ("🧩 Ghép & sắp xếp", "videoedit|join")],
+        [("📐 Khung hình & kích thước", "videoedit|frame"), ("🔄 Tốc độ, xoay & lật", "videoedit|transform")],
+        [("🔊 Âm thanh", "videoedit|audio"), ("🎨 Ánh sáng & màu", "videoedit|color")],
+        [("🔠 Chữ, logo & phụ đề", "videoedit|overlay"), ("✨ Hiệu ứng local", "videoedit|effects")],
+        [("ℹ️ Thông tin video", "videoedit|source_info"), ("📋 Xem lại", "videoedit|review")],
+        [(ui_text(lang, "common.back"), "videoedit|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_local_frame_text(lang: str = "vi") -> str:
+    return (
+        "📐 <b>Khung hình & kích thước</b>\n\n"
+        "Chọn tỉ lệ/cách đặt hình hoặc độ phân giải đầu ra. Crop có thể cắt mép; Fit giữ đủ hình và thêm viền. "
+        "Đây là xử lý hình học local, không phải theo dõi chủ thể hay AI upscale."
+    )
+
+
+def video_local_frame_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("📐 Chọn tỉ lệ & cách đặt hình", "videoedit|aspect"), ("🖥 Chọn độ phân giải", "videoedit|resolution")],
+        [("🎞 Thông tin video", "videoedit|source_info"), ("📋 Xem lại", "videoedit|review")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_local_transform_text(lang: str = "vi") -> str:
+    return (
+        "🔄 <b>Tốc độ, xoay & lật</b>\n\n"
+        "Đổi tốc độ hình và âm thanh cùng hệ số, hoặc xoay/lật khung hình bằng FFmpeg local. "
+        "Mọi lựa chọn chỉ được thực thi sau bước Xem lại và xác nhận."
+    )
+
+
+def video_local_transform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
         [("⏩ Đổi tốc độ", "videoedit|speed"), ("🔄 Xoay / lật", "videoedit|manual_rotate_flip")],
-        [("☀️ Chỉnh độ sáng", "videoedit|brightness"), ("🎞 Thông tin video", "videoedit|source_info")],
-        [("✅ Xem lại", "videoedit|review"), ("📎 Gửi video khác", "videoedit|upload|manual")],
-        [(ui_text(lang, "common.back"), "videoedit|hub"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [("🎞 Thông tin video", "videoedit|source_info"), ("📋 Xem lại", "videoedit|review")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_local_color_text(lang: str = "vi") -> str:
+    return (
+        "🎨 <b>Ánh sáng & màu</b>\n\n"
+        "Chỉnh độ sáng hoặc chọn preset màu local đã kiểm soát. Hệ thống không tạo chi tiết mới và không gọi provider."
+    )
+
+
+def video_local_color_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("☀️ Chỉnh độ sáng", "videoedit|brightness"), ("🎨 Chọn preset màu", "videoedit|color_preset")],
+        [("🎞 Thông tin video", "videoedit|source_info"), ("📋 Xem lại", "videoedit|review")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
+    ])
+
+
+def video_local_overlay_text(lang: str = "vi") -> str:
+    return (
+        "🔠 <b>Chữ, logo & phụ đề</b>\n\n"
+        "Chèn chữ theo thời gian, đặt logo có kiểm soát hoặc gửi SRT hợp lệ để burn vào MP4 local."
+    )
+
+
+def video_local_overlay_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_scene3_keyboard([
+        [("🔠 Chèn chữ", "videoedit|text_overlay"), ("🖼 Chèn logo", "videoedit|logo")],
+        [("💬 Chèn phụ đề SRT", "videoedit|srt"), ("🎞 Thông tin video", "videoedit|source_info")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -74216,7 +74303,7 @@ def video_local_brightness_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✅ Xem lại" if is_vi else "✅ Review", "videoedit|review"),
             ("🎞 Thông tin video" if is_vi else "🎞 Video details", "videoedit|source_info"),
         ],
-        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), "videoedit|color"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -74234,7 +74321,7 @@ def video_local_cut_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✂️ Cắt đầu/cuối", "videoedit|trim_edges"), ("🗑️ Bỏ đoạn giữa", "videoedit|remove_middle")],
         [("🧩 Chia thành nhiều đoạn", "videoedit|split_from_manual"), ("🎞 Thông tin video", "videoedit|source_summary")],
-        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -74252,7 +74339,7 @@ def video_local_join_options_text(state: dict | None = None, lang: str = "vi") -
 def video_local_join_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("➕ Thêm video để ghép", "videoedit|concat"), ("↕️ Đổi thứ tự", "videoedit|reorder")],
-        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -74267,7 +74354,7 @@ def video_local_rotate_flip_text(lang: str = "vi") -> str:
 def video_local_rotate_flip_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("🔄 Xoay video", "videoedit|rotation"), ("↔️ Lật video", "videoedit|flip")],
-        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), "videoedit|workspace"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -74293,8 +74380,9 @@ def video_local_split_options_keyboard(state: dict, lang: str = "vi") -> InlineK
         items.append(("✅ Xem lại", "videoedit|review"))
     else:
         items.append(("🎞 Thông tin video", "videoedit|source_info"))
-    last_section = str((state or {}).get("last_section") or "")
-    back_target = "videoedit|options|manual" if last_section in {"manual", "timeline"} else "videoedit|source_summary"
+    back_target = video_edit_state_machine.safe_parent_callback(
+        (state or {}).get("parent_callback") or "videoedit|cut"
+    )
     items.extend([
         (ui_text(lang, "common.back"), back_target),
         (ui_text(lang, "common.main_menu"), "menu|main"),
@@ -74302,7 +74390,7 @@ def video_local_split_options_keyboard(state: dict, lang: str = "vi") -> InlineK
     return video_scene3_keyboard([items[index:index + 2] for index in range(0, len(items), 2)])
 
 
-def video_local_choice_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def video_local_choice_keyboard(kind: str, lang: str = "vi", *, back_callback: str = "") -> InlineKeyboardMarkup:
     maps = {
         "aspect": [("Giữ nguyên", "keep"), ("16:9", "16x9"), ("9:16", "9x16"), ("1:1", "1x1"), ("4:5", "4x5")],
         "resolution": [("Giữ nguyên", "keep"), ("720p", "720p"), ("1080p", "1080p")],
@@ -74316,9 +74404,18 @@ def video_local_choice_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMa
     items = [(label, f"videoedit|set|{kind}|{value}") for label, value in options]
     if kind == "aspect":
         items.extend([("Crop vừa khung", "videoedit|set|aspect_mode|crop"), ("Fit có viền", "videoedit|set|aspect_mode|fit")])
+    default_back = {
+        "aspect": "videoedit|frame",
+        "resolution": "videoedit|frame",
+        "rotation": "videoedit|transform",
+        "flip": "videoedit|transform",
+        "speed": "videoedit|transform",
+        "volume": "videoedit|audio",
+        "color_preset": "videoedit|color",
+    }.get(kind, "videoedit|workspace")
     items.extend([
         ("🎞 Thông tin video", "videoedit|source_summary"),
-        (ui_text(lang, "common.back"), "videoedit|options|manual"),
+        (ui_text(lang, "common.back"), video_edit_state_machine.safe_parent_callback(back_callback or default_back)),
         (ui_text(lang, "common.main_menu"), "menu|main"),
     ])
     if len(items) % 2:
@@ -74326,35 +74423,35 @@ def video_local_choice_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMa
     return video_scene3_keyboard([items[index:index + 2] for index in range(0, len(items), 2)])
 
 
-def video_local_input_keyboard(tool: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def video_local_input_keyboard(tool: str, lang: str = "vi", *, back_callback: str = "") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([[
-        (ui_text(lang, "common.back"), f"videoedit|options|{tool}"),
+        (ui_text(lang, "common.back"), video_edit_state_machine.safe_parent_callback(back_callback or f"videoedit|options|{tool}")),
         (ui_text(lang, "common.main_menu"), "menu|main"),
     ]])
 
 
-def video_local_custom_input_keyboard(allow_gaps: bool, lang: str = "vi") -> InlineKeyboardMarkup:
+def video_local_custom_input_keyboard(allow_gaps: bool, lang: str = "vi", *, back_callback: str = "videoedit|split") -> InlineKeyboardMarkup:
     gap_label = "✅ Được bỏ đoạn" if allow_gaps else "⬜ Không bỏ đoạn"
     return video_scene3_keyboard([
         [(gap_label, "videoedit|toggle_gaps"), ("🎞 Thông tin video", "videoedit|source_summary")],
-        [(ui_text(lang, "common.back"), "videoedit|options|split"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), video_edit_state_machine.safe_parent_callback(back_callback)), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
-def video_local_concat_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_local_concat_keyboard(lang: str = "vi", *, back_callback: str = "videoedit|join") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("✅ Xong phần ghép", "videoedit|concat_done"), ("🎞 Thông tin video", "videoedit|source_summary")],
-        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), video_edit_state_machine.safe_parent_callback(back_callback)), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
-def video_local_logo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_local_logo_keyboard(lang: str = "vi", *, back_callback: str = "videoedit|overlay") -> InlineKeyboardMarkup:
     return video_scene3_keyboard([
         [("↖️ Trên trái", "videoedit|set|logo_position|top_left"), ("↗️ Trên phải", "videoedit|set|logo_position|top_right")],
         [("↙️ Dưới trái", "videoedit|set|logo_position|bottom_left"), ("↘️ Dưới phải", "videoedit|set|logo_position|bottom_right")],
         [("Mờ 50%", "videoedit|set|logo_opacity|0.5"), ("Mờ 75%", "videoedit|set|logo_opacity|0.75")],
         [("Rõ 100%", "videoedit|set|logo_opacity|1"), ("🎞 Thông tin video", "videoedit|source_summary")],
-        [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
+        [(ui_text(lang, "common.back"), video_edit_state_machine.safe_parent_callback(back_callback)), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
 
@@ -225803,7 +225900,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=video_edit_audio_component_keyboard(
                 lang,
-                back_callback="videoedit|manual_audio" if str(state.get("last_section") or "") == "manual" else "videoedit|audio",
+                back_callback="videoedit|audio",
             ),
         )
     if action == "audio_master":
@@ -225816,7 +225913,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=video_edit_audio_master_keyboard(
                 lang,
-                back_callback="videoedit|manual_audio" if str(state.get("last_section") or "") == "manual" else "videoedit|audio",
+                back_callback="videoedit|audio",
             ),
         )
     if action == "audio_set":
@@ -225849,7 +225946,7 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=video_edit_audio_component_keyboard(
                 lang,
-                back_callback="videoedit|manual_audio" if str(state.get("last_section") or "") == "manual" else "videoedit|audio",
+                back_callback="videoedit|audio",
             ),
         )
     if action == "effect_pick":
@@ -226366,28 +226463,54 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             parse_mode="HTML",
             reply_markup=video_local_upload_keyboard(tool, lang),
         )
+    if action == "workspace":
+        current = update_video_editor_screen(
+            uid,
+            "workspace",
+            parent_callback=video_edit_state_machine.parent_callback("workspace", lane="manual_edit"),
+            selected_tool="manual",
+            last_section="manual",
+        )
+        return await safe_edit_or_send(
+            query,
+            video_local_manual_options_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_local_manual_options_keyboard(lang),
+        )
+    if action == "frame":
+        update_video_editor_screen(uid, "frame", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual")
+        return await safe_edit_or_send(query, video_local_frame_text(lang), parse_mode="HTML", reply_markup=video_local_frame_keyboard(lang))
+    if action == "transform":
+        update_video_editor_screen(uid, "transform", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual")
+        return await safe_edit_or_send(query, video_local_transform_text(lang), parse_mode="HTML", reply_markup=video_local_transform_keyboard(lang))
+    if action == "color":
+        update_video_editor_screen(uid, "color", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual")
+        return await safe_edit_or_send(query, video_local_color_text(lang), parse_mode="HTML", reply_markup=video_local_color_keyboard(lang))
+    if action == "overlay":
+        update_video_editor_screen(uid, "overlay", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual")
+        return await safe_edit_or_send(query, video_local_overlay_text(lang), parse_mode="HTML", reply_markup=video_local_overlay_keyboard(lang))
     if action == "manual_cut":
-        update_video_editor_pending(uid, "manual_cut", selected_tool="manual", last_section="manual", return_to="manual_cut")
+        update_video_editor_screen(uid, "cut", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="cut")
         return await safe_edit_or_send(query, video_local_cut_options_text(lang), parse_mode="HTML", reply_markup=video_local_cut_options_keyboard(lang))
     if action == "manual_join":
-        current = update_video_editor_pending(uid, "manual_join", selected_tool="manual", last_section="manual", return_to="manual_join")
+        current = update_video_editor_screen(uid, "join", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="join")
         return await safe_edit_or_send(query, video_local_join_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_join_options_keyboard(lang))
     if action == "manual_audio":
-        current = update_video_editor_pending(uid, "audio", selected_tool="manual", last_section="manual", return_to="manual_audio")
+        current = update_video_editor_screen(uid, "audio", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="audio")
         return await safe_edit_or_send(query, video_edit_audio_text(current, lang), parse_mode="HTML", reply_markup=video_edit_audio_keyboard(current, lang))
     if action == "manual_effects":
-        update_video_editor_pending(uid, "manual_effects", selected_tool="manual", entry_context="manual_effects", last_section="manual", return_to="manual_effects")
+        update_video_editor_screen(uid, "effects", parent_callback="videoedit|workspace", selected_tool="manual", entry_context="manual_effects", last_section="manual", return_to="effects")
         return await safe_edit_or_send(
             query,
             video_edit_effects_text(lang, source_ready=True),
             parse_mode="HTML",
-            reply_markup=video_edit_effects_keyboard(lang, back_callback="videoedit|options|manual"),
+            reply_markup=video_edit_effects_keyboard(lang, back_callback="videoedit|workspace"),
         )
     if action == "manual_rotate_flip":
-        update_video_editor_pending(uid, "manual_rotate_flip", selected_tool="manual", last_section="manual", return_to="manual_rotate_flip")
+        update_video_editor_screen(uid, "transform", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="transform")
         return await safe_edit_or_send(query, video_local_rotate_flip_text(lang), parse_mode="HTML", reply_markup=video_local_rotate_flip_keyboard(lang))
     if action == "brightness":
-        current = update_video_editor_pending(uid, "brightness", selected_tool="manual", last_section="manual", return_to="brightness")
+        current = update_video_editor_screen(uid, "color", parent_callback="videoedit|workspace", selected_tool="manual", last_section="manual", return_to="color")
         return await safe_edit_or_send(
             query,
             video_local_brightness_text(current, lang),
@@ -226428,21 +226551,30 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
             reply_markup=video_local_brightness_keyboard(lang),
         )
     if action == "manual_done":
-        current = update_video_editor_pending(uid, "options", selected_tool="manual", last_section="manual")
+        current = update_video_editor_screen(uid, "workspace", parent_callback="videoedit|manual", selected_tool="manual", last_section="manual")
         return await safe_edit_or_send(query, video_local_manual_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang))
     if action in {"source_summary", "source_info"}:
-        update_video_editor_pending(uid, "source_summary")
+        caller = video_edit_state_machine.screen_callback(state.get("current_screen") or state.get("screen_id"))
+        if str(state.get("current_screen") or "") == "source_info":
+            caller = video_edit_state_machine.safe_parent_callback(state.get("parent_callback") or "videoedit|workspace")
+        current = update_video_editor_screen(uid, "source_info", parent_callback=caller)
         return await safe_edit_or_send(
             query,
-            video_local_source_summary_text(state, lang),
+            video_local_source_summary_text(current, lang),
             parse_mode="HTML",
-            reply_markup=video_local_source_summary_keyboard(tool, lang, state),
+            reply_markup=video_local_source_summary_keyboard(tool, lang, current),
         )
     if action == "options":
         requested_tool = str(parts[2] if len(parts) > 2 else tool)
         if requested_tool in {"manual", "split"}:
             tool = requested_tool
-        current = update_video_editor_pending(uid, "options", selected_tool=tool, last_section="timeline" if str(state.get("entry_context") or "") == "timeline" else "manual")
+        current = update_video_editor_screen(
+            uid,
+            "split" if tool == "split" else "workspace",
+            parent_callback="videoedit|cut" if tool == "split" else "videoedit|manual",
+            selected_tool=tool,
+            last_section="timeline" if str(state.get("entry_context") or "") == "timeline" else "manual",
+        )
         if tool == "split":
             return await safe_edit_or_send(query, video_local_split_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_split_options_keyboard(current, lang))
         return await safe_edit_or_send(query, video_local_manual_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang))
@@ -226486,31 +226618,47 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
         current = update_video_editor_pending(uid, "options", manual_edit_plan=plan)
         return await safe_edit_or_send(query, video_local_manual_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_manual_options_keyboard(lang))
     if action in {"trim_edges", "trim_range"}:
-        update_video_editor_pending(uid, "await_trim_edges" if action == "trim_edges" else "await_trim_range")
+        update_video_editor_screen(
+            uid,
+            "trim_input",
+            parent_callback="videoedit|cut",
+            state_step="await_trim_edges" if action == "trim_edges" else "await_trim_range",
+            pending_field="trim_edges" if action == "trim_edges" else "trim_range",
+        )
         return await safe_edit_or_send(
             query,
             "✂️ Nhập khoảng cần giữ theo mẫu <b>00:05-01:20</b>. Mốc đầu và cuối phải nằm trong thời lượng video.",
             parse_mode="HTML",
-            reply_markup=video_local_input_keyboard("manual", lang),
+            reply_markup=video_local_input_keyboard("manual", lang, back_callback="videoedit|cut"),
         )
     if action == "remove_middle":
-        update_video_editor_pending(uid, "await_split_custom", selected_tool="split", allow_gaps=True, split_mode="remove_middle", last_section="manual")
+        update_video_editor_screen(
+            uid,
+            "trim_input",
+            parent_callback="videoedit|cut",
+            state_step="await_split_custom",
+            selected_tool="split",
+            allow_gaps=True,
+            split_mode="remove_middle",
+            pending_field="remove_middle",
+            last_section="manual",
+        )
         return await safe_edit_or_send(
             query,
             "🗑️ <b>Chọn các phần cần giữ</b>\n\nNhập mỗi khoảng cần giữ trên một dòng. Ví dụ:\n<code>00:00-00:20\n00:35-01:10</code>\n\nĐoạn 00:20-00:35 sẽ bị bỏ. Hệ thống xuất các phần còn lại theo đúng thứ tự; chưa ghép thành một file nếu chưa có bước ghép tiếp.",
             parse_mode="HTML",
-            reply_markup=video_local_input_keyboard("manual", lang),
+            reply_markup=video_local_input_keyboard("manual", lang, back_callback="videoedit|cut"),
         )
     if action == "split_from_manual":
-        current = update_video_editor_pending(uid, "options", selected_tool="split", last_section="manual")
+        current = update_video_editor_screen(uid, "split", parent_callback="videoedit|cut", selected_tool="split", last_section="manual")
         return await safe_edit_or_send(query, video_local_split_options_text(current, lang), parse_mode="HTML", reply_markup=video_local_split_options_keyboard(current, lang))
     if action == "concat":
-        update_video_editor_pending(uid, "await_concat")
+        update_video_editor_screen(uid, "concat_input", parent_callback="videoedit|join", state_step="await_concat", pending_field="concat")
         return await safe_edit_or_send(
             query,
             "➕ <b>Gửi lần lượt các video cần ghép tiếp</b>\n\nTối đa 10 video tính cả video đầu. Hệ thống sẽ chuẩn hóa cùng thông số trước khi ghép.",
             parse_mode="HTML",
-            reply_markup=video_local_concat_keyboard(lang),
+            reply_markup=video_local_concat_keyboard(lang, back_callback="videoedit|join"),
         )
     if action == "concat_done":
         concat_sources = list(state.get("concat_sources") or [])
@@ -226525,58 +226673,73 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
                 query,
                 "↕️ <b>Đổi thứ tự video ghép</b>\n\nHiện mới có video đầu tiên. Hãy thêm ít nhất một video nữa trước khi đổi thứ tự.",
                 parse_mode="HTML",
-                reply_markup=video_scene3_keyboard([[('➕ Thêm video ghép', 'videoedit|concat'), (ui_text(lang, 'common.back'), 'videoedit|options|manual')]]),
+                reply_markup=video_scene3_keyboard([[('➕ Thêm video ghép', 'videoedit|concat'), (ui_text(lang, 'common.back'), 'videoedit|join')]]),
             )
         total = len(concat_sources) + 1
-        update_video_editor_pending(uid, "await_concat_order", last_section="manual")
+        update_video_editor_screen(uid, "reorder_input", parent_callback="videoedit|join", state_step="await_concat_order", pending_field="concat_order", last_section="manual")
         return await safe_edit_or_send(
             query,
             f"↕️ <b>Nhập thứ tự mới</b>\n\nCó {total} video. Nhập đủ các số, mỗi số đúng một lần. Ví dụ: <code>{','.join(str(index) for index in range(total, 0, -1))}</code>.",
             parse_mode="HTML",
-            reply_markup=video_local_input_keyboard("manual", lang),
+            reply_markup=video_local_input_keyboard("manual", lang, back_callback="videoedit|join"),
         )
     if action in {"aspect", "resolution", "rotation", "flip", "speed", "volume", "color_preset"}:
-        update_video_editor_pending(
+        parent_callback = {
+            "aspect": "videoedit|frame",
+            "resolution": "videoedit|frame",
+            "rotation": "videoedit|transform",
+            "flip": "videoedit|transform",
+            "speed": "videoedit|transform",
+            "volume": "videoedit|audio",
+            "color_preset": "videoedit|color",
+        }[action]
+        update_video_editor_screen(
             uid,
-            f"choose_{action}",
-            return_to=action if action == "speed" else "options",
+            "rotation_value" if action in {"rotation", "flip"} else f"choose_{action}",
+            parent_callback=parent_callback,
+            return_to=parent_callback,
         )
-        return await safe_edit_or_send(query, "Chọn giá trị phù hợp cho video.", parse_mode=None, reply_markup=video_local_choice_keyboard(action, lang))
+        return await safe_edit_or_send(
+            query,
+            "Chọn giá trị phù hợp cho video.",
+            parse_mode=None,
+            reply_markup=video_local_choice_keyboard(action, lang, back_callback=parent_callback),
+        )
     if action == "text_overlay":
-        update_video_editor_pending(uid, "await_text_overlay")
+        update_video_editor_screen(uid, "text_input", parent_callback="videoedit|overlay", state_step="await_text_overlay", pending_field="text_overlay")
         return await safe_edit_or_send(
             query,
             "🔠 Nhập theo mẫu: <b>Nội dung | dưới | 00:00-00:10 | 42</b>\n\nCó thể bỏ các phần sau dấu | để dùng mặc định.",
             parse_mode="HTML",
-            reply_markup=video_local_input_keyboard("manual", lang),
+            reply_markup=video_local_input_keyboard("manual", lang, back_callback="videoedit|overlay"),
         )
     if action == "logo":
-        update_video_editor_pending(uid, "await_logo")
-        return await safe_edit_or_send(query, "🖼 Gửi logo PNG hoặc JPG. Hệ thống sẽ giữ đúng tỉ lệ và hỏi vị trí sau khi nhận.", reply_markup=video_local_input_keyboard("manual", lang))
+        update_video_editor_screen(uid, "logo_input", parent_callback="videoedit|overlay", state_step="await_logo", pending_field="logo")
+        return await safe_edit_or_send(query, "🖼 Gửi logo PNG hoặc JPG. Hệ thống sẽ giữ đúng tỉ lệ và hỏi vị trí sau khi nhận.", reply_markup=video_local_input_keyboard("manual", lang, back_callback="videoedit|overlay"))
     if action == "srt":
-        update_video_editor_pending(uid, "await_srt")
-        return await safe_edit_or_send(query, "💬 Gửi file phụ đề định dạng .srt. Hệ thống sẽ kiểm tra trước khi cho xác nhận.", reply_markup=video_local_input_keyboard("manual", lang))
+        update_video_editor_screen(uid, "srt_input", parent_callback="videoedit|overlay", state_step="await_srt", pending_field="srt")
+        return await safe_edit_or_send(query, "💬 Gửi file phụ đề định dạng .srt. Hệ thống sẽ kiểm tra trước khi cho xác nhận.", reply_markup=video_local_input_keyboard("manual", lang, back_callback="videoedit|overlay"))
     if action == "split_fixed":
-        update_video_editor_pending(uid, "await_split_fixed")
-        return await safe_edit_or_send(query, "⏱ Nhập thời lượng mỗi phần. Ví dụ: <b>30</b> (giây) hoặc <b>2m</b> (phút).", parse_mode="HTML", reply_markup=video_local_input_keyboard("split", lang))
+        update_video_editor_screen(uid, "split_input", parent_callback="videoedit|split", state_step="await_split_fixed", pending_field="split_fixed")
+        return await safe_edit_or_send(query, "⏱ Nhập thời lượng mỗi phần. Ví dụ: <b>30</b> (giây) hoặc <b>2m</b> (phút).", parse_mode="HTML", reply_markup=video_local_input_keyboard("split", lang, back_callback="videoedit|split"))
     if action == "split_count":
-        update_video_editor_pending(uid, "await_split_count")
-        return await safe_edit_or_send(query, "🔢 Nhập số phần muốn chia, từ 1 đến 30. Mỗi phần phải dài ít nhất 2 giây.", reply_markup=video_local_input_keyboard("split", lang))
+        update_video_editor_screen(uid, "split_input", parent_callback="videoedit|split", state_step="await_split_count", pending_field="split_count")
+        return await safe_edit_or_send(query, "🔢 Nhập số phần muốn chia, từ 1 đến 30. Mỗi phần phải dài ít nhất 2 giây.", reply_markup=video_local_input_keyboard("split", lang, back_callback="videoedit|split"))
     if action == "split_custom":
-        current = update_video_editor_pending(uid, "await_split_custom", allow_gaps=bool(state.get("allow_gaps", False)))
+        current = update_video_editor_screen(uid, "split_input", parent_callback="videoedit|split", state_step="await_split_custom", pending_field="split_custom", allow_gaps=bool(state.get("allow_gaps", False)))
         return await safe_edit_or_send(
             query,
             "✍️ Nhập mỗi khoảng trên một dòng. Ví dụ:\n<code>00:00-00:30\n00:30-01:00</code>\n\nMặc định các khoảng phải liên tục và phủ hết video.",
             parse_mode="HTML",
-            reply_markup=video_local_custom_input_keyboard(bool(current.get("allow_gaps")), lang),
+            reply_markup=video_local_custom_input_keyboard(bool(current.get("allow_gaps")), lang, back_callback="videoedit|split"),
         )
     if action == "toggle_gaps":
         allow_gaps = not bool(state.get("allow_gaps", False))
-        update_video_editor_pending(uid, "await_split_custom", allow_gaps=allow_gaps)
+        update_video_editor_screen(uid, "split_input", parent_callback="videoedit|split", state_step="await_split_custom", pending_field="split_custom", allow_gaps=allow_gaps)
         return await safe_edit_or_send(
             query,
             "✍️ Nhập mỗi khoảng trên một dòng. " + ("Các đoạn không chọn sẽ được bỏ qua." if allow_gaps else "Các khoảng phải liên tục và phủ hết video."),
-            reply_markup=video_local_custom_input_keyboard(allow_gaps, lang),
+            reply_markup=video_local_custom_input_keyboard(allow_gaps, lang, back_callback="videoedit|split"),
         )
     if action == "set":
         kind = str(parts[2] if len(parts) > 2 else "")
