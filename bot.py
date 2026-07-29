@@ -2176,6 +2176,9 @@ SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.02, min(0.06, env_float("SUBDUB_HARDSU
 SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.90, min(0.96, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.91)))
 SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.04, min(0.09, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.05)))
 SUBDUB_SUBTITLE_FONT_MULTIPLIER = max(1.0, min(1.25, env_float("SUBDUB_SUBTITLE_FONT_MULTIPLIER", 1.08)))
+SUBDUB_SUBTITLE_POSITION_COUNT = 7
+SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT = 2
+SUBDUB_SUBTITLE_VERTICAL_FONT_INCREMENT = 2
 SUBDUB_SUBTITLE_TEXT_BOX_ENABLED = env_flag("SUBDUB_SUBTITLE_TEXT_BOX_ENABLED", "true")
 SUBDUB_VIDEO_FIT_MODE = (_env("SUBDUB_VIDEO_FIT_MODE", "cover") or "cover").strip().lower()
 SUBDUB_KEEP_ORIGINAL_RESOLUTION = env_flag("SUBDUB_KEEP_ORIGINAL_RESOLUTION", "true")
@@ -202737,6 +202740,8 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "requested_voice_gender", "dub_voice_gender",
             "hardsub_cover_enabled", "subtitle_style_profile",
             "subtitle_style_preset", "cover_original_subtitle",
+            "subtitle_position_slot", "subtitle_position", "subtitle_align",
+            "subtitle_position_return_step",
             "cover_opacity", "cover_height_ratio", "cover_y_ratio",
             "advanced_style_enabled",
             "keep_original_audio", "original_audio_volume_percent",
@@ -203532,6 +203537,8 @@ def subtitle_plus_dub_confirm_keyboard(lang: str = "vi", state: dict | None = No
     ]
     if subdub_audio_mix_available(state):
         rows.insert(1, [InlineKeyboardButton("🎚 Âm thanh" if is_vi else "🎚 Audio", callback_data="videodub|audio_mix")])
+    if video_dubbing_subtitle_position_available(state):
+        rows.insert(1, [video_dubbing_subtitle_position_button(lang, state)])
     return InlineKeyboardMarkup(rows)
 
 def subtitle_plus_dub_preview_ready_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -204583,6 +204590,168 @@ def video_dubbing_original_subtitle_confirm_text(state: dict | None = None, lang
         "TOAN AAS chưa xử lý file và chưa trừ Xu ở bước này."
     )
 
+def subdub_subtitle_position_slot(state: dict | None = None) -> int:
+    current = dict(state or {})
+    raw = current.get("subtitle_position_slot") or current.get("subdub_position_slot")
+    if raw in {None, ""}:
+        token = str(current.get("subtitle_position") or current.get("position") or "").strip().lower()
+        match = re.fullmatch(r"slot[_-]?(\d+)", token)
+        raw = match.group(1) if match else SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT
+    return subdub_clamp_int(
+        raw,
+        SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT,
+        1,
+        SUBDUB_SUBTITLE_POSITION_COUNT,
+    )
+
+def subdub_subtitle_position_label(slot, lang: str = "vi") -> str:
+    position = subdub_clamp_int(
+        slot,
+        SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT,
+        1,
+        SUBDUB_SUBTITLE_POSITION_COUNT,
+    )
+    labels_vi = {
+        1: "Sát dưới",
+        2: "Thấp",
+        3: "Dưới giữa",
+        4: "Chính giữa",
+        5: "Trên giữa",
+        6: "Cao",
+        7: "Sát trên",
+    }
+    labels_en = {
+        1: "Bottom edge",
+        2: "Low",
+        3: "Lower middle",
+        4: "Center",
+        5: "Upper middle",
+        6: "High",
+        7: "Top edge",
+    }
+    labels = labels_vi if normalize_user_language(lang) == "vi" else labels_en
+    return f"{position}/7 · {labels[position]}"
+
+def video_dubbing_subtitle_position_available(state: dict | None = None) -> bool:
+    current = dict(state or {})
+    mode = normalize_video_translate_mode(
+        current.get("video_processing_mode") or current.get("mode") or current.get("process_type")
+    )
+    output = str(current.get("output_type") or current.get("output_format") or "").strip().lower()
+    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
+        return output not in {"srt", "vtt", "txt", "audio"}
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return output not in {"video", "audio"} or subtitle_plus_dub_no_subtitle_subpath(current) != VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
+    return False
+
+def video_dubbing_subtitle_position_button(lang: str = "vi", state: dict | None = None) -> InlineKeyboardButton:
+    is_vi = normalize_user_language(lang) == "vi"
+    label = subdub_subtitle_position_label(subdub_subtitle_position_slot(state), lang)
+    return InlineKeyboardButton(
+        f"📍 Vị trí: {label}" if is_vi else f"📍 Position: {label}",
+        callback_data="videodub|subtitle_position",
+    )
+
+def video_dubbing_subtitle_position_text(state: dict | None = None, lang: str = "vi") -> str:
+    label = html.escape(subdub_subtitle_position_label(subdub_subtitle_position_slot(state), lang))
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📍 <b>Subtitle position</b>\n\n"
+            f"Current: <b>{label}</b>"
+        )
+    return (
+        "📍 <b>Vị trí phụ đề</b>\n\n"
+        f"Đang chọn: <b>{label}</b>"
+    )
+
+def video_dubbing_subtitle_position_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    selected = subdub_subtitle_position_slot(state)
+
+    def button(slot: int) -> InlineKeyboardButton:
+        label = subdub_subtitle_position_label(slot, lang)
+        prefix = "✓ " if slot == selected else ""
+        return InlineKeyboardButton(
+            f"{prefix}{label}",
+            callback_data=f"videodub|subtitle_position_set|{slot}",
+        )
+
+    return InlineKeyboardMarkup([
+        [button(7), button(6)],
+        [button(5), button(4)],
+        [button(3), button(2)],
+        [button(1)],
+        [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|subtitle_position_back")],
+    ])
+
+async def handle_video_dubbing_subtitle_position_callback(
+    query,
+    user_id,
+    state: dict,
+    mode: str,
+    action: str,
+    value: str,
+    lang: str = "vi",
+):
+    if not video_dubbing_subtitle_position_available(state) and str(state.get("step") or "") != "original_subtitle_confirm":
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_confirm_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_confirm_keyboard(lang, state),
+        )
+    if action == "subtitle_position":
+        return_step = str(state.get("step") or "confirm")
+        if return_step not in {"confirm", "original_subtitle_confirm", "dub_confirmation"}:
+            return_step = "confirm"
+        state = set_video_dubbing_pending(
+            user_id,
+            "subtitle_position",
+            subtitle_position_return_step=return_step,
+            processing="0",
+        )
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_subtitle_position_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_subtitle_position_keyboard(lang, state),
+        )
+    return_step = str(state.get("subtitle_position_return_step") or "confirm")
+    if return_step not in {"confirm", "original_subtitle_confirm", "dub_confirmation"}:
+        return_step = "confirm"
+    fields = {"subtitle_position_return_step": "", "processing": "0"}
+    if action == "subtitle_position_set":
+        slot = subdub_clamp_int(value, SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT, 1, SUBDUB_SUBTITLE_POSITION_COUNT)
+        fields.update({
+            "subtitle_position_slot": slot,
+            "subtitle_position": f"slot_{slot}",
+            "subtitle_align": "center",
+        })
+    state = set_video_dubbing_pending(user_id, return_step, **fields)
+    if return_step == "original_subtitle_confirm":
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_original_subtitle_confirm_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_original_subtitle_confirm_keyboard(lang, state),
+        )
+    if return_step == "dub_confirmation" or (
+        mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        and str(state.get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+    ):
+        return await safe_edit_or_send(
+            query,
+            subtitle_plus_dub_confirm_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=subtitle_plus_dub_confirm_keyboard(lang, state),
+        )
+    return await safe_edit_or_send(
+        query,
+        video_dubbing_confirm_text(state, lang),
+        parse_mode="HTML",
+        reply_markup=video_dubbing_confirm_keyboard(lang, state),
+    )
+
 def video_dubbing_original_subtitle_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     mode = normalize_video_translate_mode((state or {}).get("mode") or (state or {}).get("video_processing_mode"))
@@ -204590,6 +204759,8 @@ def video_dubbing_original_subtitle_confirm_keyboard(lang: str = "vi", state: di
     rows = [
         [InlineKeyboardButton("✅ Tạo phụ đề gốc" if is_vi else "✅ Create original subtitles", callback_data="videodub|confirm_original_subtitle")],
     ]
+    if mode != VIDEO_SUBTITLE_MODE_DUB:
+        rows.append([video_dubbing_subtitle_position_button(lang, state)])
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         rows.append([InlineKeyboardButton("⏭ Bỏ qua" if is_vi else "⏭ Skip", callback_data="videodub|skip_original_subtitle")])
     back_label = "⬅️ Quay lại" if is_vi else "⬅️ Back"
@@ -205377,7 +205548,7 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
         (state or {}).get("video_processing_mode") or (state or {}).get("mode") or (state or {}).get("process_type")
     )
     if subtitle_plus_dub_is_active(state) and active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and not video_dubbing_is_video_only_mode(mode):
-        return subtitle_plus_dub_confirm_keyboard(lang)
+        return subtitle_plus_dub_confirm_keyboard(lang, state)
     confirm_action = {
         VIDEO_SUBTITLE_MODE_CREATE: "confirm_subtitle_create",
         VIDEO_SUBTITLE_MODE_TRANSLATE: "confirm_subtitle_translate",
@@ -205399,6 +205570,7 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
     } and not standalone_flow:
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             return InlineKeyboardMarkup([
+                [video_dubbing_subtitle_position_button(lang, state)],
                 [
                     InlineKeyboardButton("✅ Xác nhận dịch" if is_vi else "✅ Confirm translation", callback_data="videodub|final"),
                     InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_language"),
@@ -205421,15 +205593,19 @@ def video_dubbing_confirm_keyboard(lang: str = "vi", state: dict | None = None) 
             voice_row = [InlineKeyboardButton("🎙 Đổi voice" if is_vi else "🎙 Change voice", callback_data="videodub|back_voice")]
             if subdub_audio_mix_available(state):
                 voice_row.append(InlineKeyboardButton("🎚 Âm thanh" if is_vi else "🎚 Audio", callback_data="videodub|audio_mix"))
-            return InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Tạo video hoàn chỉnh" if is_vi else "✅ Create final video", callback_data="videodub|final")],
+            rows = [[InlineKeyboardButton("✅ Tạo video hoàn chỉnh" if is_vi else "✅ Create final video", callback_data="videodub|final")]]
+            if video_dubbing_subtitle_position_available(state):
+                rows.append([video_dubbing_subtitle_position_button(lang, state)])
+            rows.extend([
                 voice_row,
                 [
                     InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_voice"),
                     InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
                 ],
             ])
+            return InlineKeyboardMarkup(rows)
         return InlineKeyboardMarkup([
+            [video_dubbing_subtitle_position_button(lang, state)],
             [
                 InlineKeyboardButton("✅ Tạo phụ đề gốc" if is_vi else "✅ Create original subtitles", callback_data="videodub|final"),
                 InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_confirm"),
@@ -211207,6 +211383,7 @@ def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
     width, height = subdub_style_video_size(state)
     target = int(round(base * multiplier))
     cap = 42
+    vertical = False
     if height:
         vertical = bool(width and height >= width * 1.15)
         if height <= 720:
@@ -211216,7 +211393,8 @@ def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
         else:
             cap = 44 if vertical else 42
     current_effective = subdub_clamp_int(min(target, cap) + 2, min(target, cap) + 2, 40, 48)
-    return subdub_clamp_int(current_effective - 2, current_effective - 2, 38, 46)
+    vertical_increment = SUBDUB_SUBTITLE_VERTICAL_FONT_INCREMENT if vertical else 0
+    return subdub_clamp_int(current_effective - 2 + vertical_increment, current_effective - 2 + vertical_increment, 38, 48)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
@@ -211251,6 +211429,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
             "font", "subtitle_font", "subdub_font",
             "size", "subtitle_size", "subdub_size",
             "position", "subtitle_position", "subdub_position",
+            "subtitle_position_slot", "subdub_position_slot",
             "align", "subtitle_align", "subdub_align",
             "text_color", "subtitle_color", "subdub_color",
             "outline_color", "subtitle_outline_color",
@@ -211280,6 +211459,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
                 normalized_key = "show_subtitles"
             if normalized_key == "box_background":
                 normalized_key = "boxed_background"
+            if normalized_key == "position_slot":
+                normalized_key = "subtitle_position_slot"
             style[normalized_key] = value
     if cover_default_enabled:
         style["cover_original"] = True
@@ -211303,6 +211484,12 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["subtitle_font_multiplier"] = max(1.0, min(1.25, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     style["subtitle_font_size_before"] = int(round(float(style.get("size") or 0) * float(style.get("subtitle_font_multiplier") or 1.0)))
     style["render_size"] = subdub_render_subtitle_size(style, state)
+    video_width, video_height = subdub_style_video_size(state)
+    style["subtitle_vertical_font_increment"] = (
+        SUBDUB_SUBTITLE_VERTICAL_FONT_INCREMENT
+        if m4live1_style_active and video_width and video_height >= video_width * 1.15
+        else 0
+    )
     style["subtitle_font_size_after"] = int(style.get("render_size") or 0)
     if m4live1_style_active:
         style["subtitle_style_design_base_size"] = int(style.get("size") or 0)
@@ -211345,13 +211532,23 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
     style["play_res_x"] = max(480, min(3840, int(width or 1280)))
     style["play_res_y"] = max(480, min(3840, int(height or 720)))
+    position_slot_explicit = any(
+        str(source.get(key) or "").strip()
+        for source in (state, custom)
+        for key in ("subtitle_position_slot", "subdub_position_slot")
+    ) or bool(re.fullmatch(r"slot[_-]?\d+", str(state.get("subtitle_position") or "").strip().lower()))
+    style["subtitle_position_slot_explicit"] = bool(position_slot_explicit)
+    if position_slot_explicit:
+        style["subtitle_position_slot"] = subdub_subtitle_position_slot({**state, **custom, **style})
+        style["position"] = f"slot_{style['subtitle_position_slot']}"
+        style["align"] = "center"
     if m4live1_style_active:
         style["subtitle_alignment"] = "bottom_center"
         style["subtitle_max_width_ratio"] = max(0.84, min(0.88, subdub_float_value(style.get("max_width_ratio"), 0.86)))
         style["subtitle_max_lines"] = 2
         style["subtitle_pipeline_untouched"] = True
         style["m4live2_subtitle_bottom_lock"] = True
-        style["subtitle_pos_override_removed"] = True
+        style["subtitle_pos_override_removed"] = not bool(position_slot_explicit)
         style["m4live1_style_renderer_only"] = True
         style["subtitle_margin_v_before"] = int(max(48, int(style["play_res_y"] * 0.05)))
         style["subtitle_margin_v_after"] = max(6, min(14, int(round(style["play_res_y"] * 0.008))))
@@ -211401,6 +211598,18 @@ def subdub_ass_alignment(position: str = "bottom", align: str = "center") -> tup
     if position in {"bottom_high", "above_original"}:
         return horizontal, 110
     return horizontal, 48
+
+def subdub_subtitle_position_point(style_or_state: dict | None = None) -> tuple[int, int]:
+    style = dict(style_or_state or {})
+    play_res_x = max(480, int(style.get("play_res_x") or style.get("video_width") or 1280))
+    play_res_y = max(480, int(style.get("play_res_y") or style.get("video_height") or 720))
+    font_size = max(24, int(style.get("render_size") or style.get("size") or 48))
+    slot = subdub_subtitle_position_slot(style)
+    bottom_y = play_res_y - max(int(round(play_res_y * 0.035)), font_size)
+    top_y = max(int(round(play_res_y * 0.055)), int(round(font_size * 2.4)))
+    progress = float(slot - 1) / float(max(1, SUBDUB_SUBTITLE_POSITION_COUNT - 1))
+    y = int(round(bottom_y + ((top_y - bottom_y) * progress)))
+    return int(round(play_res_x / 2.0)), max(1, min(play_res_y - 1, y))
 
 def subdub_parse_srt_timestamp(value: str) -> float:
     text = str(value or "0").strip().replace(",", ".")
@@ -211534,6 +211743,12 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
     play_res_x = int(style.get("play_res_x") or 1080)
     play_res_y = int(style.get("play_res_y") or 1920)
+    position_slot = int(style.get("subtitle_position_slot") or 0) if style.get("subtitle_position_slot_explicit") else 0
+    position_override = ""
+    position_y = 0
+    if position_slot:
+        position_x, position_y = subdub_subtitle_position_point(style)
+        position_override = rf"{{\an2\pos({position_x},{position_y})}}"
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
         if style.get("m4live1_style_renderer_only"):
             if style.get("subtitle_margin_v_after") is not None:
@@ -211564,7 +211779,9 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         f"; m4live2_subtitle_bottom_lock: {'yes' if style.get('m4live2_subtitle_bottom_lock') else 'no'}",
         f"; subtitle_alignment: {'bottom_center' if alignment == 2 else alignment}",
         f"; subtitle_margin_v_effective: {margin_v}",
-        "; subtitle_pos_override_removed: yes",
+        f"; subtitle_position_slot: {position_slot or 'default'}",
+        f"; subtitle_position_y: {position_y or 'default'}",
+        f"; subtitle_pos_override_removed: {'no' if position_override else 'yes'}",
         f"; subtitle_max_lines: {int(style.get('max_lines') or 2)}",
         "; subtitle_cue_timestamps_mutated: no",
         f"; subtitle_font_script: {style.get('subtitle_font_script') or 'latin'}",
@@ -211606,7 +211823,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
                 "Dialogue: 0,"
                 f"{subdub_ass_timestamp(block_start)},"
                 f"{subdub_ass_timestamp(block_end)},"
-                f"Default,,0,0,0,,{escaped}"
+                f"Default,,0,0,0,,{position_override}{escaped}"
             )
             last_dialogue_end = max(last_dialogue_end, block_end)
             continue
@@ -211636,7 +211853,7 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
                 "Dialogue: 0,"
                 f"{subdub_ass_timestamp(chunk_start)},"
                 f"{subdub_ass_timestamp(chunk_end)},"
-                f"Default,,0,0,0,,{escaped}"
+                f"Default,,0,0,0,,{position_override}{escaped}"
             )
             last_dialogue_end = max(last_dialogue_end, chunk_end)
     if len(header) >= 5:
@@ -218467,6 +218684,9 @@ async def handle_video_dubbing_callback(
             "output_type": "",
             "output_format": "",
             "output_label": "",
+            "subtitle_position_slot": SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT,
+            "subtitle_position": f"slot_{SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT}",
+            "subtitle_align": "center",
         }
         lane_readiness = get_subdub_lane_readiness(
             mode,
@@ -218516,6 +218736,10 @@ async def handle_video_dubbing_callback(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     active_flow = str(state.get("active_flow") or "")
+    if action in {"subtitle_position", "subtitle_position_set", "subtitle_position_back"}:
+        return await handle_video_dubbing_subtitle_position_callback(
+            query, uid, state, mode, action, value, lang
+        )
     if action == "language" and (not state or not mode):
         return await safe_edit_or_send(
             query,
@@ -219071,7 +219295,7 @@ async def handle_video_dubbing_callback(
                 query,
                 subtitle_plus_dub_confirm_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_confirm_keyboard(lang),
+                reply_markup=subtitle_plus_dub_confirm_keyboard(lang, state),
             )
         if action == "combo_back_voice":
             state = set_video_dubbing_pending(uid, "choosing_voice", processing="0")
@@ -219085,7 +219309,7 @@ async def handle_video_dubbing_callback(
             return await safe_edit_or_send(
                 query,
                 video_dubbing_preview_locked_text(lang),
-                reply_markup=subtitle_plus_dub_confirm_keyboard(lang),
+                reply_markup=subtitle_plus_dub_confirm_keyboard(lang, state),
             )
         if action == "combo_full_dub":
             if state.get("processing") == "1" and VIDEO_WAITING_LOCK_ENABLED:
@@ -219142,7 +219366,7 @@ async def handle_video_dubbing_callback(
                 state = set_video_dubbing_pending(uid, "dub_confirmation", processing="0")
                 return await query.message.reply_text(
                     result.get("text") or subtitle_plus_dub_safe_fail_text("tts_failed", lang),
-                    reply_markup=subtitle_plus_dub_confirm_keyboard(lang),
+                    reply_markup=subtitle_plus_dub_confirm_keyboard(lang, state),
                 )
             state = set_video_dubbing_pending(
                 uid,
