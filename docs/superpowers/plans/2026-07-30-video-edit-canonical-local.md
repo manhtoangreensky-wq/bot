@@ -61,6 +61,8 @@ def test_videoedit_parent_callback_fails_closed():
     assert machine.safe_parent_callback("menu|main_video", root=True) == "menu|main_video"
 ```
 
+Add one public keyboard audit that constructs every Video Edit keyboard and asserts every row satisfies the current adaptive-row contract, every callback is non-empty, and no row repeats callback data. This must reproduce the current one-button Brightness review row and the duplicate `videoedit|hub` legacy redirect before implementation.
+
 - [ ] **Step 2: Run the tests and verify RED**
 
 Run:
@@ -117,6 +119,8 @@ def parent_callback(screen: Any, *, lane: Any = "") -> str:
         return lane_callback(lane)
     return _SCREEN_PARENTS.get(key, "videoedit|hub")
 ```
+
+The state contract must also reject unknown requested operation keys. A plan field that the normalizer does not understand is an error, not something it may silently discard while still delivering an unchanged MP4.
 
 - [ ] **Step 4: Run the navigation tests and verify GREEN**
 
@@ -220,6 +224,8 @@ VIDEO_EDIT_LEGACY_GROUP = {
 - When no source exists, persist `requested_group` and request upload. When a valid inspected source exists, render that exact group.
 - Use `get_user_language(user_id)` when `lvs27b` root returns to the hub; do not change `lvs27b` state, callbacks, summary or actions.
 - Ensure each keyboard row has distinct non-empty callback data.
+- Make the Brightness keyboard's final row valid by pairing `✅ Xem lại` with its exact Back action; do not weaken the shared keyboard validator.
+- Pass the exact caller when Guide or Source Info is opened from AI, Manual, Quality, Cut, Join or another child. No `menu|guide_video_ai` route may leave the `videoedit|` product unexpectedly.
 
 - [ ] **Step 4: Verify GREEN and existing hub freeze**
 
@@ -273,6 +279,8 @@ def test_videoedit_back_matrix(open_callback, back_callback):
 ```
 
 Add tests for source-info invoked from Cut and Join, asserting Back returns to the actual caller rather than always Workspace.
+
+Add AI Source and Guide caller cases. A caller stored for one screen must not be reused by a sibling screen.
 
 - [ ] **Step 2: Verify RED**
 
@@ -332,6 +340,8 @@ assert normalized["local_effects"]["fade_in_ms"] == 300
 
 Command tests must find `loudnorm`, `unsharp`, `hqdn3d`, `fade`, `vignette`, and a bounded zoom expression only when selected. Invalid durations or unknown effect/filter keys must raise exact `LocalVideoEditError` reasons.
 
+Add an explicit RED test that passes an unknown top-level operation key and asserts `unknown_edit_plan_field`; the current merge-and-allowlist behavior silently drops such keys and can otherwise create fake success.
+
 - [ ] **Step 2: Verify RED**
 
 Run the new runtime test file. Expected: fields are absent or ignored.
@@ -353,6 +363,10 @@ Extend `default_manual_edit_plan` with disabled defaults:
 
 Validate every field with bounded numeric values. Compile selected filters into the existing argument array without a shell. Add `loudnorm` to the audio filter chain only when audio exists. Keep output H.264/AAC MP4 and preserve the existing partial-file/final-validation transaction.
 
+Implement one filter-discovery helper using `ffmpeg -hide_banner -filters`, cached by the resolved FFmpeg binary path. The worker must re-check requested filters before execution. If the worker heartbeat can safely carry an optional `video_edit_filters` field, publish the discovered set without changing another product's readiness; otherwise keep the UI conservative and let the worker fail closed before rendering. UI and executor must never assume that the test machine and production worker have identical filters.
+
+Implement `remove_middle` as one joined MP4, not a set of unrelated delivered clips. Validate the removed interval inside the selected trim, render the two kept intervals to normalized intermediates, concatenate in order, and validate the resulting duration. Do not reset the user's requested trim after concat; compute the timeline from the actual selected clips. Extend `expected_manual_duration_ms` to include kept intervals, concatenated clip duration and any future transition overlap.
+
 Crossfade remains hidden until a two-clip real-media test proves a stable `xfade`/audio transition pipeline; do not expose it merely because the FFmpeg filter exists.
 
 - [ ] **Step 4: Add real-media tests and verify GREEN**
@@ -362,7 +376,7 @@ Generate 2–4 second `testsrc2` + sine fixtures and prove each selected operati
 The real-media matrix must cover the complete already-advertised editor, not only the newly added filters:
 
 - trim start/end and an arbitrary keep range;
-- remove-middle/custom ranges with truthful multi-output behavior;
+- remove-middle as one joined MP4 with the removed interval absent;
 - fixed-duration, exact-count and custom split coverage;
 - two-clip concat and persisted reorder;
 - crop/fit for 9:16, 16:9, 1:1 and 4:5 at keep/720p/1080p;
@@ -372,6 +386,8 @@ The real-media matrix must cover the complete already-advertised editor, not onl
 - brightness, every public color preset, sharpen and available denoise;
 - Vietnamese text, logo placement/opacity and validated SRT burn-in;
 - fade, vignette and slow zoom when their runtime filter preflight passes.
+
+For concat/reorder/remove-middle/crossfade fixtures, use distinguishable color clips and audio frequencies, then sample the first/middle/last output regions. Duration alone is insufficient proof of requested ordering.
 
 - [ ] **Step 5: Commit Task 4**
 
@@ -518,6 +534,8 @@ should_charge = bool(
 
 Do not change shared `video_tail9` or wallet functions.
 
+Update Video Edit worker receipt/caption truth for the free package: `charge_policy="free_local_tool"`, `charge_status="not_required_free"`, `charged_xu=0`, and Vietnamese copy that says the tool is free. The current generic caption saying a fee is recorded after delivery must not remain on a zero-price job.
+
 - [ ] **Step 4: Verify GREEN and receipt truth**
 
 Run the new file plus `tests/test_p0_video_editengine1_local_render_status_delivery.py`. A delivered free job remains `delivered`, receipt fields are present, and zero wallet calls occur.
@@ -541,6 +559,8 @@ git commit -m "fix(video-edit): submit local jobs free without wallet"
 
 Test successful edit commits state only after `safe_edit_or_send` succeeds; failed UI edit keeps the previous valid state; duplicate `confirm_local` reuses the existing job; stale confirmation creates no job; status refresh is read-only; deleted state does not resurrect; a user cannot access another user's job.
 
+Add malformed `videoedit|set|...` cases for arbitrary aspect/resolution/flip/color strings, non-numeric rotation, `nan`/`inf` speed or volume, and invalid logo opacity. Each must alert/fail closed without changing the prior plan or screen.
+
 - [ ] **Step 2: Verify RED**
 
 Run only transaction tests and record each expected failure reason.
@@ -548,6 +568,8 @@ Run only transaction tests and record each expected failure reason.
 - [ ] **Step 3: Implement bounded callback claims and fail-closed state transitions**
 
 Store a bounded list of handled callback IDs only around the final confirm edge. Commit screen state after successful Telegram rendering. Preserve the database idempotency key as the authoritative duplicate guard. Status callbacks read the existing job and never submit, charge or deliver.
+
+For navigation callbacks, derive a candidate state first, render the candidate view, and persist it only after the Telegram edit/reply succeeds. Do not leave state on `brightness`, `await_*`, review or another child after a keyboard/render exception.
 
 - [ ] **Step 4: Verify GREEN and no fake success**
 
