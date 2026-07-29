@@ -684,6 +684,10 @@ def run_video_local_edit(job: dict) -> None:
         source_video_path = os.path.basename(source_path)
         mode = str(payload.get("local1_mode") or "manual").strip().lower()
         price_xu = max(0, int(payload.get("price_xu") or 0))
+        free_edit = price_xu == 0
+        charge_status = "not_required_free" if free_edit else "pending_post_delivery"
+        charge_policy = "not_required_free" if free_edit else "after_valid_mp4_delivery"
+        charged_xu = 0
         timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(30, int(payload.get("max_render_seconds") or 600)))
         if mode == "split":
             raw_ranges = [item for item in payload.get("split_ranges") or [] if isinstance(item, dict)]
@@ -724,10 +728,15 @@ def run_video_local_edit(job: dict) -> None:
                     raise LocalVideoEditError("forbidden_delivery_artifact")
                 _local1_progress(job_id, "delivering", processed=total, total=total, delivered=index - 1)
                 duration_seconds = max(0.0, float(item.get("duration_ms") or 0) / 1000)
+                delivery_caption = (
+                    f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · Miễn phí · 0 Xu"
+                    if free_edit
+                    else f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · chỉ ghi phí sau khi giao đủ kết quả"
+                )
                 delivery = telegram_send_video_receipt(
                     chat_id,
                     output_path,
-                    f"✅ Phần {index}/{total} · {duration_seconds:.1f} giây · chỉ ghi phí sau khi giao đủ kết quả",
+                    delivery_caption,
                     filename=os.path.basename(output_path),
                 )
                 if not delivery.get("sent") or not delivery.get("file_id") or not delivery.get("message_id"):
@@ -751,7 +760,9 @@ def run_video_local_edit(job: dict) -> None:
                 "output_sha256": hashlib.sha256(joined_hashes.encode("utf-8")).hexdigest(),
                 "ffprobe": dict(delivery_receipts[0].get("ffprobe") or {}) if delivery_receipts else {},
                 "output_count": len(delivery_receipts),
-                "charge_policy": "after_valid_mp4_delivery",
+                "charge_policy": charge_policy,
+                "charge_status": charge_status,
+                "charged_xu": charged_xu,
             }
             terminal_detail = json.dumps({
                 "local1": 1,
@@ -762,7 +773,8 @@ def run_video_local_edit(job: dict) -> None:
                 "delivered": total,
                 "validation": "passed",
                 "price_xu": price_xu,
-                "charge_status": "pending_post_delivery",
+                "charge_status": charge_status,
+                "charged_xu": charged_xu,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
         else:
@@ -826,10 +838,15 @@ def run_video_local_edit(job: dict) -> None:
             if not result.get("ok") or not delivery_file_allowed(output_path, workspace=workspace):
                 raise LocalVideoEditError("output_validation_failed")
             _local1_progress(job_id, "delivering", processed=1, total=1)
+            delivery_caption = (
+                "✅ Video đã chỉnh sửa xong · Miễn phí · 0 Xu."
+                if free_edit
+                else "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi giao file MP4 hợp lệ."
+            )
             delivery = telegram_send_video_receipt(
                 chat_id,
                 str(output_path),
-                "✅ Video đã chỉnh sửa xong. Hệ thống chỉ ghi phí sau khi giao file MP4 hợp lệ.",
+                delivery_caption,
                 filename=output_path.name,
             )
             if not delivery.get("sent") or not delivery.get("file_id") or not delivery.get("message_id"):
@@ -846,7 +863,9 @@ def run_video_local_edit(job: dict) -> None:
                 "output_sha256": video_ai_edit_validation.sha256_file(output_path),
                 "ffprobe": validation,
                 "output_count": 1,
-                "charge_policy": "after_valid_mp4_delivery",
+                "charge_policy": charge_policy,
+                "charge_status": charge_status,
+                "charged_xu": charged_xu,
             }
             terminal_detail = json.dumps({
                 "local1": 1,
@@ -857,7 +876,8 @@ def run_video_local_edit(job: dict) -> None:
                 "delivered": 1,
                 "validation": "passed",
                 "price_xu": price_xu,
-                "charge_status": "pending_post_delivery",
+                "charge_status": charge_status,
+                "charged_xu": charged_xu,
                 "cleanup": "done",
             }, ensure_ascii=False, separators=(",", ":"))
         terminal_status = "succeeded"
