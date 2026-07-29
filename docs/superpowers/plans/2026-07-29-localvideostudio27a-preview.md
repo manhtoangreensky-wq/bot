@@ -32,7 +32,7 @@ SubDub, portal/static UI, renderer, worker, ENV, DB, wallet hoặc billing.
 
 ## Task 1: Inventory baseline and RED contract
 
-- [ ] **Step 1: Record exact baseline**
+- [x] **Step 1: Record exact baseline**
 
 Run:
 
@@ -46,7 +46,7 @@ Expected: HEAD contains 27A spec commit; worktree clean except this plan after
 creation. Record baseline `py_compile` result honestly; latest-main baseline
 already timed out after 184 seconds.
 
-- [ ] **Step 2: Write focused test constants and forbidden boundaries**
+- [x] **Step 2: Write focused test constants and forbidden boundaries**
 
 Create `tests/test_p1_localvideostudio27a_preview.py` with exact constants:
 
@@ -82,7 +82,7 @@ coverage, exact 19 QA IDs, pure stdlib imports, exact namespace/state key,
 flow order, Back, mandatory-step rejection, callback length, no cross-product
 route and bot registration/authorization.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 Run:
 
@@ -94,7 +94,7 @@ Expected: FAIL because `services.local_video_studio_preview` does not exist.
 
 ## Task 2: Pure capability/index boundary
 
-- [ ] **Step 1: Add module envelope and index validator**
+- [x] **Step 1: Add module envelope and index validator**
 
 Create `services/local_video_studio_preview.py` with:
 
@@ -132,13 +132,13 @@ Validation requires exact record order, 14 records, 251 globally unique IDs,
 planning locks. It must reject any production-ready/public/provider-executable
 record and must not upgrade readiness.
 
-- [ ] **Step 2: Run focused index tests**
+- [x] **Step 2: Run focused index tests**
 
 Expected: index/coverage tests PASS; flow/render tests remain FAIL.
 
 ## Task 3: Session, callback and exact Back behavior
 
-- [ ] **Step 1: Define data-driven flow**
+- [x] **Step 1: Define data-driven flow**
 
 Add exact immutable definitions:
 
@@ -168,7 +168,7 @@ Each selectable step has 3–4 exact Vietnamese options and a short stored ID.
 Audio options exclude Suno/generation. Source options explicitly require
 owner-supplied/licensed/planned footage.
 
-- [ ] **Step 2: Implement immutable session navigation**
+- [x] **Step 2: Implement immutable session navigation**
 
 Add `new_session()`, `normalize_session(session)` and
 `apply_callback(session, callback_data)`. `new_session()` returns every state
@@ -183,14 +183,14 @@ pops exactly one history entry. `Home` resets only 27A. `Close` returns
 `closed=True`. `pick` is accepted only when its screen equals current screen;
 therefore a callback cannot skip required steps.
 
-- [ ] **Step 3: Run navigation tests**
+- [x] **Step 3: Run navigation tests**
 
 Expected: create/edit forward flow, every parent Back, stale action rejection,
 home reset and close all PASS.
 
 ## Task 4: Pure Vietnamese view renderer
 
-- [ ] **Step 1: Implement button and pagination helpers**
+- [x] **Step 1: Implement button and pagination helpers**
 
 Add `callback_data(*parts)`, `paginate(items, page, page_size)` and
 `render_view(session, payload=None)`. `callback_data` rejects separators inside
@@ -203,20 +203,20 @@ ordered tuple of rows, each row an ordered tuple of `(label, callback)` pairs.
 Enforce callback namespace and UTF-8 size ≤64 bytes.
 Each row has at most two buttons.
 
-- [ ] **Step 2: Render exact home and wizards**
+- [x] **Step 2: Render exact home and wizards**
 
 Home has create, edit, catalog, safety and close. Flow screens show progress,
 current choice and only valid next actions. Review/QA/complete screens state
 `planning-only`, `provider calls=0`, `Xu=0`, `không tạo MP4`.
 
-- [ ] **Step 3: Render catalog and safety**
+- [x] **Step 3: Render catalog and safety**
 
 Catalog pages expose all 11 local records. Pack pages expose every one of 248
 local qualified IDs. Safety/QA pages expose 3 paid-disabled IDs, exact 19 QA
 IDs and all zero counters. No button may target `menu|`, `vproduct|`,
 `videoedit|`, `videodub|`, `motion|` or another product namespace.
 
-- [ ] **Step 4: Run local preview tests**
+- [x] **Step 4: Run local preview tests**
 
 Iterate every flow screen, catalog page, pack page and QA page. Expected:
 all render without exception, all text ≤4096 chars, callback matrix PASS,
@@ -224,7 +224,7 @@ coverage 251/251.
 
 ## Task 5: Narrow Telegram adapter
 
-- [ ] **Step 1: Add service import only**
+- [x] **Step 1: Add service import only**
 
 Modify the existing services import section in `bot.py`:
 
@@ -232,7 +232,7 @@ Modify the existing services import section in `bot.py`:
 from services import local_video_studio_preview
 ```
 
-- [ ] **Step 2: Add keyboard adapter and two guarded handlers**
+- [x] **Step 2: Add keyboard adapter and two guarded handlers**
 
 Add exactly three adapter functions:
 
@@ -249,7 +249,7 @@ and do not create state. The command initializes only `context.user_data[STATE_K
 The callback acknowledges once, applies the pure result, edits the same message
 and clears only the 27A state on close.
 
-- [ ] **Step 3: Register hidden entry and callback**
+- [x] **Step 3: Register hidden entry and callback**
 
 Add only:
 
@@ -266,13 +266,13 @@ tg_app.add_handler(CallbackQueryHandler(
 
 Do not edit any menu text, keyboard, existing handler pattern or callback.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Expected: focused 27A all PASS.
 
 ## Task 6: Verification, review and ship
 
-- [ ] **Step 1: Run focused and regressions**
+- [x] **Step 1: Run focused and regressions**
 
 Run:
 
@@ -283,7 +283,7 @@ python -m pytest -q --noconftest -p no:cacheprovider tests/test_p1_localvideostu
 
 Expected: zero failures/new failures.
 
-- [ ] **Step 2: Validate changed Python**
+- [x] **Step 2: Validate changed Python**
 
 Run:
 
@@ -296,16 +296,23 @@ python -m py_compile bot.py
 For `bot.py`, report timeout honestly and compare to baseline timeout; do not
 claim compile PASS unless exit code is 0.
 
-- [ ] **Step 3: Static and scope gates**
+- [x] **Step 3: Static and scope gates**
 
 Run `git diff --check`, secret/placeholder scan, callback length/namespace
 tests and `git diff --name-only`. Exact implementation scope must be plan,
 service, focused test and narrow `bot.py`; no protected product files.
 
-- [ ] **Step 4: Independent spec and quality review**
+- [x] **Step 4: Independent spec and quality review**
 
 Reject Critical/Important findings or fix them on the same branch. Re-run
 focused/regression after every code correction.
+
+Review corrections completed on this branch: fail-closed capability-index
+schema validation, exact QA/counter coverage, stale-selection rejection,
+backstack selection pruning, page clamping, and transactional failure-view
+state handling. Final focused and regression gates are green; `bot.py`
+full-bytecode compilation remains a timeout on this large legacy module and
+is reported honestly rather than treated as a pass.
 
 - [ ] **Step 5: Commit, sync, PR and merge**
 

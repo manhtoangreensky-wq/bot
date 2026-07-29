@@ -113,6 +113,7 @@ from services import video_profile_context_engine
 from services import frame_video_commercial, frame_video_flow, frame_video_runtime
 from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
+from services import local_video_studio_preview
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
 from services.pricing_guide_content import (
@@ -66443,6 +66444,98 @@ def admin_internal_command(handler):
             return await reply_internal_customer_feature(update)
         return await handler(update, context)
     return wrapped
+
+# --- LOCAL VIDEO STUDIO 27A PREVIEW ---
+def local_video_studio_preview_keyboard(view: dict[str, object]) -> InlineKeyboardMarkup:
+    rows = []
+    for row in view.get("rows") or ():
+        rows.append([
+            InlineKeyboardButton(str(label), callback_data=str(callback))
+            for label, callback in row
+        ])
+    return InlineKeyboardMarkup(rows)
+
+async def cmd_local_video_studio_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.effective_message
+    if not user or not message or not is_admin_user(user.id):
+        if message:
+            return await message.reply_text("⛔ Preview này chỉ dành cho owner/admin.")
+        return None
+    session = local_video_studio_preview.new_session()
+    try:
+        view = local_video_studio_preview.render_view(session)
+    except local_video_studio_preview.PreviewDataError:
+        view = local_video_studio_preview.render_failure_view()
+        reply = await message.reply_text(
+            view["text"],
+            parse_mode="HTML",
+            reply_markup=local_video_studio_preview_keyboard(view),
+        )
+        context.user_data.pop(local_video_studio_preview.STATE_KEY, None)
+        return reply
+    reply = await message.reply_text(
+        view["text"],
+        parse_mode="HTML",
+        reply_markup=local_video_studio_preview_keyboard(view),
+    )
+    context.user_data[local_video_studio_preview.STATE_KEY] = session
+    return reply
+
+async def handle_local_video_studio_preview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    if not query:
+        return None
+    if not user or not is_admin_user(user.id):
+        return await query.answer("Preview này chỉ dành cho owner/admin.", show_alert=True)
+    session = context.user_data.get(
+        local_video_studio_preview.STATE_KEY,
+        local_video_studio_preview.new_session(),
+    )
+    try:
+        result = local_video_studio_preview.apply_callback(session, query.data or "")
+    except local_video_studio_preview.PreviewActionError:
+        return await query.answer("Thao tác preview không hợp lệ hoặc đã cũ.", show_alert=True)
+    except local_video_studio_preview.PreviewDataError:
+        view = local_video_studio_preview.render_failure_view()
+        edited = await query.edit_message_text(
+            view["text"],
+            parse_mode="HTML",
+            reply_markup=local_video_studio_preview_keyboard(view),
+        )
+        context.user_data.pop(local_video_studio_preview.STATE_KEY, None)
+        await query.answer("Capability index local không hợp lệ.", show_alert=True)
+        return edited
+    if result["closed"]:
+        edited = await query.edit_message_text(
+            "✖️ <b>Đã đóng Local Video Studio Preview</b>\n\nKhông có provider, Xu hoặc tác vụ chạy ngầm.",
+            parse_mode="HTML",
+        )
+        context.user_data.pop(local_video_studio_preview.STATE_KEY, None)
+        await query.answer(result["feedback"])
+        return edited
+    try:
+        view = local_video_studio_preview.render_view(result["session"])
+    except local_video_studio_preview.PreviewDataError:
+        view = local_video_studio_preview.render_failure_view()
+        edited = await query.edit_message_text(
+            view["text"],
+            parse_mode="HTML",
+            reply_markup=local_video_studio_preview_keyboard(view),
+        )
+        context.user_data.pop(local_video_studio_preview.STATE_KEY, None)
+        await query.answer("Capability index local không hợp lệ.", show_alert=True)
+        return edited
+    edited = await query.edit_message_text(
+        view["text"],
+        parse_mode="HTML",
+        reply_markup=local_video_studio_preview_keyboard(view),
+    )
+    context.user_data[local_video_studio_preview.STATE_KEY] = result["session"]
+    await query.answer(result["feedback"])
+    return edited
+# --- END LOCAL VIDEO STUDIO 27A PREVIEW ---
 
 def build_2col_keyboard(
     buttons,
@@ -226560,6 +226653,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_member_help", cmd_admin_member_help))
     tg_app.add_handler(CommandHandler("admin_payment_help", cmd_admin_payment_help))
     tg_app.add_handler(CommandHandler("admin_tools_help", cmd_admin_tools_help))
+    tg_app.add_handler(CommandHandler("local_video_studio_preview", admin_internal_command(cmd_local_video_studio_preview)))
     tg_app.add_handler(CommandHandler("architecture_profile_status", cmd_architecture_profile_status))
     tg_app.add_handler(CommandHandler("architecture_profile_debug", cmd_architecture_profile_debug))
     tg_app.add_handler(CommandHandler("profile_user", cmd_profile_user))
@@ -226601,6 +226695,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_preview_callback, pattern=r"^lvs27a\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_tail_callback, pattern=r"^video_tail\|", block=True))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
