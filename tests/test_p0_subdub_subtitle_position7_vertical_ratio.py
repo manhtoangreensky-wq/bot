@@ -1,7 +1,9 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import bot
+from services import dubbing_pipeline
 
 
 VALID_SRT = (
@@ -32,6 +34,11 @@ class FakeMessage:
 
     async def reply_text(self, text, **kwargs):
         item = {"text": str(text), **kwargs}
+        self.sent.append(item)
+        return SimpleNamespace(**item)
+
+    async def reply_video(self, video, **kwargs):
+        item = {"video": video, **kwargs}
         self.sent.append(item)
         return SimpleNamespace(**item)
 
@@ -66,7 +73,7 @@ async def _press(monkeypatch, data, uid=950071):
         SimpleNamespace(callback_query=query),
         SimpleNamespace(),
     )
-    return edits[-1] if edits else query.message.sent[-1]
+    return edits[-1] if edits else (query.message.sent[-1] if query.message.sent else None)
 
 
 def test_position_picker_has_exactly_seven_vertical_slots():
@@ -219,7 +226,7 @@ def test_seven_ass_positions_are_centered_safe_and_evenly_spaced(monkeypatch):
     assert "; subtitle_position_slot: 4" in ass
 
 
-def test_vertical_subtitle_font_is_exactly_two_points_larger(monkeypatch):
+def test_vertical_subtitle_font_is_exactly_two_points_larger_for_new_jobs_only(monkeypatch):
     monkeypatch.setattr(
         bot,
         "resolve_subdub_subtitle_font",
@@ -230,7 +237,7 @@ def test_vertical_subtitle_font_is_exactly_two_points_larger(monkeypatch):
             "blocker": "",
         },
     )
-    style = bot.subdub_normalize_style(
+    legacy_style = bot.subdub_normalize_style(
         {
             "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             "output_type": "burn",
@@ -238,9 +245,19 @@ def test_vertical_subtitle_font_is_exactly_two_points_larger(monkeypatch):
             "video_height": 1920,
         }
     )
+    selected_style = bot.subdub_normalize_style(
+        {
+            "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+            "output_type": "burn",
+            "video_width": 1080,
+            "video_height": 1920,
+            "subtitle_position_slot": 2,
+        }
+    )
 
-    assert style["render_size"] == 46
-    assert style["subtitle_vertical_font_increment"] == 2
+    assert legacy_style["subtitle_vertical_font_increment"] == 0
+    assert selected_style["subtitle_vertical_font_increment"] == 2
+    assert selected_style["render_size"] == legacy_style["render_size"] + 2
 
 
 def test_vertical_video_fit_preserves_source_aspect_ratio():
@@ -319,3 +336,173 @@ def test_position_callback_returns_to_original_subtitle_confirm(monkeypatch):
     assert "videodub|confirm_original_subtitle" in _callbacks(
         returned["reply_markup"]
     )
+
+
+def test_position_callback_replay_and_stale_selection_are_idempotent(monkeypatch):
+    uid = 950074
+    bot.clear_video_dubbing_pending(uid)
+    bot.set_video_dubbing_pending(
+        uid,
+        "dub_confirmation",
+        mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        process_type=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        video_processing_mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        output_type="video_subtitle",
+        origin="translation",
+        subtitle_position_slot=2,
+        processing="0",
+    )
+
+    asyncio.run(_press(monkeypatch, "videodub|subtitle_position", uid))
+    asyncio.run(_press(monkeypatch, "videodub|subtitle_position", uid))
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] == "subtitle_position"
+    assert state["subtitle_position_return_step"] == "dub_confirmation"
+
+    asyncio.run(_press(monkeypatch, "videodub|subtitle_position_set|5", uid))
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] == "dub_confirmation"
+    assert bot.subdub_subtitle_position_slot(state) == 5
+
+    bot.set_video_dubbing_pending(uid, "confirm", processing="1")
+    stale_open_result = asyncio.run(
+        _press(monkeypatch, "videodub|subtitle_position", uid)
+    )
+    state = bot.get_video_dubbing_pending(uid)
+    assert stale_open_result is None
+    assert state["step"] == "confirm"
+    assert state["processing"] == "1"
+    assert bot.subdub_subtitle_position_slot(state) == 5
+
+    bot.set_video_dubbing_pending(uid, "generating_full_dub", processing="1")
+    stale_result = asyncio.run(
+        _press(monkeypatch, "videodub|subtitle_position_set|6", uid)
+    )
+    state = bot.get_video_dubbing_pending(uid)
+    assert stale_result is None
+    assert state["step"] == "generating_full_dub"
+    assert state["processing"] == "1"
+    assert bot.subdub_subtitle_position_slot(state) == 5
+
+
+def test_rotation_tagged_vertical_probe_uses_display_dimensions(monkeypatch):
+    captured = {}
+    payload = {
+        "format": {"duration": "2.0"},
+        "streams": [
+            {
+                "codec_type": "video",
+                "width": 1920,
+                "height": 1080,
+                "side_data_list": [{"rotation": -90}],
+            },
+            {"codec_type": "audio"},
+        ],
+    }
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return json.dumps(payload).encode("utf-8"), b""
+
+    async def fake_create_subprocess_exec(*args, **_kwargs):
+        captured["args"] = args
+        return FakeProcess()
+
+    monkeypatch.setattr(bot, "ffprobe_path_for_ffmpeg", lambda: "ffprobe")
+    monkeypatch.setattr(bot.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    result = asyncio.run(bot.subdub_probe_video_bytes(b"fixture-video"))
+
+    assert result["ok"] is True
+    assert result["coded_width"] == 1920
+    assert result["coded_height"] == 1080
+    assert result["width"] == 1080
+    assert result["height"] == 1920
+    assert result["rotation"] in {90, 270}
+    assert any("stream_side_data=rotation" in str(arg) for arg in captured["args"])
+
+
+def test_combo_retry_mux_uses_canonical_renderer_with_subtitle_position(monkeypatch, tmp_path):
+    uid = 950075
+    audio_path = tmp_path / "dub.mp3"
+    audio_path.write_bytes(b"dub-audio")
+    delivered_path = tmp_path / "delivered.mp4"
+    seen = {}
+
+    bot.clear_video_dubbing_pending(uid)
+    state = bot.set_video_dubbing_pending(
+        uid,
+        "completed",
+        mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        process_type=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        video_processing_mode=bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        active_flow=bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+        output_type="video_subtitle",
+        source_mime_type="video/mp4",
+        video_file_id="telegram-file",
+        final_dub_asset_id="audio-asset",
+        translated_subtitle_ref="translated-subtitle",
+        subtitle_position_slot=5,
+    )
+
+    monkeypatch.setattr(
+        bot,
+        "get_media_asset_record",
+        lambda *_args, **_kwargs: {"local_path": str(audio_path)},
+    )
+    monkeypatch.setattr(bot, "video_dubbing_has_media", lambda _state: True)
+
+    async def fake_download_source(_context, _state):
+        return b"source-video", "video/mp4"
+
+    async def fake_render(source_bytes, dubbed_audio=b"", subtitle_bytes=b"", **kwargs):
+        seen.update(
+            {
+                "source_bytes": source_bytes,
+                "dubbed_audio": dubbed_audio,
+                "subtitle_bytes": subtitle_bytes,
+                **kwargs,
+            }
+        )
+        return b"0000ftyp-rendered-video", "validated"
+
+    def forbidden_legacy_mux(*_args, **_kwargs):
+        raise AssertionError("combo retry must use the canonical renderer")
+
+    def fake_write_asset(_kind, _asset_id, data, _suffix):
+        delivered_path.write_bytes(data)
+        return str(delivered_path)
+
+    monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download_source)
+    monkeypatch.setattr(bot, "subtitle_plus_dub_subtitle_text", lambda *_args, **_kwargs: VALID_SRT)
+    monkeypatch.setattr(bot, "video_dubbing_render_video", fake_render)
+    monkeypatch.setattr(bot, "pipeline_final_video_sendable", lambda _data: True)
+    monkeypatch.setattr(bot, "media_asset_make_id", lambda *_args, **_kwargs: "video-asset")
+    monkeypatch.setattr(bot, "write_media_asset_bytes", fake_write_asset)
+    monkeypatch.setattr(
+        bot,
+        "create_dub_asset_record",
+        lambda **_kwargs: {"asset_id": "video-asset"},
+    )
+    monkeypatch.setattr(dubbing_pipeline, "mux_final_video", forbidden_legacy_mux)
+
+    query = FakeQuery("videodub|combo_retry_mux", uid)
+    result = asyncio.run(
+        bot.subtitle_plus_dub_retry_mux_final_video(
+            query,
+            SimpleNamespace(),
+            uid,
+            state,
+            "vi",
+        )
+    )
+
+    assert result is True
+    assert seen["source_bytes"] == b"source-video"
+    assert seen["dubbed_audio"] == b"dub-audio"
+    assert seen["subtitle_bytes"].decode("utf-8") == VALID_SRT
+    assert bot.subdub_subtitle_position_slot(seen["subtitle_style"]) == 5
+    assert query.message.sent[-1]["filename"] == "toan_aas_subtitle_dub.mp4"

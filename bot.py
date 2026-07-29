@@ -204604,6 +204604,20 @@ def subdub_subtitle_position_slot(state: dict | None = None) -> int:
         SUBDUB_SUBTITLE_POSITION_COUNT,
     )
 
+def subdub_subtitle_position_is_explicit(state: dict | None = None) -> bool:
+    current = dict(state or {})
+    for key in ("subtitle_position_slot", "subdub_position_slot"):
+        raw = current.get(key)
+        if raw is not None and str(raw).strip():
+            return True
+    token = str(
+        current.get("subtitle_position")
+        or current.get("subdub_position")
+        or current.get("position")
+        or ""
+    ).strip().lower()
+    return bool(re.fullmatch(r"slot[_-]?\d+", token))
+
 def subdub_subtitle_position_label(slot, lang: str = "vi") -> str:
     position = subdub_clamp_int(
         slot,
@@ -204693,7 +204707,15 @@ async def handle_video_dubbing_subtitle_position_callback(
     value: str,
     lang: str = "vi",
 ):
-    if not video_dubbing_subtitle_position_available(state) and str(state.get("step") or "") != "original_subtitle_confirm":
+    current_step = str(state.get("step") or "")
+    return_steps = {"confirm", "original_subtitle_confirm", "dub_confirmation"}
+    if str(state.get("processing") or "").strip() == "1":
+        return None
+    if action in {"subtitle_position_set", "subtitle_position_back"} and current_step != "subtitle_position":
+        return None
+    if action == "subtitle_position" and current_step not in return_steps | {"subtitle_position"}:
+        return None
+    if not video_dubbing_subtitle_position_available(state) and current_step != "original_subtitle_confirm":
         return await safe_edit_or_send(
             query,
             video_dubbing_confirm_text(state, lang),
@@ -204701,14 +204723,17 @@ async def handle_video_dubbing_subtitle_position_callback(
             reply_markup=video_dubbing_confirm_keyboard(lang, state),
         )
     if action == "subtitle_position":
-        return_step = str(state.get("step") or "confirm")
-        if return_step not in {"confirm", "original_subtitle_confirm", "dub_confirmation"}:
+        return_step = (
+            str(state.get("subtitle_position_return_step") or "confirm")
+            if current_step == "subtitle_position"
+            else current_step
+        )
+        if return_step not in return_steps:
             return_step = "confirm"
         state = set_video_dubbing_pending(
             user_id,
             "subtitle_position",
             subtitle_position_return_step=return_step,
-            processing="0",
         )
         return await safe_edit_or_send(
             query,
@@ -204717,9 +204742,9 @@ async def handle_video_dubbing_subtitle_position_callback(
             reply_markup=video_dubbing_subtitle_position_keyboard(lang, state),
         )
     return_step = str(state.get("subtitle_position_return_step") or "confirm")
-    if return_step not in {"confirm", "original_subtitle_confirm", "dub_confirmation"}:
+    if return_step not in return_steps:
         return_step = "confirm"
-    fields = {"subtitle_position_return_step": "", "processing": "0"}
+    fields = {"subtitle_position_return_step": ""}
     if action == "subtitle_position_set":
         slot = subdub_clamp_int(value, SUBDUB_SUBTITLE_POSITION_DEFAULT_SLOT, 1, SUBDUB_SUBTITLE_POSITION_COUNT)
         fields.update({
@@ -211393,7 +211418,10 @@ def subdub_render_subtitle_size(style: dict, state: dict | None = None) -> int:
         else:
             cap = 44 if vertical else 42
     current_effective = subdub_clamp_int(min(target, cap) + 2, min(target, cap) + 2, 40, 48)
-    vertical_increment = SUBDUB_SUBTITLE_VERTICAL_FONT_INCREMENT if vertical else 0
+    position_explicit = subdub_subtitle_position_is_explicit(
+        {**dict(state or {}), **dict(style or {})}
+    )
+    vertical_increment = SUBDUB_SUBTITLE_VERTICAL_FONT_INCREMENT if vertical and position_explicit else 0
     return subdub_clamp_int(current_effective - 2 + vertical_increment, current_effective - 2 + vertical_increment, 38, 48)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
@@ -211420,6 +211448,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style = dict(SUBDUB_STYLE_PRESETS[preset_key])
     style["preset"] = preset_key
     custom = dict(state.get("subtitle_style_options") or state.get("subdub_style_options") or {})
+    position_slot_explicit = subdub_subtitle_position_is_explicit({**state, **custom})
     explicit_size = any(
         key in custom or key in state
         for key in ("size", "subtitle_size", "subdub_size")
@@ -211487,7 +211516,12 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     video_width, video_height = subdub_style_video_size(state)
     style["subtitle_vertical_font_increment"] = (
         SUBDUB_SUBTITLE_VERTICAL_FONT_INCREMENT
-        if m4live1_style_active and video_width and video_height >= video_width * 1.15
+        if (
+            m4live1_style_active
+            and position_slot_explicit
+            and video_width
+            and video_height >= video_width * 1.15
+        )
         else 0
     )
     style["subtitle_font_size_after"] = int(style.get("render_size") or 0)
@@ -211532,11 +211566,6 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         width, height = (720, 1280) if bool(style.get("cover_original")) else (1280, 720)
     style["play_res_x"] = max(480, min(3840, int(width or 1280)))
     style["play_res_y"] = max(480, min(3840, int(height or 720)))
-    position_slot_explicit = any(
-        str(source.get(key) or "").strip()
-        for source in (state, custom)
-        for key in ("subtitle_position_slot", "subdub_position_slot")
-    ) or bool(re.fullmatch(r"slot[_-]?\d+", str(state.get("subtitle_position") or "").strip().lower()))
     style["subtitle_position_slot_explicit"] = bool(position_slot_explicit)
     if position_slot_explicit:
         style["subtitle_position_slot"] = subdub_subtitle_position_slot({**state, **custom, **style})
@@ -211951,6 +211980,34 @@ async def run_subdub_ffmpeg_command(cmd: list[str], timeout: float = 120.0) -> t
         return False, type(exc).__name__
 
 
+def subdub_video_stream_rotation(stream: dict | None = None) -> int:
+    current = dict(stream or {})
+    candidates = []
+    for item in list(current.get("side_data_list") or []):
+        if isinstance(item, dict):
+            candidates.append(item.get("rotation"))
+    candidates.extend([
+        (current.get("tags") or {}).get("rotate") if isinstance(current.get("tags"), dict) else None,
+        current.get("rotation"),
+    ])
+    for raw in candidates:
+        if raw in {None, ""}:
+            continue
+        try:
+            return int(round(float(raw))) % 360
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+def subdub_video_stream_display_geometry(stream: dict | None = None) -> tuple[int, int, int, int, int]:
+    current = dict(stream or {})
+    coded_width = max(0, _safe_int(current.get("width"), 0))
+    coded_height = max(0, _safe_int(current.get("height"), 0))
+    rotation = subdub_video_stream_rotation(current)
+    if rotation in {90, 270}:
+        return coded_height, coded_width, coded_width, coded_height, rotation
+    return coded_width, coded_height, coded_width, coded_height, rotation
+
 async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
     ffprobe = ffprobe_path_for_ffmpeg()
     if not ffprobe:
@@ -211967,7 +212024,7 @@ async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
                 ffprobe,
                 "-v", "error",
                 "-print_format", "json",
-                "-show_entries", "format=duration:stream=codec_type,width,height",
+                "-show_entries", "format=duration:stream=codec_type,width,height:stream_tags=rotate:stream_side_data=rotation",
                 path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -211982,14 +212039,18 @@ async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
             has_video = any(str(item.get("codec_type") or "") == "video" for item in streams)
             has_audio = any(str(item.get("codec_type") or "") == "audio" for item in streams)
             video_stream = next((item for item in streams if str(item.get("codec_type") or "") == "video"), {})
+            display_width, display_height, coded_width, coded_height, rotation = subdub_video_stream_display_geometry(video_stream)
             return {
                 "ok": bool(has_video and duration > 0),
                 "detail": "ok",
                 "duration": duration,
                 "has_video": has_video,
                 "has_audio": has_audio,
-                "width": _safe_int(video_stream.get("width"), 0),
-                "height": _safe_int(video_stream.get("height"), 0),
+                "width": display_width,
+                "height": display_height,
+                "coded_width": coded_width,
+                "coded_height": coded_height,
+                "rotation": rotation,
                 "size": len(video_bytes),
             }
         except asyncio.TimeoutError:
@@ -216774,27 +216835,39 @@ async def subtitle_plus_dub_retry_mux_final_video(query, context: ContextTypes.D
     if not video_dubbing_has_media(state):
         await query.message.reply_text("Chưa có video nguồn để ghép lại. Anh/chị có thể tải audio lồng tiếng trước.")
         return False
-    workspace = create_subtitle_dub_pipeline_workspace(f"retry_mux_{uid}_{int(time.time())}")
     try:
         source_bytes, _content_type = await video_dubbing_download_source(context, state)
-        source_path = write_subtitle_dub_pipeline_artifact(workspace, "input.mp4", source_bytes)
         subtitle_text = subtitle_plus_dub_subtitle_text(uid, state, translated=bool(state.get("translated_subtitle_ref")))
-        subtitle_path = ""
-        if str(subtitle_text or "").strip():
-            subtitle_path = write_subtitle_dub_pipeline_artifact(workspace, "subtitle.srt", str(subtitle_text).encode("utf-8"))
-        output_path = os.path.join(workspace, "final_retry.mp4")
-        from services.dubbing_pipeline import mux_final_video
-
-        final_path = mux_final_video(
-            source_path,
-            audio_path,
-            output_path,
-            srt_path=subtitle_path or None,
-            burn_subtitles=False,
-            replace_audio=True,
+        if not str(subtitle_text or "").strip():
+            await query.message.reply_text(
+                "Phụ đề chưa có file hợp lệ để ghép lại. TOAN AAS không chạy lại TTS và không trừ Xu."
+            )
+            return False
+        with open(audio_path, "rb") as handle:
+            dubbed_audio = handle.read()
+        if not dubbed_audio:
+            raise RuntimeError("retry_dub_audio_empty")
+        retry_style = subdub_output_style_state(
+            {
+                **dict(state or {}),
+                "mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                "process_type": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                "video_processing_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                "output_type": "video_subtitle",
+            },
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         )
-        with open(final_path, "rb") as handle:
-            video_bytes = handle.read()
+        video_bytes, render_detail = await video_dubbing_render_video(
+            source_bytes,
+            dubbed_audio=dubbed_audio,
+            subtitle_bytes=str(subtitle_text).encode("utf-8"),
+            keep_original_audio=False,
+            subtitle_style=retry_style,
+            original_audio_mode="mute",
+            require_audio=True,
+        )
+        if not video_bytes:
+            raise RuntimeError(f"retry_render_failed:{sanitize_log_text(str(render_detail or 'video_render_failed'))[:120]}")
         if not pipeline_final_video_sendable(video_bytes):
             await query.message.reply_text("Video đã ghép nhưng vượt giới hạn gửi Telegram hiện tại. Anh/chị tải audio trước hoặc gửi video ngắn hơn.")
             return False
@@ -216839,8 +216912,6 @@ async def subtitle_plus_dub_retry_mux_final_video(query, context: ContextTypes.D
             reply_markup=subtitle_plus_dub_completed_keyboard(lang, state),
         )
         return False
-    finally:
-        cleanup_subtitle_dub_pipeline_workspace(workspace)
 
 async def subtitle_plus_dub_create_original_from_media(
     update: Update,
