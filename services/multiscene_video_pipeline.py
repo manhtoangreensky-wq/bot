@@ -22,6 +22,44 @@ from services import ffmpeg_text
 
 
 DEFAULT_TEMP_ROOT = os.path.join(tempfile.gettempdir(), "toanaas_multiscene_blackbox")
+DEFAULT_VIDEO_TRACK_TIMESCALE = 90_000
+DEFAULT_NORMALIZED_FPS = 30
+DEFAULT_AUDIO_SAMPLE_RATE = 48_000
+DEFAULT_AUDIO_CHANNELS = 2
+
+_XFADE_TRANSITIONS = {
+    "fade": "fade",
+    "dissolve": "dissolve",
+    "wipe_left": "wipeleft",
+    "wipe_right": "wiperight",
+    "wipe_up": "wipeup",
+    "wipe_down": "wipedown",
+    "slide_left": "slideleft",
+    "slide_right": "slideright",
+    "slide_up": "slideup",
+    "slide_down": "slidedown",
+    "circle_open": "circleopen",
+    "circle_close": "circleclose",
+    "fade_black": "fadeblack",
+    "fade_white": "fadewhite",
+}
+
+_SEMANTIC_CUT_TRANSITIONS = frozenset(
+    {
+        "cut",
+        "none",
+        "cut_on_action",
+        "match_cut",
+        "motion_match",
+        "camera_pan_continuation",
+        "whip_pan",
+        "sound_bridge",
+        "dialogue_bridge",
+        "object_wipe",
+        "doorway_transition",
+        "reveal",
+    }
+)
 
 
 @dataclass
@@ -72,6 +110,10 @@ class MultisceneManifest:
     winner_task_by_scene: dict[str, str] = field(default_factory=dict)
     scene_order: list[int] = field(default_factory=list)
     expected_duration_sec: float = 0.0
+    transition_plan: list[str] = field(default_factory=list)
+    transition_implementation_plan: list[str] = field(default_factory=list)
+    transition_duration_sec: float = 0.0
+    normalization_profile: dict[str, Any] = field(default_factory=dict)
     final_duration_sec: float = 0.0
     concat_state: str = "not_ready"
     delivery_state: str = "pending"
@@ -161,6 +203,123 @@ def probe_duration(path: str) -> float:
         return max(0.0, float((result.stdout or "").strip()))
     except ValueError as exc:
         raise RuntimeError("ffprobe_duration_invalid") from exc
+
+
+def probe_media_streams(path: str) -> dict[str, Any]:
+    source = ensure_video_output(path)
+    ffprobe = _ffprobe_path()
+    if not ffprobe:
+        raise RuntimeError("ffprobe_missing")
+    result = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            (
+                "format=duration:"
+                "stream=index,codec_type,codec_name,width,height,pix_fmt,"
+                "sample_aspect_ratio,r_frame_rate,time_base,sample_rate,channels,channel_layout:"
+                "stream_side_data=rotation"
+            ),
+            "-of",
+            "json",
+            source,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("ffprobe_failed")
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("ffprobe_json_invalid") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("ffprobe_json_invalid")
+    return payload
+
+
+def _stream_rotation(stream: dict[str, Any]) -> int:
+    rotations = [
+        int(item.get("rotation") or 0)
+        for item in list(stream.get("side_data_list") or [])
+        if isinstance(item, dict)
+    ]
+    return rotations[-1] % 360 if rotations else 0
+
+
+def _display_geometry(path: str) -> tuple[int, int]:
+    payload = probe_media_streams(path)
+    video = next(
+        (
+            item
+            for item in list(payload.get("streams") or [])
+            if isinstance(item, dict) and item.get("codec_type") == "video"
+        ),
+        {},
+    )
+    width = int(video.get("width") or 0)
+    height = int(video.get("height") or 0)
+    if width <= 0 or height <= 0:
+        raise RuntimeError("scene_video_geometry_invalid")
+    if _stream_rotation(video) in {90, 270}:
+        width, height = height, width
+    return width - (width % 2), height - (height % 2)
+
+
+def _has_audio_stream(path: str) -> bool:
+    return any(
+        isinstance(item, dict) and item.get("codec_type") == "audio"
+        for item in list(probe_media_streams(path).get("streams") or [])
+    )
+
+
+def _transition_key(value: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(value or "cut").strip().lower()).strip("_")
+    return token or "cut"
+
+
+def _transition_effect(value: Any) -> str:
+    token = _transition_key(value)
+    if token in _SEMANTIC_CUT_TRANSITIONS:
+        return "cut"
+    if token == "before_after_morph":
+        return "dissolve"
+    effect = _XFADE_TRANSITIONS.get(token)
+    if not effect:
+        raise ValueError(f"unsupported_multiscene_transition:{token}")
+    return effect
+
+
+def _transition_plan(
+    transition: str | list[str] | tuple[str, ...] | None,
+    boundary_count: int,
+) -> tuple[list[str], list[str]]:
+    if boundary_count <= 0:
+        return [], []
+    if isinstance(transition, (list, tuple)):
+        requested = [_transition_key(item) for item in transition]
+        if len(requested) != boundary_count:
+            raise ValueError("multiscene_transition_count_invalid")
+    else:
+        requested = [_transition_key(transition)] * boundary_count
+    return requested, [_transition_effect(item) for item in requested]
+
+
+def _transition_overlap_seconds(
+    effect: str,
+    requested_seconds: float,
+    left_duration: float,
+    right_duration: float,
+    fps: int,
+) -> float:
+    if effect == "cut":
+        return 0.0
+    maximum = max(1.0 / max(1, fps), min(left_duration, right_duration) / 2.0)
+    return min(max(1.0 / max(1, fps), requested_seconds), maximum)
 
 
 MAX_MULTISCENE_SCENES = 20
@@ -492,6 +651,12 @@ def normalize_scene_duration(
     *,
     allow_slowdown: bool = True,
     allow_speedup: bool = True,
+    target_width: int | None = None,
+    target_height: int | None = None,
+    target_fps: int = DEFAULT_NORMALIZED_FPS,
+    preserve_audio: bool = False,
+    audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
+    audio_channels: int = DEFAULT_AUDIO_CHANNELS,
 ) -> str:
     del allow_speedup
     source = ensure_video_output(input_video_path)
@@ -502,46 +667,111 @@ def normalize_scene_duration(
     if not ffmpeg:
         raise RuntimeError("ffmpeg_missing")
     duration = probe_duration(source)
+    width = int(target_width or 0)
+    height = int(target_height or 0)
+    if bool(width) != bool(height):
+        raise ValueError("normalized_geometry_incomplete")
+    if width <= 0 or height <= 0:
+        width, height = _display_geometry(source)
+    width -= width % 2
+    height -= height % 2
+    fps = max(1, min(120, int(target_fps or DEFAULT_NORMALIZED_FPS)))
+    sample_rate = max(8_000, min(192_000, int(audio_sample_rate or DEFAULT_AUDIO_SAMPLE_RATE)))
+    channels = max(1, min(8, int(audio_channels or DEFAULT_AUDIO_CHANNELS)))
+    if width <= 0 or height <= 0:
+        raise ValueError("normalized_geometry_invalid")
+    if preserve_audio and not _has_audio_stream(source):
+        raise RuntimeError("scene_audio_missing")
     pad = max(0.0, target - duration)
-    vf = "fps=30,format=yuv420p"
+    video_filters: list[str] = []
     slowdown_ratio = duration / target if target > 0 else 1.0
     slowdown_min_ratio = max(0.5, min(0.99, float(os.getenv("MULTISCENE_SLOWDOWN_MIN_RATIO") or 0.85)))
+    audio_tempo = 1.0
     if pad > 0.05 and allow_slowdown and slowdown_ratio >= slowdown_min_ratio:
-        vf = f"setpts={target / max(duration, 0.001):.8f}*PTS,fps=30,format=yuv420p"
+        video_filters.append(f"setpts={target / max(duration, 0.001):.8f}*PTS")
+        audio_tempo = slowdown_ratio
     elif pad > 0.05:
-        vf = f"{vf},tpad=stop_mode=clone:stop_duration={pad:.3f}"
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
-        source,
-        "-map",
-        "0:v:0",
-        "-vf",
-        vf,
-        "-t",
-        f"{target:.3f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        "-pix_fmt",
-        "yuv420p",
-        "-an",
-        "-movflags",
-        "+faststart",
-        output,
-    ]
+        video_filters.append(f"tpad=stop_mode=clone:stop_duration={pad:.3f}")
+    video_filters.extend(
+        [
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black",
+            "setsar=1",
+            f"fps={fps}",
+            f"settb=1/{DEFAULT_VIDEO_TRACK_TIMESCALE}",
+            "setpts=PTS-STARTPTS",
+            "format=yuv420p",
+        ]
+    )
+    cmd = [ffmpeg, "-y", "-autorotate", "-i", source]
+    if preserve_audio:
+        audio_filters: list[str] = []
+        if abs(audio_tempo - 1.0) > 0.0001:
+            audio_filters.append(f"atempo={audio_tempo:.8f}")
+        audio_filters.extend(
+            [
+                f"aresample={sample_rate}:async=1:first_pts=0",
+                f"aformat=sample_rates={sample_rate}:channel_layouts={'mono' if channels == 1 else 'stereo' if channels == 2 else f'{channels}c'}",
+                "apad",
+                f"atrim=duration={target:.3f}",
+                "asetpts=PTS-STARTPTS",
+            ]
+        )
+        cmd.extend(
+            [
+                "-filter_complex",
+                f"[0:v:0]{','.join(video_filters)}[vout];[0:a:0]{','.join(audio_filters)}[aout]",
+                "-map",
+                "[vout]",
+                "-map",
+                "[aout]",
+            ]
+        )
+    else:
+        cmd.extend(["-map", "0:v:0", "-vf", ",".join(video_filters), "-an"])
+    cmd.extend(
+        [
+            "-t",
+            f"{target:.3f}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    )
+    if preserve_audio:
+        cmd.extend(["-c:a", "aac", "-ar", str(sample_rate), "-ac", str(channels)])
+    cmd.extend(
+        [
+            "-map_metadata",
+            "-1",
+            "-metadata:s:v:0",
+            "rotate=0",
+            "-video_track_timescale",
+            str(DEFAULT_VIDEO_TRACK_TIMESCALE),
+            "-movflags",
+            "+faststart",
+            output,
+        ]
+    )
     result = safe_run_ffmpeg(cmd, timeout=max(60, int(target * 20)))
     if result.returncode != 0:
-        raise RuntimeError("ffmpeg_normalize_failed")
+        raise RuntimeError(f"ffmpeg_normalize_failed:{(result.stderr or '')[-300:]}")
     return ensure_video_output(output)
 
 
-def stitch_scenes(scene_video_paths: list[str], output_path: str, *, transition: str | None = None) -> str:
-    del transition
+def stitch_scenes(
+    scene_video_paths: list[str],
+    output_path: str,
+    *,
+    transition: str | list[str] | tuple[str, ...] | None = None,
+    transition_duration_sec: float = 0.35,
+    include_audio: bool = False,
+) -> str:
     if not scene_video_paths:
         raise ValueError("scene_video_paths_required")
     ffmpeg = _ffmpeg_path()
@@ -551,15 +781,104 @@ def stitch_scenes(scene_video_paths: list[str], output_path: str, *, transition:
         ensure_video_output(path)
     output = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output), exist_ok=True)
-    list_path = os.path.join(os.path.dirname(output), "concat_scenes.txt")
-    with open(list_path, "w", encoding="utf-8") as handle:
-        for path in scene_video_paths:
-            normalized = os.path.abspath(path).replace("\\", "/").replace("'", "'\\''")
-            handle.write(f"file '{normalized}'\n")
-    cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", "-movflags", "+faststart", output]
+    requested_plan, implementation_plan = _transition_plan(
+        transition,
+        max(0, len(scene_video_paths) - 1),
+    )
+    del requested_plan
+    if not include_audio and all(item == "cut" for item in implementation_plan):
+        list_path = os.path.join(os.path.dirname(output), "concat_scenes.txt")
+        with open(list_path, "w", encoding="utf-8") as handle:
+            for path in scene_video_paths:
+                normalized = os.path.abspath(path).replace("\\", "/").replace("'", "'\\''")
+                handle.write(f"file '{normalized}'\n")
+        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", "-movflags", "+faststart", output]
+        result = safe_run_ffmpeg(cmd, timeout=max(120, len(scene_video_paths) * 60))
+        if result.returncode != 0:
+            raise RuntimeError("ffmpeg_stitch_failed")
+        return ensure_video_output(output)
+
+    durations = [probe_duration(path) for path in scene_video_paths]
+    if include_audio and any(not _has_audio_stream(path) for path in scene_video_paths):
+        raise RuntimeError("normalized_scene_audio_missing")
+    cmd = [ffmpeg, "-y"]
+    for path in scene_video_paths:
+        cmd.extend(["-i", ensure_video_output(path)])
+    filters: list[str] = []
+    for index in range(len(scene_video_paths)):
+        filters.append(
+            f"[{index}:v:0]settb=1/{DEFAULT_VIDEO_TRACK_TIMESCALE},setpts=PTS-STARTPTS[v{index}]"
+        )
+        if include_audio:
+            filters.append(
+                f"[{index}:a:0]aresample={DEFAULT_AUDIO_SAMPLE_RATE}:async=1:first_pts=0,"
+                "aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS"
+                f"[a{index}]"
+            )
+    previous_video = "[v0]"
+    previous_audio = "[a0]"
+    cumulative_duration = durations[0]
+    requested_overlap = max(0.0, float(transition_duration_sec or 0.0))
+    for index, effect in enumerate(implementation_plan, start=1):
+        next_video = f"[v{index}]"
+        output_video = f"[vx{index}]"
+        if effect == "cut":
+            filters.append(
+                f"{previous_video}{next_video}concat=n=2:v=1:a=0{output_video}"
+            )
+            if include_audio:
+                output_audio = f"[ax{index}]"
+                filters.append(
+                    f"{previous_audio}[a{index}]concat=n=2:v=0:a=1{output_audio}"
+                )
+                previous_audio = output_audio
+            cumulative_duration += durations[index]
+        else:
+            overlap = _transition_overlap_seconds(
+                effect,
+                requested_overlap,
+                cumulative_duration,
+                durations[index],
+                DEFAULT_NORMALIZED_FPS,
+            )
+            offset = max(0.0, cumulative_duration - overlap)
+            filters.append(
+                f"{previous_video}{next_video}xfade=transition={effect}:"
+                f"duration={overlap:.6f}:offset={offset:.6f}{output_video}"
+            )
+            if include_audio:
+                output_audio = f"[ax{index}]"
+                filters.append(
+                    f"{previous_audio}[a{index}]acrossfade=d={overlap:.6f}:c1=tri:c2=tri{output_audio}"
+                )
+                previous_audio = output_audio
+            cumulative_duration += durations[index] - overlap
+        previous_video = output_video
+    cmd.extend(["-filter_complex", ";".join(filters), "-map", previous_video])
+    if include_audio:
+        cmd.extend(["-map", previous_audio, "-c:a", "aac", "-ar", "48000", "-ac", "2"])
+    else:
+        cmd.append("-an")
+    cmd.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-video_track_timescale",
+            str(DEFAULT_VIDEO_TRACK_TIMESCALE),
+            "-movflags",
+            "+faststart",
+            output,
+        ]
+    )
     result = safe_run_ffmpeg(cmd, timeout=max(120, len(scene_video_paths) * 60))
     if result.returncode != 0:
-        raise RuntimeError("ffmpeg_stitch_failed")
+        raise RuntimeError(f"ffmpeg_stitch_failed:{(result.stderr or '')[-300:]}")
     return ensure_video_output(output)
 
 
@@ -688,6 +1007,9 @@ def mux_final_multiscene_video(
     logo_text: str | None = None,
     burn_subtitles: bool = True,
     logo_position: str = "top-right",
+    preserve_master_audio: bool = False,
+    audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
+    audio_channels: int = DEFAULT_AUDIO_CHANNELS,
 ) -> str:
     master = ensure_video_output(master_video_path)
     output = os.path.abspath(output_path)
@@ -697,16 +1019,20 @@ def mux_final_multiscene_video(
         raise RuntimeError("ffmpeg_missing")
     filters: list[str] = []
     cmd = [ffmpeg, "-y", "-i", master]
-    audio_inputs = []
+    next_input_index = 1
+    voice_input_index = None
     if voice_audio_path:
         cmd += ["-i", ensure_video_output(voice_audio_path)]
-        audio_inputs.append("voice")
+        voice_input_index = next_input_index
+        next_input_index += 1
+    bgm_input_index = None
     if bgm_audio_path:
         cmd += ["-i", ensure_video_output(bgm_audio_path)]
-        audio_inputs.append("bgm")
+        bgm_input_index = next_input_index
+        next_input_index += 1
     logo_input_index = None
     if logo_path:
-        logo_input_index = 1 + len(audio_inputs)
+        logo_input_index = next_input_index
         cmd += ["-loop", "1", "-i", ensure_video_output(logo_path)]
     video_map = "0:v:0"
     if subtitle_path and burn_subtitles:
@@ -745,13 +1071,34 @@ def mux_final_multiscene_video(
             f"[base][logo]overlay=x={logo_x}:y={logo_y}:format=auto:shortest=1[vlogo]"
         )
         video_map = "vlogo"
-    if voice_audio_path and bgm_audio_path:
-        filters.append("[1:a]volume=1.0[a1];[2:a]volume=0.10[a2];[a1][a2]amix=inputs=2:duration=first:dropout_transition=2[aout]")
+    selected_sample_rate = max(
+        8_000,
+        min(192_000, int(audio_sample_rate or DEFAULT_AUDIO_SAMPLE_RATE)),
+    )
+    selected_channels = max(1, min(8, int(audio_channels or DEFAULT_AUDIO_CHANNELS)))
+    audio_labels: list[str] = []
+    if preserve_master_audio:
+        filters.append("[0:a:0]volume=1.0[amaster]")
+        audio_labels.append("[amaster]")
+    if voice_input_index is not None:
+        filters.append(f"[{voice_input_index}:a:0]volume=1.0[avoice]")
+        audio_labels.append("[avoice]")
+    if bgm_input_index is not None:
+        filters.append(f"[{bgm_input_index}:a:0]volume=0.10[abgm]")
+        audio_labels.append("[abgm]")
+    if len(audio_labels) > 1:
+        filters.append(
+            "".join(audio_labels)
+            + f"amix=inputs={len(audio_labels)}:duration=longest:dropout_transition=2,"
+            + f"aresample={selected_sample_rate}:async=1:first_pts=0,apad[aout]"
+        )
         audio_map = "[aout]"
-    elif voice_audio_path:
-        audio_map = "1:a:0"
-    elif bgm_audio_path:
-        audio_map = "1:a:0"
+    elif audio_labels:
+        filters.append(
+            audio_labels[0]
+            + f"aresample={selected_sample_rate}:async=1:first_pts=0,apad[aout]"
+        )
+        audio_map = "[aout]"
     else:
         audio_map = ""
     if filters:
@@ -759,7 +1106,17 @@ def mux_final_multiscene_video(
     else:
         cmd += ["-map", video_map]
     if audio_map:
-        cmd += ["-map", audio_map, "-shortest", "-c:a", "aac", "-ar", "44100", "-ac", "2"]
+        cmd += [
+            "-map",
+            audio_map,
+            "-shortest",
+            "-c:a",
+            "aac",
+            "-ar",
+            str(selected_sample_rate),
+            "-ac",
+            str(selected_channels),
+        ]
     else:
         cmd += (["-shortest"] if logo_input_index is not None else []) + ["-an"]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output]
@@ -797,6 +1154,13 @@ def finalize_multiscene_scene_clips(
     logo_text: str | None = None,
     logo_position: str = "bottom_right",
     final_duration_tolerance_sec: float | None = None,
+    output_width: int | None = None,
+    output_height: int | None = None,
+    output_fps: int = DEFAULT_NORMALIZED_FPS,
+    transition_duration_sec: float = 0.35,
+    preserve_scene_audio: bool = False,
+    audio_sample_rate: int = DEFAULT_AUDIO_SAMPLE_RATE,
+    audio_channels: int = DEFAULT_AUDIO_CHANNELS,
 ) -> dict[str, Any]:
     """Canonical B13 finalizer for fully downloaded Product Video scene clips."""
     workspace = os.path.abspath(workspace_dir)
@@ -807,10 +1171,31 @@ def finalize_multiscene_scene_clips(
     active_manifest.workspace_dir = workspace
     ordered_scenes = sorted(list(scenes or []), key=lambda item: int(item.scene_id))
     required_indexes = [int(scene.scene_id) for scene in ordered_scenes]
+    scene_durations = [
+        max(1.0, float(scene.target_duration_sec or 0.0))
+        for scene in ordered_scenes
+    ]
+    requested_transition_plan, implementation_transition_plan = _transition_plan(
+        [scene.transition or "cut" for scene in ordered_scenes[:-1]],
+        max(0, len(ordered_scenes) - 1),
+    )
+    selected_fps = max(1, min(120, int(output_fps or DEFAULT_NORMALIZED_FPS)))
+    selected_transition_duration = max(0.0, float(transition_duration_sec or 0.0))
+    transition_overlaps = [
+        _transition_overlap_seconds(
+            effect,
+            selected_transition_duration,
+            scene_durations[index],
+            scene_durations[index + 1],
+            selected_fps,
+        )
+        for index, effect in enumerate(implementation_transition_plan)
+    ]
+    target_duration = sum(scene_durations) - sum(transition_overlaps)
     active_manifest.scene_specs = [asdict(scene) for scene in ordered_scenes]
     active_manifest.required_scene_indexes = required_indexes
     active_manifest.scene_order = required_indexes
-    active_manifest.expected_duration_sec = sum(max(1.0, float(scene.target_duration_sec or 0.0)) for scene in ordered_scenes)
+    active_manifest.expected_duration_sec = target_duration
     missing = []
     for index in required_indexes:
         candidate = str(scene_clip_paths.get(index) or "").strip()
@@ -839,14 +1224,45 @@ def finalize_multiscene_scene_clips(
             "error": "full_scene_coverage_required",
         }
 
-    target_duration = active_manifest.expected_duration_sec
+    requested_width = int(output_width or 0)
+    requested_height = int(output_height or 0)
+    if bool(requested_width) != bool(requested_height):
+        raise ValueError("normalized_geometry_incomplete")
+    if requested_width <= 0 or requested_height <= 0:
+        requested_width, requested_height = _display_geometry(
+            str(scene_clip_paths[required_indexes[0]])
+        )
+    requested_width -= requested_width % 2
+    requested_height -= requested_height % 2
+    normalization_profile = {
+        "width": requested_width,
+        "height": requested_height,
+        "fps": selected_fps,
+        "pixel_format": "yuv420p",
+        "sample_aspect_ratio": "1:1",
+        "video_time_base": f"1/{DEFAULT_VIDEO_TRACK_TIMESCALE}",
+    }
+    previous_profile = dict(active_manifest.normalization_profile or {})
+    previous_transition_plan = list(active_manifest.transition_plan or [])
+    previous_transition_duration = float(active_manifest.transition_duration_sec or 0.0)
+    active_manifest.normalization_profile = dict(normalization_profile)
+    active_manifest.transition_plan = list(requested_transition_plan)
+    active_manifest.transition_implementation_plan = list(
+        implementation_transition_plan
+    )
+    active_manifest.transition_duration_sec = selected_transition_duration
     tolerance = (
         max(0.25, float(final_duration_tolerance_sec))
         if final_duration_tolerance_sec is not None
         else max(1.0, len(ordered_scenes) * 0.2)
     )
     persisted_final = str(active_manifest.final_video_path or "")
-    if persisted_final and os.path.isfile(persisted_final) and os.path.getsize(persisted_final) > 0:
+    reuse_contract_matches = bool(
+        previous_profile == normalization_profile
+        and previous_transition_plan == requested_transition_plan
+        and abs(previous_transition_duration - selected_transition_duration) <= 0.000001
+    )
+    if reuse_contract_matches and persisted_final and os.path.isfile(persisted_final) and os.path.getsize(persisted_final) > 0:
         persisted_duration = probe_duration(persisted_final)
         if abs(persisted_duration - target_duration) <= tolerance:
             active_manifest.status = "final_ready"
@@ -867,6 +1283,10 @@ def finalize_multiscene_scene_clips(
                 "normalized_scene_paths": [str(active_manifest.normalized_clip_paths_by_scene.get(str(index)) or "") for index in required_indexes],
                 "duration_sec": persisted_duration,
                 "target_duration_sec": target_duration,
+                "transition_plan": list(requested_transition_plan),
+                "transition_implementation_plan": list(implementation_transition_plan),
+                "transition_duration_seconds": selected_transition_duration,
+                "normalization_profile": dict(normalization_profile),
                 "final_duration_tolerance_sec": tolerance,
                 "scene_coverage_count": len(required_indexes),
                 "scene_coverage_expected": len(required_indexes),
@@ -896,7 +1316,17 @@ def finalize_multiscene_scene_clips(
             shutil.copyfile(source, raw_path)
         raw_path = ensure_video_output(raw_path)
         normalized_path = os.path.join(workspace, f"scene_{index:03d}_normalized.mp4")
-        normalized_path = normalize_scene_duration(raw_path, normalized_path, scene.target_duration_sec)
+        normalized_path = normalize_scene_duration(
+            raw_path,
+            normalized_path,
+            scene.target_duration_sec,
+            target_width=requested_width,
+            target_height=requested_height,
+            target_fps=selected_fps,
+            preserve_audio=preserve_scene_audio,
+            audio_sample_rate=audio_sample_rate,
+            audio_channels=audio_channels,
+        )
         normalized_duration = probe_duration(normalized_path)
         raw_paths.append(raw_path)
         normalized_paths.append(normalized_path)
@@ -927,7 +1357,13 @@ def finalize_multiscene_scene_clips(
     active_manifest.status = "concatenating"
     active_manifest.concat_state = "running"
     _write_manifest(active_manifest)
-    master = stitch_scenes(normalized_paths, os.path.join(workspace, "master_video_only.mp4"))
+    master = stitch_scenes(
+        normalized_paths,
+        os.path.join(workspace, "master_video_only.mp4"),
+        transition=requested_transition_plan,
+        transition_duration_sec=selected_transition_duration,
+        include_audio=preserve_scene_audio,
+    )
     active_manifest.master_video_path = master
     master_duration = probe_duration(master)
     if abs(master_duration - target_duration) > tolerance:
@@ -950,7 +1386,11 @@ def finalize_multiscene_scene_clips(
 
     subtitle_path = None
     if enable_subtitle:
-        subtitle_path = build_scene_subtitle(ordered_scenes, durations, os.path.join(workspace, "scene_subtitles.srt"))
+        subtitle_durations = [
+            max(0.1, duration - (transition_overlaps[index] if index < len(transition_overlaps) else 0.0))
+            for index, duration in enumerate(durations)
+        ]
+        subtitle_path = build_scene_subtitle(ordered_scenes, subtitle_durations, os.path.join(workspace, "scene_subtitles.srt"))
         active_manifest.subtitle_path = subtitle_path
     voice_path = None
     if enable_voice:
@@ -971,6 +1411,7 @@ def finalize_multiscene_scene_clips(
         logo_text=logo_text if enable_logo else None,
         burn_subtitles=bool(enable_subtitle),
         logo_position=logo_position,
+        preserve_master_audio=preserve_scene_audio,
     )
     final_duration = probe_duration(final)
     if abs(final_duration - target_duration) > tolerance:
@@ -1012,6 +1453,10 @@ def finalize_multiscene_scene_clips(
         "normalized_scene_paths": normalized_paths,
         "duration_sec": final_duration,
         "target_duration_sec": target_duration,
+        "transition_plan": list(requested_transition_plan),
+        "transition_implementation_plan": list(implementation_transition_plan),
+        "transition_duration_seconds": selected_transition_duration,
+        "normalization_profile": dict(normalization_profile),
         "final_duration_tolerance_sec": tolerance,
         "scene_coverage_count": len(required_indexes),
         "scene_coverage_expected": len(required_indexes),

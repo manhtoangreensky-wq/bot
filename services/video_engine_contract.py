@@ -353,15 +353,28 @@ _PROFILE_ONLY_PRODUCTS = frozenset(
 def product_route_contract(
     product: VideoProduct | str,
     *,
+    mode: VideoEngineMode | str | None = None,
     environ: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     item = _product(product)
     if item is VideoProduct.PRODUCT_VIDEO:
         from services import product_video_one_scene_engine
 
-        flags = product_video_one_scene_engine.product_video_one_scene_flags(environ)
-        if flags["PRODUCT_VIDEO_ONE_SCENE_ENGINE_ENABLED"]:
+        selected_mode = _mode(mode) if mode is not None else None
+        one_scene_flags = product_video_one_scene_engine.product_video_one_scene_flags(environ)
+        if (
+            selected_mode in {None, VideoEngineMode.SINGLE_SCENE}
+            and one_scene_flags["PRODUCT_VIDEO_ONE_SCENE_ENGINE_ENABLED"]
+        ):
             return product_video_one_scene_engine.shared_product_video_one_scene_route()
+        if selected_mode is VideoEngineMode.MULTI_SCENE:
+            from services import product_video_multiscene_engine
+
+            multiscene_flags = product_video_multiscene_engine.product_video_multiscene_flags(
+                environ
+            )
+            if multiscene_flags["PRODUCT_VIDEO_MULTISCENE_ENGINE_ENABLED"]:
+                return product_video_multiscene_engine.shared_product_video_multiscene_route()
     if item in _PROFILE_ONLY_PRODUCTS:
         return {
             "product": item.value,
@@ -533,7 +546,11 @@ def evaluate_readiness(
     runtime_sha: str,
     environ: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    route = product_route_contract(request.product_type, environ=environ)
+    route = product_route_contract(
+        request.product_type,
+        mode=request.mode,
+        environ=environ,
+    )
     supported_products = tuple(manifest.get("supported_products") or ())
     supported_modes = tuple(manifest.get("supported_modes") or ())
     capabilities = set(manifest.get("capabilities") or ())
@@ -621,7 +638,11 @@ def guarded_submit(
     existing = jobs_by_idempotency.get(request.idempotency_key)
     if existing is not None:
         job = _coerce_job(existing)
-        route = product_route_contract(request.product_type, environ=environ)
+        route = product_route_contract(
+            request.product_type,
+            mode=request.mode,
+            environ=environ,
+        )
         if not route["connected"]:
             readiness = evaluate_readiness(
                 request,
