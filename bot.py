@@ -2135,6 +2135,10 @@ SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_M
 # subdub_input_limit_mb() = min(SUBDUB_MAX_INPUT_MB, this).
 SUBDUB_TELEGRAM_CLOUD_DOWNLOAD_LIMIT_MB = 20
 SUBDUB_TELEGRAM_LOCAL_DOWNLOAD_LIMIT_MAX_MB = 2000
+# Observability threshold only. This must never become an intake rejection:
+# successful media above 50 MiB is classified as large even when Local Bot API
+# fetched it without hitting a Telegram transport limit.
+SUBDUB_LARGE_MEDIA_DETECTED_THRESHOLD_BYTES = 50 * 1024 * 1024
 if telegram_local_api_enabled():
     SUBDUB_TELEGRAM_DOWNLOAD_LIMIT_MB = max(1, min(
         SUBDUB_TELEGRAM_LOCAL_DOWNLOAD_LIMIT_MAX_MB,
@@ -116422,6 +116426,41 @@ def subdub_merge_debug_job(job: dict | None = None, *, lookup_store_hit: str = "
     # Nested debug snapshots are historical context. Canonical persisted root
     # fields must win so a stale in-memory stage cannot overwrite DB truth.
     merged = {**dict(current.get("debug_job") or {}), **current}
+    # Older successful jobs persisted the authoritative input-save receipt only
+    # in the nested object while leaving root defaults false. Promote a proven
+    # successful receipt so historical production diagnostics remain truthful.
+    nested_input_save = dict(merged.get("input_save") or {})
+    if nested_input_save:
+        input_save_fields = subdub_input_save_debug_fields(nested_input_save, merged)
+        explicit_input_failure = bool(
+            str(merged.get("input_save_blocker") or "").strip()
+            or str(merged.get("no_charge_reason") or "").strip()
+            or merged.get("telegram_download_limit_hit")
+        )
+        if input_save_fields.get("input_save_success") and not explicit_input_failure:
+            merged.update(input_save_fields)
+        elif not input_save_fields.get("input_save_success"):
+            for key, value in input_save_fields.items():
+                merged.setdefault(key, value)
+    video_delivery_message_id = str(
+        merged.get("video_delivery_message_id")
+        or merged.get("final_video_message_id")
+        or merged.get("subdub_final_video_message_id")
+        or ""
+    ).strip()
+    delivered_video_receipt = bool(
+        video_delivery_message_id
+        and (
+            merged.get("final_mp4_delivered")
+            or str(merged.get("terminal_state") or "").strip().lower() == "delivered"
+        )
+    )
+    if delivered_video_receipt:
+        # This is historical receipt truth (the MP4 existed and was validated at
+        # delivery), not a claim that the temporary workspace still exists.
+        merged["final_mp4_exists"] = True
+        merged["final_mp4_validated"] = True
+        merged["final_mp4_delivered"] = True
     merged = subdub_enrich_job_identity(merged, job_key=str(current.get("job_key") or ""))
     if lookup_store_hit and not merged.get("lookup_store_hit"):
         merged["lookup_store_hit"] = lookup_store_hit
@@ -116577,7 +116616,10 @@ async def cmd_subtitle_dub_debug(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as exc:
         logger.warning("subtitle/dub debug command safe failure | %s", sanitize_log_text(str(exc))[:180])
         text = subdub_debug_command_safe_error_text("/subtitle_dub_debug", type(exc).__name__)
-    return await update.message.reply_text(text, parse_mode="HTML")
+    sent = None
+    for chunk in subdub_admin_debug_chunks(text):
+        sent = await update.message.reply_text(chunk)
+    return sent
 
 async def cmd_subtitle_dub_last_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
@@ -208421,6 +208463,8 @@ def mark_subtitle_dub_pipeline_output_sent(
         job["public_error_sent"] = False
         job["final_video_message_id"] = final_video_message_id
         job["subdub_final_video_message_id"] = final_video_message_id
+        job["final_mp4_exists"] = True
+        job["final_mp4_validated"] = True
         job["final_mp4_delivered"] = True
         job["full_video_failed"] = False
         job["success_blocked_reason"] = ""
@@ -208712,7 +208756,11 @@ def subdub_input_save_debug_fields(input_save: dict | None = None, state: dict |
         "telegram_download_method": method,
         "telegram_api_source": str(item.get("telegram_api_source") or telegram_api_source_label()),
         "telegram_download_limit_hit": limit_hit,
-        "large_telegram_media_detected": bool(limit_hit or item.get("large_telegram_media_detected")),
+        "large_telegram_media_detected": bool(
+            limit_hit
+            or item.get("large_telegram_media_detected")
+            or file_size > SUBDUB_LARGE_MEDIA_DETECTED_THRESHOLD_BYTES
+        ),
         "large_media_intake_supported": supported,
         "large_media_intake_source": supported_source or ("source_bytes_override" if method == "source_bytes_override" else ""),
         "input_save_blocker": blocker,
@@ -214700,6 +214748,7 @@ async def _execute_video_dubbing_pipeline_core(
         source_path = str(workspace_artifacts.get("source") or "")
         subtitle_paths = list(subtitle_asset_paths or workspace_artifacts.get("subtitles") or [])
         translated_paths = list(translation_asset_paths or [])
+        input_save_fields = subdub_input_save_debug_fields(input_save, state)
         job = save_engine_async_job({
             "feature": "subtitle_dub",
             "job_id": str(state.get("_pipeline_job_id") or ""),
@@ -214731,6 +214780,7 @@ async def _execute_video_dubbing_pipeline_core(
             "tts_segments": len(tts_chunks),
             "mux_status": mux_state,
             "charged_xu": charged,
+            **input_save_fields,
             "input_file_path": source_path,
             "input_file_exists": bool(source_path and os.path.exists(source_path)),
             "input_file_size": len(video_bytes or b""),
@@ -215084,6 +215134,7 @@ async def execute_video_dubbing_pipeline(
         artifacts = dict(result.get("workspace_artifacts") or {})
         input_save = {key: value for key, value in dict(result.get("input_save") or {}).items() if key != "source_bytes"}
         result_state = dict(result.get("state") or {})
+        input_save_fields = subdub_input_save_debug_fields(input_save, result_state or state)
         runtime_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
         debug_job = dict(result.get("debug_job") or {})
         gate_matrix = dict(result.get("gate_matrix") or debug_job.get("gate_matrix") or {})
@@ -215127,6 +215178,7 @@ async def execute_video_dubbing_pipeline(
         write_subtitle_dub_pipeline_manifest(workspace, manifest)
         update_fields = {
             **debug_job,
+            **input_save_fields,
             "job_id": job.get("job_id"),
             "workspace": workspace,
             "manifest": os.path.join(workspace, "manifest.json"),
@@ -215217,6 +215269,11 @@ async def execute_video_dubbing_pipeline(
             "terminal_public_outcome_type": str(result.get("terminal_public_outcome_type") or debug_job.get("terminal_public_outcome_type") or ""),
             "full_video_failed": bool(result.get("full_video_failed") or debug_job.get("full_video_failed")),
             "partial_audio_after_failure_prevented": bool(result.get("partial_audio_after_failure_prevented") or debug_job.get("partial_audio_after_failure_prevented")),
+            "final_mp4_exists": bool(
+                result.get("final_mp4_exists")
+                or debug_job.get("final_mp4_exists")
+                or result.get("video_delivery_message_id")
+            ),
             "final_mp4_validated": bool(result.get("final_mp4_validated") or debug_job.get("final_mp4_validated")),
             "final_mp4_delivered": bool(result.get("final_mp4_delivered") or debug_job.get("final_mp4_delivered") or result.get("video_delivery_message_id")),
             "success_blocked_reason": str(result.get("success_blocked_reason") or debug_job.get("success_blocked_reason") or ""),
