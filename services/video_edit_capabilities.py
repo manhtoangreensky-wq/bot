@@ -387,6 +387,16 @@ def _merge_plan_patch(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, 
     return result
 
 
+def merge_plan_patch(base: dict[str, Any] | None, patch: dict[str, Any] | None) -> dict[str, Any]:
+    """Public copy-safe helper used by lane adapters when composing choices."""
+    try:
+        left = dict(base or {})
+        right = dict(patch or {})
+    except (TypeError, ValueError):
+        return deepcopy(dict(base or {})) if isinstance(base, dict) else {}
+    return _merge_plan_patch(left, right)
+
+
 def _fold_vietnamese(value: Any) -> str:
     """Normalize Vietnamese text for deterministic, accent-tolerant matching."""
     text = unicodedata.normalize("NFKD", str(value or "")).lower()
@@ -435,7 +445,10 @@ def _no_side_effect_fields() -> dict[str, Any]:
     }
 
 
-def compile_local_intent(user_intent: str) -> dict[str, Any]:
+def compile_local_intent(
+    user_intent: str,
+    base_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compile a Vietnamese request into a deterministic local edit plan.
 
     The compiler is pure: it only returns a plan fragment and truthful copy;
@@ -445,18 +458,23 @@ def compile_local_intent(user_intent: str) -> dict[str, Any]:
     advertised as success.
     """
     normalized = _fold_vietnamese(user_intent)
+    try:
+        existing_plan = deepcopy(dict(base_plan or {}))
+    except (TypeError, ValueError):
+        existing_plan = {}
     base = _no_side_effect_fields()
     base.update(
         {
             "input_text": str(user_intent or ""),
             "normalized_intent": normalized,
             "feature_keys": [],
-            "plan_patch": {},
+            "plan_patch": existing_plan,
             "unsupported": False,
             "ok": False,
         }
     )
     if not normalized:
+        base["manual_edit_plan"] = deepcopy(existing_plan)
         base["message_vi"] = "Hãy mô tả thao tác local như làm sáng, làm rõ, giảm nhiễu hoặc video dọc TikTok; chưa tạo tác vụ và chưa trừ Xu."
         return base
 
@@ -464,6 +482,7 @@ def compile_local_intent(user_intent: str) -> dict[str, Any]:
     if unsupported:
         base["unsupported"] = True
         base["reason"] = "local_capability_unavailable"
+        base["manual_edit_plan"] = deepcopy(existing_plan)
         base["message_vi"] = (
             "Yêu cầu này cần năng lực chưa có trong bộ chỉnh sửa local ("
             + ", ".join(unsupported)
@@ -479,13 +498,14 @@ def compile_local_intent(user_intent: str) -> dict[str, Any]:
             selected.append(key)
     if not selected:
         base["reason"] = "no_local_capability_match"
+        base["manual_edit_plan"] = deepcopy(existing_plan)
         base["message_vi"] = (
             "Chưa nhận ra thao tác local từ yêu cầu này. Hãy thử làm sáng, làm rõ, giảm nhiễu, "
             "cân bằng âm lượng hoặc video dọc TikTok; chưa tạo tác vụ và chưa trừ Xu."
         )
         return base
 
-    compiled: dict[str, Any] = {}
+    compiled: dict[str, Any] = existing_plan
     for key in selected:
         patch = plan_patch(key)
         # The public phrase "video dọc TikTok" carries an explicit ratio;

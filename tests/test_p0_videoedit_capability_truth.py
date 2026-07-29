@@ -95,6 +95,23 @@ def test_vietnamese_vertical_tiktok_intent_maps_to_local_ratio() -> None:
     }
 
 
+def test_intent_compiler_merges_nested_patch_without_erasing_existing_plan() -> None:
+    existing = {
+        "volume": 0.75,
+        "quality_filters": {"sharpen": True},
+    }
+    result = capabilities.compile_local_intent("giảm nhiễu", base_plan=existing)
+    assert result["ok"] is True
+    assert result["plan_patch"] == {
+        "volume": 0.75,
+        "quality_filters": {"sharpen": True, "denoise": True},
+    }
+    assert existing == {
+        "volume": 0.75,
+        "quality_filters": {"sharpen": True},
+    }
+
+
 def test_unsupported_generative_intent_fails_closed_without_job() -> None:
     result = capabilities.compile_local_intent("tạo phép thuật/parallax")
     assert result["ok"] is False
