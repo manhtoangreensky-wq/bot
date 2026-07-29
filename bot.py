@@ -66997,8 +66997,9 @@ async def handle_local_video_studio_public_callback(update: Update, context: Con
         )
 
     if result.get("exit_parent"):
-        text = video_edit_hub_text(normalize_user_language(getattr(getattr(update, "effective_user", None), "language_code", "") or "vi"))
-        markup = video_edit_hub_keyboard(normalize_user_language(getattr(getattr(update, "effective_user", None), "language_code", "") or "vi"))
+        parent_lang = normalize_user_language(get_user_language(user_id) or "vi")
+        text = video_edit_hub_text(parent_lang)
+        markup = video_edit_hub_keyboard(parent_lang)
 
         def commit_parent():
             local_video_studio_public.delete_session(store, user_id, chat_id, session_id)
@@ -68380,6 +68381,7 @@ VIDEO_EDITOR_TEXT_FIELDS = {
     "source_video_id", "source_video_hash", "audio_policy", "status",
     "delivery_message_id", "receipt_state", "charge_state",
     "quality_tier_id", "package_id", "source_origin",
+    "requested_group",
 }
 VIDEO_EDITOR_NUMBER_FIELDS = {
     "source_file_size", "source_duration", "source_duration_ms", "job_id",
@@ -73371,7 +73373,18 @@ def video_edit_legacy_redirect_keyboard(action: str, lang: str = "vi") -> Inline
         "concat": "videoedit|manual",
         "effects": "videoedit|manual",
         "plan": "videoedit|manual",
-    }.get(str(action or ""), "videoedit|hub")
+        "compress": "videoedit|manual",
+        "subtitle": "videoedit|manual",
+        "manual_info": "videoedit|manual",
+        "split_info": "videoedit|manual",
+        "ai_info": "videoedit|ai",
+        "color": "videoedit|manual",
+        "preset": "videoedit|manual",
+        "text": "videoedit|manual",
+        "logo": "videoedit|manual",
+        "sharpen": "videoedit|restore",
+        "legacy": "videoedit|manual",
+    }.get(str(action or ""), "videoedit|manual")
     return video_scene3_keyboard([[
         ("➡️ Mở màn mới", target),
         (ui_text(lang, "common.back"), "videoedit|hub"),
@@ -74199,7 +74212,10 @@ def video_local_brightness_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("↩️ Giữ nguyên 100%" if is_vi else "↩️ Original 100%", "videoedit|brightness_set|100"),
             ("✍️ Tự nhập" if is_vi else "✍️ Custom", "videoedit|brightness_custom"),
         ],
-        [("✅ Xem lại" if is_vi else "✅ Review", "videoedit|review")],
+        [
+            ("✅ Xem lại" if is_vi else "✅ Review", "videoedit|review"),
+            ("🎞 Thông tin video" if is_vi else "🎞 Video details", "videoedit|source_info"),
+        ],
         [(ui_text(lang, "common.back"), "videoedit|options|manual"), (ui_text(lang, "common.main_menu"), "menu|main")],
     ])
 
@@ -150969,9 +150985,9 @@ async def cmd_video_upscale(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_video_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     lang = get_user_language(uid) or "vi"
-    source = recent_video_editor_source(uid)
-    set_video_editor_pending(uid, "menu", **source)
-    await update.message.reply_text(video_editor_menu_text(lang), parse_mode="HTML", reply_markup=video_editor_menu_keyboard(lang))
+    clear_video_editor_pending(uid)
+    set_video_route_session(uid, "video_local_edit", "tool_home", product_id="video_local_edit")
+    await update.message.reply_text(video_edit_hub_text(lang), parse_mode="HTML", reply_markup=video_edit_hub_keyboard(lang))
 
 async def cmd_image_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -225759,66 +225775,8 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
         clear_video_editor_pending(uid)
         set_video_route_session(uid, "video_local_edit", "tool_home", product_id="video_local_edit")
         return await safe_edit_or_send(query, video_edit_hub_text(lang), parse_mode="HTML", reply_markup=video_edit_hub_keyboard(lang))
-    if raw_action in {"manual_info", "split_info", "ai_info"}:
-        return await safe_edit_or_send(
-            query,
-            video_edit_legacy_redirect_text("legacy", lang),
-            parse_mode="HTML",
-            reply_markup=video_edit_legacy_redirect_keyboard("legacy", lang),
-        )
-    if raw_action == "quick":
-        legacy_action = str(parts[2] if len(parts) > 2 else "legacy")
-        return await safe_edit_or_send(
-            query,
-            video_edit_legacy_redirect_text(legacy_action, lang),
-            parse_mode="HTML",
-            reply_markup=video_edit_legacy_redirect_keyboard(legacy_action, lang),
-        )
-    if raw_action in {"audio", "audio_upload", "timeline", "effects", "plan", "split", "reset_manual", "cut"}:
-        legacy_action = {
-            "audio": "audio",
-            "audio_upload": "audio",
-            "timeline": "concat",
-            "effects": "effects",
-            "plan": "plan",
-            "split": "concat",
-            "reset_manual": "plan",
-            "cut": "concat",
-        }[raw_action]
-        return await safe_edit_or_send(
-            query,
-            video_edit_legacy_redirect_text(legacy_action, lang),
-            parse_mode="HTML",
-            reply_markup=video_edit_legacy_redirect_keyboard(legacy_action, lang),
-        )
-    legacy_action_map = {
-        "aspect": "aspect",
-        "resize": "aspect",
-        "crop": "aspect",
-        "ratio": "aspect",
-        "method": "aspect",
-        "vertical": "aspect",
-        "resolution": "aspect",
-        "compress": "compress",
-        "srt": "subtitle",
-        "subtitle": "subtitle",
-        "volume": "audio",
-        "color": "legacy",
-        "color_preset": "legacy",
-        "preset": "legacy",
-        "text": "legacy",
-        "text_overlay": "legacy",
-        "logo": "legacy",
-        "sharpen": "legacy",
-    }
-    if raw_action in legacy_action_map:
-        legacy_action = legacy_action_map[raw_action]
-        return await safe_edit_or_send(
-            query,
-            video_edit_legacy_redirect_text(legacy_action, lang),
-            parse_mode="HTML",
-            reply_markup=video_edit_legacy_redirect_keyboard(legacy_action, lang),
-        )
+    requested_group = video_edit_state_machine.requested_group(raw_action)
+    raw_action = video_edit_state_machine.canonical_compatibility_action(raw_action)
     action = video_editor_normalize_action(raw_action)
     if action == "guide":
         caller = str(parts[2] if len(parts) > 2 else "hub")
@@ -226396,7 +226354,12 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
         )
         return await video_tail9_render(query, uid, context, "logo")
     if not state.get("source_file_id") or not state.get("inspection_complete"):
-        set_video_editor_pending(uid, "await_video", selected_tool=tool)
+        set_video_editor_pending(
+            uid,
+            "await_video",
+            selected_tool=tool,
+            requested_group=requested_group,
+        )
         return await safe_edit_or_send(
             query,
             video_local_upload_text(tool, lang),

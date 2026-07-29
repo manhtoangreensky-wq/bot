@@ -50,6 +50,68 @@ _SCREEN_PARENTS = {
     "confirmation": "videoedit|review",
 }
 
+_COMPATIBILITY_ACTIONS = {
+    "manual_info": "manual",
+    "split_info": "split_from_manual",
+    "ai_info": "ai",
+    "audio": "manual_audio",
+    "audio_upload": "manual",
+    "timeline": "manual_join",
+    "effects": "manual_effects",
+    "plan": "review",
+    "split": "split_from_manual",
+    "reset_manual": "manual",
+    "cut": "manual_cut",
+    "resize": "aspect",
+    "crop": "aspect",
+    "ratio": "aspect",
+    "method": "aspect",
+    "vertical": "aspect",
+    "compress": "resolution",
+    "subtitle": "srt",
+    "color": "color_preset",
+    "preset": "color_preset",
+    "text": "text_overlay",
+    "sharpen": "restore",
+}
+
+_REQUESTED_GROUPS = {
+    "manual_info": "manual",
+    "split_info": "cut",
+    "ai_info": "assistant",
+    "audio": "audio",
+    "audio_upload": "audio",
+    "timeline": "join",
+    "effects": "effects",
+    "plan": "review",
+    "split": "cut",
+    "reset_manual": "manual",
+    "cut": "cut",
+    "resize": "frame",
+    "crop": "frame",
+    "ratio": "frame",
+    "method": "frame",
+    "vertical": "frame",
+    "aspect": "frame",
+    "compress": "resolution",
+    "resolution": "resolution",
+    "subtitle": "overlay",
+    "srt": "overlay",
+    "color": "color",
+    "preset": "color",
+    "color_preset": "color",
+    "brightness": "color",
+    "text": "overlay",
+    "text_overlay": "overlay",
+    "logo": "overlay",
+    "sharpen": "quality",
+    "manual_cut": "cut",
+    "manual_join": "join",
+    "manual_audio": "audio",
+    "manual_effects": "effects",
+    "review": "review",
+}
+
 
 def normalize_edit_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
@@ -84,6 +146,20 @@ def parent_matrix() -> dict[str, str]:
     """Return a caller-owned copy so navigation constants cannot be mutated."""
 
     return dict(_SCREEN_PARENTS)
+
+
+def canonical_compatibility_action(value: Any) -> str:
+    """Map an old callback action onto one live canonical Video Edit action."""
+
+    action = str(value or "").strip().lower()
+    return _COMPATIBILITY_ACTIONS.get(action, action)
+
+
+def requested_group(value: Any) -> str:
+    """Return the editor group to preserve while a compatibility upload waits."""
+
+    action = str(value or "").strip().lower()
+    return _REQUESTED_GROUPS.get(action, "")
 
 
 def ready_screen(edit_mode: Any) -> str:

@@ -54,3 +54,51 @@ def test_videoedit_parent_map_is_immutable_to_callers() -> None:
     second = machine.parent_matrix()
     assert second["cut"] == "videoedit|workspace"
 
+
+def test_videoedit_legacy_actions_map_to_live_canonical_actions() -> None:
+    expected = {
+        "manual_info": ("manual", "manual"),
+        "split_info": ("split_from_manual", "cut"),
+        "ai_info": ("ai", "assistant"),
+        "cut": ("manual_cut", "cut"),
+        "timeline": ("manual_join", "join"),
+        "split": ("split_from_manual", "cut"),
+        "audio": ("manual_audio", "audio"),
+        "effects": ("manual_effects", "effects"),
+        "plan": ("review", "review"),
+        "resize": ("aspect", "frame"),
+        "crop": ("aspect", "frame"),
+        "ratio": ("aspect", "frame"),
+        "vertical": ("aspect", "frame"),
+        "compress": ("resolution", "resolution"),
+        "subtitle": ("srt", "overlay"),
+        "color": ("color_preset", "color"),
+        "preset": ("color_preset", "color"),
+        "text": ("text_overlay", "overlay"),
+        "sharpen": ("restore", "quality"),
+    }
+    for raw_action, (canonical_action, requested_group) in expected.items():
+        assert machine.canonical_compatibility_action(raw_action) == canonical_action
+        assert machine.requested_group(raw_action) == requested_group
+
+
+def test_videoedit_live_actions_are_not_rewritten_as_legacy_redirects() -> None:
+    for action in (
+        "manual",
+        "manual_cut",
+        "manual_join",
+        "manual_audio",
+        "manual_effects",
+        "aspect",
+        "resolution",
+        "rotation",
+        "flip",
+        "speed",
+        "volume",
+        "color_preset",
+        "text_overlay",
+        "logo",
+        "srt",
+        "review",
+    ):
+        assert machine.canonical_compatibility_action(action) == action
