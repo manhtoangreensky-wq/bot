@@ -114,6 +114,7 @@ from services import frame_video_commercial, frame_video_flow, frame_video_runti
 from services import video_addon_planner, video_flow6, video_flow7, video_idea_handoff, video_idea_prompt, video_long_planning, video_scene3_flow, video_scene_prompt_builder, video_selfshot2, video_selfshot3, video_selfshot_local_analysis, video_selfshotflow4, video_semantic_scene_planner, video_storyboard2, video_tail9, video_trend_catalog, video_uifreeze1
 from services import ui_navigation
 from services import local_video_studio_preview
+from services import local_video_studio_public
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
 from services.pricing_guide_content import (
@@ -1895,6 +1896,12 @@ FRAME_VIDEO_DURATION_SLOW_EXTRA_XU = env_int("FRAME_VIDEO_DURATION_SLOW_EXTRA_XU
 FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_MOTION_EFFECT_EXTRA_XU", 20)
 FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU = env_int("FRAME_VIDEO_RANDOM_EFFECT_EXTRA_XU", 30)
 FRAME_VIDEO_ENABLED = env_flag("FRAME_VIDEO_ENABLED", "true")
+LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED = env_flag("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", "0")
+
+def local_video_studio_public_enabled() -> bool:
+    # Read at call time so an invalid/missing ENV remains fail-closed and local
+    # preview tests can toggle the gate without changing the existing menu.
+    return env_flag("LOCAL_VIDEO_STUDIO_PUBLIC_ENABLED", "0")
 FRAME_VIDEO_DIRECT_RENDER_ENABLED = env_flag("FRAME_VIDEO_DIRECT_RENDER_ENABLED", "true")
 FRAME_VIDEO_REQUIRE_LOCAL_WORKER = env_flag("FRAME_VIDEO_REQUIRE_LOCAL_WORKER", "false")
 FRAME_VIDEO_MAX_IMAGES = max(2, min(100, env_int("FRAME_VIDEO_MAX_IMAGES", 20)))
@@ -66632,6 +66639,324 @@ async def handle_local_video_studio_preview_callback(update: Update, context: Co
     return edited
 # --- END LOCAL VIDEO STUDIO 27A PREVIEW ---
 
+# --- LOCAL VIDEO STUDIO 27B PUBLIC ---
+def local_video_studio_public_keyboard(view: dict[str, object]) -> InlineKeyboardMarkup:
+    rows = []
+    for row in view.get("rows") or ():
+        rows.append([
+            InlineKeyboardButton(str(label), callback_data=str(callback))
+            for label, callback in row
+        ])
+    return InlineKeyboardMarkup(rows)
+
+
+def _local_video_studio_public_store(context, *, create: bool = False):
+    user_data = getattr(context, "user_data", None)
+    if not isinstance(user_data, dict):
+        return None
+    store = user_data.get(local_video_studio_public.STATE_KEY)
+    store_valid = bool(
+        isinstance(store, dict)
+        and isinstance(store.get("sessions"), dict)
+        and isinstance(store.get("active_by_chat"), dict)
+    )
+    if not store_valid and create:
+        store = local_video_studio_public.new_store()
+        store_valid = True
+    return store if store_valid else None
+
+
+def _local_video_studio_public_cleanup_store(context, store) -> None:
+    sessions = store.get("sessions") if isinstance(store, dict) else None
+    if isinstance(sessions, dict) and not sessions:
+        user_data = getattr(context, "user_data", None)
+        if isinstance(user_data, dict) and user_data.get(local_video_studio_public.STATE_KEY) is store:
+            user_data.pop(local_video_studio_public.STATE_KEY, None)
+
+
+def _local_video_studio_public_identity(update: Update):
+    query = getattr(update, "callback_query", None)
+    message = getattr(query, "message", None)
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None) or getattr(message, "chat", None)
+    user_id = getattr(user, "id", 0)
+    chat_id = getattr(chat, "id", 0) or getattr(message, "chat_id", 0)
+    if not user_id or not chat_id:
+        return "", ""
+    return str(user_id), str(chat_id)
+
+
+async def _local_video_studio_public_deliver(
+    query,
+    text: str,
+    reply_markup,
+    commit,
+    feedback: str,
+    *,
+    reply_only: bool = False,
+) -> bool:
+    async def edit():
+        if reply_only:
+            return False
+        editor = getattr(query, "edit_message_text", None)
+        if not callable(editor):
+            return False
+        try:
+            return await editor(
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:
+            if "message is not modified" in str(exc).lower():
+                return True
+            raise
+
+    async def reply():
+        message = getattr(query, "message", None)
+        responder = getattr(message, "reply_text", None) if message else None
+        if callable(responder):
+            try:
+                return await responder(
+                    text,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
+            except Exception:
+                pass
+        bot = getattr(query, "bot", None)
+        sender = getattr(bot, "send_message", None) if bot else None
+        if callable(sender) and message:
+            return await sender(
+                chat_id=getattr(message, "chat_id", None),
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        return False
+
+    async def answer():
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder(feedback)
+        return True
+
+    return await local_video_studio_public.deliver_then_commit(
+        edit,
+        reply,
+        commit,
+        answer,
+    )
+
+
+async def handle_local_video_studio_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = getattr(update, "callback_query", None)
+    if not query:
+        return None
+    raw_callback = str(getattr(query, "data", "") or "")
+    try:
+        _sid, _verb, _args = local_video_studio_public.parse_callback(raw_callback)
+    except local_video_studio_public.PreviewActionError:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Thao tác lập kế hoạch không hợp lệ hoặc đã cũ.", show_alert=True)
+        return None
+    feature_enabled = local_video_studio_public_enabled()
+    if not feature_enabled and _verb not in {"back", "close"}:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Công cụ lập kế hoạch đang tạm đóng.", show_alert=True)
+        return None
+    user_id, chat_id = _local_video_studio_public_identity(update)
+    if not user_id or not chat_id:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Không xác định được phiên lập kế hoạch.", show_alert=True)
+        return None
+
+    now = time.time()
+    store = _local_video_studio_public_store(context, create=_verb == "open")
+    if store is None:
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
+        return None
+    callback_id = str(getattr(query, "id", "") or "").strip()
+    if _verb == "open":
+        try:
+            duplicate_open = local_video_studio_public.store_has_callback_id(
+                store,
+                callback_id,
+                now=now,
+            )
+        except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder(
+                    "Dữ liệu lập kế hoạch tạm thời chưa sẵn sàng; trạng thái hiện tại được giữ nguyên.",
+                    show_alert=True,
+                )
+            return None
+        if duplicate_open:
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder("Thao tác này đã được nhận.")
+            return None
+        try:
+            result = local_video_studio_public.apply_callback(
+                local_video_studio_public.new_session(now=now),
+                raw_callback,
+                now=now,
+            )
+            view = local_video_studio_public.render_view(result["session"])
+        except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder("Capability local chưa sẵn sàng.", show_alert=True)
+            return None
+
+        def commit_open():
+            candidate = local_video_studio_public.commit_callback_id(
+                result["session"],
+                callback_id,
+                now=time.time(),
+            )
+            local_video_studio_public.put_session(store, user_id, chat_id, candidate)
+            context.user_data[local_video_studio_public.STATE_KEY] = store
+
+        return await _local_video_studio_public_deliver(
+            query,
+            str(view["text"]),
+            local_video_studio_public_keyboard(view),
+            commit_open,
+            str(result["feedback"]),
+        )
+
+    session_id = _sid
+    try:
+        session = local_video_studio_public.get_session(
+            store,
+            user_id,
+            chat_id,
+            session_id,
+            now=now,
+        )
+    except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder(
+                "Dữ liệu lập kế hoạch tạm thời chưa sẵn sàng; trạng thái hiện tại được giữ nguyên.",
+                show_alert=True,
+            )
+        return None
+    if session is None:
+        _local_video_studio_public_cleanup_store(context, store)
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
+        return None
+    if not feature_enabled and _verb == "back":
+        result = {
+            "session": session,
+            "closed": False,
+            "exit_parent": True,
+            "duplicate": False,
+            "saved_text": "",
+            "feedback": "Đã quay lại Chỉnh sửa video.",
+        }
+    else:
+        try:
+            result = local_video_studio_public.apply_callback(
+                session,
+                raw_callback,
+                now=now,
+                callback_id=callback_id,
+            )
+        except local_video_studio_public.PublicSessionExpired:
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder("Phiên lập kế hoạch đã hết hạn.", show_alert=True)
+            return None
+        except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+            responder = getattr(query, "answer", None)
+            if callable(responder):
+                return await responder("Thao tác không hợp lệ; kế hoạch hiện tại được giữ nguyên.", show_alert=True)
+            return None
+    if result.get("duplicate"):
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Thao tác này đã được nhận.")
+        return None
+
+    if result.get("closed"):
+        text = "✖️ <b>Đã đóng bản lập kế hoạch</b>\n\nKhông có xử lý media hoặc tác vụ chạy ngầm."
+        markup = None
+
+        def commit_close():
+            local_video_studio_public.delete_session(store, user_id, chat_id, session_id)
+            _local_video_studio_public_cleanup_store(context, store)
+
+        return await _local_video_studio_public_deliver(
+            query,
+            text,
+            markup,
+            commit_close,
+            str(result["feedback"]),
+        )
+
+    if result.get("exit_parent"):
+        text = video_edit_hub_text(normalize_user_language(getattr(getattr(update, "effective_user", None), "language_code", "") or "vi"))
+        markup = video_edit_hub_keyboard(normalize_user_language(getattr(getattr(update, "effective_user", None), "language_code", "") or "vi"))
+
+        def commit_parent():
+            local_video_studio_public.delete_session(store, user_id, chat_id, session_id)
+            _local_video_studio_public_cleanup_store(context, store)
+
+        return await _local_video_studio_public_deliver(
+            query,
+            text,
+            markup,
+            commit_parent,
+            str(result["feedback"]),
+        )
+
+    try:
+        view = local_video_studio_public.render_view(result["session"])
+    except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
+        responder = getattr(query, "answer", None)
+        if callable(responder):
+            return await responder("Không thể hiển thị planning view; trạng thái chưa được ghi.", show_alert=True)
+        return None
+
+    saved_text = str(result.get("saved_text") or "")
+    if saved_text:
+        text = saved_text
+        markup = None
+        reply_only = True
+    else:
+        text = str(view["text"])
+        markup = local_video_studio_public_keyboard(view)
+        reply_only = False
+
+    def commit_forward():
+        candidate = local_video_studio_public.commit_callback_id(
+            result["session"],
+            callback_id,
+            now=time.time(),
+        )
+        local_video_studio_public.put_session(store, user_id, chat_id, candidate)
+
+    return await _local_video_studio_public_deliver(
+        query,
+        text,
+        markup,
+        commit_forward,
+        str(result["feedback"]),
+        reply_only=reply_only,
+    )
+# --- END LOCAL VIDEO STUDIO 27B PUBLIC ---
+
+
 def build_2col_keyboard(
     buttons,
     nav_back: tuple[str, str] | None = None,
@@ -72825,7 +73150,7 @@ def video_edit_hub_text(lang: str = "vi") -> str:
 
 def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    return video_scene3_keyboard([
+    rows = [
         [
             ("✨ Chỉnh sửa & nâng cấp bằng AI" if is_vi else "✨ AI edit & enhance", "videoedit|ai"),
             ("✂️ Chỉnh sửa thủ công" if is_vi else "✂️ Manual editing", "videoedit|manual"),
@@ -72834,11 +73159,14 @@ def video_edit_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧹 Nâng chất lượng video" if is_vi else "🧹 Enhance quality", "videoedit|restore"),
             ("❓ Hướng dẫn công cụ này" if is_vi else "❓ Tool guide", "videoedit|guide"),
         ],
-        [
-            (ui_text(lang, "common.back"), "menu|main_video"),
-            (ui_text(lang, "common.main_menu"), "menu|main"),
-        ],
+    ]
+    if local_video_studio_public_enabled():
+        rows.append([("🧭 Lập kế hoạch dựng video", "lvs27b|open")])
+    rows.append([
+        (ui_text(lang, "common.back"), "menu|main_video"),
+        (ui_text(lang, "common.main_menu"), "menu|main"),
     ])
+    return video_scene3_keyboard(rows)
 
 
 def video_edit_info_text(kind: str, lang: str = "vi") -> str:
@@ -74929,6 +75257,7 @@ def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
 
 VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES = (
     ("vproduct|b14_confirm", "handle_product_video_public_confirm_callback"),
+    ("lvs27b|", "handle_local_video_studio_public_callback"),
     ("video_tail|", "handle_video_tail_callback"),
     ("vtrend|", "handle_video_trend2_callback"),
     ("vproduct|", "handle_video_product_callback"),
@@ -227412,6 +227741,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_preview_callback, pattern=r"^lvs27a\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback, pattern=r"^lvs27b\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_product_video_public_confirm_callback, pattern=r"^vproduct\|b14_confirm$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_tail_callback, pattern=r"^video_tail\|", block=True))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
