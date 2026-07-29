@@ -25,6 +25,31 @@ _LANE_CALLBACKS = {
     "quality_enhance": "videoedit|restore",
 }
 
+_SCREEN_PARENTS = {
+    "cut": "videoedit|workspace",
+    "trim_input": "videoedit|cut",
+    "split": "videoedit|cut",
+    "split_input": "videoedit|split",
+    "join": "videoedit|workspace",
+    "concat_input": "videoedit|join",
+    "reorder_input": "videoedit|join",
+    "frame": "videoedit|workspace",
+    "transform": "videoedit|workspace",
+    "rotation_value": "videoedit|transform",
+    "audio": "videoedit|workspace",
+    "audio_input": "videoedit|audio",
+    "color": "videoedit|workspace",
+    "overlay": "videoedit|workspace",
+    "text_input": "videoedit|overlay",
+    "logo_input": "videoedit|overlay",
+    "srt_input": "videoedit|overlay",
+    "effects": "videoedit|workspace",
+    "effect_detail": "videoedit|effects",
+    "source_info": "videoedit|workspace",
+    "review": "videoedit|workspace",
+    "confirmation": "videoedit|review",
+}
+
 
 def normalize_edit_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
@@ -33,6 +58,32 @@ def normalize_edit_mode(value: Any) -> str:
 
 def lane_callback(edit_mode: Any) -> str:
     return _LANE_CALLBACKS.get(normalize_edit_mode(edit_mode), "videoedit|hub")
+
+
+def safe_parent_callback(value: Any, *, root: bool = False) -> str:
+    """Return only a same-product parent or an explicitly allowed root exit."""
+
+    callback = str(value or "").strip()
+    if callback.startswith("videoedit|") and callback.removeprefix("videoedit|").strip("|"):
+        return callback
+    if root and callback in {"menu|main_video", "menu|main"}:
+        return callback
+    return "videoedit|hub"
+
+
+def parent_callback(screen: Any, *, lane: Any = "") -> str:
+    """Resolve the immediate parent for a canonical Video Edit screen."""
+
+    key = str(screen or "").strip().lower()
+    if key == "workspace":
+        return lane_callback(lane)
+    return _SCREEN_PARENTS.get(key, "videoedit|hub")
+
+
+def parent_matrix() -> dict[str, str]:
+    """Return a caller-owned copy so navigation constants cannot be mutated."""
+
+    return dict(_SCREEN_PARENTS)
 
 
 def ready_screen(edit_mode: Any) -> str:
